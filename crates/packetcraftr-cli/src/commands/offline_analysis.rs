@@ -72,16 +72,22 @@ pub(super) fn prepare(
         max_frame_bytes: capture.reader.max_frame_bytes,
         max_flows: limits.max_flows,
         max_scope_bytes: limits.max_scope_bytes,
-        max_tcp_bytes_per_flow: limits.max_tcp_bytes_per_flow,
-        max_tcp_reassembly_bytes: limits.max_tcp_reassembly_bytes,
-        max_tcp_segments_per_flow: limits.max_tcp_segments_per_flow,
-        tcp_idle_expiry: Duration::from_millis(limits.tcp_idle_expiry_ms),
-        max_ip_datagrams: limits.max_ip_datagrams,
-        max_ip_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
-        max_ip_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
-        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
-        max_ip_outcomes: limits.max_ip_outcomes,
-        ip_idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
+        // Each conversation occupies one TCP reassembly flow per direction.
+        tcp: analysis::reassembly::tcp::Limits {
+            max_flows: limits.max_flows.saturating_mul(2),
+            max_bytes_per_flow: limits.max_tcp_bytes_per_flow,
+            max_aggregate_bytes: limits.max_tcp_reassembly_bytes,
+            max_segments_per_flow: limits.max_tcp_segments_per_flow,
+            idle_expiry: Duration::from_millis(limits.tcp_idle_expiry_ms),
+        },
+        ip: analysis::reassembly::ip::Limits {
+            max_datagrams: limits.max_ip_datagrams,
+            max_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
+            max_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
+            max_aggregate_bytes: limits.max_ip_reassembly_bytes,
+            max_retained_outcomes: limits.max_ip_outcomes,
+            idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
+        },
         max_duration: Duration::from_millis(limits.max_duration_ms),
     };
     limits.validate().map_err(CliError::classified)?;

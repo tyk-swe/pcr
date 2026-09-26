@@ -125,14 +125,17 @@ impl IpDispatch {
     pub(super) fn contains_datagram(&self, key: &DatagramKey) -> bool {
         self.reassembler.contains_datagram(key)
     }
-    pub(super) fn new(limits: IpReassemblyLimits, overlap_policy: OverlapPolicy) -> Self {
-        Self {
+    pub(super) fn new(
+        limits: IpReassemblyLimits,
+        overlap_policy: OverlapPolicy,
+    ) -> Result<Self, crate::analysis::Error> {
+        Ok(Self {
             max_aggregate_bytes: limits.max_aggregate_bytes,
             max_outcomes: limits.max_retained_outcomes,
-            reassembler: ip::Reassembler::new(limits, overlap_policy),
+            reassembler: ip::Reassembler::new(limits, overlap_policy)?,
             clock: CaptureClock::new(),
             report: IpReassemblyReport::default(),
-        }
+        })
     }
 
     /// The monotonic instant this frame's capture timestamp maps to, plus the
@@ -434,7 +437,8 @@ mod tests {
                 ..ReassemblyLimits::default()
             },
             OverlapPolicy::Reject,
-        );
+        )
+        .expect("valid limits");
         let start = Instant::now();
         dispatch
             .reassembler
@@ -460,7 +464,8 @@ mod tests {
                 ..ReassemblyLimits::default()
             },
             OverlapPolicy::Reject,
-        );
+        )
+        .expect("valid limits");
         let start = Instant::now();
         for identification in 1..=2 {
             dispatch

@@ -37,11 +37,11 @@ impl SettingValue for IpOverlap {
 }
 
 fn default_ip_idle_expiry_ms() -> u64 {
-    u64::try_from(analysis::Limits::default().ip_idle_expiry.as_millis()).unwrap_or(u64::MAX)
+    u64::try_from(analysis::Limits::default().ip.idle_expiry.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn default_tcp_idle_expiry_ms() -> u64 {
-    u64::try_from(analysis::Limits::default().tcp_idle_expiry.as_millis()).unwrap_or(u64::MAX)
+    u64::try_from(analysis::Limits::default().tcp.idle_expiry.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Capture-reader bounds shared by offline commands.
@@ -148,18 +148,18 @@ pub(crate) struct OfflineLimitsArgs {
     #[arg(long, default_value_t = analysis::Limits::default().max_scope_bytes)]
     pub(crate) max_scope_bytes: usize,
     /// Maximum retained TCP stream bytes in one direction.
-    #[arg(long, default_value_t = analysis::Limits::default().max_tcp_bytes_per_flow)]
+    #[arg(long, default_value_t = analysis::Limits::default().tcp.max_bytes_per_flow)]
     pub(crate) max_tcp_bytes_per_flow: usize,
     /// Maximum retained TCP payload and metadata bytes.
     #[arg(
         long,
-        default_value_t = analysis::Limits::default().max_tcp_reassembly_bytes
+        default_value_t = analysis::Limits::default().tcp.max_aggregate_bytes
     )]
     pub(crate) max_tcp_reassembly_bytes: usize,
     /// Maximum pending out-of-order segments retained for one TCP direction.
     #[arg(
         long,
-        default_value_t = analysis::Limits::default().max_tcp_segments_per_flow
+        default_value_t = analysis::Limits::default().tcp.max_segments_per_flow
     )]
     pub(crate) max_tcp_segments_per_flow: usize,
     /// TCP flow inactivity interval in capture-time milliseconds.
@@ -169,28 +169,28 @@ pub(crate) struct OfflineLimitsArgs {
     #[arg(long, value_enum, default_value_t = IpOverlap::Reject)]
     pub(crate) ip_overlap: IpOverlap,
     /// Maximum incomplete IPv4 and IPv6 datagrams retained concurrently.
-    #[arg(long, default_value_t = analysis::Limits::default().max_ip_datagrams)]
+    #[arg(long, default_value_t = analysis::Limits::default().ip.max_datagrams)]
     pub(crate) max_ip_datagrams: usize,
     /// Maximum physical fragments accepted for one retained IP datagram.
     #[arg(
         long,
-        default_value_t = analysis::Limits::default().max_ip_fragments_per_datagram
+        default_value_t = analysis::Limits::default().ip.max_fragments_per_datagram
     )]
     pub(crate) max_ip_fragments_per_datagram: usize,
     /// Maximum fragmentable payload bytes accepted for one IP datagram.
     #[arg(
         long,
-        default_value_t = analysis::Limits::default().max_ip_bytes_per_datagram
+        default_value_t = analysis::Limits::default().ip.max_bytes_per_datagram
     )]
     pub(crate) max_ip_bytes_per_datagram: usize,
     /// Maximum retained IP, derived cascade, and metadata bytes.
     #[arg(
         long,
-        default_value_t = analysis::Limits::default().max_ip_reassembly_bytes
+        default_value_t = analysis::Limits::default().ip.max_aggregate_bytes
     )]
     pub(crate) max_ip_reassembly_bytes: usize,
     /// Maximum per-datagram IP outcomes retained for aggregate reporting.
-    #[arg(long, default_value_t = analysis::Limits::default().max_ip_outcomes)]
+    #[arg(long, default_value_t = analysis::Limits::default().ip.max_retained_outcomes)]
     pub(crate) max_ip_outcomes: usize,
     /// IP datagram inactivity interval in capture-time milliseconds.
     #[arg(long, default_value_t = default_ip_idle_expiry_ms())]

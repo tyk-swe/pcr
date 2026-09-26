@@ -12,6 +12,8 @@ use packetcraftr_core::analysis::reassembly::ip::{
     Reassembler, Resource,
 };
 use packetcraftr_core::analysis::scope::{Interner, ScopeId};
+use packetcraftr_core::analysis::{Constraint, Error as AnalysisError};
+use packetcraftr_core::error::Classified;
 use proptest::prelude::*;
 
 fn scope() -> ScopeId {
@@ -192,7 +194,7 @@ fn completed(
 fn ipv4_out_of_order_completion_reconstructs_a_normalized_datagram() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     let tail = reassembler
         .push(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), now)
         .expect("tail is retained with a gap");
@@ -227,7 +229,7 @@ fn ipv4_out_of_order_completion_reconstructs_a_normalized_datagram() {
 fn separated_out_of_order_ranges_remain_sorted_and_complete() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     for (offset, more_fragments, payload) in [
         (3, false, &b"yz12"[..]),
         (0, true, &b"abcdefgh"[..]),
@@ -256,7 +258,7 @@ fn retained_reconstruction_bytes_do_not_pin_capture_storage() {
     let mut ipv4_frame = vec![0_u8; 4096];
     ipv4_frame[..ipv4_header.len()].copy_from_slice(&ipv4_header);
     let ipv4_frame = Bytes::from(ipv4_frame);
-    let mut ipv4 = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut ipv4 = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     ipv4.push(
         Fragment::Ipv4(Ipv4Fragment {
             key: ipv4_key,
@@ -275,7 +277,7 @@ fn retained_reconstruction_bytes_do_not_pin_capture_storage() {
     let mut ipv6_frame = vec![0_u8; 4096];
     ipv6_frame[..ipv6_prefix.len()].copy_from_slice(&ipv6_prefix);
     let ipv6_frame = Bytes::from(ipv6_frame);
-    let mut ipv6 = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut ipv6 = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     ipv6.push(
         Fragment::Ipv6(Ipv6Fragment {
             key: ipv6_key,
@@ -306,7 +308,7 @@ fn identical_datagram_tuples_never_cross_exact_capture_scopes() {
     let mut second_key = first_key.clone();
     second_key.scope = second_scope;
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
 
     reassembler
         .push(ipv4_fragment(&first_key, 0, true, &b"aaaaaaaa"[..]), now)
@@ -334,7 +336,7 @@ fn identical_datagram_tuples_never_cross_exact_capture_scopes() {
 fn ipv6_completion_removes_fragment_header_and_patches_its_predecessor() {
     let key = ipv6_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(ipv6_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
         .expect("first fragment is retained");
@@ -355,7 +357,7 @@ fn ipv6_completion_removes_fragment_header_and_patches_its_predecessor() {
 fn reconstruction_preserves_ipv4_options_and_ipv6_extension_prefixes() {
     let now = Instant::now();
     let ipv4_key = ipv4_key();
-    let mut ipv4 = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut ipv4 = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     ipv4.push(ipv4_fragment(&ipv4_key, 1, false, &b"ijkl"[..]), now)
         .expect("optionless tail is retained");
     let first_payload = Bytes::from_static(b"abcdefgh");
@@ -394,7 +396,7 @@ fn reconstruction_preserves_ipv4_options_and_ipv6_extension_prefixes() {
             payload,
         })
     };
-    let mut ipv6 = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut ipv6 = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     ipv6.push(make_fragment(0, true, Bytes::from_static(b"abcdefgh")), now)
         .expect("prefixed first fragment is retained");
     let datagram = completed(
@@ -415,7 +417,7 @@ fn overlap_policies_reject_keep_first_or_keep_last_and_report_changed_bytes() {
         (OverlapPolicy::First, &b"abcdefgh"[..]),
         (OverlapPolicy::Last, &b"ABcdefgh"[..]),
     ] {
-        let mut reassembler = Reassembler::new(Limits::default(), policy);
+        let mut reassembler = Reassembler::new(Limits::default(), policy).unwrap();
         reassembler
             .push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
             .expect("first copy is retained");
@@ -440,7 +442,7 @@ fn overlap_policies_reject_keep_first_or_keep_last_and_report_changed_bytes() {
         assert_eq!(datagram.overlap_bytes, 2);
     }
 
-    let mut reject = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reject = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reject
         .push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
         .expect("first copy is retained");
@@ -455,7 +457,7 @@ fn overlap_policies_reject_keep_first_or_keep_last_and_report_changed_bytes() {
 fn ipv4_overlap_ignores_per_fragment_normalized_header_fields() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Last);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Last).unwrap();
     reassembler
         .push(ipv4_fragment(&key, 0, true, &b"abcdefghijklmnop"[..]), now)
         .expect("long first fragment is retained");
@@ -477,7 +479,7 @@ fn ipv4_overlap_ignores_per_fragment_normalized_header_fields() {
 fn identical_duplicates_count_without_retaining_payload_twice() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
         .expect("first copy is retained");
@@ -509,7 +511,7 @@ fn idle_and_eof_retirement_report_bounded_gap_evidence() {
         idle_expiry: Duration::from_secs(2),
         ..Limits::default()
     };
-    let mut reassembler = Reassembler::new(limits, OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(limits, OverlapPolicy::Reject).unwrap();
     reassembler
         .push(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), now)
         .expect("tail with gap is retained");
@@ -546,7 +548,8 @@ fn resource_limits_reject_before_retaining_new_payload() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     assert_eq!(
         datagrams.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
         Err(Error::Resource(Resource::DatagramLimit { limit: 0 }))
@@ -559,7 +562,8 @@ fn resource_limits_reject_before_retaining_new_payload() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     assert_eq!(
         bytes.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
         Err(Error::Resource(Resource::DatagramByteLimit { limit: 7 }))
@@ -573,7 +577,8 @@ fn resource_limits_reject_before_retaining_new_payload() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     assert_eq!(
         aggregate.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
         Err(Error::Resource(Resource::AggregateMemoryLimit {
@@ -588,7 +593,8 @@ fn resource_limits_reject_before_retaining_new_payload() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     fragments
         .push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
         .expect("first fragment fits the limit");
@@ -615,7 +621,8 @@ fn aggregate_limit_covers_replacement_and_completion_peak_allocations() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     reassembler
         .push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now)
         .expect("the first retained range fits");
@@ -644,7 +651,8 @@ fn removed_datagrams_keep_hash_table_high_water_memory_charged() {
             ..Limits::default()
         },
         OverlapPolicy::Reject,
-    );
+    )
+    .unwrap();
     reassembler
         .push(ipv4_fragment(&first, 0, true, &b"abcdefgh"[..]), now)
         .expect("first high-water slot fits");
@@ -665,7 +673,7 @@ fn removed_datagrams_keep_hash_table_high_water_memory_charged() {
 fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     assert_eq!(
         reassembler.push(ipv4_fragment(&key, 0, true, Bytes::new()), now),
         Err(Error::Malformed(Malformed::EmptyPayload))
@@ -687,7 +695,7 @@ fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state(
     );
     assert_eq!(reassembler.flush().outcomes[0].known_final_length, Some(20));
 
-    let mut oversized = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut oversized = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     assert_eq!(
         oversized.push(ipv4_fragment(&key, 0x1fff, false, &b"1234567"[..]), now),
         Err(Error::Malformed(Malformed::ReconstructedLength {
@@ -701,7 +709,7 @@ fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state(
 fn first_ipv4_header_revalidates_the_retained_wire_extent() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(ipv4_fragment(&key, 8_187, true, &b"abcdefgh"[..]), now)
         .expect("the high range fits with the minimum IPv4 header");
@@ -742,7 +750,7 @@ fn repeated_first_ipv4_headers_must_agree_on_preserved_flags() {
     header[10..12].copy_from_slice(&checksum.to_be_bytes());
     conflicting.header = Bytes::from(header);
 
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(first, now)
         .expect("the first offset-zero fragment is retained");
@@ -756,7 +764,7 @@ fn repeated_first_ipv4_headers_must_agree_on_preserved_flags() {
 fn known_final_length_rejects_beyond_and_nonfinal_data_atomically() {
     let key = ipv4_key();
     let now = Instant::now();
-    let mut beyond = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut beyond = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     beyond
         .push(ipv4_fragment(&key, 1, false, &b"tail"[..]), now)
         .expect("final length twelve is established");
@@ -769,7 +777,7 @@ fn known_final_length_rejects_beyond_and_nonfinal_data_atomically() {
     );
     assert_eq!(beyond.aggregate_memory_charge(), retained);
 
-    let mut at_final = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut at_final = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     at_final
         .push(ipv4_fragment(&key, 1, false, &b"12345678"[..]), now)
         .expect("final length sixteen is established");
@@ -794,7 +802,7 @@ fn final_length_rejects_a_retained_nonfinal_endpoint_regardless_of_arrival_order
         [non_final.clone(), final_tail.clone()],
         [final_tail.clone(), non_final.clone()],
     ] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(fragments[0].clone(), now)
             .expect("the first fragment is individually valid");
@@ -818,7 +826,7 @@ fn wire_offset_guard_rejects_values_before_checked_byte_conversion() {
         Fragment::Ipv4(_) => unreachable!(),
     };
     fragment.fragment_offset = 0x2000;
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     assert_eq!(
         reassembler.push(Fragment::Ipv6(fragment), Instant::now()),
         Err(Error::Malformed(Malformed::OffsetOutOfRange {
@@ -846,7 +854,7 @@ fn wire_offset_guard_rejects_values_before_checked_byte_conversion() {
 fn intrinsic_wire_extent_precedes_configurable_byte_limit() {
     let key = ipv6_key();
     let now = Instant::now();
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     assert_eq!(
         reassembler.push(ipv6_fragment(&key, 0x1fff, false, &b"12345678"[..]), now),
         Err(Error::Malformed(Malformed::ReconstructedLength {
@@ -874,7 +882,7 @@ fn ipv6_predecessor_must_be_on_the_structural_extension_chain() {
         predecessor_next_header_offset: 8,
         payload,
     });
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     assert!(matches!(
         reassembler.push(fragment, Instant::now()),
         Err(Error::Malformed(Malformed::InvalidIpv6Prefix { .. }))
@@ -904,7 +912,7 @@ fn ipv6_predecessor_rejects_an_undersized_authentication_header() {
         predecessor_next_header_offset: 40,
         payload,
     });
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
 
     assert!(matches!(
         reassembler.push(fragment, Instant::now()),
@@ -914,21 +922,54 @@ fn ipv6_predecessor_rejects_an_undersized_authentication_header() {
 }
 
 #[test]
-fn unrepresentable_idle_expiry_fails_before_state_mutation() {
-    let key = ipv4_key();
+fn unrepresentable_idle_expiry_is_refused_at_construction() {
     let limits = Limits {
         idle_expiry: Duration::MAX,
         ..Limits::default()
     };
-    let mut reassembler = Reassembler::new(limits, OverlapPolicy::Reject);
+    let error = Reassembler::new(limits.clone(), OverlapPolicy::Reject).unwrap_err();
+    assert!(matches!(
+        error,
+        AnalysisError::InvalidLimit {
+            field: "idle_expiry",
+            reason: Constraint::WithinClockRange,
+            ..
+        }
+    ));
+    assert_eq!(error.classification().code, "cli.analysis_limit");
+    assert!(limits.validate().is_err());
+}
+
+#[test]
+fn idle_expiry_past_a_late_capture_clock_fails_before_state_mutation() {
+    // The largest whole-second expiry the clock can add to `base`, less a
+    // margin for the time construction takes to validate it.
+    let base = Instant::now();
+    let (mut fits, mut overflows) = (0_u64, u64::MAX);
+    while overflows - fits > 1 {
+        let middle = fits + (overflows - fits) / 2;
+        if base.checked_add(Duration::from_secs(middle)).is_some() {
+            fits = middle;
+        } else {
+            overflows = middle;
+        }
+    }
+    let expiry = Duration::from_secs(fits - 60);
+    let key = ipv4_key();
+    let mut reassembler = Reassembler::new(
+        Limits {
+            idle_expiry: expiry,
+            ..Limits::default()
+        },
+        OverlapPolicy::Reject,
+    )
+    .unwrap();
     assert_eq!(
         reassembler.push(
             ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]),
-            Instant::now()
+            base + Duration::from_secs(3_600)
         ),
-        Err(Error::Resource(Resource::IdleExpiryRange {
-            expiry: Duration::MAX,
-        }))
+        Err(Error::Resource(Resource::IdleExpiryRange { expiry }))
     );
     assert_eq!(reassembler.datagram_count(), 0);
 }
@@ -946,7 +987,7 @@ fn ipv6_fragment_next_header_uses_the_offset_zero_value_in_either_order() {
     let tail = Fragment::Ipv6(tail);
 
     for fragments in [[first.clone(), tail.clone()], [tail.clone(), first.clone()]] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         let mut completion = None;
         for fragment in fragments {
             if let PushOutcome::Completed { datagram, .. } = reassembler
@@ -985,7 +1026,7 @@ fn ipv6_fragments_may_carry_different_unfragmentable_prefixes() {
     let tail = Fragment::Ipv6(tail);
 
     for fragments in [[first.clone(), tail.clone()], [tail.clone(), first.clone()]] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         let mut completion = None;
         for fragment in fragments {
             if let PushOutcome::Completed { datagram, .. } = reassembler
@@ -1015,7 +1056,7 @@ fn repeated_offset_zero_fragments_may_differ_only_in_ecn() {
     let duplicate = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), dscp | 0x03);
     let tail = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), dscp | 0x02);
 
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(first.clone(), now)
         .expect("the first offset-zero fragment is retained");
@@ -1031,7 +1072,7 @@ fn repeated_offset_zero_fragments_may_differ_only_in_ecn() {
     );
     assert_eq!(datagram.bytes[1], dscp | 0x03);
 
-    let mut mismatched = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut mismatched = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     mismatched
         .push(first, now)
         .expect("the first offset-zero fragment is retained");
@@ -1054,7 +1095,7 @@ fn ipv4_reassembly_merges_ecn_dscp_and_checksum_in_either_order() {
     let ce = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), dscp | 0x03);
 
     for (first, second) in [(ect0.clone(), ce.clone()), (ce, ect0)] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(first, now)
             .expect("the first fragment is admitted");
@@ -1079,7 +1120,7 @@ fn ipv4_identical_ecn_codepoints_are_preserved() {
     for marking in [0x00_u8, 0x01, 0x02, 0x03] {
         let first = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), marking);
         let tail = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), marking);
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(first, now)
             .expect("the first fragment is admitted");
@@ -1100,7 +1141,7 @@ fn ipv4_not_ect_with_ce_fails_typed_in_either_order() {
     let ce = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x03);
 
     for (first, second) in [(not_ect.clone(), ce.clone()), (ce, not_ect)] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(first, now)
             .expect("the first fragment is admitted");
@@ -1121,7 +1162,7 @@ fn ipv4_unspecified_ecn_mixtures_resolve_conservatively() {
     // keeps Not-ECT.
     let not_ect = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x00);
     let ect0 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x02);
-    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
     reassembler
         .push(not_ect, now)
         .expect("the first fragment is admitted");
@@ -1136,7 +1177,7 @@ fn ipv4_unspecified_ecn_mixtures_resolve_conservatively() {
     let ect0 = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x02);
     let ect1 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x01);
     for (first, second) in [(ect0.clone(), ect1.clone()), (ect1, ect0)] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(first, now)
             .expect("the first fragment is admitted");
@@ -1157,7 +1198,7 @@ fn ipv6_reassembly_merges_ecn_in_either_order() {
     let ce = ipv6_with_traffic_class(ipv6_fragment(&key, 1, false, &b"ijkl"[..]), 0x03);
 
     for (first, second) in [(ect0.clone(), ce.clone()), (ce, ect0)] {
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reassembler
             .push(first, now)
             .expect("the first fragment is admitted");
@@ -1182,7 +1223,7 @@ proptest! {
         if reverse {
             order.reverse();
         }
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         let mut completion = None;
         for index in order {
             let outcome = reassembler
@@ -1228,7 +1269,7 @@ proptest! {
         ] {
             let mut outputs = Vec::new();
             for _ in 0..2 {
-                let mut reassembler = Reassembler::new(Limits::default(), policy);
+                let mut reassembler = Reassembler::new(Limits::default(), policy).unwrap();
                 reassembler
                     .push(
                         ipv4_fragment(&key, 0, true, Bytes::copy_from_slice(&first)),
@@ -1268,7 +1309,7 @@ proptest! {
             prop_assert_eq!(outputs[0].bytes.clone(), outputs[1].bytes.clone());
         }
 
-        let mut reject = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reject = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         reject
             .push(
                 ipv4_fragment(&key, 0, true, Bytes::copy_from_slice(&first)),
@@ -1307,7 +1348,7 @@ proptest! {
         if reverse {
             order.reverse();
         }
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         let mut completion = None;
         for index in order {
             let outcome = reassembler

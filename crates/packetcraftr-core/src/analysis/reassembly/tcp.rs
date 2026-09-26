@@ -11,6 +11,7 @@ mod model;
 pub use model::{Error, Event, FlowKey, Malformed, Resource, ScopedFlowKey, Segment};
 mod engine;
 mod limits;
+pub(crate) use limits::Field;
 pub use limits::{Limits, MAX_BYTES_PER_FLOW};
 mod history;
 mod pages;

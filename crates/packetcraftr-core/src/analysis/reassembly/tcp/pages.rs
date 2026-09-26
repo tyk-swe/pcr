@@ -185,7 +185,7 @@ mod tests {
         for size in [128, 1024, 8192] {
             for reverse in [false, true] {
                 let now = Instant::now();
-                let mut tcp = Reassembler::new(Limits::default());
+                let mut tcp = Reassembler::new(Limits::default()).unwrap();
                 // Exercise sequence wrapping as well as both extension directions.
                 let base = u32::MAX - 64;
                 tcp.push(segment(base.wrapping_sub(1), vec![], true), now)
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn bridging_overlap_keeps_first_bytes_and_shared_page_until_final_delivery() {
         let now = Instant::now();
-        let mut tcp = Reassembler::new(Limits::default());
+        let mut tcp = Reassembler::new(Limits::default()).unwrap();
         tcp.push(segment(99, vec![], true), now).unwrap();
         tcp.push(segment(102, vec![2, 3], false), now).unwrap();
         tcp.push(segment(106, vec![6, 7], false), now).unwrap();
@@ -279,7 +279,8 @@ mod tests {
         let mut tcp = Reassembler::new(Limits {
             max_aggregate_bytes: PAGE_CHARGE + 400,
             ..Limits::default()
-        });
+        })
+        .unwrap();
         tcp.push(segment(99, vec![], true), now).unwrap();
         tcp.push(segment(101, vec![42; 200], false), now).unwrap();
         let before = tcp.aggregate_memory_charge();

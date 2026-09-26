@@ -32,7 +32,7 @@ fuzz_target!(|data: &[u8]| {
     limits.max_flows = 8;
     limits.max_aggregate_bytes = 64 * 1024;
     limits.max_bytes_per_flow = 16 * 1024;
-    let mut reassembler = Reassembler::new(limits);
+    let mut reassembler = Reassembler::new(limits).unwrap();
     let now = Instant::now();
 
     let mut offset = 0;

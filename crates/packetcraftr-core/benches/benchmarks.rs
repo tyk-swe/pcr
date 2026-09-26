@@ -310,7 +310,7 @@ fn bench_tcp_reassembly(c: &mut Criterion) {
                 max_aggregate_bytes: 64 * 1024,
                 ..Default::default()
             };
-            let mut reassembler = Reassembler::new(limits);
+            let mut reassembler = Reassembler::new(limits).unwrap();
             let now = Instant::now();
             for seg in &segments {
                 let events = reassembler.push(black_box(seg.clone()), now).expect("push");
@@ -440,7 +440,7 @@ fn bench_ip_reassembly(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let reassembler =
-                        IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject);
+                        IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject).unwrap();
                     (reassembler, fragments.clone(), Instant::now())
                 },
                 |(mut reassembler, fragments, now)| {

@@ -347,21 +347,21 @@ where
         limit: scope_limit,
         max_bytes: limits.max_scope_bytes,
     });
-    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
-    let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
+    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits)?;
+    let mut ip_dispatch = IpDispatch::new(limits.ip.clone(), options.ip_overlap)?;
     let mut provenance = options
         .track_sources
         .then(|| {
             crate::analysis::provenance::Tracker::new(
                 limits.max_provenance_bytes,
-                limits.max_ip_outcomes,
+                limits.ip.max_retained_outcomes,
             )
         })
         .transpose()?;
     let stage = FrameStage {
         decoder: &decoder,
         deadline: &deadline,
-        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+        max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
     };
 
     let mut input = limits.capture_budget()?;
@@ -879,14 +879,15 @@ mod tests {
             Self {
                 decoder: Dissector::new(builtin::registry()),
                 deadline: Deadline::new(limits.max_duration),
-                dispatch: IpDispatch::new(limits.ip_reassembly(), OverlapPolicy::default()),
+                dispatch: IpDispatch::new(limits.ip.clone(), OverlapPolicy::default())
+                    .expect("default limits are valid"),
                 scopes: Interner::new(),
                 provenance: Some(
-                    Tracker::new(limits.max_provenance_bytes, limits.max_ip_outcomes)
+                    Tracker::new(limits.max_provenance_bytes, limits.ip.max_retained_outcomes)
                         .expect("tracker"),
                 ),
                 max_frame_bytes: limits.max_frame_bytes,
-                max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+                max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
             }
         }
 

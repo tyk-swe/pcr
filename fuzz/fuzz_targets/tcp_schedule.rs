@@ -34,7 +34,7 @@ fuzz_target!(|data: &[u8]| {
         idle_expiry: Duration::from_millis(4),
         ..Limits::default()
     };
-    let mut engine = Reassembler::new(limits);
+    let mut engine = Reassembler::new(limits).unwrap();
     let mut now = Instant::now();
     let mut delivered = HashSet::new();
     // Bounded action records: push, expire, flush, or reopen. Every payload byte

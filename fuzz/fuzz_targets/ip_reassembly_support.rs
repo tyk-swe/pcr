@@ -51,9 +51,9 @@ pub(crate) fn run(data: &[u8]) -> Coverage {
             .expect("three bounded fixture scopes fit")
     });
     let mut reassemblers = [
-        Reassembler::new(limits.clone(), OverlapPolicy::Reject),
-        Reassembler::new(limits.clone(), OverlapPolicy::First),
-        Reassembler::new(limits, OverlapPolicy::Last),
+        Reassembler::new(limits.clone(), OverlapPolicy::Reject).unwrap(),
+        Reassembler::new(limits.clone(), OverlapPolicy::First).unwrap(),
+        Reassembler::new(limits, OverlapPolicy::Last).unwrap(),
     ];
     let start = Instant::now();
     let mut cursor = CONFIG_BYTES.min(data.len());

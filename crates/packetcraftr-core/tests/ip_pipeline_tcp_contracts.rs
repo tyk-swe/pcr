@@ -264,8 +264,11 @@ fn ip_expiry_and_tcp_state_keep_separate_limits_and_terminal_evidence() {
             tcp_events: true,
             limits: packetcraftr_core::analysis::Limits {
                 max_flows: 1,
-                max_ip_datagrams: 1,
-                ip_idle_expiry: Duration::from_secs(30),
+                ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+                    max_datagrams: 1,
+                    idle_expiry: Duration::from_secs(30),
+                    ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+                },
                 ..packetcraftr_core::analysis::Limits::default()
             },
             ..Options::default()

@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod options;
-mod reflection;
-use super::{Budget, Error, Limits, extend, take, u16_at, u32_at};
+
 use bytes::Bytes;
-pub use options::{Option4, Value4};
-pub(super) use reflection::{layout, schema};
 use std::net::Ipv4Addr;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dhcpv4 {
     pub operation: u8,
@@ -26,8 +23,8 @@ pub struct Dhcpv4 {
     pub options: Vec<Option4>,
     pub file_options: Vec<Option4>,
     pub server_name_options: Vec<Option4>,
-    trailing: Bytes,
-    wire: Bytes,
+    pub(super) trailing: Bytes,
+    pub(super) wire: Bytes,
 }
 impl Default for Dhcpv4 {
     fn default() -> Self {
@@ -54,31 +51,6 @@ impl Default for Dhcpv4 {
         }
     }
 }
-impl TryFrom<Bytes> for Dhcpv4 {
-    type Error = Error;
-
-    fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
-        Self::from_wire_with_limits(wire, Limits::default())
-    }
-}
-
-impl TryFrom<Vec<u8>> for Dhcpv4 {
-    type Error = Error;
-
-    fn try_from(wire: Vec<u8>) -> Result<Self, Self::Error> {
-        Self::try_from(Bytes::from(wire))
-    }
-}
-
-impl TryFrom<&[u8]> for Dhcpv4 {
-    type Error = Error;
-
-    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
-        Budget::new(Limits::default(), wire.len())?;
-        Self::try_from(Bytes::copy_from_slice(wire))
-    }
-}
-
 impl Dhcpv4 {
     pub fn wire(&self) -> &Bytes {
         &self.wire
@@ -102,134 +74,63 @@ impl Dhcpv4 {
             .chain(&self.file_options)
             .chain(&self.server_name_options)
     }
-    pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
-        let wire = wire.into();
-        let mut budget = Budget::new(limits, wire.len())?;
-        take(&wire, 0, 240)?;
-        if &wire[236..240] != b"\x63\x82\x53\x63" {
-            return Err(Error::Invalid("DHCPv4 magic cookie"));
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Option4 {
+    pub code: u8,
+    pub value: Value4,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Value4 {
+    MessageType(u8),
+    Address(Ipv4Addr),
+    Addresses(Vec<Ipv4Addr>),
+    Seconds(u32),
+    Number(u16),
+    Codes(Bytes),
+    Text(Bytes),
+    ClientIdentifier {
+        hardware_type: u8,
+        identifier: Bytes,
+    },
+    Overload(u8),
+    Raw(Bytes),
+}
+impl Option4 {
+    pub fn message_type(value: u8) -> Self {
+        Self {
+            code: 53,
+            value: Value4::MessageType(value),
         }
-        if wire[2] > 16 {
-            return Err(Error::Invalid("hardware address length exceeds chaddr"));
-        }
-        let (options, trailing) = options::decode(&wire.slice(240..), &mut budget)?;
-        let overload = options::overload(&options)?;
-        let file_options = if overload & 1 != 0 {
-            options::decode(&wire.slice(108..236), &mut budget)?.0
-        } else {
-            Vec::new()
-        };
-        let server_name_options = if overload & 2 != 0 {
-            options::decode(&wire.slice(44..108), &mut budget)?.0
-        } else {
-            Vec::new()
-        };
-        let address = |offset| {
-            Ipv4Addr::from(<[u8; 4]>::try_from(&wire[offset..offset + 4]).expect("fixed address"))
-        };
-        Ok(Self {
-            operation: wire[0],
-            hardware_type: wire[1],
-            hardware_length: wire[2],
-            hops: wire[3],
-            transaction_id: u32_at(&wire, 4)?,
-            seconds: u16_at(&wire, 8)?,
-            flags: u16_at(&wire, 10)?,
-            client_address: address(12),
-            your_address: address(16),
-            server_address: address(20),
-            gateway_address: address(24),
-            client_hardware_address: wire[28..44].try_into().expect("fixed chaddr"),
-            server_name: wire[44..108].try_into().expect("fixed sname"),
-            boot_file: wire[108..236].try_into().expect("fixed file"),
-            options,
-            file_options,
-            server_name_options,
-            trailing,
-            wire,
-        })
     }
-    pub fn to_wire(&self) -> Result<Bytes, Error> {
-        self.to_wire_with_limits(Limits::default())
+    pub fn server_identifier(value: Ipv4Addr) -> Self {
+        Self {
+            code: 54,
+            value: Value4::Address(value),
+        }
     }
-    pub fn to_wire_with_limits(&self, limits: Limits) -> Result<Bytes, Error> {
-        if !self.wire.is_empty()
-            && Self::from_wire_with_limits(self.wire.clone(), limits)
-                .is_ok_and(|original| original == *self)
-        {
-            return Ok(self.wire.clone());
+    pub fn lease_time(seconds: u32) -> Self {
+        Self {
+            code: 51,
+            value: Value4::Seconds(seconds),
         }
-        if self.hardware_length > 16 {
-            return Err(Error::Invalid("hardware address length exceeds chaddr"));
+    }
+    pub fn requested_address(value: Ipv4Addr) -> Self {
+        Self {
+            code: 50,
+            value: Value4::Address(value),
         }
-        let mut budget = Budget::new(limits, 240)?;
-        let maximum = budget.limits.max_message_bytes;
-        if self
-            .options
-            .len()
-            .saturating_add(self.file_options.len())
-            .saturating_add(self.server_name_options.len())
-            > budget.limits.max_options
-        {
-            return Err(Error::Limit("option count"));
+    }
+    pub fn parameter_request(codes: impl Into<Bytes>) -> Self {
+        Self {
+            code: 55,
+            value: Value4::Codes(codes.into()),
         }
-        let mut primary = self.options.clone();
-        let existing = options::overload(&primary)?;
-        let needed = u8::from(!self.file_options.is_empty())
-            | (u8::from(!self.server_name_options.is_empty()) << 1);
-        if existing != 0 && needed & !existing != 0 {
-            return Err(Error::Invalid(
-                "overload option disagrees with option areas",
-            ));
+    }
+    pub fn raw(code: u8, data: impl Into<Bytes>) -> Self {
+        Self {
+            code,
+            value: Value4::Raw(data.into()),
         }
-        if existing == 0 && needed != 0 {
-            primary.push(Option4 {
-                code: 52,
-                value: Value4::Overload(needed),
-            });
-        }
-        let overload = existing | needed;
-        let mut output = Vec::new();
-        extend(
-            &mut output,
-            &[
-                self.operation,
-                self.hardware_type,
-                self.hardware_length,
-                self.hops,
-            ],
-            maximum,
-        )?;
-        extend(&mut output, &self.transaction_id.to_be_bytes(), maximum)?;
-        extend(&mut output, &self.seconds.to_be_bytes(), maximum)?;
-        extend(&mut output, &self.flags.to_be_bytes(), maximum)?;
-        for address in [
-            self.client_address,
-            self.your_address,
-            self.server_address,
-            self.gateway_address,
-        ] {
-            extend(&mut output, &address.octets(), maximum)?;
-        }
-        extend(&mut output, &self.client_hardware_address, maximum)?;
-        let mut sname = self.server_name;
-        let mut file = self.boot_file;
-        if overload & 1 != 0 {
-            let encoded = options::encode(&self.file_options, &mut budget, 128)?;
-            file[..encoded.len()].copy_from_slice(&encoded);
-        }
-        if overload & 2 != 0 {
-            let encoded = options::encode(&self.server_name_options, &mut budget, 64)?;
-            sname[..encoded.len()].copy_from_slice(&encoded);
-        }
-        extend(&mut output, &sname, maximum)?;
-        extend(&mut output, &file, maximum)?;
-        extend(&mut output, b"\x63\x82\x53\x63", maximum)?;
-        let encoded = options::encode(&primary, &mut budget, maximum.saturating_sub(output.len()))?;
-        extend(&mut output, &encoded, maximum)?;
-        extend(&mut output, &self.trailing, maximum)?;
-        let wire: Bytes = output.into();
-        Self::from_wire_with_limits(wire.clone(), limits)?;
-        Ok(wire)
     }
 }

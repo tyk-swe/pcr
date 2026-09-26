@@ -1,163 +1,145 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{
-    super::{Budget, Error, Limits, extend, take, u16_at, u32_at},
-    Dhcpv6,
-};
-use bytes::Bytes;
+
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Duid {
-    pub kind: u16,
-    pub data: Bytes,
-}
-impl Duid {
-    fn with_identifier(kind: u16, prefix: &[u8], identifier: &[u8]) -> Result<Self, Error> {
-        if identifier.is_empty() {
-            return Err(Error::Invalid("empty DUID identifier"));
-        }
-        if prefix.len().saturating_add(identifier.len()) > 65_533 {
-            return Err(Error::Limit("DUID bytes"));
-        }
-        let mut data = prefix.to_vec();
-        data.extend_from_slice(identifier);
-        Ok(Self {
-            kind,
-            data: data.into(),
-        })
-    }
-    pub fn link_layer(hardware_type: u16, address: impl AsRef<[u8]>) -> Result<Self, Error> {
-        Self::with_identifier(3, &hardware_type.to_be_bytes(), address.as_ref())
-    }
-    pub fn link_layer_time(
-        hardware_type: u16,
-        time: u32,
-        address: impl AsRef<[u8]>,
-    ) -> Result<Self, Error> {
-        let mut prefix = [0; 6];
-        prefix[..2].copy_from_slice(&hardware_type.to_be_bytes());
-        prefix[2..].copy_from_slice(&time.to_be_bytes());
-        Self::with_identifier(1, &prefix, address.as_ref())
-    }
-    pub fn enterprise(enterprise: u32, identifier: impl AsRef<[u8]>) -> Result<Self, Error> {
-        Self::with_identifier(2, &enterprise.to_be_bytes(), identifier.as_ref())
-    }
-    pub fn uuid(uuid: [u8; 16]) -> Self {
-        Self {
-            kind: 4,
-            data: Bytes::copy_from_slice(&uuid),
-        }
+
+use bytes::Bytes;
+
+use super::super::codec::{self as shared, Budget, Message, extend, take, u16_at, u32_at};
+use super::super::{Error, Limits};
+use super::reflection::{layout, schema};
+use super::{Dhcpv6, Duid, Option6, Value6};
+use crate::{
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    field::FieldValue,
+    layer::{Id, Layer, Schema},
+    layout::FieldLayout,
+    protocol::BuiltinProtocol,
+};
+
+const NAME: &str = BuiltinProtocol::Dhcpv6.as_str();
+
+impl TryFrom<Bytes> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
+        Self::from_wire_with_limits(wire, Limits::default())
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Option6 {
-    pub code: u16,
-    pub value: Value6,
+
+impl TryFrom<Vec<u8>> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::from(wire))
+    }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Value6 {
-    Identifier(Duid),
-    Association {
-        iaid: u32,
-        t1: u32,
-        t2: u32,
-        options: Vec<Option6>,
-    },
-    /// Historical IA_TA, retained for captures predating RFC 9915.
-    TemporaryAssociation {
-        iaid: u32,
-        options: Vec<Option6>,
-    },
-    Address {
-        address: Ipv6Addr,
-        preferred_lifetime: u32,
-        valid_lifetime: u32,
-        options: Vec<Option6>,
-    },
-    Prefix {
-        prefix: Ipv6Addr,
-        prefix_length: u8,
-        preferred_lifetime: u32,
-        valid_lifetime: u32,
-        options: Vec<Option6>,
-    },
-    Requested(Vec<u16>),
-    Byte(u8),
-    Number(u16),
-    Seconds(u32),
-    Relay(Box<Dhcpv6>),
-    Status {
-        code: u16,
-        message: Bytes,
-    },
-    /// DNS servers or the historical Server Unicast option.
-    Addresses(Vec<Ipv6Addr>),
-    Flag,
-    Raw(Bytes),
+
+impl TryFrom<&[u8]> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        Budget::new(Limits::default(), wire.len())?;
+        Self::try_from(Bytes::copy_from_slice(wire))
+    }
+}
+
+impl Dhcpv6 {
+    pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
+        let wire = wire.into();
+        let mut budget = Budget::new(limits, wire.len())?;
+        Self::decode(wire, &mut budget, 0)
+    }
+    fn decode(wire: Bytes, budget: &mut Budget, depth: usize) -> Result<Self, Error> {
+        if depth > budget.limits.max_nesting {
+            return Err(Error::Limit("relay nesting"));
+        }
+        take(&wire, 0, 4)?;
+        let message_type = wire[0];
+        let mut message = Self {
+            message_type,
+            ..Default::default()
+        };
+        let offset = if message.is_relay() {
+            take(&wire, 0, 34)?;
+            message.hop_count = wire[1];
+            message.link_address =
+                Ipv6Addr::from(<[u8; 16]>::try_from(&wire[2..18]).expect("relay link address"));
+            message.peer_address =
+                Ipv6Addr::from(<[u8; 16]>::try_from(&wire[18..34]).expect("relay peer address"));
+            34
+        } else {
+            message.transaction_id = u32::from_be_bytes([0, wire[1], wire[2], wire[3]]);
+            4
+        };
+        message.options = decode_options(&wire.slice(offset..), budget, depth)?;
+        message.wire = wire;
+        Ok(message)
+    }
+    pub fn to_wire(&self) -> Result<Bytes, Error> {
+        self.to_wire_with_limits(Limits::default())
+    }
+    pub fn to_wire_with_limits(&self, limits: Limits) -> Result<Bytes, Error> {
+        if !self.wire.is_empty()
+            && Self::from_wire_with_limits(self.wire.clone(), limits)
+                .is_ok_and(|original| original == *self)
+        {
+            return Ok(self.wire.clone());
+        }
+        let mut budget = Budget::new(limits, 0)?;
+        let wire: Bytes = self.encode(&mut budget, 0)?.into();
+        Self::from_wire_with_limits(wire.clone(), limits)?;
+        Ok(wire)
+    }
+    fn encode(&self, budget: &mut Budget, depth: usize) -> Result<Vec<u8>, Error> {
+        if depth > budget.limits.max_nesting {
+            return Err(Error::Limit("relay nesting"));
+        }
+        let maximum = budget.limits.max_message_bytes;
+        let mut output = Vec::new();
+        extend(&mut output, &[self.message_type], maximum)?;
+        if self.is_relay() {
+            if self.transaction_id != 0 {
+                return Err(Error::Invalid("relay message has no transaction ID field"));
+            }
+            extend(&mut output, &[self.hop_count], maximum)?;
+            extend(&mut output, &self.link_address.octets(), maximum)?;
+            extend(&mut output, &self.peer_address.octets(), maximum)?;
+        } else {
+            if self.transaction_id > 0xffffff {
+                return Err(Error::Invalid("DHCPv6 transaction ID exceeds 24 bits"));
+            }
+            if self.hop_count != 0
+                || !self.link_address.is_unspecified()
+                || !self.peer_address.is_unspecified()
+            {
+                return Err(Error::Invalid("ordinary message has no relay fields"));
+            }
+            extend(
+                &mut output,
+                &self.transaction_id.to_be_bytes()[1..],
+                maximum,
+            )?;
+        }
+        let options = encode_options(
+            &self.options,
+            budget,
+            depth,
+            maximum.saturating_sub(output.len()),
+        )?;
+        extend(&mut output, &options, maximum)?;
+        Ok(output)
+    }
 }
 impl Option6 {
-    pub fn client_identifier(duid: Duid) -> Self {
-        Self {
-            code: 1,
-            value: Value6::Identifier(duid),
-        }
-    }
-    pub fn server_identifier(duid: Duid) -> Self {
-        Self {
-            code: 2,
-            value: Value6::Identifier(duid),
-        }
-    }
-    pub fn ia_na(iaid: u32, t1: u32, t2: u32, options: Vec<Self>) -> Self {
-        Self {
-            code: 3,
-            value: Value6::Association {
-                iaid,
-                t1,
-                t2,
-                options,
-            },
-        }
-    }
-    pub fn ia_pd(iaid: u32, t1: u32, t2: u32, options: Vec<Self>) -> Self {
-        Self {
-            code: 25,
-            value: Value6::Association {
-                iaid,
-                t1,
-                t2,
-                options,
-            },
-        }
-    }
-    pub fn address(address: Ipv6Addr, preferred_lifetime: u32, valid_lifetime: u32) -> Self {
-        Self {
-            code: 5,
-            value: Value6::Address {
-                address,
-                preferred_lifetime,
-                valid_lifetime,
-                options: Vec::new(),
-            },
-        }
-    }
-    pub fn raw(code: u16, data: impl Into<Bytes>) -> Self {
-        Self {
-            code,
-            value: Value6::Raw(data.into()),
-        }
-    }
     pub fn data(&self) -> Result<Bytes, Error> {
         let mut budget = Budget::new(Limits::default(), 0)?;
         budget.option(0)?;
         encode_value(self, &mut budget, 0).map(Into::into)
     }
 }
-pub(super) fn decode(
-    bytes: &Bytes,
-    budget: &mut Budget,
-    depth: usize,
-) -> Result<Vec<Option6>, Error> {
+fn decode_options(bytes: &Bytes, budget: &mut Budget, depth: usize) -> Result<Vec<Option6>, Error> {
     let mut position = 0;
     let mut options = Vec::new();
     while position < bytes.len() {
@@ -179,14 +161,14 @@ pub(super) fn decode(
                     iaid: u32_at(&data, 0)?,
                     t1: u32_at(&data, 4)?,
                     t2: u32_at(&data, 8)?,
-                    options: decode(&data.slice(12..), budget, depth + 1)?,
+                    options: decode_options(&data.slice(12..), budget, depth + 1)?,
                 }
             }
             4 => {
                 take(&data, 0, 4)?;
                 Value6::TemporaryAssociation {
                     iaid: u32_at(&data, 0)?,
-                    options: decode(&data.slice(4..), budget, depth + 1)?,
+                    options: decode_options(&data.slice(4..), budget, depth + 1)?,
                 }
             }
             5 => {
@@ -197,7 +179,7 @@ pub(super) fn decode(
                     ),
                     preferred_lifetime: u32_at(&data, 16)?,
                     valid_lifetime: u32_at(&data, 20)?,
-                    options: decode(&data.slice(24..), budget, depth + 1)?,
+                    options: decode_options(&data.slice(24..), budget, depth + 1)?,
                 }
             }
             26 => {
@@ -212,7 +194,7 @@ pub(super) fn decode(
                         prefix: Ipv6Addr::from(
                             <[u8; 16]>::try_from(&data[9..25]).expect("IPv6 prefix"),
                         ),
-                        options: decode(&data.slice(25..), budget, depth + 1)?,
+                        options: decode_options(&data.slice(25..), budget, depth + 1)?,
                     }
                 }
             }
@@ -250,7 +232,7 @@ pub(super) fn decode(
     }
     Ok(options)
 }
-pub(super) fn encode(
+fn encode_options(
     options: &[Option6],
     budget: &mut Budget,
     depth: usize,
@@ -287,7 +269,7 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
             for value in [iaid, t1, t2] {
                 extend(&mut output, &value.to_be_bytes(), maximum)?;
             }
-            let nested = encode(
+            let nested = encode_options(
                 options,
                 budget,
                 depth + 1,
@@ -297,7 +279,7 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
         }
         (Value6::TemporaryAssociation { iaid, options }, 4) => {
             extend(&mut output, &iaid.to_be_bytes(), maximum)?;
-            let nested = encode(
+            let nested = encode_options(
                 options,
                 budget,
                 depth + 1,
@@ -317,7 +299,7 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
             extend(&mut output, &address.octets(), maximum)?;
             extend(&mut output, &preferred_lifetime.to_be_bytes(), maximum)?;
             extend(&mut output, &valid_lifetime.to_be_bytes(), maximum)?;
-            let nested = encode(
+            let nested = encode_options(
                 options,
                 budget,
                 depth + 1,
@@ -342,7 +324,7 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
             extend(&mut output, &valid_lifetime.to_be_bytes(), maximum)?;
             extend(&mut output, &[*prefix_length], maximum)?;
             extend(&mut output, &prefix.octets(), maximum)?;
-            let nested = encode(
+            let nested = encode_options(
                 options,
                 budget,
                 depth + 1,
@@ -385,4 +367,64 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
         }
     }
     Ok(output)
+}
+
+impl Message for Dhcpv6 {
+    const NAME: &'static str = NAME;
+
+    fn decode_wire(wire: Bytes) -> Result<Self, Error> {
+        Self::try_from(wire)
+    }
+
+    fn encode_wire(&self, limits: Limits) -> Result<Bytes, Error> {
+        self.to_wire_with_limits(limits)
+    }
+
+    fn layout() -> Vec<FieldLayout> {
+        layout()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Dhcpv6Codec;
+
+impl LayerCodec for Dhcpv6Codec {
+    fn protocol_id(&self) -> &'static Id {
+        &schema().protocol
+    }
+
+    fn published_schema(&self) -> Option<&'static Schema> {
+        Some(schema())
+    }
+
+    fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
+        matches!(protocol.as_str(), NAME | "raw")
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        payload: &[u8],
+        context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, crate::codec::Error> {
+        shared::encode::<Dhcpv6>(layer, payload, context)
+    }
+
+    fn decode(
+        &self,
+        input: Bytes,
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        if input.len() < 4 {
+            return Ok(shared::raw(input));
+        }
+        shared::decode::<Dhcpv6>(input)
+    }
+
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        shared::make_layer::<Dhcpv6>(fields)
+    }
 }

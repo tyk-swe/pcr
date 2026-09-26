@@ -152,7 +152,7 @@ fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<()
     Ok(())
 }
 reflective_layer! {
-    pub(in super::super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv4.as_str()),name:"DHCPv4"}
+    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv4.as_str()),name:"DHCPv4"}
     impl Dhcpv4 {
         "operation" | "op" => {kind:Unsigned,derived:false,required:false,description:"BOOTP message operation",reflect:operation,layout:(0,1)},
         "hardware_type" => {kind:Unsigned,derived:false,required:false,description:"Hardware address type",reflect:hardware_type,layout:(1,2)},
@@ -174,5 +174,5 @@ reflective_layer! {
         "server_name_options" => {kind:List,derived:false,required:false,description:"Options in the overloaded server-name area",children:OPTION_FIELDS,get |layer| Some(options_value(&layer.server_name_options)),set |layer,value,name| {layer.server_name_options=parse_options(value,name)?;Ok(())}},
         "wire" => {kind:Bytes,derived:false,required:false,description:"Retained complete DHCP wire",get |layer| (!layer.wire.is_empty()).then(||layer.wire.clone().into()),set |_layer,_value,name| read_only(schema(),name)}
     }
-    layout pub(in super::super) fn layout();
+    layout pub(super) fn layout();
 }

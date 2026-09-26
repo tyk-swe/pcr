@@ -14,7 +14,7 @@ mod executor;
 mod plan;
 mod report;
 mod request;
-mod run;
+mod engine;
 #[cfg(test)]
 mod tests;
 
@@ -23,4 +23,4 @@ pub use execution::{Execution, ExecutionCase};
 pub use report::{Case, CaseOutcome, IncoherentReport, Report, Stats, Summary, Totals};
 pub use request::{LiveLimits, LiveOptions};
 
-pub use run::{RunInput, run, run_offline_with_events, run_with_events};
+pub use engine::{RunInput, run, run_offline_with_events, run_with_events};

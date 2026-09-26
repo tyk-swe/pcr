@@ -1,6 +1,6 @@
 # Coherent architecture: one vocabulary, correct ownership
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

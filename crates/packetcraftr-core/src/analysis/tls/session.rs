@@ -9,13 +9,11 @@ use serde::Serialize;
 use crate::analysis::Endpoint;
 use crate::analysis::dedup::{Deduplicator, PeerDirection};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
-use crate::protocol::application::tls::codec::{escape_wire_bytes, escape_wire_text};
-use crate::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
-use crate::protocol::application::tls::model::{
+use crate::protocol::application::tls::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
-    CONTENT_TYPE_HANDSHAKE, ClientHello, Handshake, Record, ServerHello,
+    CONTENT_TYPE_HANDSHAKE, ClientHello, Handshake, Outcome, Record, ServerHello, Transport,
+    escape_wire_bytes, escape_wire_text, ja3, ja3s, ja4, parse_handshake, parse_record,
 };
-use crate::protocol::application::tls::parse::{Outcome, parse_handshake, parse_record};
 
 /// Alert level meaning the sender means to carry on.
 pub const ALERT_LEVEL_WARNING: u8 = 1;

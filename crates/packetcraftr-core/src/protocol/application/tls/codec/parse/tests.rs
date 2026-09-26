@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::fuzz::rng::SplitMix64;
-use crate::protocol::application::tls::model::{
+use crate::protocol::application::tls::test_support::{
+    extension, handshake_message, record, u16_bytes, vector8, vector16,
+};
+use crate::protocol::application::tls::{
     CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_HANDSHAKE, ClientHello, HANDSHAKE_CLIENT_HELLO,
     HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES,
     MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     ServerHello, extension,
-};
-use crate::protocol::application::tls::test_support::{
-    extension, handshake_message, record, u16_bytes, vector8, vector16,
 };
 
 use super::handshake::{

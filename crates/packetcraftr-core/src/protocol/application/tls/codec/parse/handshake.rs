@@ -11,13 +11,13 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 
-use super::super::model::{
+use super::super::super::Error;
+use super::super::super::{
     ClientHello, Extension, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_HEADER_LEN, HANDSHAKE_SERVER_HELLO,
     HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSION_LEN,
     MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_SESSION_ID_LEN, MAX_SNI_LEN, ServerHello, extension,
 };
-use super::{Error, NAME, Outcome, Reader};
-use crate::protocol::common::invalid;
+use super::{Outcome, Reader};
 
 /// Reads one handshake message from the front of `input`.
 ///
@@ -33,16 +33,14 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
     let kind = header[0];
     let declared = u32::from_be_bytes([0, header[1], header[2], header[3]]);
     let Ok(length) = usize::try_from(declared) else {
-        return Outcome::Malformed(invalid(
-            NAME,
-            format!("handshake body of {declared} bytes exceeds the address space"),
-        ));
+        return Outcome::Malformed(Error::invalid(format!(
+            "handshake body of {declared} bytes exceeds the address space"
+        )));
     };
     if length > MAX_HANDSHAKE_BODY {
-        return Outcome::Malformed(invalid(
-            NAME,
-            format!("handshake body of {length} bytes exceeds the limit of {MAX_HANDSHAKE_BODY}"),
-        ));
+        return Outcome::Malformed(Error::invalid(format!(
+            "handshake body of {length} bytes exceeds the limit of {MAX_HANDSHAKE_BODY}"
+        )));
     }
     let total = HANDSHAKE_HEADER_LEN.saturating_add(length);
     let Some(body) = input.get(HANDSHAKE_HEADER_LEN..total) else {
@@ -67,7 +65,7 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
 }
 
 /// Parses a ClientHello body: the bytes after the handshake header.
-fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
+fn parse_client_hello(body: &[u8]) -> Result<ClientHello, Error> {
     let mut reader = Reader::new(body);
     let mut hello = ClientHello {
         legacy_version: reader.u16()?,
@@ -88,7 +86,7 @@ fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
 }
 
 /// Parses a ServerHello body: the bytes after the handshake header.
-pub(super) fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
+pub(super) fn parse_server_hello(body: &[u8]) -> Result<ServerHello, Error> {
     let mut reader = Reader::new(body);
     let mut hello = ServerHello {
         legacy_version: reader.u16()?,
@@ -117,22 +115,18 @@ fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
     if remaining == 0 {
         return Ok(());
     }
-    Err(invalid(
-        NAME,
-        format!("{what} has {remaining} trailing bytes"),
-    ))
+    Err(Error::invalid(format!(
+        "{what} has {remaining} trailing bytes"
+    )))
 }
 
 fn session_id<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Error> {
     let session_id = reader.vector8()?;
     if session_id.len() > MAX_SESSION_ID_LEN {
-        return Err(invalid(
-            NAME,
-            format!(
-                "session identifier of {} bytes exceeds the limit of {MAX_SESSION_ID_LEN}",
-                session_id.len()
-            ),
-        ));
+        return Err(Error::invalid(format!(
+            "session identifier of {} bytes exceeds the limit of {MAX_SESSION_ID_LEN}",
+            session_id.len()
+        )));
     }
     Ok(session_id)
 }
@@ -143,7 +137,7 @@ pub(super) fn parse_client_extensions(input: &[u8], hello: &mut ClientHello) -> 
     while !reader.is_empty() {
         let (extension, body) = next_extension(&mut reader, hello.extensions.len())?;
         if !seen.insert(extension.kind) {
-            return Err(invalid(NAME, "duplicate hello extension"));
+            return Err(Error::invalid("duplicate hello extension"));
         }
         apply_client_extension(extension.kind, body, hello)?;
         hello.extensions.push(extension);
@@ -157,7 +151,7 @@ pub(super) fn parse_server_extensions(input: &[u8], hello: &mut ServerHello) -> 
     while !reader.is_empty() {
         let (extension, body) = next_extension(&mut reader, hello.extensions.len())?;
         if !seen.insert(extension.kind) {
-            return Err(invalid(NAME, "duplicate hello extension"));
+            return Err(Error::invalid("duplicate hello extension"));
         }
         apply_server_extension(extension.kind, body, hello)?;
         hello.extensions.push(extension);
@@ -170,20 +164,16 @@ fn next_extension<'a>(
     seen: usize,
 ) -> Result<(Extension, &'a [u8]), Error> {
     if seen >= MAX_EXTENSIONS {
-        return Err(invalid(
-            NAME,
-            format!("extension count exceeds the limit of {MAX_EXTENSIONS}"),
-        ));
+        return Err(Error::invalid(format!(
+            "extension count exceeds the limit of {MAX_EXTENSIONS}"
+        )));
     }
     let kind = reader.u16()?;
     let len = usize::from(reader.u16()?);
     if len > MAX_EXTENSION_LEN {
-        return Err(invalid(
-            NAME,
-            format!(
-                "extension {kind:#06x} of {len} bytes exceeds the limit of {MAX_EXTENSION_LEN}"
-            ),
-        ));
+        return Err(Error::invalid(format!(
+            "extension {kind:#06x} of {len} bytes exceeds the limit of {MAX_EXTENSION_LEN}"
+        )));
     }
     let body = reader.take(len)?;
     Ok((
@@ -256,15 +246,14 @@ pub(super) fn apply_server_extension(
             let mut reader = Reader::new(body);
             hello.key_share_group = Some(reader.u16()?);
             if !hello.is_hello_retry_request && reader.vector16()?.is_empty() {
-                return Err(invalid(NAME, "ServerHello key_exchange is empty"));
+                return Err(Error::invalid("ServerHello key_exchange is empty"));
             }
             trailing_bytes(&reader, "key_share extension")
         }
         extension::ALPN => {
             let protocols = parse_alpn(body)?;
             if protocols.len() != 1 {
-                return Err(invalid(
-                    NAME,
+                return Err(Error::invalid(
                     "ServerHello ALPN must select exactly one protocol",
                 ));
             }
@@ -294,13 +283,10 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
             continue;
         }
         if name.len() > MAX_SNI_LEN {
-            return Err(invalid(
-                NAME,
-                format!(
-                    "server name of {} bytes exceeds the limit of {MAX_SNI_LEN}",
-                    name.len()
-                ),
-            ));
+            return Err(Error::invalid(format!(
+                "server name of {} bytes exceeds the limit of {MAX_SNI_LEN}",
+                name.len()
+            )));
         }
         if hello.sni_raw.is_none() {
             hello.sni_raw = Some(Bytes::copy_from_slice(name));
@@ -332,14 +318,13 @@ fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     let mut protocols = Vec::new();
     while !list.is_empty() {
         if protocols.len() >= MAX_ALPN {
-            return Err(invalid(
-                NAME,
-                format!("ALPN list exceeds the limit of {MAX_ALPN} protocols"),
-            ));
+            return Err(Error::invalid(format!(
+                "ALPN list exceeds the limit of {MAX_ALPN} protocols"
+            )));
         }
         let protocol = list.vector8()?;
         if protocol.is_empty() {
-            return Err(invalid(NAME, "ALPN protocol name is empty"));
+            return Err(Error::invalid("ALPN protocol name is empty"));
         }
         protocols.push(Bytes::copy_from_slice(protocol));
     }
@@ -367,14 +352,13 @@ fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
     let mut groups = Vec::new();
     while !list.is_empty() {
         if groups.len() >= MAX_EXTENSIONS {
-            return Err(invalid(
-                NAME,
-                format!("key_share list exceeds the limit of {MAX_EXTENSIONS} entries"),
-            ));
+            return Err(Error::invalid(format!(
+                "key_share list exceeds the limit of {MAX_EXTENSIONS} entries"
+            )));
         }
         groups.push(list.u16()?);
         if list.vector16()?.is_empty() {
-            return Err(invalid(NAME, "ClientHello key_exchange is empty"));
+            return Err(Error::invalid("ClientHello key_exchange is empty"));
         }
     }
     Ok(groups)
@@ -389,20 +373,16 @@ fn parse_ec_point_formats(body: &[u8]) -> Result<Vec<u8>, Error> {
 
 pub(super) fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
     if !input.len().is_multiple_of(2) {
-        return Err(invalid(
-            NAME,
-            format!(
-                "{what} list of {} bytes is not a whole number of entries",
-                input.len()
-            ),
-        ));
+        return Err(Error::invalid(format!(
+            "{what} list of {} bytes is not a whole number of entries",
+            input.len()
+        )));
     }
     let count = input.len() / 2;
     if count > limit {
-        return Err(invalid(
-            NAME,
-            format!("{what} list of {count} entries exceeds the limit of {limit}"),
-        ));
+        return Err(Error::invalid(format!(
+            "{what} list of {count} entries exceeds the limit of {limit}"
+        )));
     }
     let values = input
         .as_chunks::<2>()

@@ -26,10 +26,8 @@ use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as Fil
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::application::tls::fingerprint::{Transport, ja3, ja4};
-use packetcraftr_core::protocol::application::tls::model::Handshake;
-use packetcraftr_core::protocol::application::tls::parse::{
-    Outcome, parse_handshake, parse_record,
+use packetcraftr_core::protocol::application::tls::{
+    Handshake, Outcome, Transport, ja3, ja4, parse_handshake, parse_record,
 };
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;

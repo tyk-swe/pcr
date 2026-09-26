@@ -7,20 +7,13 @@
 
 use bytes::Bytes;
 
-use super::model::{
-    CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC, MAX_LEGACY_VERSION,
+use super::super::{
+    CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC, Error, MAX_LEGACY_VERSION,
     MAX_RECORD_BODY, MIN_LEGACY_VERSION, RECORD_HEADER_LEN, Record,
 };
-use crate::protocol::common::invalid;
-
-use crate::protocol::BuiltinProtocol;
 
 mod handshake;
 pub use handshake::parse_handshake;
-
-const NAME: &str = BuiltinProtocol::Tls.as_str();
-
-type Error = crate::codec::Error;
 
 /// The result of reading one framed item from a byte slice.
 #[derive(Debug)]
@@ -39,7 +32,7 @@ pub enum Outcome<T> {
     },
     /// The input cannot be a valid item, whatever follows it. The error
     /// describes which rule or limit it broke.
-    Malformed(crate::codec::Error),
+    Malformed(Error),
 }
 
 /// TLS dissection gate: requires a full [`RECORD_HEADER_LEN`], content type
@@ -86,33 +79,26 @@ struct RecordHeader {
 fn record_header(header: &[u8; RECORD_HEADER_LEN]) -> Result<RecordHeader, Error> {
     let content_type = header[0];
     if !(CONTENT_TYPE_CHANGE_CIPHER_SPEC..=CONTENT_TYPE_APPLICATION_DATA).contains(&content_type) {
-        return Err(invalid(
-            NAME,
-            format!(
-                "record content type {content_type} is outside \
+        return Err(Error::invalid(format!(
+            "record content type {content_type} is outside \
                  {CONTENT_TYPE_CHANGE_CIPHER_SPEC}..={CONTENT_TYPE_APPLICATION_DATA}"
-            ),
-        ));
+        )));
     }
     let legacy_version = u16::from_be_bytes([header[1], header[2]]);
     if !(MIN_LEGACY_VERSION..=MAX_LEGACY_VERSION).contains(&legacy_version) {
-        return Err(invalid(
-            NAME,
-            format!(
-                "record version {legacy_version:#06x} is outside \
+        return Err(Error::invalid(format!(
+            "record version {legacy_version:#06x} is outside \
                  {MIN_LEGACY_VERSION:#06x}..={MAX_LEGACY_VERSION:#06x}"
-            ),
-        ));
+        )));
     }
     let length = usize::from(u16::from_be_bytes([header[3], header[4]]));
     if length == 0 {
-        return Err(invalid(NAME, "record body length is zero"));
+        return Err(Error::invalid("record body length is zero"));
     }
     if length > MAX_RECORD_BODY {
-        return Err(invalid(
-            NAME,
-            format!("record body of {length} bytes exceeds the limit of {MAX_RECORD_BODY}"),
-        ));
+        return Err(Error::invalid(format!(
+            "record body of {length} bytes exceeds the limit of {MAX_RECORD_BODY}"
+        )));
     }
     Ok(RecordHeader {
         content_type,
@@ -143,15 +129,12 @@ impl<'a> Reader<'a> {
         let end = self
             .cursor
             .checked_add(len)
-            .ok_or_else(|| invalid(NAME, "handshake offset arithmetic overflowed"))?;
+            .ok_or_else(|| Error::invalid("handshake offset arithmetic overflowed"))?;
         let slice = self.input.get(self.cursor..end).ok_or_else(|| {
-            invalid(
-                NAME,
-                format!(
-                    "handshake field needs {len} bytes but only {} remain",
-                    self.input.len().saturating_sub(self.cursor)
-                ),
-            )
+            Error::invalid(format!(
+                "handshake field needs {len} bytes but only {} remain",
+                self.input.len().saturating_sub(self.cursor)
+            ))
         })?;
         self.cursor = end;
         Ok(slice)
@@ -161,7 +144,7 @@ impl<'a> Reader<'a> {
     fn array<const N: usize>(&mut self) -> Result<&'a [u8; N], Error> {
         let bytes = self.take(N)?;
         <&[u8; N]>::try_from(bytes)
-            .map_err(|_| invalid(NAME, format!("handshake field is not {N} bytes")))
+            .map_err(|_| Error::invalid(format!("handshake field is not {N} bytes")))
     }
 
     fn u8(&mut self) -> Result<u8, Error> {

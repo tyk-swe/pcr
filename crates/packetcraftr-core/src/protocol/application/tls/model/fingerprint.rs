@@ -36,8 +36,8 @@ use std::fmt::Write as _;
 use md5::Md5;
 use sha2::{Digest as _, Sha256};
 
-use super::hex;
-use super::model::{ClientHello, ServerHello, extension};
+use super::super::hex;
+use super::{ClientHello, ServerHello, extension};
 
 /// Hash length, in hex characters, of the JA4 `b` and `c` components.
 const JA4_HASH_LEN: usize = 12;
@@ -278,7 +278,7 @@ mod tests {
 
     use super::{Transport, is_grease, ja3, ja3s, ja4};
     use crate::protocol::application::tls::hex;
-    use crate::protocol::application::tls::model::{ClientHello, Extension, ServerHello};
+    use crate::protocol::application::tls::{ClientHello, Extension, ServerHello};
 
     fn extensions(kinds: &[u16]) -> Vec<Extension> {
         kinds

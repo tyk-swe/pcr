@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
-use packetcraftr::ProviderSet;
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::{MacAddress, Packet};
@@ -91,26 +90,19 @@ impl net::transmit::Provider for ConfirmingTransmit {
     }
 }
 
-type FixtureProviders = ProviderSet<
-    FixtureRoutes,
-    FixtureInterfaces,
-    net::capture::SystemProvider,
-    ConfirmingTransmit,
-    net::tcp::SystemProvider,
-    packetcraftr::target::SystemResolver,
->;
-
 /// A client over the fixture providers whose policy admits at most
 /// `max_packets` frames, each needing the permissive rebuild replay does.
-fn client(max_packets: u64) -> packetcraftr::Client<FixtureProviders> {
-    packetcraftr::Client::new(
+fn client(max_packets: u64) -> packetcraftr::Client<impl packetcraftr::Providers> {
+    crate::system::fixture::transmitting(
         packetcraftr_core::protocol::builtin::registry(),
         packetcraftr::policy::Policy {
             allow_permissive_packets: true,
             max_packets_per_operation: max_packets,
             ..packetcraftr::policy::Policy::default()
         },
-        ProviderSet::default(),
+        FixtureRoutes,
+        FixtureInterfaces,
+        ConfirmingTransmit,
     )
 }
 

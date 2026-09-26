@@ -1,17 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native provider composition for CLI commands; dispatch and rendering remain
-//! elsewhere.
+//! The CLI's one composition root: the only place that names system
+//! providers, prepares live operations, and builds the client a command runs
+//! on. Dispatch and rendering remain elsewhere.
 
 mod client;
-pub(crate) mod exchange;
+mod exchange;
+#[cfg(test)]
+pub(crate) mod fixture;
 mod interface;
-pub(crate) mod preparation;
+mod preparation;
 mod route;
 
-pub(crate) use interface::{InterfaceSelector, resolve, select_interfaces};
-
-pub(crate) use route::{prepare_expanded_route, prepare_route};
-
-pub(crate) use client::{Client, client};
+pub(crate) use client::{Client, Runtime, client, runtime};
+pub(crate) use interface::{
+    InterfaceSelector, interface_route, interfaces, resolve, timestamp_types,
+};
+pub(crate) use preparation::{
+    Prepared, Workflow, placeholder, prepare_live, prepare_plan, prepare_workflow,
+};

@@ -18,15 +18,15 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
-use crate::system::{client, exchange};
+use crate::system::{Runtime, Workflow, prepare_workflow};
 
 use super::execution;
 
 /// A validated live campaign still waiting for its template packet, and the
-/// policy its client admits it under.
+/// prepared workflow its client runs it under.
 struct PreparedLive {
     request: packetcraftr::fuzz::Request,
-    policy: packetcraftr::policy::Policy,
+    workflow: Workflow,
 }
 
 impl super::Spec for Args {
@@ -124,7 +124,7 @@ fn prepare_live(
     }
     let queue_limits = arguments.limits.clone().into_limits();
     // The template packet is read after every option is validated.
-    let mut live = packetcraftr::fuzz::Request {
+    let live = packetcraftr::fuzz::Request {
         timeout: arguments.timeout.timeout(),
         cases_per_second: arguments.rate,
         destination: arguments.destination,
@@ -134,24 +134,17 @@ fn prepare_live(
         ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::new())
     };
     live.validate().map_err(CliError::classified)?;
-    let policy = arguments.policy.clone().into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    let interface = arguments
-        .route
-        .interface
-        .as_ref()
-        .map(crate::command_options::Selector::get)
-        .transpose()?
-        .map(Into::into);
-    live.route = packetcraftr::route::Options {
-        link_mode: arguments.route.link_mode.into(),
-        interface,
-        preferred_source: arguments.route.source,
-    };
-    live.collection = exchange::collection(arguments.timeout.timeout(), 1, queue_limits)?;
+    // Each case is one probe.
+    let workflow = prepare_workflow(
+        &arguments.route,
+        arguments.policy.clone().into_policy(),
+        arguments.timeout.timeout(),
+        1,
+        queue_limits,
+    )?;
     Ok(Some(PreparedLive {
         request: live,
-        policy,
+        workflow,
     }))
 }
 
@@ -164,7 +157,7 @@ fn execute_and_render(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
-        execute_live(packet, registry, live, format, stream)
+        execute_live(packet, live, format, stream)
     } else {
         execute_offline(request, packet, registry, format, stream)
     }
@@ -240,17 +233,18 @@ fn execute_offline(
 
 fn execute_live(
     packet: core::packet::Packet,
-    registry: Arc<core::registry::Registry>,
     live: PreparedLive,
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let PreparedLive {
-        mut request,
-        policy,
-    } = live;
-    request.packet = packet;
-    let client = client(registry, policy, "fuzz_progress");
+    let PreparedLive { request, workflow } = live;
+    let client = workflow.client(Runtime::Fuzz);
+    let request = packetcraftr::fuzz::Request {
+        packet,
+        route: workflow.route,
+        collection: workflow.collection,
+        ..request
+    };
     // The client admits, paces, and publishes the campaign itself, so the
     // driver vends no session state.
     execution::run_workflow(
@@ -300,8 +294,7 @@ fn publish_offline(
     registry: Arc<core::registry::Registry>,
     emit: execution::Emit<core::fuzz::Case>,
 ) -> Result<core::fuzz::Summary, core::fuzz::Error> {
-    let runtime =
-        crate::resources::runtime("fuzz_progress", packetcraftr::runtime::MAX_WORKER_CAPACITY);
+    let runtime = crate::system::runtime(Runtime::Fuzz);
     let worker = packetcraftr::runtime::Worker::new_in(&runtime, emit)
         .map_err(|source| core::fuzz::Error::Output { source })?;
     core::fuzz::run_observed(request, packet, registry, |case, deadline| {

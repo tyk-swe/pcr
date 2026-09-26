@@ -15,7 +15,7 @@ use self::arguments::Args;
 use super::execution;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
-use crate::system::preparation;
+use crate::system::{Prepared, placeholder, prepare_live};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ExchangeFormat;
@@ -66,12 +66,12 @@ pub(super) fn run(
             ..packetcraftr::exchange::Collection::default()
         },
         ..packetcraftr::exchange::Request::new(
-            preparation::placeholder(),
+            placeholder(),
             packetcraftr::send::Options::default(),
         )
     };
     request.collection.decode.limits.max_packet_size = limits.snap_length;
-    let preparation::Prepared { request, client } = preparation::prepare(send, template, request)?;
+    let Prepared { request, client } = prepare_live(send, template, request)?;
     // Exchange drives the composed client itself — authorization,
     // cancellation, and the callback runtime live inside it — so the driver
     // vends no session state.

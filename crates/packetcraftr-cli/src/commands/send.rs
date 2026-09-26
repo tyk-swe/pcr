@@ -17,7 +17,7 @@ use crate::rendering::{
     emit_published, render_diagnostics_text, write_capture_file, write_hex_line, write_raw,
     write_summary_line,
 };
-use crate::system::preparation::{self, Prepared};
+use crate::system::{Prepared, placeholder, prepare_live};
 
 fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, CliError> {
     let Args {
@@ -30,12 +30,9 @@ fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, Cli
         repeat,
         rate,
         max_template_packets: template.max_template_packets,
-        ..packetcraftr::send::Request::new(
-            preparation::placeholder(),
-            packetcraftr::send::Options::default(),
-        )
+        ..packetcraftr::send::Request::new(placeholder(), packetcraftr::send::Options::default())
     };
-    preparation::prepare(send, template, request)
+    prepare_live(send, template, request)
 }
 
 /// A sink that writes each confirmed frame with `write` as the send publishes

@@ -20,7 +20,7 @@ use crate::{
     errors::CliError,
     filtering::FrameSelector,
     rendering::StreamEncoder,
-    system::{client, resolve},
+    system::{Runtime, client, resolve},
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
@@ -195,7 +195,7 @@ pub(super) fn run(
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for source in args.interface {
-        let interface = resolve(source.get()?, &net::interface::SystemProvider)?;
+        let interface = resolve(source.get()?)?;
         if seen.insert(interface.index) {
             interfaces.push(interface);
         }
@@ -217,7 +217,7 @@ pub(super) fn run(
         timeout,
     );
     drive(
-        &client(registry, policy, "capture_progress"),
+        &client(registry, policy, Runtime::Capture),
         request,
         Output {
             format,

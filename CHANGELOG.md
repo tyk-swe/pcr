@@ -834,9 +834,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   their cause in the message: it reads `DNS query construction failed` or
   `DNS-over-TCP execution is unavailable on attempt N`, and the cause appears
   once in `causes`. Codes are unchanged.
-- `dns` publishes its events on the client's runtime, so its `resources`
-  report lists the `client_progress` runtime row instead of
-  `workflow_progress`.
+- `dns`, `scan`, and `traceroute` run on a client with one event runtime, so
+  their `resources` report lists a single `workflow_progress` worker row; the
+  idle `client_progress` row beside it is gone.
 - Live `fuzz` publishes its cases through its client's one runtime, so the
   resources report lists a single `fuzz_progress` worker row in every format,
   instead of an idle `client_progress` row plus, under NDJSON, a

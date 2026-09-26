@@ -122,33 +122,16 @@ fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
         stopped,
     )
 }
-/// The fixture capture provider; capture never reaches the others.
-type Fixture = packetcraftr::ProviderSet<
-    net::route::SystemProvider,
-    net::interface::SystemProvider,
-    Provider,
-    net::transmit::SystemProvider,
-    net::tcp::SystemProvider,
-    packetcraftr::target::SystemResolver,
->;
-
 /// A client capturing from `provider` under a budget of `count` frames.
-fn client(provider: Provider, count: u64) -> packetcraftr::Client<Fixture> {
-    packetcraftr::Client::new(
+fn client(provider: Provider, count: u64) -> packetcraftr::Client<impl packetcraftr::Providers> {
+    crate::system::fixture::capturing(
         registry(),
         packetcraftr::policy::Policy {
             max_packets_per_operation: count,
             max_bytes_per_operation: 1024,
             ..Default::default()
         },
-        packetcraftr::ProviderSet {
-            route: Default::default(),
-            interface: Default::default(),
-            capture: provider,
-            transmit: Default::default(),
-            tcp: Default::default(),
-            resolver: packetcraftr::target::SystemResolver,
-        },
+        provider,
     )
 }
 #[test]

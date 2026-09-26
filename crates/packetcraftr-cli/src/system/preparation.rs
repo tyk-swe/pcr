@@ -1,19 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The pre-discovery preparation `send` and `exchange` share: every check
-//! that can refuse the operation runs before hostname work, in one order, and
-//! policy is validated once. The client resolves the interface selector after
-//! it admits the operation.
+//! The one pre-discovery preparation every live command runs: each check that
+//! can refuse the operation runs before hostname work, in one order per
+//! command family, policy is validated once, and the client is composed last.
+//! The client resolves the interface selector after it admits each operation.
 
+use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use packetcraftr_core as core;
+use packetcraftr_netio as net;
 
-use crate::command_options::{SendArgs, TemplateArgs};
+use super::{Client, Runtime, client, exchange, route};
+use crate::command_options::{RouteArgs, RouteSelectionArgs, SendArgs, TemplateArgs};
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::system::{Client, client, prepare_expanded_route};
 
 /// A live command's request, as the shared preparation sees it. A command
 /// builds it before the recipe is read, with a placeholder template the
@@ -93,9 +96,9 @@ pub(crate) struct Prepared<R> {
 }
 
 /// Validates `request`, reads the recipe into its template, validates policy,
-/// authorizes the budget count and every expanded destination, then prepares
-/// the first packet's route.
-pub(crate) fn prepare<R: LiveRequest>(
+/// authorizes the budget count and every expanded destination, then resolves
+/// the first packet's destination and composes the client.
+pub(crate) fn prepare_live<R: LiveRequest>(
     send: SendArgs,
     template: TemplateArgs,
     mut request: R,
@@ -119,16 +122,12 @@ pub(crate) fn prepare<R: LiveRequest>(
             packetcraftr::policy::WireLimits::new(count, 0),
         ))
         .map_err(CliError::classified)?;
-    let routed = prepare_expanded_route(
-        request.template(),
-        max_template_packets,
-        send.route.destination,
-        send.route.route,
-        policy,
-    )?;
+    let first =
+        route::authorize_expanded_destinations(request.template(), max_template_packets, &policy)?;
+    let destination = route::destination(send.route.destination, &first, &policy)?;
     request.set_send(packetcraftr::send::Options {
-        destination: routed.destination,
-        plan: routed.options,
+        destination,
+        plan: route::options(&send.route.route)?,
         build: core::build::Options {
             mode: send.mode.into(),
             ..core::build::Options::default()
@@ -137,7 +136,89 @@ pub(crate) fn prepare<R: LiveRequest>(
     });
     Ok(Prepared {
         request,
-        client: client(Arc::clone(&registry), routed.policy, "client_progress"),
+        client: client(registry, policy, Runtime::Client),
+    })
+}
+
+/// One recipe packet with its resolved destination and requested route, and
+/// the client that plans it.
+pub(crate) struct Plan {
+    pub(crate) client: Client,
+    pub(crate) packet: core::packet::Packet,
+    pub(crate) destination: Option<IpAddr>,
+    pub(crate) route: packetcraftr::route::Options,
+}
+
+/// Reads one recipe, validates `policy`, and authorizes the packet's declared
+/// destinations before hostname work, then composes the client.
+pub(crate) fn prepare_plan(
+    arguments: RouteArgs,
+    policy: packetcraftr::policy::Policy,
+) -> Result<Plan, CliError> {
+    let RouteArgs {
+        recipe,
+        destination,
+        route,
+    } = arguments;
+    let registry = core::protocol::builtin::registry();
+    let packet = read_recipe(recipe, &registry, core::layout::DEFAULT_MAX_LAYERS)?;
+    policy.validate().map_err(CliError::classified)?;
+    // This check intentionally precedes interface discovery and route lookup.
+    policy
+        .authorize_packet_destinations(&packet)
+        .map_err(CliError::classified)?;
+    let destination = route::destination(destination, &packet, &policy)?;
+    let route = route::options(&route)?;
+    Ok(Plan {
+        client: client(registry, policy, Runtime::Client),
+        packet,
+        destination,
+        route,
+    })
+}
+
+/// A probe workflow's validated policy, with the route and capture bounds
+/// every exchange of the workflow runs under.
+pub(crate) struct Workflow {
+    policy: Arc<packetcraftr::policy::Policy>,
+    /// The route every exchange of the workflow plans on.
+    pub(crate) route: packetcraftr::route::Options,
+    /// The capture bounds every exchange of the workflow collects under.
+    pub(crate) collection: packetcraftr::exchange::Collection,
+}
+
+impl Workflow {
+    /// Composes the client the workflow runs on, publishing its events on
+    /// `runtime`.
+    pub(crate) fn client(&self, runtime: Runtime) -> Client {
+        client(
+            core::protocol::builtin::registry(),
+            Arc::clone(&self.policy),
+            runtime,
+        )
+    }
+}
+
+/// Validates the policy, the interface selector, and the collection bounds,
+/// in that order. The client resolves the selector only after it admits each
+/// exchange, so a denied target never enumerates interfaces.
+///
+/// `max_template_packets` is how many packets one exchange may hold: one query
+/// for `dns`, one probe for `scan` and each fuzz case, one attempt per hop for
+/// `traceroute`.
+pub(crate) fn prepare_workflow(
+    route: &RouteSelectionArgs,
+    policy: packetcraftr::policy::Policy,
+    timeout: Duration,
+    max_template_packets: usize,
+    queue_limits: net::capture::Limits,
+) -> Result<Workflow, CliError> {
+    policy.validate().map_err(CliError::classified)?;
+    let route = route::options(route)?;
+    Ok(Workflow {
+        policy: Arc::new(policy),
+        route,
+        collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
     })
 }
 
@@ -198,7 +279,7 @@ mod tests {
             repeat: 0,
             ..send_request()
         };
-        let message = error_message(prepare(send, template, request));
+        let message = error_message(prepare_live(send, template, request));
         assert!(message.contains("repeat"), "{message}");
         assert_ne!(message, recipe_error());
     }
@@ -210,7 +291,7 @@ mod tests {
             timeout: Duration::MAX,
             ..exchange_request()
         };
-        let message = error_message(prepare(send, template, request));
+        let message = error_message(prepare_live(send, template, request));
         assert!(message.contains("timeout"), "{message}");
         assert_ne!(message, recipe_error());
     }
@@ -219,12 +300,12 @@ mod tests {
     fn valid_options_reach_the_invalid_recipe() {
         let (send, template) = live_arguments("send");
         assert_eq!(
-            error_message(prepare(send, template, send_request())),
+            error_message(prepare_live(send, template, send_request())),
             recipe_error()
         );
         let (send, template) = live_arguments("exchange");
         assert_eq!(
-            error_message(prepare(send, template, exchange_request())),
+            error_message(prepare_live(send, template, exchange_request())),
             recipe_error()
         );
     }

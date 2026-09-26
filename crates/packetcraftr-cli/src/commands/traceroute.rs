@@ -19,6 +19,7 @@ use super::execution;
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
+use crate::system::{Runtime, prepare_workflow};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -62,26 +63,19 @@ pub(super) fn run(
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;
-    let execution::Providers {
-        client,
-        route,
-        collection,
-        runtime,
-    } = execution::prepare(
-        arguments.route,
-        arguments.policy,
+    let workflow = prepare_workflow(
+        &arguments.route,
+        arguments.policy.into_policy(),
         request.timeout,
         max_template_packets,
         queue_limits,
     )?;
+    let client = workflow.client(Runtime::Workflow);
     let request = packetcraftr::traceroute::Request {
-        route,
-        collection,
+        route: workflow.route,
+        collection: workflow.collection,
         ..request
     };
-    // Events publish on the workflow runtime, as they did before traceroute
-    // ran on the client, so the `resources` report keeps its rows.
-    let client = client.with_runtime(runtime);
     execution::run_workflow(
         &mut (),
         format,

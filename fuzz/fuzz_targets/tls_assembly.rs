@@ -4,7 +4,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::protocol::application::tls::{Handshake, Outcome, Transport, ja3, ja3s, ja4, parse_handshake, parse_record};
+use packetcraftr_core::protocol::application::tls::{
+    Handshake, Outcome, Transport, ja3, ja3s, ja4, parse_handshake, parse_record,
+};
 
 fuzz_target!(|data: &[u8]| {
     let _ = parse_record(data);

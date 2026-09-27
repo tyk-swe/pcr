@@ -3,275 +3,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
-
 use super::limits::{DetailBudget, DetailCharge, ScratchBudget};
-use super::{
-    Error, ExpectationOutcome, Incomplete, Observation, Rules, Side, ValueState, VerifyLimits,
+use super::report::{
+    ASSUMPTIONS, AmbiguousGroup, Check, CheckEvaluation, CheckKind, Evidence, Match, Omissions,
+    Outcome, Report, RequestedRules, SideSummary, Sided, Summary, UnkeyedObservation, Verdict,
+    Violation,
 };
+use super::{Error, ExpectationOutcome, Limits, Observation, Rules, Side, ValueState};
 use crate::budget::{Cancellation, Deadline};
 use crate::field::FieldValue;
-use crate::frame::LinkType;
-
-pub const ASSUMPTIONS: &[&str] = &[
-    "identity is exact equality of the declared decoded field values; a field absent from an observation makes it unkeyable",
-    "timestamps are per-capture evidence only; no clock relationship between the two captures is assumed, and no cross-capture difference is a latency measurement",
-    "correspondence is observational evidence, not proof of device forwarding, loss, duplication, or reordering",
-    "no NAT inference, tunnel reconstruction, stream reassembly, or fragment correspondence is performed",
-    "ordinary value checks require readable values; two missing fields do not satisfy preservation",
-    "presence and absence assertions describe the declared decoder view, not the absence of unknown wire protocols",
-    "capture incompleteness does not erase a contradiction already established by readable fields",
-];
-
-/// `fail` and `inconclusive` are deliberately distinct: `fail` requires an
-/// attributable observation that demonstrably violates an explicit rule,
-/// while `inconclusive` records that the evidence could not answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Verdict {
-    Pass,
-    Fail,
-    Inconclusive,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct Sided<T> {
-    pub ingress: T,
-    pub egress: T,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct SideSummary {
-    pub read: u64,
-    pub selected: u64,
-    pub keyed: u64,
-    pub unkeyed: u64,
-    pub incomplete: u64,
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct SideInput {
     pub frames_read: u64,
     pub observations: Vec<Observation>,
-}
-
-/// Aggregate comparison counters; every list in the report is a bounded
-/// sample of what these counters measure exactly.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Summary {
-    pub unique_matches: u64,
-    /// Uniquely paired observations whose egress order contradicts the
-    /// ingress order of earlier pairs.
-    pub reordered_pairs: u64,
-    pub ingress_only: u64,
-    pub egress_only: u64,
-    pub ambiguous_groups: u64,
-    pub ambiguous_observations: u64,
-    pub checks_evaluated: u64,
-    pub checks_satisfied: u64,
-    pub checks_violated: u64,
-    pub checks_unevaluable: u64,
-}
-
-/// A reference to one frame inside its own capture. The `frame` number is
-/// 1-based and capture-local.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Evidence {
-    pub frame: u64,
-    pub timestamp: std::time::SystemTime,
-    pub interface: Option<u32>,
-    pub link_type: LinkType,
-    pub incomplete: Option<Incomplete>,
-    pub diagnostics: Vec<&'static str>,
-}
-
-impl From<&Observation> for Evidence {
-    fn from(observation: &Observation) -> Self {
-        Self {
-            frame: observation.frame,
-            timestamp: observation.timestamp,
-            interface: observation.interface,
-            link_type: observation.link_type,
-            incomplete: observation.incomplete,
-            diagnostics: observation.diagnostics.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct UnkeyedObservation {
-    pub evidence: Evidence,
-    pub key: Vec<Option<FieldValue>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CheckKind {
-    Preserve,
-    Expect,
-    PreservePresence,
-    ExpectAbsent,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Check {
-    pub kind: CheckKind,
-    pub field: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Satisfied,
-    Violated,
-    Unevaluable,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct CheckEvaluation {
-    pub check: Check,
-    pub outcome: Outcome,
-    pub expected_state: Option<ValueState>,
-    pub actual_state: ValueState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected: Option<FieldValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual: Option<FieldValue>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Match {
-    pub key: Vec<FieldValue>,
-    pub ingress: Evidence,
-    pub egress: Evidence,
-    pub ingress_order: u64,
-    pub egress_order: u64,
-    pub reordered: bool,
-    pub checks: Vec<CheckEvaluation>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Violation {
-    pub check: Check,
-    pub key: Option<Vec<FieldValue>>,
-    pub ingress: Option<Evidence>,
-    pub egress: Evidence,
-    pub expected: Option<FieldValue>,
-    pub actual: Option<FieldValue>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AmbiguousGroup {
-    pub key: Vec<FieldValue>,
-    pub ingress: Vec<Evidence>,
-    pub egress: Vec<Evidence>,
-    pub ingress_total: u64,
-    pub egress_total: u64,
-    pub ingress_indistinguishable: bool,
-    pub egress_indistinguishable: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Omissions {
-    pub matches: u64,
-    pub violations: u64,
-    pub unmatched_ingress: u64,
-    pub unmatched_egress: u64,
-    pub unkeyed_ingress: u64,
-    pub unkeyed_egress: u64,
-    pub ambiguous_groups: u64,
-    pub group_members: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct Report {
-    pub verdict: Verdict,
-    pub rules: RequestedRules,
-    pub assumptions: &'static [&'static str],
-    pub sides: Sided<SideSummary>,
-    pub summary: Summary,
-    pub matches: Vec<Match>,
-    pub violations: Vec<Violation>,
-    pub unmatched: Sided<Vec<Evidence>>,
-    pub unkeyed: Sided<Vec<UnkeyedObservation>>,
-    pub ambiguous: Vec<AmbiguousGroup>,
-    pub omitted: Omissions,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RequestedRules {
-    pub comparison: ComparisonKind,
-    pub warnings: Vec<RuleWarning>,
-    pub preserve_presence: Vec<String>,
-    pub expect_absent: Vec<String>,
-    pub identity: Vec<String>,
-    pub preserve: Vec<String>,
-    pub expect: Vec<ExpectationRule>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ComparisonKind {
-    CorrespondenceOnly,
-    PropertyChecks,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RuleWarning {
-    pub code: &'static str,
-    pub message: String,
-}
-
-impl RequestedRules {
-    fn from_rules(rules: &Rules) -> Self {
-        let correspondence_only = rules.preserve.is_empty() && rules.expectations.is_empty();
-        let mut warnings = Vec::new();
-        if correspondence_only {
-            warnings.push(RuleWarning {
-                code: "verify.correspondence_only",
-                message: "pass establishes exact unique correspondence only; no property assertions were requested".to_owned(),
-            });
-        }
-        let overlap: Vec<_> = rules
-            .preserve_fields()
-            .iter()
-            .filter(|field| rules.identity_fields().contains(field))
-            .cloned()
-            .collect();
-        if !overlap.is_empty() {
-            warnings.push(RuleWarning {
-                code: "verify.identity_preservation_overlap",
-                message: format!("identity also contains {}; changes to these fields prevent matching instead of establishing a preservation violation", overlap.join(", ")),
-            });
-        }
-        Self {
-            comparison: if correspondence_only {
-                ComparisonKind::CorrespondenceOnly
-            } else {
-                ComparisonKind::PropertyChecks
-            },
-            warnings,
-            identity: rules.identity_fields().to_vec(),
-            preserve: rules.preserve_fields().to_vec(),
-            preserve_presence: rules.preserve_presence_fields().to_vec(),
-            expect_absent: rules.absent_fields().map(str::to_owned).collect(),
-            expect: rules
-                .expectation_specs()
-                .map(|(field, value)| ExpectationRule {
-                    field: field.to_owned(),
-                    value: value.to_owned(),
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ExpectationRule {
-    pub field: String,
-    pub value: String,
 }
 
 pub fn verify(
@@ -285,9 +30,9 @@ pub fn verify(
         rules,
         ingress,
         egress,
-        VerifyLimits {
+        Limits {
             max_details,
-            ..VerifyLimits::default()
+            ..Limits::default()
         },
         cancellation,
         None,
@@ -299,7 +44,7 @@ pub fn verify_with_limits(
     rules: &Rules,
     ingress: SideInput,
     egress: SideInput,
-    limits: VerifyLimits,
+    limits: Limits,
     cancellation: Option<&Cancellation>,
     deadline: Option<&Deadline>,
 ) -> Result<Report, Error> {

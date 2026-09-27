@@ -6,12 +6,11 @@ use super::{
     Bytes, DatagramKey, DatagramState, Ecn, Error, Fragment, Ipv4Addr, Limits, Malformed,
     Reconstruction, Resource, RetainedRange,
 };
+use crate::protocol::headers::{Ipv4Header, Ipv6ExtensionChain, Ipv6Header};
+use crate::protocol::network::ip_protocol;
 
-const IPV4_MIN_HEADER_LENGTH: usize = 20;
-pub(super) const IPV6_HEADER_LENGTH: usize = 40;
 const IPV6_FRAGMENT_HEADER_LENGTH: usize = 8;
 const MAX_WIRE_LENGTH: usize = 65_535;
-const IPV6_FRAGMENT_DISCRIMINATOR: u8 = 44;
 
 pub(super) const FAMILY_MISMATCH: Error = Error::Inconsistent {
     reason: "retained datagram family disagrees with its key",
@@ -121,7 +120,7 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
 }
 
 fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
-    let Some(fixed) = fragment.header.first_chunk::<IPV4_MIN_HEADER_LENGTH>() else {
+    let Some(fixed) = fragment.header.first_chunk::<{ Ipv4Header::MIN_LENGTH }>() else {
         return Err(Malformed::InvalidIpv4Header {
             reason: "header is shorter than twenty bytes",
         }
@@ -136,7 +135,7 @@ fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
     let header_length = usize::from(fixed[0] & 0x0f)
         .checked_mul(4)
         .ok_or(Malformed::OffsetOverflow)?;
-    if header_length < IPV4_MIN_HEADER_LENGTH || header_length != fragment.header.len() {
+    if header_length < Ipv4Header::MIN_LENGTH || header_length != fragment.header.len() {
         return Err(Malformed::InvalidIpv4Header {
             reason: "IHL does not match supplied header bytes",
         }
@@ -174,7 +173,7 @@ fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
 fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
     let Some(base) = fragment
         .unfragmentable_prefix
-        .first_chunk::<IPV6_HEADER_LENGTH>()
+        .first_chunk::<{ Ipv6Header::LENGTH }>()
     else {
         return Err(Malformed::InvalidIpv6Prefix {
             reason: "prefix is shorter than the IPv6 base header",
@@ -198,7 +197,7 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
     let prefix_payload_length = fragment
         .unfragmentable_prefix
         .len()
-        .checked_sub(IPV6_HEADER_LENGTH)
+        .checked_sub(Ipv6Header::LENGTH)
         .and_then(|length| length.checked_add(IPV6_FRAGMENT_HEADER_LENGTH))
         .and_then(|length| length.checked_add(fragment.payload.len()))
         .ok_or(Malformed::OffsetOverflow)?;
@@ -231,24 +230,17 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
 }
 
 fn ipv6_fragment_predecessor(prefix: &[u8]) -> Option<usize> {
-    let base = prefix.first_chunk::<IPV6_HEADER_LENGTH>()?;
-    let mut next_header = base[6];
+    let base = prefix.first_chunk::<{ Ipv6Header::LENGTH }>()?;
+    let mut chain =
+        Ipv6ExtensionChain::new(prefix, Ipv6Header::LENGTH, base[6]).with_ceiling(prefix.len() / 8);
     let mut predecessor = 6usize;
-    let mut cursor = IPV6_HEADER_LENGTH;
     loop {
-        if next_header == IPV6_FRAGMENT_DISCRIMINATOR {
-            return (cursor == prefix.len()).then_some(predecessor);
+        let (protocol, offset) = chain.position();
+        if protocol == ip_protocol::FRAGMENT {
+            return (offset == prefix.len()).then_some(predecessor);
         }
-        let header = prefix.get(cursor..)?;
-        let length =
-            crate::protocol::network::ipv6_extension_header_length(next_header, *header.get(1)?)?;
-        let end = cursor.checked_add(length)?;
-        if end > prefix.len() {
-            return None;
-        }
-        predecessor = cursor;
-        next_header = *header.first()?;
-        cursor = end;
+        let extension = chain.next()?.ok()?;
+        predecessor = extension.range().start;
     }
 }
 
@@ -372,8 +364,8 @@ pub(super) fn validate_family_wire_extent(
             }),
         ) => first_header
             .as_ref()
-            .map_or(IPV4_MIN_HEADER_LENGTH, Bytes::len),
-        (IncomingReconstruction::Ipv4 { .. }, None) => IPV4_MIN_HEADER_LENGTH,
+            .map_or(Ipv4Header::MIN_LENGTH, Bytes::len),
+        (IncomingReconstruction::Ipv4 { .. }, None) => Ipv4Header::MIN_LENGTH,
         (IncomingReconstruction::Ipv6 { prefix, .. }, existing) => {
             let retained = match existing {
                 Some(DatagramState {
@@ -392,7 +384,7 @@ pub(super) fn validate_family_wire_extent(
                 _ => prefix.len(),
             };
             retained
-                .checked_sub(IPV6_HEADER_LENGTH)
+                .checked_sub(Ipv6Header::LENGTH)
                 .ok_or(Malformed::OffsetOverflow)?
         }
         _ => return Err(FAMILY_MISMATCH),

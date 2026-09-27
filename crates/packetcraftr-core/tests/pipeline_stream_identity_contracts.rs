@@ -144,7 +144,7 @@ fn pipeline_assigns_stable_indices_before_filtering() {
     let filter = Filter::compile(
         "tcp.stream == 1",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("stream filter compiles");
     let mut capture = reader(&frames);

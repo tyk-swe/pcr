@@ -6,7 +6,7 @@
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::protocol::application::dns::{
-    DecodeLimits, Dns, MAX_LABEL_LEN, MAX_NAME_LEN, MAX_NAME_POINTERS, decode_name,
+    Dns, Limits, MAX_LABEL_LEN, MAX_NAME_LEN, MAX_NAME_POINTERS, decode_name,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -17,9 +17,9 @@ fuzz_target!(|data: &[u8]| {
     let message = Bytes::copy_from_slice(message);
     let start = usize::from(control.first().copied().unwrap_or(0));
     let max_pointers = usize::from(control.get(1).copied().unwrap_or(32)).min(MAX_NAME_POINTERS);
-    let limits = |max_name_pointers| DecodeLimits {
+    let limits = |max_name_pointers| Limits {
         max_name_pointers,
-        ..DecodeLimits::default()
+        ..Limits::default()
     };
 
     let expanded = decode_name(&message, start, limits(max_pointers));

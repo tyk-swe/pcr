@@ -322,7 +322,7 @@ impl Request {
     }
 }
 
-impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::DecodeLimits {
+impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::Limits {
     fn from(limits: MessageLimits) -> Self {
         Self {
             max_message_bytes: limits.max_message_bytes,

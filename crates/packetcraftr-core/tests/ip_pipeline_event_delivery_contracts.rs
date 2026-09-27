@@ -20,7 +20,7 @@ fn eof_incomplete_event_is_capture_global_even_when_filter_matches_no_frame() {
     let filter = Filter::compile(
         "udp",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("UDP filter compiles");
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames[..1]);

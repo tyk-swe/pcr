@@ -4,20 +4,20 @@
 use serde::Serialize;
 use std::io::{self, Write};
 
-use super::evaluate::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
+use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
 
 /// Every value is honored as given, so [`validate`](Self::validate) has
 /// nothing to refuse: zero `max_details` or `max_detail_bytes` retains no
 /// details, and zero `max_scratch_bytes` refuses any comparison that needs
 /// scratch space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VerifyLimits {
+pub struct Limits {
     pub max_details: usize,
     pub max_detail_bytes: usize,
     pub max_scratch_bytes: usize,
 }
 
-impl Default for VerifyLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_details: 256,
@@ -27,7 +27,7 @@ impl Default for VerifyLimits {
     }
 }
 
-impl VerifyLimits {
+impl Limits {
     pub const fn validate(&self) -> Result<(), super::Error> {
         Ok(())
     }
@@ -185,13 +185,13 @@ mod tests {
 
     #[test]
     fn every_ceiling_is_a_valid_verify_limit() {
-        let zero = VerifyLimits {
+        let zero = Limits {
             max_details: 0,
             max_detail_bytes: 0,
             max_scratch_bytes: 0,
         };
         assert!(zero.validate().is_ok());
-        assert!(VerifyLimits::default().validate().is_ok());
+        assert!(Limits::default().validate().is_ok());
     }
 
     #[test]

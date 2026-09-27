@@ -99,7 +99,7 @@ pub struct RewriteLimits {
 impl Default for RewriteLimits {
     fn default() -> Self {
         Self {
-            max_output_bytes: crate::frame::DEFAULT_SIZE_LIMIT,
+            max_output_bytes: crate::frame::DEFAULT_MAX_SIZE,
         }
     }
 }

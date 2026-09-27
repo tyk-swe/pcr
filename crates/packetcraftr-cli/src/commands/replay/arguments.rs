@@ -105,11 +105,11 @@ pub(crate) struct Streamed;
 
 impl Budget for Streamed {
     fn max_packets() -> u64 {
-        packetcraftr_core::capture_file::DEFAULT_STREAM_FRAMES
+        packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_FRAMES
     }
 
     fn max_bytes() -> u64 {
-        packetcraftr_core::capture_file::DEFAULT_STREAM_BYTES
+        packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_BYTES
     }
 
     const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";

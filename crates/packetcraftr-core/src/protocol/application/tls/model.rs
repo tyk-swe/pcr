@@ -15,7 +15,7 @@ pub const MAX_CIPHER_SUITES: usize = 512;
 pub const MAX_EXTENSIONS: usize = 64;
 pub const MAX_EXTENSION_LEN: usize = 16 * 1024;
 pub const MAX_ALPN: usize = 32;
-/// The 255-byte cap is the DNS name limit (RFC 1035 section 2.3.4).
+/// The 255-byte ceiling is the DNS name limit (RFC 1035 section 2.3.4).
 pub const MAX_SNI_LEN: usize = 255;
 pub const MAX_SESSION_ID_LEN: usize = 32;
 

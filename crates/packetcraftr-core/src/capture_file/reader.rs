@@ -8,11 +8,11 @@ use crate::frame::{Frame, LinkType};
 
 use super::classic::{read_next_pcap_record, read_pcap_header};
 use super::error::Error;
-use super::model::{
-    CaptureHeader, CaptureRecord, Endianness, Format, Interface, ReaderLimits, Section,
-    TimestampPrecision, TimestampResolution,
-};
+use super::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
+use super::header::{CaptureHeader, Interface, Section};
+use super::limits::ReaderLimits;
 use super::pcapng::{PcapNgState, read_next_pcapng_record, read_section_header_after_type};
+use super::record::CaptureRecord;
 use super::wire::{PCAPNG_SECTION_HEADER, read_exact_or_eof};
 
 pub(super) enum ReaderState {
@@ -39,7 +39,7 @@ pub struct Reader<R> {
 }
 
 fn wrap_pcap_header(
-    value: (ReaderState, super::model::PcapHeader),
+    value: (ReaderState, super::header::PcapHeader),
 ) -> (ReaderState, CaptureHeader) {
     (value.0, CaptureHeader::Pcap(value.1))
 }

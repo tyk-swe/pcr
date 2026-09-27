@@ -74,44 +74,63 @@ impl Classified for Error {
     }
 }
 
+/// Ceilings on one packet expression.
+///
+/// Every value is honored as given: bytes, layers, and nesting beyond their
+/// ceilings are refused where they occur, and zero refuses the corresponding
+/// construct. `max_nesting` also has a stable maximum, which
+/// [`validate`](Self::validate) enforces.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Options {
+pub struct Limits {
     pub max_bytes: usize,
     pub max_layers: usize,
     pub max_nesting: usize,
 }
 
-impl Default for Options {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_EXPRESSION_BYTES,
-            max_layers: crate::layout::DEFAULT_MAX_LAYERS,
+            max_layers: crate::packet::DEFAULT_MAX_LAYERS,
             max_nesting: MAX_EXPRESSION_NESTING,
         }
     }
 }
 
-pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packet, Error> {
+impl Limits {
+    /// Checks the ceilings against their stable maxima.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidNestingLimit`] when `max_nesting` exceeds the stable
+    /// maximum.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.max_nesting > MAX_EXPRESSION_NESTING {
+            return Err(Error::InvalidNestingLimit {
+                value: self.max_nesting,
+                maximum: MAX_EXPRESSION_NESTING,
+            });
+        }
+        Ok(())
+    }
+}
+
+pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet, Error> {
     if input.trim().is_empty() {
         return Err(Error::Empty);
     }
-    if input.len() > options.max_bytes {
+    if input.len() > limits.max_bytes {
         return Err(Error::SizeLimit {
             actual: input.len(),
-            limit: options.max_bytes,
+            limit: limits.max_bytes,
         });
     }
-    if options.max_nesting > MAX_EXPRESSION_NESTING {
-        return Err(Error::InvalidNestingLimit {
-            value: options.max_nesting,
-            maximum: MAX_EXPRESSION_NESTING,
-        });
-    }
+    limits.validate()?;
     // Bound layers while scanning so delimiters cannot amplify a small byte budget.
-    let segments = split_top_level_bounded(input, '/', Some(options.max_layers))?;
+    let segments = split_top_level_bounded(input, '/', Some(limits.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
     for (layer_index, segment) in segments.into_iter().enumerate() {
-        let (name, fields) = parse_layer(segment, layer_index, options.max_nesting)?;
+        let (name, fields) = parse_layer(segment, layer_index, limits.max_nesting)?;
         let codec = registry
             .codec_named(&name)
             .ok_or_else(|| Error::UnknownProtocol {
@@ -136,20 +155,15 @@ pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packe
 }
 
 /// `max_layers` has no effect because this input contains no layer stack.
-pub fn parse_value(input: &str, options: Options) -> Result<FieldValue, Error> {
-    if input.len() > options.max_bytes {
+pub fn parse_value(input: &str, limits: Limits) -> Result<FieldValue, Error> {
+    if input.len() > limits.max_bytes {
         return Err(Error::SizeLimit {
             actual: input.len(),
-            limit: options.max_bytes,
+            limit: limits.max_bytes,
         });
     }
-    if options.max_nesting > MAX_EXPRESSION_NESTING {
-        return Err(Error::InvalidNestingLimit {
-            value: options.max_nesting,
-            maximum: MAX_EXPRESSION_NESTING,
-        });
-    }
-    parse_value_bounded(input.trim(), 0, options.max_nesting)
+    limits.validate()?;
+    parse_value_bounded(input.trim(), 0, limits.max_nesting)
 }
 
 fn parse_layer(
@@ -690,16 +704,16 @@ mod tests {
         let registry = crate::protocol::builtin::registry();
 
         assert!(matches!(
-            parse(" ", &registry, Options::default()),
+            parse(" ", &registry, Limits::default()),
             Err(Error::Empty)
         ));
         assert!(matches!(
             parse(
                 "ipv4",
                 &registry,
-                Options {
+                Limits {
                     max_bytes: 3,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::SizeLimit {
@@ -711,9 +725,9 @@ mod tests {
             parse(
                 "ipv4",
                 &registry,
-                Options {
+                Limits {
                     max_nesting: MAX_EXPRESSION_NESTING + 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::InvalidNestingLimit { .. })
@@ -722,19 +736,19 @@ mod tests {
             parse(
                 "ipv4/udp",
                 &registry,
-                Options {
+                Limits {
                     max_layers: 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::LayerLimit { limit: 1 })
         ));
         assert!(matches!(
-            parse("unknown_fixture", &registry, Options::default()),
+            parse("unknown_fixture", &registry, Limits::default()),
             Err(Error::UnknownProtocol { layer: 0, .. })
         ));
         assert!(matches!(
-            parse("ipv4(source=not-an-address)", &registry, Options::default()),
+            parse("ipv4(source=not-an-address)", &registry, Limits::default()),
             Err(Error::Layer { layer: 0, .. })
         ));
     }

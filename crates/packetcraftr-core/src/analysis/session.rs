@@ -193,7 +193,7 @@ mod tests {
     use crate::error::Classified;
     use crate::error::{Classification, Kind};
     use crate::field::WireValue;
-    use crate::filter::Options as FilterOptions;
+    use crate::filter::Limits as FilterLimits;
     use crate::frame::{Frame, LinkType};
     use crate::layer::Raw;
     use crate::packet::Packet;
@@ -360,8 +360,7 @@ mod tests {
     }
 
     fn compile(source: &str, registry: &Registry) -> Filter {
-        Filter::compile(source, registry, FilterOptions::default())
-            .expect("fixture filter compiles")
+        Filter::compile(source, registry, FilterLimits::default()).expect("fixture filter compiles")
     }
 
     struct Driven {

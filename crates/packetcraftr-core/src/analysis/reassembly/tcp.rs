@@ -1,6 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Bounded TCP stream reassembly: [`Reassembler`] tracks per-flow sequence
+//! state with deduplicated in-order deliveries, capture-clock idle expiry,
+//! and a shared aggregate memory ceiling, reporting each lifecycle step as
+//! an [`Event`].
+
 use std::collections::HashMap;
 
 use super::expiry::ExpiryIndex;

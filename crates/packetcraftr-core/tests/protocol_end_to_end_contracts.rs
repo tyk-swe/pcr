@@ -377,7 +377,7 @@ fn assert_negative_filters(registry: &Registry, decoded: &decode::DecodedPacket)
         let filter = Filter::compile(
             source,
             registry,
-            packetcraftr_core::filter::Options::default(),
+            packetcraftr_core::filter::Limits::default(),
         )
         .expect("valid negative filter");
         assert!(
@@ -400,7 +400,7 @@ fn assert_invalid_filters(registry: &Registry) {
         Filter::compile(
             "ipv4.unknown == 1",
             registry,
-            packetcraftr_core::filter::Options::default(),
+            packetcraftr_core::filter::Limits::default(),
         )
         .is_err()
     );
@@ -409,7 +409,7 @@ fn assert_invalid_filters(registry: &Registry) {
     let error = Filter::compile(
         &overflowed_index,
         registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect_err("a single-byte slice must have a representable exclusive end");
     assert!(
@@ -431,7 +431,7 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     let filter = Filter::compile(
         source,
         &registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("valid filter");
     let requirements = filter.requirements();
@@ -1327,7 +1327,7 @@ fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
         Filter::compile(
             &format!("{path} == 192.0.2.1"),
             &registry,
-            packetcraftr_core::filter::Options::default(),
+            packetcraftr_core::filter::Limits::default(),
         )
         .unwrap_or_else(|error| panic!("{path}: {error}"));
     }

@@ -20,174 +20,28 @@ use crate::analysis::adapter::{
 };
 use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey, Resource as IpResource};
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
-use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES, ScopeId};
+use crate::analysis::reassembly::tcp::Event as TcpEvent;
+use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES};
 use crate::analysis::{Error, StreamTransport};
 use crate::frame::{Frame, LinkType};
-use crate::protocol::transport::Tcp;
 
 mod clock;
 mod dispatch;
 mod ip;
 mod limits;
+mod options;
+mod record;
 
 pub use clock::ClockReport;
 pub use ip::{
     IpCounters, IpDatagramOutcome, IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport,
 };
-pub use limits::{Limits, Options, Plan};
+pub use limits::Limits;
+pub use options::{Options, Plan};
+pub use record::{Conversation, DerivedDatagram, FrameRecord, TcpView, UdpView};
 
 use dispatch::ReassemblyDispatch;
 use ip::IpDispatch;
-
-/// A complete datagram decoded separately from, and attributed to, the
-/// physical fragment whose arrival filled its final gap.
-#[derive(Debug)]
-pub struct DerivedDatagram {
-    pub sources: Option<crate::analysis::provenance::SourceSet>,
-    pub decoded: DecodedPacket,
-    pub scope: ScopeId,
-    pub fragment_count: usize,
-    pub unique_bytes: usize,
-    pub payload_bytes: usize,
-    replayed_prefix_layers: usize,
-}
-
-impl DerivedDatagram {
-    pub(crate) const fn replayed_prefix_layers(&self) -> usize {
-        self.replayed_prefix_layers
-    }
-}
-
-#[derive(Debug)]
-pub struct FrameRecord<'a> {
-    /// 1-based position in the capture, counting unmatched frames too, so
-    /// numbers agree with every other command reading the same file.
-    pub number: u64,
-    pub timestamp: SystemTime,
-    pub decoded: &'a DecodedPacket,
-    derived_datagrams: &'a [DerivedDatagram],
-    scopes: &'a Interner,
-    physical_sources: Option<&'a crate::analysis::provenance::SourceSet>,
-    pub tcp: Option<TcpView<'a>>,
-    pub udp: Option<UdpView<'a>>,
-    pub tcp_events: &'a [TcpEvent],
-    pub clock_regression: Option<Duration>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Conversation<'a> {
-    pub index: u64,
-    pub flow: &'a ScopedFlowKey,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct TcpView<'a> {
-    pub decoded: &'a DecodedPacket,
-    pub layer: usize,
-    pub header: &'a Tcp,
-    pub conversation: Option<Conversation<'a>>,
-    pub payload: &'a [u8],
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct UdpView<'a> {
-    pub decoded: &'a DecodedPacket,
-    pub layer: usize,
-    pub conversation: Option<Conversation<'a>>,
-}
-
-impl FrameRecord<'_> {
-    pub fn physical_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
-        self.physical_sources
-    }
-    pub fn tcp_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
-        self.tcp.and_then(|view| self.sources_of(view.decoded))
-    }
-    pub fn udp_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
-        self.udp.and_then(|view| self.sources_of(view.decoded))
-    }
-    fn sources_of(
-        &self,
-        decoded: &DecodedPacket,
-    ) -> Option<&crate::analysis::provenance::SourceSet> {
-        if std::ptr::eq(decoded, self.decoded) {
-            return self.physical_sources;
-        }
-        self.derived_datagrams
-            .iter()
-            .find(|datagram| std::ptr::eq(&datagram.decoded, decoded))
-            .and_then(|datagram| datagram.sources.as_ref())
-    }
-
-    pub fn physical_context(&self) -> crate::filter::Context<'_> {
-        crate::filter::Context {
-            decoded: self.decoded,
-            derived: &[],
-            number: self.number,
-            tcp_stream: self
-                .tcp
-                .filter(|view| std::ptr::eq(view.decoded, self.decoded))
-                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
-            udp_stream: self
-                .udp
-                .filter(|view| std::ptr::eq(view.decoded, self.decoded))
-                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
-        }
-    }
-
-    pub fn project(
-        &self,
-        projection: &crate::filter::Projection,
-        max_bytes: usize,
-    ) -> Result<Vec<Option<crate::field::FieldValue>>, crate::filter::Error> {
-        self.with_filter_context(|context| projection.values(context, max_bytes))
-    }
-
-    pub fn matches(&self, filter: &crate::filter::Filter) -> Result<bool, crate::filter::Error> {
-        self.with_filter_context(|context| filter.matches(context))
-    }
-
-    fn with_filter_context<T>(&self, visit: impl FnOnce(&crate::filter::Context<'_>) -> T) -> T {
-        let derived: Vec<_> = self
-            .derived_datagrams
-            .iter()
-            .map(|datagram| crate::filter::DerivedPacket {
-                decoded: &datagram.decoded,
-                replayed_prefix_layers: datagram.replayed_prefix_layers,
-            })
-            .collect();
-        visit(&crate::filter::Context {
-            decoded: self.decoded,
-            derived: &derived,
-            number: self.number,
-            tcp_stream: self
-                .tcp
-                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
-            udp_stream: self
-                .udp
-                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
-        })
-    }
-
-    pub fn scope_definition(&self, id: ScopeId) -> Option<&crate::analysis::scope::Definition> {
-        self.scopes.definition(id)
-    }
-
-    pub fn scope_definitions(&self) -> &[crate::analysis::scope::Definition] {
-        self.scopes.definitions()
-    }
-
-    #[must_use]
-    pub fn derived(&self) -> Option<&DerivedDatagram> {
-        self.derived_datagrams.last()
-    }
-
-    #[must_use]
-    pub fn derived_datagrams(&self) -> &[DerivedDatagram] {
-        self.derived_datagrams
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct Summary {

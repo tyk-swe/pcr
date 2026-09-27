@@ -9,11 +9,10 @@ use bytes::Bytes;
 use crate::frame::{Frame, Lengths, LinkType};
 
 use crate::capture_file::error::Error;
-use crate::capture_file::model::{
-    CaptureRecord, Endianness, Format, PacketBlockKind, PcapHeader, RecordKind, TimestampPrecision,
-    TimestampResolution,
-};
+use crate::capture_file::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
+use crate::capture_file::header::PcapHeader;
 use crate::capture_file::reader::ReaderState;
+use crate::capture_file::record::{CaptureRecord, PacketBlockKind, RecordKind};
 use crate::capture_file::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
     read_exact_or_eof, read_exact_vec, validate_declared_lengths,

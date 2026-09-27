@@ -5,7 +5,8 @@ use bytes::Bytes;
 
 use crate::capture_file::{
     error::Error,
-    model::{Endianness, Format, PcapNgOption},
+    format::{Endianness, Format},
+    header::PcapNgOption,
     wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},
 };
 

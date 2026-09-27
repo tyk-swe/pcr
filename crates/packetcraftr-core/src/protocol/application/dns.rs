@@ -18,14 +18,14 @@ pub const MAX_NAME_LEN: usize = 255;
 
 /// Each is at most its `MAX_*` constant, and a message may carry at most 64 questions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DecodeLimits {
+pub struct Limits {
     pub max_message_bytes: usize,
     pub max_records: usize,
     pub max_name_pointers: usize,
     pub max_txt_strings: usize,
     pub max_txt_bytes: usize,
 }
-impl DecodeLimits {
+impl Limits {
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             (
@@ -53,7 +53,7 @@ impl DecodeLimits {
         Ok(())
     }
 }
-impl Default for DecodeLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_message_bytes: MAX_MESSAGE_BYTES,

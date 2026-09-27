@@ -13,7 +13,7 @@ pub(crate) struct CaptureLimitsArgs {
     #[arg(long, default_value_t = net::capture::Limits::default().max_bytes)]
     max_captured_bytes: usize,
     /// Maximum bytes retained from any one captured frame.
-    #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_SIZE_LIMIT)]
+    #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_MAX_SIZE)]
     snap_length: usize,
     /// Backend queue behavior when a configured bound is reached.
     #[arg(long, value_enum, default_value_t = OverflowPolicy::Fail)]

@@ -8,7 +8,8 @@ use bytes::Bytes;
 use super::options::parse_options;
 use crate::capture_file::{
     error::Error,
-    model::{Endianness, Format, PcapNgOption},
+    format::{Endianness, Format},
+    header::PcapNgOption,
     wire::{
         decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
     },

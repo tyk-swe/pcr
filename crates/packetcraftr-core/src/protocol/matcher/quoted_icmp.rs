@@ -14,6 +14,7 @@ use crate::{
 };
 
 use super::{IcmpMessage, sctp::sctp_initiate_tag};
+use crate::protocol::headers::{Ipv4Header, Ipv6Header};
 use crate::protocol::network::ip_protocol;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,108 +265,64 @@ struct QuotedProbe<'a> {
     payload: &'a [u8],
 }
 
-const IPV6_HEADER_LEN: usize = 40;
 const MIN_QUOTED_TRANSPORT_LEN: usize = 8;
 const MAX_QUOTED_IPV6_EXTENSION_HEADERS: usize = 16;
 
 fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
     match bytes.first()? >> 4 {
         4 => {
-            let header = bytes.first_chunk::<20>()?;
-            let header_len = usize::from(header[0] & 0x0f).checked_mul(4)?;
-            let minimum_len = header_len.checked_add(8)?;
-            if header_len < 20 || bytes.len() < minimum_len {
-                return None;
-            }
-            let total_length = usize::from(u16::from_be_bytes([header[2], header[3]]));
-            if total_length < minimum_len {
-                return None;
-            }
-            let fragment_offset = u16::from_be_bytes([header[6], header[7]]) & 0x1fff;
-            if fragment_offset != 0 {
+            let header = Ipv4Header::walk_prefix(bytes).ok()?;
+            let header_len = header.header_length();
+            // Only atomic and first fragments can quote a transport key at
+            // the start of this payload.
+            if header.flags_and_offset() & 0x1fff != 0
+                || bytes.len() < header_len + MIN_QUOTED_TRANSPORT_LEN
+                || header.total_length() < header_len + MIN_QUOTED_TRANSPORT_LEN
+            {
                 return None;
             }
             Some(QuotedProbe {
-                source: IpAddr::V4(Ipv4Addr::new(
-                    header[12], header[13], header[14], header[15],
+                source: IpAddr::V4(Ipv4Addr::from(
+                    <[u8; 4]>::try_from(&bytes[Ipv4Header::SOURCE]).ok()?,
                 )),
-                destination: IpAddr::V4(Ipv4Addr::new(
-                    header[16], header[17], header[18], header[19],
+                destination: IpAddr::V4(Ipv4Addr::from(
+                    <[u8; 4]>::try_from(&bytes[Ipv4Header::DESTINATION]).ok()?,
                 )),
-                protocol: header[9],
-                payload: bytes.get(header_len..total_length.min(bytes.len()))?,
+                protocol: header.protocol(),
+                payload: bytes.get(header_len..header.total_length().min(bytes.len()))?,
             })
         }
         6 => {
-            let header = bytes.first_chunk::<IPV6_HEADER_LEN>()?;
-            let payload_length = usize::from(u16::from_be_bytes([header[4], header[5]]));
-            let end = IPV6_HEADER_LEN
-                .checked_add(payload_length)?
-                .min(bytes.len());
-            let (protocol, payload) = parse_quoted_ipv6_payload(bytes, header[6], end)?;
+            let header = Ipv6Header::walk_prefix(bytes).ok()?;
+            let end = header.datagram_length().min(bytes.len());
+            // Only atomic and first fragments can quote a transport key at
+            // the start of this payload.
+            if header.extensions().len() > MAX_QUOTED_IPV6_EXTENSION_HEADERS
+                || header.extensions().iter().any(|extension| {
+                    extension
+                        .fragment_offset_and_flags()
+                        .is_some_and(|word| word & 0xfffe != 0)
+                })
+            {
+                return None;
+            }
+            let (protocol, offset) = header.upper_layer();
+            if end - offset < MIN_QUOTED_TRANSPORT_LEN {
+                return None;
+            }
             Some(QuotedProbe {
-                source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&header[8..24]).ok()?)),
+                source: IpAddr::V6(Ipv6Addr::from(
+                    <[u8; 16]>::try_from(&bytes[Ipv6Header::SOURCE]).ok()?,
+                )),
                 destination: IpAddr::V6(Ipv6Addr::from(
-                    <[u8; 16]>::try_from(&header[24..40]).ok()?,
+                    <[u8; 16]>::try_from(&bytes[Ipv6Header::DESTINATION]).ok()?,
                 )),
                 protocol,
-                payload,
+                payload: bytes.get(offset..end)?,
             })
         }
         _ => None,
     }
-}
-
-fn extension_len(header: &[u8], addend: usize, unit: usize, minimum: usize) -> Option<(u8, usize)> {
-    let next = *header.first()?;
-    let header_len = usize::from(*header.get(1)?)
-        .checked_add(addend)?
-        .checked_mul(unit)?;
-    if header_len < minimum || header.len() < header_len {
-        return None;
-    }
-    Some((next, header_len))
-}
-
-fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Option<(u8, &[u8])> {
-    let mut offset = IPV6_HEADER_LEN;
-    let mut extension_count = 0_usize;
-    loop {
-        let header = bytes.get(offset..end)?;
-        let header_len = match protocol {
-            ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
-                let (next, header_len) = extension_len(header, 1, 8, 8)?;
-                protocol = next;
-                header_len
-            }
-            ip_protocol::FRAGMENT => {
-                let fragment = header.first_chunk::<8>()?;
-                let offset_and_flags = u16::from_be_bytes([fragment[2], fragment[3]]);
-                if offset_and_flags & 0xfffe != 0 {
-                    return None;
-                }
-                protocol = fragment[0];
-                8
-            }
-            // The AH length is measured in 32-bit words excluding the first
-            // two words.
-            ip_protocol::AH => {
-                let (next, header_len) = extension_len(header, 2, 4, 12)?;
-                protocol = next;
-                header_len
-            }
-            _ => break,
-        };
-        offset = offset.checked_add(header_len)?;
-        extension_count = extension_count.checked_add(1)?;
-        if extension_count > MAX_QUOTED_IPV6_EXTENSION_HEADERS {
-            return None;
-        }
-    }
-    if end.checked_sub(offset)? < MIN_QUOTED_TRANSPORT_LEN {
-        return None;
-    }
-    Some((protocol, bytes.get(offset..end)?))
 }
 
 fn outer_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

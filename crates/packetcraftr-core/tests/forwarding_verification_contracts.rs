@@ -494,7 +494,7 @@ fn a_selection_filter_applies_per_capture() {
     let ingress_only_udp53 = Filter::compile(
         "udp.destination_port == 9000",
         &registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("filter compiles");
     let rules = rules(&["raw.bytes"], &[], &[]);
@@ -1182,10 +1182,10 @@ fn details_are_presentation_and_scratch_is_a_separate_failure_domain() {
                 &rules,
                 collect(&rules, Side::Ingress, &ingress, None),
                 collect(&rules, Side::Egress, &egress, None),
-                forwarding::VerifyLimits {
+                forwarding::Limits {
                     max_details,
                     max_detail_bytes,
-                    ..forwarding::VerifyLimits::default()
+                    ..forwarding::Limits::default()
                 },
                 None,
                 None,
@@ -1204,7 +1204,7 @@ fn details_are_presentation_and_scratch_is_a_separate_failure_domain() {
         &rules,
         collect(&rules, Side::Ingress, &ingress, None),
         collect(&rules, Side::Egress, &egress, None),
-        forwarding::VerifyLimits {
+        forwarding::Limits {
             max_scratch_bytes: 0,
             ..Default::default()
         },

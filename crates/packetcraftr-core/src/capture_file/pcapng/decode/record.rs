@@ -13,10 +13,10 @@ use crate::capture_file::pcapng::{
 };
 use crate::capture_file::{
     error::Error,
-    model::{
-        CaptureRecord, Format, Interface, MetadataBlockKind, PacketBlockKind, ReaderLimits,
-        RecordKind,
-    },
+    format::Format,
+    header::Interface,
+    limits::ReaderLimits,
+    record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind},
     wire::{
         PCAPNG_CUSTOM_BLOCK, PCAPNG_CUSTOM_BLOCK_NO_COPY, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
         PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, decode_u32,

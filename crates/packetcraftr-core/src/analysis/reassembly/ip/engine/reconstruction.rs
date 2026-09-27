@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::validation::{FAMILY_MISMATCH, IPV6_HEADER_LENGTH, Incoming, IncomingReconstruction};
+use super::validation::{FAMILY_MISMATCH, Incoming, IncomingReconstruction};
 use super::{Bytes, DatagramState, Ecn, Error, Family, Malformed, Reconstruction, Resource};
+use crate::protocol::headers::Ipv6Header;
 
 const MISSING_OFFSET_ZERO_HEADER: Error = Error::Inconsistent {
     reason: "complete IPv4 payload has no offset-zero header",
@@ -257,7 +258,7 @@ fn reconstruct_ipv6(
 ) -> Result<Bytes, Error> {
     let extension_length = prefix
         .len()
-        .checked_sub(IPV6_HEADER_LENGTH)
+        .checked_sub(Ipv6Header::LENGTH)
         .ok_or(Malformed::OffsetOverflow)?;
     let payload_bytes = payload_length(payload)?;
     let payload_length = extension_length

@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! One bounded walker over raw link, VLAN, and IP header bytes.
+//!
+//! [`Ipv4Header::walk_prefix`] and [`Ipv6Header::walk_prefix`] cover inputs
+//! that hold only the datagram's start, such as the quote inside an ICMP
+//! error, and [`Ipv6ExtensionChain`] walks an extension chain directly.
+//!
 //! ```
 //! use packetcraftr_core::{
 //!     frame::LinkType,
@@ -32,10 +37,35 @@ use crate::frame::LinkType;
 use crate::packet::{MacAddress, VlanKind, VlanTag};
 
 use super::BuiltinProtocol;
-use super::network::{ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension};
+use super::network::ip_protocol;
 
 pub const MAX_VLAN_DEPTH: usize = 64;
 pub const MAX_IPV6_EXTENSIONS: usize = 64;
+
+pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
+    matches!(
+        next_header,
+        ip_protocol::HOP_BY_HOP
+            | ip_protocol::ROUTING
+            | ip_protocol::AH
+            | ip_protocol::DESTINATION_OPTIONS
+    )
+}
+
+pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) -> Option<usize> {
+    match next_header {
+        ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
+            usize::from(encoded_length)
+                .checked_add(1)
+                .and_then(|units| units.checked_mul(8))
+        }
+        ip_protocol::AH => usize::from(encoded_length)
+            .checked_add(2)
+            .and_then(|words| words.checked_mul(4))
+            .filter(|length| *length >= 12),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -312,6 +342,18 @@ impl Ipv4Header {
     pub const DESTINATION: Range<usize> = 16..20;
 
     pub fn walk(ip: &[u8]) -> Result<Self, Error> {
+        Self::walk_lengths(ip, false)
+    }
+
+    /// Walks the IPv4 header at the start of `ip`, which may be only the
+    /// header's prefix: the declared total length may exceed `ip`, as in the
+    /// datagram an ICMP error quotes. The header itself, including options,
+    /// must still fit.
+    pub fn walk_prefix(ip: &[u8]) -> Result<Self, Error> {
+        Self::walk_lengths(ip, true)
+    }
+
+    fn walk_lengths(ip: &[u8], prefix: bool) -> Result<Self, Error> {
         let fixed = ip
             .first_chunk::<{ Self::MIN_LENGTH }>()
             .ok_or(Error::Truncated(Header::Ipv4))?;
@@ -326,7 +368,7 @@ impl Ipv4Header {
         if header_length < Self::MIN_LENGTH || total_length < header_length {
             return Err(Error::Length(Header::Ipv4));
         }
-        if total_length > ip.len() {
+        if header_length > ip.len() || !prefix && total_length > ip.len() {
             return Err(Error::Truncated(Header::Ipv4));
         }
         Ok(Self {
@@ -439,6 +481,25 @@ impl Ipv6Header {
     pub const DESTINATION: Range<usize> = 24..40;
 
     pub fn walk(ip: &[u8]) -> Result<Self, Error> {
+        let (payload_length, next_header) = Self::walk_fixed(ip)?;
+        let datagram = ip
+            .get(..Self::LENGTH + payload_length)
+            .ok_or(Error::Truncated(Header::Ipv6))?;
+        Self::walk_chain(datagram, payload_length, next_header)
+    }
+
+    /// Walks the IPv6 header at the start of `ip` and its extension chain,
+    /// which may be only the datagram's prefix: the declared payload length
+    /// may exceed `ip`, as in the datagram an ICMP error quotes. Every
+    /// extension header must still fit in the bytes that are present; the
+    /// chain otherwise follows [`walk`](Self::walk).
+    pub fn walk_prefix(ip: &[u8]) -> Result<Self, Error> {
+        let (payload_length, next_header) = Self::walk_fixed(ip)?;
+        let datagram = &ip[..(Self::LENGTH + payload_length).min(ip.len())];
+        Self::walk_chain(datagram, payload_length, next_header)
+    }
+
+    fn walk_fixed(ip: &[u8]) -> Result<(usize, u8), Error> {
         let fixed = ip
             .first_chunk::<{ Self::LENGTH }>()
             .ok_or(Error::Truncated(Header::Ipv6))?;
@@ -453,54 +514,26 @@ impl Ipv6Header {
         if payload_length == 0 && next_header != ip_protocol::NO_NEXT_HEADER {
             return Err(Error::Jumbogram);
         }
-        let datagram = ip
-            .get(..Self::LENGTH + payload_length)
-            .ok_or(Error::Truncated(Header::Ipv6))?;
+        Ok((payload_length, next_header))
+    }
+
+    fn walk_chain(datagram: &[u8], payload_length: usize, next_header: u8) -> Result<Self, Error> {
         let mut extensions = Vec::new();
-        let mut protocol = next_header;
-        let mut offset = Self::LENGTH;
-        while protocol == ip_protocol::FRAGMENT || is_walkable_ipv6_extension(protocol) {
-            if extensions.len() == MAX_IPV6_EXTENSIONS {
-                return Err(Error::Depth {
-                    header: Header::Ipv6Extension,
-                    limit: MAX_IPV6_EXTENSIONS,
-                });
-            }
-            let prefix = datagram
-                .get(offset..)
-                .and_then(<[u8]>::first_chunk::<2>)
-                .ok_or(Error::Truncated(Header::Ipv6Extension))?;
-            let length = if protocol == ip_protocol::FRAGMENT {
-                8
-            } else {
-                ipv6_extension_header_length(protocol, prefix[1])
-                    .ok_or(Error::Length(Header::Ipv6Extension))?
-            };
-            let header = datagram
-                .get(offset..offset + length)
-                .ok_or(Error::Truncated(Header::Ipv6Extension))?;
-            let fragment = (protocol == ip_protocol::FRAGMENT)
-                .then(|| u16::from_be_bytes([header[2], header[3]]));
-            let extension = Ipv6Extension {
-                protocol,
-                offset,
-                length,
-                next_header: header[0],
-                fragment,
+        let mut chain = Ipv6ExtensionChain::new(datagram, Self::LENGTH, next_header);
+        while chain.at_header() {
+            let extension = match chain.next() {
+                Some(extension) => extension?,
+                None => break,
             };
             extensions.push(extension);
-            offset += length;
-            protocol = header[0];
-            if extension.fragment_offset().is_some_and(|units| units != 0) {
-                break;
-            }
         }
+        let (upper_layer, upper_layer_offset) = chain.position();
         Ok(Self {
             payload_length,
             next_header,
             extensions,
-            upper_layer: protocol,
-            upper_layer_offset: offset,
+            upper_layer,
+            upper_layer_offset,
         })
     }
 
@@ -543,12 +576,20 @@ impl Ipv6Extension {
         self.protocol
     }
 
+    /// Where the header sits, counted from the start of the walked bytes
+    /// (the IPv6 header start for [`Ipv6Header`] walks).
     pub fn range(&self) -> Range<usize> {
         self.offset..self.offset + self.length
     }
 
     pub fn next_header(&self) -> u8 {
         self.next_header
+    }
+
+    /// For a Fragment header, the offset and flags word as it appears on
+    /// the wire (mirrors [`Ipv4Header::flags_and_offset`]).
+    pub fn fragment_offset_and_flags(&self) -> Option<u16> {
+        self.fragment
     }
 
     /// For a Fragment header, the fragment offset in 8-byte units.
@@ -577,6 +618,114 @@ impl Ipv6Extension {
         Ipv6Options {
             ip: &ip[..end],
             cursor: self.offset + 2,
+        }
+    }
+}
+
+/// Iterator over one IPv6 extension-header chain in `bytes`. Each step
+/// reports the Hop-by-Hop, Routing, Fragment, AH, or Destination Options
+/// header the position stands at; the walk ends at the first other Next
+/// Header value, behind a Fragment header with a nonzero offset — the
+/// bytes there continue an earlier fragment, not another header — or at
+/// [`MAX_IPV6_EXTENSIONS`]. It yields an error once and then ends.
+#[derive(Clone, Debug)]
+pub struct Ipv6ExtensionChain<'a> {
+    bytes: &'a [u8],
+    protocol: u8,
+    offset: usize,
+    limit: usize,
+    remaining: usize,
+    done: bool,
+}
+
+impl<'a> Ipv6ExtensionChain<'a> {
+    /// Starts a walk at `offset` in `bytes`, where the header announced by
+    /// `next_header` begins.
+    pub fn new(bytes: &'a [u8], offset: usize, next_header: u8) -> Self {
+        Self {
+            bytes,
+            protocol: next_header,
+            offset,
+            limit: MAX_IPV6_EXTENSIONS,
+            remaining: MAX_IPV6_EXTENSIONS,
+            done: false,
+        }
+    }
+
+    /// The Next Header value the walk stands at and the offset where the
+    /// header or upper layer it announces starts.
+    pub fn position(&self) -> (u8, usize) {
+        (self.protocol, self.offset)
+    }
+
+    /// Relaxes the header ceiling for a caller whose slice is already
+    /// bounded, such as a walk over a length-checked datagram prefix.
+    /// `bytes.len() / 8` is the largest count a slice can hold, so such a
+    /// caller keeps the slice's own bound rather than the generic one.
+    pub(crate) fn with_ceiling(mut self, ceiling: usize) -> Self {
+        self.limit = ceiling;
+        self.remaining = ceiling;
+        self
+    }
+
+    fn at_header(&self) -> bool {
+        !self.done
+            && (self.protocol == ip_protocol::FRAGMENT || is_walkable_ipv6_extension(self.protocol))
+    }
+}
+
+impl Iterator for Ipv6ExtensionChain<'_> {
+    type Item = Result<Ipv6Extension, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.at_header() {
+            return None;
+        }
+        if self.remaining == 0 {
+            self.done = true;
+            return Some(Err(Error::Depth {
+                header: Header::Ipv6Extension,
+                limit: self.limit,
+            }));
+        }
+        let step = (|| {
+            let prefix = self
+                .bytes
+                .get(self.offset..)
+                .and_then(<[u8]>::first_chunk::<2>)
+                .ok_or(Error::Truncated(Header::Ipv6Extension))?;
+            let length = if self.protocol == ip_protocol::FRAGMENT {
+                8
+            } else {
+                ipv6_extension_header_length(self.protocol, prefix[1])
+                    .ok_or(Error::Length(Header::Ipv6Extension))?
+            };
+            let header = self
+                .bytes
+                .get(self.offset..self.offset + length)
+                .ok_or(Error::Truncated(Header::Ipv6Extension))?;
+            let fragment = (self.protocol == ip_protocol::FRAGMENT)
+                .then(|| u16::from_be_bytes([header[2], header[3]]));
+            Ok(Ipv6Extension {
+                protocol: self.protocol,
+                offset: self.offset,
+                length,
+                next_header: header[0],
+                fragment,
+            })
+        })();
+        match step {
+            Ok(extension) => {
+                self.remaining -= 1;
+                self.offset += extension.length;
+                self.protocol = extension.next_header;
+                self.done = extension.fragment_offset().is_some_and(|units| units != 0);
+                Some(Ok(extension))
+            }
+            Err(error) => {
+                self.done = true;
+                Some(Err(error))
+            }
         }
     }
 }
@@ -904,6 +1053,141 @@ mod tests {
             header.extensions()[0].options(&ip).collect::<Vec<_>>(),
             [Err(Error::Length(Header::Ipv6Option))]
         );
+    }
+
+    #[test]
+    fn ipv4_walk_prefix_accepts_a_truncated_datagram_but_not_truncated_options() {
+        let mut ip = ipv4(&[1, 1, 1, 1], 64);
+        let declared = ip.len();
+        ip.truncate(36);
+        assert_eq!(Ipv4Header::walk(&ip), Err(Error::Truncated(Header::Ipv4)));
+        let header = Ipv4Header::walk_prefix(&ip).unwrap();
+        assert_eq!(header.header_length(), 24);
+        assert_eq!(header.total_length(), declared);
+
+        ip.truncate(23);
+        assert_eq!(
+            Ipv4Header::walk_prefix(&ip),
+            Err(Error::Truncated(Header::Ipv4))
+        );
+    }
+
+    #[test]
+    fn ipv6_walk_prefix_walks_the_chain_inside_a_truncated_datagram() {
+        let chain = [17, 0, 1, 4, 0, 0, 0, 0]; // Hop-by-Hop -> UDP
+        let mut ip = ipv6(0, &chain, 64);
+        ip.truncate(40 + chain.len());
+        assert_eq!(Ipv6Header::walk(&ip), Err(Error::Truncated(Header::Ipv6)));
+        let header = Ipv6Header::walk_prefix(&ip).unwrap();
+        assert_eq!(header.extensions().len(), 1);
+        assert_eq!(header.extensions()[0].range(), 40..48);
+        assert_eq!(header.upper_layer(), (17, 48));
+        assert_eq!(header.datagram_length(), 40 + chain.len() + 64);
+
+        ip.truncate(43);
+        assert_eq!(
+            Ipv6Header::walk_prefix(&ip),
+            Err(Error::Truncated(Header::Ipv6Extension))
+        );
+    }
+
+    #[test]
+    fn ipv6_extension_chain_walks_from_any_offset_and_reports_its_position() {
+        let mut bytes = vec![0xaa; 20];
+        bytes.extend_from_slice(&[51, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]); // AH -> AH
+        bytes.extend_from_slice(&[6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]); // AH -> TCP
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 20, ip_protocol::AH);
+        assert_eq!(chain.position(), (ip_protocol::AH, 20));
+        let first = chain.next().unwrap().unwrap();
+        assert_eq!(first.range(), 20..32);
+        assert_eq!(chain.position(), (ip_protocol::AH, 32));
+        let second = chain.next().unwrap().unwrap();
+        assert_eq!(second.range(), 32..44);
+        assert_eq!(chain.position(), (6, 44));
+        assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn ipv6_extension_chain_yields_one_error_then_ends() {
+        let bytes = [17, 0, 1, 4, 0, 0, 0]; // truncated Hop-by-Hop
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::HOP_BY_HOP);
+        assert_eq!(
+            chain.next(),
+            Some(Err(Error::Truncated(Header::Ipv6Extension)))
+        );
+        assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 0));
+        assert_eq!(chain.next(), None);
+        assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn ipv6_extension_chain_stops_behind_a_later_fragment() {
+        // A non-initial fragment announces Hop-by-Hop, but the bytes behind
+        // it continue an earlier fragment and must not walk as a header.
+        let mut bytes = vec![0xaa; 8];
+        bytes.extend_from_slice(&[0, 0, 0, 0x09, 0, 0, 0, 0]); // Fragment -> Hop-by-Hop, offset 1
+        bytes.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]); // fragment data
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 8, ip_protocol::FRAGMENT);
+        let fragment = chain.next().unwrap().unwrap();
+        assert_eq!(fragment.range(), 8..16);
+        assert_eq!(fragment.fragment_offset(), Some(1));
+        assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
+        assert_eq!(chain.next(), None);
+        assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
+    }
+
+    #[test]
+    fn ipv6_extension_chain_is_bounded_by_max_ipv6_extensions() {
+        let bytes = [60, 0, 1, 4, 0, 0, 0, 0].repeat(MAX_IPV6_EXTENSIONS + 1);
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS);
+        for _ in 0..MAX_IPV6_EXTENSIONS {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert_eq!(
+            chain.next(),
+            Some(Err(Error::Depth {
+                header: Header::Ipv6Extension,
+                limit: MAX_IPV6_EXTENSIONS,
+            }))
+        );
+        assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn ipv6_extension_chain_ceiling_is_relaxable_for_bounded_inputs() {
+        // len/8 is the largest header count a slice can hold, so a caller
+        // bounded by its own slice never trips the relaxed ceiling.
+        let mut bytes = [60, 0, 1, 4, 0, 0, 0, 0].repeat(MAX_IPV6_EXTENSIONS + 1);
+        *bytes.last_chunk_mut::<8>().unwrap() = [59, 0, 1, 4, 0, 0, 0, 0];
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS)
+            .with_ceiling(bytes.len() / 8);
+        for _ in 0..=MAX_IPV6_EXTENSIONS {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert_eq!(chain.next(), None);
+
+        let mut chain =
+            Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS).with_ceiling(3);
+        for _ in 0..3 {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert!(matches!(chain.next(), Some(Err(Error::Depth { .. }))));
+        assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn fragment_offset_and_flags_returns_the_wire_word() {
+        let ip = ipv6(44, &[17, 0, 0x05, 0x01, 0, 0, 0, 9], 8);
+        let header = Ipv6Header::walk(&ip).unwrap();
+        let fragment = header.extensions()[0];
+        assert_eq!(fragment.fragment_offset_and_flags(), Some(0x0501));
+        assert_eq!(fragment.fragment_offset(), Some(160));
+        assert_eq!(fragment.more_fragments(), Some(true));
+        assert_eq!(header.extensions()[0].protocol(), ip_protocol::FRAGMENT);
+
+        let chain = [17, 0, 1, 4, 0, 0, 0, 0];
+        let header = Ipv6Header::walk(&ipv6(0, &chain, 8)).unwrap();
+        assert_eq!(header.extensions()[0].fragment_offset_and_flags(), None);
     }
 
     #[test]

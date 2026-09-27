@@ -10,7 +10,7 @@ use super::decode_name;
 use super::primitives::{read_u16, read_u32};
 use crate::protocol::application::dns::Error as WireError;
 use crate::protocol::application::dns::{
-    DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record, RecordValue,
+    Edns, EdnsOption, Limits as MessageLimits, Name, Record, RecordValue,
 };
 
 const TYPE_OPT: u16 = 41;

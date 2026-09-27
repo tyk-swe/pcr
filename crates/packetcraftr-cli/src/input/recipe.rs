@@ -116,9 +116,9 @@ fn parse_expression(
     core::expression::parse(
         input,
         registry,
-        core::expression::Options {
+        core::expression::Limits {
             max_layers,
-            ..core::expression::Options::default()
+            ..core::expression::Limits::default()
         },
     )
     .map_err(CliError::classified)

@@ -41,7 +41,7 @@ pub struct DocumentLimits {
 impl DocumentLimits {
     pub const DEFAULT: Self = Self {
         max_input_bytes: DEFAULT_MAX_DOCUMENT_BYTES,
-        max_layers: crate::layout::DEFAULT_MAX_LAYERS,
+        max_layers: crate::packet::DEFAULT_MAX_LAYERS,
         max_nesting: MAX_DOCUMENT_NESTING,
         max_fields_per_layer: 256,
         max_total_nodes: 65_536,

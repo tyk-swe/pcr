@@ -10,7 +10,7 @@ const DEFAULT_MAX_SESSIONS: usize = 8_192;
 const DEFAULT_MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
 
 /// Reaching a ceiling degrades affected sessions to a status saying so; the run never fails.
-/// These limits are not a total-memory or RSS cap.
+/// These limits are not a total-memory or RSS ceiling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Reaching it retires the oldest conversation; an in-flight handshake reports as a gap.

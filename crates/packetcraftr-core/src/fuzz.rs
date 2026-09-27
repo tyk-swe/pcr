@@ -22,7 +22,7 @@ pub const MAX_TARGET_FIELDS: usize = 4_096;
 
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_TOTAL_BYTES: usize = MAX_TOTAL_BYTES;
-pub const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_PACKET_BYTES: usize = crate::packet::DEFAULT_MAX_PACKET_SIZE;
 /// This must not exceed [`MAX_DOCUMENT_NESTING`](crate::document::MAX_DOCUMENT_NESTING).
 pub const MAX_VALUE_NESTING: usize = 64;
 const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -34,7 +34,7 @@ mod mutation;
 mod prepare;
 mod report;
 mod request;
-pub(crate) mod rng;
+mod rng;
 mod run;
 mod totals;
 

@@ -7,7 +7,8 @@ use crate::frame::{Direction, Frame, Lengths};
 
 use super::options::visit_options;
 use crate::capture_file::error::Error;
-use crate::capture_file::model::{Endianness, Format, Interface, PcapNgOption};
+use crate::capture_file::format::{Endianness, Format};
+use crate::capture_file::header::{Interface, PcapNgOption};
 use crate::capture_file::wire::{
     PCAPNG_OPTION_EPB_FLAGS, align_to_usize, copy_bytes_fallibly, decode_u16, decode_u32,
     timestamp_from_ticks, validate_declared_lengths,

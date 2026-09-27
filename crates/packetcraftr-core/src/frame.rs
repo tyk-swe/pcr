@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
+pub const DEFAULT_MAX_SIZE: usize = 16 * 1024 * 1024;
 
 /// Open numeric libpcap link-layer type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

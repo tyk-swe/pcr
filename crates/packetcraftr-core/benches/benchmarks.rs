@@ -22,7 +22,7 @@ use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
-use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as FilterOptions};
+use packetcraftr_core::filter::{Context as FilterContext, Filter, Limits as FilterLimits};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
@@ -498,7 +498,7 @@ fn bench_filter_evaluation(c: &mut Criterion) {
     let registry = bench_registry();
     let filter_str = "ipv4.source in 192.0.2.0/24 && tcp.dstport == 80";
     let compiled =
-        Filter::compile(filter_str, &registry, FilterOptions::default()).expect("compile");
+        Filter::compile(filter_str, &registry, FilterLimits::default()).expect("compile");
 
     let dissector = Dissector::new(Arc::clone(&registry));
     let frame_payload = Bytes::from_static(b"\x45\x00\x00\x28\x00\x01\x00\x00\x40\x06\x00\x00\xc0\x00\x02\x01\xc6\x33\x64\x02\x04\xd2\x00\x50\x00\x00\x03\xe8\x00\x00\x00\x00\x50\x02\x20\x00\x00\x00\x00\x00");

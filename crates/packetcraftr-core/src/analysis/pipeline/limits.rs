@@ -3,14 +3,13 @@
 
 use std::time::Duration;
 
-use crate::analysis::reassembly::ip::{self, Limits as IpReassemblyLimits, OverlapPolicy};
+use crate::analysis::reassembly::ip::{self, Limits as IpReassemblyLimits};
 use crate::analysis::reassembly::tcp::{self, Limits as TcpReassemblyLimits};
 use crate::capture_file::{
-    Budget as CaptureBudget, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError,
-    Limits as CaptureLimits,
+    Budget as CaptureBudget, DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES,
+    Error as CaptureError, Limits as CaptureLimits,
 };
-use crate::filter::Filter;
-use crate::frame::DEFAULT_SIZE_LIMIT;
+use crate::frame::DEFAULT_MAX_SIZE;
 
 use crate::analysis::{Constraint, Error};
 
@@ -58,9 +57,9 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_provenance_bytes: 16 * 1024 * 1024,
-            max_frames: DEFAULT_STREAM_FRAMES,
-            max_bytes: DEFAULT_STREAM_BYTES,
-            max_frame_bytes: DEFAULT_SIZE_LIMIT,
+            max_frames: DEFAULT_MAX_STREAM_FRAMES,
+            max_bytes: DEFAULT_MAX_STREAM_BYTES,
+            max_frame_bytes: DEFAULT_MAX_SIZE,
             max_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
             max_scope_bytes: 16 * 1024 * 1024,
             tcp: TcpReassemblyLimits {
@@ -181,61 +180,4 @@ impl Limits {
             source => Error::Capture { number: 0, source },
         })
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Plan {
-    pub ip_reassembly: bool,
-    pub tcp_index: bool,
-    pub udp_index: bool,
-}
-
-impl Default for Plan {
-    fn default() -> Self {
-        Self {
-            ip_reassembly: true,
-            tcp_index: true,
-            udp_index: true,
-        }
-    }
-}
-
-impl Plan {
-    pub fn physical(requirements: crate::filter::Requirements) -> Self {
-        Self {
-            ip_reassembly: requirements.tcp_stream || requirements.udp_stream,
-            tcp_index: requirements.tcp_stream,
-            udp_index: requirements.udp_stream,
-        }
-    }
-
-    /// Indexing keeps IP reconstruction, so the union never renumbers streams.
-    #[must_use]
-    pub fn union(self, other: Self) -> Self {
-        let tcp_index = self.tcp_index || other.tcp_index;
-        let udp_index = self.udp_index || other.udp_index;
-        Self {
-            ip_reassembly: self.ip_reassembly || other.ip_reassembly || tcp_index || udp_index,
-            tcp_index,
-            udp_index,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Options<'a> {
-    pub plan: Plan,
-    /// Shared invocation ceiling; a local phase limit may tighten it.
-    pub deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
-    pub track_sources: bool,
-    pub cancellation: Option<crate::budget::Cancellation>,
-    /// IP reconstruction sees all input, but TCP and collectors see only matches.
-    pub filter: Option<&'a Filter>,
-    /// Indices are assigned before selection, so the plan must index the selected transport.
-    pub stream: Option<crate::analysis::StreamRef>,
-    /// Inclusive capture-time bounds applied with the filter.
-    pub time_bounds: Option<crate::frame::TimeBounds>,
-    pub tcp_events: bool,
-    pub ip_overlap: OverlapPolicy,
-    pub limits: Limits,
 }

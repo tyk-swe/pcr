@@ -34,7 +34,7 @@ impl Default for MergeLimits {
         Self {
             streams: Limits::default(),
             max_sources: MAX_MERGE_SOURCES,
-            max_interfaces: super::DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_interfaces: super::DEFAULT_MAX_TOTAL_INTERFACES,
         }
     }
 }

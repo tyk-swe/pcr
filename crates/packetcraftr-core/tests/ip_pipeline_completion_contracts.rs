@@ -318,7 +318,7 @@ fn assert_derived_udp(link_type: LinkType, family: Family, frames: &[Frame]) {
     let filter = Filter::compile(
         filter_source,
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("stream filter compiles");
     let mut capture = reader_with_link_type(link_type, frames);
@@ -524,7 +524,7 @@ fn derived_filter_layers_exclude_replayed_ipv6_prefix() {
     let filter = Filter::compile(
         "ipv6_destination_options#2",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("occurrence filter compiles");
     let mut capture = reader_with_link_type(LinkType::IPV6, &frames);

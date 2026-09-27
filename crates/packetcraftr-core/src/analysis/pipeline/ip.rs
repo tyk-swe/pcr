@@ -446,7 +446,7 @@ mod tests {
             removed,
             "retirements bounded into omitted counters still prove removal"
         );
-        assert!(events.is_empty(), "no outcomes fit the zero cap");
+        assert!(events.is_empty(), "no outcomes fit the zero ceiling");
         assert_eq!(dispatch.report().outcomes_omitted, 2);
         assert_eq!(dispatch.report().counters.ipv4.idle_expired_datagrams, 2);
     }

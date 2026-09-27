@@ -429,7 +429,7 @@ fn capture_writer<R: Read, W: Write>(
                 endianness: reader.endianness(),
                 max_size: limits.max_frame_bytes,
                 // --max-interfaces bounds each input section, not the one output section.
-                max_interfaces: capture::DEFAULT_TOTAL_INTERFACE_LIMIT,
+                max_interfaces: capture::DEFAULT_MAX_TOTAL_INTERFACES,
                 stream_limits: stream_limits(limits),
             },
         )

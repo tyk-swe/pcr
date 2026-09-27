@@ -41,6 +41,7 @@ use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;
 
 mod limits;
+mod live;
 mod selector;
 mod session;
 
@@ -51,7 +52,7 @@ pub use session::{
     Session, Status,
 };
 
-use session::{Live, Verdict};
+use live::{Live, Verdict};
 
 /// QUIC's HTTPS port: its TLS 1.3 handshakes are counted, not read.
 const QUIC_UDP_PORT: u16 = 443;
@@ -310,7 +311,7 @@ impl Collector {
         key: &CanonicalFlow,
         events: &mut Vec<SessionEvent>,
     ) {
-        let cap = MAX_DIRECTION_BUFFER;
+        let ceiling = MAX_DIRECTION_BUFFER;
         for event in record.tcp_events {
             let TcpEvent::Data {
                 flow: sender,
@@ -335,7 +336,7 @@ impl Collector {
             let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
                 continue;
             };
-            let Some(charge) = live.retainable(direction, payload.len(), cap) else {
+            let Some(charge) = live.retainable(direction, payload.len(), ceiling) else {
                 continue;
             };
             live.note_delivery(record.number);
@@ -362,7 +363,7 @@ impl Collector {
                 return;
             };
             let before = live.buffered();
-            let verdict = live.feed(direction, &payload, cap, &mut limit_hits);
+            let verdict = live.feed(direction, &payload, ceiling, &mut limit_hits);
             let after = live.buffered();
             self.buffered_bytes = self
                 .buffered_bytes

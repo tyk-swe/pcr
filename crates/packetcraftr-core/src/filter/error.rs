@@ -132,7 +132,7 @@ fn cli_filter(remediation: &'static str) -> Classification {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filter::{Filter, Options};
+    use crate::filter::{Filter, Limits};
     use crate::protocol::builtin;
 
     #[test]
@@ -178,7 +178,7 @@ mod tests {
         ];
 
         for (source, expected_remediation) in cases {
-            let error = Filter::compile(source, &registry, Options::default())
+            let error = Filter::compile(source, &registry, Limits::default())
                 .expect_err("fixture filter must fail");
             assert_eq!(error.classification().code, "cli.filter", "{source}");
             assert!(

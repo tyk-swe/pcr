@@ -9,7 +9,8 @@ use super::PcapNgState;
 use crate::capture_file::pcapng::section::validate_pcapng_block_length;
 use crate::capture_file::{
     error::Error,
-    model::{PacketBlockKind, ReaderLimits},
+    limits::ReaderLimits,
+    record::PacketBlockKind,
     wire::{
         PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_PACKET_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32,
         read_exact_vec,

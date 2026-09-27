@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::Error;
-use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
+
+/// The default [`Limits::max_packet_size`].
+pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
+/// The default [`Limits::max_layers`].
+pub const DEFAULT_MAX_LAYERS: usize = 64;
 
 /// Every value is honored as given, and zero refuses every packet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

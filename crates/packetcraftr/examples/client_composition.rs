@@ -86,7 +86,7 @@ fn packet(destination: Ipv4Addr) -> Result<packetcraftr_core::packet::Packet, ex
             "ipv4(src={SELECTED_SOURCE},dst={destination})/udp(sport=12345,dport=9)/raw(text=ping)"
         ),
         &builtin::registry(),
-        expression::Options::default(),
+        expression::Limits::default(),
     )
 }
 

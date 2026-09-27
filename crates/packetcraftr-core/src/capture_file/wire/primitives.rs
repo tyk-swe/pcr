@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use crate::frame::Frame;
 
 use crate::capture_file::error::Error;
-use crate::capture_file::model::{Endianness, Format, TimestampResolution};
+use crate::capture_file::format::{Endianness, Format, TimestampResolution};
 
 pub(in crate::capture_file) const PCAP_GLOBAL_HEADER_LEN: usize = 24;
 pub(in crate::capture_file) const PCAP_RECORD_HEADER_LEN: usize = 16;

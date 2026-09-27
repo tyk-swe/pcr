@@ -12,35 +12,10 @@ use crate::{
 
 use crate::protocol::common::{invalid, network_from_addresses, rejected};
 
-use super::{Ipv4, Ipv6, ip_protocol};
+use super::{Ipv4, Ipv6};
 
 pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
     BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
-}
-
-pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
-    matches!(
-        next_header,
-        ip_protocol::HOP_BY_HOP
-            | ip_protocol::ROUTING
-            | ip_protocol::AH
-            | ip_protocol::DESTINATION_OPTIONS
-    )
-}
-
-pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) -> Option<usize> {
-    match next_header {
-        ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
-            usize::from(encoded_length)
-                .checked_add(1)
-                .and_then(|units| units.checked_mul(8))
-        }
-        ip_protocol::AH => usize::from(encoded_length)
-            .checked_add(2)
-            .and_then(|words| words.checked_mul(4))
-            .filter(|length| *length >= 12),
-        _ => None,
-    }
 }
 
 pub(crate) fn resolve_envelope(

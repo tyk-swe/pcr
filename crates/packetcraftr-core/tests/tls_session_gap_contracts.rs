@@ -242,7 +242,7 @@ fn filtered_first_observations_count_distinct_streams_across_direction_and_evict
     let filter = filter::Filter::compile(
         "frame.number > 1",
         &capture.registry,
-        filter::Options::default(),
+        filter::Limits::default(),
     )
     .unwrap();
     let mut collector = analysis::tls::Collector::new(TlsLimits {

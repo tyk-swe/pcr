@@ -1,10 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use serde::Serialize;
+//! Byte-level packet layouts.
 
-pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
-pub const DEFAULT_MAX_LAYERS: usize = 64;
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ByteRange {

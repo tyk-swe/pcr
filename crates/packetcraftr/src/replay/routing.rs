@@ -175,7 +175,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::filter::{Filter, Options};
+    use packetcraftr_core::filter::{Filter, Limits};
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::protocol::builtin;
 
@@ -191,8 +191,8 @@ mod tests {
 
     fn selector(source: &str) -> Result<FrameSelector, Error> {
         let registry = builtin::registry();
-        let filter = Filter::compile(source, &registry, Options::default())
-            .expect("fixture filter compiles");
+        let filter =
+            Filter::compile(source, &registry, Limits::default()).expect("fixture filter compiles");
         Ok(FrameSelector::new(Arc::clone(&registry), filter, 64).expect("frame filter"))
     }
 
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn a_filter_rule_that_cannot_judge_a_frame_stops_the_routing() {
         let registry = builtin::registry();
-        let filter = Filter::compile("frame.len == 14", &registry, Options::default()).unwrap();
+        let filter = Filter::compile("frame.len == 14", &registry, Limits::default()).unwrap();
         let too_small = FrameSelector::new(registry, filter, 13).unwrap();
         let routing = Routing::new(
             vec![Rule {

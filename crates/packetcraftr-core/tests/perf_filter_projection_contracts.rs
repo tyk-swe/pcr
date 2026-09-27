@@ -3,47 +3,25 @@
 
 mod common;
 
+use common::decoded::{context, ipv6_tcp, tunnelled};
 use common::registry;
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr_core::decode::{self, DecodedPacket};
+use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::field::{self, FieldValue};
 use packetcraftr_core::filter::{
-    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection,
+    Context, DerivedPacket, Error, Filter, Limits, MAX_FILTER_TERMS, Projection,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw, Schema};
 use packetcraftr_core::layout::PacketLayout;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::application::dns::{Dns, Question, Record, RecordValue};
-use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
-use packetcraftr_core::protocol::tunnel::Vxlan;
-use packetcraftr_core::{build, codec};
-
-const PAYLOAD: &[u8] = b"GET /index HTTP/1.1";
-
-fn decoded(packet: Packet) -> DecodedPacket {
-    let registry = registry();
-    let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, codec::Context::default(), build::Options::default())
-        .unwrap_or_else(|error| panic!("fixture build: {error}"));
-    let frame = Frame::new(
-        UNIX_EPOCH + Duration::from_secs(123),
-        LinkType::ETHERNET,
-        built.bytes,
-    )
-    .expect("fixture frame");
-    let mut decoded = decode::Dissector::new(registry)
-        .decode(frame, decode::Options::default())
-        .unwrap_or_else(|error| panic!("fixture decode: {error}"));
-    decoded.frame.interface = Some(4);
-    decoded
-}
 
 fn layered(layers: Vec<Box<dyn Layer>>) -> DecodedPacket {
     let mut packet = Packet::new();
@@ -62,64 +40,6 @@ fn layered(layers: Vec<Box<dyn Layer>>) -> DecodedPacket {
         layout: PacketLayout::new(Vec::new()),
         diagnostics: Vec::new(),
     }
-}
-
-fn tunnelled() -> DecodedPacket {
-    let mut packet = Packet::new();
-    packet.push(Ethernet {
-        destination: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05],
-        source: [0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b],
-        ..Ethernet::default()
-    });
-    packet.push(Ipv4 {
-        source: "192.0.2.1".parse().expect("outer source"),
-        destination: "198.51.100.2".parse().expect("outer destination"),
-        ..Ipv4::default()
-    });
-    packet.push(Udp {
-        source_port: 12_345,
-        destination_port: 4_789,
-        ..Udp::default()
-    });
-    packet.push(Vxlan {
-        vni: 0x12345,
-        ..Vxlan::default()
-    });
-    packet.push(Ethernet {
-        destination: [0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f],
-        source: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
-        ..Ethernet::default()
-    });
-    packet.push(Ipv4 {
-        source: "10.0.0.1".parse().expect("inner source"),
-        destination: "10.0.0.2".parse().expect("inner destination"),
-        ..Ipv4::default()
-    });
-    packet.push(Udp {
-        source_port: 40_000,
-        destination_port: 9_999,
-        ..Udp::default()
-    });
-    packet.push(Raw::new(PAYLOAD.to_vec()));
-    decoded(packet)
-}
-
-fn ipv6_tcp() -> DecodedPacket {
-    let mut packet = Packet::new();
-    packet.push(Ethernet::default());
-    packet.push(Ipv6 {
-        source: "2001:db8::1".parse().expect("source"),
-        destination: "2001:db8:1::2".parse().expect("destination"),
-        ..Ipv6::default()
-    });
-    packet.push(Tcp {
-        source_port: 44_000,
-        destination_port: 443,
-        flags: Tcp::SYN | Tcp::ACK,
-        ..Tcp::default()
-    });
-    packet.push(Raw::new(PAYLOAD.to_vec()));
-    decoded(packet)
 }
 
 fn dns_layered() -> DecodedPacket {
@@ -162,18 +82,8 @@ fn dns_layered() -> DecodedPacket {
     layered(vec![Box::new(dns)])
 }
 
-fn context(decoded: &DecodedPacket) -> Context<'_> {
-    Context {
-        decoded,
-        derived: &[],
-        number: 7,
-        tcp_stream: Some(2),
-        udp_stream: Some(3),
-    }
-}
-
 fn compiled(source: &str) -> Filter {
-    Filter::compile(source, &registry(), Options::default())
+    Filter::compile(source, &registry(), Limits::default())
         .unwrap_or_else(|error| panic!("{source} must compile: {error}"))
 }
 
@@ -373,7 +283,7 @@ fn unreachable_branches_are_still_validated_at_compile_time() {
         "!(ipv4.nosuchfield == 1) && udp",
         "udp && !nosuchproto.field",
     ] {
-        let error = Filter::compile(source, &registry(), Options::default())
+        let error = Filter::compile(source, &registry(), Limits::default())
             .expect_err("dead branches must still validate");
         assert!(
             error.to_string().contains("unknown"),
@@ -572,17 +482,17 @@ fn seeded_deep_expressions_match_per_leaf_semantics() {
 #[test]
 fn parser_limits_long_chains_and_nested_not_hold() {
     let at_terms = vec!["ipv4"; MAX_FILTER_TERMS].join(" && ");
-    assert!(Filter::compile(&at_terms, &registry(), Options::default()).is_ok());
+    assert!(Filter::compile(&at_terms, &registry(), Limits::default()).is_ok());
     let over_terms = vec!["ipv4"; MAX_FILTER_TERMS + 1].join(" && ");
     assert!(matches!(
-        Filter::compile(&over_terms, &registry(), Options::default()),
+        Filter::compile(&over_terms, &registry(), Limits::default()),
         Err(Error::TermLimit { .. })
     ));
     let at_nesting = format!("{}ipv4{}", "(".repeat(64), ")".repeat(64));
-    assert!(Filter::compile(&at_nesting, &registry(), Options::default()).is_ok());
+    assert!(Filter::compile(&at_nesting, &registry(), Limits::default()).is_ok());
     let over_nesting = format!("{}ipv4{}", "(".repeat(65), ")".repeat(65));
     assert!(matches!(
-        Filter::compile(&over_nesting, &registry(), Options::default()),
+        Filter::compile(&over_nesting, &registry(), Limits::default()),
         Err(Error::NestingLimit { .. })
     ));
 
@@ -623,7 +533,7 @@ fn parser_limits_long_chains_and_nested_not_hold() {
         "ipv4 &&& ipv4",
     ] {
         assert!(
-            Filter::compile(malformed, &registry(), Options::default()).is_err(),
+            Filter::compile(malformed, &registry(), Limits::default()).is_err(),
             "{malformed} must not compile"
         );
     }
@@ -1045,7 +955,7 @@ fn perf_compile_cost() {
     let typical = "ipv4.source in 192.0.2.0/24 && tcp.dstport == 80 || udp.port in {53, 5353}";
     let start = Instant::now();
     for _ in 0..200 {
-        black_box(Filter::compile(&max, &registry, Options::default()).expect("compiles"));
+        black_box(Filter::compile(&max, &registry, Limits::default()).expect("compiles"));
     }
     eprintln!(
         "compile_max_terms: {:?} over 200 compilations",
@@ -1054,9 +964,9 @@ fn perf_compile_cost() {
     let start = Instant::now();
     for _ in 0..2_000 {
         black_box(
-            Filter::compile(nested.as_str(), &registry, Options::default()).expect("compiles"),
+            Filter::compile(nested.as_str(), &registry, Limits::default()).expect("compiles"),
         );
-        black_box(Filter::compile(typical, &registry, Options::default()).expect("compiles"));
+        black_box(Filter::compile(typical, &registry, Limits::default()).expect("compiles"));
     }
     eprintln!(
         "compile_typical_and_nested: {:?} over 4000 compilations",

@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=12345,dport={dport})/raw(text=fixture)"
                 ),
                 &registry,
-                expression::Options::default(),
+                expression::Limits::default(),
             )?;
             let built = Builder::new(Arc::clone(&registry)).build(
                 packet,

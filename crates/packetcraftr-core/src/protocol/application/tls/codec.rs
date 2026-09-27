@@ -33,7 +33,7 @@ pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record}
 pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 
 /// A hostile peer can pack thousands of one-byte records into a single
-/// segment; the cap keeps per-frame work linear in the segment length.
+/// segment; the ceiling keeps per-frame work linear in the segment length.
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 
 pub(crate) const RECORD_CONTINUES: &str = "tls.record_continues";

@@ -190,8 +190,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   is replaced by `capture_file::Budget` (`new`, `charge`, `after`, `frames`,
   `captured_bytes`). `capture_file::Limits`, `MergeLimits` (whose source
   ceiling is the new `capture_file::MAX_MERGE_SOURCES`), `compression::Limits`, `scope::Limits`, the IP and TCP reassembly `Limits`,
-  `dhcp::Limits`, `dns::DecodeLimits`, `packet::Limits`, and
-  `forwarding::VerifyLimits` gain `validate()` (packetcraftr's
+  `dhcp::Limits`, `dns::Limits`, `packet::Limits`, and
+  `forwarding::Limits` gain `validate()` (packetcraftr's
   `policy::WireLimits` and `policy::SocketLimits` too; for the last four every
   value is legal, so it always succeeds), and
   `application::Limits::validate` is public. Writers, `rewrite`, `select`,
@@ -555,6 +555,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   See `docs/migration-unreleased.md`.
 - `packetcraftr_cli::output::verify_forwarding::Input` is a struct with
   `path`, `source`, and `selection_filter` fields instead of a tuple alias.
+- Core limit vocabulary is uniform: `expression::Options` is
+  `expression::Limits`, `filter::Options` is `filter::Limits` (each gains a
+  public `validate()` with the same checks), `dns::DecodeLimits` is
+  `dns::Limits`, `forwarding::VerifyLimits` is `forwarding::Limits`,
+  `layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` moved to `packet::`,
+  `frame::DEFAULT_SIZE_LIMIT` is `frame::DEFAULT_MAX_SIZE`, and the
+  `capture_file` defaults are `DEFAULT_MAX_INTERFACES_PER_SECTION`,
+  `DEFAULT_MAX_TOTAL_INTERFACES`, `DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME`,
+  `DEFAULT_MAX_METADATA_BYTES_PER_FRAME`, `DEFAULT_MAX_STREAM_FRAMES`, and
+  `DEFAULT_MAX_STREAM_BYTES`. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -879,6 +889,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `follow`, and `tls` now supply only a collector and an event sink; `follow`
   uses the split observe/finish phases so its missing-selector verdict still
   precedes collection teardown.
+- `protocol::headers` gains `Ipv4Header::walk_prefix` and
+  `Ipv6Header::walk_prefix`, which walk a datagram prefix whose declared
+  length may exceed the bytes present; `Ipv6ExtensionChain`, an iterator
+  over the extension headers at any offset; and
+  `Ipv6Extension::fragment_offset_and_flags`, the Fragment header's raw
+  offset/flags word.
 
 ### Changed
 
@@ -1231,12 +1247,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   now separate internal traits, so the failure cannot occur.
 - Rust: the equivalent public paths `packetcraftr_core::{Packet, PacketError}`
   (use `packet::`), `build::{Context, Mode, DEFAULT_MAX_LAYERS,
-  DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `layout::`),
+  DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `packet::`),
   `protocol::application::{Dns, Tls}` (use `dns::Dns` and `tls::Tls`),
   the `protocol::application::tls::{codec, fingerprint, model, names, parse}`
   submodule paths (use the flat `tls::` re-exports),
   `analysis::pcap::DEFAULT_SIZE_LIMIT` (use
-  `frame::DEFAULT_SIZE_LIMIT`), and `packetcraftr::dns::tcp::SocketFault` (use
+  `frame::DEFAULT_MAX_SIZE`), and `packetcraftr::dns::tcp::SocketFault` (use
   `packetcraftr_core::error::Source`).
 - The independent downstream compatibility workspace (`compatibility/`); its
   codec, offline collector, provider composition and output-consumer checks

@@ -882,6 +882,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A capture group's waits classify like a single session's: `wait_ready`
+  with a spent deadline reports `io.capture_readiness`, and a wait whose
+  remainder exceeds the one-hour ceiling reports `cli.capture_timeout`,
+  where both previously reported `cli.capture_group`.
 - Text output no longer shows Rust `Debug` formatting. Durations read as
   milliseconds to the microsecond (`12.345ms`, `none` when absent) in the
   `scan`, `traceroute`, `dns`, `replay`, `stats`, `tls`, `expert`, and

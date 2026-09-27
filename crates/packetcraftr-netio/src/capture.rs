@@ -24,6 +24,8 @@ mod record;
 mod settings;
 mod system;
 
+use std::time::Instant;
+
 use super::Error;
 use super::interface::Id as InterfaceId;
 use packetcraftr_core::budget::Deadline;
@@ -148,6 +150,35 @@ fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
     }
 }
 
+/// The instant a capture wait ends: `None` once the caller's deadline is
+/// spent, so the wait takes only what is already queued. A remainder above
+/// [`deadline::MAX_WAIT`](crate::deadline::MAX_WAIT) is refused as
+/// [`Error::InvalidCaptureTimeout`] rather than clipped, and a signaled
+/// cancellation stops the wait. Single sessions and groups share this rule.
+pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {
+    deadline.check_cancelled()?;
+    let Some(timeout) = deadline
+        .remaining()
+        .ok()
+        .filter(|remaining| !remaining.is_zero())
+    else {
+        return Ok(None);
+    };
+    if timeout > crate::deadline::MAX_WAIT {
+        return Err(Error::InvalidCaptureTimeout {
+            timeout,
+            maximum: crate::deadline::MAX_WAIT,
+        });
+    }
+    Instant::now()
+        .checked_add(timeout)
+        .map(Some)
+        .ok_or(Error::InvalidCaptureTimeout {
+            timeout,
+            maximum: crate::deadline::MAX_WAIT,
+        })
+}
+
 /// Backend-confirmed properties of an activated capture session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
@@ -206,5 +237,28 @@ impl Provider for SystemProvider {
         deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
         system::timestamp_types(interface, deadline)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::deadline::MAX_WAIT;
+
+    #[test]
+    fn capture_waits_reject_timeouts_above_the_public_maximum() {
+        let frozen = Instant::now();
+        let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
+        assert!(wait_end(&fixed(MAX_WAIT)).unwrap().is_some());
+        assert!(matches!(
+            wait_end(&fixed(MAX_WAIT + Duration::from_nanos(1))),
+            Err(Error::InvalidCaptureTimeout {
+                maximum: MAX_WAIT,
+                ..
+            })
+        ));
+        assert!(wait_end(&fixed(Duration::ZERO)).unwrap().is_none());
     }
 }

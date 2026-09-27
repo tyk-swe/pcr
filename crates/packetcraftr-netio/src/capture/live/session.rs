@@ -9,7 +9,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use packetcraftr_core::budget::Deadline;
@@ -22,7 +22,6 @@ use crate::workers::{Permit, Task, Waited};
 use crate::{
     Error,
     capture::{Captured, Limits, Metadata, Session, Stats},
-    deadline::MAX_WAIT,
     workers::reaper::{ReaperClient, ReaperStartError, shared_reaper},
 };
 
@@ -33,33 +32,6 @@ use super::{
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// The instant a capture wait ends: `None` once the caller's deadline is
-/// spent, so the wait takes only what is already there. A remainder above
-/// the public maximum is refused rather than clipped.
-fn capture_deadline(deadline: &Deadline) -> Result<Option<Instant>, Error> {
-    deadline.check_cancelled()?;
-    let Some(timeout) = deadline
-        .remaining()
-        .ok()
-        .filter(|remaining| !remaining.is_zero())
-    else {
-        return Ok(None);
-    };
-    if timeout > MAX_WAIT {
-        return Err(Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: MAX_WAIT,
-        });
-    }
-    Instant::now()
-        .checked_add(timeout)
-        .map(Some)
-        .ok_or(Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: MAX_WAIT,
-        })
-}
 
 pub(crate) struct NativeCaptureSession {
     metadata: Metadata,
@@ -182,7 +154,7 @@ impl Session for NativeCaptureSession {
     }
 
     fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
-        let deadline = capture_deadline(caller)?;
+        let deadline = crate::capture::wait_end(caller)?;
         let expired = || Error::CaptureReadiness {
             message: "capture readiness deadline expired".to_owned(),
         };
@@ -217,7 +189,7 @@ impl Session for NativeCaptureSession {
     }
 
     fn next_captured_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
-        let deadline = capture_deadline(caller)?;
+        let deadline = crate::capture::wait_end(caller)?;
         let mut state = self.shared.lock();
         loop {
             if let Some(captured) = state.queue.front() {
@@ -366,6 +338,7 @@ mod tests {
         mpsc::{self, Receiver, Sender},
     };
     use std::thread;
+    use std::time::Instant;
     use std::time::SystemTime;
 
     use bytes::Bytes;
@@ -738,21 +711,6 @@ mod tests {
         session
             .shutdown()
             .expect("observed capture error leaves no cleanup error");
-    }
-
-    #[test]
-    fn capture_waits_reject_timeouts_above_the_public_maximum() {
-        let frozen = Instant::now();
-        let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
-        assert!(capture_deadline(&fixed(MAX_WAIT)).unwrap().is_some());
-        assert!(matches!(
-            capture_deadline(&fixed(MAX_WAIT + Duration::from_nanos(1))),
-            Err(Error::InvalidCaptureTimeout {
-                maximum: MAX_WAIT,
-                ..
-            })
-        ));
-        assert!(capture_deadline(&fixed(Duration::ZERO)).unwrap().is_none());
     }
 
     #[test]

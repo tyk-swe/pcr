@@ -4,7 +4,11 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Group and single-session waits publish the same codes for the same conditions.
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] Group and single-session waits publish the same codes for the same conditions.
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- `capture::wait_end` is the shared rule (moved from the native session's private `capture_deadline`); its unit test moved with it, and the group's own `wait_end` is gone.

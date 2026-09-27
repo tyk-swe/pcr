@@ -571,8 +571,9 @@ CONNECT success and protocol upgrades end HTTP inspection for that connection.
 Bodies are counted without being retained or decompressed. Duplicate headers,
 exact header wire, binary values, source frames, and request links remain in
 JSON/NDJSON. Gaps, resets, capture endings, invalid framing, and body limits are
-explicit outcomes. HTTP/2, HTTP/3, TLS decryption, and object extraction remain
-outside this command. `--http-port` adds a cleartext service to ports 80 and 8080;
+explicit outcomes. HTTP/2, HTTP/3, TLS decryption, and multi-body or decoded
+object extraction remain outside this command. `--http-port` adds a cleartext
+service to ports 80 and 8080;
 `--stream tcp:INDEX` selects a whole conversation. The per-frame `http` layer and
 `--decode-as tcp.port=PORT:http` expose headers that fit in one captured segment.
 `--transactions` publishes settled request/response header-association rows —
@@ -582,6 +583,18 @@ parser. The intervals are capture observations, not wire timing or processing
 duration, and each row cites this invocation's message indices, so a row can
 precede the message record it cites; message statuses remain the authority on
 body completeness.
+
+`--body-message INDEX --write FILE` saves one completed message's body bytes:
+Content-Length, close-delimited, or concatenated chunk-data bytes after chunk
+removal, with content encodings and remaining transfer codings kept exactly —
+nothing is decompressed. `INDEX` is this invocation's one-based message index
+in parse-start order, so list and export with the same capture, stream, epoch,
+HTTP-port, and decode settings. The new file publishes only if the whole
+capture inspects cleanly and the message completed; existing files are never
+overwritten, and a report that cannot be written after publication leaves the
+artifact in place. Machine output carries the artifact's path, byte count,
+SHA-256 digest, and `http_body_after_dechunking` representation — never the
+body bytes.
 
 `export CAPTURE --stream tcp:INDEX --write selected.pcap` copies a whole scoped
 conversation, including the physical fragments used to reconstruct its transport

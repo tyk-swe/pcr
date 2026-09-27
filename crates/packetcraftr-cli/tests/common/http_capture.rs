@@ -160,6 +160,19 @@ impl Capture {
         self.push(stream, spec, at, payload);
     }
 
+    /// Server FIN+ACK — the clean close that completes a close-delimited body.
+    pub(crate) fn server_close(&mut self, stream: &mut Stream, at: SystemTime) {
+        let spec = self.server_spec(stream, Tcp::FIN | Tcp::ACK);
+        self.push(stream, spec, at, b"");
+        stream.server_sequence = stream.server_sequence.wrapping_add(1);
+    }
+
+    /// Server RST+ACK — the dispatch evicts both directions of the flow.
+    pub(crate) fn server_reset(&mut self, stream: &mut Stream, at: SystemTime) {
+        let spec = self.server_spec(stream, Tcp::RST | Tcp::ACK);
+        self.push(stream, spec, at, b"");
+    }
+
     /// A segment whose header fields the scenario computed itself.
     fn push(&mut self, stream: &Stream, spec: Segment, at: SystemTime, payload: &[u8]) {
         self.frames

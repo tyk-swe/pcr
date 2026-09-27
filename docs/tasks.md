@@ -48,6 +48,15 @@ capture evidence, not wire timing or processing duration — and cites this
 invocation's one-based message indices; a row can precede the message record
 it cites. Message statuses remain the authority on body completeness.
 
+`http --body-message INDEX --write FILE` saves one message's body bytes —
+Content-Length, close-delimited, or concatenated chunk-data after chunk
+removal; content and remaining transfer codings stay coded. List messages
+first, then rerun with the same capture, stream, epoch, and decode settings
+plus the pair: the new file appears only when the whole capture inspects
+cleanly and the message completed, an existing destination is never
+overwritten, and `result.body_export` reports the artifact's path, byte
+count, and SHA-256 digest rather than its bytes.
+
 For an ordinary failure, lower `--max-frames` below the physical capture count.
 Filtered-out input still counts; adding a display filter does not bypass that
 limit. Inspect resource diagnostics, then raise the specific finite ceiling or

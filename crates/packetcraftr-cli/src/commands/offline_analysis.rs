@@ -17,7 +17,7 @@ use analysis::StreamRef;
 use packetcraftr_core::error::Kind;
 
 use super::application_output::EventOutput;
-use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::validate_capture_stream_limits;
@@ -115,17 +115,17 @@ pub(super) fn prepare(
 
 /// What one application-layer inspection (`dns-read`, `http`) reads: the
 /// capture, its bounds and decoding, and the one conversation it may keep.
+/// The caller owns the shared `EventOutput` allowance its events charge.
 pub(super) struct Inspection<'a> {
     pub(super) path: &'a Path,
     pub(super) limits: OfflineLimitsArgs,
     pub(super) decode: &'a DecodeArgs,
-    pub(super) application: ApplicationLimitsArgs,
     pub(super) selector: Option<StreamRef>,
 }
 
 /// Runs one collector over a capture file, publishing each event through
-/// `publish` under the shared `--max-application-output-bytes` budget, and
-/// fails when a selected conversation is absent.
+/// `publish` under the caller's `EventOutput` allowance, and fails when a
+/// selected conversation is absent.
 ///
 /// The selector narrows the pass to its conversation; IP reassembly events
 /// reach the NDJSON stream only.
@@ -134,13 +134,13 @@ pub(super) fn inspect<C: analysis::Collector>(
     collector: C,
     format: ToolFormat,
     stream: &StreamEncoder,
+    output: &mut EventOutput<'_>,
     mut publish: impl FnMut(&mut EventOutput<'_>, C::Event) -> Result<(), CliError>,
 ) -> Result<analysis::Outcome<C>, CliError> {
     let Inspection {
         path,
         limits,
         decode,
-        application,
         selector,
     } = inspection;
     let setup = prepare(limits, None, decode)?;
@@ -149,10 +149,9 @@ pub(super) fn inspect<C: analysis::Collector>(
     let session =
         analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
     let mut reader = crate::input::open_capture(path, limits.capture.reader)?;
-    let mut output = EventOutput::new(format, stream, application.max_application_output_bytes);
     let outcome = session
         .run(&mut reader, ip_event_sink(format, stream), |event| {
-            publish(&mut output, event).map_err(CliError::into_boundary_error)
+            publish(output, event).map_err(CliError::into_boundary_error)
         })
         .map_err(CliError::classified)?;
     if outcome.selected_absent() {

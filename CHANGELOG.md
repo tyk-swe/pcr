@@ -796,6 +796,32 @@ All notable changes to PacketcraftR are documented here. The format follows
   authority on body completeness. Serialized transaction bytes charge
   `--max-application-output-bytes` in every format, and disabled mode keeps
   `transactions` empty with a null `transaction_summary`.
+- `http --body-message INDEX --write FILE` stages and publishes one completed
+  message's entity bytes — Content-Length, close-delimited, or concatenated
+  chunk-data bytes after chunk removal, with content encodings and remaining
+  transfer codings kept exactly and never decompressed — through the
+  `Collector::with_body_sink` seam. `INDEX` is this invocation's one-based
+  parse-start message index, narrowed by `--stream`, epoch, `--http-port`,
+  and decode settings exactly as `--transactions` cites it. The bytes stream
+  through a 64 KiB-buffered sink into a `StagedFile` beside the destination
+  without being retained; the file syncs and persists without clobbering only
+  after the whole capture inspects cleanly to EOF, the selected message ends
+  `complete`, the artifact byte count equals the message `body_bytes`, and
+  the serialized `body_export` metadata charges the shared
+  `--max-application-output-bytes` allowance once. Successful aggregate and
+  terminal records populate `body_export` (`message`, `stream`, `generation`,
+  `path`, `bytes`, `sha256`, `representation: http_body_after_dechunking`);
+  text prints a `body message=… bytes=… sha256=… path=…` line before the
+  summary, and body bytes never embed in machine output. Failures keep the
+  prescribed classifications — usage failures (`cli.error`, Clap pairing, or
+  `cli.http_body_message` for an absent index), `packet.http_body_incomplete`
+  with the HTTP cause for any non-`complete`, non-`limit` terminal status,
+  `policy.http_limit` for a limited body, `internal.http_body_evidence` for a
+  byte-count mismatch, `io.output_file` for staged write/sync/persist
+  failures, and every existing inspection, cancellation, deadline, and budget
+  classification — and always discard the staging without a destination. An
+  output failure after a successful commit leaves the published artifact in
+  place, matching the other `--write` commands.
 - Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
   UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
   responses, partial messages, and capture-clock regressions.

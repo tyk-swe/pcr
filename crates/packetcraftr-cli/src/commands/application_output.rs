@@ -23,13 +23,16 @@ impl<'a> EventOutput<'a> {
         }
     }
 
-    pub(super) fn emit<T: StreamRecord>(
-        &mut self,
-        value: T,
-        retained: &mut Vec<T>,
-        render_text: impl FnOnce(&T) -> Result<(), CliError>,
-    ) -> Result<(), CliError> {
-        let bytes = bounded_json_len(&value, self.remaining).map_err(|error| {
+    /// Charges `value`'s compact-JSON byte count against the shared
+    /// `--max-application-output-bytes` allowance without emitting it. The
+    /// allowance is spent only on success; a failure leaves `remaining` — and
+    /// every output sink — untouched.
+    ///
+    /// `emit` delegates its sizing step here; commands that prepare a
+    /// serialized artifact record charge it against the same remaining
+    /// allowance through this method.
+    pub(super) fn charge(&mut self, value: &impl serde::Serialize) -> Result<(), CliError> {
+        let bytes = bounded_json_len(value, self.remaining).map_err(|error| {
             error.into_cli_error(|| {
                 CliError::new(
                     Kind::Policy,
@@ -38,6 +41,16 @@ impl<'a> EventOutput<'a> {
             })
         })?;
         self.remaining -= bytes;
+        Ok(())
+    }
+
+    pub(super) fn emit<T: StreamRecord>(
+        &mut self,
+        value: T,
+        retained: &mut Vec<T>,
+        render_text: impl FnOnce(&T) -> Result<(), CliError>,
+    ) -> Result<(), CliError> {
+        self.charge(&value)?;
         match self.format {
             ToolFormat::Json => retained.push(value),
             ToolFormat::Ndjson => self

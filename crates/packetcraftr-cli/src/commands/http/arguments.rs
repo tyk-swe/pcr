@@ -15,11 +15,14 @@ pub(crate) const AFTER_LONG_HELP: &str = r"HTTP/1 messages are read offline from
 
 --transactions adds one settled header-association row per request pairing, unanswered request, or orphan response. Each row records the physical capture frames at which header boundaries became available to the parser and the signed intervals between those markers; they are capture observations, not wire-time or processing measurements. Rows cite this invocation's one-based message indices, and a row can precede the message record it cites. Message statuses remain the authority on body completeness.
 
+--body-message INDEX --write FILE saves one completed message's body bytes — Content-Length, close-delimited, or concatenated chunk-data bytes after chunk removal, with content encodings and remaining transfer codings kept exactly; nothing is decompressed. INDEX is this invocation's one-based message index in parse-start order, so list and export with the same capture, stream, epoch, HTTP-port, and decode settings. The file publishes only if the whole capture inspects cleanly and the message completed; a report that cannot be written after publication leaves the artifact in place.
+
 Examples:
   packetcraftr http capture.pcapng
   packetcraftr http capture.pcapng --http-port 8000 --stream tcp:2
   packetcraftr --output json http capture.pcapng
-  packetcraftr --output ndjson http capture.pcapng --transactions";
+  packetcraftr --output ndjson http capture.pcapng --transactions
+  packetcraftr --output json http capture.pcapng --body-message 2 --write response.bin";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -41,6 +44,14 @@ pub(crate) struct Args {
     /// invocation's one-based message indices.
     #[arg(long)]
     pub(crate) transactions: bool,
+    /// One-based index of the message whose body --write saves, in this
+    /// invocation's parse-start order. Requires --write.
+    #[arg(long, value_name = "INDEX", requires = "write", value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) body_message: Option<u64>,
+    /// New file the selected body bytes publish to; existing files are never
+    /// overwritten. Requires --body-message.
+    #[arg(long, value_name = "FILE", requires = "body_message")]
+    pub(crate) write: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) application: ApplicationLimitsArgs,
     #[command(flatten)]

@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! `http`: inspects the cleartext HTTP/1 messages carried on captured TCP
-//! streams. Bodies are counted and discarded, never retained.
+//! streams. Bodies are counted and discarded — except `--body-message`,
+//! whose one selected body `--write` stages, hashes, and publishes only
+//! after the whole capture inspects cleanly and the message completes.
 
 pub(super) mod arguments;
+mod body;
 mod rendering;
 
 use packetcraftr_core::analysis::{
@@ -14,13 +17,16 @@ use packetcraftr_core::analysis::{
 use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
+use super::application_output::EventOutput;
 use super::offline_analysis::{Inspection, inspect};
 use crate::errors::CliError;
 use crate::output::{
     contract::{Command, ToolFormat},
     http as wire,
+    stream::PreparedComplete,
 };
-use crate::rendering::{StreamEncoder, emit_aggregate};
+use crate::rendering::{PreparedAggregate, StreamEncoder, emit_aggregate, prepare_aggregate};
+use crate::staged_output::StagedFile;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -49,6 +55,15 @@ impl super::Spec for Args {
     }
 }
 
+/// The terminal success record an artifact commit publishes unchanged:
+/// converted, charged, and serialized before the commit boundary, then sent
+/// once — and only — after it.
+enum Prepared {
+    Json(Box<PreparedAggregate<wire::Report>>),
+    Ndjson(PreparedComplete),
+    Text(Box<wire::Complete>),
+}
+
 fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.http_ports;
@@ -75,45 +90,118 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             "HTTP/1 inspection requires --stream tcp:INDEX",
         ));
     }
-    let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
-    let outcome = inspect(
-        Inspection {
-            path: &args.path,
-            limits: args.limits,
-            decode: &args.decode,
-            application: args.application,
-            selector,
-        },
-        collector,
+    // The destination stages before any input is read. The writer borrows
+    // only the staged file; `selected` tracks the message's own evidence,
+    // independently of the sink. The writer's borrow lives inside this block,
+    // so `staged` is movable once `seal` ends it and the block closes.
+    let mut staged = args.write.as_deref().map(StagedFile::stage).transpose()?;
+    let mut selected = args.body_message.map(body::SelectedMessage::new);
+    let mut output = EventOutput::new(
         format,
         stream,
-        |output, event| match event {
-            Event::Message(message) => output.emit(
-                wire::Message::try_from(*message).map_err(CliError::classified)?,
-                &mut messages,
-                rendering::render_message,
+        args.application.max_application_output_bytes,
+    );
+    let prepared = {
+        let mut writer = staged.as_mut().map(|staged| {
+            let destination = staged.destination().to_owned();
+            body::BodyWriter::new(staged.as_file_mut(), destination)
+        });
+        let collector = match (args.body_message, writer.as_mut()) {
+            (Some(message), Some(writer)) => collector
+                .with_body_sink(message, writer)
+                .map_err(CliError::classified)?,
+            _ => collector,
+        };
+        let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
+        let outcome = inspect(
+            Inspection {
+                path: &args.path,
+                limits: args.limits,
+                decode: &args.decode,
+                selector,
+            },
+            collector,
+            format,
+            stream,
+            &mut output,
+            |output, event| {
+                if let Some(selected) = &mut selected {
+                    selected.observe(&event);
+                }
+                match event {
+                    Event::Message(message) => output.emit(
+                        wire::Message::try_from(*message).map_err(CliError::classified)?,
+                        &mut messages,
+                        rendering::render_message,
+                    ),
+                    Event::Issue(issue) => output.emit(
+                        wire::Issue::from(issue),
+                        &mut issues,
+                        rendering::render_issue,
+                    ),
+                    Event::Transaction(transaction) => output.emit(
+                        wire::Transaction::try_from(*transaction).map_err(CliError::classified)?,
+                        &mut transactions,
+                        rendering::render_transaction,
+                    ),
+                }
+            },
+        )?;
+        let mut complete =
+            wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
+                .map_err(CliError::classified)?;
+        let Some(writer) = writer else {
+            return match format {
+                ToolFormat::Json => emit_aggregate(
+                    Command::Http,
+                    wire::Report::from((messages, transactions, issues, complete)),
+                    Vec::new(),
+                ),
+                ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+                ToolFormat::Text => rendering::render_complete(&complete),
+            };
+        };
+        // The whole capture inspected cleanly through EOF. Only now may the
+        // selected evidence admit an artifact, the artifact record charge the
+        // shared output allowance once, and the success report freeze —
+        // before the commit boundary touches the filesystem.
+        let export = selected
+            .expect("a staged writer implies a selected message")
+            .artifact(
+                writer.bytes(),
+                writer.sha256(),
+                writer.destination().display().to_string(),
+            )?;
+        output.charge(&export)?;
+        complete.body_export = Some(export);
+        let prepared = match format {
+            ToolFormat::Json => Prepared::Json(Box::new(prepare_aggregate(
+                Command::Http,
+                wire::Report::from((messages, transactions, issues, complete)),
+                Vec::new(),
+            )?)),
+            ToolFormat::Ndjson => Prepared::Ndjson(
+                stream
+                    .prepare_complete(complete, Vec::new())
+                    .map_err(CliError::from)?,
             ),
-            Event::Issue(issue) => output.emit(
-                wire::Issue::from(issue),
-                &mut issues,
-                rendering::render_issue,
-            ),
-            Event::Transaction(transaction) => output.emit(
-                wire::Transaction::try_from(*transaction).map_err(CliError::classified)?,
-                &mut transactions,
-                rendering::render_transaction,
-            ),
-        },
-    )?;
-    let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
-        .map_err(CliError::classified)?;
-    match format {
-        ToolFormat::Json => emit_aggregate(
-            Command::Http,
-            wire::Report::from((messages, transactions, issues, complete)),
-            Vec::new(),
-        ),
-        ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => rendering::render_complete(&complete),
+            ToolFormat::Text => Prepared::Text(Box::new(complete)),
+        };
+        // The commit's first step flushes the buffered tail into the staged
+        // file and ends the borrow, so the file itself can commit next.
+        writer.seal()?;
+        prepared
+    };
+    // Commit: sync, recheck the deadline, and publish without clobbering.
+    body::commit(staged.expect("a staged writer implies a staged file"))?;
+    match prepared {
+        Prepared::Json(aggregate) => aggregate.publish(),
+        Prepared::Ndjson(prepared) => stream
+            .publish_prepared_complete(prepared)
+            .map_err(Into::into),
+        Prepared::Text(complete) => {
+            rendering::render_body_export(&complete)?;
+            rendering::render_complete(&complete)
+        }
     }
 }

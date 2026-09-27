@@ -50,6 +50,23 @@ For two captures, use `verify-forwarding` with explicit identity and checks.
 Its verdict is observational, not a device-loss or latency measurement.
 The [machine consumer](consumer-compatibility.md) rejects incomplete streams.
 
+To turn findings into a pass/fail signal for automation, use the expert
+gate:
+
+```sh
+target/debug/packetcraftr --output json expert capture.pcap \
+  --fail-on warning --allow-findings 0 --minimum-frames 20
+```
+
+The gate counts every produced finding — including findings
+`--min-severity`, `--code`, or aggregate retention hide from the report —
+and requires the declared matched-frame coverage for a conclusive verdict.
+`fail` (allowance exceeded) and `inconclusive` (coverage short) both exit 1
+after the normal report publishes; read `result.gate` for the verdict and
+complete counts. A `pass` asserts only the declared predicate over the
+selected evidence — not that the network is healthy or the observation was
+complete.
+
 ## 3. Run an authorized diagnostic in an isolated lab
 
 Begin with passive `interfaces` and `routes` inspection. Live adapters depend on

@@ -6,13 +6,21 @@ mod rendering;
 
 use crate::output::contract::ToolFormat;
 
-use packetcraftr_core::analysis;
+use packetcraftr_core::analysis::{self, expert::gate};
+use packetcraftr_core::error::BoundaryError;
 
 use self::arguments::Args;
+use super::CommandExit;
 use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
+use crate::output;
 use crate::rendering::StreamEncoder;
+
+/// The process status when the analysis completed and published its report
+/// but the verdict was not `pass`. `fail` and `inconclusive` share this code;
+/// the report's `verdict` field distinguishes them.
+const VERDICT_NOT_PASS: u8 = 1;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -35,8 +43,8 @@ impl super::Spec for Args {
         self,
         format: Self::Format,
         stream: &crate::rendering::StreamEncoder,
-    ) -> Result<super::CommandExit, CliError> {
-        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    ) -> Result<CommandExit, CliError> {
+        run(self, format, stream)
     }
 }
 
@@ -44,12 +52,26 @@ pub(super) fn run(
     arguments: Args,
     format: ToolFormat,
     stream: &StreamEncoder,
-) -> Result<(), CliError> {
+) -> Result<CommandExit, CliError> {
     let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
+    // The gate's criteria are analysis criteria validated before input opens,
+    // not resource ceilings.
+    let mut gate = arguments
+        .fail_on
+        .map(|min_severity| {
+            gate::Gate::new(gate::Options {
+                min_severity: min_severity.into(),
+                allow_findings: arguments.allow_findings.unwrap_or(0),
+                minimum_frames: arguments.minimum_frames.unwrap_or(1),
+            })
+            .map_err(BoundaryError::from_error)
+        })
+        .transpose()
+        .map_err(CliError::classified)?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // The collector declares what expert reads: transport indexes, the
@@ -71,6 +93,13 @@ pub(super) fn run(
             &mut reader,
             super::offline_analysis::ip_event_sink(format, stream),
             |finding| {
+                // The gate observes every produced finding — including ones
+                // the report selector or retention discards, and the trailing
+                // findings the collector emits at end of input — before the
+                // selector applies.
+                if let Some(gate) = gate.as_mut() {
+                    gate.observe(&finding).map_err(BoundaryError::from_error)?;
+                }
                 if selector.matches(&finding) {
                     state.count(&finding);
                     rendering::render_record(format, finding.into(), &mut state, stream)
@@ -81,10 +110,21 @@ pub(super) fn run(
         )
         .map_err(CliError::classified)?;
     let summary = outcome.run;
+    let gate = gate.map(|gate| gate.finish(summary.frames_matched));
+    // The verdict's status is fixed once the analysis completes; a
+    // publication failure below still overrides it.
+    let exit = match gate.as_ref().map(|report| report.verdict) {
+        Some(gate::Verdict::Fail | gate::Verdict::Inconclusive) => {
+            CommandExit::status(VERDICT_NOT_PASS)
+        }
+        _ => CommandExit::SUCCESS,
+    };
+    let gate = gate.map(output::expert::GateReport::from);
 
     match format {
-        ToolFormat::Text => rendering::render_text(&summary, &state),
-        ToolFormat::Json => rendering::render_aggregate(&summary, state),
-        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream),
-    }
+        ToolFormat::Text => rendering::render_text(&summary, &state, gate.as_ref()),
+        ToolFormat::Json => rendering::render_aggregate(&summary, state, gate),
+        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream, gate),
+    }?;
+    Ok(exit)
 }

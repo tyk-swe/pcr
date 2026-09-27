@@ -1,27 +1,34 @@
 {
   "schema": "packetcraftr.output/v7",
   "command": "expert",
-  "mode": "aggregate",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "complete",
   "status": "success",
   "result": {
     "clock": {
-      "regressions": 0,
+      "regressions": 1,
       "max_regression": {
-        "secs": 0,
+        "secs": 10,
         "nanos": 0
       },
       "max_forward_step": {
         "secs": 1,
         "nanos": 0
       },
-      "max_forward_step_frame": 2
+      "max_forward_step_frame": 3
     },
-    "frames_read": 7,
-    "frames_matched": 7,
+    "frames_read": 3,
+    "frames_matched": 3,
     "errors": 0,
-    "warnings": 0,
+    "warnings": 1,
     "notes": 0,
-    "codes": [],
+    "codes": [
+      {
+        "code": "capture.clock_regression",
+        "findings": 1
+      }
+    ],
     "findings": [],
     "ip_reassembly": {
       "families": [
@@ -62,14 +69,14 @@
       "outcomes_omitted": 0
     },
     "gate": {
-      "verdict": "pass",
-      "reason": "within_allowance",
-      "min_severity": "info",
+      "verdict": "fail",
+      "reason": "finding_allowance_exceeded",
+      "min_severity": "warning",
       "allow_findings": 0,
       "minimum_frames": 1,
-      "frames_matched": 7,
-      "findings_observed": 0,
-      "triggering_findings": 0
+      "frames_matched": 3,
+      "findings_observed": 1,
+      "triggering_findings": 1
     }
   },
   "diagnostics": []

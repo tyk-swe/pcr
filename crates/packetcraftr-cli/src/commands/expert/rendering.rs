@@ -73,7 +73,11 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
+pub(super) fn render_text(
+    summary: &analysis::Summary,
+    state: &State,
+    gate: Option<&output::expert::GateReport>,
+) -> Result<(), CliError> {
     crate::commands::offline_analysis::render_clock(&summary.clock)?;
     let selected = &state.selected;
     // BTreeMap iteration is code order, so the per-code lines are deterministic.
@@ -88,10 +92,27 @@ pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<
         selected.notes,
         summary.frames_matched,
         summary.frames_read,
-    ))
+    ))?;
+    if let Some(gate) = gate {
+        write_stdout_line(format_args!(
+            "gate={} reason={} severity={} triggering={} allowed={} frames={} required={}",
+            gate.verdict,
+            gate.reason,
+            gate.min_severity,
+            gate.triggering_findings,
+            gate.allow_findings,
+            gate.frames_matched,
+            gate.minimum_frames,
+        ))?;
+    }
+    Ok(())
 }
 
-pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Result<(), CliError> {
+pub(super) fn render_aggregate(
+    summary: &analysis::Summary,
+    state: State,
+    gate: Option<output::expert::GateReport>,
+) -> Result<(), CliError> {
     let diagnostics = omitted_diagnostic(
         "expert.findings_omitted",
         "finding(s)",
@@ -100,7 +121,7 @@ pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Res
     );
     emit_aggregate(
         output::contract::Command::Expert,
-        result(summary, state, true),
+        result(summary, state, true, gate),
         diagnostics,
     )
 }
@@ -109,14 +130,16 @@ pub(super) fn render_stream(
     summary: &analysis::Summary,
     state: State,
     stream: &StreamEncoder,
+    gate: Option<output::expert::GateReport>,
 ) -> Result<(), CliError> {
-    Ok(stream.complete(result(summary, state, false), Vec::new())?)
+    Ok(stream.complete(result(summary, state, false, gate), Vec::new())?)
 }
 
 fn result(
     summary: &analysis::Summary,
     state: State,
     include_findings: bool,
+    gate: Option<output::expert::GateReport>,
 ) -> output::expert::Report {
     let State {
         mut selected,
@@ -134,5 +157,6 @@ fn result(
         summary.frames_matched,
         findings,
         &summary.ip_reassembly,
+        gate,
     ))
 }

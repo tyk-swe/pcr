@@ -303,6 +303,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
         11,
         findings,
         &IpReassemblyReport::default(),
+        None,
     ));
     let expert_json = serde_json::to_value(&expert_result).expect("expert output serializes");
     assert_eq!(expert_result.codes[0].code, "capture.note");

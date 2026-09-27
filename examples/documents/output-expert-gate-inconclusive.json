@@ -62,11 +62,11 @@
       "outcomes_omitted": 0
     },
     "gate": {
-      "verdict": "pass",
-      "reason": "within_allowance",
+      "verdict": "inconclusive",
+      "reason": "insufficient_frames",
       "min_severity": "info",
       "allow_findings": 0,
-      "minimum_frames": 1,
+      "minimum_frames": 20,
       "frames_matched": 7,
       "findings_observed": 0,
       "triggering_findings": 0

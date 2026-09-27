@@ -265,8 +265,10 @@ denies the operation (`policy`), and 70 for an internal invariant failure.
 The name in parentheses is the `error.kind` of the same failure in JSON and
 NDJSON output; `packetcraftr --help` lists the table. `verify-forwarding`
 exits 1 when its comparison completes but the verdict is `fail` or
-`inconclusive`; the published `verdict` field distinguishes them, so a
-completed report never pairs with a contradictory error record.
+`inconclusive`, and `expert --fail-on` exits 1 the same way when its gate
+evaluates `fail` or `inconclusive`; the published `verdict` field
+distinguishes them, so a completed report never pairs with a contradictory
+error record.
 
 Offline `stats`, `expert`, `follow`, and `tls` perform bounded, capture-global
 IPv4 and IPv6 fragment reassembly before downstream transport indexing. A
@@ -306,6 +308,19 @@ of its wire length, and `capture.clock_regression` marks a matched frame
 timestamped below the capture's high-water mark. Both carry the frame number
 and, when the source declares one, the interface ID; both are warnings and
 respect `--min-severity`, `--code`, and the retained-finding limit.
+
+`expert --fail-on info|warning|error` turns a completed analysis into a CI
+gate: `--allow-findings N` (default 0) is how many findings at or above the
+threshold severity may pass, and `--minimum-frames N` (default 1) is the
+matched physical-frame coverage a conclusive verdict requires. The gate
+counts **every produced finding** — decode diagnostics, capture evidence,
+and trailing end-of-capture findings — including ones `--min-severity`,
+`--code`, or aggregate retention keep out of the report, and publishes the
+complete counts under `result.gate` (null without `--fail-on`). An
+allowance violation fails; otherwise insufficient coverage is
+`inconclusive`; both exit 1 after the normal report publishes. A `pass`
+establishes only the declared predicate over the selected evidence — not
+network health, packet-loss absence, or observation completeness.
 
 ## Library
 

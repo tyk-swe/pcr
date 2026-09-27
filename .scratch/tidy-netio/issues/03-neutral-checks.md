@@ -7,7 +7,12 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Every file under `platform/` calls a native API, declares native modules, or is target-gated ABI knowledge.
-- [ ] Preparation tests move with the code; fmt, clippy, and the workspace tests pass.
+- [x] Every file under `platform/` calls a native API, declares native modules, or is target-gated ABI knowledge.
+- [x] Preparation tests move with the code; fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- `transmit::raw_ip::validate(frame, target_restrictions)` takes the target's own refusal as a closure, so the Windows raw-UDP rule stays in `platform/transmit/raw_ip/preparation.rs` beside the macOS byte-order rewrite while the neutral checks compile everywhere Layer 3 does.
+- `interface::current` carries `cfg_attr(not(native_layer2), allow(dead_code))`: Linux and macOS sends verify by name lookup, so a Layer-3-only build there has no caller, while Windows Layer-3-only builds still enumerate through it.

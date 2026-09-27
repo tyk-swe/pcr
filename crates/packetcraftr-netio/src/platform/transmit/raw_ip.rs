@@ -1,8 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Target-native raw IP transmission after upstream authorization, route, MTU,
-//! and capture-readiness checks.
+//! Target-native raw IP transmission. Authorization and capture readiness are
+//! the caller's; the datagram's fit to its route and header is checked by
+//! `transmit::raw_ip` before this backend adds its target's restrictions and
+//! opens a socket.
 
 use crate::{
     Error,

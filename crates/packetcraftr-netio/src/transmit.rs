@@ -5,6 +5,9 @@
 //! Layer 3 packet, and the native [`SystemProvider`] dispatches each to the
 //! backend compiled in for its layer. Callers own policy authorization.
 
+#[cfg(native_layer3)]
+pub(crate) mod raw_ip;
+
 use bytes::Bytes;
 use std::net::IpAddr;
 use std::time::{Instant, SystemTime};

@@ -178,12 +178,3 @@ pub(crate) fn send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, E
 pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     super::interface::identity::verify_interface_identity(expected)
 }
-
-/// Confirms the interface is still current and returns its snapshot.
-#[cfg(native_layer2)]
-pub(crate) fn current_interface(
-    expected: &InterfaceId,
-    deadline: &Deadline,
-) -> Result<interface::Info, Error> {
-    super::interface::identity::validate_current_interface_identity(expected, deadline)
-}

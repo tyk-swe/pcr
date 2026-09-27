@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! The native capture path behind [`SystemProvider`](super::SystemProvider):
-//! every request check, the interface identity check, and the BPF netmask
+//! every request check, the current-interface lookup, and the BPF netmask
 //! happen here before the selected backend opens its source.
 
 use packetcraftr_core::budget::Deadline;
@@ -21,7 +21,7 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
     }
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
-    let interface = crate::platform::current_interface(&request.interface, deadline)?;
+    let interface = crate::interface::current(&request.interface, deadline)?;
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
     let request = request.clone();
@@ -58,7 +58,7 @@ pub(super) fn timestamp_types(
 ) -> Result<Vec<TimestampType>, Error> {
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
-    let interface = crate::platform::current_interface(interface, deadline)?;
+    let interface = crate::interface::current(interface, deadline)?;
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
     crate::platform::timestamp_types(&interface.id)

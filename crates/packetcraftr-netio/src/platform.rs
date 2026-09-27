@@ -45,7 +45,7 @@ mod transmit;
 pub(crate) use dispatch::unsupported;
 #[cfg(native_send)]
 pub(crate) use dispatch::verify_interface_identity;
-#[cfg(native_layer2)]
-pub(crate) use dispatch::{current_interface, open_capture, timestamp_types};
 pub(crate) use dispatch::{interface_route, interfaces, route, send_layer2, send_layer3};
+#[cfg(native_layer2)]
+pub(crate) use dispatch::{open_capture, timestamp_types};
 pub(crate) use execution_context::{ExecutionContext, current as execution_context};

@@ -69,6 +69,48 @@ impl Provider for SystemProvider {
     }
 }
 
+/// The current snapshot of the interface `expected` names, or the live I/O
+/// failure for one that was renamed, removed, or recreated since it was
+/// selected. Capture reads the snapshot's addresses; a target with no cheap
+/// name lookup verifies each send this way too.
+///
+/// Linux and macOS sends verify by name lookup instead, so a build with only
+/// Layer 3 there has no caller.
+#[cfg(native_send)]
+#[cfg_attr(not(native_layer2), allow(dead_code))]
+pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate::Error> {
+    let mut interfaces = SystemProvider.interfaces(deadline)?;
+    if let Some(position) = interfaces
+        .iter()
+        .position(|interface| interface.id == *expected)
+    {
+        return Ok(interfaces.swap_remove(position));
+    }
+    let actual = interfaces
+        .iter()
+        .find(|interface| interface.id.index == expected.index)
+        .map(|interface| interface.id.name.clone());
+    Err(identity_changed(expected, actual.as_deref()))
+}
+
+/// The live I/O failure for an interface whose name/index pair changed
+/// before native I/O; `actual` is the name now holding the expected index.
+#[cfg(native_send)]
+pub(crate) fn identity_changed(expected: &Id, actual: Option<&str>) -> crate::Error {
+    let actual = actual.map_or_else(
+        || "no current interface".to_owned(),
+        |name| format!("{name} (index {})", expected.index),
+    );
+    crate::Error::Device {
+        interface: expected.name.clone(),
+        message: format!(
+            "interface identity changed before native I/O: expected {} (index {}), found {actual}",
+            expected.name, expected.index
+        ),
+        source: None,
+    }
+}
+
 /// Refuses a native snapshot with an incomplete identity, an impossible
 /// prefix, or a duplicate interface.
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {

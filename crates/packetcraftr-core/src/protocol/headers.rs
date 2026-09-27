@@ -521,12 +521,6 @@ impl Ipv6Header {
         let mut extensions = Vec::new();
         let mut chain = Ipv6ExtensionChain::new(datagram, Self::LENGTH, next_header);
         while chain.at_header() {
-            if extensions.len() == MAX_IPV6_EXTENSIONS {
-                return Err(Error::Depth {
-                    header: Header::Ipv6Extension,
-                    limit: MAX_IPV6_EXTENSIONS,
-                });
-            }
             let extension = match chain.next() {
                 Some(extension) => extension?,
                 None => break,
@@ -631,17 +625,15 @@ impl Ipv6Extension {
 /// Iterator over one IPv6 extension-header chain in `bytes`. Each step
 /// reports the Hop-by-Hop, Routing, Fragment, AH, or Destination Options
 /// header the position stands at; the walk ends at the first other Next
-/// Header value, and behind a Fragment header with a nonzero offset — the
-/// bytes there continue an earlier fragment, not another header. It yields
-/// an error once and then ends.
-///
-/// There is no count bound: the slice bounds the chain. [`Ipv6Header`]
-/// walks apply [`MAX_IPV6_EXTENSIONS`] on top.
+/// Header value, behind a Fragment header with a nonzero offset — the
+/// bytes there continue an earlier fragment, not another header — or at
+/// [`MAX_IPV6_EXTENSIONS`]. It yields an error once and then ends.
 #[derive(Clone, Debug)]
 pub struct Ipv6ExtensionChain<'a> {
     bytes: &'a [u8],
     protocol: u8,
     offset: usize,
+    remaining: usize,
     done: bool,
 }
 
@@ -653,6 +645,7 @@ impl<'a> Ipv6ExtensionChain<'a> {
             bytes,
             protocol: next_header,
             offset,
+            remaining: MAX_IPV6_EXTENSIONS,
             done: false,
         }
     }
@@ -675,6 +668,13 @@ impl Iterator for Ipv6ExtensionChain<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         if !self.at_header() {
             return None;
+        }
+        if self.remaining == 0 {
+            self.done = true;
+            return Some(Err(Error::Depth {
+                header: Header::Ipv6Extension,
+                limit: MAX_IPV6_EXTENSIONS,
+            }));
         }
         let step = (|| {
             let prefix = self
@@ -704,6 +704,7 @@ impl Iterator for Ipv6ExtensionChain<'_> {
         })();
         match step {
             Ok(extension) => {
+                self.remaining -= 1;
                 self.offset += extension.length;
                 self.protocol = extension.next_header;
                 self.done = extension.fragment_offset().is_some_and(|units| units != 0);
@@ -1121,6 +1122,23 @@ mod tests {
         assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
         assert_eq!(chain.next(), None);
         assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
+    }
+
+    #[test]
+    fn ipv6_extension_chain_is_bounded_by_max_ipv6_extensions() {
+        let bytes = [60, 0, 1, 4, 0, 0, 0, 0].repeat(MAX_IPV6_EXTENSIONS + 1);
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS);
+        for _ in 0..MAX_IPV6_EXTENSIONS {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert_eq!(
+            chain.next(),
+            Some(Err(Error::Depth {
+                header: Header::Ipv6Extension,
+                limit: MAX_IPV6_EXTENSIONS,
+            }))
+        );
+        assert_eq!(chain.next(), None);
     }
 
     #[test]

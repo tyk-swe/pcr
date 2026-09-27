@@ -396,7 +396,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::InvalidCaptureTimeout {
                 timeout: Duration::ZERO,
-                maximum: capture::MAX_TIMEOUT,
+                maximum: packetcraftr_netio::deadline::MAX_WAIT,
             },
             "cli.capture_timeout",
             Kind::Usage,

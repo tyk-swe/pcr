@@ -30,10 +30,12 @@ use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 /// spinning.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-/// Longest single wall-clock wait a provider derives from a deadline. A
-/// longer remainder is clipped so its instant stays inside the monotonic
-/// clock's range; callers re-check the deadline after each wait.
-const MAX_WALL_CLOCK_WAIT: Duration = Duration::from_secs(60 * 60);
+/// The longest wait a provider derives from one deadline, and the ceiling
+/// every bounded live operation accepts for its run time or response window:
+/// one hour. A capture or connect refuses a longer remainder; [`expires_at`]
+/// clips one so its instant stays inside the monotonic clock's range, and
+/// callers re-check the deadline after each wait.
+pub const MAX_WAIT: Duration = Duration::from_secs(60 * 60);
 
 /// Wall-clock time remaining, or `None` at or after `deadline`. Treat `None` as
 /// expiry before calling providers that reject a zero timeout.
@@ -71,7 +73,7 @@ pub fn remaining(deadline: &Deadline) -> Result<Duration, Interrupted> {
 ///
 /// Returns the same interruptions as [`remaining`].
 pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
-    let remaining = remaining(deadline)?.min(MAX_WALL_CLOCK_WAIT);
+    let remaining = remaining(deadline)?.min(MAX_WAIT);
     let now = Instant::now();
     Ok(now.checked_add(remaining).unwrap_or(now))
 }

@@ -25,7 +25,8 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{self, Group, GroupRequest, MAX_TIMEOUT, Session as _},
+    capture::{self, Group, GroupRequest, Session as _},
+    deadline::MAX_WAIT,
 };
 use prepare::AdmittedProbe;
 use std::{
@@ -175,8 +176,8 @@ fn validate_options(
         ),
         (
             "max_duration",
-            usize::try_from(MAX_TIMEOUT.as_secs()).unwrap_or(usize::MAX),
-            !options.max_duration.is_zero() && options.max_duration <= MAX_TIMEOUT,
+            usize::try_from(MAX_WAIT.as_secs()).unwrap_or(usize::MAX),
+            !options.max_duration.is_zero() && options.max_duration <= MAX_WAIT,
         ),
     ];
     match bounds.into_iter().find(|(_, _, holds)| !holds) {
@@ -705,7 +706,7 @@ mod tests {
     use super::*;
     use crate::probe::ProbeEndpoint;
     use crate::scan::{MAX_PROBES, MAX_RATE, Probe};
-    use packetcraftr_netio::capture::MAX_TIMEOUT;
+    use packetcraftr_netio::deadline::MAX_WAIT;
 
     fn options() -> PipelineOptions {
         PipelineOptions {
@@ -760,7 +761,7 @@ mod tests {
                     max_duration: Duration::ZERO,
                     ..options()
                 },
-                format!("max_duration={}", MAX_TIMEOUT.as_secs()),
+                format!("max_duration={}", MAX_WAIT.as_secs()),
             ),
         ];
         for (options, bound) in refusals {

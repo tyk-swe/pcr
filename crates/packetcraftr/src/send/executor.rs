@@ -8,7 +8,7 @@ use crate::{
     Client, clock::Clock, evidence::SentPacket, preparation::Streaming, providers::Providers,
 };
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::capture::MAX_TIMEOUT;
+use packetcraftr_netio::deadline::MAX_WAIT;
 use std::time::Duration;
 
 pub(super) fn send<P: Providers, K: Clock>(
@@ -23,7 +23,7 @@ pub(super) fn send<P: Providers, K: Clock>(
         stream.check()?;
         client
             .clock
-            .sleep(delay, &client.deadline(MAX_TIMEOUT))
+            .sleep(delay, &client.deadline(MAX_WAIT))
             .map_err(|source| Error::Clock {
                 source: Box::new(source),
             })?;

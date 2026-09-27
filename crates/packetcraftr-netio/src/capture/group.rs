@@ -489,7 +489,7 @@ impl<C: Session> Session for Group<C> {
             return Err(self.fail(Error::CaptureGroupState));
         }
         let deadline = match caller.remaining() {
-            Ok(remaining) if remaining > super::MAX_TIMEOUT => {
+            Ok(remaining) if remaining > crate::deadline::MAX_WAIT => {
                 return Err(self.fail(invalid("capture wait exceeds its finite range")));
             }
             _ => wait_end(caller),
@@ -573,7 +573,7 @@ fn wait_end(deadline: &Deadline) -> Option<Instant> {
     let remaining = deadline
         .remaining()
         .ok()
-        .filter(|remaining| !remaining.is_zero() && *remaining <= super::MAX_TIMEOUT)?;
+        .filter(|remaining| !remaining.is_zero() && *remaining <= crate::deadline::MAX_WAIT)?;
     Instant::now().checked_add(remaining)
 }
 

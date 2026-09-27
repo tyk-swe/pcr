@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_netio::capture::{self as native, Session as _};
+use packetcraftr_netio::capture::Session as _;
 
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
@@ -39,7 +39,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
     ///
     /// Returns the invalid request, the provider, budget, selector, or sink
     /// failure, the cancellation, or evidence lost under
-    /// [`OverflowPolicy::Fail`](native::OverflowPolicy::Fail). The error keeps
+    /// [`OverflowPolicy::Fail`](packetcraftr_netio::capture::OverflowPolicy::Fail). The error keeps
     /// the report of everything done before it, after every source was shut
     /// down.
     pub fn capture<S>(&self, request: Request, sink: S) -> Result<Report, Error>
@@ -66,9 +66,12 @@ impl<P: Providers, K: Clock> Client<P, K> {
         };
         // Each event gets the longest wait a capture has.
         let mut publish = |event: Event| -> Result<Control, Cause> {
-            publisher(event, &self.deadline(native::MAX_TIMEOUT))
-                .map(Into::into)
-                .map_err(|cause| interrupted_or(&deadline, cause))
+            publisher(
+                event,
+                &self.deadline(packetcraftr_netio::deadline::MAX_WAIT),
+            )
+            .map(Into::into)
+            .map_err(|cause| interrupted_or(&deadline, cause))
         };
         let Armed {
             mut group,

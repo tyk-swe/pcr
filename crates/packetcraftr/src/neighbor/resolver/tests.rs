@@ -110,7 +110,7 @@ where
 
 /// An operation with no deadline of its own.
 fn unbounded() -> Deadline {
-    Deadline::new(capture::MAX_TIMEOUT)
+    Deadline::new(packetcraftr_netio::deadline::MAX_WAIT)
 }
 
 /// Compares every field through `Debug`, including the non-comparable

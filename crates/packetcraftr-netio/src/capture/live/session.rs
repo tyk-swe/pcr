@@ -21,7 +21,8 @@ use crate::workers::{Permit, Task, Waited};
 
 use crate::{
     Error,
-    capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Stats},
+    capture::{Captured, Limits, Metadata, Session, Stats},
+    deadline::MAX_WAIT,
     workers::reaper::{ReaperClient, ReaperStartError, shared_reaper},
 };
 
@@ -45,10 +46,10 @@ fn capture_deadline(deadline: &Deadline) -> Result<Option<Instant>, Error> {
     else {
         return Ok(None);
     };
-    if timeout > MAX_TIMEOUT {
+    if timeout > MAX_WAIT {
         return Err(Error::InvalidCaptureTimeout {
             timeout,
-            maximum: MAX_TIMEOUT,
+            maximum: MAX_WAIT,
         });
     }
     Instant::now()
@@ -56,7 +57,7 @@ fn capture_deadline(deadline: &Deadline) -> Result<Option<Instant>, Error> {
         .map(Some)
         .ok_or(Error::InvalidCaptureTimeout {
             timeout,
-            maximum: MAX_TIMEOUT,
+            maximum: MAX_WAIT,
         })
 }
 
@@ -743,11 +744,11 @@ mod tests {
     fn capture_waits_reject_timeouts_above_the_public_maximum() {
         let frozen = Instant::now();
         let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
-        assert!(capture_deadline(&fixed(MAX_TIMEOUT)).unwrap().is_some());
+        assert!(capture_deadline(&fixed(MAX_WAIT)).unwrap().is_some());
         assert!(matches!(
-            capture_deadline(&fixed(MAX_TIMEOUT + Duration::from_nanos(1))),
+            capture_deadline(&fixed(MAX_WAIT + Duration::from_nanos(1))),
             Err(Error::InvalidCaptureTimeout {
-                maximum: MAX_TIMEOUT,
+                maximum: MAX_WAIT,
                 ..
             })
         ));

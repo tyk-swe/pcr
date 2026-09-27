@@ -9,7 +9,7 @@ use packetcraftr_core::capture_file::{
 };
 use packetcraftr_core::filter::FrameSelector;
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
-use packetcraftr_netio::{capture::MAX_TIMEOUT, link::Mode as LinkMode};
+use packetcraftr_netio::{deadline::MAX_WAIT, link::Mode as LinkMode};
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
@@ -63,7 +63,7 @@ pub struct Limits {
     pub max_transmitted_bytes: u64,
     pub max_frame_bytes: usize,
     /// Deadline on elapsed time from the replay's start, at most
-    /// [`MAX_TIMEOUT`]. The intentional delays it schedules must also fit.
+    /// [`MAX_WAIT`]. The intentional delays it schedules must also fit.
     pub max_duration: Duration,
 }
 
@@ -73,7 +73,7 @@ impl Default for Limits {
             max_source_frames: DEFAULT_STREAM_FRAMES,
             max_transmitted_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
-            max_duration: MAX_TIMEOUT,
+            max_duration: MAX_WAIT,
         }
     }
 }
@@ -119,10 +119,10 @@ impl Limits {
                 reason: "cannot exceed max_transmitted_bytes",
             });
         }
-        if self.max_duration.is_zero() || self.max_duration > MAX_TIMEOUT {
+        if self.max_duration.is_zero() || self.max_duration > MAX_WAIT {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_TIMEOUT,
+                maximum: MAX_WAIT,
             });
         }
         Ok(())

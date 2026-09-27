@@ -24,7 +24,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
-    /// The caller's deadline allows a connection longer than one hour.
+    /// The caller's deadline allows a connection longer than
+    /// [`deadline::MAX_WAIT`](crate::deadline::MAX_WAIT).
     #[error("TCP connect timeout must be nonzero and at most one hour")]
     Timeout,
     /// The caller's deadline was spent before the connection could start.

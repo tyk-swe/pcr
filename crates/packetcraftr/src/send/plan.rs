@@ -5,7 +5,7 @@
 
 use super::request::invalid;
 use super::{Error, Request};
-use packetcraftr_netio::capture::MAX_TIMEOUT;
+use packetcraftr_netio::deadline::MAX_WAIT;
 use std::time::Duration;
 
 pub(super) struct Plan {
@@ -35,11 +35,11 @@ impl TryFrom<&Request> for Plan {
         let delay = crate::clock::rate_delay(1, request.rate)
             .ok_or_else(|| invalid("rate", "rate-delay arithmetic overflowed"))?;
         let scheduled_nanos = u128::from(total - 1) * delay.as_nanos();
-        if scheduled_nanos > MAX_TIMEOUT.as_nanos() {
+        if scheduled_nanos > MAX_WAIT.as_nanos() {
             return Err(Error::InvalidRequest {
                 field: "rate",
                 message: format!(
-                    "scheduled pacing {scheduled_nanos} ns exceeds the {MAX_TIMEOUT:?} ceiling"
+                    "scheduled pacing {scheduled_nanos} ns exceeds the {MAX_WAIT:?} ceiling"
                 ),
             });
         }

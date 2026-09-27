@@ -24,8 +24,6 @@ mod record;
 mod settings;
 mod system;
 
-use std::time::Duration;
-
 use super::Error;
 use super::interface::Id as InterfaceId;
 use packetcraftr_core::budget::Deadline;
@@ -40,9 +38,6 @@ pub use settings::{
     MAX_NATIVE_BUFFER_SIZE, MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings,
     TimestampPrecision, TimestampSource, TimestampType,
 };
-
-/// Longest remainder a capture wait accepts from its caller's deadline.
-pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Longest native capture filter, in bytes, that a single session or a group
 /// accepts.

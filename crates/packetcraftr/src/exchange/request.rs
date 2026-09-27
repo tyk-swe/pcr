@@ -4,9 +4,8 @@
 use std::time::Duration;
 
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
-use packetcraftr_netio::capture::{
-    Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT,
-};
+use packetcraftr_netio::capture::{Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::Error;
 
@@ -48,10 +47,10 @@ impl Request {
     ///
     /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
-        if self.timeout > MAX_TIMEOUT {
+        if self.timeout > MAX_WAIT {
             return Err(Error::InvalidRequest {
                 field: "timeout",
-                message: format!("must not exceed {MAX_TIMEOUT:?}"),
+                message: format!("must not exceed {MAX_WAIT:?}"),
             });
         }
         if self.max_template_packets == 0 {

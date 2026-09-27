@@ -8,6 +8,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `packetcraftr_netio::capture::MAX_TIMEOUT` is `packetcraftr_netio::deadline::MAX_WAIT`,
+  the one-hour ceiling every provider wait and bounded live operation
+  accepts, and `packetcraftr_netio::SendEvidenceFault` is
+  `packetcraftr_netio::transmit::SendEvidenceFault`. See
+  `docs/migration-unreleased.md`.
 - `dns::tcp::query` takes an `Arc<P>` so its admitted connect worker owns the
   provider; `P` and its stream must be `'static`. `dns::tcp::Request` gains
   `cancellation: Option<&Cancellation>`, and its `Error` and `Category` gain

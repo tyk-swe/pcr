@@ -326,7 +326,7 @@ fn exchange_requests_validate_all_aggregate_bounds() {
 
     let invalid = [
         exchange::Request {
-            timeout: net::capture::MAX_TIMEOUT + Duration::from_nanos(1),
+            timeout: net::deadline::MAX_WAIT + Duration::from_nanos(1),
             ..defaults.clone()
         },
         exchange::Request {

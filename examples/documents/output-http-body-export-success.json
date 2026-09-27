@@ -128,7 +128,56 @@
         ]
       }
     ],
-    "transactions": [],
+    "transactions": [
+      {
+        "index": 1,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "outcome": "paired",
+        "request": 1,
+        "response": 2,
+        "response_status": 200,
+        "informational": [],
+        "request_headers_available": {
+          "frame": 2,
+          "timestamp": {
+            "unix_seconds": 2,
+            "nanoseconds": 0
+          }
+        },
+        "response_started": {
+          "frame": 5,
+          "timestamp": {
+            "unix_seconds": 5,
+            "nanoseconds": 0
+          }
+        },
+        "response_headers_available": {
+          "frame": 6,
+          "timestamp": {
+            "unix_seconds": 6,
+            "nanoseconds": 0
+          }
+        },
+        "response_header_wait": {
+          "nanoseconds": 3000000000,
+          "negative": false
+        },
+        "response_header_span": {
+          "nanoseconds": 1000000000,
+          "negative": false
+        }
+      }
+    ],
     "issues": [],
     "frames_read": 7,
     "frames_matched": 7,
@@ -188,8 +237,23 @@
       "outcomes": [],
       "outcomes_omitted": 0
     },
-    "transaction_summary": null,
-    "body_export": null
+    "transaction_summary": {
+      "transactions": 1,
+      "paired": 1,
+      "unanswered": 0,
+      "orphan_responses": 0,
+      "negative_header_waits": 0,
+      "negative_header_spans": 0
+    },
+    "body_export": {
+      "message": 2,
+      "stream": 0,
+      "generation": 0,
+      "path": "artifacts/message-2-body.bin",
+      "bytes": 5,
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "representation": "http_body_after_dechunking"
+    }
   },
   "diagnostics": []
 }

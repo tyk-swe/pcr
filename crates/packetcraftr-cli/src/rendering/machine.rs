@@ -135,6 +135,54 @@ pub(crate) fn emit_published<T: Serialize>(
     ))
 }
 
+/// A decorated aggregate success envelope, serialized-checked and frozen until
+/// [`PreparedAggregate::publish`]. Deliberately not `Clone`: an aggregate
+/// document is published exactly once, and dropping a prepared envelope is a
+/// no-op.
+// Artifact-committing commands (body export, capture split) consume this seam.
+#[cfg_attr(not(test), expect(dead_code))]
+pub(crate) struct PreparedAggregate<T> {
+    envelope: output::envelope::Envelope<T>,
+}
+
+impl<T: Serialize> PreparedAggregate<T> {
+    /// Sends the frozen envelope through the ordinary aggregate writer.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn publish(self) -> Result<(), CliError> {
+        emit_json(&self.envelope)
+    }
+}
+
+/// Builds and preflights the decorated success envelope an artifact commit may
+/// later publish unchanged. Resource diagnostics are sampled now, so the
+/// committed report describes the run as of preparation.
+///
+/// The counting-writer pass only proves the owned envelope serializes:
+/// `usize::MAX` is an overflow ceiling, not a byte budget — aggregate JSON has
+/// no record limit. Nothing is written and no second payload buffer is built.
+#[cfg_attr(not(test), expect(dead_code))]
+pub(crate) fn prepare_aggregate<T: Serialize>(
+    command: output::contract::Command,
+    result: T,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+) -> Result<PreparedAggregate<T>, CliError> {
+    crate::cancellation::check()?;
+    let envelope = crate::resources::decorate(output::envelope::Envelope::success(
+        command,
+        result,
+        diagnostics,
+    ));
+    bounded_pretty_json_len(&envelope, usize::MAX).map_err(|error| {
+        error.into_cli_error(|| {
+            CliError::new(
+                Kind::Internal,
+                "aggregate output exceeded the addressable byte ceiling".to_owned(),
+            )
+        })
+    })?;
+    Ok(PreparedAggregate { envelope })
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -143,6 +191,8 @@ mod tests {
     use serde::ser::{Error as _, SerializeSeq};
 
     use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len};
+    use crate::output::contract::Command;
+    use crate::rendering::{PreparedAggregate, prepare_aggregate};
 
     struct Instrumented<'a> {
         second: &'a Cell<bool>,
@@ -238,5 +288,51 @@ mod tests {
             };
             assert_eq!(source.to_string(), "fixture serialization failure");
         }
+    }
+
+    #[test]
+    fn prepare_aggregate_freezes_the_decorated_envelope() {
+        let prepared: PreparedAggregate<_> = prepare_aggregate(
+            Command::Merge,
+            serde_json::json!({"parts": 2}),
+            vec![packetcraftr_core::diagnostic::Diagnostic::info(
+                "fixture.note",
+                "prepared",
+            )],
+        )
+        .expect("a serializable result prepares");
+
+        let value = serde_json::to_value(&prepared.envelope).expect("envelope serializes");
+        assert_eq!(value["schema"], "packetcraftr.output/v7");
+        assert_eq!(value["command"], "merge");
+        assert_eq!(value["mode"], "aggregate");
+        assert_eq!(value["status"], "success");
+        assert_eq!(value["result"], serde_json::json!({"parts": 2}));
+        assert_eq!(value["diagnostics"][0]["code"], "fixture.note");
+        // A stream record carries sequence/event; an aggregate document does not.
+        assert!(value.get("sequence").is_none());
+        assert!(value.get("event").is_none());
+        // The frozen envelope's pretty bytes are exactly what publish emits:
+        // field order starts with the schema identity, matching emit_json.
+        let pretty = serde_json::to_string_pretty(&prepared.envelope).unwrap();
+        assert!(pretty.starts_with("{\n  \"schema\": \"packetcraftr.output/v7\""));
+        prepared
+            .publish()
+            .expect("the frozen envelope emits through the aggregate writer");
+    }
+
+    #[test]
+    fn prepare_aggregate_preflights_pretty_serialization_without_a_byte_budget() {
+        let Err(error) = prepare_aggregate(Command::Read, FailingSerialization, Vec::new()) else {
+            panic!("a serialization failure must surface during preparation");
+        };
+        assert!(error.to_string().contains("serialize output failed"));
+
+        // usize::MAX is an overflow ceiling, not a budget: any real document
+        // passes, including one larger than the NDJSON record ceiling.
+        let large =
+            serde_json::json!({"blob": "x".repeat(crate::output::stream::MAX_RECORD_BYTES)});
+        prepare_aggregate(Command::Read, large, Vec::new())
+            .expect("aggregate JSON has no record ceiling");
     }
 }

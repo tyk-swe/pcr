@@ -1,45 +1,52 @@
 {
   "schema": "packetcraftr.output/v7",
-  "command": "export",
-  "mode": "stream",
-  "sequence": 0,
-  "event": "complete",
+  "command": "expert",
+  "mode": "aggregate",
   "status": "success",
   "result": {
-    "path": "selected-http.pcap",
-    "format": "pcap",
-    "frames_read": 7,
-    "frames_selected": 7,
-    "captured_bytes_read": 425,
-    "captured_bytes_selected": 425,
-    "interfaces": 1,
-    "metadata_records": 0,
-    "source_frames": [
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7
-    ],
-    "matched_streams": [
+    "frames_read": 5,
+    "frames_matched": 5,
+    "errors": 0,
+    "warnings": 3,
+    "notes": 0,
+    "codes": [
       {
-        "transport": "tcp",
-        "index": 0
+        "code": "tcp.duplicate_ack",
+        "findings": 1
+      },
+      {
+        "code": "tcp.reset",
+        "findings": 1
+      },
+      {
+        "code": "tcp.retransmission",
+        "findings": 1
       }
     ],
-    "unmatched_streams": [],
-    "unmatched_datagram_frames": [],
-    "selected_complete_datagrams": 0,
-    "selected_incomplete_datagrams": [],
-    "unselected_incomplete_datagrams": 0,
-    "source_outcomes_omitted": 0,
-    "scopes": [
+    "findings": [
       {
-        "id": 0,
-        "interface": null,
-        "encapsulation": []
+        "severity": "warning",
+        "code": "tcp.retransmission",
+        "frame": 2,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "4 byte(s) at sequence 100 retransmit previously seen data"
+      },
+      {
+        "severity": "warning",
+        "code": "tcp.duplicate_ack",
+        "frame": 4,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "10.0.0.2:443 repeats acknowledgment 100 (duplicate #1)"
+      },
+      {
+        "severity": "warning",
+        "code": "tcp.reset",
+        "frame": 5,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "connection reset by 10.0.0.2:443"
       }
     ],
     "ip_reassembly": {
@@ -79,6 +86,16 @@
       ],
       "outcomes": [],
       "outcomes_omitted": 0
+    },
+    "gate": {
+      "verdict": "fail",
+      "reason": "finding_allowance_exceeded",
+      "min_severity": "warning",
+      "allow_findings": 0,
+      "minimum_frames": 1,
+      "frames_matched": 5,
+      "findings_observed": 3,
+      "triggering_findings": 3
     }
   },
   "diagnostics": []

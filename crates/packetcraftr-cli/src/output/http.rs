@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt;
+
 use super::{
     analysis::{Scope, ScopedFlowKey},
     contract::Error,
+    frame::Timestamp,
     hex::compact_hex,
     provenance::Source,
     stream::StreamRecord,
@@ -220,6 +223,128 @@ impl From<analysis::Summary> for Summary {
         }
     }
 }
+
+/// How a settled request/response header association ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub enum TransactionOutcome {
+    /// A parsed response head consumed a pending request.
+    #[serde(rename = "paired")]
+    Paired,
+    /// A request saw no consuming response before retirement.
+    #[serde(rename = "unanswered")]
+    Unanswered,
+    /// A response head had no pending request to consume.
+    #[serde(rename = "orphan_response")]
+    OrphanResponse,
+}
+
+impl TransactionOutcome {
+    /// The published name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Paired => "paired",
+            Self::Unanswered => "unanswered",
+            Self::OrphanResponse => "orphan_response",
+        }
+    }
+}
+
+impl fmt::Display for TransactionOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The physical frame that made header bytes available to the parser, and its
+/// capture timestamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Availability {
+    pub frame: u64,
+    pub timestamp: Timestamp,
+}
+
+/// A signed capture-observed interval between two availability markers.
+/// Negative intervals stay visible; zero is never negative.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Interval {
+    pub nanoseconds: u128,
+    pub negative: bool,
+}
+
+/// One settled header transaction: request/response association plus the
+/// availability markers and signed intervals the capture observed.
+#[derive(Debug, Serialize)]
+pub struct Transaction {
+    pub index: u64,
+    pub stream: u64,
+    pub generation: u64,
+    pub flow: ScopedFlowKey,
+    pub outcome: TransactionOutcome,
+    pub request: Option<u64>,
+    pub response: Option<u64>,
+    pub response_status: Option<u16>,
+    pub informational: Vec<u64>,
+    pub request_headers_available: Option<Availability>,
+    pub response_started: Option<Availability>,
+    pub response_headers_available: Option<Availability>,
+    pub response_header_wait: Option<Interval>,
+    pub response_header_span: Option<Interval>,
+}
+impl StreamRecord for Transaction {
+    fn event_name(&self) -> &'static str {
+        "http_transaction"
+    }
+}
+
+/// Outcome totals across every transaction a run emitted.
+#[derive(Debug, Serialize)]
+pub struct TransactionSummary {
+    pub transactions: u64,
+    pub paired: u64,
+    pub unanswered: u64,
+    pub orphan_responses: u64,
+    pub negative_header_waits: u64,
+    pub negative_header_spans: u64,
+}
+
+/// The byte domain an exported body artifact preserves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub enum Representation {
+    /// Entity bytes after chunk removal, with content encodings unchanged.
+    #[serde(rename = "http_body_after_dechunking")]
+    HttpBodyAfterDechunking,
+}
+
+impl Representation {
+    /// The published name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HttpBodyAfterDechunking => "http_body_after_dechunking",
+        }
+    }
+}
+
+impl fmt::Display for Representation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// The caller-named artifact one completed message body was published as.
+/// Body bytes are never embedded in machine output.
+#[derive(Debug, Serialize)]
+pub struct BodyExport {
+    pub message: u64,
+    pub stream: u64,
+    pub generation: u64,
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub representation: Representation,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Complete {
     pub frames_read: u64,
@@ -229,6 +354,8 @@ pub struct Complete {
     pub incomplete_datagrams: usize,
     pub source_outcomes_omitted: u64,
     pub ip_reassembly: super::reassembly::Report,
+    pub transaction_summary: Option<TransactionSummary>,
+    pub body_export: Option<BodyExport>,
 }
 /// The run's counters, the collector's summary, and the scopes it exposed.
 impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Complete {
@@ -247,12 +374,15 @@ impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Comple
             incomplete_datagrams: run.incomplete_sources.len(),
             source_outcomes_omitted: run.source_outcomes_omitted,
             ip_reassembly: (&run.ip_reassembly).into(),
+            transaction_summary: None,
+            body_export: None,
         })
     }
 }
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub messages: Vec<Message>,
+    pub transactions: Vec<Transaction>,
     pub issues: Vec<Issue>,
     #[serde(flatten)]
     pub complete: Complete,
@@ -263,6 +393,7 @@ impl From<(Vec<Message>, Vec<Issue>, Complete)> for Report {
     fn from((messages, issues, complete): (Vec<Message>, Vec<Issue>, Complete)) -> Self {
         Self {
             messages,
+            transactions: Vec::new(),
             issues,
             complete,
         }

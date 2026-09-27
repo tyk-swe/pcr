@@ -2,10 +2,49 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v6` and
-validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents
+All structured command envelopes now identify `packetcraftr.output/v7` and
+validate against `schemas/packetcraftr.output.v7.schema.json`. Packet documents
 now use `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
+
+## Structured output/v7
+
+v7 carries every v6 change described below under the new family name
+`packetcraftr.output/v7`; a v6 envelope cannot be relabeled because the schema
+identity is part of the contract. The new shapes the offline-investigation
+batch shares land here:
+
+- `split` joins the command vocabulary for capture splitting (SPLIT-02):
+  `splitResult` reports format/compression, the output directory,
+  `frames_per_file`, read/write totals, and a nonempty bounded `files` list
+  of `part-NNNNNN.pcap[ng][.gz|.zst]` parts with per-part frame ranges and
+  byte counts.
+- HTTP adds `transactions` (empty until HTTP-T02 populates them), a nullable
+  `transaction_summary`, and a nullable `body_export` record (HTTP-B02)
+  identifying the caller-named artifact by path, byte count, SHA-256, and the
+  fixed `http_body_after_dechunking` representation; body bytes are never
+  embedded. NDJSON gains the `http_transaction` event. Transactions carry
+  availability markers (`frame`, `timestamp`) and signed intervals
+  (`nanoseconds`, `negative`) that preserve negative capture-observed
+  timing and reject negative zero.
+- Expert adds a nullable `gate` (GATE-02): `verdict`, `reason`,
+  `min_severity`, `allow_findings`, `minimum_frames` (positive),
+  `frames_matched`, `findings_observed`, and `triggering_findings`.
+
+Current runs publish `transactions: []`, `transaction_summary: null`,
+`body_export: null`, and `gate: null` until the feature tickets fill them.
+The forwarding consumer accepts both families with identical semantics: the
+first NDJSON record selects the family and a later switch is rejected. The
+v6 schema and the frozen `v6-forwarding.json` fixture remain packaged
+byte-for-byte for archival compatibility alongside `v7-forwarding.json`.
+The CLI contract constant is `SCHEMA_V7`, and private preparation seams
+(`StreamEncoder::prepare_complete`/`publish_prepared_complete` and
+`rendering::machine::prepare_aggregate`) let artifact-committing commands
+serialize a completion before deciding to publish it.
+
+Consumers validating a pinned family must pin v7; consumers accepting both
+must select by the envelope `schema` field exactly as the reference consumer
+does.
 
 ## Forwarding semantics and output/v6
 
@@ -83,7 +122,7 @@ with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CN
 `MX`, `NS`, `PTR`, `SOA`, `SRV`, `TXT`, and `ANY`; update names such as `Aaaa` to
 `AAAA`. Match constants or numeric codes with a fallback for other values.
 Use `Display` for presentation and integer serde values for data. The CLI
-contract constant is now `SCHEMA_V6`.
+contract constant is now `SCHEMA_V7`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
 Text parsing returns `dns::wire::Error` (`QueryTypeSyntax` or `QueryTypeRange`), preserving the original integer
 parse error for out-of-range values.

@@ -1,9 +1,12 @@
 # Consumer compatibility policy
 
-The pending machine contract is `packetcraftr.output/v6`, which supersedes the
-unreleased v3–v5 drafts. Its forwarding change is semantic: missing values do
-not satisfy ordinary preservation, and check-specific evidence states are
-explicit.
+The pending machine contract is `packetcraftr.output/v7`. It supersedes v6
+(the family that superseded the unreleased v3–v5 drafts) by adding the
+shared shapes the offline-investigation features publish: capture `split`
+results, HTTP `transactions`/`transaction_summary`/`body_export` plus
+`http_transaction` stream events, and the expert `gate` verdict. Forwarding
+semantics are unchanged from v6: missing values do not satisfy ordinary
+preservation, and check-specific evidence states are explicit.
 
 ## Versioning and immutable evidence
 
@@ -12,11 +15,12 @@ ordering, and terminal semantics—not only JSON shape. Incompatible changes
 require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
-release checksum together. v6 uses `urn:packetcraftr:output:v6`; resolve it to
+release checksum together. v7 uses `urn:packetcraftr:output:v7`; resolve it to
 the bundled local schema, not a moving branch or network fetch. The release
-packager copies every file under `schemas/`, and the verifier requires the v6
-output schema.
-Never modify an already published archive in place.
+packager copies every file under `schemas/`, and the verifier requires both the
+current v7 output schema and the archived v6 schema and its frozen fixture.
+Never modify an already published archive in place, and never relabel
+historical v6 evidence.
 
 Consumers should tolerate unknown object members, but must not guess meanings
 for unknown verdicts, check kinds, evidence states, or contract families.
@@ -57,16 +61,18 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The consumer validates the subset of v6 it interprets, including evidence states,
-counter relationships, omission totals, requested-check coverage, and verdict
-consistency. It does not claim to replace complete JSON Schema validation.
+The consumer validates the subset of v6 and v7 it interprets, including evidence
+states, counter relationships, omission totals, requested-check coverage, and
+verdict consistency. The first record of an NDJSON stream selects the schema
+family and a mid-stream switch is rejected; anything else requires explicit
+migration. It does not claim to replace complete JSON Schema validation.
 Its own successful exit means the report was interpreted, not that forwarding
 passed. Read `execution` and `verdict`, or use the regression harness's explicit
 test contract.
 
-The frozen v6 fixture and its mutations are exercised by
+The frozen v6 and v7 fixtures and their mutations are exercised by
 `scripts/test-output-consumer.py`.
-The Rust CLI tests continue validating real serializers against v6.
+The Rust CLI tests continue validating real serializers against v7.
 
 ## Rust API adoption
 

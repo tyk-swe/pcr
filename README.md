@@ -233,7 +233,8 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v6`](schemas/packetcraftr.output.v6.schema.json)
+- Structured command output: [`packetcraftr.output/v7`](schemas/packetcraftr.output.v7.schema.json)
+  (the archived v6 schema remains bundled for existing evidence)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
@@ -246,7 +247,7 @@ Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, `pcapng`, `csv`, and `tsv`; invalid
-combinations fail explicitly. Every output/v6 NDJSON envelope has an `event`
+combinations fail explicitly. Every output/v7 NDJSON envelope has an `event`
 discriminator; the schema enumerates the per-command event names, and
 `complete` and `error` are the terminal records. The payload is in `result` or
 `error`; consumers never need to

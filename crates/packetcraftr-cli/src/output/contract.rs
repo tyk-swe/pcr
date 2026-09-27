@@ -10,7 +10,7 @@ use serde::Serialize;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
-pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
+pub const SCHEMA_V7: &str = "packetcraftr.output/v7";
 
 /// CLI command identifier frozen into the output schema.
 ///

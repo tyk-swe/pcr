@@ -414,6 +414,48 @@ fn production_typed_event_variants_are_schema_valid() {
         },
         Vec::new(),
     );
+    // A settled transaction streams with its signed header-timing evidence.
+    let availability = |frame: u64, unix_seconds: i64| output::http::Availability {
+        frame,
+        timestamp: output::frame::Timestamp {
+            unix_seconds,
+            nanoseconds: 0,
+        },
+    };
+    validate_typed_event(
+        output::contract::Command::Http,
+        output::http::Transaction {
+            index: 1,
+            stream: 0,
+            generation: 0,
+            flow: output::analysis::ScopedFlowKey {
+                scope: 0,
+                flow: output::analysis::FlowKey {
+                    source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                    source_port: 40000,
+                    destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                    destination_port: 80,
+                },
+            },
+            outcome: output::http::TransactionOutcome::Paired,
+            request: Some(1),
+            response: Some(2),
+            response_status: Some(200),
+            informational: vec![3],
+            request_headers_available: Some(availability(4, 5)),
+            response_started: Some(availability(5, 5)),
+            response_headers_available: Some(availability(7, 6)),
+            response_header_wait: Some(output::http::Interval {
+                nanoseconds: 200_000_000,
+                negative: true,
+            }),
+            response_header_span: Some(output::http::Interval {
+                nanoseconds: 1_000_000_000,
+                negative: false,
+            }),
+        },
+        Vec::new(),
+    );
     validate_typed_event(
         output::contract::Command::Tls,
         tls_session_event(),
@@ -548,6 +590,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
             codes: Vec::new(),
             findings: Vec::new(),
             ip_reassembly: output::reassembly::Report::default(),
+            gate: None,
         },
     );
     validate_ip_event_stream(

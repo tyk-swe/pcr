@@ -1,6 +1,6 @@
 # HTTP-B01: Deliver selected HTTP entity bytes to a bounded sink
 
-Status: ready-for-agent
+Status: resolved (5c8b6df1; all listed tests green)
 Blocked by: HTTP-T01
 Size: medium
 Spec: [core API, byte meaning, resources, HB01–HB17](../spec.md)
@@ -21,12 +21,12 @@ Spec: [core API, byte meaning, resources, HB01–HB17](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] HB01–HB06, HB08, HB12–HB13, HB15, HB17 hold at the core API boundary.
-- [ ] Every-byte segmentation fixtures distinguish entity bytes from chunk
+- [x] HB01–HB06, HB08, HB12–HB13, HB15, HB17 hold at the core API boundary.
+- [x] Every-byte segmentation fixtures distinguish entity bytes from chunk
   syntax/trailers and pipelined data; include binary content and clean FIN.
-- [ ] Callback failure prevents later invocations in that analysis run.
-- [ ] Beyond-limit bytes never reach the callback, even in a large input slice.
-- [ ] Default `consume`/collector behavior and transaction evidence pass their
+- [x] Callback failure prevents later invocations in that analysis run.
+- [x] Beyond-limit bytes never reach the callback, even in a large input slice.
+- [x] Default `consume`/collector behavior and transaction evidence pass their
   existing regressions without retaining body bytes.
 
 ```sh

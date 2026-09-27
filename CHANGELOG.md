@@ -563,6 +563,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   See `docs/migration-unreleased.md`.
 - `packetcraftr_cli::output::verify_forwarding::Input` is a struct with
   `path`, `source`, and `selection_filter` fields instead of a tuple alias.
+- `analysis::http::Collector` carries a lifetime, `Collector<'a>`, for its
+  optional borrowed body sink. `Collector::new`, `with_transactions`, the
+  session `Collector` implementation, and callers that let the compiler infer
+  the parameter are unchanged; code naming the type writes `Collector<'_>` or
+  binds a lifetime.
 
 ### Added
 
@@ -597,6 +602,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   - `cli.http_configuration` (usage): `application::Error::Configuration`,
     an HTTP collector configuration change refused after the first `observe`
     attempt sealed it.
+  - `cli.http_body_selection` (usage): `application::Error::BodySelection`,
+    an HTTP body-sink selection whose message index is not positive.
 - `packetcraftr_core::error::BoundaryError::as_causes` lists a boundary
   error's message followed by its captured causes, for a wrapper that reports
   it as its source without repeating its text.
@@ -748,6 +755,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   row charges the shared `max_retained_bytes` budget. Retired requests settle
   once, in ascending message index, at connection-generation reuse and at
   capture end.
+- One selected HTTP/1 message's entity bytes stream to a caller's synchronous
+  sink without the body being retained. `http::BodyDecoder::consume_with`
+  invokes a borrowed-slice callback once per nonempty entity span in parse
+  order — Content-Length, close-delimited, or concatenated chunk-data bytes,
+  never chunk framing, trailers, pipelined bytes, or decoded content — after
+  the span's body-byte charge passes the configured ceiling, committing
+  decoder state only once the callback accepts it; `http::ConsumeError`
+  keeps `Framing` failures distinct from the callback's terminal `Sink`
+  refusal, and `consume` delegates to the same state machine with an
+  infallible discard. At `analysis::http`, implement `BodySink` and select
+  a one-based `Message::index` with `Collector::with_body_sink` before the
+  first `observe` attempt: only that message's spans reach the sink, every
+  other body keeps the counting discard path, and a sink refusal aborts the
+  run as `application::Error::Output` with the sink's own classification and
+  causes rather than a recoverable message status.
 - Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
   UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
   responses, partial messages, and capture-clock regressions.

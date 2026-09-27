@@ -1,6 +1,6 @@
 # BASE-01: Prepare the complete v7 output family
 
-Status: ready-for-agent
+Status: resolved (a2796199; validated per the commands below — all green)
 Blocked by: none
 Size: medium, shared contract work
 Spec: [batch contract](../spec.md), plus every linked feature spec's Output section
@@ -60,14 +60,14 @@ replacement. Completions and man pages are generated from command definitions.
 
 ## Acceptance and validation
 
-- [ ] v6 schema and frozen v6 fixture have no diff; both consumers pass.
-- [ ] v7 schema describes the entire decided batch, with no unconstrained
+- [x] v6 schema and frozen v6 fixture have no diff; both consumers pass.
+- [x] v7 schema describes the entire decided batch, with no unconstrained
   placeholder records. New enums reject unknown values and wrong types.
-- [ ] Current real output validates as v7; current forwarding behavior and
+- [x] Current real output validates as v7; current forwarding behavior and
   exit semantics are unchanged.
-- [ ] All current examples and new feature examples validate against v7.
-- [ ] Archive checks require the correct current assets and retain history.
-- [ ] Prepared terminal reports validate the actual decorated envelope before
+- [x] All current examples and new feature examples validate against v7.
+- [x] Archive checks require the correct current assets and retain history.
+- [x] Prepared terminal reports validate the actual decorated envelope before
   artifact publication and leave normal error publication available on abort.
 
 Run:

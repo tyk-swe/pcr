@@ -21,6 +21,8 @@
 //! [`Error::UnsupportedCaptureSetting`].
 
 #[cfg(native_layer2)]
+mod activation;
+#[cfg(native_layer2)]
 mod filter;
 mod group;
 #[cfg(native_layer2)]

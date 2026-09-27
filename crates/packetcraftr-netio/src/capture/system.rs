@@ -10,8 +10,8 @@ use packetcraftr_core::budget::Deadline;
 use super::{Request, Session, TimestampType};
 use crate::{Error, interface::Id as InterfaceId};
 
-/// Checks the caller's deadline before discovery and again before opening
-/// and activating the native source.
+/// Checks the caller's deadline before discovery and bounds native activation
+/// by the same deadline and cancellation signal.
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
@@ -24,17 +24,17 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
     let interface = crate::platform::current_interface(&request.interface, deadline)?;
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
-    let parts = crate::platform::open_capture(
-        &interface.id,
-        limits,
-        request.filter.as_deref(),
-        netmask(&interface),
-        request.promiscuous,
-        &request.native,
-    )?;
-    Ok(Box::new(super::live::NativeCaptureSession::spawn(
-        parts, limits,
-    )?))
+    let request = request.clone();
+    super::activation::open(limits, deadline, move || {
+        crate::platform::open_capture(
+            &interface.id,
+            limits,
+            request.filter.as_deref(),
+            netmask(&interface),
+            request.promiscuous,
+            &request.native,
+        )
+    })
 }
 
 #[cfg(not(native_layer2))]

@@ -1253,6 +1253,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Native capture activation honors the caller's deadline and cancellation while
+  libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit
   link-mode overrides before scheduling any connections.
 - Detached provider deadlines retain inherited cancellation through every

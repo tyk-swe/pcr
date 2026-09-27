@@ -34,7 +34,7 @@ const MAX_UNMATCHED_MESSAGES: usize = 64;
 
 /// Runs on the worker pool; reads are sliced by the deadline so a cancelled
 /// caller's work stops promptly.
-pub(super) fn route(
+pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,

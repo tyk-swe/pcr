@@ -15,14 +15,14 @@ const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PreparedRawIp {
-    pub(super) interface: InterfaceId,
-    pub(super) destination: IpAddr,
-    pub(super) submission: Bytes,
-    pub(super) wire_bytes: Bytes,
+pub(in crate::platform) struct PreparedRawIp {
+    pub(in crate::platform) interface: InterfaceId,
+    pub(in crate::platform) destination: IpAddr,
+    pub(in crate::platform) submission: Bytes,
+    pub(in crate::platform) wire_bytes: Bytes,
 }
 
-pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
+pub(in crate::platform) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     let bytes = frame.bytes().clone();
     let route = frame.route();
     let decision = route.decision;

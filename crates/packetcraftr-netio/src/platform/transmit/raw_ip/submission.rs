@@ -29,9 +29,9 @@ use packetcraftr_core::error::Source;
 const IPPROTO_RAW: i32 = 255;
 
 #[derive(Debug)]
-pub(super) struct RawSocketError {
-    pub(super) operation: &'static str,
-    pub(super) source: io::Error,
+pub(in crate::platform) struct RawSocketError {
+    pub(in crate::platform) operation: &'static str,
+    pub(in crate::platform) source: io::Error,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +68,7 @@ fn configure_socket_options(
     Ok(())
 }
 
-pub(super) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
+pub(in crate::platform) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
     let domain = match packet.destination {
         IpAddr::V4(_) => Domain::IPV4,
         IpAddr::V6(_) => Domain::IPV6,
@@ -171,7 +171,7 @@ fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Error> {
+pub(in crate::platform) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Error> {
     if packet.destination.is_ipv6() {
         return Err(Unsupported::new(
             NativeCapability::Transmission(Mode::Layer3),
@@ -182,11 +182,11 @@ pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Er
     Ok(())
 }
 
-pub(super) fn raw_error(operation: &'static str, source: io::Error) -> RawSocketError {
+fn raw_error(operation: &'static str, source: io::Error) -> RawSocketError {
     RawSocketError { operation, source }
 }
 
-pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> Error {
+pub(in crate::platform) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> Error {
     let message = error.operation.to_owned();
     let kind = error.source.kind();
     let source = Some(Source::new(error.source));

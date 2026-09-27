@@ -8,8 +8,9 @@
 //!
 //! - `route`: route lookup (`netlink` on Linux, `af_route` on macOS,
 //!   `iphelper` on Windows).
-//! - `interface`: interface enumeration with the same three backends, and
-//!   `identity`, the per-send check that an interface kept its name and index.
+//! - `interface`: interface enumeration with the same three backends (the
+//!   macOS one reads `getifaddrs(3)`), and `identity`, the per-send check
+//!   that an interface kept its name and index.
 //! - `capture`: live capture (`libpcap` on Linux and macOS, the runtime-loaded
 //!   `npcap` on Windows).
 //! - `transmit`: Layer 2 injection (`libpcap`, `npcap`) and raw IP

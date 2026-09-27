@@ -48,7 +48,7 @@ impl Drop for PcapBpfProgram {
     }
 }
 
-pub(super) fn install_capture_filter(
+pub(in crate::platform) fn install_capture_filter(
     capture: &mut Capture<Active>,
     interface: &InterfaceId,
     filter: &str,

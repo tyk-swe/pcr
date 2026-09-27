@@ -7,7 +7,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No `pub(super)` remains under `platform/`.
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] No `pub(super)` remains under `platform/`.
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- `NamespaceId` in the netlink worker is now `ExecutionContext` (which gained `Ord`/`Hash`), computed by `ExecutionContext::of_namespace` from the file the worker keeps open; `NAMESPACE_PATH` is the one spelling of the procfs entry.

@@ -21,7 +21,7 @@ use crate::{
     route::{self, Decision, SelectionReason},
 };
 
-pub(super) async fn query_route(
+pub(in crate::platform) async fn query_route(
     handle: Handle,
     destination: IpAddr,
     interface_hint: Option<InterfaceId>,

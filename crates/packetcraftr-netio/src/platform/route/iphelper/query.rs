@@ -32,7 +32,7 @@ use packetcraftr_core::budget::Deadline;
 
 /// Runs on the worker pool. IP Helper calls take no timeout, so the deadline
 /// is also checked between them, stopping work nobody waits for.
-pub(super) fn route(
+pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
@@ -183,12 +183,14 @@ fn query_best_route(
 }
 
 /// One synchronous `GetAdaptersAddresses` snapshot, run on the worker pool.
-pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, route::Error> {
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+) -> Result<Decision, route::Error> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }
 
-pub(super) fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
+fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
     match address {
         IpAddr::V4(address) => SOCKADDR_INET {
             Ipv4: SOCKADDR_IN {
@@ -225,7 +227,7 @@ pub(super) fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
     }
 }
 
-pub(super) fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
+fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
     // SAFETY: the family field is common to every SOCKADDR_INET union member.
     let family = unsafe { address.si_family };
     match family {

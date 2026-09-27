@@ -17,6 +17,7 @@ use crate::error::BoundaryError;
 use tcp::DirectionState;
 
 mod finding;
+pub mod gate;
 mod generation;
 mod observation;
 mod selector;

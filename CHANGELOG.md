@@ -882,6 +882,17 @@ All notable changes to PacketcraftR are documented here. The format follows
   `follow`, and `tls` now supply only a collector and an event sink; `follow`
   uses the split observe/finish phases so its missing-selector verdict still
   precedes collection teardown.
+- `packetcraftr_core::analysis::expert::gate` evaluates a completed expert
+  analysis against declared criteria: `Gate::new` validates `Options`
+  (severity threshold, finding allowance, and a required non-zero minimum
+  matched-frame count), `observe` counts every produced finding once and the
+  ones at or above the threshold as triggering with checked counters, and
+  `finish` reports `pass`, `fail` (allowance exceeded, which wins over
+  insufficient coverage), or `inconclusive` (matched frames below the
+  minimum) in a `Report` echoing the criteria and observed counts. Gate
+  state is constant-size; its typed `Error` classifies an invalid minimum as
+  `cli.expert_gate` usage and counter overflow as `policy.expert_gate_limit`
+  policy.
 
 ### Changed
 

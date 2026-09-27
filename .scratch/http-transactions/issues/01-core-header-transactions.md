@@ -1,6 +1,6 @@
 # HTTP-T01: Add bounded HTTP header transactions in core
 
-Status: ready-for-agent
+Status: resolved (22abe662; all listed tests green)
 Blocked by: BASE-01
 Size: medium
 Spec: [correlation, timing, core API, and HT01–HT15](../spec.md)
@@ -28,15 +28,15 @@ Spec: [correlation, timing, core API, and HT01–HT15](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] HT01–HT13 core behavior is covered in `http_analysis_contracts.rs`, with
+- [x] HT01–HT13 core behavior is covered in `http_analysis_contracts.rs`, with
   small owner unit tests only for arithmetic/state boundaries that public
   regressions do not cover.
-- [ ] Public tests exercise fragment completion and gap filling through the
+- [x] Public tests exercise fragment completion and gap filling through the
   actual analysis pipeline, not only handcrafted availability markers.
-- [ ] Existing HTTP messages, request associations, summaries, and default
+- [x] Existing HTTP messages, request associations, summaries, and default
   collector event order remain unchanged when the option is disabled.
-- [ ] Pending retirement never duplicates rows on generation replacement/EOF.
-- [ ] Allocation/resource failure retains typed sources and classified limits.
+- [x] Pending retirement never duplicates rows on generation replacement/EOF.
+- [x] Allocation/resource failure retains typed sources and classified limits.
 
 ```sh
 cargo test --locked -p packetcraftr-core --test http_analysis_contracts --test http_framing_contracts

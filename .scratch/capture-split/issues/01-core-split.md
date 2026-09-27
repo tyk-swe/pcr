@@ -1,6 +1,6 @@
 # SPLIT-01: Implement raw-record capture part planning and writing
 
-Status: ready-for-agent
+Status: resolved (1333cbaf; all listed tests green)
 Blocked by: BASE-01
 Size: medium
 Spec: [fidelity, core API, algorithm, limits, SP01–SP09/SP16–SP17](../spec.md)
@@ -25,15 +25,15 @@ Spec: [fidelity, core API, algorithm, limits, SP01–SP09/SP16–SP17](../spec.m
 
 ## Acceptance and validation
 
-- [ ] SP01–SP05, the uncompressed cases of SP06, SP07, SP09, SP16 and replay
+- [x] SP01–SP05, the uncompressed cases of SP06, SP07, SP09, SP16 and replay
   cancellation in SP17 pass at the core boundary, including a changed source
   with the same size/counts, empty capture, and metadata-run coalescence.
   Compressed-input SP06 and encoded-output SP08 belong to SPLIT-02.
-- [ ] Outputs equal existing `capture_file::select` bytes for every range;
+- [x] Outputs equal existing `capture_file::select` bytes for every range;
   combined raw packet records reproduce the source sequence.
-- [ ] Limits are preflighted before first sink begin when knowable; write-time
+- [x] Limits are preflighted before first sink begin when knowable; write-time
   counters/digest revalidate the planned source.
-- [ ] Metadata replay uses no whole-input-per-part scan, packet accumulation,
+- [x] Metadata replay uses no whole-input-per-part scan, packet accumulation,
   dissection, filesystem path, or native provider.
 
 ```sh

@@ -172,7 +172,7 @@ impl<R: Read> Reader<R> {
         self.deadline = deadline;
     }
 
-    fn check_interrupted(&self) -> Result<(), Error> {
+    pub(super) fn check_interrupted(&self) -> Result<(), Error> {
         if let Some(signal) = &self.cancellation {
             signal.check()?;
         }

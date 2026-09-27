@@ -565,6 +565,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr_core::capture_file::split` divides a seekable capture into
+  contiguous physical-frame parts, each emitted through a `Sink` as decoded
+  bytes equal to `capture_file::select` on that range. `split::plan` reads
+  the source once, retaining only a bounded metadata cache (every non-packet
+  record plus the initial header, charged its raw length plus per-entry
+  bookkeeping) and the part descriptors, and `split::write` replays one
+  sequential pass; a SHA-256 over every raw header and record rejects a
+  source changed between passes. `split::Options`/`split::Limits` bound the
+  file count, metadata cache, input pass, and exact decoded output before
+  any sink callback.
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own:
   - `cli.layer_index` (usage): `packet::Error::IndexOutOfBounds`, a layer

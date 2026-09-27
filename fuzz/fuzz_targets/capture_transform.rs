@@ -6,10 +6,38 @@ mod composed_support;
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::{
-    capture_file::{self, compression},
+    capture_file::{self, compression, split},
+    error::BoundaryError,
     transform,
 };
 use std::io::{Cursor, Read, Write};
+
+/// Collects every emitted part's decoded bytes.
+#[derive(Default)]
+struct PartBytes(Vec<Vec<u8>>);
+
+impl split::Sink for PartBytes {
+    fn begin(
+        &mut self,
+        _index: u64,
+        _format: capture_file::Format,
+    ) -> Result<(), BoundaryError> {
+        self.0.push(Vec::new());
+        Ok(())
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<(), BoundaryError> {
+        self.0
+            .last_mut()
+            .expect("begin precedes write")
+            .extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn finish(&mut self, _part: &split::Part) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+}
 
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(64 * 1024)];
@@ -82,4 +110,36 @@ fuzz_target!(|data: &[u8]| {
     );
     assert!(output.next_frame().unwrap().is_none());
     let _ = report;
+
+    // Splitting reproduces `select` byte-for-byte on every part's range.
+    for boundary in 1..=3_u64 {
+        let mut source = composed_support::reader(&frames);
+        let plan = split::plan(
+            &mut source,
+            split::Options {
+                frames_per_file: boundary,
+                limits: split::Limits {
+                    input: limits,
+                    max_files: 4,
+                    max_metadata_records: 4,
+                    max_metadata_bytes: 64 * 1024,
+                    max_output_bytes: 128 * 1024,
+                },
+            },
+        )
+        .unwrap();
+        let mut sink = PartBytes::default();
+        let report = split::write(&mut source, plan, &mut sink).unwrap();
+        for (bytes, part) in sink.0.iter().zip(&report.parts) {
+            let mut oracle = composed_support::reader(&frames);
+            let (expected, _) = capture_file::select(&mut oracle, Vec::new(), limits, |number, _| {
+                Ok(
+                    (part.first_frame.unwrap_or(1)..=part.last_frame.unwrap_or(0))
+                        .contains(&number),
+                )
+            })
+            .unwrap();
+            assert_eq!(bytes, &expected);
+        }
+    }
 });

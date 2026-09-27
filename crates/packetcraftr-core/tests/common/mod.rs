@@ -7,6 +7,7 @@
 pub(crate) mod ip_fragments;
 pub(crate) mod packets;
 pub(crate) mod pcap;
+pub(crate) mod pcapng;
 pub(crate) mod probe;
 pub(crate) mod tls_capture;
 pub(crate) mod tls_frames;

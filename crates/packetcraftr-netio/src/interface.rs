@@ -15,6 +15,7 @@ use packetcraftr_core::packet::MacAddress;
 use super::link::Capability;
 
 pub use error::Error;
+pub(crate) use error::discovery_classification;
 
 /// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]

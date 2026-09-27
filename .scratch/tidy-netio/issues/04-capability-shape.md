@@ -10,8 +10,14 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Public paths unchanged except `transmit::SendEvidenceFault`.
-- [ ] Classification codes unchanged (`tests/error_contracts.rs`).
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] Public paths unchanged except `transmit::SendEvidenceFault`.
+- [x] Classification codes unchanged (`tests/error_contracts.rs`).
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- `interface::discovery_classification` is the one definition of `io.interface_discovery`; `crate::Error::InterfaceDiscovery` reuses it, so `interface::Error` no longer clones itself into `crate::Error` to classify.
+- `error::live_io_invariant` is crate-visible so `transmit::SendEvidenceFault` classifies itself where it now lives.
+- The `[Unreleased]` and migration entries for `transmit::SendEvidenceFault` land with issue 05's `deadline::MAX_WAIT` entry.

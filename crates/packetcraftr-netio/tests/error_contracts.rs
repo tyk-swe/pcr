@@ -6,8 +6,8 @@ use std::{fmt, io, net::IpAddr, time::Duration};
 use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode, route,
-    tcp,
+    Error, NativeCapability, Unsupported, capture, interface, link::Mode, route, tcp,
+    transmit::SendEvidenceFault,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as

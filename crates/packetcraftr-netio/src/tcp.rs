@@ -5,14 +5,16 @@
 //! the caller; providers own the connection and its native resources.
 
 mod connect;
+mod error;
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::budget::Deadline;
+
+pub use error::Error;
 
 /// Process-wide connections that may hold a worker or an open socket at
 /// once: a named sub-limit of the native worker pool, published as its own
@@ -21,94 +23,6 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 /// fill the whole pool while no capture or route work holds a slot; any such
 /// work lowers what connects can be admitted.
 pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
-
-/// Why a bounded TCP connection could not be admitted, started, or
-/// completed, including the provider's own socket failure.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// The provider's socket call failed. Its [`io::ErrorKind`] says how: the
-    /// peer refused, the attempt timed out, the destination was unreachable,
-    /// or a local failure.
-    #[error(transparent)]
-    Socket(#[from] io::Error),
-    #[error("could not inspect the connected {operation} endpoint")]
-    Evidence {
-        operation: &'static str,
-        #[source]
-        source: io::Error,
-    },
-    /// The caller's deadline allows a connection longer than one hour.
-    #[error("TCP connect timeout must be nonzero and at most one hour")]
-    Timeout,
-    /// The caller's deadline was spent before the connection could start.
-    #[error("live operation deadline expired while starting a TCP connection")]
-    DeadlineExceeded,
-    #[error("TCP connect admission reached its process-wide limit of {limit}")]
-    Capacity { limit: usize },
-    #[error("TCP connect worker could not start")]
-    Spawn(#[source] io::Error),
-    #[error("TCP connect worker stopped without an outcome")]
-    Worker,
-    #[error("TCP connect attempt was already completed")]
-    Completed,
-    /// The caller cancelled the connection before it started.
-    #[error(transparent)]
-    Cancelled(#[from] Cancelled),
-}
-
-impl Error {
-    /// The failure a connection reports when its caller's deadline stopped it
-    /// before it started.
-    fn interrupted(interrupted: Interrupted) -> Self {
-        match interrupted {
-            Interrupted::Cancelled(cancelled) => cancelled.into(),
-            _ => Self::DeadlineExceeded,
-        }
-    }
-}
-
-impl Classified for Error {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Socket(_) => Classification::new(
-                "io.tcp_connect",
-                Kind::Io,
-                Some("inspect the socket failure and the destination's reachability"),
-            ),
-            Self::Evidence { .. } => Classification::new(
-                "io.tcp_connect_evidence",
-                Kind::Io,
-                Some("inspect the socket endpoint query failure"),
-            ),
-            Self::Cancelled(source) => source.classification(),
-            Self::DeadlineExceeded => crate::Error::DeadlineExceeded {
-                operation: "starting a TCP connection",
-            }
-            .classification(),
-            Self::Timeout => Classification::new(
-                "cli.tcp_connect_timeout",
-                Kind::Usage,
-                Some("choose a finite nonzero connection timeout"),
-            ),
-            Self::Capacity { .. } => Classification::new(
-                "io.tcp_connect_capacity",
-                Kind::Io,
-                Some("wait for admitted connection cleanup or reduce concurrency"),
-            ),
-            Self::Spawn(_) | Self::Worker => Classification::new(
-                "io.tcp_connect_worker",
-                Kind::Io,
-                Some("inspect local worker resources and retry"),
-            ),
-            Self::Completed => Classification::new(
-                "internal.tcp_connect_state",
-                Kind::Internal,
-                Some("consume each completed connection exactly once"),
-            ),
-        }
-    }
-}
 
 /// A socket and its worker-pool permit. The socket closes before the permit.
 pub struct Connection<S> {

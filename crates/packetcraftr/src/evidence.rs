@@ -10,8 +10,8 @@ use std::time::Duration;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
-    Error as LiveIoError, SendEvidenceFault,
-    transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
+    Error as LiveIoError,
+    transmit::{Report as TransmissionReport, SendEvidenceFault, Timing as TransmissionTiming},
 };
 
 /// Why the evidence an executor returned for one step is inconsistent with

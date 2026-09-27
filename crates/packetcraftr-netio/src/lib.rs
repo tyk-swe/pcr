@@ -20,8 +20,9 @@
 //! A native failure keeps the platform's own error as its source, stored as
 //! `packetcraftr_core::error::Source` when it is type-erased, and its message
 //! never repeats that source. [`Error`] is the live-I/O failure capture and
-//! transmission share; [`route::Error`], [`interface::Error`], and
-//! [`tcp::Error`] are their capabilities' own. A capability this build, target,
+//! transmission share (including the interface-discovery failure a capture
+//! reports); [`route::Error`], [`interface::Error`], and [`tcp::Error`] are
+//! their capabilities' own. A capability this build, target,
 //! or device lacks is one [`Unsupported`], which all three live-I/O errors
 //! carry and whose [`NativeCapability`] decides its class.
 
@@ -53,5 +54,5 @@ mod unsupported;
 #[forbid(unsafe_code)]
 mod workers;
 
-pub use error::{Error, SendEvidenceFault};
+pub use error::Error;
 pub use unsupported::{NativeCapability, Unsupported};

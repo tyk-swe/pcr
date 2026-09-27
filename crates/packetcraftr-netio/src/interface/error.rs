@@ -1,8 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Why interface enumeration failed.
+
 use packetcraftr_core::budget::{Cancelled, Interrupted};
-use packetcraftr_core::error::{Classification, Classified, Source};
+use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 
 use crate::Unsupported;
 use thiserror::Error as ThisError;
@@ -75,6 +77,23 @@ impl From<Error> for crate::Error {
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        crate::Error::from(self.clone()).classification()
+        match self {
+            Self::Cancelled(cancelled) => cancelled.classification(),
+            Self::DeadlineExceeded { operation } => {
+                crate::Error::DeadlineExceeded { operation }.classification()
+            }
+            Self::Unsupported(unsupported) => unsupported.classification(),
+            Self::Discovery { .. } => discovery_classification(),
+        }
     }
+}
+
+/// The classification of a failed interface discovery, shared with the
+/// live-I/O failure a capture reports for the same condition.
+pub(crate) fn discovery_classification() -> Classification {
+    Classification::new(
+        "io.interface_discovery",
+        Kind::Io,
+        Some("inspect the operating-system interface state and retry with an available interface"),
+    )
 }

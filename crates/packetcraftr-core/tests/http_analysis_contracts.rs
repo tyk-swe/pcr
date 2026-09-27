@@ -1,67 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
-use common::{
-    reader, registry,
-    tls_capture::{Capture, Stream},
-};
+use common::http::{collect, collect_events, setup};
+use common::registry;
+use common::tls_capture::{Capture, Stream};
 use packetcraftr_core::{
     analysis::{
         self,
         application::Limits,
-        http::{Collector, Event, Message, Status},
+        http::{Collector, Event, Status},
     },
-    error::BoundaryError,
-    frame::Frame,
     protocol::{application::http::StartLine, transport::Tcp},
 };
-fn collect_events(frames: &[Frame]) -> (Vec<Event>, analysis::http::Summary) {
-    let mut collector = Collector::new(Limits::default(), vec![80], 1024).unwrap();
-    let mut events = Vec::new();
-    let run = analysis::run(
-        &mut reader(frames),
-        registry(),
-        &analysis::Options {
-            track_sources: true,
-            tcp_events: true,
-            ..Default::default()
-        },
-        |record| {
-            events.extend(
-                collector
-                    .observe(&record)
-                    .map_err(BoundaryError::from_error)?,
-            );
-            Ok(())
-        },
-    )
-    .unwrap();
-    let (trailing, summary) = collector.finish(&run).unwrap();
-    events.extend(trailing);
-    (events, summary)
-}
-fn collect(frames: &[Frame]) -> (Vec<Message>, analysis::http::Summary) {
-    let (events, summary) = collect_events(frames);
-    (
-        events
-            .into_iter()
-            .filter_map(|event| {
-                if let Event::Message(message) = event {
-                    Some(*message)
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        summary,
-    )
-}
-fn setup() -> (Capture, Stream) {
-    let mut capture = Capture::new();
-    let mut stream = Stream::new(40000);
-    stream.server_port = 80;
-    capture.open(&mut stream);
-    (capture, stream)
+
+fn collector() -> Collector {
+    Collector::new(Limits::default(), vec![80], 1024).unwrap()
 }
 
 #[test]
@@ -79,7 +32,7 @@ fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
         b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n",
     );
 
-    let (events, summary) = collect_events(&capture.frames);
+    let (events, summary) = collect_events(&capture.frames, collector());
     let issues: Vec<_> = events
         .iter()
         .filter_map(|event| match event {
@@ -142,7 +95,7 @@ fn syn_ack_only_reuse_after_a_midstream_capture_starts_a_new_generation() {
         b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n",
     );
 
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 4);
     assert!(
         messages
@@ -180,7 +133,7 @@ fn split_headers_pipeline_head_responses_and_chunked_trailers_keep_boundaries() 
         b"D /first HTTP/1.1\r\nHost: example.test\r\n\r\nGET /second HTTP/1.1\r\n\r\n",
     );
     capture.server(&mut stream,b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\nHTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\nX-End: yes\r\n\r\n");
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 5);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(
@@ -209,7 +162,7 @@ fn close_delimited_response_requires_clean_fin_and_connect_stops_http() {
         if fin {
             capture.push(capture.server_spec(&stream, Tcp::FIN | Tcp::ACK), b"");
         }
-        let (messages, _) = collect(&capture.frames);
+        let (messages, _) = collect(&capture.frames, collector());
         assert_eq!(messages[1].body_bytes, 4);
         assert_eq!(
             messages[1].status,
@@ -224,7 +177,7 @@ fn close_delimited_response_requires_clean_fin_and_connect_stops_http() {
     capture.client(&mut stream, b"CONNECT example.test:443 HTTP/1.1\r\n\r\n");
     capture.server(&mut stream, b"HTTP/1.1 200 Connected\r\n\r\nopaque tunnel");
     capture.client(&mut stream, b"GET /this-is-tunnel-data HTTP/1.1\r\n\r\n");
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[1].status, Status::Upgrade);
     assert_eq!(summary.upgraded_connections, 1);
@@ -236,13 +189,13 @@ fn ambiguous_headers_and_partial_eof_remain_explicit() {
         &mut stream,
         b"POST / HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
     );
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].status, Status::Malformed);
     assert!(messages[0].error.is_some());
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, b"GET / HTTP/1.1\r\nHost: example");
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     assert_eq!(messages[0].status, Status::Incomplete);
     assert!(messages[0].head.is_none());
     assert_eq!(
@@ -262,7 +215,7 @@ fn out_of_order_body_reassembles_once_and_protocol_fields_are_registered() {
     capture.client(&mut stream, b"def");
     capture.push(earlier.clone(), b"bc");
     capture.push(earlier, b"bc");
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].body_bytes, 6);
     assert_eq!(messages[0].status, Status::Complete);
@@ -292,7 +245,7 @@ fn tolerated_chunk_size_whitespace_does_not_disable_the_direction() {
         &mut stream,
         b"POST /a HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3 ;x=y\r\nabc\r\n0\r\n\r\nGET /b HTTP/1.1\r\n\r\n",
     );
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(messages[0].body_bytes, 3);
@@ -312,7 +265,7 @@ fn suffix_overlapping_gap_fill_preserves_response_provenance() {
     capture.server_beyond(&mut stream, 4, &response[4..]);
     let fill = capture.server_spec(&stream, Tcp::ACK);
     capture.push(fill, response);
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(messages[1].body_bytes, 3);
@@ -340,7 +293,7 @@ fn gap_fill_overlapping_two_pending_intervals_keeps_every_source() {
     capture.push(fill, &response[..8]);
     stream.server_sequence += 8;
     capture.server(&mut stream, &response[8..]);
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(
@@ -366,7 +319,7 @@ fn gap_fill_overlap_near_sequence_wrap_keeps_sources() {
     capture.server_beyond(&mut stream, 4, &response[4..]);
     let fill = capture.server_spec(&stream, Tcp::ACK);
     capture.push(fill, response);
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(

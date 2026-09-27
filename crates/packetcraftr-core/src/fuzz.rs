@@ -48,7 +48,7 @@ mod mutation;
 mod prepare;
 mod report;
 mod request;
-pub(crate) mod rng;
+mod rng;
 mod run;
 mod totals;
 

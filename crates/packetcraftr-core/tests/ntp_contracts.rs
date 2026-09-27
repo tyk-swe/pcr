@@ -1,35 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
+
 use bytes::Bytes;
+use common::packets::{build, dissect};
 use packetcraftr_core::{
     build::Builder,
-    decode::Dissector,
     expression,
     field::FieldValue,
     filter,
-    frame::{Frame, LinkType},
     layer::{Layer, Raw},
     protocol::{application::ntp::Ntp, builtin},
     template::{NumericRange, Template},
 };
-use std::time::UNIX_EPOCH;
-
-fn build(expression_text: &str) -> packetcraftr_core::build::BuiltPacket {
-    let registry = builtin::registry();
-    let packet = expression::parse(expression_text, &registry, Default::default()).unwrap();
-    Builder::new(registry)
-        .build(packet, Default::default(), Default::default())
-        .unwrap()
-}
-
-fn dissect(bytes: Bytes) -> packetcraftr_core::decode::DecodedPacket {
-    Dissector::new(builtin::registry())
-        .decode(
-            Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap(),
-            Default::default(),
-        )
-        .unwrap()
-}
 
 #[test]
 fn ntp_client_messages_construct_decode_and_reencode_byte_exactly() {

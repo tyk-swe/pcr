@@ -8,76 +8,29 @@
 
 mod common;
 
+use common::http::{collect, collect_events, setup};
 use common::{
     CLIENT, SERVER,
     ip_fragments::{ipv4_fragments, ipv4_protocol_fragment_frame, reader_with_link_type},
-    reader, registry,
+    registry,
     tls_capture::{Capture, Stream},
     udp_frame,
 };
 use packetcraftr_core::{
     analysis::{
-        self, Limits, Options,
+        Limits, Options,
         application::Limits as HttpLimits,
         http::{Collector, Event, Message, Status},
         reassembly::ip::DatagramKey,
         run_with_ip_events,
     },
-    error::BoundaryError,
-    frame::{Frame, LinkType},
+    frame::LinkType,
     protocol::transport::Tcp,
 };
 use std::time::{Duration, Instant, SystemTime};
 
-fn collect_events(frames: &[Frame]) -> (Vec<Event>, analysis::http::Summary) {
-    let mut collector = Collector::new(HttpLimits::default(), vec![80], 1024 * 1024).unwrap();
-    let mut events = Vec::new();
-    let run = analysis::run(
-        &mut reader(frames),
-        registry(),
-        &Options {
-            track_sources: true,
-            tcp_events: true,
-            ..Default::default()
-        },
-        |record| {
-            events.extend(
-                collector
-                    .observe(&record)
-                    .map_err(BoundaryError::from_error)?,
-            );
-            Ok(())
-        },
-    )
-    .unwrap();
-    let (trailing, summary) = collector.finish(&run).unwrap();
-    events.extend(trailing);
-    (events, summary)
-}
-
-fn collect(frames: &[Frame]) -> (Vec<Message>, analysis::http::Summary) {
-    let (events, summary) = collect_events(frames);
-    (
-        events
-            .into_iter()
-            .filter_map(|event| {
-                if let Event::Message(message) = event {
-                    Some(*message)
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        summary,
-    )
-}
-
-fn setup() -> (Capture, Stream) {
-    let mut capture = Capture::new();
-    let mut stream = Stream::new(40_000);
-    stream.server_port = 80;
-    capture.open(&mut stream);
-    (capture, stream)
+fn collector() -> Collector {
+    Collector::new(HttpLimits::default(), vec![80], 1024 * 1024).unwrap()
 }
 
 fn numbers(message: &Message) -> Vec<u64> {
@@ -96,7 +49,7 @@ fn a_header_in_one_delivery_or_split_keeps_exact_ordered_sources() {
         &mut stream,
         b"GET /path HTTP/1.1\r\nHost: example.test\r\n\r\n",
     );
-    let (messages, _) = collect(&whole.frames);
+    let (messages, _) = collect(&whole.frames, collector());
     let [message] = messages.as_slice() else {
         panic!("one message expected, got {}", messages.len());
     };
@@ -107,7 +60,7 @@ fn a_header_in_one_delivery_or_split_keeps_exact_ordered_sources() {
     split.client(&mut stream, b"GET /path HTTP/1.1\r\nHo");
     split.client(&mut stream, b"st: example.test\r\n\r");
     split.client(&mut stream, b"\n");
-    let (messages, _) = collect(&split.frames);
+    let (messages, _) = collect(&split.frames, collector());
     let [message] = messages.as_slice() else {
         panic!("one message expected, got {}", messages.len());
     };
@@ -133,7 +86,7 @@ fn long_header_across_many_deliveries_and_a_split_crlf() {
     let boundary = head.len() - 3;
     capture.client(&mut stream, &head.as_bytes()[..boundary]);
     capture.client(&mut stream, &head.as_bytes()[boundary..]);
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     let [message] = messages.as_slice() else {
         panic!("one message expected, got {}", messages.len());
     };
@@ -153,7 +106,7 @@ fn pipelined_messages_and_the_header_body_boundary_attribute_sources() {
         b"POST /c HTTP/1.1\r\nContent-Length: 3\r\n\r\nab",
     );
     capture.client(&mut stream, b"c");
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 3);
     assert!(messages.iter().all(|m| m.status == Status::Complete));
     assert_eq!(numbers(&messages[0]), [4]);
@@ -167,7 +120,7 @@ fn pipelined_messages_and_the_header_body_boundary_attribute_sources() {
 fn malformed_and_gap_messages_keep_their_contributing_sources() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, b"GET /x HTTP/1.1\rBAD\r\n\r\n");
-    let (messages, _) = collect(&capture.frames);
+    let (messages, _) = collect(&capture.frames, collector());
     let [message] = messages.as_slice() else {
         panic!("one message expected, got {}", messages.len());
     };
@@ -181,7 +134,7 @@ fn malformed_and_gap_messages_keep_their_contributing_sources() {
     let mut spec = capture.client_spec(&stream, Tcp::ACK);
     spec.sequence = spec.sequence.wrapping_add(32);
     capture.push(spec, b"past-the-hole");
-    let (events, _) = collect_events(&capture.frames);
+    let (events, _) = collect_events(&capture.frames, collector());
     assert!(
         events
             .iter()
@@ -207,7 +160,7 @@ fn upgraded_tunnel_messages_keep_exact_sources() {
     capture.client(&mut stream, b"CONNECT example.test:443 HTTP/1.1\r\n\r\n");
     capture.server(&mut stream, b"HTTP/1.1 200 Connected\r\n\r\n");
     capture.client(&mut stream, b"opaque tunnel bytes");
-    let (messages, summary) = collect(&capture.frames);
+    let (messages, summary) = collect(&capture.frames, collector());
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].status, Status::Complete);
     assert_eq!(numbers(&messages[0]), [4]);
@@ -423,12 +376,12 @@ fn measure_repeated_provenance_work() {
     }
 
     let single_start = Instant::now();
-    let (messages, _) = collect(&whole.frames);
+    let (messages, _) = collect(&whole.frames, collector());
     let single = single_start.elapsed();
     assert_eq!(messages.len(), 1);
 
     let split_start = Instant::now();
-    let (messages, _) = collect(&split.frames);
+    let (messages, _) = collect(&split.frames, collector());
     let split_elapsed = split_start.elapsed();
     assert_eq!(messages.len(), 1);
     assert_eq!(

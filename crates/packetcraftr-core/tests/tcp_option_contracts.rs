@@ -3,38 +3,18 @@
 mod common;
 
 use bytes::Bytes;
-use common::packets::ipv4;
+use common::packets::{build, dissect, ipv4};
 use packetcraftr_core::{
     build::Builder,
-    decode::Dissector,
     document, expression,
     field::FieldValue,
     filter,
-    frame::{Frame, LinkType},
     layer::Layer,
     packet::Packet,
     protocol::builtin,
     protocol::transport::{SackBlock, Tcp, TcpOption},
     template::Template,
 };
-use std::time::UNIX_EPOCH;
-
-fn build(recipe: &str) -> packetcraftr_core::build::BuiltPacket {
-    let registry = builtin::registry();
-    let packet = expression::parse(recipe, &registry, Default::default()).unwrap();
-    Builder::new(registry)
-        .build(packet, Default::default(), Default::default())
-        .unwrap()
-}
-
-fn dissect(bytes: Bytes) -> packetcraftr_core::decode::DecodedPacket {
-    Dissector::new(builtin::registry())
-        .decode(
-            Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap(),
-            Default::default(),
-        )
-        .unwrap()
-}
 
 fn reencode(packet: Packet) -> Bytes {
     Builder::new(builtin::registry())

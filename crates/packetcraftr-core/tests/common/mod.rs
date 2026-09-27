@@ -4,6 +4,8 @@
 // uses only the fixtures it needs.
 #![allow(dead_code)]
 
+pub(crate) mod decoded;
+pub(crate) mod http;
 pub(crate) mod ip_fragments;
 pub(crate) mod packets;
 pub(crate) mod pcap;

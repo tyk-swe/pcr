@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::fuzz::rng::SplitMix64;
+use proptest::prelude::*;
+
 use crate::protocol::application::tls::test_support::{
     extension, handshake_message, record, u16_bytes, vector8, vector16,
 };
@@ -531,12 +532,12 @@ fn a_server_name_list_reports_the_first_host_name_entry() {
 
 #[test]
 fn a_u16_list_past_its_entry_cap_is_malformed() {
-    // The cap sits above what one extension body can carry, so it is
+    // The ceiling sits above what one extension body can carry, so it is
     // asserted here directly rather than through a hello.
     let limit = MAX_EXTENSION_LEN / 2;
     let input = vec![0u8; (limit + 1) * 2];
-    let error =
-        u16_list(&input, limit, "supported group").expect_err("a list past the cap is rejected");
+    let error = u16_list(&input, limit, "supported group")
+        .expect_err("a list past the ceiling is rejected");
     assert!(
         error.to_string().contains("supported group list"),
         "{error}"
@@ -581,49 +582,45 @@ fn bytes_after_an_extension_list_name_the_extension() {
     assert!(!message.contains("extension block"), "{message}");
 }
 
-#[test]
-fn mutated_handshake_bytes_never_panic() {
-    let seed = client_hello(&[
-        server_name_extension(b"api.example.test"),
-        alpn_extension(&[b"h2", b"http/1.1"]),
-        extension(0x002b, &vector8(&u16_bytes(&[0x0304, 0x0303]))),
-        extension(0x000a, &vector16(&u16_bytes(&[0x001d, 0x0017]))),
-        extension(0x000d, &vector16(&u16_bytes(&[0x0403]))),
-        extension(
-            0x0033,
-            &vector16(&{
-                let mut share = 0x001du16.to_be_bytes().to_vec();
-                share.extend_from_slice(&vector16(&[3; 32]));
-                share
-            }),
-        ),
-    ]);
-    let framed = record(CONTENT_TYPE_HANDSHAKE, 0x0303, &seed);
-    let mut random = SplitMix64::new(0x5eed_1234_abcd_0001);
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2_000))]
 
-    for iteration in 0..2_000u32 {
-        let mut bytes = framed.clone();
-        let mutations = 1 + usize::try_from(random.next_u64() % 4).expect("small count fits");
-        for _ in 0..mutations {
-            let index = usize::try_from(random.next_u64() % 64).expect("small index fits")
-                * bytes.len()
-                / 64;
-            let value = u8::try_from(random.next_u64() % 256).expect("byte value fits");
+    #[test]
+    fn mutated_handshake_bytes_never_panic(
+        mutations in prop::collection::vec((0..64usize, 0..=255u8), 1..=4),
+        truncation in prop::option::weighted(1.0 / 3.0, 0..64usize),
+    ) {
+        let seed = client_hello(&[
+            server_name_extension(b"api.example.test"),
+            alpn_extension(&[b"h2", b"http/1.1"]),
+            extension(0x002b, &vector8(&u16_bytes(&[0x0304, 0x0303]))),
+            extension(0x000a, &vector16(&u16_bytes(&[0x001d, 0x0017]))),
+            extension(0x000d, &vector16(&u16_bytes(&[0x0403]))),
+            extension(
+                0x0033,
+                &vector16(&{
+                    let mut share = 0x001du16.to_be_bytes().to_vec();
+                    share.extend_from_slice(&vector16(&[3; 32]));
+                    share
+                }),
+            ),
+        ]);
+        let framed = record(CONTENT_TYPE_HANDSHAKE, 0x0303, &seed);
+        let mut bytes = framed;
+        for (fraction, value) in mutations {
+            let index = fraction * bytes.len() / 64;
             if let Some(slot) = bytes.get_mut(index) {
                 *slot = value;
             }
         }
-        if random.next_u64().is_multiple_of(3) {
-            let keep = usize::try_from(random.next_u64() % 64).expect("small length fits")
-                * bytes.len()
-                / 64;
-            bytes.truncate(keep);
+        if let Some(keep) = truncation {
+            bytes.truncate(keep * bytes.len() / 64);
         }
 
         let outcome = parse_record(&bytes);
-        assert!(
+        prop_assert!(
             !matches!(outcome, Outcome::Complete { consumed, .. } if consumed > bytes.len()),
-            "iteration {iteration} consumed more than it was given"
+            "consumed more than it was given"
         );
         if let Outcome::Complete { value, .. } = outcome {
             let _ = parse_handshake(value.body.as_ref());

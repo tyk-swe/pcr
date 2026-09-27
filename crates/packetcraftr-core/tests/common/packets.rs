@@ -5,8 +5,13 @@
 
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
-use packetcraftr_core::frame::LinkType;
+use bytes::Bytes;
+use packetcraftr_core::build::{Builder, BuiltPacket};
+use packetcraftr_core::decode::{DecodedPacket, Dissector};
+use packetcraftr_core::expression;
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::registry::Registry;
@@ -39,4 +44,21 @@ pub(crate) fn ipv6(source: &str, destination: &str) -> Ipv6 {
         destination: destination.parse().expect("destination address"),
         ..Ipv6::default()
     }
+}
+
+pub(crate) fn build(recipe: &str) -> BuiltPacket {
+    let registry = builtin::registry();
+    let packet = expression::parse(recipe, &registry, Default::default()).unwrap();
+    Builder::new(registry)
+        .build(packet, Default::default(), Default::default())
+        .unwrap()
+}
+
+pub(crate) fn dissect(bytes: Bytes) -> DecodedPacket {
+    Dissector::new(builtin::registry())
+        .decode(
+            Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap(),
+            Default::default(),
+        )
+        .unwrap()
 }

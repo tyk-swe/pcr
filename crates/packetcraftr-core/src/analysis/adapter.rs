@@ -522,7 +522,8 @@ fn ipv6_fragment_transport_protocol(
         .and_then(|layout| decoded.original.get(layout.range.end..payload_end))?;
     // A further Fragment header ends the walk: its protocol is the answer,
     // because the bytes behind it may belong to another fragment.
-    let mut chain = Ipv6ExtensionChain::new(payload, 0, next_header);
+    let mut chain =
+        Ipv6ExtensionChain::new(payload, 0, next_header).with_ceiling(payload.len() / 8);
     loop {
         let (protocol, _) = chain.position();
         if protocol == ip_protocol::FRAGMENT {

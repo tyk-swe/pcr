@@ -231,7 +231,8 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
 
 fn ipv6_fragment_predecessor(prefix: &[u8]) -> Option<usize> {
     let base = prefix.first_chunk::<{ Ipv6Header::LENGTH }>()?;
-    let mut chain = Ipv6ExtensionChain::new(prefix, Ipv6Header::LENGTH, base[6]);
+    let mut chain =
+        Ipv6ExtensionChain::new(prefix, Ipv6Header::LENGTH, base[6]).with_ceiling(prefix.len() / 8);
     let mut predecessor = 6usize;
     loop {
         let (protocol, offset) = chain.position();

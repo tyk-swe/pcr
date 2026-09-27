@@ -633,6 +633,7 @@ pub struct Ipv6ExtensionChain<'a> {
     bytes: &'a [u8],
     protocol: u8,
     offset: usize,
+    limit: usize,
     remaining: usize,
     done: bool,
 }
@@ -645,6 +646,7 @@ impl<'a> Ipv6ExtensionChain<'a> {
             bytes,
             protocol: next_header,
             offset,
+            limit: MAX_IPV6_EXTENSIONS,
             remaining: MAX_IPV6_EXTENSIONS,
             done: false,
         }
@@ -654,6 +656,16 @@ impl<'a> Ipv6ExtensionChain<'a> {
     /// header or upper layer it announces starts.
     pub fn position(&self) -> (u8, usize) {
         (self.protocol, self.offset)
+    }
+
+    /// Relaxes the header ceiling for a caller whose slice is already
+    /// bounded, such as a walk over a length-checked datagram prefix.
+    /// `bytes.len() / 8` is the largest count a slice can hold, so such a
+    /// caller keeps the slice's own bound rather than the generic one.
+    pub(crate) fn with_ceiling(mut self, ceiling: usize) -> Self {
+        self.limit = ceiling;
+        self.remaining = ceiling;
+        self
     }
 
     fn at_header(&self) -> bool {
@@ -673,7 +685,7 @@ impl Iterator for Ipv6ExtensionChain<'_> {
             self.done = true;
             return Some(Err(Error::Depth {
                 header: Header::Ipv6Extension,
-                limit: MAX_IPV6_EXTENSIONS,
+                limit: self.limit,
             }));
         }
         let step = (|| {
@@ -1138,6 +1150,28 @@ mod tests {
                 limit: MAX_IPV6_EXTENSIONS,
             }))
         );
+        assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn ipv6_extension_chain_ceiling_is_relaxable_for_bounded_inputs() {
+        // len/8 is the largest header count a slice can hold, so a caller
+        // bounded by its own slice never trips the relaxed ceiling.
+        let mut bytes = [60, 0, 1, 4, 0, 0, 0, 0].repeat(MAX_IPV6_EXTENSIONS + 1);
+        *bytes.last_chunk_mut::<8>().unwrap() = [59, 0, 1, 4, 0, 0, 0, 0];
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS)
+            .with_ceiling(bytes.len() / 8);
+        for _ in 0..=MAX_IPV6_EXTENSIONS {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert_eq!(chain.next(), None);
+
+        let mut chain =
+            Ipv6ExtensionChain::new(&bytes, 0, ip_protocol::DESTINATION_OPTIONS).with_ceiling(3);
+        for _ in 0..3 {
+            assert!(chain.next().unwrap().is_ok());
+        }
+        assert!(matches!(chain.next(), Some(Err(Error::Depth { .. }))));
         assert_eq!(chain.next(), None);
     }
 

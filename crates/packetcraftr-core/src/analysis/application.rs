@@ -70,6 +70,11 @@ pub enum Error {
     /// The collector refused a configuration change it no longer accepts.
     #[error("HTTP collector configuration refused: {0}")]
     Configuration(&'static str),
+    /// The selected HTTP body target cannot name a message: the index must
+    /// be positive. Library-side validation, distinct from the CLI's
+    /// positive-integer argument parsing.
+    #[error("HTTP body selection requires a positive message index")]
+    BodySelection,
 }
 impl Classified for Error {
     fn classification(&self) -> Classification {
@@ -91,6 +96,11 @@ impl Classified for Error {
                 "cli.http_configuration",
                 Kind::Usage,
                 Some("enable transactions and select a body before the first observed frame"),
+            ),
+            Self::BodySelection => Classification::new(
+                "cli.http_body_selection",
+                Kind::Usage,
+                Some("select a positive HTTP message index"),
             ),
         }
     }

@@ -23,7 +23,7 @@ use crate::{
 
 mod body;
 
-pub use body::{BodyDecoder, Progress};
+pub use body::{BodyDecoder, ConsumeError, Progress};
 
 pub(super) const NAME: &str = BuiltinProtocol::Http.as_str();
 

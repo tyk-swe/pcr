@@ -4,8 +4,10 @@
 //! Sourced cleartext HTTP/1 messages over reassembled TCP. Body bytes are counted
 //! without retaining or decompressing content. Feed complete conversations.
 
+mod body;
 mod transaction;
 
+pub use body::BodySink;
 pub use transaction::{
     Availability, Interval, Transaction, TransactionOutcome, TransactionSummary,
 };
@@ -117,7 +119,7 @@ struct Direction {
 }
 type Connection = (u64, u64);
 type RequestKey = (Connection, ScopedFlowKey);
-pub struct Collector {
+pub struct Collector<'a> {
     limits: Limits,
     max_body_bytes: u64,
     tcp: TcpSources,
@@ -128,6 +130,9 @@ pub struct Collector {
     /// Emission numbering and counters; `Some` only while transactions are
     /// enabled.
     transactions: Option<transaction::Transactions>,
+    /// The selected message's borrowed sink; `None` unless configured, and
+    /// cleared once a write fails so no later span reaches the failed sink.
+    body_target: Option<body::Target<'a>>,
     /// Whether configuration is still open: the first `observe` attempt
     /// closes it so late enabling cannot assign invented markers to already
     /// collected requests.
@@ -136,7 +141,7 @@ pub struct Collector {
     retained: usize,
     summary: Summary,
 }
-impl Collector {
+impl<'a> Collector<'a> {
     pub fn new(
         limits: Limits,
         ports: impl IntoIterator<Item = u16>,
@@ -159,6 +164,7 @@ impl Collector {
             upgraded: BTreeSet::new(),
             generations: BTreeMap::new(),
             transactions: None,
+            body_target: None,
             sealed: false,
             buffered: 0,
             retained: 0,
@@ -178,6 +184,40 @@ impl Collector {
         if self.transactions.is_none() {
             self.transactions = Some(transaction::Transactions::new());
         }
+        Ok(self)
+    }
+    /// Selects the one-based [`Message::index`] whose entity spans `sink`
+    /// receives synchronously while the collector parses: Content-Length,
+    /// close-delimited, or concatenated chunk-data bytes, in order and never
+    /// decoded. Only that message's body reaches the sink; every other body
+    /// keeps the counting discard path, and each callback finishes before
+    /// analysis consumes more input.
+    ///
+    /// A zero `message` is an invalid selection
+    /// ([`Error::BodySelection`]). Selection closes at the first `observe`
+    /// attempt, and only one message can be selected: either violation
+    /// fails with [`Error::Configuration`]. A `sink` refusal propagates as
+    /// [`Error::Output`], preserving the sink's classification and causes —
+    /// it never becomes a recoverable [`Message::status`].
+    pub fn with_body_sink(
+        mut self,
+        message: u64,
+        sink: &'a mut dyn BodySink,
+    ) -> Result<Self, Error> {
+        if self.sealed {
+            return Err(Error::Configuration(
+                "a body sink cannot be selected after observation started",
+            ));
+        }
+        if message == 0 {
+            return Err(Error::BodySelection);
+        }
+        if self.body_target.is_some() {
+            return Err(Error::Configuration(
+                "only one message's body can be selected",
+            ));
+        }
+        self.body_target = Some(body::Target { message, sink });
         Ok(self)
     }
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
@@ -596,22 +636,39 @@ impl Collector {
                     .expect("head has body state")
                     .additional_buffer_bound(input.len());
                 self.check_buffer(live.buffered().saturating_add(growth))?;
+                let index = live.index;
+                let mut sink = self
+                    .body_target
+                    .as_mut()
+                    .filter(|target| target.message == index)
+                    .map(|target| &mut *target.sink);
                 match live
                     .body
                     .as_mut()
                     .expect("head has body state")
-                    .consume(input)
-                {
+                    .consume_with(input, &mut |span| {
+                        if let Some(sink) = &mut sink {
+                            sink.write(span)?;
+                        }
+                        Ok::<(), BoundaryError>(())
+                    }) {
                     Ok(progress) => {
                         input = &input[progress.consumed..];
                         if progress.complete {
                             self.flush(&data.flow, &mut direction, Status::Complete, None, output)?;
                         }
                     }
-                    Err(error) => {
+                    Err(http::ConsumeError::Framing(error)) => {
                         let status = failure_status(&error);
                         self.flush(&data.flow, &mut direction, status, Some(error), output)?;
                         direction.disabled = true;
+                    }
+                    // A refused span is terminal: it fails the run as an
+                    // output error, never a recoverable message status, and
+                    // clears the target so no later span reaches the sink.
+                    Err(http::ConsumeError::Sink(error)) => {
+                        self.body_target = None;
+                        return Err(Error::Output(error));
                     }
                 }
             }
@@ -714,7 +771,7 @@ impl Collector {
     }
 }
 
-impl session::Collector for Collector {
+impl session::Collector for Collector<'_> {
     type Event = Event;
     type Summary = Summary;
 

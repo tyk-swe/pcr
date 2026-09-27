@@ -12,11 +12,11 @@ use packetcraftr_core::{
         self,
         application::{self, Limits},
         http::{
-            Availability, Collector, Event, Interval, Message, Status, Transaction,
+            Availability, BodySink, Collector, Event, Interval, Message, Status, Transaction,
             TransactionOutcome,
         },
     },
-    error::{BoundaryError, Classified, Kind},
+    error::{BoundaryError, Classification, Classified, Kind},
     field::WireValue,
     frame::{Frame, LinkType},
     layer::Raw,
@@ -1381,4 +1381,509 @@ fn ip_fragmented_response_marks_the_completing_fragment_frame() {
             negative: false
         })
     );
+}
+
+/// An instrumented [`BodySink`]: records each span's length and the
+/// concatenated bytes, and can refuse the write after `fail_after` spans.
+#[derive(Default)]
+struct BodyRecorder {
+    bytes: Vec<u8>,
+    spans: Vec<usize>,
+    fail_after: Option<usize>,
+}
+impl BodySink for BodyRecorder {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), BoundaryError> {
+        if self
+            .fail_after
+            .is_some_and(|limit| self.spans.len() >= limit)
+        {
+            return Err(BoundaryError::new(
+                "test sink refused the entity span",
+                Classification::new("test.body_sink", Kind::Io, None),
+                Vec::new(),
+            ));
+        }
+        assert!(!bytes.is_empty(), "the callback never sees an empty span");
+        self.spans.push(bytes.len());
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+/// Collects the run's events while `sink` receives `selected`'s entity
+/// spans. Both the run and the collector finish are expected to succeed.
+fn collect_selected(
+    frames: &[Frame],
+    selected: u64,
+    max_body_bytes: u64,
+    sink: &mut impl BodySink,
+) -> (Vec<Event>, analysis::http::Summary) {
+    let mut collector = Collector::new(Limits::default(), vec![80], max_body_bytes)
+        .expect("collector")
+        .with_body_sink(selected, sink)
+        .expect("pre-observe selection");
+    let mut events = Vec::new();
+    let run = analysis::run(
+        &mut reader(frames),
+        registry(),
+        &analysis::Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            events.extend(
+                collector
+                    .observe(&record)
+                    .map_err(BoundaryError::from_error)?,
+            );
+            Ok(())
+        },
+    )
+    .expect("analysis run succeeds");
+    let (trailing, summary) = collector.finish(&run).expect("collector finishes");
+    events.extend(trailing);
+    (events, summary)
+}
+/// What a failing selected-sink run observed before propagation.
+struct SinkFailure {
+    /// The first collector failure was `Error::Output`, not a message
+    /// status or a limit.
+    output: bool,
+    /// Its classification, recorded before the error was converted.
+    classification: Classification,
+}
+/// Drives the selected collector over `frames` like [`collect_selected`],
+/// but records the first collector error and the run's own result.
+fn observe_selected(
+    frames: &[Frame],
+    selected: u64,
+    max_body_bytes: u64,
+    sink: &mut impl BodySink,
+) -> (
+    Vec<Event>,
+    Option<SinkFailure>,
+    Result<analysis::Summary, analysis::Error>,
+) {
+    let mut collector = Collector::new(Limits::default(), vec![80], max_body_bytes)
+        .expect("collector")
+        .with_body_sink(selected, sink)
+        .expect("pre-observe selection");
+    let mut events = Vec::new();
+    let mut failure = None;
+    let run = analysis::run(
+        &mut reader(frames),
+        registry(),
+        &analysis::Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| match collector.observe(&record) {
+            Ok(observed) => {
+                events.extend(observed);
+                Ok(())
+            }
+            Err(error) => {
+                if failure.is_none() {
+                    failure = Some(SinkFailure {
+                        output: matches!(error, application::Error::Output(_)),
+                        classification: error.classification(),
+                    });
+                }
+                Err(BoundaryError::from_error(error))
+            }
+        },
+    );
+    (events, failure, run)
+}
+
+#[test]
+fn only_the_selected_message_body_reaches_the_sink() {
+    let (mut capture, mut stream) = setup();
+    capture.client(
+        &mut stream,
+        b"POST /upload HTTP/1.1\r\nContent-Length: 7\r\n\r\nreq",
+    );
+    capture.client(&mut stream, b"body");
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n\x00\xff",
+    );
+    capture.server(&mut stream, b"\x01\x02\x03\xfe\x80\xff\x1f");
+
+    // Selecting the response delivers its binary body, including NUL and
+    // non-UTF8 octets, byte-exactly; the request body stays on the discard
+    // path.
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 2, 1024, &mut sink);
+    assert_eq!(sink.bytes, b"\x00\xff\x01\x02\x03\xfe\x80\xff\x1f");
+    assert_eq!(sink.spans, [2, 7]);
+    let messages = message_rows(&events);
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.status == Status::Complete));
+    assert_eq!(messages[1].body_bytes, 9);
+
+    // The same capture with the request selected delivers the request body
+    // instead — selection follows the shared message index, not a stream.
+    let mut sink = BodyRecorder::default();
+    let (_, _) = collect_selected(&capture.frames, 1, 1024, &mut sink);
+    assert_eq!(sink.bytes, b"reqbody");
+    assert_eq!(sink.spans, [3, 4]);
+
+    // An index no message reaches is simply never invoked; absence is the
+    // caller's verdict, not a collector error.
+    let mut sink = BodyRecorder::default();
+    let (events, summary) = collect_selected(&capture.frames, 3, 1024, &mut sink);
+    assert!(sink.spans.is_empty());
+    assert_eq!(summary.messages, 2);
+    assert_eq!(message_rows(&events).len(), 2);
+}
+
+#[test]
+fn chunked_body_emits_only_data_in_every_two_segment_split() {
+    let request =
+        b"POST /b HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3;ext=\"ok\"\r\nabc\r\n2;x\r\nde\r\n0\r\nX-End: yes\r\n\r\nPOST /c HTTP/1.1\r\nContent-Length: 4\r\n\r\nwxyz";
+    for split in 0..=request.len() {
+        let (mut capture, mut stream) = setup();
+        capture.client(&mut stream, b"GET /a HTTP/1.1\r\n\r\n");
+        capture.client(&mut stream, &request[..split]);
+        capture.client(&mut stream, &request[split..]);
+        let mut sink = BodyRecorder::default();
+        let (events, _) = collect_selected(&capture.frames, 2, 1024, &mut sink);
+        assert_eq!(sink.bytes, b"abcde", "split {split}");
+        let messages = message_rows(&events);
+        assert_eq!(messages.len(), 3, "split {split}");
+        assert_eq!(messages[1].status, Status::Complete, "split {split}");
+        assert_eq!(messages[1].body_bytes, 5, "split {split}");
+        assert_eq!(messages[1].trailers[0].name, "X-End", "split {split}");
+        // The pipelined third message's body never reaches the sink.
+        assert_eq!(messages[2].body_bytes, 4, "split {split}");
+    }
+}
+
+#[test]
+fn close_delimited_body_streams_until_a_clean_fin() {
+    for (flags, status) in [
+        (Tcp::FIN | Tcp::ACK, Status::Complete),
+        (Tcp::ACK, Status::Incomplete),
+        // The dispatch evicts both directions of a reset flow, so the
+        // in-flight message ends as evicted rather than reset.
+        (Tcp::RST | Tcp::ACK, Status::Evicted),
+    ] {
+        let (mut capture, mut stream) = setup();
+        capture.client(&mut stream, b"GET / HTTP/1.0\r\n\r\n");
+        capture.server(&mut stream, b"HTTP/1.0 200 OK\r\n\r\nbo");
+        capture.server(&mut stream, b"dy");
+        if flags != Tcp::ACK {
+            capture.push(capture.server_spec(&stream, flags), b"");
+        }
+        let mut sink = BodyRecorder::default();
+        let (events, _) = collect_selected(&capture.frames, 2, 1024, &mut sink);
+        // Accepted entity bytes stream as they parse; only the message's
+        // terminal status says whether the body completed.
+        assert_eq!(sink.bytes, b"body", "flags {flags:#x}");
+        let messages = message_rows(&events);
+        assert_eq!(messages[1].status, status, "flags {flags:#x}");
+    }
+}
+
+#[test]
+fn body_selection_rejects_zero_repeated_and_late_targets() {
+    // A zero index is the typed library selection error, classified for the
+    // CLI's usage lane rather than its argument parsing.
+    let mut sink = BodyRecorder::default();
+    let error = Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_body_sink(0, &mut sink)
+        .err()
+        .expect("a zero message must be refused");
+    assert!(
+        matches!(error, application::Error::BodySelection),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().code, "cli.http_body_selection");
+    assert_eq!(error.classification().kind, Kind::Usage);
+
+    // Only one body can be selected, even before observation starts.
+    let mut other = BodyRecorder::default();
+    let error = Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_body_sink(1, &mut sink)
+        .expect("first selection")
+        .with_body_sink(2, &mut other)
+        .err()
+        .expect("a second selection must be refused");
+    assert!(
+        matches!(error, application::Error::Configuration(..)),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().code, "cli.http_configuration");
+
+    // A frame carrying no HTTP data still seals configuration.
+    let mut capture = Capture::new();
+    capture.udp_443();
+    let mut sink = BodyRecorder::default();
+    let mut collector = Collector::new(Limits::default(), vec![80], 1024).expect("collector");
+    analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &analysis::Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            collector
+                .observe(&record)
+                .map_err(BoundaryError::from_error)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let error = collector
+        .with_body_sink(1, &mut sink)
+        .err()
+        .expect("late selection must be refused");
+    assert!(
+        matches!(error, application::Error::Configuration(..)),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().code, "cli.http_configuration");
+
+    // Selection composes with the transaction capability either way.
+    let mut sink = BodyRecorder::default();
+    Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_transactions()
+        .expect("transactions")
+        .with_body_sink(1, &mut sink)
+        .expect("selection after transactions");
+    let mut sink = BodyRecorder::default();
+    Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_body_sink(1, &mut sink)
+        .expect("selection")
+        .with_transactions()
+        .expect("transactions after selection");
+}
+
+#[test]
+fn sink_failure_surfaces_as_output_and_stops_all_later_writes() {
+    // The second entity span is refused: the collector reports the sink
+    // failure as output, never a recoverable message status.
+    let build = || {
+        let (mut capture, mut stream) = setup();
+        capture.client(
+            &mut stream,
+            b"POST / HTTP/1.1\r\nContent-Length: 6\r\n\r\nab",
+        );
+        capture.client(&mut stream, b"cd");
+        capture.client(&mut stream, b"ef");
+        capture
+    };
+    let capture = build();
+    let mut sink = BodyRecorder {
+        fail_after: Some(1),
+        ..BodyRecorder::default()
+    };
+    let (events, failure, run) = observe_selected(&capture.frames, 1, 1024, &mut sink);
+    let failure = failure.expect("the sink refusal surfaced");
+    assert!(failure.output, "classified as application::Error::Output");
+    assert_eq!(failure.classification.code, "test.body_sink");
+    assert_eq!(failure.classification.kind, Kind::Io);
+    // Propagated, it keeps its own classification through the run's sink
+    // error rather than becoming packet or message evidence.
+    let error = run.expect_err("the run fails with the sink refusal");
+    assert_eq!(error.classification().code, "test.body_sink");
+    assert_eq!(error.classification().kind, Kind::Io);
+    // Only the first span was ever delivered.
+    assert_eq!(sink.spans, [2]);
+    assert_eq!(sink.bytes, b"ab");
+    assert!(message_rows(&events).is_empty());
+
+    // Even when the caller keeps feeding records after the refusal, the
+    // cleared target never invokes the sink again.
+    let capture = build();
+    let mut sink = BodyRecorder {
+        fail_after: Some(1),
+        ..BodyRecorder::default()
+    };
+    let mut collector = Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_body_sink(1, &mut sink)
+        .expect("selection");
+    let mut failures = 0;
+    analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &analysis::Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            if collector.observe(&record).is_err() {
+                failures += 1;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(failures > 0);
+    assert_eq!(sink.spans, [2], "no write ever follows a refusal");
+    assert_eq!(sink.bytes, b"ab");
+}
+
+#[test]
+fn over_ceiling_bodies_never_reach_the_sink() {
+    // A declared length beyond the message ceiling fails at the head.
+    let (mut capture, mut stream) = setup();
+    capture.client(
+        &mut stream,
+        b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\n0123456789",
+    );
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 1, 5, &mut sink);
+    assert!(sink.spans.is_empty());
+    assert_eq!(message_rows(&events)[0].status, Status::Limit);
+
+    // A close-delimited body delivers only through the ceiling even when
+    // the crossing byte shares a delivery with in-limit bytes.
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET / HTTP/1.0\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.0 200 OK\r\n\r\nab");
+    capture.server(&mut stream, b"cd");
+    capture.server(&mut stream, b"ef");
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 2, 4, &mut sink);
+    assert_eq!(sink.bytes, b"abcd");
+    assert_eq!(sink.spans, [2, 2]);
+    let messages = message_rows(&events);
+    assert_eq!(messages[1].status, Status::Limit);
+    assert!(matches!(
+        messages[1].error,
+        Some(
+            packetcraftr_core::protocol::application::http::Error::Limit(
+                packetcraftr_core::protocol::application::http::Limit::BodyBytes
+            )
+        )
+    ));
+
+    // A chunk size beyond the remaining ceiling fails at its line before
+    // any chunk data is delivered.
+    let (mut capture, mut stream) = setup();
+    capture.client(
+        &mut stream,
+        b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n6\r\ncdefgh\r\n0\r\n\r\n",
+    );
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 1, 5, &mut sink);
+    assert_eq!(sink.bytes, b"ab");
+    assert_eq!(message_rows(&events)[0].status, Status::Limit);
+}
+
+#[test]
+fn bodyless_and_empty_selected_messages_invoke_no_writes() {
+    // 204, HEAD, and Content-Length: 0 responses all complete with no
+    // entity bytes: the sink is never invoked.
+    let (mut capture, mut stream) = setup();
+    capture.client(
+        &mut stream,
+        b"HEAD /h HTTP/1.1\r\n\r\nGET /e HTTP/1.1\r\n\r\n",
+    );
+    capture.server(&mut stream, b"HTTP/1.1 204 No Content\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    for selected in 1..=4 {
+        let mut sink = BodyRecorder::default();
+        let (events, _) = collect_selected(&capture.frames, selected, 1024, &mut sink);
+        assert!(sink.spans.is_empty(), "message {selected}");
+        let messages = message_rows(&events);
+        assert_eq!(messages.len(), 4);
+        assert!(
+            messages.iter().all(|m| m.status == Status::Complete),
+            "message {selected}"
+        );
+    }
+
+    // An upgraded message parses no body at all; tunnel bytes are not
+    // entity spans.
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"CONNECT example.test:443 HTTP/1.1\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.1 200 Connected\r\n\r\ntunnel-bytes");
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 2, 1024, &mut sink);
+    assert!(sink.spans.is_empty());
+    assert_eq!(message_rows(&events)[1].status, Status::Upgrade);
+}
+
+#[test]
+fn a_large_body_arrives_in_spans_bounded_by_the_deliveries() {
+    // Each delivery produces bounded spans independent of total body
+    // length; here a Content-Length body's spans exactly mirror its
+    // segments.
+    let lengths = [30_000usize, 20_000, 40_000, 6_144];
+    let body_len: usize = lengths.iter().sum();
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {body_len}\r\n\r\n");
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET /big HTTP/1.1\r\n\r\n");
+    capture.server(&mut stream, head.as_bytes());
+    let mut offset = 0;
+    let body: Vec<u8> = (0..body_len).map(|i| (i % 251) as u8).collect();
+    for length in lengths {
+        capture.server(&mut stream, &body[offset..offset + length]);
+        offset += length;
+    }
+    let mut sink = BodyRecorder::default();
+    let (events, _) = collect_selected(&capture.frames, 2, 1 << 20, &mut sink);
+    assert_eq!(sink.spans, lengths);
+    assert_eq!(sink.bytes, body);
+    let messages = message_rows(&events);
+    assert_eq!(messages[1].status, Status::Complete);
+    assert_eq!(messages[1].body_bytes, body_len as u64);
+}
+
+#[test]
+fn transactions_and_a_body_sink_compose() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET /a HTTP/1.1\r\n\r\n");
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc",
+    );
+    let mut sink = BodyRecorder::default();
+    let mut collector = Collector::new(Limits::default(), vec![80], 1024)
+        .expect("collector")
+        .with_transactions()
+        .expect("transactions")
+        .with_body_sink(2, &mut sink)
+        .expect("selection");
+    let mut events = Vec::new();
+    let run = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &analysis::Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            events.extend(
+                collector
+                    .observe(&record)
+                    .map_err(BoundaryError::from_error)?,
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
+    let (trailing, _) = collector.finish(&run).unwrap();
+    events.extend(trailing);
+    assert_eq!(sink.bytes, b"abc");
+    let transactions = transaction_rows(&events);
+    let [transaction] = transactions.as_slice() else {
+        panic!("one paired transaction expected");
+    };
+    assert_eq!(transaction.outcome, TransactionOutcome::Paired);
+    assert_eq!(transaction.request, Some(1));
+    assert_eq!(transaction.response, Some(2));
 }

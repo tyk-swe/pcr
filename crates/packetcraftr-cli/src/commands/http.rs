@@ -89,6 +89,12 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
                 &mut issues,
                 rendering::render_issue,
             ),
+            // The command never enables transactions; HTTP-T02 publishes
+            // this event once `--transactions` exists.
+            Event::Transaction(_) => Err(CliError::new(
+                Kind::Internal,
+                "HTTP collector emitted a transaction without --transactions",
+            )),
         },
     )?;
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))

@@ -72,6 +72,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
   listing the arriving segment's actual retransmitted sequence spans, which
   need not form a contiguous prefix.
+- `analysis::http::Event` gains a `Transaction(Box<Transaction>)` variant,
+  emitted only while the collector runs with `with_transactions`; exhaustive
+  matches over HTTP events need an arm for it. Disabled collectors emit no
+  transaction events and `Summary::transaction_summary` stays `None`.
 - Shared probe APIs have canonical paths: `probe::{ProbeEndpoint,
   ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`, and `fuzz`
   aliases are removed without compatibility aliases, and the executor seams
@@ -579,6 +583,9 @@ All notable changes to PacketcraftR are documented here. The format follows
     fields that are malformed or ambiguous.
   - `packet.tls`: `protocol::application::tls::Error::Invalid`, a TLS record
     or handshake that breaks a wire rule or bound.
+  - `cli.http_configuration` (usage): `application::Error::Configuration`,
+    an HTTP collector configuration change refused after the first `observe`
+    attempt sealed it.
 - `packetcraftr_core::error::BoundaryError::as_causes` lists a boundary
   error's message followed by its captured causes, for a wrapper that reports
   it as its source without repeating its text.
@@ -716,6 +723,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   incomplete IP groups, then atomically copies their original capture records.
 - Cleartext HTTP/1 headers and sourced TCP message inspection through `http`,
   including bounded body framing, request links, trailers, and incomplete evidence.
+- Bounded HTTP/1 header transactions through `analysis::http`: opt in with
+  `Collector::with_transactions` before the first `observe` attempt. The
+  existing pending-request queue correlates both `Message.request` links and
+  `Event::Transaction` rows — `paired`, `unanswered`, and `orphan_response`
+  rows with request/response/informational message indices, scoped
+  flow/stream/generation identity, and capture-observed `Availability` markers
+  (the frame and timestamp that made each header boundary available to the
+  parser, never an inferred wire time). Waits and spans are signed `Interval`s;
+  capture-clock regressions stay negative and equal markers give canonical
+  zero. `Summary::transaction_summary` counts emitted outcomes and negative
+  intervals, and each pending request, informational reference, and emitted
+  row charges the shared `max_retained_bytes` budget. Retired requests settle
+  once, in ascending message index, at connection-generation reuse and at
+  capture end.
 - Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
   UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
   responses, partial messages, and capture-clock regressions.

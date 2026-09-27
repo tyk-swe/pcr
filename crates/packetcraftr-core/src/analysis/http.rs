@@ -4,6 +4,12 @@
 //! Sourced cleartext HTTP/1 messages over reassembled TCP. Body bytes are counted
 //! without retaining or decompressing content. Feed complete conversations.
 
+mod transaction;
+
+pub use transaction::{
+    Availability, Interval, Transaction, TransactionOutcome, TransactionSummary,
+};
+
 use super::{
     FrameRecord, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
@@ -60,6 +66,10 @@ pub struct Issue {
 pub enum Event {
     Message(Box<Message>),
     Issue(Issue),
+    /// A request/response header association settled while enabled through
+    /// [`Collector::with_transactions`]. It precedes any message-completion
+    /// event the same head causes.
+    Transaction(Box<Transaction>),
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Summary {
@@ -70,10 +80,16 @@ pub struct Summary {
     pub upgraded_connections: u64,
     pub responses_without_request: u64,
     pub requests_without_final_response: u64,
+    /// Emitted-transaction counters; `None` unless the collector ran with
+    /// [`Collector::with_transactions`].
+    pub transaction_summary: Option<TransactionSummary>,
 }
 struct Pending {
     index: u64,
     method: String,
+    /// Marker and informational observations, retained only while
+    /// transactions are enabled.
+    transaction: Option<transaction::PendingTransaction>,
 }
 struct Live {
     index: u64,
@@ -82,6 +98,8 @@ struct Live {
     body: Option<BodyDecoder>,
     framing: Option<Body>,
     request: Option<u64>,
+    /// The observation that consumed this head's first byte.
+    started: Option<Availability>,
     sources: SourceSet,
 }
 impl Live {
@@ -107,6 +125,13 @@ pub struct Collector {
     requests: BTreeMap<RequestKey, VecDeque<Pending>>,
     upgraded: BTreeSet<Connection>,
     generations: BTreeMap<u64, u64>,
+    /// Emission numbering and counters; `Some` only while transactions are
+    /// enabled.
+    transactions: Option<transaction::Transactions>,
+    /// Whether configuration is still open: the first `observe` attempt
+    /// closes it so late enabling cannot assign invented markers to already
+    /// collected requests.
+    sealed: bool,
     buffered: usize,
     retained: usize,
     summary: Summary,
@@ -133,18 +158,40 @@ impl Collector {
             requests: BTreeMap::new(),
             upgraded: BTreeSet::new(),
             generations: BTreeMap::new(),
+            transactions: None,
+            sealed: false,
             buffered: 0,
             retained: 0,
             summary: Summary::default(),
         })
     }
+    /// Enables header-transaction collection with its marker recording,
+    /// informational accounting, and emitted rows. Repeating this before the
+    /// first `observe` attempt is idempotent; afterwards configuration is
+    /// sealed and this fails with [`Error::Configuration`].
+    pub fn with_transactions(mut self) -> Result<Self, Error> {
+        if self.sealed {
+            return Err(Error::Configuration(
+                "transactions cannot be enabled after observation started",
+            ));
+        }
+        if self.transactions.is_none() {
+            self.transactions = Some(transaction::Transactions::new());
+        }
+        Ok(self)
+    }
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
         self.tcp.scopes.values()
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
+        self.sealed = true;
+        let marker = Availability {
+            frame: record.number,
+            timestamp: record.timestamp,
+        };
         let mut output = Vec::new();
         for event in self.tcp.observe(record)? {
-            self.event(event, record.number, &mut output)?;
+            self.event(event, record.number, Some(marker), &mut output)?;
         }
         Ok(output)
     }
@@ -157,27 +204,76 @@ impl Collector {
             if let application::Event::Evicted { flow, .. } = event {
                 self.stop(&flow, Status::Incomplete, false, &mut output)?;
             } else {
-                self.event(event, run.frames_read, &mut output)?;
+                self.event(event, run.frames_read, None, &mut output)?;
             }
         }
         for (flow, mut direction) in std::mem::take(&mut self.directions) {
             self.flush(&flow, &mut direction, Status::Incomplete, None, &mut output)?;
         }
-        self.summary.requests_without_final_response += self
-            .requests
-            .values()
-            .map(|queue| queue.len() as u64)
-            .sum::<u64>();
+        let mut pending = Vec::new();
+        for (key, queue) in std::mem::take(&mut self.requests) {
+            pending.extend(queue.into_iter().map(|request| (key.clone(), request)));
+        }
+        self.retire(pending, &mut output)?;
+        if let Some(transactions) = self.transactions.take() {
+            self.summary.transaction_summary = Some(transactions.summary);
+        }
         Ok((output, self.summary))
+    }
+    /// Charges `bytes` against the cumulative retained-byte budget before a
+    /// state change; the charge is never refunded.
+    fn charge_retained(&mut self, bytes: usize) -> Result<(), Error> {
+        self.retained = self.retained.saturating_add(bytes);
+        if self.retained > self.limits.max_retained_bytes {
+            return Err(Error::Limit {
+                field: "max_retained_bytes",
+                limit: self.limits.max_retained_bytes,
+            });
+        }
+        Ok(())
+    }
+    /// Charges, numbers, and queues one settled transaction ahead of any
+    /// message event its head causes. Disabled collectors emit nothing.
+    fn emit(&mut self, transaction: Transaction, output: &mut Vec<Event>) -> Result<(), Error> {
+        if self.transactions.is_none() {
+            return Ok(());
+        }
+        self.charge_retained(transaction::TRANSACTION_BYTES)?;
+        let transaction = self
+            .transactions
+            .as_mut()
+            .expect("transactions checked enabled")
+            .emit(transaction);
+        output.push(Event::Transaction(Box::new(transaction)));
+        Ok(())
+    }
+    /// Settles drained pending requests as `unanswered` exactly once, in
+    /// ascending request-message index, and keeps the long-standing
+    /// requests-without-final-response counter.
+    fn retire(
+        &mut self,
+        mut pending: Vec<(RequestKey, Pending)>,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        pending.sort_by_key(|(_, request)| request.index);
+        self.summary.requests_without_final_response += pending.len() as u64;
+        for (key, request) in pending {
+            self.emit(
+                Transaction::unanswered(&key, request.index, request.transaction),
+                output,
+            )?;
+        }
+        Ok(())
     }
     fn event(
         &mut self,
         event: application::Event,
         number: u64,
+        marker: Option<Availability>,
         output: &mut Vec<Event>,
     ) -> Result<(), Error> {
         let (flow, stream, status, clean) = match event {
-            application::Event::Data(data) => return self.data(data, output),
+            application::Event::Data(data) => return self.data(data, marker, output),
             application::Event::Gap { flow, stream } => (flow, stream, Status::Gap, false),
             application::Event::Conflict { flow, stream } => {
                 (flow, stream, Status::Conflict, false)
@@ -225,14 +321,22 @@ impl Collector {
             .is_some_and(|old| old != data.generation)
         {
             self.upgraded.retain(|(stream, _)| *stream != data.stream);
-            self.requests.retain(|((stream, _), _), queue| {
-                if *stream == data.stream {
-                    self.summary.requests_without_final_response += queue.len() as u64;
+            // A reused stream retires the old generation's pending requests
+            // as unanswered before the new generation parses.
+            let mut pending = Vec::new();
+            self.requests.retain(|key, queue| {
+                if key.0.0 == data.stream {
+                    pending.extend(
+                        std::mem::take(queue)
+                            .into_iter()
+                            .map(|request| (key.clone(), request)),
+                    );
                     false
                 } else {
                     true
                 }
             });
+            self.retire(pending, output)?;
         }
         let mut direction = self.directions.remove(&data.flow).unwrap_or(Direction {
             stream: data.stream,
@@ -253,7 +357,12 @@ impl Collector {
         Ok(direction)
     }
 
-    fn data(&mut self, data: application::Delivery, output: &mut Vec<Event>) -> Result<(), Error> {
+    fn data(
+        &mut self,
+        data: application::Delivery,
+        marker: Option<Availability>,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
         let connection = (data.stream, data.generation);
         let mut direction = self.direction_for(&data, output)?;
         let mut input = data.bytes.as_ref();
@@ -278,6 +387,7 @@ impl Collector {
                     body: None,
                     framing: None,
                     request: None,
+                    started: None,
                     sources: data.sources.clone(),
                 });
             }
@@ -305,6 +415,11 @@ impl Collector {
                 self.check_buffer(live.buffered().saturating_add(take))?;
                 live.header.extend_from_slice(&run[..take]);
                 input = &input[take..];
+                // The observation that consumes this head's first byte marks
+                // where a response's header wait begins.
+                if take > 0 && live.started.is_none() && self.transactions.is_some() {
+                    live.started = marker;
+                }
                 if live.header.len() > http::MAX_HEADER_BYTES {
                     self.flush(
                         &data.flow,
@@ -330,16 +445,7 @@ impl Collector {
                 if !live.header.ends_with(b"\r\n\r\n") {
                     continue;
                 }
-                self.retained = self
-                    .retained
-                    .saturating_add(live.header.len().saturating_mul(32))
-                    .saturating_add(4096);
-                if self.retained > self.limits.max_retained_bytes {
-                    return Err(Error::Limit {
-                        field: "max_retained_bytes",
-                        limit: self.limits.max_retained_bytes,
-                    });
-                }
+                self.charge_retained(live.header.len().saturating_mul(32).saturating_add(4096))?;
                 let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
                 let (head, _) = match parsed {
                     Ok(Some(head)) => head,
@@ -357,33 +463,87 @@ impl Collector {
                     }
                 };
                 let mut request_method = None;
-                if head.status().is_some() {
+                if let Some(status) = head.status() {
                     let key = (connection, data.flow.reverse());
+                    let mut consumed = None;
+                    let mut informational = false;
                     if let Some(queue) = self.requests.get_mut(&key) {
                         if let Some(request) = queue.front() {
                             live.request = Some(request.index);
                             request_method = Some(request.method.clone());
-                        }
-                        if head
-                            .status()
-                            .is_some_and(|status| status >= 200 || status == 101)
-                        {
-                            queue.pop_front();
+                            if status >= 200 || status == 101 {
+                                consumed = queue.pop_front();
+                            } else {
+                                informational = true;
+                            }
                         }
                         if queue.is_empty() {
                             self.requests.remove(&key);
                         }
                     }
-                    if live.request.is_none() {
+                    if let Some(request) = consumed {
+                        self.emit(
+                            Transaction::paired(
+                                &key,
+                                request.index,
+                                request.transaction,
+                                live.index,
+                                status,
+                                live.started,
+                                marker,
+                            ),
+                            output,
+                        )?;
+                    } else if informational {
+                        // A 1xx (except 101) response keeps its request
+                        // pending; the transaction waits for the final
+                        // response head to settle.
+                        if self.transactions.is_some() {
+                            self.charge_retained(transaction::INFORMATIONAL_BYTES)?;
+                            let request = self
+                                .requests
+                                .get_mut(&key)
+                                .and_then(VecDeque::front_mut)
+                                .expect("informational response leaves the request pending");
+                            request
+                                .transaction
+                                .as_mut()
+                                .expect("enabled transactions retain pending markers")
+                                .informational
+                                .push(live.index);
+                        }
+                    } else if live.request.is_none() {
                         self.summary.responses_without_request += 1;
+                        self.emit(
+                            Transaction::orphan(
+                                connection,
+                                data.flow.clone(),
+                                live.index,
+                                status,
+                                live.started,
+                                marker,
+                            ),
+                            output,
+                        )?;
                     }
                 } else if let Some(method) = head.method() {
+                    if self.transactions.is_some() {
+                        self.charge_retained(transaction::PENDING_REQUEST_BYTES)?;
+                    }
                     self.requests
                         .entry((connection, data.flow.clone()))
                         .or_default()
                         .push_back(Pending {
                             index: live.index,
                             method: method.to_owned(),
+                            transaction: if self.transactions.is_some() {
+                                marker.map(|marker| transaction::PendingTransaction {
+                                    request_headers_available: marker,
+                                    informational: Vec::new(),
+                                })
+                            } else {
+                                None
+                            },
                         });
                 }
                 let framing = head.body(request_method.as_deref());
@@ -525,13 +685,7 @@ impl Collector {
             })
             .saturating_mul(32)
             .saturating_add(4096);
-        self.retained = self.retained.saturating_add(extra);
-        if self.retained > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.charge_retained(extra)?;
         let header_wire = live
             .head
             .as_ref()
@@ -676,7 +830,7 @@ mod tests {
             .iter()
             .filter_map(|event| match event {
                 Event::Message(message) => Some(message.as_ref()),
-                Event::Issue(_) => None,
+                Event::Issue(_) | Event::Transaction(_) => None,
             })
             .collect()
     }
@@ -691,17 +845,19 @@ mod tests {
 
         let baseline = tracker.union_reservations();
         collector
-            .data(delivery(&tracker, &flow, 4, b"GET /lo"), &mut output)
+            .data(delivery(&tracker, &flow, 4, b"GET /lo"), None, &mut output)
             .expect("first header bytes");
         collector
             .data(
                 delivery(&tracker, &flow, 5, b"ng HTTP/1.1\r\nHost: exa"),
+                None,
                 &mut output,
             )
             .expect("continuation bytes");
         collector
             .data(
                 delivery(&tracker, &flow, 6, b"mple.test\r\n\r\n"),
+                None,
                 &mut output,
             )
             .expect("final header bytes");
@@ -744,6 +900,7 @@ mod tests {
                     9,
                     b"GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\n\r\n",
                 ),
+                None,
                 &mut output,
             )
             .expect("pipelined requests");
@@ -773,16 +930,20 @@ mod tests {
         let mut output = Vec::new();
 
         collector
-            .data(delivery(&tracker, &flow, 4, b"GET /x"), &mut output)
+            .data(delivery(&tracker, &flow, 4, b"GET /x"), None, &mut output)
             .expect("first bytes");
         collector
-            .data(delivery(&tracker, &flow, 5, b" HTTP/1.1"), &mut output)
+            .data(
+                delivery(&tracker, &flow, 5, b" HTTP/1.1"),
+                None,
+                &mut output,
+            )
             .expect("second delivery");
         let baseline = tracker.union_reservations();
         // The third delivery contributes only a frame the message already
         // holds, so the one permitted merge is allocation-free.
         collector
-            .data(delivery(&tracker, &flow, 5, b"\r\n\r\n"), &mut output)
+            .data(delivery(&tracker, &flow, 5, b"\r\n\r\n"), None, &mut output)
             .expect("subset delivery");
 
         assert_eq!(tracker.union_reservations(), baseline);
@@ -812,6 +973,7 @@ mod tests {
         collector
             .data(
                 delivery(&tracker, &flow, 4, b"GET /a HTTP/1.1\rX\r\n\r\n"),
+                None,
                 &mut output,
             )
             .expect("bare CR");
@@ -833,6 +995,7 @@ mod tests {
         collector
             .data(
                 delivery(&tracker, &flow, 5, b"GET /b HTTP/1.1\nrest\r\n\r\n"),
+                None,
                 &mut output,
             )
             .expect("bare LF");
@@ -859,11 +1022,16 @@ mod tests {
         collector
             .data(
                 delivery(&tracker, &flow, 4, b"GET /c HTTP/1.1\r"),
+                None,
                 &mut output,
             )
             .expect("pending CR");
         collector
-            .data(delivery(&tracker, &flow, 5, b"X: y\r\n\r\n"), &mut output)
+            .data(
+                delivery(&tracker, &flow, 5, b"X: y\r\n\r\n"),
+                None,
+                &mut output,
+            )
             .expect("bare CR at boundary");
         let boundary = messages(&output);
         let [message] = boundary.as_slice() else {
@@ -879,12 +1047,14 @@ mod tests {
         collector
             .data(
                 delivery(&tracker, &flow, 6, b"GET /d HTTP/1.1\r"),
+                None,
                 &mut output,
             )
             .expect("pending CR");
         collector
             .data(
                 delivery(&tracker, &flow, 7, b"\nHost: h\r\n\r\n"),
+                None,
                 &mut output,
             )
             .expect("CRLF split");
@@ -910,7 +1080,7 @@ mod tests {
             Box::leak(vec![b'a'; http::MAX_HEADER_BYTES + 2].into_boxed_slice());
 
         collector
-            .data(delivery(&tracker, &flow, 4, input), &mut output)
+            .data(delivery(&tracker, &flow, 4, input), None, &mut output)
             .expect("oversized header");
 
         let messages = messages(&output);
@@ -940,7 +1110,7 @@ mod tests {
         let input: &'static [u8] = Box::leak(head.into_boxed_slice());
 
         collector
-            .data(delivery(&tracker, &flow, 4, input), &mut output)
+            .data(delivery(&tracker, &flow, 4, input), None, &mut output)
             .expect("over-count header");
 
         let messages = messages(&output);
@@ -963,11 +1133,11 @@ mod tests {
         let mut output = Vec::new();
 
         collector
-            .data(delivery(&tracker, &flow, 4, b"GET /x"), &mut output)
+            .data(delivery(&tracker, &flow, 4, b"GET /x"), None, &mut output)
             .expect("first bytes");
         let baseline = tracker.union_reservations();
         collector
-            .data(delivery(&tracker, &flow, 5, b""), &mut output)
+            .data(delivery(&tracker, &flow, 5, b""), None, &mut output)
             .expect("empty delivery");
         assert_eq!(tracker.union_reservations(), baseline);
     }

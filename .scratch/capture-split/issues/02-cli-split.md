@@ -1,6 +1,6 @@
 # SPLIT-02: Add the split command and bounded artifact publication
 
-Status: ready-for-agent
+Status: resolved (1706cc12; all listed tests green)
 Blocked by: SPLIT-01
 Size: medium
 Spec: [user behavior, resources, publication, output, SP01–SP17](../spec.md)
@@ -31,17 +31,17 @@ Spec: [user behavior, resources, publication, output, SP01–SP17](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] SP01–SP17 are covered. CLI owns compressed-input SP06, SP08, SP10–SP15,
+- [x] SP01–SP17 are covered. CLI owns compressed-input SP06, SP08, SP10–SP15,
   duration validation in SP17, and the composed process variants of SP01–SP07;
   core owns the byte-equivalence/replay cases listed in SPLIT-01.
-- [ ] `capture_split_contracts.rs` process tests cover stdin, compression,
+- [x] `capture_split_contracts.rs` process tests cover stdin, compression,
   exact filenames, schema-valid results, empty source, collisions, and late
   malformed input with no destinations.
-- [ ] Private staging tests cover compressor finish, sync, commit, cleanup,
+- [x] Private staging tests cover compressor finish, sync, commit, cleanup,
   cancellation/deadline and bounded open handles; no one-handle-per-part leak.
-- [ ] Existing follow publication and staged-output tests pass unchanged in
+- [x] Existing follow publication and staged-output tests pass unchanged in
   behavior; no accidental broad refactor of other artifact commands.
-- [ ] Every flag has help, resource diagnostics/preset coverage, and correct
+- [x] Every flag has help, resource diagnostics/preset coverage, and correct
   range validation; new command exists in generated completions/man pages.
 
 ```sh

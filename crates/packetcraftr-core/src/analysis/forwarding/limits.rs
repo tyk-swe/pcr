@@ -7,7 +7,7 @@
 use serde::Serialize;
 use std::io::{self, Write};
 
-use super::evaluate::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
+use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
 
 /// Finite comparison limits. Input observations have their own collection
 /// limits; these ceilings account for the additional index and report work.

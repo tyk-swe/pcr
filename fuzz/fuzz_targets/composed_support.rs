@@ -10,8 +10,9 @@ use std::{
 };
 
 use packetcraftr_core::{
-    analysis::{self, forwarding, pcap},
+    analysis::{self, forwarding},
     build::{Builder, Options as BuildOptions},
+    capture_file,
     codec::Context,
     error::BoundaryError,
     frame::{Frame, LinkType},
@@ -33,10 +34,17 @@ pub fn options() -> analysis::Options<'static> {
             max_flows: 16,
             max_scope_bytes: 1024 * 1024,
             max_provenance_bytes: 2 * 1024 * 1024,
-            max_tcp_bytes_per_flow: 64 * 1024,
-            max_tcp_reassembly_bytes: 1024 * 1024,
-            max_tcp_segments_per_flow: 512,
-            max_ip_reassembly_bytes: 1024 * 1024,
+            tcp: analysis::reassembly::tcp::Limits {
+                max_flows: 32,
+                max_bytes_per_flow: 64 * 1024,
+                max_aggregate_bytes: 1024 * 1024,
+                max_segments_per_flow: 512,
+                ..analysis::reassembly::tcp::Limits::default()
+            },
+            ip: analysis::reassembly::ip::Limits {
+                max_aggregate_bytes: 1024 * 1024,
+                ..analysis::reassembly::ip::Limits::default()
+            },
             max_duration: Duration::from_secs(1),
             ..analysis::Limits::default()
         },
@@ -92,12 +100,12 @@ pub fn tcp(sequence: u32, flags: u16, payload: &[u8]) -> Frame {
     finish(packet, payload)
 }
 
-pub fn reader(frames: &[Frame]) -> pcap::Reader<Cursor<Vec<u8>>> {
-    let mut writer = pcap::Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
+pub fn reader(frames: &[Frame]) -> capture_file::Reader<Cursor<Vec<u8>>> {
+    let mut writer = capture_file::Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
     for frame in frames {
         writer.write_frame(frame).unwrap();
     }
-    pcap::Reader::new(Cursor::new(writer.into_inner())).unwrap()
+    capture_file::Reader::new(Cursor::new(writer.into_inner())).unwrap()
 }
 
 pub fn collect(

@@ -9,3 +9,12 @@ use crate::output::network::Decision;
 pub struct Report {
     pub routes: Vec<Decision>,
 }
+
+/// One route per interface, in the order the caller listed them.
+impl From<Vec<packetcraftr_netio::route::Decision>> for Report {
+    fn from(routes: Vec<packetcraftr_netio::route::Decision>) -> Self {
+        Self {
+            routes: routes.into_iter().map(Into::into).collect(),
+        }
+    }
+}

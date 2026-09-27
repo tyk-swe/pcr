@@ -9,9 +9,7 @@ use common::ip_fragments::{
     cascading_vxlan_tcp_frames, ipv4_protocol_fragment_frame, reader_with_link_type,
 };
 use common::registry;
-use packetcraftr_core::analysis::reassembly::ip::{
-    IncompleteDatagram, IncompleteReason, ResourceError,
-};
+use packetcraftr_core::analysis::reassembly::ip::{IncompleteDatagram, IncompleteReason, Resource};
 use packetcraftr_core::analysis::{
     IpDatagramOutcome, IpEvent, IpEventRecord, Limits, Options, run_with_ip_events,
 };
@@ -29,7 +27,10 @@ fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
         registry,
         &Options {
             limits: Limits {
-                max_ip_reassembly_bytes: 10_000,
+                ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+                    max_aggregate_bytes: 10_000,
+                    ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+                },
                 ..Limits::default()
             },
             ..Options::default()
@@ -43,7 +44,7 @@ fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
         packetcraftr_core::analysis::Error::IpReassembly {
             number: 2,
             source: packetcraftr_core::analysis::reassembly::ip::Error::Resource(
-                ResourceError::AggregateMemoryLimit { limit: 10_000 }
+                Resource::AggregateMemoryLimit { limit: 10_000 }
             )
         }
     ));
@@ -79,8 +80,11 @@ fn idle_expiry_is_delivered_before_a_failing_fragment_push() {
         ),
     ];
     let limits = Limits {
-        max_ip_bytes_per_datagram: 8,
-        ip_idle_expiry: Duration::from_secs(1),
+        ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+            max_bytes_per_datagram: 8,
+            idle_expiry: Duration::from_secs(1),
+            ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+        },
         ..Limits::default()
     };
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);

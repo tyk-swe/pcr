@@ -5,15 +5,14 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
-use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::capture_file::Format as CaptureFormat;
+use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::ipv6::Fragment as Ipv6Fragment;
-use packetcraftr_core::protocol::network::Ipv6;
+use packetcraftr_core::protocol::network::{Fragment as Ipv6Fragment, Ipv6};
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
@@ -954,7 +953,7 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
     let filtered = run(&["--output", "pcap", "read", path, "--filter", "udp"]);
     assert!(filtered.status.success(), "{:?}", filtered.stderr);
     let mut reader =
-        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(filtered.stdout))
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(filtered.stdout))
             .unwrap();
     for packet in [UDP_CLIENT, UDP_SERVER] {
         assert_eq!(
@@ -1292,7 +1291,7 @@ fn read_epoch_bounds_apply_to_capture_rewrite_and_compose_with_filters() {
     let path = path_text(capture.path());
     let rewritten = run_success(&["--output", "pcap", "read", path, "--stop-epoch", "1.5"]);
     let mut reader =
-        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(rewritten.stdout))
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(rewritten.stdout))
             .expect("rewritten capture opens");
     let mut kept = Vec::new();
     while let Some(frame) = reader.next_frame().expect("rewritten frame reads") {
@@ -1934,7 +1933,7 @@ fn the_tls_protocol_report_names_every_port_bound_to_the_per_frame_layer() {
 
 #[test]
 fn read_exports_selected_source_frames_in_both_capture_formats() {
-    use packetcraftr_core::analysis::pcap::Reader;
+    use packetcraftr_core::capture_file::Reader;
     use std::io::Cursor;
     for (format, capture) in [
         ("pcap", write_capture_frames(&[UDP_CLIENT, UDP_SERVER])),

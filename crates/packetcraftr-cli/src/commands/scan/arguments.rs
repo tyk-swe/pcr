@@ -7,7 +7,8 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, ProbeWindow, Probing,
+    RouteSelectionArgs, TimeoutArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -151,9 +152,8 @@ pub(crate) struct Args {
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
-    /// Response window for each capture-ready probe.
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<ProbeWindow>,
     /// Operation-wide probe-start rate ceiling, not achieved throughput.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
@@ -163,9 +163,8 @@ pub(crate) struct Args {
     /// Maximum generated probes after target resolution and attempts.
     #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
     pub(crate) max_probes: usize,
-    /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Probing>,
     /// Maximum undecodable exact frames retained across the scan.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,

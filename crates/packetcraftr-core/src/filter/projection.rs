@@ -4,16 +4,12 @@
 //! Field-only queries sharing filter path resolution and evaluation.
 
 use super::{
-    Context, Requirements,
+    Context, Error, Requirements,
     ast::{Op, Predicate},
     eval, parser,
     path::{FieldRef, FieldSource},
 };
-use crate::{
-    error::{Classification, Classified, Kind},
-    field::FieldValue,
-    registry::Registry,
-};
+use crate::{field::FieldValue, registry::Registry};
 
 #[derive(Clone, Debug)]
 pub struct Projection {
@@ -21,28 +17,10 @@ pub struct Projection {
     fields: Vec<FieldRef>,
     requirements: Requirements,
 }
-#[derive(Clone, Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ProjectionError {
-    #[error("invalid projection field: {0}")]
-    Field(#[from] super::Error),
-    #[error("projection exceeds {field}={limit}")]
-    Limit { field: &'static str, limit: usize },
-}
-impl Classified for ProjectionError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Field(_) => Classification::new(
-                "cli.projection_field",
-                Kind::Cli,
-                Some("select registered field paths"),
-            ),
-            Self::Limit { .. } => Classification::new(
-                "policy.projection_limit",
-                Kind::Policy,
-                Some("select fewer or smaller fields within the finite projection budget"),
-            ),
-        }
+/// Attributes a column's filter failure to the projection field it names.
+fn invalid_field(source: Error) -> Error {
+    Error::ProjectionField {
+        source: Box::new(source),
     }
 }
 
@@ -51,7 +29,7 @@ impl Projection {
     pub fn compile<'a>(
         columns: impl IntoIterator<Item = &'a str>,
         registry: &Registry,
-    ) -> Result<Self, ProjectionError> {
+    ) -> Result<Self, Error> {
         let mut projection = Self {
             columns: Vec::new(),
             fields: Vec::new(),
@@ -60,7 +38,7 @@ impl Projection {
         let mut bytes = 0usize;
         for column in columns {
             if projection.fields.len() >= 256 {
-                return Err(ProjectionError::Limit {
+                return Err(Error::ProjectionLimit {
                     field: "columns",
                     limit: 256,
                 });
@@ -68,7 +46,7 @@ impl Projection {
             bytes = bytes
                 .checked_add(column.len())
                 .filter(|bytes| *bytes <= parser::DEFAULT_MAX_FILTER_BYTES)
-                .ok_or(ProjectionError::Limit {
+                .ok_or(Error::ProjectionLimit {
                     field: "field_path_bytes",
                     limit: parser::DEFAULT_MAX_FILTER_BYTES,
                 })?;
@@ -79,13 +57,13 @@ impl Projection {
                     max_terms: 1,
                     ..Default::default()
                 },
-            )?;
+            )
+            .map_err(invalid_field)?;
             let [Op::Leaf(Predicate::Bare { field, .. })] = compiled.program.as_slice() else {
-                return Err(super::Error::Syntax {
+                return Err(invalid_field(Error::Syntax {
                     offset: 0,
                     message: "projection requires one field path per column".to_owned(),
-                }
-                .into());
+                }));
             };
             projection.columns.push(field.path.clone());
             projection.fields.push(field.clone());
@@ -95,7 +73,7 @@ impl Projection {
             projection.requirements.timestamp |= compiled.requirements.timestamp;
         }
         if projection.fields.is_empty() {
-            return Err(super::Error::Empty.into());
+            return Err(invalid_field(Error::Empty));
         }
         Ok(projection)
     }
@@ -142,7 +120,7 @@ impl Projection {
         &self,
         context: &Context<'_>,
         max_bytes: usize,
-    ) -> Result<Vec<Option<FieldValue>>, ProjectionError> {
+    ) -> Result<Vec<Option<FieldValue>>, Error> {
         let mut remaining = max_bytes;
         self.values_with_budget(context, &mut remaining)
     }
@@ -152,9 +130,9 @@ impl Projection {
         &self,
         context: &Context<'_>,
         remaining: &mut usize,
-    ) -> Result<Vec<Option<FieldValue>>, ProjectionError> {
+    ) -> Result<Vec<Option<FieldValue>>, Error> {
         let max_bytes = *remaining;
-        let limit = || ProjectionError::Limit {
+        let limit = || Error::ProjectionLimit {
             field: "cell_bytes",
             limit: max_bytes,
         };

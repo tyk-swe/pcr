@@ -310,7 +310,7 @@ fn stats_derived_metrics_stay_absent_for_empty_and_zero_span_captures() {
 
 #[test]
 fn stats_reports_every_declared_pcapng_interface_without_collapsing() {
-    use packetcraftr_core::analysis::pcap::Writer;
+    use packetcraftr_core::capture_file::Writer;
     use packetcraftr_core::frame::LinkType;
 
     let registry = registry();
@@ -366,7 +366,7 @@ fn stats_reports_every_declared_pcapng_interface_without_collapsing() {
     writer.write_frame(&ethernet).expect("second frame writes");
 
     let mut capture =
-        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(writer.into_inner()))
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(writer.into_inner()))
             .expect("multi-interface capture opens");
     let mut collector = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
         .expect("valid interval");

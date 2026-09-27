@@ -1,0 +1,558 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! `capture`: streams live frames from one or more interfaces to text,
+//! NDJSON, a capture stream, or rotating capture files.
+
+pub(super) mod arguments;
+mod files;
+mod rendering;
+#[cfg(test)]
+mod tests;
+mod writer;
+
+use self::arguments::Args;
+use crate::output::{
+    capture::Retention,
+    contract::{CaptureFormat, Command},
+};
+use crate::{
+    errors::CliError,
+    filtering,
+    rendering::StreamEncoder,
+    system::{Runtime, client, resolve},
+};
+use packetcraftr_core::{capture_file, error::Kind};
+use packetcraftr_netio as net;
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
+
+use self::files::Files;
+use crate::command_options::Compression;
+use crate::output;
+use crate::rendering::{render_frame_text, write_hex_line};
+use packetcraftr::capture::{self as workflow, Control, Event};
+use packetcraftr::policy::CaptureBudget;
+use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
+use packetcraftr_core::{
+    self as core,
+    capture_file::compression,
+    decode::DecodedPacket,
+    error::{BoundaryError, Classified},
+    frame::Frame,
+    registry::Registry,
+};
+use std::io;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+impl super::Spec for Args {
+    type Format = crate::output::contract::CaptureFormat;
+    const CANCELLATION: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            rotate_bytes: Bytes @ CaptureStorage,
+            rotate_interval_ms: Milliseconds @ CaptureStorage,
+            rotate_files: Count @ CaptureStorage,
+            retention: Policy @ CaptureStorage,
+            max_projection_bytes: Bytes @ ResultRetention,
+        ]);
+        self.timeout.resources(settings);
+        self.limits.resources(settings);
+        self.budgets.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
+pub(super) fn run(
+    args: Args,
+    format: CaptureFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let timeout = args.timeout.timeout();
+    if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
+        return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
+            timeout,
+            maximum: net::capture::MAX_TIMEOUT,
+        }));
+    }
+    if args.interface.len() > 256 {
+        return Err(CliError::new(
+            Kind::Usage,
+            "capture accepts at most 256 interface selectors before deduplication",
+        ));
+    }
+    let compression = if args.write.is_some() {
+        if !matches!(
+            format,
+            CaptureFormat::Text | CaptureFormat::Json | CaptureFormat::Ndjson
+        ) {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--write requires text, JSON, or NDJSON reporting",
+            ));
+        }
+        args.compression.for_file()
+    } else {
+        let compression = args.compression.for_output(format.as_format())?;
+        if args.rotate_bytes.is_some()
+            || args.rotate_interval_ms.is_some()
+            || args.rotate_files != 1
+            || Retention::from(args.retention) != Retention::Stop
+        {
+            return Err(CliError::new(
+                Kind::Usage,
+                "capture rotation requires --write",
+            ));
+        }
+        if format == CaptureFormat::Json {
+            return Err(CliError::new(
+                Kind::Usage,
+                "JSON capture summaries require --write to retain packet data",
+            ));
+        }
+        compression
+    };
+    if (args.dissect || !args.fields.is_empty())
+        && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson)
+    {
+        return Err(CliError::from_classification(
+            packetcraftr_core::error::Classification::new(
+                "cli.capture_decode_format",
+                Kind::Usage,
+                Some("use --output text or --output ndjson for decoded frame output"),
+            ),
+            "--dissect and --field require text or NDJSON output",
+            Vec::new(),
+        ));
+    }
+    let limits = args.limits.into_limits();
+    limits.validate().map_err(CliError::classified)?;
+    let native = net::capture::NativeSettings {
+        buffer_size: args.capture_buffer_bytes,
+        timestamp_source: args.timestamp_source.map(Into::into),
+        timestamp_precision: args.timestamp_precision.map(Into::into),
+    };
+    native.validate(&limits).map_err(CliError::classified)?;
+    let registry = args.decode.registry()?;
+    let projector = if args.fields.is_empty() {
+        None
+    } else {
+        super::projection::Projector::prepare(
+            &args.fields,
+            args.max_projection_bytes,
+            &registry,
+            Command::Capture,
+            format.as_format(),
+        )?
+    };
+    let decoding = Decoding::prepare(
+        args.dissect,
+        projector.is_some(),
+        args.filter.as_deref(),
+        &registry,
+        limits.snap_length,
+    )?;
+    // The raw selector remains the filter's owner when no output decoding was
+    // requested; `Decoding` otherwise evaluates the same filter itself so a
+    // frame is decoded at most once.
+    let selector = if decoding.is_none() {
+        filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
+    } else {
+        None
+    };
+    let policy = args.budgets.into_policy();
+    let budget = CaptureBudget::new(&policy);
+    let files = args
+        .write
+        .map(|path| {
+            files::Files::new(
+                files::Options {
+                    path,
+                    compression,
+                    rotate_bytes: args.rotate_bytes,
+                    rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
+                    max_files: args.rotate_files,
+                    retention: args.retention.into(),
+                },
+                capture_file::Limits {
+                    max_frames: budget.max_frames(),
+                    max_bytes: budget.max_bytes(),
+                },
+            )
+        })
+        .transpose()
+        .map_err(CliError::classified)?;
+    let mut seen = HashSet::new();
+    let mut interfaces = Vec::new();
+    for source in args.interface {
+        let interface = resolve(source.get()?)?;
+        if seen.insert(interface.index) {
+            interfaces.push(interface);
+        }
+    }
+    if format == CaptureFormat::Pcap && interfaces.len() != 1 {
+        return Err(CliError::new(
+            Kind::Usage,
+            "multiple interfaces require PCAPNG capture output",
+        ));
+    }
+    let request = workflow::Request::new(
+        net::capture::GroupRequest {
+            interfaces,
+            limits,
+            filter: args.capture_filter,
+            promiscuous: args.promiscuous,
+            native,
+        },
+        timeout,
+    );
+    drive(
+        &client(registry, policy, Runtime::Capture),
+        request,
+        Output {
+            format,
+            compression,
+            selector,
+            decoding,
+            projector,
+            files,
+            stream,
+        },
+    )
+}
+
+/// Shared per-frame decoding for `--filter`, `--dissect`, and `--field`.
+/// Selection decodes a kept frame once and parks it so emission republishes
+/// the same dissection; decoded state never outlives one frame.
+struct Decoding {
+    frames: FrameDecoder,
+    parked: Option<(u64, DecodedPacket)>,
+}
+
+impl Decoding {
+    /// Builds the shared decoding state, or `None` when neither `--dissect`
+    /// nor `--field` asked for decoded output. `parked` starts empty.
+    fn prepare(
+        dissect: bool,
+        projector: bool,
+        filter: Option<&str>,
+        registry: &Arc<Registry>,
+        snap_length: usize,
+    ) -> Result<Option<Self>, CliError> {
+        if !dissect && !projector {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            frames: filtering::frame_decoder(registry, filter, snap_length)?,
+            parked: None,
+        }))
+    }
+
+    /// The filter half of frame selection, run by the capture's selector; a
+    /// kept frame's dissection is parked for the sink.
+    fn select(&mut self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
+        let Some(decoded) = self
+            .frames
+            .decode_selected(source_frame, frame)
+            .map_err(|error| filtering::frame_error(source_frame, error))?
+        else {
+            return Ok(false);
+        };
+        self.parked = Some((source_frame, decoded));
+        Ok(true)
+    }
+
+    /// Reuses the dissection `select` parked for this frame, decoding only
+    /// when no selection ran for it (the no-filter case).
+    fn take_or_decode(
+        &mut self,
+        source_frame: u64,
+        frame: &Frame,
+    ) -> Result<DecodedPacket, CliError> {
+        if let Some((number, decoded)) = self.parked.take()
+            && number == source_frame
+        {
+            return Ok(decoded);
+        }
+        self.frames.decode(frame).map_err(CliError::classified)
+    }
+}
+
+/// Where a capture's frames and summary go.
+struct Output<'a> {
+    format: CaptureFormat,
+    compression: Compression,
+    selector: Option<FrameSelector>,
+    decoding: Option<Decoding>,
+    projector: Option<super::projection::Projector>,
+    files: Option<Files>,
+    stream: &'a StreamEncoder,
+}
+/// What the capture sink writes to while the capture runs. The command
+/// finalizes it afterwards, whether or not the capture succeeded.
+struct Destinations {
+    files: Option<Files>,
+    writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
+    projector: Option<super::projection::Projector>,
+}
+
+/// The client is injected so normal capture, rotation, and mixed interfaces
+/// all exercise the same workflow and finalization path.
+fn drive<P: packetcraftr::Providers>(
+    client: &packetcraftr::Client<P>,
+    request: workflow::Request,
+    rendering: Output<'_>,
+) -> Result<(), CliError> {
+    let budget = CaptureBudget::new(client.policy());
+    let limits = capture_file::Limits {
+        max_frames: budget.max_frames(),
+        max_bytes: budget.max_bytes(),
+    };
+    let Output {
+        format,
+        compression,
+        selector,
+        decoding,
+        projector,
+        files,
+        stream,
+    } = rendering;
+    // The selector runs on the capture's thread and the sink on its worker;
+    // the capture waits for each answer, so they never contend.
+    let decoding = decoding.map(|decoding| Arc::new(Mutex::new(decoding)));
+    let destinations = Arc::new(Mutex::new(Destinations {
+        files,
+        writer: None,
+        projector,
+    }));
+    let request = match (&decoding, selector) {
+        (Some(decoding), _) => {
+            let decoding = Arc::clone(decoding);
+            request.with_selector(move |number, frame| {
+                lock(&decoding)
+                    .select(number, frame)
+                    .map_err(CliError::into_boundary_error)
+            })
+        }
+        (None, Some(selector)) => request.with_selector(move |number, frame| {
+            selector
+                .keep(number, frame)
+                .map_err(|error| filtering::frame_error(number, error).into_boundary_error())
+        }),
+        (None, None) => request,
+    };
+    let sink = {
+        let destinations = Arc::clone(&destinations);
+        let stream = stream.clone();
+        move |event| {
+            let mut destinations = lock(&destinations);
+            let Destinations {
+                files,
+                writer,
+                projector,
+            } = &mut *destinations;
+            match event {
+                Event::Started { sources } => {
+                    if let Some(files) = files {
+                        files
+                            .initialize(sources)
+                            .map_err(BoundaryError::from_error)?;
+                    } else if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
+                        let destination =
+                            compression::Output::new(io::stdout(), compression.format())
+                                .map_err(BoundaryError::from_error)?;
+                        *writer = Some(
+                            writer::initialize(
+                                destination,
+                                if format == CaptureFormat::Pcap {
+                                    capture_file::Format::Pcap
+                                } else {
+                                    capture_file::Format::PcapNg
+                                },
+                                &sources,
+                                limits,
+                            )
+                            .map_err(BoundaryError::from_error)?,
+                        );
+                    }
+                    Ok(Control::Continue)
+                }
+                Event::Frame {
+                    source_frame,
+                    elapsed,
+                    frame,
+                    ..
+                } => {
+                    let control = if let Some(files) = files {
+                        files
+                            .write(&frame, source_frame, elapsed)
+                            .map_err(BoundaryError::from_error)?
+                    } else {
+                        Control::Continue
+                    };
+                    if control == Control::StopBefore {
+                        return Ok(control);
+                    }
+                    let mut decoding = decoding.as_deref().map(lock);
+                    emit_frame(
+                        decoding.as_deref_mut(),
+                        projector.as_mut(),
+                        &stream,
+                        format,
+                        writer,
+                        source_frame,
+                        frame,
+                    )
+                    .map_err(CliError::into_boundary_error)?;
+                    Ok(control)
+                }
+            }
+        }
+    };
+    let result = client.capture(request, sink);
+    let mut destinations = lock(&destinations);
+    // Finalize every initialized destination even when capture or a consumer
+    // failed, retaining whatever complete records reached the writer.
+    let file_finish = destinations
+        .files
+        .as_mut()
+        .map(Files::finish)
+        .transpose()
+        .map_err(CliError::classified);
+    let binary_finish = destinations
+        .writer
+        .take()
+        .map(|writer| writer.into_inner().finish())
+        .transpose()
+        .map_err(CliError::classified);
+    let files = destinations.files.as_ref().map(Files::report);
+    let (report, mut error) = match result {
+        Ok(report) => (report, None),
+        Err(error) => {
+            let cli = CliError::from_classification(
+                error.classification(),
+                error.to_string(),
+                error.causes(),
+            )
+            .with_context(error.context());
+            (*error.report, Some(cli))
+        }
+    };
+    for failure in [file_finish.err(), binary_finish.err()]
+        .into_iter()
+        .flatten()
+    {
+        error = Some(match error.take() {
+            Some(primary) => primary.with_secondary("output finalization", failure),
+            None => failure,
+        });
+    }
+
+    let snapshot = output::capture::Snapshot::from((&report, files));
+    if let Some(error) = error {
+        return Err(error.with_capture(snapshot));
+    }
+    // A projection that never matched a frame still owes its text header; the
+    // NDJSON terminal is the capture summary, never a second complete record.
+    if format == CaptureFormat::Text
+        && let Some(projector) = destinations.projector.take()
+    {
+        projector
+            .finish(report.frames_delivered, report.stats.bytes, stream)
+            .map_err(|error| error.with_capture(snapshot.clone()))?;
+    }
+    rendering::render_complete(format, &snapshot, report.diagnostics, stream)
+        .map_err(|error| error.with_capture(snapshot))
+}
+
+/// Locks state the capture's selector, sink, and command share. A panic in
+/// one of them leaves the state as it was, which finalization still needs.
+fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Publishes one matched frame. Decoded output reuses the dissection the
+/// admission callback parked, projections stream as bounded `fields` records,
+/// and every sink error propagates so capture cleanup still runs.
+fn emit_frame(
+    decoding: Option<&mut Decoding>,
+    projector: Option<&mut super::projection::Projector>,
+    stream: &StreamEncoder,
+    format: CaptureFormat,
+    writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
+    source_frame: u64,
+    frame: Frame,
+) -> Result<(), CliError> {
+    if let Some(decoding) = decoding {
+        let decoded = decoding.take_or_decode(source_frame, &frame)?;
+        if let Some(projector) = projector {
+            let values = projector
+                .projection
+                .values(
+                    &core::filter::Context {
+                        decoded: &decoded,
+                        derived: &[],
+                        number: source_frame,
+                        tcp_stream: None,
+                        udp_stream: None,
+                    },
+                    projector.remaining(),
+                )
+                .map_err(CliError::classified)?;
+            return projector.emit(source_frame, values, stream);
+        }
+        return match format {
+            CaptureFormat::Text => {
+                // Only the text rendering needs a stack here; the NDJSON event
+                // builds its own in its conversion.
+                let stack = output::frame::Stack::from(&decoded);
+                let frame =
+                    output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
+                let source_frame = source_frame.try_into().map_err(CliError::classified)?;
+                render_frame_text(source_frame, &frame, Some(&stack))
+            }
+            CaptureFormat::Ndjson => {
+                output::capture::Event::try_from((source_frame, frame, &decoded))
+                    .map_err(CliError::classified)
+                    .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into))
+            }
+            CaptureFormat::Json
+            | CaptureFormat::Hex
+            | CaptureFormat::Pcap
+            | CaptureFormat::PcapNg => Err(CliError::new(
+                packetcraftr_core::error::Kind::Internal,
+                "decoded output requires text or NDJSON",
+            )),
+        };
+    }
+    match format {
+        CaptureFormat::Text => output::frame::Captured::try_from(frame)
+            .map_err(CliError::classified)
+            .and_then(|frame| {
+                let source_frame = source_frame.try_into().map_err(CliError::classified)?;
+                render_frame_text(source_frame, &frame, None)
+            }),
+        CaptureFormat::Hex => output::frame::Captured::try_from(frame)
+            .map_err(CliError::classified)
+            .and_then(|frame| write_hex_line(frame.bytes())),
+        CaptureFormat::Ndjson => output::capture::Event::try_from((source_frame, frame))
+            .map_err(CliError::classified)
+            .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),
+        CaptureFormat::Json => Ok(()),
+        CaptureFormat::Pcap | CaptureFormat::PcapNg => writer
+            .as_mut()
+            .expect("writer initialized before frames")
+            .write_frame(&frame)
+            .map_err(CliError::classified),
+    }
+}

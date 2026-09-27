@@ -199,14 +199,14 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
     assert_eq!(probe.ipv4, Ipv4Addr::new(192, 0, 2, 1));
 
     assert_eq!(
-        packetcraftr_core::protocol::raw::parse_hex("0x01:ab-CD 20").expect("hex"),
+        packetcraftr_core::layer::parse_hex("0x01:ab-CD 20").expect("hex"),
         Bytes::from_static(&[1, 0xab, 0xcd, 0x20])
     );
     for (input, expected) in [
         ("abc", "hex value must contain an even number of digits"),
         ("zz", "invalid hex at byte 0"),
     ] {
-        match packetcraftr_core::protocol::raw::parse_hex(input) {
+        match packetcraftr_core::layer::parse_hex(input) {
             Err(packetcraftr_core::codec::Error::Invalid { message, .. }) => {
                 assert_eq!(message, expected, "{input}");
             }

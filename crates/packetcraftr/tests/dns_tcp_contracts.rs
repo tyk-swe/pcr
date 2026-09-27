@@ -44,16 +44,17 @@ fn ipv4_loopback_handles_fragmented_response_io() {
         }
     });
 
-    let response = dns_tcp::exchange(
+    let response = dns_tcp::query(
         dns_tcp::Request {
             endpoint,
             query: QUERY,
             timeout: SERVER_TIMEOUT,
+            cancellation: None,
             max_message_bytes: 512,
         },
-        &packetcraftr_netio::tcp::SystemProvider,
+        std::sync::Arc::new(packetcraftr_netio::tcp::SystemProvider),
     )
-    .expect("bounded loopback exchange");
+    .expect("bounded loopback query");
     server.join().expect("loopback server");
     assert!(endpoint.is_ipv4());
     assert_eq!(response.peer_address, endpoint);
@@ -65,4 +66,53 @@ fn ipv4_loopback_handles_fragmented_response_io() {
         &u16::try_from(RESPONSE.len()).unwrap().to_be_bytes()
     );
     assert_eq!(&response.frame[2..], RESPONSE);
+}
+
+#[test]
+fn ipv4_loopback_completes_within_a_short_attempt_window() {
+    use packetcraftr_core::budget::Deadline;
+    use packetcraftr_netio::tcp::{self, Provider};
+
+    struct DelayedConnect;
+
+    impl Provider for DelayedConnect {
+        type Stream = tcp::SystemStream;
+
+        fn connect(
+            &self,
+            endpoint: std::net::SocketAddr,
+            deadline: &Deadline,
+        ) -> Result<Self::Stream, tcp::Error> {
+            // Ensure the caller waits while the worker is still connecting.
+            thread::sleep(Duration::from_millis(1));
+            tcp::SystemProvider.connect(endpoint, deadline)
+        }
+    }
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let mut stream = accept_bounded(&listener);
+        read_query(&mut stream);
+        let mut frame = u16::try_from(RESPONSE.len())
+            .unwrap()
+            .to_be_bytes()
+            .to_vec();
+        frame.extend_from_slice(RESPONSE);
+        stream.write_all(&frame).unwrap();
+    });
+    let response = dns_tcp::query(
+        dns_tcp::Request {
+            endpoint,
+            query: QUERY,
+            timeout: Duration::from_millis(10),
+            cancellation: None,
+            max_message_bytes: 512,
+        },
+        std::sync::Arc::new(DelayedConnect),
+    );
+    let response = response.expect("completion wakes the short DNS attempt");
+    server.join().unwrap();
+    assert_eq!(&response.frame[2..], RESPONSE);
+    assert_eq!(response.bytes_written, QUERY.len() + 2);
 }

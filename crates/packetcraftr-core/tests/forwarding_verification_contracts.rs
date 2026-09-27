@@ -742,7 +742,7 @@ fn capture_local_fields_cannot_name_identity() {
             matches!(error, forwarding::Error::CaptureLocal { .. }),
             "{field}: {error}"
         );
-        assert_eq!(error.classification().kind, Kind::Cli);
+        assert_eq!(error.classification().kind, Kind::Usage);
     }
 }
 
@@ -794,7 +794,7 @@ fn rules_echo_exactly_what_was_requested() {
 fn empty_identity_is_rejected() {
     let error = forwarding::Rules::compile(&[], &[], &[], &builtin::registry(), FIELD_BUDGET)
         .expect_err("identity must not be empty");
-    assert_eq!(error.classification().kind, Kind::Cli);
+    assert_eq!(error.classification().kind, Kind::Usage);
 }
 
 #[test]
@@ -814,7 +814,7 @@ fn malformed_expectations_are_rejected_before_input() {
             FIELD_BUDGET,
         )
         .expect_err("invalid expectation must be rejected");
-        assert_eq!(error.classification().kind, Kind::Cli, "{rule}");
+        assert_eq!(error.classification().kind, Kind::Usage, "{rule}");
     }
 }
 

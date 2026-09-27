@@ -9,9 +9,10 @@ use std::net::Ipv6Addr;
 use packetcraftr_core::codec;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::field;
 use packetcraftr_core::frame::{Error as FrameError, Frame, LinkType};
-use packetcraftr_core::layer::{FieldError, Id, Malformed};
-use packetcraftr_core::packet::semantics::{Error as SemanticsError, live_destinations};
+use packetcraftr_core::layer::{Id, Malformed};
+use packetcraftr_core::protocol::semantics::{self, Error as SemanticsError, live_destinations};
 use packetcraftr_core::{build, decode, registry};
 
 fn ipv4() -> Id {
@@ -22,8 +23,8 @@ fn tcp() -> Id {
     Id::new("tcp")
 }
 
-fn field_error() -> FieldError {
-    FieldError::MissingRequired {
+fn field_error() -> field::Error {
+    field::Error::MissingRequired {
         protocol: ipv4(),
         field: "destination".to_owned(),
     }
@@ -305,6 +306,73 @@ fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
 }
 
 #[test]
+fn model_layer_errors_classify_without_a_wrapper() {
+    let cases: Vec<(Box<dyn Classified>, &str, Kind)> = vec![
+        (
+            Box::new(field_error()),
+            "packet.invalid_layer",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::Field(field_error())),
+            "packet.invalid_layer",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::rejected(tcp(), field_error())),
+            "packet.codec",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::WrongLayer {
+                expected: tcp(),
+                actual: ipv4(),
+            }),
+            "internal.codec_contract",
+            Kind::Internal,
+        ),
+        (
+            Box::new(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 2, len: 1 }),
+            "cli.layer_index",
+            Kind::Usage,
+        ),
+        (
+            Box::new(registry::Error::DuplicateMatcher { protocol: tcp() }),
+            "internal.registry",
+            Kind::Internal,
+        ),
+        (
+            Box::new(SemanticsError::LayerIndexOutOfRange),
+            "packet.semantics",
+            Kind::Packet,
+        ),
+        (
+            Box::new(packetcraftr_core::protocol::UnknownProtocolName(
+                "mystery".to_owned(),
+            )),
+            "cli.protocol",
+            Kind::Usage,
+        ),
+        (
+            Box::new(packetcraftr_core::budget::DeadlineExceeded {
+                actual: std::time::Duration::from_secs(2),
+                limit: std::time::Duration::from_secs(1),
+            }),
+            "policy.duration_limit",
+            Kind::Policy,
+        ),
+    ];
+    for (error, code, kind) in cases {
+        let classification = error.classification();
+        assert_eq!(
+            (classification.code, classification.kind),
+            (code, kind),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn registry_duplicate_alias_and_matcher_errors_name_the_conflict() {
     let alias = registry::Error::DuplicateAlias {
         alias: "ip".to_owned(),
@@ -327,16 +395,16 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
         (
             "Field",
             SemanticsError::Field {
-                protocol: Id::new("arp"),
-                field: "target_protocol",
-                reason: "is missing",
+                protocol: Id::new("vlan"),
+                field: "priority",
+                reason: semantics::Constraint::PriorityAtMost7,
             },
-            "field target_protocol on layer arp is missing",
+            "field priority on layer vlan is outside 0..=7",
         ),
         (
             "NonAtomicFragment",
             SemanticsError::NonAtomicFragment { protocol: ipv4() },
-            "non-atomic ipv4 fragment may hide a live destination",
+            "destination cannot be determined because the ipv4 layer is a non-atomic fragment",
         ),
         (
             "MalformedMayHideDestination",
@@ -344,7 +412,7 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
                 protocol: "ipv4".to_owned(),
                 reason: "truncated ipv4 layer".to_owned(),
             },
-            "malformed ipv4 layer may hide a live destination: truncated ipv4 layer",
+            "destination cannot be determined because the ipv4 layer is malformed: truncated ipv4 layer",
         ),
         (
             "UnknownProtocolRouteField",
@@ -352,7 +420,7 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
                 protocol: Id::new("route_mimic"),
                 field: "destination",
             },
-            "unknown protocol route_mimic exposes route-bearing field destination",
+            "destination cannot be determined because unknown protocol route_mimic carries route-bearing field destination",
         ),
         (
             "LayerIndexOutOfRange",
@@ -476,7 +544,7 @@ fn ipv4_wire_with_truncated_options_may_hide_a_destination() {
     let malformed = decoded
         .packet
         .iter()
-        .find_map(|layer| layer.as_any().downcast_ref::<Malformed>())
+        .find_map(|layer| layer.downcast_ref::<Malformed>())
         .expect("the truncated IPv4 header must decode as a malformed layer");
     assert_eq!(malformed.intended_protocol.as_deref(), Some("ipv4"));
 

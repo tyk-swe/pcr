@@ -29,7 +29,10 @@ pub fn dissect_built(
         Err(source) => {
             diagnostics.push(Diagnostic::warning(
                 "fuzz.decode_frame",
-                format!("could not form bounded decode evidence: {source}"),
+                format!(
+                    "could not form bounded decode evidence: {}",
+                    crate::error::render(&source)
+                ),
             ));
             return None;
         }
@@ -37,8 +40,10 @@ pub fn dissect_built(
     match dissector.decode(
         frame,
         crate::decode::Options {
-            max_packet_size: limits.max_packet_bytes,
-            ..crate::decode::Options::default()
+            limits: crate::packet::Limits {
+                max_packet_size: limits.max_packet_bytes,
+                ..crate::packet::Limits::default()
+            },
         },
     ) {
         Ok(decoded) => {
@@ -48,23 +53,17 @@ pub fn dissect_built(
         Err(source) => {
             diagnostics.push(Diagnostic::warning(
                 "fuzz.decode_rejected",
-                format!("bounded dissection rejected the built case: {source}"),
+                format!(
+                    "bounded dissection rejected the built case: {}",
+                    crate::error::render(&source)
+                ),
             ));
             None
         }
     }
 }
 
+/// The link type recorded for a built packet, from its outermost layer.
 pub fn packet_link_type(packet: &Packet) -> Option<LinkType> {
-    Some(match BuiltinProtocol::of(packet.layer(0)?)? {
-        BuiltinProtocol::Ethernet => LinkType::ETHERNET,
-        BuiltinProtocol::BsdNull => LinkType::NULL,
-        BuiltinProtocol::BsdLoop => LinkType::LOOP,
-        BuiltinProtocol::LinuxSll => LinkType::LINUX_SLL,
-        BuiltinProtocol::LinuxSll2 => LinkType::LINUX_SLL2,
-        BuiltinProtocol::Ipv4 => LinkType::IPV4,
-        BuiltinProtocol::Ipv6 => LinkType::IPV6,
-        BuiltinProtocol::RawIp => LinkType::RAW,
-        _ => return None,
-    })
+    LinkType::for_root_protocol(BuiltinProtocol::of(packet.layer(0)?)?)
 }

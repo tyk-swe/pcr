@@ -55,8 +55,9 @@ capacity recommendations.
 
 Input limits count filtered-out frames. Encoded/decoded source limits include
 container metadata and are enforced by the CLI compression wrapper. A bare
-library `pcap::Reader` instead enforces its own record/interface/metadata limits;
-use `compression::Input` for cumulative encoded/decoded byte ceilings.
+library `capture_file::Reader` instead enforces its own
+record/interface/metadata limits; use `compression::Input` for cumulative
+encoded/decoded byte ceilings.
 Physical forwarding disables unused reconstruction and indexes; it never
 pushes a filter ahead of input accounting.
 

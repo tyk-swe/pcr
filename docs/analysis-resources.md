@@ -34,7 +34,7 @@ are counted in `underflow_frames` and folded into bucket zero.
 including unused interfaces and interfaces whose frames are filtered out. A
 separate, fixed CLI input ceiling limits the capture to 65,536 descriptions
 across all sections. The library exposes that ceiling as
-`ReaderOptions::max_total_interfaces`. With `read --normalize`,
+`ReaderLimits::max_total_interfaces`. With `read --normalize`,
 `--max-interfaces` also bounds the selected interfaces in the single output
 section; filtering can reduce that output count, not either input count.
 Non-normalizing reads and rewrites retain the per-section input semantics.
@@ -166,13 +166,14 @@ allowance; it never retries an already failed output stream. One record remains
 in flight at a time. This option does not make synchronous serialization or an
 arbitrary writer preemptible.
 
-Embedders can clone a `progress::Runtime` and give it to multiple clients with
-`Client::with_progress_runtime`; `Client::progress_runtime` exposes that owner's
-snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
+Embedders can clone a `runtime::Runtime` and give it to multiple clients with
+`Client::with_runtime`; `Client::runtime` exposes that owner's snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
 and their captured-resource destructors keep their permits until cleanup ends.
 `packetcraftr_netio::resources::native_snapshot()` reports the process-wide
-16-permit native pool, active reservations, rejected admissions and retained
-cleanup. Unsupported profiles say so explicitly. These counts describe admission
+native worker pool (`resources::WORKER_CAPACITY`, 16 slots shared by capture
+reads, route queries, and TCP connects): active reservations, rejected
+admissions and retained cleanup. `tcp_connect_snapshot()` reports the TCP
+connect sub-limit of the same pool. These counts describe admission
 reservations, not all OS threads, handles, or process memory.
 
 TCP pending ranges now use separately charged 4 KiB payload pages and interval

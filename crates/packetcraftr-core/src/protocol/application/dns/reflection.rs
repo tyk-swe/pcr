@@ -1,14 +1,57 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue, dns_schema};
-use crate::field::{FieldKind, FieldValue};
-use crate::layer::{FieldError, FieldSchema, reflect_set};
+use super::codec::NAME;
+use super::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
+use crate::field::{self, FieldKind, FieldValue};
+use crate::layer::{FieldSchema, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
-use crate::protocol::common::{out_of_range, wrong_type};
+use crate::protocol::common::{out_of_range, protocol, read_only, wrong_type};
 use bytes::Bytes;
 
-pub(super) const QUESTION_FIELDS: &[FieldSchema] = &[
+impl Dns {
+    fn assign(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
+        let mut candidate = self.clone();
+        if !candidate.wire.is_empty() {
+            candidate.edit(|_| {});
+        }
+        assign_field(&mut candidate, name, value)?;
+        *self = candidate;
+        Ok(())
+    }
+}
+
+reflective_layer! {
+    pub(super) fn dns_schema() => { protocol: protocol(NAME), name: "DNS" }
+    impl Dns {
+        "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(crate::layer::reflect_get(&layer.id)), set |layer, value, name| layer.assign(name, value), layout: (0, 2) },
+        "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(crate::layer::reflect_get(&layer.response)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "opcode" => { kind: Unsigned, derived: false, required: false, description: "Operation code", get |layer| Some(crate::layer::reflect_get(&layer.opcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "authoritative_answer" => { kind: Bool, derived: false, required: false, description: "Authoritative-answer flag", get |layer| Some(crate::layer::reflect_get(&layer.authoritative_answer)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "truncated" => { kind: Bool, derived: false, required: false, description: "Truncated response flag", get |layer| Some(crate::layer::reflect_get(&layer.truncated)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "recursion_desired" => { kind: Bool, derived: false, required: false, description: "Recursion-desired flag", get |layer| Some(crate::layer::reflect_get(&layer.recursion_desired)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "recursion_available" => { kind: Bool, derived: false, required: false, description: "Recursion-available flag", get |layer| Some(crate::layer::reflect_get(&layer.recursion_available)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "reserved" => { kind: Bool, derived: false, required: false, description: "Reserved header bit", get |layer| Some(crate::layer::reflect_get(&layer.reserved)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "authenticated_data" => { kind: Bool, derived: false, required: false, description: "Authenticated-data flag", get |layer| Some(crate::layer::reflect_get(&layer.authenticated_data)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "checking_disabled" => { kind: Bool, derived: false, required: false, description: "Checking-disabled flag", get |layer| Some(crate::layer::reflect_get(&layer.checking_disabled)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "rcode" => { kind: Unsigned, derived: false, required: false, description: "Response code", get |layer| Some(crate::layer::reflect_get(&layer.rcode)), set |layer, value, name| layer.assign(name, value), layout: (2, 4) },
+        "question_count" => { kind: Unsigned, derived: true, required: false, description: "Question count", get |layer| Some(crate::layer::reflect_get(&layer.question_count)), set |layer, value, name| layer.assign(name, value), layout: (4, 6) },
+        "answer_count" => { kind: Unsigned, derived: true, required: false, description: "Answer count", get |layer| Some(crate::layer::reflect_get(&layer.answer_count)), set |layer, value, name| layer.assign(name, value), layout: (6, 8) },
+        "authority_count" => { kind: Unsigned, derived: true, required: false, description: "Authority-record count", get |layer| Some(crate::layer::reflect_get(&layer.authority_count)), set |layer, value, name| layer.assign(name, value), layout: (8, 10) },
+        "additional_count" => { kind: Unsigned, derived: true, required: false, description: "Additional-record count", get |layer| Some(crate::layer::reflect_get(&layer.additional_count)), set |layer, value, name| layer.assign(name, value), layout: (10, 12) },
+        "questions" => { kind: List, derived: false, required: false, description: "Ordered DNS questions", children: QUESTION_FIELDS, get |layer| Some(questions(&layer.questions)), set |layer, value, name| layer.assign(name, value) },
+        "answers" => { kind: List, derived: false, required: false, description: "Answer records", children: RECORD_FIELDS, get |layer| Some(records(&layer.answers)), set |layer, value, name| layer.assign(name, value) },
+        "authorities" => { kind: List, derived: false, required: false, description: "Authority records", children: RECORD_FIELDS, get |layer| Some(records(&layer.authorities)), set |layer, value, name| layer.assign(name, value) },
+        "additionals" => { kind: List, derived: false, required: false, description: "Additional records", children: RECORD_FIELDS, get |layer| Some(records(&layer.additionals)), set |layer, value, name| layer.assign(name, value) },
+        "qname" => { kind: List, derived: false, required: false, description: "Question qname values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.name.to_string().replace("\\032", " ")).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "qtype" => { kind: List, derived: false, required: false, description: "Question qtype values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.query_type).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "qclass" => { kind: List, derived: false, required: false, description: "Question qclass values", get |layer| Some(FieldValue::List(layer.questions.iter().map(|q| (q.class).into()).collect())), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "wire" => { kind: Bytes, derived: false, required: false, description: "Retained original message; explicit field edits invalidate it", get |layer| (!layer.wire.is_empty()).then(|| layer.wire.clone().into()), set |_layer, _value, name| read_only(dns_schema(), name) }
+    }
+    layout pub(super) fn dns_layout();
+}
+
+const QUESTION_FIELDS: &[FieldSchema] = &[
     member("name", FieldKind::Text, &[]),
     member("type", FieldKind::Unsigned, &[]),
     member("class", FieldKind::Unsigned, &[]),
@@ -47,7 +90,7 @@ const VALUE_FIELDS: &[FieldSchema] = &[
     member("dnssec_ok", FieldKind::Bool, &[]),
     member("options", FieldKind::List, OPTION_FIELDS),
 ];
-pub(super) const RECORD_FIELDS: &[FieldSchema] = &[
+const RECORD_FIELDS: &[FieldSchema] = &[
     member("owner", FieldKind::Text, &[]),
     member("type", FieldKind::Unsigned, &[]),
     member("class", FieldKind::Unsigned, &[]),
@@ -55,7 +98,7 @@ pub(super) const RECORD_FIELDS: &[FieldSchema] = &[
     member("value", FieldKind::Object, VALUE_FIELDS),
 ];
 
-pub(super) fn questions(values: &[Question]) -> FieldValue {
+fn questions(values: &[Question]) -> FieldValue {
     FieldValue::List(
         values
             .iter()
@@ -70,7 +113,7 @@ pub(super) fn questions(values: &[Question]) -> FieldValue {
     )
 }
 
-pub(super) fn records(values: &[Record]) -> FieldValue {
+fn records(values: &[Record]) -> FieldValue {
     FieldValue::List(
         values
             .iter()
@@ -187,14 +230,14 @@ fn record_value(value: &RecordValue) -> FieldValue {
     }
 }
 
-fn name(object: &mut Object, key: &str) -> Result<Name, FieldError> {
+fn name(object: &mut Object, key: &str) -> Result<Name, field::Error> {
     let FieldValue::Text(text) = object.required(key)? else {
         return Err(wrong_type(dns_schema(), key, "DNS name text"));
     };
     text.parse().map_err(|_| out_of_range(dns_schema(), key))
 }
 
-fn record(value: FieldValue, field: &str) -> Result<Record, FieldError> {
+fn record(value: FieldValue, field: &str) -> Result<Record, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let owner = name(&mut o, "owner")?;
     let value = parse_value(o.required("value")?, field)?;
@@ -219,7 +262,7 @@ fn record(value: FieldValue, field: &str) -> Result<Record, FieldError> {
     })
 }
 
-fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, FieldError> {
+fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let kind = o.value("kind", String::new())?;
     let value = match kind.as_str() {
@@ -308,7 +351,7 @@ fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, FieldError
     Ok(value)
 }
 
-pub(super) fn assign(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), FieldError> {
+fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), field::Error> {
     macro_rules! scalar { ($($name:ident),* $(,)?) => { match field {
         $(stringify!($name) => return reflect_set(&mut layer.$name, dns_schema(), field, value),)*
         _ => {}
@@ -356,7 +399,7 @@ pub(super) fn assign(layer: &mut Dns, field: &str, value: FieldValue) -> Result<
             }
         }
         _ => {
-            return Err(FieldError::UnknownField {
+            return Err(field::Error::UnknownField {
                 protocol: dns_schema().protocol,
                 field: field.to_owned(),
             });

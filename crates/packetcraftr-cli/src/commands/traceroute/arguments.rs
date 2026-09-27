@@ -5,7 +5,8 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, Probing,
+    RouteSelectionArgs, TimeoutArgs, Window,
 };
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.";
@@ -58,18 +59,16 @@ pub(crate) struct Args {
     /// Number of attempts retained for every hop.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_PROBES_PER_HOP)]
     pub(crate) attempts: u32,
-    /// Shared response window for every capture-ready hop batch.
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<HopWindow>,
     /// Optional average probe-rate ceiling; each hop remains one deliberate burst.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum generated probes across all hops.
     #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
     pub(crate) max_probes: usize,
-    /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Probing>,
     /// Maximum hop-scoped undecodable exact frames retained.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,
@@ -79,4 +78,13 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnamePolicyArgs,
+}
+
+/// One window per hop batch.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct HopWindow;
+
+impl Window for HopWindow {
+    const DEFAULT_MILLISECONDS: &'static str = "1000";
+    const HELP: &'static str = "Shared response window for every capture-ready hop batch";
 }

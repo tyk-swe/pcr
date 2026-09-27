@@ -367,7 +367,10 @@ fn retirements_omitted_from_the_outcome_cap_still_release_sources() {
         &Options {
             track_sources: true,
             limits: Limits {
-                max_ip_outcomes: 1,
+                ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+                    max_retained_outcomes: 1,
+                    ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+                },
                 ..Limits::default()
             },
             ..Options::default()

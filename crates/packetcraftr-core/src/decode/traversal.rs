@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{codec::NetworkEnvelope, protocol::BuiltinProtocol};
+use crate::{codec::NetworkEnvelope, protocol::BuiltinProtocol, registry::Registry};
 
 pub(super) struct TraversalScope {
     allow_trailing_padding: bool,
@@ -9,9 +9,9 @@ pub(super) struct TraversalScope {
 }
 
 impl TraversalScope {
-    pub(super) fn new(root: &crate::layer::Id) -> Self {
+    pub(super) fn new(registry: &Registry, root: &crate::layer::Id) -> Self {
         Self {
-            allow_trailing_padding: link_scope_allows_padding(BuiltinProtocol::from_id(*root)),
+            allow_trailing_padding: registry.allows_trailing_padding(root.as_str()),
             network: None,
         }
     }
@@ -32,6 +32,7 @@ impl TraversalScope {
 
     pub(super) fn enter_child(
         &mut self,
+        registry: &Registry,
         parent: &crate::layer::Id,
         child: Option<&crate::layer::Id>,
     ) {
@@ -39,22 +40,7 @@ impl TraversalScope {
         {
             self.network = None;
             self.allow_trailing_padding =
-                link_scope_allows_padding(child.copied().and_then(BuiltinProtocol::from_id));
+                child.is_some_and(|child| registry.allows_trailing_padding(child.as_str()));
         }
     }
-}
-
-fn link_scope_allows_padding(root: Option<BuiltinProtocol>) -> bool {
-    matches!(
-        root,
-        Some(
-            BuiltinProtocol::Ethernet
-                | BuiltinProtocol::Vlan
-                | BuiltinProtocol::Vlan8021ad
-                | BuiltinProtocol::BsdNull
-                | BuiltinProtocol::BsdLoop
-                | BuiltinProtocol::LinuxSll
-                | BuiltinProtocol::LinuxSll2
-        )
-    )
 }

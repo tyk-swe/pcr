@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Plans physical source-record selections with stream and IP dependencies.
-//! Copy from the same immutable capture using `pcap::select` after rewinding.
+//! Copy from the same immutable capture using `capture_file::select` after rewinding.
 
 use super::{
     Options, StreamRef, StreamTransport,
-    pcap::Reader,
     provenance::{IncompleteSources, SourceSet},
 };
 use crate::{
+    capture_file::Reader,
     error::{BoundaryError, Classification, Classified, Kind},
     filter::Filter,
     registry::Registry,
@@ -83,7 +83,7 @@ impl Classified for Error {
         match self {
             Self::Analysis(error) => error.classification(),
             Self::Limit { .. } => Classification::new("policy.export_limit", Kind::Policy, None),
-            Self::Selection => Classification::new("cli.export_selection", Kind::Cli, None),
+            Self::Selection => Classification::new("cli.export_selection", Kind::Usage, None),
             Self::Sources { .. } => {
                 Classification::new("internal.export_sources", Kind::Internal, None)
             }

@@ -34,25 +34,29 @@ fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
     assert_eq!(target.field, "destination_port");
     assert!(matches!(
         fuzz::Target::from_str("3.bad-field"),
-        Err(fuzz::TargetParseError::InvalidField { .. })
+        Err(fuzz::Error::TargetField { .. })
     ));
     assert!(matches!(
         fuzz::Target::from_str("destination_port"),
-        Err(fuzz::TargetParseError::MissingSeparator { .. })
+        Err(fuzz::Error::TargetSeparator { .. })
     ));
     assert!(matches!(
         fuzz::Target::from_str("x.destination_port"),
-        Err(fuzz::TargetParseError::InvalidLayer { .. })
+        Err(fuzz::Error::TargetLayer { .. })
     ));
 }
 
 #[test]
 fn fuzz_failures_retain_stable_boundary_classifications() {
     let cases = [
-        (fuzz::Error::InvalidStrategies, "cli.fuzz_limit", Kind::Cli),
+        (
+            fuzz::Error::InvalidStrategies,
+            "cli.fuzz_limit",
+            Kind::Usage,
+        ),
         (
             fuzz::Error::InvalidBasePacket {
-                message: "bad base".to_owned(),
+                reason: fuzz::BaseFault::FieldCountOverflow,
             },
             "packet.fuzz_recipe",
             Kind::Packet,
@@ -111,4 +115,40 @@ fn campaign_limits_reject_values_above_the_ceilings_they_enforce() {
     const {
         assert!(fuzz::MAX_VALUE_NESTING <= packetcraftr_core::document::MAX_DOCUMENT_NESTING);
     }
+}
+
+#[test]
+fn unresolvable_targets_name_their_typed_fault() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let packet =
+        packetcraftr_core::expression::parse("ipv4()/udp()", &registry, Default::default())
+            .expect("recipe parses");
+    let run = |target: &str| {
+        let request = fuzz::Request {
+            cases: 1,
+            targets: vec![fuzz::Target::from_str(target).expect("target parses")],
+            ..fuzz::Request::default()
+        };
+        fuzz::run(&request, packet.clone(), registry.clone()).expect_err("target is refused")
+    };
+
+    let error = run("5.destination_port");
+    assert!(matches!(
+        error,
+        fuzz::Error::InvalidTarget {
+            reason: fuzz::TargetFault::LayerOutOfRange { layers: 2 },
+            ..
+        }
+    ));
+    assert_eq!(
+        error.to_string(),
+        "fuzz target 5.destination_port is invalid: layer index is outside packet length 2"
+    );
+    assert!(matches!(
+        run("1.no_such_field"),
+        fuzz::Error::InvalidTarget {
+            reason: fuzz::TargetFault::UnregisteredPath,
+            ..
+        }
+    ));
 }

@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Policy {
@@ -109,7 +109,9 @@ impl Default for Policy {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+/// Every refusal the traffic policy reports, from its own configuration
+/// checks, operation authorization, and exact wire authorization.
+#[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
@@ -133,12 +135,29 @@ pub enum Error {
         /// The semantics traversal failure this refusal reports, when it
         /// came from the packet rather than from policy's own checks.
         #[source]
-        source: Option<packetcraftr_core::packet::semantics::Error>,
+        source: Option<packetcraftr_core::protocol::semantics::Error>,
+    },
+    /// The exact wire bytes do not form a frame the trusted built-in
+    /// registry could decode.
+    #[error("traffic policy cannot authorize wire bytes that do not form a frame")]
+    WireFrame {
+        #[source]
+        source: packetcraftr_core::frame::Error,
+    },
+    /// The exact wire bytes did not decode with the trusted built-in
+    /// registry, so their routing semantics cannot be authorized.
+    #[error("traffic policy cannot authorize undecodable packet routing semantics")]
+    UndecodableWire {
+        #[source]
+        source: packetcraftr_core::decode::Error,
     },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]
     PermissivePacket,
+    /// The policy allows permissive packets, but the operation did not opt in.
+    #[error("permissively built packets require allow_permissive_live")]
+    PermissiveLiveOptIn,
     #[error("traffic policy denies source {packet_source} that interface {interface} does not own")]
     SourceNotInterfaceOwned {
         packet_source: String,
@@ -152,9 +171,16 @@ pub enum Error {
     TrafficUnitLimit { actual: u64, limit: u64 },
     #[error("operation wire/application byte count {actual} exceeds policy limit {limit}")]
     TrafficByteLimit { actual: u64, limit: u64 },
+    /// An authorizer was asked to approve an operation shape it was not
+    /// built for; this is a wiring fault, not a policy denial.
+    #[error("{authorizer} does not authorize {operation} operations")]
+    UnsupportedOperation {
+        authorizer: &'static str,
+        operation: &'static str,
+    },
 }
 
-pub(crate) const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
+const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
     "policy.invalid_packet_semantics",
     Kind::Policy,
     Some("repair malformed or unsupported route-bearing packet fields before live transmission"),
@@ -188,7 +214,18 @@ impl Classified for Error {
                 "cli.live_target",
                 "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
             ),
-            Self::InvalidPacketSemantics { .. } => return INVALID_PACKET_SEMANTICS,
+            Self::InvalidPacketSemantics { .. }
+            | Self::WireFrame { .. }
+            | Self::UndecodableWire { .. } => {
+                return INVALID_PACKET_SEMANTICS;
+            }
+            Self::UnsupportedOperation { .. } => {
+                return Classification::new(
+                    "internal.unsupported_operation",
+                    Kind::Internal,
+                    Some("route this operation through the authorizer built for its workflow"),
+                );
+            }
             Self::HostnameResolution { .. } => (
                 "policy.hostname_resolution",
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",
@@ -196,6 +233,10 @@ impl Classified for Error {
             Self::PermissivePacket => (
                 "policy.permissive_packet",
                 "authorize permissive live traffic in both build options and traffic policy",
+            ),
+            Self::PermissiveLiveOptIn => (
+                "policy.permissive_live_opt_in",
+                "set the explicit per-operation malformed-live opt-in in addition to policy approval",
             ),
             Self::SourceNotInterfaceOwned { .. } => (
                 "policy.source_ownership",
@@ -221,10 +262,17 @@ impl Classified for Error {
         let kind = match self {
             Self::InvalidAddressLimit { .. }
             | Self::InvalidDestinationConstraint { .. }
-            | Self::DestinationConstraintLimit { .. } => Kind::Cli,
+            | Self::DestinationConstraintLimit { .. } => Kind::Usage,
             _ => Kind::Policy,
         };
         Classification::new(code, kind, Some(remediation))
+    }
+
+    fn context(&self) -> Option<Coordinate> {
+        match self {
+            Self::UndecodableWire { source } => source.context(),
+            _ => None,
+        }
     }
 }
 
@@ -309,8 +357,8 @@ mod tests {
                 .parse::<crate::target::Network>()
                 .expect("target network parses");
             assert_eq!(
-                input.parse::<DestinationConstraint>(),
-                Ok(DestinationConstraint::Network(network)),
+                input.parse::<DestinationConstraint>().ok(),
+                Some(DestinationConstraint::Network(network)),
                 "{input} must parse identically on both surfaces"
             );
         }

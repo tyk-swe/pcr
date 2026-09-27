@@ -7,11 +7,11 @@
 //! field so a test can say exactly which byte it is exercising. Host names
 //! are documentation names and the endpoints are RFC 5737 addresses.
 
-use packetcraftr_core::protocol::application::tls::model::extension::{
+use packetcraftr_core::protocol::application::tls::extension::{
     ALPN, ENCRYPTED_CLIENT_HELLO, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS,
     SUPPORTED_VERSIONS,
 };
-use packetcraftr_core::protocol::application::tls::model::{
+use packetcraftr_core::protocol::application::tls::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
     CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
     HELLO_RETRY_REQUEST_RANDOM,

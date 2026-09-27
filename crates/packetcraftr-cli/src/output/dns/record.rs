@@ -117,8 +117,8 @@ pub struct Record {
     pub data: RecordData,
 }
 
-impl Record {
-    pub(super) fn from_record(record: dns_wire::Record) -> Self {
+impl From<dns_wire::Record> for Record {
+    fn from(record: dns_wire::Record) -> Self {
         let data = match record.value {
             dns_wire::RecordValue::A(address) => RecordData::A { address },
             dns_wire::RecordValue::Aaaa(address) => RecordData::Aaaa { address },

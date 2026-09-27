@@ -9,7 +9,7 @@ use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Layer, Malformed, reflective_layer},
     registry::Discriminator,
 };
 
@@ -222,9 +222,9 @@ fn validate_stage(
             &mut diagnostics,
         )?;
     }
-    let expected_stage = match context.child.map(|child| child.protocol_id().as_str()) {
-        Some(PPP_NAME) => Some(0_u8),
-        Some("malformed") => None,
+    let expected_stage = match context.child {
+        Some(child) if child.is::<Ppp>() => Some(0_u8),
+        Some(child) if child.is::<Malformed>() => None,
         _ => Some(1),
     };
     if let Some(expected) = expected_stage

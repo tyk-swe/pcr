@@ -3,11 +3,10 @@
 
 //! Bounded DNS-over-TCP framing over an explicitly selected TCP provider.
 //!
-//! Callers authorize destinations and validate DNS responses. Each exchange
+//! Callers authorize destinations and validate DNS responses. Each query
 //! reads one declared response frame, then drops the connection.
 
-use packetcraftr_netio::SystemFault;
-use packetcraftr_netio::tcp::{Provider, Stream};
+use packetcraftr_netio::tcp::{self, Provider, Stream};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -16,13 +15,14 @@ use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, Interrupted};
+use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 use thiserror::Error as ThisError;
 
 /// Bytes in the DNS-over-TCP message-length prefix.
 pub const LENGTH_PREFIX_BYTES: usize = 2;
 
-/// One bounded DNS-over-TCP exchange request.
+/// One bounded DNS-over-TCP query request.
 #[derive(Clone, Copy, Debug)]
 pub struct Request<'a> {
     /// Already-authorized numeric DNS server endpoint.
@@ -31,6 +31,8 @@ pub struct Request<'a> {
     pub query: &'a [u8],
     /// Time remaining in the workflow attempt.
     pub timeout: Duration,
+    /// The operation's cancellation signal, carried into the admitted connect.
+    pub cancellation: Option<&'a Cancellation>,
     /// Maximum accepted DNS message bytes, excluding the prefix.
     pub max_message_bytes: usize,
 }
@@ -65,7 +67,9 @@ impl fmt::Display for Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Category {
-    /// The caller submitted a request that is not a runnable bounded exchange.
+    /// The operation was cancelled before its connection completed.
+    Cancelled,
+    /// The caller submitted a request that is not a runnable bounded query.
     Request,
     /// This build or route cannot execute DNS over TCP at all.
     Unsupported,
@@ -80,6 +84,8 @@ pub enum Category {
 #[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] Cancelled),
     #[error("DNS-over-TCP system I/O is unavailable: {message}")]
     Unsupported { message: String },
     #[error("DNS-over-TCP timeout {value:?} is invalid; it must be non-zero")]
@@ -106,7 +112,7 @@ pub enum Error {
         endpoint: SocketAddr,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "DNS-over-TCP could not configure the {phase} timeout after {transferred} phase byte(s)"
@@ -115,7 +121,7 @@ pub enum Error {
         phase: Phase,
         transferred: usize,
         #[source]
-        source: SystemFault,
+        source: Source,
     },
     /// The prefixed query could not be written completely.
     ///
@@ -127,7 +133,7 @@ pub enum Error {
         expected: usize,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     /// A response read failed before an orderly end of stream.
     ///
@@ -138,7 +144,7 @@ pub enum Error {
         phase: Phase,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "DNS-over-TCP response prefix ended after {actual} of {} bytes",
@@ -162,6 +168,7 @@ impl Error {
     #[must_use]
     pub const fn category(&self) -> Category {
         match self {
+            Self::Cancelled(_) => Category::Cancelled,
             Self::Unsupported { .. } => Category::Unsupported,
             Self::InvalidTimeout { .. }
             | Self::EmptyQuery
@@ -207,7 +214,8 @@ impl Error {
             | Self::ZeroLength
             | Self::MessageTooLarge { .. }
             | Self::IncompleteMessage { .. } => framed_query_bytes,
-            Self::Unsupported { .. }
+            Self::Cancelled(_)
+            | Self::Unsupported { .. }
             | Self::InvalidTimeout { .. }
             | Self::EmptyQuery
             | Self::QueryTooLarge { .. }
@@ -229,6 +237,7 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self.category() {
+            Category::Cancelled => Cancelled.classification(),
             Category::Request => Classification::new(
                 "internal.dns_tcp_request",
                 Kind::Internal,
@@ -282,18 +291,27 @@ pub struct Response {
     pub frame: Bytes,
 }
 
-/// Runs one bounded DNS-over-TCP exchange through the selected provider.
+/// Runs one bounded DNS-over-TCP query through the selected provider.
+/// The shared provider moves into an admitted native connect worker; a
+/// cancelled or expired wait returns while a stalled call retains its slot
+/// until cleanup finishes.
 /// Writes one framed query and reads the first framed response. Subsequent
 /// messages on the stream are outside this response.
-pub fn exchange<P: Provider>(request: Request<'_>, provider: &P) -> Result<Response, Error> {
-    exchange_with_clock(request, provider, Instant::now)
+pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
+    query_with_clock(request, provider, Instant::now)
 }
 
-fn exchange_with_clock<P: Provider>(
+fn query_with_clock<P>(
     request: Request<'_>,
-    connector: &P,
+    connector: Arc<P>,
     now: impl Fn() -> Instant,
-) -> Result<Response, Error> {
+) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
     let maximum = usize::from(u16::MAX);
     if request.timeout.is_zero() {
         return Err(Error::InvalidTimeout {
@@ -321,13 +339,34 @@ fn exchange_with_clock<P: Provider>(
             value: request.timeout,
         })?;
     let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
-    let mut stream = connector
-        .connect(request.endpoint, connect_timeout)
+    let connect_deadline =
+        Deadline::new(connect_timeout).with_cancellation(request.cancellation.cloned());
+    let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
+        .map_err(|source| map_connect_error(request.endpoint, source))?;
+    let outcome = pending
+        .wait(&connect_deadline)
+        .map_err(|source| map_connect_error(request.endpoint, source))?;
+    packetcraftr_netio::deadline::remaining(&connect_deadline).map_err(|interrupted| {
+        match interrupted {
+            Interrupted::Cancelled(cancelled) => Error::Cancelled(cancelled),
+            _ => Error::Timeout {
+                phase: Phase::Connect,
+                transferred: 0,
+            },
+        }
+    })?;
+    remaining(deadline, now(), Phase::Connect, 0)?;
+    let mut stream = outcome
+        .ok_or(Error::Timeout {
+            phase: Phase::Connect,
+            transferred: 0,
+        })?
+        .result
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "peer socket inspection failed".to_owned(),
-        source: Some(Arc::new(source)),
+        source: Some(Source::new(source)),
     })?;
     if peer_address != request.endpoint {
         return Err(Error::Connect {
@@ -339,7 +378,7 @@ fn exchange_with_clock<P: Provider>(
     let local_address = stream.local_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "local socket inspection failed".to_owned(),
-        source: Some(Arc::new(source)),
+        source: Some(Source::new(source)),
     })?;
 
     let expected_write =
@@ -443,18 +482,27 @@ fn remaining(
         .ok_or(Error::Timeout { phase, transferred })
 }
 
-fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
-    if is_timeout(&source) {
-        Error::Timeout {
-            phase: Phase::Connect,
-            transferred: 0,
-        }
-    } else {
-        Error::Connect {
-            endpoint,
-            message: "the socket could not be opened".to_owned(),
-            source: Some(Arc::new(source)),
-        }
+/// A connect that timed out, at the socket or before it could start, is the
+/// connect phase's timeout; any other failure keeps its socket error, or the
+/// provider's own failure, as its source.
+fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
+    use packetcraftr_netio::tcp::Error as TcpError;
+
+    let timeout = Error::Timeout {
+        phase: Phase::Connect,
+        transferred: 0,
+    };
+    let source = match error {
+        TcpError::Cancelled(cancelled) => return Error::Cancelled(cancelled),
+        TcpError::Socket(source) if is_timeout(&source) => return timeout,
+        TcpError::DeadlineExceeded => return timeout,
+        TcpError::Socket(source) => Source::new(source),
+        error => Source::new(error),
+    };
+    Error::Connect {
+        endpoint,
+        message: "the socket could not be opened".to_owned(),
+        source: Some(source),
     }
 }
 
@@ -473,7 +521,7 @@ fn write_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase: Phase::Write,
                 transferred: *written,
-                source: Arc::new(source),
+                source: Source::new(source),
             })?;
         match stream.write(bytes) {
             Ok(0) => {
@@ -510,7 +558,7 @@ fn write_exact<S: Stream>(
                     written: *written,
                     expected,
                     message: "the socket write failed".to_owned(),
-                    source: Some(Arc::new(source)),
+                    source: Some(Source::new(source)),
                 });
             }
         }
@@ -533,7 +581,7 @@ fn read_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase,
                 transferred: read,
-                source: Arc::new(source),
+                source: Source::new(source),
             })?;
         let tail = bytes.get_mut(read..).ok_or(Error::Read {
             phase,
@@ -560,7 +608,7 @@ fn read_exact<S: Stream>(
                 return Err(Error::Read {
                     phase,
                     message: "the socket read failed".to_owned(),
-                    source: Some(Arc::new(source)),
+                    source: Some(Source::new(source)),
                 });
             }
         }

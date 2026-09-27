@@ -5,7 +5,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::dns::{
-    EdnsRequest, MessageLimits, QueryType, decode_response, decode_tcp_frame, encode_query,
+    EdnsRequest, MessageLimits, QueryType,
+    wire::{decode_response, decode_tcp_frame, encode_query},
 };
 
 fuzz_target!(|data: &[u8]| {

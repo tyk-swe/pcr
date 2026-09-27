@@ -15,7 +15,7 @@ use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::protocol::application::tls::codec::Tls;
+use packetcraftr_core::protocol::application::tls::Tls;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;

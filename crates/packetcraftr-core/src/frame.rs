@@ -13,26 +13,11 @@ use crate::error::{Classification, Classified, Kind};
 
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 
-/// Capture-wide interface identifier normalized across PCAPNG sections.
-pub type GlobalInterfaceId = u32;
-
-/// Open numeric libpcap link-layer type.
+/// Open numeric libpcap link-layer type. The known numbers and their root
+/// protocols are defined by [`capture_file`](crate::capture_file).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LinkType(pub u32);
-
-impl LinkType {
-    pub const NULL: Self = Self(0);
-    pub const ETHERNET: Self = Self(1);
-    /// BSD raw-IP DLT, distinct from the IANA-assigned raw LINKTYPE.
-    pub const BSD_RAW: Self = Self(12);
-    pub const RAW: Self = Self(101);
-    pub const LOOP: Self = Self(108);
-    pub const LINUX_SLL: Self = Self(113);
-    pub const IPV4: Self = Self(228);
-    pub const IPV6: Self = Self(229);
-    pub const LINUX_SLL2: Self = Self(276);
-}
 
 impl std::fmt::Display for LinkType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -82,7 +67,7 @@ impl Classified for Error {
             ),
             Self::ReversedTimeBounds { .. } => Classification::new(
                 "cli.reversed_time_bounds",
-                Kind::Cli,
+                Kind::Usage,
                 Some("order the bounds so the earlier time comes first"),
             ),
         }
@@ -98,8 +83,10 @@ pub struct Frame {
     captured_length: u32,
     original_length: u32,
     pub link_type: LinkType,
+    /// Capture-wide interface index, normalized across PCAPNG sections, when
+    /// the source declared one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub interface: Option<GlobalInterfaceId>,
+    pub interface: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
     bytes: Bytes,
@@ -243,7 +230,7 @@ impl<'de> Deserialize<'de> for Frame {
             captured_length: u32,
             original_length: u32,
             link_type: LinkType,
-            interface: Option<GlobalInterfaceId>,
+            interface: Option<u32>,
             direction: Option<Direction>,
             bytes: Bytes,
         }

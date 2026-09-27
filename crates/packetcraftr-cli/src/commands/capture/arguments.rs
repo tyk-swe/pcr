@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, Captured, DecodeArgs, TrafficBudgetArgs};
+use crate::command_options::{
+    Budget, CaptureLimitsArgs, CompressionArgs, DecodeArgs, Destination, TimeoutArgs,
+    TrafficBudgetArgs, Window, default_limit_bytes,
+};
+use crate::system::InterfaceSelector;
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
@@ -66,13 +70,17 @@ Examples:
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Compress binary stdout or saved PCAPNG files.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<CaptureDestination>,
 
     /// Interface names or numeric indexes; repeat to capture an explicit set.
-    #[arg(long, value_name = "NAME_OR_INDEX", required = true)]
-    pub(crate) interface: Vec<String>,
+    #[arg(
+        long,
+        value_name = "NAME_OR_INDEX",
+        value_parser = crate::command_options::interface_selector,
+        required = true
+    )]
+    pub(crate) interface: Vec<crate::command_options::Selector<InterfaceSelector>>,
     /// Save PCAPNG files; existing paths are never overwritten.
     #[arg(long)]
     pub(crate) write: Option<std::path::PathBuf>,
@@ -86,8 +94,8 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1)]
     pub(crate) rotate_files: usize,
     /// Stop at the file limit, or reuse only files created by this operation.
-    #[arg(long, value_enum, default_value_t = packetcraftr_cli::output::capture::Retention::Stop)]
-    pub(crate) retention: packetcraftr_cli::output::capture::Retention,
+    #[arg(long, value_enum, default_value_t = Retention::Stop)]
+    pub(crate) retention: Retention,
     /// Enable promiscuous capture mode.
     #[arg(long)]
     pub(crate) promiscuous: bool,
@@ -104,9 +112,8 @@ pub(crate) struct Args {
     /// Packet timestamp fraction precision delivered by the backend.
     #[arg(long, value_enum)]
     pub(crate) timestamp_precision: Option<TimestampPrecisionArg>,
-    /// Overall capture window in milliseconds.
-    #[arg(long, default_value_t = 3_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<CaptureWindow>,
     /// Resolver-free core libpcap/Npcap BPF, applied before capture.
     #[arg(long, value_name = "BPF")]
     pub(crate) capture_filter: Option<String>,
@@ -178,4 +185,63 @@ impl From<TimestampPrecisionArg> for TimestampPrecision {
             TimestampPrecisionArg::Nano => Self::Nano,
         }
     }
+}
+
+/// The `--retention` selector for [`crate::output::capture::Retention`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Retention {
+    Stop,
+    Ring,
+}
+
+impl crate::resources::SettingValue for Retention {
+    fn setting_value(&self) -> Option<crate::output::resources::Value> {
+        crate::resources::policy_value(self)
+    }
+}
+
+impl From<Retention> for crate::output::capture::Retention {
+    fn from(value: Retention) -> Self {
+        match value {
+            Retention::Stop => Self::Stop,
+            Retention::Ring => Self::Ring,
+        }
+    }
+}
+
+/// Frames this operation only receives.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Captured;
+
+/// Frames one capture may keep; independent of the transmitted ceiling.
+pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
+
+impl Budget for Captured {
+    fn max_packets() -> u64 {
+        DEFAULT_CAPTURED_FRAMES
+    }
+
+    fn max_bytes() -> u64 {
+        default_limit_bytes()
+    }
+
+    const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
+    const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
+}
+
+/// The whole capture.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CaptureWindow;
+
+impl Window for CaptureWindow {
+    const DEFAULT_MILLISECONDS: &'static str = "3000";
+    const HELP: &'static str = "Overall capture window in milliseconds";
+}
+
+/// Capture bytes on stdout, or the saved files with `--write`.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CaptureDestination;
+
+impl Destination for CaptureDestination {
+    const HELP: &'static str = "Compress binary stdout or saved PCAPNG files";
 }

@@ -6,8 +6,8 @@ use serde::Serialize;
 use std::time::Duration;
 
 use crate::output::contract::Error;
+use crate::output::envelope::Published;
 use crate::output::frame::{Captured, Decoded, Wire};
-use packetcraftr::Stats;
 
 /// One response correlated with a sent request, with its measured latency.
 #[derive(Clone, Debug, Serialize)]
@@ -27,11 +27,12 @@ pub struct Report {
     pub undecoded: Vec<Captured>,
 }
 
-impl Report {
-    pub fn try_from_exchange(
-        result: packetcraftr::exchange::Report,
-    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let packetcraftr::exchange::Report {
+/// An exchange, with the request builder's diagnostics and the totals.
+impl TryFrom<packetcraftr::exchange::Aggregate> for Published<Report> {
+    type Error = Error;
+
+    fn try_from(result: packetcraftr::exchange::Aggregate) -> Result<Self, Error> {
+        let packetcraftr::exchange::Aggregate {
             sent,
             responses,
             unanswered,
@@ -50,26 +51,26 @@ impl Report {
             .collect();
         let response_outputs = responses
             .into_iter()
-            .map(response_output)
+            .map(Response::try_from)
             .collect::<Result<Vec<_>, Error>>()?;
         let unsolicited_outputs = unsolicited
             .into_iter()
-            .map(Decoded::try_from_decoded)
+            .map(Decoded::try_from)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((
-            Self {
+        Ok(Self::new(
+            Report {
                 sent: sent_frames,
                 responses: response_outputs,
                 unanswered: unanswered.into_iter().map(request_index).collect(),
                 unsolicited: unsolicited_outputs,
                 undecoded: undecoded
                     .into_iter()
-                    .map(Captured::try_from_frame)
+                    .map(Captured::try_from)
                     .collect::<Result<Vec<_>, _>>()?,
             },
             diagnostics,
-            stats,
-        ))
+        )
+        .with_stats(stats))
     }
 }
 
@@ -100,10 +101,11 @@ pub enum Event {
     },
 }
 
-impl Event {
-    pub fn try_from_exchange(
-        event: packetcraftr::exchange::Event,
-    ) -> Result<(Self, Vec<Diagnostic>), Error> {
+/// One exchange event, with any diagnostic it carried for the envelope.
+impl TryFrom<packetcraftr::exchange::Event> for Published<Event> {
+    type Error = Error;
+
+    fn try_from(event: packetcraftr::exchange::Event) -> Result<Self, Error> {
         let (event, diagnostics) = match event {
             packetcraftr::exchange::Event::Sent {
                 request_index: index,
@@ -111,7 +113,7 @@ impl Event {
             } => {
                 let (frame, diagnostics) = sent_output(sent);
                 (
-                    Self::Sent {
+                    Event::Sent {
                         request_index: request_index(index),
                         frame,
                     },
@@ -119,9 +121,9 @@ impl Event {
                 )
             }
             packetcraftr::exchange::Event::Response(response) => {
-                let response = response_output(response)?;
+                let response = Response::try_from(response)?;
                 (
-                    Self::Response {
+                    Event::Response {
                         request_index: response.request_index,
                         response: response.response,
                         latency: response.latency,
@@ -132,61 +134,68 @@ impl Event {
             packetcraftr::exchange::Event::Unanswered {
                 request_index: index,
             } => (
-                Self::Unanswered {
+                Event::Unanswered {
                     request_index: request_index(index),
                 },
                 Vec::new(),
             ),
             packetcraftr::exchange::Event::Unsolicited { frame } => (
-                Self::Unsolicited {
-                    frame: Decoded::try_from_decoded(frame)?,
+                Event::Unsolicited {
+                    frame: frame.try_into()?,
                 },
                 Vec::new(),
             ),
             packetcraftr::exchange::Event::Undecoded { frame } => (
-                Self::Undecoded {
-                    frame: Captured::try_from_frame(frame)?,
+                Event::Undecoded {
+                    frame: frame.try_into()?,
                 },
                 Vec::new(),
             ),
             packetcraftr::exchange::Event::Diagnostic(diagnostic) => {
-                (Self::Diagnostic {}, vec![diagnostic])
+                (Event::Diagnostic {}, vec![diagnostic])
             }
         };
-        Ok((event, diagnostics))
+        Ok(Self::new(event, diagnostics))
     }
+}
 
-    pub fn complete_from_exchange(
-        summary: packetcraftr::exchange::Summary,
-    ) -> (Self, Vec<Diagnostic>, Stats) {
-        let packetcraftr::exchange::Summary {
+/// The terminal record, with the exchange's diagnostics and totals.
+impl From<packetcraftr::exchange::Report> for Published<Event> {
+    fn from(summary: packetcraftr::exchange::Report) -> Self {
+        let packetcraftr::exchange::Report {
             unanswered,
             diagnostics,
             stats,
         } = summary;
-        (
-            Self::Complete {
+        Self::new(
+            Event::Complete {
                 unanswered: unanswered.into_iter().map(request_index).collect(),
             },
             diagnostics,
-            stats,
         )
+        .with_stats(stats)
     }
 }
 
-fn sent_output(sent: std::sync::Arc<packetcraftr::SentPacket>) -> (Wire, Vec<Diagnostic>) {
+fn sent_output(
+    sent: std::sync::Arc<packetcraftr::evidence::SentPacket>,
+) -> (Wire, Vec<Diagnostic>) {
     (
-        Wire::new(sent.wire_bytes().clone()),
+        sent.wire_bytes().clone().into(),
         sent.built().diagnostics.clone(),
     )
 }
 
-fn response_output(response: packetcraftr::exchange::Response) -> Result<Response, Error> {
-    Ok(Response {
-        request_index: request_index(response.request_index),
-        response: Decoded::try_from_decoded(response.response)?,
-        latency: response.latency,
-    })
+impl TryFrom<packetcraftr::exchange::Response> for Response {
+    type Error = Error;
+
+    fn try_from(response: packetcraftr::exchange::Response) -> Result<Self, Error> {
+        Ok(Self {
+            request_index: request_index(response.request_index),
+            response: response.response.try_into()?,
+            latency: response.latency,
+        })
+    }
 }
 
 fn request_index(index: usize) -> u64 {

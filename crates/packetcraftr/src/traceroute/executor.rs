@@ -1,32 +1,29 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::BoundaryError;
-use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{ExchangeExecutor, Execution, Executor, Transport};
+use crate::execution::{ExchangeExecutor, Executor};
+use crate::execution::{ExecutorFault, WorkflowOverrides};
+use crate::probe::{Batch, Evidence, Transport};
+use packetcraftr_core::error::BoundaryError;
 
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
+use crate::clock::Clock;
+use crate::providers::Providers;
 
-use super::classification::classify_response;
-use super::{Batch, Probe};
+use super::Probe;
+use super::evidence::classify_response;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
-    I: PacketIo + CaptureProvider,
-{
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
-        if self.options.max_responses < batch.probes.len() {
+        if self.collection.max_responses < batch.probes.len() {
             return Err(EXECUTOR_FAULT.invalid(format!(
                 "max_responses={} is smaller than traceroute hop batch size {}",
-                self.options.max_responses,
+                self.collection.max_responses,
                 batch.probes.len()
             )));
         }
@@ -73,7 +70,7 @@ where
                 })
             };
         let exchange = self.exchange_for_workflow(
-            &template,
+            template,
             WorkflowOverrides {
                 timeout: batch.timeout,
                 max_template_packets: batch.probes.len(),
@@ -83,12 +80,12 @@ where
             &mut matches_request,
             None,
         )?;
-        let execution = Execution::from_exchange(batch.permit, exchange);
+        let execution = Evidence::from_exchange(batch.permit, exchange);
         Ok(execution)
     }
 }
 
-fn validate_batch(batch: &Batch) -> Result<&Probe, BoundaryError> {
+fn validate_batch(batch: &Batch<Probe>) -> Result<&Probe, BoundaryError> {
     let first = batch
         .probes
         .first()
@@ -132,7 +129,7 @@ mod tests {
     use crate::evidence::ExecutionPermit;
     use crate::probe::ProbeEndpoint;
 
-    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch {
+    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch<Probe> {
         Batch {
             probes: source_ports
                 .iter()

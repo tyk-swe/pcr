@@ -177,3 +177,26 @@ fn capture_retention_is_reported_as_a_policy_setting() {
     assert_eq!(setting(&report, "--rotate-files")["unit"], "count");
     assert!(!target.exists());
 }
+#[test]
+fn a_probe_workflow_reports_its_one_event_runtime() {
+    // The scan is refused inside its client, after the client is composed.
+    let output = run(&[
+        "--resource-diagnostics",
+        "--output",
+        "json",
+        "scan",
+        "192.0.2.1",
+    ]);
+    let document = parse_json(&output);
+    assert_eq!(document["status"], "error", "{document}");
+    let workers = document["resources"]["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|worker| worker["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        workers,
+        ["native_process", "tcp_connect_process", "workflow_progress"]
+    );
+}

@@ -10,7 +10,7 @@ use packetcraftr_core::{
     fuzz,
     layer::Layer,
     protocol::{
-        application::dns::{Dns, Name},
+        application::dns::{self, Dns, Name},
         builtin,
     },
     template::Template,
@@ -90,7 +90,10 @@ fn wire_images_survive_documents_and_explicit_edits_rebuild_counts() {
     assert_eq!(recreated.get::<Dns>().unwrap().to_wire().unwrap(), original);
     let mut edited = recreated.get::<Dns>().unwrap().clone();
     edited
-        .set_field_path("answers[0].owner", "different.example.test.".into())
+        .set_field_path(
+            &"answers[0].owner".parse().unwrap(),
+            "different.example.test.".into(),
+        )
         .unwrap();
     edited.edit(|message| message.answers.clear());
     let decoded = Dns::try_from(edited.to_wire().unwrap()).unwrap();
@@ -221,10 +224,16 @@ fn borrowed_dns_wire_enforces_message_byte_limit() {
     wire.push(0);
     let error = Dns::try_from(wire.as_slice()).unwrap_err();
     assert!(matches!(
-        &error,
-        codec::Error::Invalid { message, .. }
-            if message == "DNS message is 65536 bytes; maximum is 65535"
+        error,
+        dns::Error::MessageTooLarge {
+            actual: 65_536,
+            maximum: 65_535
+        }
     ));
+    assert_eq!(
+        error.to_string(),
+        "DNS message is 65536 bytes; maximum is 65535"
+    );
     assert_eq!(
         error.to_string(),
         Dns::try_from(wire).unwrap_err().to_string()

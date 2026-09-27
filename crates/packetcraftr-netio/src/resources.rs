@@ -1,17 +1,28 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Read-only native admission diagnostics. Capacity is process-wide and cannot
-//! be increased by constructing more providers or clients.
+//! Read-only diagnostics of the process-wide native worker pool. Capacity is
+//! process-wide and cannot be increased by constructing more providers or
+//! clients.
 
-/// A coherent sample of native worker admission. Active includes resources
+/// Work the process-wide native worker pool admits at once: capture reads,
+/// route queries, and ordinary TCP connects, each holding one slot until its
+/// work and the resources it opened are released.
+///
+/// [`tcp::MAX_PENDING_CONNECTIONS`](crate::tcp::MAX_PENDING_CONNECTIONS) is a
+/// sub-limit of this pool. [`capture::MAX_SOURCES`](crate::capture::MAX_SOURCES)
+/// is a separate limit on one group's size.
+pub const WORKER_CAPACITY: usize = 16;
+
+/// A coherent sample of worker admission. Active includes resources
 /// retained after caller timeout; cleanup must finish before capacity returns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeSnapshot {
-    /// Whether this feature/platform profile uses the native worker pool.
+    /// Whether this feature/platform profile uses the worker pool. Ordinary
+    /// TCP connects use it in every profile.
     pub supported: bool,
-    /// Maximum concurrent native worker reservations.
+    /// Maximum concurrent reservations.
     pub capacity: usize,
     /// Reservations still owned by work or cleanup, including the persistent
     /// Linux route workers initialized by route lookup or interface discovery.
@@ -22,16 +33,18 @@ pub struct NativeSnapshot {
     pub cleanup_retaining_capacity: usize,
 }
 
-/// Inspect native resources without starting workers or performing I/O.
-/// The Linux route service retains one reservation per initialized network
-/// namespace while idle because each thread, runtime, and socket stays alive.
+/// Inspect the whole worker pool, TCP connects included, without starting
+/// workers or performing I/O. The Linux route service retains one
+/// reservation per initialized network namespace while idle because each
+/// worker, runtime, and socket stays alive.
 #[must_use]
 pub fn native_snapshot() -> NativeSnapshot {
-    crate::platform::native_resource_snapshot()
+    crate::workers::shared().snapshot()
 }
 
-/// Inspect the separate process-wide ordinary-TCP worker/socket admission pool.
+/// Inspect the ordinary-TCP sub-limit of the worker pool: connects still
+/// running or cleaning up, and connected sockets that are still open.
 #[must_use]
 pub fn tcp_connect_snapshot() -> NativeSnapshot {
-    crate::platform::tcp_connect_snapshot()
+    crate::workers::shared().tcp_snapshot()
 }

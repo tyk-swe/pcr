@@ -18,7 +18,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-# `dep:socket2` covers the macOS AF_ROUTE socket in `platform/af_route/query.rs`.
+# `dep:socket2` covers the macOS AF_ROUTE socket in `platform/route/af_route/query.rs`.
 # Cargo cannot scope a feature's dependency to one target, so Linux and Windows
 # route-only builds pull the (tiny) crate as well.
 native-route = [

@@ -8,14 +8,13 @@ use crate::decode::DecodedPacket;
 use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::packet::Packet;
-use crate::protocol::gre::Gre;
-use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
 use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};
 use crate::protocol::network::{
-    Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension,
+    Fragment as Ipv6FragmentHeader, Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length,
+    is_walkable_ipv6_extension,
 };
 use crate::protocol::transport::{Tcp, Udp};
-use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
+use crate::protocol::tunnel::{Ah, Erspan, Geneve, Gre, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 
 use crate::analysis::reassembly::ip::{
@@ -64,7 +63,6 @@ pub(crate) struct UdpTransport {
 /// to dissection.
 fn ipv4_fragment(layer: &dyn Layer) -> Option<&Ipv4> {
     layer
-        .as_any()
         .downcast_ref::<Ipv4>()
         .filter(|ipv4| ipv4.fragment_offset != 0 || ipv4.more_fragments)
 }
@@ -73,7 +71,6 @@ fn ipv4_fragment(layer: &dyn Layer) -> Option<&Ipv4> {
 /// rule is the same one [`ipv4_fragment`] documents.
 fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
     layer
-        .as_any()
         .downcast_ref::<Ipv6FragmentHeader>()
         .filter(|fragment| fragment.fragment_offset != 0 || fragment.more_fragments)
 }
@@ -86,39 +83,39 @@ fn tunnel_identifier(
     layer: &dyn Layer,
     ethernet: Option<([u8; 6], [u8; 6])>,
 ) -> Option<EncapsulationIdentifier> {
-    let any = layer.as_any();
-    if let Some(vlan) = any.downcast_ref::<Vlan>() {
+    if let Some(vlan) = layer.downcast_ref::<Vlan>() {
         Some(EncapsulationIdentifier::Vlan {
             vlan_id: vlan.vlan_id,
         })
-    } else if let Some(vlan) = any.downcast_ref::<Vlan8021ad>() {
+    } else if let Some(vlan) = layer.downcast_ref::<Vlan8021ad>() {
         Some(EncapsulationIdentifier::Vlan8021ad {
             vlan_id: vlan.vlan_id,
         })
-    } else if let Some(vxlan) = any.downcast_ref::<Vxlan>() {
+    } else if let Some(vxlan) = layer.downcast_ref::<Vxlan>() {
         Some(EncapsulationIdentifier::Vxlan { vni: vxlan.vni })
-    } else if let Some(geneve) = any.downcast_ref::<Geneve>() {
+    } else if let Some(geneve) = layer.downcast_ref::<Geneve>() {
         Some(EncapsulationIdentifier::Geneve { vni: geneve.vni })
-    } else if let Some(gre) = any.downcast_ref::<Gre>() {
+    } else if let Some(gre) = layer.downcast_ref::<Gre>() {
         Some(EncapsulationIdentifier::Gre { key: gre.key })
-    } else if let Some(mpls) = any.downcast_ref::<Mpls>() {
+    } else if let Some(mpls) = layer.downcast_ref::<Mpls>() {
         Some(EncapsulationIdentifier::Mpls { label: mpls.label })
-    } else if let Some(pppoe) = any.downcast_ref::<Pppoe>() {
+    } else if let Some(pppoe) = layer.downcast_ref::<Pppoe>() {
         Some(EncapsulationIdentifier::Pppoe {
             session_id: pppoe.session_id,
             endpoints: ethernet,
         })
-    } else if let Some(l2tp) = any.downcast_ref::<L2tpv3>() {
+    } else if let Some(l2tp) = layer.downcast_ref::<L2tpv3>() {
         Some(EncapsulationIdentifier::L2tpv3 {
             session_id: l2tp.session_id,
         })
-    } else if let Some(erspan) = any.downcast_ref::<Erspan>() {
+    } else if let Some(erspan) = layer.downcast_ref::<Erspan>() {
         Some(EncapsulationIdentifier::Erspan {
             vlan: erspan.vlan,
             session_id: erspan.session_id,
         })
     } else {
-        any.downcast_ref::<Ah>()
+        layer
+            .downcast_ref::<Ah>()
             .map(|ah| EncapsulationIdentifier::Ah { spi: ah.spi })
     }
 }
@@ -139,10 +136,10 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
         outermost: None,
     };
     for (index, layer) in packet.iter().enumerate() {
-        if let Some(link) = layer.as_any().downcast_ref::<Ethernet>() {
+        if let Some(link) = layer.downcast_ref::<Ethernet>() {
             ethernet = Some(ordered(link.source, link.destination));
         }
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
+        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
             let source = IpAddr::V4(ipv4.source);
             let destination = IpAddr::V4(ipv4.destination);
             let (first, second) = ordered(source, destination);
@@ -153,7 +150,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                 destination,
                 path_index,
             });
-        } else if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
+        } else if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
             let source = IpAddr::V6(ipv6.source);
             let destination = IpAddr::V6(ipv6.destination);
             let (first, second) = ordered(source, destination);
@@ -166,7 +163,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
             });
         } else if let Some(identifier) = tunnel_identifier(layer, ethernet) {
             path.push(identifier);
-        } else if let Some(tcp) = layer.as_any().downcast_ref::<Tcp>() {
+        } else if let Some(tcp) = layer.downcast_ref::<Tcp>() {
             if let Some(network) = &network {
                 found.outermost.get_or_insert(index);
                 let flow = FlowKey {
@@ -182,7 +179,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                     encapsulation: path_without(&path, network.path_index),
                 });
             }
-        } else if let Some(udp) = layer.as_any().downcast_ref::<Udp>()
+        } else if let Some(udp) = layer.downcast_ref::<Udp>()
             && let Some(network) = &network
         {
             found.outermost.get_or_insert(index);
@@ -264,10 +261,10 @@ fn ip_fragments_with_scope(
     let mut non_atomic = None;
 
     for (index, layer) in decoded.packet.iter().enumerate() {
-        if let Some(link) = layer.as_any().downcast_ref::<Ethernet>() {
+        if let Some(link) = layer.downcast_ref::<Ethernet>() {
             ethernet = Some(ordered(link.source, link.destination));
         }
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
+        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
             let source = IpAddr::V4(ipv4.source);
             let destination = IpAddr::V4(ipv4.destination);
             let (first, second) = ordered(source, destination);
@@ -318,7 +315,7 @@ fn ip_fragments_with_scope(
             break;
         }
 
-        if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
+        if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
             let source = IpAddr::V6(ipv6.source);
             let destination = IpAddr::V6(ipv6.destination);
             let (first, second) = ordered(source, destination);
@@ -332,7 +329,7 @@ fn ip_fragments_with_scope(
             continue;
         }
 
-        if layer.as_any().is::<Ipv6FragmentHeader>() {
+        if layer.is::<Ipv6FragmentHeader>() {
             let Some(fragment) = ipv6_fragment(layer) else {
                 atomic.push(IpFamily::Ipv6);
                 continue;
@@ -434,7 +431,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
         .enumerate()
         .skip(transport_index.saturating_add(1))
     {
-        if let Some(padding) = layer.as_any().downcast_ref::<Padding>()
+        if let Some(padding) = layer.downcast_ref::<Padding>()
             && padding.excluded_from(transport_index)
         {
             continue;
@@ -524,7 +521,7 @@ fn transport_hidden_by_fragment(
         if index <= transport_index {
             return false;
         }
-        if layer.as_any().is::<Ipv4>() {
+        if layer.is::<Ipv4>() {
             return ipv4_fragment(layer)
                 .is_some_and(|ipv4| ipv4.protocol.exact().copied() == Some(protocol));
         }
@@ -554,12 +551,7 @@ fn ipv6_fragment_transport_protocol(
         .take(fragment_index)
         .enumerate()
         .rev()
-        .find_map(|(index, layer)| {
-            layer
-                .as_any()
-                .downcast_ref::<Ipv6>()
-                .map(|ipv6| (index, ipv6))
-        })?;
+        .find_map(|(index, layer)| layer.downcast_ref::<Ipv6>().map(|ipv6| (index, ipv6)))?;
     let ipv6_layout = decoded.layout.layer(ipv6_index)?;
     let payload_length = usize::from(ipv6.payload_length.exact().copied()?);
     let payload_end = ipv6_layout.range.end.checked_add(payload_length)?;
@@ -586,17 +578,17 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
     let mut in_ipv6 = false;
     let mut replayed = Vec::new();
     for layer in decoded.packet.iter() {
-        if layer.as_any().is::<Ipv4>() {
+        if layer.is::<Ipv4>() {
             in_ipv6 = false;
             replayed.clear();
-        } else if layer.as_any().is::<Ipv6>() {
+        } else if layer.is::<Ipv6>() {
             in_ipv6 = true;
             replayed.clear();
-        } else if layer.as_any().is::<Ipv6FragmentHeader>() {
+        } else if layer.is::<Ipv6FragmentHeader>() {
             if in_ipv6 && ipv6_fragment(layer).is_some() {
                 return replayed;
             }
-        } else if in_ipv6 && let Some(ah) = layer.as_any().downcast_ref::<Ah>() {
+        } else if in_ipv6 && let Some(ah) = layer.downcast_ref::<Ah>() {
             replayed.push(EncapsulationIdentifier::Ah { spi: ah.spi });
         }
     }
@@ -607,12 +599,12 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
 pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
     let mut ipv6_start = None;
     for (index, layer) in decoded.packet.iter().enumerate() {
-        if layer.as_any().is::<Ipv4>() {
+        if layer.is::<Ipv4>() {
             ipv6_start = None;
             if ipv4_fragment(layer).is_some() {
                 return 1;
             }
-        } else if layer.as_any().is::<Ipv6>() {
+        } else if layer.is::<Ipv6>() {
             ipv6_start = Some(index);
         } else if ipv6_fragment(layer).is_some()
             && let Some(start) = ipv6_start

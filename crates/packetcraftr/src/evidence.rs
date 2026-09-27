@@ -1,16 +1,110 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::{
-    build::BuiltPacket,
-    diagnostic::Diagnostic,
-    frame::{Frame, LinkType},
-};
+//! Evidence every live workflow shares: the exact [`SentPacket`] a
+//! transmission produced, and the [`Error`] for evidence an executor returned
+//! that is inconsistent with the step it was granted.
+
+use std::time::Duration;
+
+use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, SendEvidenceFault,
-    link::Mode as LinkMode,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
+
+/// Why the evidence an executor returned for one step is inconsistent with
+/// the step it was granted: the exact sent packets and bytes, the captured
+/// responses and their timing, capture statistics, or evidence limits.
+///
+/// Workflows report it at the step it concerns, in their own error.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// The evidence is bound to a different execution permit than the one
+    /// the step was granted.
+    #[error("executor returned evidence for a different execution permit")]
+    PermitMismatch,
+    #[error("expected {expected} sent receipts, received {receipts}")]
+    SentCardinality { expected: usize, receipts: usize },
+    #[error("matched response references a request outside the executed step")]
+    ResponseOutsideBatch,
+    #[error("executor capture frame-count accounting overflowed")]
+    CapturedFrameCountOverflow,
+    #[error("executor returned {actual} captured frames beyond max_evidence_frames={limit}")]
+    CapturedFrameLimitExceeded { actual: usize, limit: usize },
+    #[error("executor capture byte accounting overflowed")]
+    CapturedByteCountOverflow,
+    #[error("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")]
+    CapturedByteLimitExceeded { actual: usize, limit: usize },
+    /// The packet at `request_index` does not carry the destination and
+    /// probe identity the step requested.
+    #[error("sent packet does not preserve the requested destination and probe identity")]
+    SentPacketMismatch { request_index: usize },
+    #[error("sent frame byte accounting overflowed")]
+    SentByteCountOverflow,
+    #[error("successful exchange reported {reported} sent bytes for {actual} exact frame bytes")]
+    SentByteCountMismatch { reported: u64, actual: u64 },
+    #[error("executor returned {evidence} without a timestamp")]
+    TimestampUnavailable { evidence: &'static str },
+    #[error("{message}")]
+    InvalidMatchedResponse { message: String },
+    #[error("matched response latency {latency:?} exceeds timeout {timeout:?}")]
+    ResponseAfterTimeout {
+        latency: Duration,
+        timeout: Duration,
+    },
+    #[error("{message}")]
+    InvalidUnsolicitedResponse { message: String },
+    #[error("{message}")]
+    InvalidCaptureStatistics { message: String },
+    #[error("successful exchange statistics do not account for every request")]
+    IncompleteStatistics,
+}
+
+impl Error {
+    pub(crate) const fn request_index(&self) -> Option<usize> {
+        match self {
+            Self::SentPacketMismatch { request_index } => Some(*request_index),
+            _ => None,
+        }
+    }
+
+    /// The message a workflow reports, naming what one executed step is
+    /// (`step`, such as "hop batch") and the workflow (`workflow`) where the
+    /// neutral [`Display`](std::fmt::Display) text leaves them generic.
+    pub(crate) fn describe(&self, step: &str, workflow: &str) -> String {
+        match self {
+            Self::ResponseOutsideBatch => {
+                format!("matched response references a request outside the {step}")
+            }
+            Self::SentPacketMismatch { .. } => {
+                format!(
+                    "sent packet does not preserve the {workflow} destination and probe identity"
+                )
+            }
+            Self::IncompleteStatistics => {
+                format!("successful exchange statistics do not account for every {workflow} probe")
+            }
+            error => error.to_string(),
+        }
+    }
+}
+
+/// Inconsistent evidence breaks the executor's contract with the workflow;
+/// each workflow reports it at the step it concerns with its own code.
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        Classification::new(
+            "internal.live_io_invariant",
+            Kind::Internal,
+            Some(
+                "report the inconsistent provider result; do not reinterpret it as a successful operation",
+            ),
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExecutionPermit(u64);
@@ -72,40 +166,44 @@ pub(crate) fn total_bytes_sent<'a>(sent: impl IntoIterator<Item = &'a SentPacket
     })
 }
 
+/// Why a frame could not be retained: a retention limit was reached or a
+/// counter would overflow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BudgetError {
+pub(crate) enum RetentionError {
     FrameCountOverflow,
     FrameLimit,
     ByteCountOverflow,
     ByteLimit,
 }
 
+/// The retention budget: frames and bytes of evidence kept so far, charged
+/// against a workflow's evidence limits.
 #[derive(Default)]
-pub(crate) struct Budget {
+pub(crate) struct RetentionBudget {
     retained_frames: usize,
     retained_bytes: usize,
 }
 
-impl Budget {
+impl RetentionBudget {
     pub(crate) fn reserve(
         &mut self,
         additional_bytes: usize,
         max_frames: usize,
         max_bytes: usize,
-    ) -> Result<(), BudgetError> {
+    ) -> Result<(), RetentionError> {
         let next_frames = self
             .retained_frames
             .checked_add(1)
-            .ok_or(BudgetError::FrameCountOverflow)?;
+            .ok_or(RetentionError::FrameCountOverflow)?;
         if next_frames > max_frames {
-            return Err(BudgetError::FrameLimit);
+            return Err(RetentionError::FrameLimit);
         }
         let next_bytes = self
             .retained_bytes
             .checked_add(additional_bytes)
-            .ok_or(BudgetError::ByteCountOverflow)?;
+            .ok_or(RetentionError::ByteCountOverflow)?;
         if next_bytes > max_bytes {
-            return Err(BudgetError::ByteLimit);
+            return Err(RetentionError::ByteLimit);
         }
         self.retained_frames = next_frames;
         self.retained_bytes = next_bytes;
@@ -118,7 +216,7 @@ impl Budget {
 #[derive(Clone, Debug)]
 pub struct SentPacket {
     built: BuiltPacket,
-    route: packetcraftr_netio::route::Materialized,
+    route: crate::route::Materialized,
     report: TransmissionReport,
     frame: Frame,
 }
@@ -133,15 +231,11 @@ impl SentPacket {
     /// complete exact transmission or the route has no resolved link mode.
     pub fn try_new(
         built: BuiltPacket,
-        route: packetcraftr_netio::route::Materialized,
+        route: crate::route::Materialized,
         report: TransmissionReport,
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
-        let link_type = match route.plan.mode {
-            LinkMode::Layer2 => route.plan.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
-        };
+        let link_type = route.plan.wire_link_type()?;
         let frame = Frame::new(
             report.timing().freshness_marker().wall_clock(),
             link_type,
@@ -162,7 +256,7 @@ impl SentPacket {
         &self.built
     }
 
-    pub fn route(&self) -> &packetcraftr_netio::route::Materialized {
+    pub fn route(&self) -> &crate::route::Materialized {
         &self.route
     }
 
@@ -180,77 +274,6 @@ impl SentPacket {
 
     pub fn frame(&self) -> &Frame {
         &self.frame
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn test_sent_packet(packet: packetcraftr_core::packet::Packet) -> SentPacket {
-    use packetcraftr_netio::transmit::Submission;
-
-    let built = test_built_packet(packet);
-    let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
-    SentPacket::try_new(built, test_materialized_route(), report)
-        .expect("valid trusted sent fixture")
-}
-
-#[cfg(test)]
-pub(crate) fn test_sent_packet_with_report(
-    packet: packetcraftr_core::packet::Packet,
-    report: TransmissionReport,
-) -> SentPacket {
-    SentPacket::try_new(test_built_packet(packet), test_materialized_route(), report)
-        .expect("valid trusted sent fixture")
-}
-
-#[cfg(test)]
-fn test_built_packet(packet: packetcraftr_core::packet::Packet) -> BuiltPacket {
-    use packetcraftr_core::build::{Builder, Options};
-    use packetcraftr_core::codec::Context;
-
-    Builder::new(packetcraftr_core::protocol::builtin::registry())
-        .build(packet, Context::default(), Options::default())
-        .expect("sent-packet fixture must build")
-}
-
-#[cfg(test)]
-fn test_materialized_route() -> packetcraftr_netio::route::Materialized {
-    use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::{
-        interface::Id as InterfaceId,
-        link::{Capability, Mode},
-        route::{Decision, Materialized, Plan},
-    };
-
-    Materialized {
-        plan: Plan {
-            decision: Decision {
-                interface: InterfaceId {
-                    name: "fixture0".to_owned(),
-                    index: 1,
-                },
-                source_mac: None,
-                selected_source: None,
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
-                destination_scope: packetcraftr_netio::route::Scope::Link,
-                mtu: u32::MAX,
-                capability: Capability::Layer3,
-                link_type: LinkType::RAW,
-            },
-            mode: Mode::Layer3,
-            lookup_destination: None,
-            final_destination: None,
-            visited_destinations: Vec::new(),
-            packet_source: None,
-            neighbor_source: None,
-            neighbor_target: None,
-            destination_mac: None,
-            source_mac: None,
-            neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: false,
-        },
-        neighbor_resolution: None,
     }
 }
 
@@ -321,7 +344,7 @@ mod tests {
     fn sent_receipt_rejects_semantic_build_with_different_accepted_bytes() {
         let mut packet = Packet::new();
         packet.push(Raw::new(Bytes::from_static(&[1, 2, 3])));
-        let fixture = test_sent_packet(packet);
+        let fixture = crate::test_support::sent_packet(packet);
         let built = fixture.built.clone();
         let route = fixture.route.clone();
         let report = Submission::start().complete(3, Bytes::from_static(&[3, 2, 1]));
@@ -334,7 +357,7 @@ mod tests {
 
     #[test]
     fn reservation_commits_both_counters_only_when_every_bound_fits() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 10,
         };
@@ -344,17 +367,17 @@ mod tests {
 
     #[test]
     fn frame_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 3,
         };
-        assert_eq!(budget.reserve(1, 1, 10), Err(BudgetError::FrameLimit));
+        assert_eq!(budget.reserve(1, 1, 10), Err(RetentionError::FrameLimit));
         assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
 
         budget.retained_frames = usize::MAX;
         assert_eq!(
             budget.reserve(1, usize::MAX, 10),
-            Err(BudgetError::FrameCountOverflow)
+            Err(RetentionError::FrameCountOverflow)
         );
         assert_eq!(
             (budget.retained_frames, budget.retained_bytes),
@@ -364,17 +387,17 @@ mod tests {
 
     #[test]
     fn byte_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 9,
         };
-        assert_eq!(budget.reserve(2, 10, 10), Err(BudgetError::ByteLimit));
+        assert_eq!(budget.reserve(2, 10, 10), Err(RetentionError::ByteLimit));
         assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 9));
 
         budget.retained_bytes = usize::MAX;
         assert_eq!(
             budget.reserve(1, 10, usize::MAX),
-            Err(BudgetError::ByteCountOverflow)
+            Err(RetentionError::ByteCountOverflow)
         );
         assert_eq!(
             (budget.retained_frames, budget.retained_bytes),

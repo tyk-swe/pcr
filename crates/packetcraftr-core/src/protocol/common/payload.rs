@@ -15,16 +15,14 @@ pub(crate) fn payload_without_padding<'a>(
         .iter()
         .skip(context.index.saturating_add(1))
         .rev()
-        .take_while(|layer| layer.as_any().is::<Padding>())
+        .take_while(|layer| layer.is::<Padding>())
         .filter(|layer| {
             layer
-                .as_any()
                 .downcast_ref::<Padding>()
                 .is_some_and(|padding| padding.excluded_from(context.index))
         })
         .try_fold(0_usize, |total, layer| {
             let length = layer
-                .as_any()
                 .downcast_ref::<Padding>()
                 .map_or(0, |padding| padding.bytes.len());
             total.checked_add(length)

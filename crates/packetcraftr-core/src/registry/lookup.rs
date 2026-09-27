@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -21,6 +21,7 @@ pub struct Registry {
     pub(super) reverse_bindings:
         HashMap<crate::layer::Id, HashMap<crate::layer::Id, Vec<ReverseBinding>>>,
     pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
+    pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) schemas: BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
@@ -41,7 +42,8 @@ impl fmt::Debug for Registry {
 
 impl Registry {
     /// Derives a mutable registry configuration, retaining existing codecs,
-    /// aliases, roots, matchers and filter fields. `build` revalidates bindings.
+    /// aliases, roots, matchers, padding properties and filter fields. `build`
+    /// revalidates bindings.
     pub fn to_builder(&self) -> Builder {
         Builder {
             codecs: self.codecs.clone(),
@@ -49,6 +51,7 @@ impl Registry {
             roots: self.roots.clone(),
             bindings: self.bindings.clone(),
             matchers: self.matchers.clone(),
+            trailing_padding: self.trailing_padding.clone(),
             filter_fields: self.filter_fields.clone(),
         }
     }
@@ -121,6 +124,13 @@ impl Registry {
 
     pub fn matcher(&self, protocol: &str) -> Option<&Arc<dyn ResponseMatcher>> {
         self.matchers.get(protocol)
+    }
+
+    /// Whether frames of a link protocol may carry trailing padding after the
+    /// payload their network layer declares. See
+    /// [`Builder::allow_trailing_padding`].
+    pub fn allows_trailing_padding(&self, protocol: &str) -> bool {
+        self.trailing_padding.contains(protocol)
     }
 
     pub fn protocols(&self) -> impl ExactSizeIterator<Item = &crate::layer::Id> {

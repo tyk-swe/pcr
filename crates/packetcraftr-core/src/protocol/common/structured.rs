@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::field::{FieldKind, FieldValue};
-use crate::layer::{FieldError, FieldSchema, ReflectiveField, Schema};
+use crate::field::{self, FieldKind, FieldValue};
+use crate::layer::{FieldSchema, ReflectiveField, Schema};
 use std::collections::BTreeMap;
 
 pub(crate) const fn member(
@@ -44,7 +44,7 @@ impl Object {
         value: FieldValue,
         schema: &'static Schema,
         field: &str,
-    ) -> Result<Self, FieldError> {
+    ) -> Result<Self, field::Error> {
         let FieldValue::Object(values) = value else {
             return Err(super::wrong_type(schema, field, "object"));
         };
@@ -60,17 +60,18 @@ impl Object {
     pub(crate) fn take(&mut self, name: &str) -> Option<FieldValue> {
         self.values.remove(name)
     }
-    pub(crate) fn required(&mut self, name: &str) -> Result<FieldValue, FieldError> {
-        self.take(name).ok_or_else(|| FieldError::MissingRequired {
-            protocol: self.schema.protocol,
-            field: format!("{}.{}", self.field, name),
-        })
+    pub(crate) fn required(&mut self, name: &str) -> Result<FieldValue, field::Error> {
+        self.take(name)
+            .ok_or_else(|| field::Error::MissingRequired {
+                protocol: self.schema.protocol,
+                field: format!("{}.{}", self.field, name),
+            })
     }
     pub(crate) fn required_with<T: ReflectiveField>(
         &mut self,
         name: &str,
         mut initial: T,
-    ) -> Result<T, FieldError> {
+    ) -> Result<T, field::Error> {
         let value = self.required(name)?;
         crate::layer::reflect_set(
             &mut initial,
@@ -83,7 +84,7 @@ impl Object {
     pub(crate) fn required_value<T: ReflectiveField + Default>(
         &mut self,
         name: &str,
-    ) -> Result<T, FieldError> {
+    ) -> Result<T, field::Error> {
         let value = self.required(name)?;
         let mut result = T::default();
         crate::layer::reflect_set(
@@ -98,7 +99,7 @@ impl Object {
         &mut self,
         name: &str,
         default: T,
-    ) -> Result<T, FieldError> {
+    ) -> Result<T, field::Error> {
         let mut result = default;
         if let Some(value) = self.take(name) {
             crate::layer::reflect_set(
@@ -110,9 +111,9 @@ impl Object {
         }
         Ok(result)
     }
-    pub(crate) fn finish(self) -> Result<(), FieldError> {
+    pub(crate) fn finish(self) -> Result<(), field::Error> {
         if let Some((name, _)) = self.values.first_key_value() {
-            Err(FieldError::UnknownField {
+            Err(field::Error::UnknownField {
                 protocol: self.schema.protocol,
                 field: format!("{}.{}", self.field, name),
             })
@@ -127,7 +128,7 @@ pub(crate) fn list(
     maximum: usize,
     schema: &'static Schema,
     field: &str,
-) -> Result<Vec<FieldValue>, FieldError> {
+) -> Result<Vec<FieldValue>, field::Error> {
     match value {
         FieldValue::List(values) if values.len() <= maximum => Ok(values),
         FieldValue::List(_) => Err(super::out_of_range(schema, field)),

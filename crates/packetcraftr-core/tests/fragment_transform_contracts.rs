@@ -3,15 +3,13 @@
 
 use bytes::Bytes;
 use packetcraftr_core::{
-    analysis::{self, pcap},
-    build,
+    analysis, build, capture_file,
     frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
     protocol::{
         builtin,
-        ipv6::{DestinationOptions, HopByHop},
-        network::{Ipv4, Ipv6},
+        network::{DestinationOptions, HopByHop, Ipv4, Ipv6},
         transport::Udp,
     },
     transform::{FragmentOptions, fragment},
@@ -80,11 +78,11 @@ fn both_families_reassemble_exact_transport_bytes_in_reverse_capture_order() {
                 assert_eq!(fragments[1].bytes()[0] & 15, 6);
                 assert_eq!(&fragments[1].bytes()[20..24], &[0x82, 4, 1, 2]);
             }
-            let mut writer = pcap::Writer::pcap(Vec::new(), original.link_type).unwrap();
+            let mut writer = capture_file::Writer::pcap(Vec::new(), original.link_type).unwrap();
             for frame in fragments.iter().rev() {
                 writer.write_frame(frame).unwrap();
             }
-            let mut reader = pcap::Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            let mut reader = capture_file::Reader::new(Cursor::new(writer.into_inner())).unwrap();
             let mut rebuilt = None;
             analysis::run(
                 &mut reader,
@@ -175,4 +173,38 @@ fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
     )
     .unwrap();
     assert!(fragment(&once[0], Default::default()).is_err());
+}
+
+#[test]
+fn only_ethernet_and_ip_roots_frame_a_packet_for_fragmenting() {
+    use packetcraftr_core::{
+        error::Classified,
+        protocol::{link::Ethernet, transport::Tcp},
+        transform::fragment_link_type,
+    };
+    fn rooted(layer: impl packetcraftr_core::layer::Layer) -> Packet {
+        let mut packet = Packet::new();
+        packet.push(layer);
+        packet
+    }
+    for (packet, expected) in [
+        (rooted(Ethernet::default()), LinkType::ETHERNET),
+        (rooted(Ipv4::default()), LinkType::IPV4),
+        (rooted(Ipv6::default()), LinkType::IPV6),
+    ] {
+        assert_eq!(fragment_link_type(&packet).unwrap(), expected);
+    }
+    for packet in [
+        Packet::new(),
+        rooted(Udp::default()),
+        rooted(Tcp::default()),
+        rooted(Raw::new(vec![0x45])),
+    ] {
+        let error = fragment_link_type(&packet).expect_err("unsupported root");
+        assert_eq!(
+            error.to_string(),
+            "unsupported packet transform: recipe must begin with Ethernet or IP"
+        );
+        assert_eq!(error.classification().code, "packet.transform_unsupported");
+    }
 }

@@ -1,25 +1,43 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Typed Layer 2 and Layer 3 transmission contracts; callers own policy authorization.
+//! The transmission contract: a [`Provider`] sends one routed Layer 2 frame or
+//! Layer 3 packet, and the native [`SystemProvider`] dispatches each to the
+//! backend compiled in for its layer. Callers own policy authorization.
 
 use bytes::Bytes;
+use std::net::IpAddr;
 use std::time::{Instant, SystemTime};
 
 use super::Error;
 use super::error::SendEvidenceFault;
 use super::link::Mode;
-use super::route::Materialized;
+use super::route::Decision;
+
+/// The route facts a transmission backend checks before sending: the
+/// selected interface decision, the resolved link mode, and the destination
+/// the route was looked up for.
+///
+/// This is a borrowed view of a finished route; planning and neighbor
+/// resolution happen before a frame is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Route<'a> {
+    pub decision: &'a Decision,
+    pub mode: Mode,
+    /// Destination the route was looked up for; absent for destination-free
+    /// Layer 2 frames.
+    pub lookup_destination: Option<IpAddr>,
+}
 
 /// Complete Layer 2 frame with a verified Layer 2 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a Materialized,
+    route: Route<'a>,
 }
 
 impl<'a> Layer2Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer2)?;
         Ok(Self { bytes, route })
     }
@@ -28,7 +46,7 @@ impl<'a> Layer2Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         self.route
     }
 }
@@ -37,11 +55,11 @@ impl<'a> Layer2Frame<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Layer3Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a Materialized,
+    route: Route<'a>,
 }
 
 impl<'a> Layer3Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer3)?;
         Ok(Self { bytes, route })
     }
@@ -50,22 +68,23 @@ impl<'a> Layer3Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         self.route
     }
 }
 
-/// Mode-tagged transmission input used by the high-level client.
+/// One routed transmission: a Layer 2 frame or a Layer 3 packet, tagged by the
+/// link mode its route resolved to.
 #[derive(Clone, Copy, Debug)]
-pub enum Frame<'a> {
+pub enum Outbound<'a> {
     Layer2(Layer2Frame<'a>),
     Layer3(Layer3Frame<'a>),
 }
 
-impl<'a> Frame<'a> {
-    /// Selects the typed provider boundary from the already-materialized route.
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
-        match route.plan.mode {
+impl<'a> Outbound<'a> {
+    /// Selects the layer from the route's resolved mode.
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
+        match route.mode {
             Mode::Layer2 => Layer2Frame::try_new(bytes, route).map(Self::Layer2),
             Mode::Layer3 => Layer3Frame::try_new(bytes, route).map(Self::Layer3),
             Mode::Auto => Err(Error::UnresolvedLinkMode),
@@ -79,7 +98,7 @@ impl<'a> Frame<'a> {
         }
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         match self {
             Self::Layer2(frame) => frame.route(),
             Self::Layer3(frame) => frame.route(),
@@ -87,8 +106,8 @@ impl<'a> Frame<'a> {
     }
 }
 
-fn require_link_mode(route: &Materialized, expected: Mode) -> Result<(), Error> {
-    let actual = route.plan.mode;
+fn require_link_mode(route: Route<'_>, expected: Mode) -> Result<(), Error> {
+    let actual = route.mode;
     if actual == expected {
         Ok(())
     } else {
@@ -247,75 +266,34 @@ impl Report {
     }
 }
 
-/// Unified packet-I/O seam used by the root client and injected providers.
-pub trait Sender: Send + Sync {
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error>;
+/// Sends one routed Layer 2 frame or Layer 3 packet and reports the bytes the
+/// backend accepted.
+pub trait Provider: Send + Sync {
+    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error>;
 }
 
-/// Native or injected Layer 2 transmission implementation.
-pub trait Layer2Sender: Send + Sync {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error>;
-}
-
-/// Target-selected native Layer 2 provider; requires `native-layer2`.
+/// Transmission provider backed by the native backend for each layer: Layer 2
+/// injection with `native-layer2` and raw IP with `native-layer3`. A layer
+/// that isn't compiled in fails with a classified capability error.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SystemLayer2;
+pub struct SystemProvider;
 
-impl Layer2Sender for SystemLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
-        super::platform::system_send_layer2(frame)
-    }
-}
-
-/// Native or injected raw Layer 3 transmission implementation.
-pub trait Layer3Sender: Send + Sync {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error>;
-}
-
-/// Target-selected native Layer 3 provider; requires `native-layer3`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemLayer3;
-
-impl Layer3Sender for SystemLayer3 {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
-        super::platform::system_send_layer3(frame)
-    }
-}
-
-/// Composes independently owned Layer 2 and Layer 3 providers into one
-/// [`Sender`] that dispatches on the frame's link mode.
-#[derive(Clone, Copy, Debug)]
-pub struct ModeSender<L2, L3> {
-    layer2: L2,
-    layer3: L3,
-}
-
-impl<L2, L3> ModeSender<L2, L3> {
-    pub fn new(layer2: L2, layer3: L3) -> Self {
-        Self { layer2, layer3 }
-    }
-}
-
-impl<L2, L3> Sender for ModeSender<L2, L3>
-where
-    L2: Layer2Sender,
-    L3: Layer3Sender,
-{
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        match frame {
-            Frame::Layer2(frame) => self.layer2.send_layer2(frame),
-            Frame::Layer3(frame) => self.layer3.send_layer3(frame),
+impl Provider for SystemProvider {
+    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
+        match outbound {
+            Outbound::Layer2(frame) => {
+                // A renamed, removed, or recreated interface must not receive the frame.
+                #[cfg(native_layer2)]
+                super::platform::verify_interface_identity(&frame.route().decision.interface)?;
+                super::platform::send_layer2(frame)
+            }
+            Outbound::Layer3(packet) => {
+                // A renamed, removed, or recreated interface must not receive the packet.
+                #[cfg(native_layer3)]
+                super::platform::verify_interface_identity(&packet.route().decision.interface)?;
+                super::platform::send_layer3(packet)
+            }
         }
-    }
-}
-
-impl<S, C> Sender for crate::PacketIo<S, C>
-where
-    S: Sender,
-    C: Send + Sync,
-{
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        self.sender.send(frame)
     }
 }
 
@@ -324,7 +302,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::error::testing::assert_same_failure;
+    use crate::error::test_support::assert_same_failure;
 
     #[test]
     fn backward_wall_clock_step_does_not_invalidate_submission_timing() {

@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::path::{Path, PathBuf};
+//! `documentation`: writes shell completions and man pages for the finalized
+//! command tree. It publishes no contract output, so startup runs it outside
+//! the output pipeline and reports failures on stderr.
 
-use clap::{CommandFactory, ValueEnum};
-use clap_complete::Shell;
+pub(crate) mod arguments;
+mod rendering;
+
+use std::path::Path;
+
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::cli::Cli;
+use self::arguments::Args;
 use crate::errors::CliError;
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Write `completions/` and `man/` trees under this directory.
-    #[arg(long, value_name = "DIR")]
-    pub(crate) directory: PathBuf,
-}
 
 /// Generates shell completions and man pages from the finalized command tree,
 /// so the shipped documentation always describes the binary that produced it.
@@ -26,11 +24,8 @@ pub(crate) fn run(arguments: &Args) -> Result<(), CliError> {
     for directory in [&completions, &man] {
         std::fs::create_dir_all(directory).map_err(|error| io_error(directory, error))?;
     }
-    for shell in Shell::value_variants() {
-        clap_complete::generate_to(*shell, &mut Cli::command(), "packetcraftr", &completions)
-            .map_err(|error| io_error(&completions, error))?;
-    }
-    clap_mangen::generate_to(Cli::command(), &man).map_err(|error| io_error(&man, error))?;
+    rendering::write_completions(&completions).map_err(|error| io_error(&completions, error))?;
+    rendering::write_man_pages(&man).map_err(|error| io_error(&man, error))?;
     Ok(())
 }
 

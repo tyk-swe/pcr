@@ -3,13 +3,12 @@
 
 use clap::Args;
 
-use super::{BuildMode, RouteArgs, SendPolicyArgs};
+use super::{BuildMode, CaptureStdout, CompressionArgs, RouteArgs, SendPolicyArgs};
 
 #[derive(Debug, Args)]
 pub(crate) struct SendArgs {
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<CaptureStdout>,
 
     #[command(flatten)]
     pub(crate) route: RouteArgs,
@@ -21,4 +20,10 @@ pub(crate) struct SendArgs {
     pub(crate) allow_permissive_live: bool,
     #[command(flatten)]
     pub(crate) policy: SendPolicyArgs,
+}
+
+impl SendArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.policy.resources(settings);
+    }
 }

@@ -83,7 +83,10 @@ fn eof_events_and_outcomes_share_the_configured_retention_cap() {
         registry,
         &Options {
             limits: Limits {
-                max_ip_outcomes: 1,
+                ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+                    max_retained_outcomes: 1,
+                    ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+                },
                 ..Limits::default()
             },
             ..Options::default()

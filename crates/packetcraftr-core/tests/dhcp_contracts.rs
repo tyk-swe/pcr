@@ -152,18 +152,20 @@ fn dhcpv6_relay_address_associations_and_prefixes_are_typed_and_editable() {
     let mut decoded = Dhcpv6::try_from(wire.clone()).unwrap();
     assert_eq!(decoded.to_wire().unwrap(), wire);
     assert_eq!(decoded.message_type, 12);
-    let path = "options[0].value.message.options[1].value.options[0].value.address";
+    let path = "options[0].value.message.options[1].value.options[0].value.address"
+        .parse()
+        .unwrap();
     assert_eq!(
-        decoded.field_path(path),
+        decoded.field_path(&path),
         Some(FieldValue::Ipv6("2001:db8::10".parse().unwrap()))
     );
     decoded
-        .set_field_path(path, FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
+        .set_field_path(&path, FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
         .unwrap();
     let changed = decoded.to_wire().unwrap();
     let parsed = Dhcpv6::try_from(changed).unwrap();
     assert_eq!(
-        parsed.field_path(path),
+        parsed.field_path(&path),
         Some(FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
     );
     let Value6::Relay(inner) = &parsed.options[0].value else {
@@ -276,17 +278,17 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
 
 #[test]
 fn borrowed_dhcp_wire_enforces_message_byte_limit() {
-    use packetcraftr_core::protocol::application::dhcp::Error;
+    use packetcraftr_core::protocol::application::dhcp::{Error, Limit};
 
     // DHCPv4 retains trailing bytes after the end option.
     let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
     v4.resize(65_535, 0);
     assert_eq!(Dhcpv4::try_from(v4.as_slice()).unwrap().wire().as_ref(), v4);
     v4.push(0);
-    assert_eq!(
-        Dhcpv4::try_from(v4.as_slice()).unwrap_err(),
-        Error::Limit("message bytes")
-    );
+    assert!(matches!(
+        Dhcpv4::try_from(v4.as_slice()),
+        Err(Error::Limit(Limit::MessageBytes))
+    ));
 
     // One unknown DHCPv6 option fills the remaining message bytes.
     let mut v6 = vec![1, 0, 0, 0, 0xfd, 0xe8];
@@ -294,8 +296,113 @@ fn borrowed_dhcp_wire_enforces_message_byte_limit() {
     v6.resize(65_535, 0);
     assert_eq!(Dhcpv6::try_from(v6.as_slice()).unwrap().wire().as_ref(), v6);
     v6.push(0);
-    assert_eq!(
-        Dhcpv6::try_from(v6.as_slice()).unwrap_err(),
-        Error::Limit("message bytes")
-    );
+    assert!(matches!(
+        Dhcpv6::try_from(v6.as_slice()),
+        Err(Error::Limit(Limit::MessageBytes))
+    ));
+}
+
+#[test]
+fn dhcp_codec_failures_keep_the_dhcp_error_as_their_source() {
+    use packetcraftr_core::codec;
+    use packetcraftr_core::error::{Classified, source_chain};
+    use packetcraftr_core::protocol::application::dhcp::Error;
+    use std::collections::BTreeMap;
+    use std::error::Error as _;
+
+    let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
+    v4[236..240].fill(0);
+    let mut v6 = Dhcpv6::default().to_wire().unwrap().to_vec();
+    v6.truncate(3);
+    let registry = builtin::registry();
+    for (protocol, wire) in [("dhcpv4", v4), ("dhcpv6", v6)] {
+        let direct = match protocol {
+            "dhcpv4" => Dhcpv4::try_from(wire.as_slice()).map(|_| ()),
+            _ => Dhcpv6::try_from(wire.as_slice()).map(|_| ()),
+        }
+        .expect_err("the wire is refused");
+        let fields = BTreeMap::from([("wire".to_owned(), FieldValue::Bytes(Bytes::from(wire)))]);
+        let error = registry
+            .codec(protocol)
+            .expect("built-in DHCP codec")
+            .make_layer(&fields)
+            .expect_err("the codec refuses the wire");
+        assert!(matches!(error, codec::Error::Rejected { .. }), "{error:?}");
+        assert_eq!(error.to_string(), format!("invalid {protocol} layer"));
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<Error>())
+            .expect("the DHCP error is the codec error's source");
+        assert_eq!(source, &direct);
+        assert_eq!(source_chain(&error), [direct.to_string()]);
+        assert_eq!(error.classification().code, "packet.codec");
+        assert_eq!(source.classification().code, "packet.dhcp");
+    }
+}
+
+#[test]
+fn dhcp_limits_above_their_ceiling_are_refused_rather_than_lowered() {
+    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::protocol::application::dhcp::{
+        Error, Limit, MAX_MESSAGE_BYTES, MAX_NESTING, MAX_OPTIONS,
+    };
+
+    let v4 = Dhcpv4::default();
+    let v6 = Dhcpv6::default();
+    let (v4_wire, v6_wire) = (v4.to_wire().unwrap(), v6.to_wire().unwrap());
+    for (limits, limit, value, maximum) in [
+        (
+            Limits {
+                max_message_bytes: MAX_MESSAGE_BYTES + 1,
+                ..Limits::default()
+            },
+            Limit::MessageBytes,
+            MAX_MESSAGE_BYTES + 1,
+            MAX_MESSAGE_BYTES,
+        ),
+        (
+            Limits {
+                max_options: MAX_OPTIONS + 1,
+                ..Limits::default()
+            },
+            Limit::OptionCount,
+            MAX_OPTIONS + 1,
+            MAX_OPTIONS,
+        ),
+        (
+            Limits {
+                max_nesting: MAX_NESTING + 1,
+                ..Limits::default()
+            },
+            Limit::OptionNesting,
+            MAX_NESTING + 1,
+            MAX_NESTING,
+        ),
+    ] {
+        let expected = Error::InvalidLimit {
+            limit,
+            value,
+            maximum,
+        };
+        assert_eq!(limits.validate(), Err(expected.clone()));
+        for refused in [
+            Dhcpv4::from_wire_with_limits(v4_wire.clone(), limits).map(|_| ()),
+            Dhcpv6::from_wire_with_limits(v6_wire.clone(), limits).map(|_| ()),
+            v4.to_wire_with_limits(limits).map(|_| ()),
+            v6.to_wire_with_limits(limits).map(|_| ()),
+        ] {
+            assert_eq!(refused, Err(expected.clone()));
+        }
+        assert_eq!(expected.classification().code, "policy.dhcp_limit");
+    }
+
+    // Every ceiling at its maximum is accepted as given.
+    let widest = Limits {
+        max_message_bytes: MAX_MESSAGE_BYTES,
+        max_options: MAX_OPTIONS,
+        max_nesting: MAX_NESTING,
+    };
+    assert_eq!(widest.validate(), Ok(()));
+    assert!(Dhcpv4::from_wire_with_limits(v4_wire, widest).is_ok());
+    assert!(Dhcpv6::from_wire_with_limits(v6_wire, widest).is_ok());
 }

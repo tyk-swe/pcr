@@ -6,19 +6,19 @@ mod composed_support;
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::{
-    analysis::pcap::{self, compression},
+    capture_file::{self, compression},
     transform,
 };
 use std::io::{Cursor, Read, Write};
 
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(64 * 1024)];
-    let limits = pcap::Limits {
+    let limits = capture_file::Limits {
         max_frames: 64,
         max_bytes: 64 * 1024,
     };
-    if let Ok(mut source) = pcap::Reader::new(Cursor::new(data))
-        && let Ok((output, _)) = pcap::rewrite(&mut source, Vec::new(), limits)
+    if let Ok(mut source) = capture_file::Reader::new(Cursor::new(data))
+        && let Ok((output, _)) = capture_file::rewrite(&mut source, Vec::new(), limits)
     {
         // Fidelity rewrite is intentionally not a decode/re-encode oracle.
         assert_eq!(output, data);
@@ -71,11 +71,11 @@ fuzz_target!(|data: &[u8]| {
 
     let frames = [frame.clone(), frame];
     let mut source = composed_support::reader(&frames);
-    let (selected, report) = pcap::select(&mut source, Vec::new(), limits, |number, _| {
+    let (selected, report) = capture_file::select(&mut source, Vec::new(), limits, |number, _| {
         Ok(number % 2 == 0)
     })
     .unwrap();
-    let mut output = pcap::Reader::new(Cursor::new(selected)).unwrap();
+    let mut output = capture_file::Reader::new(Cursor::new(selected)).unwrap();
     assert_eq!(
         output.next_frame().unwrap().unwrap().bytes(),
         frames[1].bytes()

@@ -4,7 +4,7 @@
 use std::io::{self, Cursor, Write};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::capture_file::{
     Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader,
     TimestampResolution, Writer,
 };

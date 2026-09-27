@@ -3,7 +3,9 @@
 
 use bytes::Bytes;
 
-use crate::{field::FieldValue, packet::Packet};
+use crate::packet::Packet;
+
+use super::opaque_bytes;
 
 pub(super) fn sctp_initiate_tag(
     packet: &Packet,
@@ -11,9 +13,7 @@ pub(super) fn sctp_initiate_tag(
     expected_type: u8,
 ) -> Option<(u32, Bytes)> {
     let chunk_index = sctp_index.checked_add(1)?;
-    let FieldValue::Bytes(bytes) = packet.layer(chunk_index)?.field("bytes")? else {
-        return None;
-    };
+    let bytes = opaque_bytes(packet.layer(chunk_index)?)?.clone();
     let header = bytes.first_chunk::<8>()?;
     if bytes.len() < 20 || header[0] != expected_type {
         return None;

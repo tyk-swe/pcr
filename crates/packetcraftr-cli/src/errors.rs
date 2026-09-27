@@ -8,7 +8,7 @@ use packetcraftr_core::error::Kind;
 #[cfg(test)]
 use packetcraftr_netio as net;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 #[derive(Debug)]
 pub(crate) struct CliError {
@@ -49,6 +49,19 @@ impl CliError {
             source.to_string(),
             packetcraftr_core::error::source_chain(source),
         )
+    }
+
+    /// A refused option: the option's own usage message, with the library's
+    /// refusal and its sources as the causes.
+    pub(crate) fn refused_option(
+        message: impl Into<String>,
+        source: &(impl std::error::Error + ?Sized),
+    ) -> Self {
+        let mut error = Self::new(Kind::Usage, message);
+        error.causes = std::iter::once(source.to_string())
+            .chain(packetcraftr_core::error::source_chain(source))
+            .collect();
+        error
     }
 
     pub(crate) fn from_classification(
@@ -143,7 +156,7 @@ impl From<output::contract::Error> for CliError {
 
 const fn fallback_code(kind: Kind) -> &'static str {
     match kind {
-        Kind::Cli => "cli.error",
+        Kind::Usage => "cli.error",
         Kind::Packet => "packet.error",
         Kind::Capability => "capability.unavailable",
         Kind::Io => "io.runtime",
@@ -155,7 +168,7 @@ const fn fallback_code(kind: Kind) -> &'static str {
 /// Every failure class in exit-code order; the root `--help` renders its
 /// exit-code table from this list.
 pub(crate) const KINDS: [Kind; 6] = [
-    Kind::Cli,
+    Kind::Usage,
     Kind::Packet,
     Kind::Capability,
     Kind::Io,
@@ -170,7 +183,7 @@ pub(crate) const CANCELLED_EXIT_CODE: u8 = 130;
 
 pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
     match kind {
-        Kind::Cli => 2,
+        Kind::Usage => 2,
         Kind::Packet => 3,
         Kind::Capability => 4,
         Kind::Io => 5,
@@ -182,7 +195,7 @@ pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
 /// The one-line meaning of `kind` shown beside its exit code in the root help.
 pub(crate) const fn exit_code_description(kind: Kind) -> &'static str {
     match kind {
-        Kind::Cli => "the invocation or its input was invalid.",
+        Kind::Usage => "the invocation or its input was invalid.",
         Kind::Packet => "the packet could not be built, parsed, or dissected.",
         Kind::Capability => "a native feature, backend, or privilege is unavailable.",
         Kind::Io => "a system or network operation failed.",
@@ -198,19 +211,24 @@ mod tests {
     #[test]
     fn kinds_map_to_stable_exit_codes_and_classifications() {
         let cases = [
-            (Kind::Cli, 2, "cli.error"),
-            (Kind::Packet, 3, "packet.error"),
-            (Kind::Capability, 4, "capability.unavailable"),
-            (Kind::Io, 5, "io.runtime"),
-            (Kind::Policy, 6, "policy.denied"),
-            (Kind::Internal, 70, "internal.error"),
+            (Kind::Usage, 2, "cli.error", "cli"),
+            (Kind::Packet, 3, "packet.error", "packet"),
+            (Kind::Capability, 4, "capability.unavailable", "capability"),
+            (Kind::Io, 5, "io.runtime", "io"),
+            (Kind::Policy, 6, "policy.denied", "policy"),
+            (Kind::Internal, 70, "internal.error", "internal"),
         ];
 
-        for (kind, exit_code, code) in cases {
+        for (kind, exit_code, code, published) in cases {
             let error = CliError::new(kind, "failure");
             assert_eq!(error.exit_code(), exit_code, "kind {kind:?}");
             assert_eq!(error.classification.kind, kind, "kind {kind:?}");
             assert_eq!(error.classification.code, code, "kind {kind:?}");
+            assert_eq!(
+                error.output_error().kind.as_str(),
+                published,
+                "kind {kind:?}"
+            );
         }
     }
 
@@ -233,7 +251,10 @@ mod tests {
         assert_eq!(output.code, "fixture.denied");
         assert_eq!(output.causes, ["first cause", "second cause"]);
         assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
-        assert_eq!(output.context, Some(Coordinate::ProbeSequence(42)));
+        assert_eq!(
+            output.context,
+            Some(crate::output::envelope::ErrorContext::ProbeSequence(42))
+        );
 
         let boundary = error.into_boundary_error();
         assert_eq!(boundary.classification().code, "fixture.denied");

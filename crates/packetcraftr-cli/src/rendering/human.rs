@@ -6,19 +6,18 @@ use packetcraftr_core::error::Kind;
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
-use packetcraftr_core as core;
 use packetcraftr_core::budget::Interrupted;
-
-use packetcraftr_cli::output;
 
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
     terminal_safe,
 };
 use crate::errors::CliError;
+use crate::output;
 
 /// One diagnostic line, severity spelled exactly as the JSON document spells it.
-fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
+fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> String {
+    let diagnostic = diagnostic.into();
     format!(
         "{} {}: {}",
         diagnostic.severity.as_str(),
@@ -27,22 +26,23 @@ fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
     )
 }
 
-pub(crate) fn render_diagnostics_text(
-    diagnostics: &[core::diagnostic::Diagnostic],
+/// Library or published diagnostics, one line each on stdout.
+pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagnostic>>(
+    diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic)))?;
+        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic.clone())))?;
     }
     Ok(())
 }
 
 /// The same lines on stderr, for a command whose stdout carries capture bytes
 /// or NDJSON records a diagnostic must not be interleaved with.
-pub(crate) fn render_diagnostics_stderr(
-    diagnostics: &[core::diagnostic::Diagnostic],
+pub(crate) fn render_diagnostics_stderr<D: Clone + Into<output::diagnostic::Diagnostic>>(
+    diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        emit_stderr_message(&diagnostic_line(diagnostic))?;
+        emit_stderr_message(&diagnostic_line(diagnostic.clone()))?;
     }
     Ok(())
 }
@@ -55,8 +55,23 @@ pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String
     render_optional(value, |value| value.to_string())
 }
 
-pub(crate) fn optional_debug<T: std::fmt::Debug>(value: Option<T>) -> String {
-    render_optional(value, |value| format!("{value:?}"))
+/// A duration in milliseconds to the microsecond, such as `12.345ms`.
+pub(crate) fn duration_text(duration: std::time::Duration) -> String {
+    format!("{:.3}ms", duration.as_secs_f64() * 1_000.0)
+}
+
+pub(crate) fn optional_duration(value: Option<std::time::Duration>) -> String {
+    render_optional(value, duration_text)
+}
+
+/// An encapsulation path, outermost first, such as `vlan:10,vxlan:42`, or
+/// `none` for an unencapsulated scope.
+pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifier]) -> String {
+    if path.is_empty() {
+        "none".to_owned()
+    } else {
+        comma_separated(path)
+    }
 }
 
 /// A unit enum value spelled exactly as the JSON document spells it, so text
@@ -67,24 +82,6 @@ pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {
         Ok(other) => other.to_string(),
         Err(_) => "unknown".to_owned(),
     }
-}
-
-/// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
-/// so the section's format string lives here alone while each command keeps
-/// its own row type.
-pub(crate) fn render_undecoded<'a>(
-    rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
-) -> Result<(), CliError> {
-    for (label, frame) in rows {
-        match label {
-            Some(label) => write_stdout_line(format_args!(
-                "undecoded {label} {}",
-                captured_frame_text(frame)
-            ))?,
-            None => write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?,
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn comma_separated<I, T>(values: I) -> String
@@ -114,26 +111,6 @@ impl fmt::Display for SpacedHex<'_> {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
-    }
-}
-
-pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
-    CapturedFrameText(frame)
-}
-
-struct CapturedFrameText<'a>(&'a output::frame::Captured);
-
-impl fmt::Display for CapturedFrameText<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let frame = self.0;
-        write!(
-            formatter,
-            "dlt={} caplen={} wirelen={} {}",
-            frame.link_type,
-            frame.captured_length,
-            frame.original_length,
-            spaced_hex(frame.bytes())
-        )
     }
 }
 
@@ -173,10 +150,15 @@ pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), Cl
     write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
-pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+/// One `--output hex` line: the bytes as contiguous lowercase hex.
+///
+/// Every other stdout line goes through terminal sanitization; this one
+/// holds only hex digits by construction, so it is written unstyled and
+/// byte-exact.
+pub(crate) fn write_hex_line(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
-        .write_fmt(arguments)
+        .write_fmt(format_args!("{}", crate::output::hex::CompactHex(bytes)))
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
@@ -259,6 +241,33 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn durations_and_encapsulations_render_as_plain_text() {
+        use output::analysis::EncapsulationIdentifier;
+        use std::time::Duration;
+
+        assert_eq!(duration_text(Duration::from_micros(12_345)), "12.345ms");
+        assert_eq!(duration_text(Duration::from_secs(2)), "2000.000ms");
+        assert_eq!(optional_duration(None), "none");
+        assert_eq!(encapsulation_text(&[]), "none");
+        assert_eq!(
+            encapsulation_text(&[
+                EncapsulationIdentifier::Vlan { vlan_id: 10 },
+                EncapsulationIdentifier::Network {
+                    first: "192.0.2.1".parse().expect("address"),
+                    second: "198.51.100.2".parse().expect("address"),
+                },
+                EncapsulationIdentifier::Gre { key: None },
+                EncapsulationIdentifier::Pppoe {
+                    session_id: 7,
+                    endpoints: Some(([2, 0, 0, 0, 0, 1], [2, 0, 0, 0, 0, 2])),
+                },
+            ]),
+            "vlan:10,network:192.0.2.1<->198.51.100.2,gre,\
+             pppoe:7(02:00:00:00:00:01<->02:00:00:00:00:02)"
+        );
+    }
+
     fn plain(error: &CliError) -> String {
         anstream::adapter::strip_str(&render_human_error(error)).to_string()
     }
@@ -268,16 +277,20 @@ mod tests {
     #[test]
     fn diagnostic_lines_spell_severity_exactly_as_the_document_does() {
         for diagnostic in [
-            core::diagnostic::Diagnostic::info("decode.note", "a note"),
-            core::diagnostic::Diagnostic::warning("tcp.retransmission", "duplicate segment"),
-            core::diagnostic::Diagnostic::error("ipv4.checksum", "bad checksum"),
+            packetcraftr_core::diagnostic::Diagnostic::info("decode.note", "a note"),
+            packetcraftr_core::diagnostic::Diagnostic::warning(
+                "tcp.retransmission",
+                "duplicate segment",
+            ),
+            packetcraftr_core::diagnostic::Diagnostic::error("ipv4.checksum", "bad checksum"),
         ] {
             let severity = diagnostic.severity.as_str();
             assert_eq!(
-                diagnostic_line(&diagnostic),
+                diagnostic_line(diagnostic.clone()),
                 format!("{severity} {}: {}", diagnostic.code, diagnostic.message),
             );
-            let document = serde_json::to_value(&diagnostic).expect("diagnostics serialize");
+            let document = serde_json::to_value(output::diagnostic::Diagnostic::from(diagnostic))
+                .expect("diagnostics serialize");
             assert_eq!(
                 document.get("severity"),
                 Some(&serde_json::Value::from(severity)),
@@ -308,7 +321,7 @@ mod tests {
     #[test]
     fn classified_errors_render_causes_and_remediation_in_order() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Kind::Usage, Some("try again")),
             "primary failure",
             vec!["first cause".to_owned(), "second cause".to_owned()],
         );
@@ -345,7 +358,7 @@ mod tests {
         let error = CliError::from_classification(
             Classification::new(
                 "cli.\u{202e}code\x1b",
-                Kind::Cli,
+                Kind::Usage,
                 Some("help:\t\u{2066}now\r\n"),
             ),
             "primary\n\t\u{200f}\x1bmessage",
@@ -367,7 +380,7 @@ mod tests {
     #[test]
     fn identical_primary_causes_are_not_rendered_twice() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, None),
+            Classification::new("cli.fixture", Kind::Usage, None),
             "same message",
             vec![
                 "same message".to_owned(),
@@ -385,7 +398,7 @@ mod tests {
     #[test]
     fn disabled_or_noninteractive_streams_strip_renderer_styles() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Kind::Usage, Some("try again")),
             "primary failure",
             vec!["cause".to_owned()],
         );

@@ -1,17 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
+
 use bytes::Bytes;
+use common::responder::Routes;
 use packetcraftr::{
     Client,
-    clock::SystemClock,
-    policy::{Policy, PolicyAuthorizer},
-    probe::{ExchangeExecutor, Transport},
+    policy::Policy,
+    probe::Transport,
     scan::{
         self,
-        profile::{ByteCheck, Config, Payload, ResponseCheck, Status, UdpProfile},
+        profile::{Status, UdpProfile},
     },
     target::Target,
 };
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::document::udp_profiles::{ByteCheck, Config, Payload, ResponseCheck};
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
@@ -20,16 +24,9 @@ use packetcraftr_core::{
     packet::Packet,
     protocol::{application::dns::Dns, builtin, network::Ipv4, transport::Udp},
 };
-use packetcraftr_netio::{
-    self as net, capture,
-    interface::Id,
-    link::{Capability, Mode},
-    neighbor, route, transmit,
-};
+use packetcraftr_netio::{self as net, capture, link::Mode, transmit};
 use std::{
     collections::{BTreeMap, VecDeque},
-    convert::Infallible,
-    net::IpAddr,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
@@ -131,38 +128,6 @@ struct State {
 }
 #[derive(Clone)]
 struct Io(Arc<Mutex<State>>);
-struct Routes;
-impl route::Provider for Routes {
-    type Error = Infallible;
-    fn lookup_with_preferences(
-        &self,
-        _: IpAddr,
-        _: Option<&Id>,
-        _: Option<IpAddr>,
-    ) -> Result<route::Decision, Infallible> {
-        Ok(route::Decision {
-            interface: Id {
-                index: 1,
-                name: "fixture0".to_owned(),
-            },
-            source_mac: None,
-            selected_source: Some("192.0.2.1".parse().unwrap()),
-            preferred_source: None,
-            next_hop: None,
-            selection_reason: route::SelectionReason::OnLink,
-            destination_scope: route::Scope::Link,
-            mtu: 1500,
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
-        })
-    }
-}
-struct NoNeighbors;
-impl neighbor::Resolver for NoNeighbors {
-    fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
-        panic!("no layer-3 discovery")
-    }
-}
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
@@ -173,8 +138,8 @@ fn registry() -> Arc<packetcraftr_core::registry::Registry> {
         .unwrap(),
     )
 }
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, net::Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let decoded = Dissector::new(registry())
             .decode(
                 Frame::new(SystemTime::now(), LinkType::RAW, frame.bytes().clone()).unwrap(),
@@ -239,12 +204,12 @@ impl capture::Session for Capture {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
     fn next_captured_frame(
         &mut self,
-        _: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         Ok(self
             .state
@@ -258,13 +223,17 @@ impl capture::Session for Capture {
         self.state.lock().unwrap().stops += 1;
         Ok(())
     }
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 impl capture::Provider for Io {
     type Capture = Capture;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Capture, net::Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Capture, net::Error> {
         self.0.lock().unwrap().arms += 1;
         Ok(Capture {
             state: self.0.clone(),
@@ -277,7 +246,7 @@ impl capture::Provider for Io {
         })
     }
 }
-fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
+fn run(window: usize, wrong_only: bool) -> (scan::Aggregate, Arc<Mutex<State>>) {
     let profiles = BTreeMap::from([(5353, dns_profile()), (67, bytes_profile())]);
     let state = Arc::new(Mutex::new(State {
         wrong_only,
@@ -288,17 +257,13 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
         max_bytes_per_operation: 8 * 1500,
         ..Default::default()
     };
-    let registry = builtin::registry();
     let client = Client::new(
-        registry.clone(),
-        Routes,
-        NoNeighbors,
-        Io(state.clone()),
-        policy.clone(),
+        builtin::registry(),
+        policy,
+        common::providers(Routes, Io(state.clone())),
     );
-    let mut options = packetcraftr::exchange::Options::default();
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
     let request = scan::Request {
         max_in_flight: window,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
@@ -314,16 +279,15 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
             max_duration: Duration::from_secs(3),
             ..Default::default()
         },
+        route: packetcraftr::route::Options {
+            link_mode: Mode::Layer3,
+            ..Default::default()
+        },
+        collection,
     };
-    let report = scan::run(
-        &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
-        &registry,
-        &mut ExchangeExecutor::new(&client, options),
-        &mut SystemClock,
-    )
-    .unwrap();
-    (report, state)
+    let collector = scan::Collector::default();
+    let report = client.scan(request, collector.clone()).unwrap();
+    (collector.finish(report).unwrap(), state)
 }
 #[test]
 fn serial_and_rolling_scans_prefer_valid_application_replies_and_bind_custom_ports() {

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Dhcpv4, Option4, Value4};
 use crate::{
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, reflect_set, reflective_layer},
+    field::{self, FieldKind, FieldValue},
+    layer::{FieldSchema, reflect_set, reflective_layer},
     protocol::{
         BuiltinProtocol,
         common::{
@@ -71,7 +71,7 @@ fn options_value(options: &[Option4]) -> FieldValue {
             .collect(),
     )
 }
-fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, FieldError> {
+fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::Error> {
     list(value, 4096, schema(), field)?
         .into_iter()
         .map(|value| {
@@ -96,7 +96,7 @@ fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, FieldEr
                                 reflect_set(&mut address, schema(), field, value)?;
                                 Ok(address)
                             })
-                            .collect::<Result<_, FieldError>>()?,
+                            .collect::<Result<_, field::Error>>()?,
                     ),
                     24 | 35 | 38 | 51 | 58 | 59 => {
                         Value4::Seconds(value.required_value("seconds")?)
@@ -130,7 +130,7 @@ fn fixed<const N: usize>(
     target: &mut [u8; N],
     value: FieldValue,
     field: &str,
-) -> Result<(), FieldError> {
+) -> Result<(), field::Error> {
     let FieldValue::Bytes(value) = value else {
         return Err(wrong_type(schema(), field, "bytes"));
     };
@@ -141,7 +141,7 @@ fn fixed<const N: usize>(
     target[..value.len()].copy_from_slice(&value);
     Ok(())
 }
-fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<(), FieldError> {
+fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<(), field::Error> {
     let mut number = 0u8;
     reflect_set(&mut number, schema(), field, value)?;
     if let Some(option) = layer.options.iter_mut().find(|option| option.code == 53) {
@@ -152,7 +152,7 @@ fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<()
     Ok(())
 }
 reflective_layer! {
-    pub(in super::super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv4.as_str()),name:"DHCPv4"}
+    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv4.as_str()),name:"DHCPv4"}
     impl Dhcpv4 {
         "operation" | "op" => {kind:Unsigned,derived:false,required:false,description:"BOOTP message operation",reflect:operation,layout:(0,1)},
         "hardware_type" => {kind:Unsigned,derived:false,required:false,description:"Hardware address type",reflect:hardware_type,layout:(1,2)},
@@ -174,5 +174,5 @@ reflective_layer! {
         "server_name_options" => {kind:List,derived:false,required:false,description:"Options in the overloaded server-name area",children:OPTION_FIELDS,get |layer| Some(options_value(&layer.server_name_options)),set |layer,value,name| {layer.server_name_options=parse_options(value,name)?;Ok(())}},
         "wire" => {kind:Bytes,derived:false,required:false,description:"Retained complete DHCP wire",get |layer| (!layer.wire.is_empty()).then(||layer.wire.clone().into()),set |_layer,_value,name| read_only(schema(),name)}
     }
-    layout pub(in super::super) fn layout();
+    layout pub(super) fn layout();
 }

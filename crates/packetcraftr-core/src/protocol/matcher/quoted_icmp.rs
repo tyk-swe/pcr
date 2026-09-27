@@ -4,72 +4,88 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    codec::NetworkEnvelope, field::FieldValue, layer::Layer, packet::Packet, packet::semantics,
+    codec::NetworkEnvelope,
+    field::WireValue,
+    layer::Layer,
+    packet::Packet,
     protocol::BuiltinProtocol,
+    protocol::semantics,
+    protocol::transport::{Sctp, Tcp},
 };
 
-use super::{sctp::sctp_initiate_tag, unsigned_field};
+use super::{IcmpMessage, sctp::sctp_initiate_tag};
 use crate::protocol::network::ip_protocol;
 
+/// What an ICMPv4 or ICMPv6 error message that quotes a request reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QuotedIcmpError {
+pub enum IcmpErrorKind {
+    /// Port unreachable for a UDP request (ICMPv4 3/3, ICMPv6 1/4).
     PortUnreachable,
+    /// Communication administratively prohibited (ICMPv4 3/9, 3/10, 3/13;
+    /// ICMPv6 1/1, 1/5, 1/6).
     AdministrativelyProhibited,
+    /// Any other destination-unreachable code, including port unreachable for
+    /// a transport other than UDP.
     DestinationUnreachable,
+    /// Time exceeded (ICMPv4 11, ICMPv6 3).
     TimeExceeded,
 }
 
+/// The transport a request carries, which the quoted copy inside an ICMP
+/// error must match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QuotedProbeTransport {
+pub enum QuotedTransport {
     Tcp,
     Udp,
     Sctp,
+    /// ICMPv4 or ICMPv6, matched by echo identifier and sequence.
     Icmp,
 }
 
-/// Identifies an ICMP error that quotes the exact request. The client exchange
-/// uses this protocol-layer correlation before workflow-specific classification
-/// so it can retain the capture ingress latency.
-pub fn quoted_icmp_error_kind(
+/// Classifies `response` as an ICMP error about `request`.
+///
+/// Returns `None` unless the request's first transport is
+/// `expected_transport`, the response's outer IP layer directly carries an
+/// ICMP error of the same IP version addressed to the request's source, and
+/// the quoted datagram is the request's own outer network header and
+/// transport key. A live exchange uses this before its own classification, so
+/// the evidence keeps the time the response arrived.
+pub fn quoted_icmp_error(
     request: &Packet,
     response: &Packet,
-    expected_transport: QuotedProbeTransport,
-) -> Option<QuotedIcmpError> {
+    expected_transport: QuotedTransport,
+) -> Option<IcmpErrorKind> {
     let transport = request
         .iter()
         .find_map(|layer| match BuiltinProtocol::of(layer) {
-            Some(BuiltinProtocol::Tcp) => Some(QuotedProbeTransport::Tcp),
-            Some(BuiltinProtocol::Udp) => Some(QuotedProbeTransport::Udp),
-            Some(BuiltinProtocol::Sctp) => Some(QuotedProbeTransport::Sctp),
-            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6) => {
-                Some(QuotedProbeTransport::Icmp)
-            }
+            Some(BuiltinProtocol::Tcp) => Some(QuotedTransport::Tcp),
+            Some(BuiltinProtocol::Udp) => Some(QuotedTransport::Udp),
+            Some(BuiltinProtocol::Sctp) => Some(QuotedTransport::Sctp),
+            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6) => Some(QuotedTransport::Icmp),
             _ => None,
         })?;
     if transport != expected_transport {
         return None;
     }
     let (icmp_protocol, layer) = directly_received_icmp(response)?;
-    let icmp_type = unsigned_field::<u8>(layer, "type")?;
-    let code = unsigned_field::<u8>(layer, "code")?;
+    let icmp = IcmpMessage::of(layer)?;
+    let (icmp_type, code) = (icmp.icmp_type, icmp.code);
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
-            3 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            9 | 10 | 13 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
+            3 if transport == QuotedTransport::Udp => IcmpErrorKind::PortUnreachable,
+            9 | 10 | 13 => IcmpErrorKind::AdministrativelyProhibited,
+            _ => IcmpErrorKind::DestinationUnreachable,
         },
-        BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpError::TimeExceeded,
+        BuiltinProtocol::Icmpv4 if icmp_type == 11 => IcmpErrorKind::TimeExceeded,
         BuiltinProtocol::Icmpv6 if icmp_type == 1 => match code {
-            4 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            1 | 5 | 6 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
+            4 if transport == QuotedTransport::Udp => IcmpErrorKind::PortUnreachable,
+            1 | 5 | 6 => IcmpErrorKind::AdministrativelyProhibited,
+            _ => IcmpErrorKind::DestinationUnreachable,
         },
-        BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpError::TimeExceeded,
+        BuiltinProtocol::Icmpv6 if icmp_type == 3 => IcmpErrorKind::TimeExceeded,
         _ => return None,
     };
-    let FieldValue::Bytes(body) = layer.field("body")? else {
-        return None;
-    };
+    let body = icmp.body;
     let request_network = outer_network_envelope(request)?;
     let response_destination = outer_network_envelope(response)?.destination;
     if request_network.source != response_destination {
@@ -136,7 +152,7 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
 }
 
 fn quoted_probe_matches(
-    transport: QuotedProbeTransport,
+    transport: QuotedTransport,
     request: &Packet,
     network: NetworkEnvelope,
     quote: &[u8],
@@ -148,12 +164,12 @@ fn quoted_probe_matches(
         return false;
     }
     match transport {
-        QuotedProbeTransport::Tcp | QuotedProbeTransport::Udp | QuotedProbeTransport::Sctp => {
+        QuotedTransport::Tcp | QuotedTransport::Udp | QuotedTransport::Sctp => {
             let (protocol, protocol_number) = match transport {
-                QuotedProbeTransport::Tcp => (BuiltinProtocol::Tcp, ip_protocol::TCP),
-                QuotedProbeTransport::Udp => (BuiltinProtocol::Udp, ip_protocol::UDP),
-                QuotedProbeTransport::Sctp => (BuiltinProtocol::Sctp, 132),
-                QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
+                QuotedTransport::Tcp => (BuiltinProtocol::Tcp, ip_protocol::TCP),
+                QuotedTransport::Udp => (BuiltinProtocol::Udp, ip_protocol::UDP),
+                QuotedTransport::Sctp => (BuiltinProtocol::Sctp, 132),
+                QuotedTransport::Icmp => unreachable!("ICMP uses the other match arm"),
             };
             if quoted.protocol != protocol_number {
                 return false;
@@ -183,25 +199,24 @@ fn quoted_probe_matches(
                 return false;
             }
             match transport {
-                QuotedProbeTransport::Tcp => {
-                    let Some(sequence) = unsigned_field::<u32>(layer, "sequence") else {
+                QuotedTransport::Tcp => {
+                    let Some(tcp) = layer.downcast_ref::<Tcp>() else {
                         return false;
                     };
-                    quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
+                    quoted.payload.get(4..8) == Some(&tcp.sequence.to_be_bytes()[..])
                 }
-                QuotedProbeTransport::Sctp => {
-                    let Some(verification_tag) = unsigned_field::<u32>(layer, "verification_tag")
-                    else {
+                QuotedTransport::Sctp => {
+                    let Some(sctp) = layer.downcast_ref::<Sctp>() else {
                         return false;
                     };
-                    quoted.payload.get(4..8) == Some(&verification_tag.to_be_bytes()[..])
-                        && quoted_sctp_init_matches(layer, request, layer_index, quoted.payload)
+                    quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
+                        && quoted_sctp_init_matches(sctp, request, layer_index, quoted.payload)
                 }
-                QuotedProbeTransport::Udp => true,
-                QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
+                QuotedTransport::Udp => true,
+                QuotedTransport::Icmp => unreachable!("ICMP uses the other match arm"),
             }
         }
-        QuotedProbeTransport::Icmp => {
+        QuotedTransport::Icmp => {
             let (protocol_number, protocol) = if network.source.is_ipv4() {
                 (1, BuiltinProtocol::Icmpv4)
             } else {
@@ -216,13 +231,12 @@ fn quoted_probe_matches(
             else {
                 return false;
             };
-            let Some(icmp_type) = unsigned_field::<u8>(layer, "type") else {
-                return false;
-            };
-            let Some(code) = unsigned_field::<u8>(layer, "code") else {
-                return false;
-            };
-            let Some(FieldValue::Bytes(body)) = layer.field("body") else {
+            let Some(IcmpMessage {
+                icmp_type,
+                code,
+                body,
+            }) = IcmpMessage::of(layer)
+            else {
                 return false;
             };
             let Some(quoted_echo) = quoted.payload.first_chunk::<8>() else {
@@ -239,7 +253,7 @@ fn quoted_probe_matches(
 }
 
 fn quoted_sctp_init_matches(
-    layer: &dyn crate::layer::Layer,
+    sctp: &Sctp,
     request: &Packet,
     sctp_index: usize,
     payload: &[u8],
@@ -247,23 +261,15 @@ fn quoted_sctp_init_matches(
     let Some((_, chunk)) = sctp_initiate_tag(request, sctp_index, 1) else {
         return false;
     };
-    let Some(checksum) = layer.field("checksum") else {
-        return false;
-    };
-    let checksum_bytes = match checksum {
-        FieldValue::Unsigned(value) => {
-            let Ok(value) = u32::try_from(value) else {
-                return false;
-            };
-            value.to_le_bytes()
-        }
-        FieldValue::Bytes(value) => {
+    let checksum_bytes = match &sctp.checksum {
+        WireValue::Exact(value) => value.to_le_bytes(),
+        WireValue::Raw(value) => {
             let Ok(value) = <[u8; 4]>::try_from(value.as_ref()) else {
                 return false;
             };
             value
         }
-        _ => return false,
+        WireValue::Auto => return false,
     };
     payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
 }

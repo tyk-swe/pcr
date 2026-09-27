@@ -38,13 +38,11 @@ pub struct Worker {
     pub cleanup_retaining_capacity: usize,
 }
 
-impl Worker {
-    pub fn progress(
-        name: impl Into<String>,
-        snapshot: packetcraftr::progress::RuntimeSnapshot,
-    ) -> Self {
+/// A callback runtime's admission sample, under its assembly owner's name.
+impl From<(&str, packetcraftr::runtime::RuntimeSnapshot)> for Worker {
+    fn from((name, snapshot): (&str, packetcraftr::runtime::RuntimeSnapshot)) -> Self {
         Self {
-            name: name.into(),
+            name: name.to_owned(),
             supported: true,
             capacity: snapshot.capacity,
             active: snapshot.active,
@@ -52,9 +50,13 @@ impl Worker {
             cleanup_retaining_capacity: snapshot.timed_out_retaining_capacity,
         }
     }
-    pub fn native(snapshot: packetcraftr_netio::resources::NativeSnapshot) -> Self {
+}
+
+/// A native worker pool's admission sample, under the name it is published as.
+impl From<(&str, packetcraftr_netio::resources::NativeSnapshot)> for Worker {
+    fn from((name, snapshot): (&str, packetcraftr_netio::resources::NativeSnapshot)) -> Self {
         Self {
-            name: "native_process".to_owned(),
+            name: name.to_owned(),
             supported: snapshot.supported,
             capacity: snapshot.capacity,
             active: snapshot.active,

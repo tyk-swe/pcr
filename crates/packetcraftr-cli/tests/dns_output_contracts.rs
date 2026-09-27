@@ -11,6 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::{Stats, dns};
 use packetcraftr_cli::output::dns as dns_output;
+use packetcraftr_cli::output::envelope::Published;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
@@ -143,7 +144,7 @@ fn representative_response() -> packetcraftr::dns::ValidatedResponse {
         rdata: vec![0, 10, 0, 2, 0xaa, 0xbb],
     };
     let message = response_message(&answers, &[opt]);
-    let mut response = dns::decode_response(
+    let mut response = dns::wire::decode_response(
         &message,
         "example.test",
         dns::QueryType::ANY,
@@ -189,7 +190,7 @@ fn attempt_evidence() -> dns::AttemptEvidence {
         latency: Some(Duration::from_secs(1)),
         response_code: Some(18),
         reason: "validated DNS response".to_owned(),
-        exchange: packetcraftr::dns::AttemptTransport::Udp {
+        transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
             source_port: 49_152,
             sent_at: UNIX_EPOCH + Duration::from_secs(1),
             response: Some(evidence_frame()),
@@ -203,10 +204,10 @@ fn stats() -> Stats {
         packets_completed: 1,
         bytes: 128,
         elapsed: Duration::from_millis(25),
-        capture: packetcraftr_netio::capture::Statistics {
+        capture: packetcraftr_netio::capture::Stats {
             received_frames: 2,
             received_bytes: 256,
-            ..packetcraftr_netio::capture::Statistics::default()
+            ..packetcraftr_netio::capture::Stats::default()
         },
     }
 }
@@ -223,11 +224,15 @@ fn event_context() -> Arc<dns::EventContext> {
 #[test]
 fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     let diagnostic = Diagnostic::warning("dns.fixture", "fixture warning");
-    let (output, diagnostics, converted_stats) = dns_output::Report::try_from_dns({
+    let Published {
+        result: output,
+        diagnostics,
+        stats: converted_stats,
+    } = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> =
             Some(representative_response());
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -255,7 +260,8 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     })
     .expect("bounded DNS result converts");
 
-    assert_eq!(diagnostics, [diagnostic]);
+    assert_eq!(diagnostics, [diagnostic.into()]);
+    let converted_stats = converted_stats.expect("a query publishes its totals");
     assert_eq!(converted_stats.packets_attempted, 2);
     assert_eq!(converted_stats.capture.received_frames, 2);
     let response = output.response.as_ref().expect("accepted response header");
@@ -269,10 +275,7 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     assert!(response.checking_disabled);
     assert_eq!(output.rejected_record_count, 1);
     assert!(!output.fallback_attempted);
-    assert_eq!(
-        output.accepted_transport,
-        Some(packetcraftr::dns::Transport::Udp)
-    );
+    assert_eq!(output.accepted_transport, Some(dns_output::Transport::Udp));
     assert_eq!(output.rejected_records.len(), 1);
     assert_eq!(output.attempts[0].attempt, 1);
     assert_eq!(
@@ -327,11 +330,15 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
 #[test]
 fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
     let mut tcp = attempt_evidence();
-    tcp.exchange = dns::AttemptTransport::Tcp {
+    tcp.transport_evidence = dns::TransportEvidence::Tcp {
         source_port: Some(50_000),
         sent_at: tcp.sent_at(),
     };
-    let (event, diagnostics) = dns_output::Event::try_from_dns(dns::Event::Attempt {
+    let Published {
+        result: event,
+        diagnostics,
+        ..
+    } = Published::<dns_output::Event>::try_from(dns::Event::Attempt {
         context: event_context(),
         evidence: tcp.clone(),
     })
@@ -343,18 +350,19 @@ fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
     assert!(json["evidence"].get("frame").is_none());
 
     let mut failed_tcp = tcp.clone();
-    failed_tcp.exchange = dns::AttemptTransport::Tcp {
+    failed_tcp.transport_evidence = dns::TransportEvidence::Tcp {
         source_port: Some(50_000),
         sent_at: None,
     };
     failed_tcp.received_at = None;
     failed_tcp.latency = None;
     failed_tcp.status = packetcraftr::dns::Outcome::NetworkFailure;
-    let (event, _) = dns_output::Event::try_from_dns(dns::Event::Attempt {
-        context: event_context(),
-        evidence: failed_tcp,
-    })
-    .expect("an unsent TCP attempt converts without a synthetic timestamp");
+    let Published { result: event, .. } =
+        Published::<dns_output::Event>::try_from(dns::Event::Attempt {
+            context: event_context(),
+            evidence: failed_tcp,
+        })
+        .expect("an unsent TCP attempt converts without a synthetic timestamp");
     let json = serde_json::to_value(event).expect("failed TCP attempt serializes");
     assert!(json["evidence"].get("sent_at").is_none());
 }
@@ -392,8 +400,11 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
     ];
     let expected_kinds = ["attempt", "record", "rejected", "undecoded"];
     for (event, expected_kind) in domain_events.into_iter().zip(expected_kinds) {
-        let (event, diagnostics) =
-            dns_output::Event::try_from_dns(event).expect("progressive event converts");
+        let Published {
+            result: event,
+            diagnostics,
+            ..
+        } = Published::<dns_output::Event>::try_from(event).expect("progressive event converts");
         assert!(diagnostics.is_empty());
         assert_eq!(event.event_name(), expected_kind);
         let json = serde_json::to_value(event).unwrap();
@@ -404,31 +415,37 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
     }
 
     let diagnostic = Diagnostic::warning("dns.progressive_fixture", "fixture warning");
-    let (event, diagnostics) =
-        dns_output::Event::try_from_dns(dns::Event::Diagnostic(diagnostic.clone()))
-            .expect("diagnostic event converts");
+    let Published {
+        result: event,
+        diagnostics,
+        ..
+    } = Published::<dns_output::Event>::try_from(dns::Event::Diagnostic(diagnostic.clone()))
+        .expect("diagnostic event converts");
     assert!(matches!(event, dns_output::Event::Diagnostic {}));
-    assert_eq!(diagnostics, [diagnostic]);
+    assert_eq!(diagnostics, [diagnostic.into()]);
 
-    let (complete, diagnostics, converted_stats) =
-        dns_output::Event::complete_from_dns(packetcraftr::dns::Summary {
-            server: "resolver.example.test".to_owned(),
-            server_port: 53,
-            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
-            query_name: "example.test".to_owned(),
-            query_type: dns::QueryType::new(65535),
-            transaction_id: TRANSACTION_ID,
-            stats: stats(),
-            completion: packetcraftr::dns::Completion::new(
-                packetcraftr::dns::Outcome::Response,
-                false,
-                Some(packetcraftr::dns::Transport::Udp),
-                Some(response.metadata),
-            )
-            .unwrap(),
-        });
+    let Published {
+        result: complete,
+        diagnostics,
+        stats: converted_stats,
+    } = Published::<dns_output::Event>::from(packetcraftr::dns::Report {
+        server: "resolver.example.test".to_owned(),
+        server_port: 53,
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::new(65535),
+        transaction_id: TRANSACTION_ID,
+        stats: stats(),
+        completion: packetcraftr::dns::Completion::new(
+            packetcraftr::dns::Outcome::Response,
+            false,
+            Some(packetcraftr::dns::Transport::Udp),
+            Some(response.metadata),
+        )
+        .unwrap(),
+    });
     assert!(diagnostics.is_empty());
-    assert_eq!(converted_stats.bytes, 128);
+    assert_eq!(converted_stats.expect("totals").bytes, 128);
     assert_eq!(complete.event_name(), "complete");
     let complete = serde_json::to_value(complete).expect("completion payload serializes");
     assert_eq!(complete["query_type"], 65535);
@@ -439,10 +456,14 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
 
 #[test]
 fn dns_timeout_output_omits_response_only_fields() {
-    let (output, diagnostics, _) = dns_output::Report::try_from_dns({
+    let Published {
+        result: output,
+        diagnostics,
+        ..
+    } = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = None;
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -488,23 +509,26 @@ fn dns_timeout_output_omits_response_only_fields() {
         );
     }
 
-    let (complete, diagnostics, _) =
-        dns_output::Event::complete_from_dns(packetcraftr::dns::Summary {
-            server: "resolver.example.test".to_owned(),
-            server_port: 53,
-            resolved_addresses: Vec::new(),
-            query_name: "example.test".to_owned(),
-            query_type: dns::QueryType::new(0),
-            transaction_id: TRANSACTION_ID,
-            stats: Stats::default(),
-            completion: packetcraftr::dns::Completion::new(
-                packetcraftr::dns::Outcome::Timeout,
-                false,
-                None,
-                None,
-            )
-            .unwrap(),
-        });
+    let Published {
+        result: complete,
+        diagnostics,
+        ..
+    } = Published::<dns_output::Event>::from(packetcraftr::dns::Report {
+        server: "resolver.example.test".to_owned(),
+        server_port: 53,
+        resolved_addresses: Vec::new(),
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::new(0),
+        transaction_id: TRANSACTION_ID,
+        stats: Stats::default(),
+        completion: packetcraftr::dns::Completion::new(
+            packetcraftr::dns::Outcome::Timeout,
+            false,
+            None,
+            None,
+        )
+        .unwrap(),
+    });
     assert!(diagnostics.is_empty());
     let complete = serde_json::to_value(complete).expect("complete timeout serializes");
     assert!(complete.get("response_code").is_none());

@@ -1,35 +1,43 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::{
-    command_options::{Compression, OfflineCaptureLimitsArgs},
-    errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_plain_line},
-};
-use packetcraftr_cli::output::{self, contract::ToolFormat};
-use packetcraftr_core::{analysis::pcap, error::Kind};
-use std::path::{Path, PathBuf};
+//! `merge`: merges time-ordered captures into one scoped PCAPNG file.
 
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Captures in stable tie-breaking order; at most one may read stdin with -.
-    #[arg(required = true, num_args = 2..)]
-    pub(crate) paths: Vec<PathBuf>,
-    /// New PCAPNG destination. Existing files are never overwritten.
-    #[arg(long)]
-    pub(crate) write: PathBuf,
-    /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
-    #[command(flatten)]
-    pub(crate) limits: OfflineCaptureLimitsArgs,
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
+use crate::output::{self, contract::ToolFormat};
+use crate::{
+    errors::CliError,
+    rendering::{StreamEncoder, emit_aggregate},
+};
+use packetcraftr_core::{capture_file, error::Kind};
+use std::path::Path;
+
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.limits.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
 }
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
     if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "merge accepts at most 64 captures and one stdin source",
         ));
     }
@@ -38,22 +46,24 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         .paths
         .iter()
         .map(|path| {
-            Ok(pcap::MergeSource {
+            Ok(capture_file::MergeSource {
                 name: path.display().to_string(),
                 reader: crate::input::open_capture(path, args.limits.reader)?,
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;
-    let mut writer = pcap::Writer::pcapng_with_options(
-        args.compression.writer(std::io::BufWriter::with_capacity(
-            64 * 1024,
-            staged.as_file_mut(),
-        ))?,
-        pcap::PcapNgOptions {
+    let mut writer = capture_file::Writer::pcapng_with_options(
+        args.compression
+            .for_file()
+            .writer(std::io::BufWriter::with_capacity(
+                64 * 1024,
+                staged.as_file_mut(),
+            ))?,
+        capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: pcap::DEFAULT_TOTAL_INTERFACE_LIMIT,
-            stream_limits: pcap::Limits {
+            max_interfaces: capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT,
+            stream_limits: capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,
             },
@@ -61,11 +71,11 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         },
     )
     .map_err(CliError::classified)?;
-    let report = pcap::merge(
+    let report = capture_file::merge(
         &mut sources,
         &mut writer,
-        pcap::MergeLimits {
-            streams: pcap::Limits {
+        capture_file::MergeLimits {
+            streams: capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,
             },
@@ -77,16 +87,10 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     staged.sync()?;
     crate::cancellation::check()?;
     staged.persist()?;
-    let report = output::merge::Report::new(args.write.display().to_string(), report);
+    let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {
         ToolFormat::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
         ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => write_plain_line(format_args!(
-            "merged {} frames ({} bytes) across {} interfaces into {}",
-            report.frames,
-            report.captured_bytes,
-            report.interfaces.len(),
-            report.path
-        )),
+        ToolFormat::Text => rendering::render_text(&report),
     }
 }

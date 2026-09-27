@@ -41,3 +41,13 @@ pub enum Error {
     #[error("filter field path {path} is not usable: {reason}")]
     InvalidFilterField { path: String, reason: String },
 }
+
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "internal.registry",
+            crate::error::Kind::Internal,
+            Some("register each protocol, alias, link type, matcher, and filter field once"),
+        )
+    }
+}

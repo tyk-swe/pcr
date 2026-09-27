@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::analysis::scope::ScopeId;
+use crate::error::{Classification, Classified, Kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -206,7 +207,7 @@ pub struct RetiredDatagrams {
 /// Resource failures, all detected before mutating retained datagram state.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ResourceError {
+pub enum Resource {
     #[error("IP reassembly reached concurrent datagram limit {limit}")]
     DatagramLimit { limit: usize },
     #[error("IP datagram reached physical fragment limit {limit}")]
@@ -224,7 +225,7 @@ pub enum ResourceError {
 /// Malformed or mutually inconsistent fragment input.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum MalformedError {
+pub enum Malformed {
     #[error("IP fragment offset {offset} exceeds the 13-bit wire field")]
     OffsetOutOfRange { offset: u16 },
     #[error("IP fragment offset or length overflows")]
@@ -259,13 +260,42 @@ pub enum MalformedError {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
-    Resource(#[from] ResourceError),
+    Resource(#[from] Resource),
     #[error(transparent)]
-    Malformed(#[from] MalformedError),
+    Malformed(#[from] Malformed),
     /// Contradictory retained state: mismatched family or missing completion
     /// evidence. Classified as an internal defect, not malformed capture input.
     #[error("IP reassembly state is inconsistent: {reason}")]
     Inconsistent { reason: &'static str },
+}
+
+const RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
+                                    relevant finite --max-ip-* analysis budget";
+
+impl Classified for Resource {
+    fn classification(&self) -> Classification {
+        crate::analysis::error::resource_limit(RESOURCE_REMEDIATION)
+    }
+}
+
+impl Classified for Malformed {
+    fn classification(&self) -> Classification {
+        crate::analysis::error::malformed_reassembly()
+    }
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Resource(source) => source.classification(),
+            Self::Malformed(source) => source.classification(),
+            Self::Inconsistent { .. } => Classification::new(
+                "internal.ip_reassembly",
+                Kind::Internal,
+                Some("report the capture and command as an internal IP reassembly failure"),
+            ),
+        }
+    }
 }
 
 impl std::fmt::Display for Family {

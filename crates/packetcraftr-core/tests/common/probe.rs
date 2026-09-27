@@ -158,7 +158,7 @@ impl LayerCodec for ProbeCodec {
         _payload: &[u8],
         _context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
-        let probe = layer.as_any().downcast_ref::<Probe>().ok_or_else(|| {
+        let probe = layer.downcast_ref::<Probe>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "probe".into(),
                 actual: *layer.protocol_id(),
@@ -229,7 +229,7 @@ impl LayerCodec for ChildCodec {
         _payload: &[u8],
         _context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
-        let child = layer.as_any().downcast_ref::<Child>().ok_or_else(|| {
+        let child = layer.downcast_ref::<Child>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "child".into(),
                 actual: *layer.protocol_id(),

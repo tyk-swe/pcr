@@ -3,34 +3,30 @@
 
 use std::time::Duration;
 
-use super::LiveOptions;
-use super::MAX_DURATION;
-use super::error::Error;
+use packetcraftr_netio::capture::MAX_TIMEOUT;
 
-pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, Error> {
-    let exchange = live
+use super::Request;
+use super::error::{CaseErrors, Error};
+use crate::execution::rate_delay;
+
+/// The longest the live part of a campaign may take: every built case's
+/// collection window plus the pacing delay between them.
+pub(super) fn worst_case_duration(request: &Request, cases: usize) -> Result<Duration, Error> {
+    let exchange = request
         .timeout
         .checked_mul(u32::try_from(cases).unwrap_or(u32::MAX))
         .ok_or(Error::DurationLimit {
             actual: Duration::MAX,
-            limit: MAX_DURATION,
+            limit: MAX_TIMEOUT,
         })?;
-    let delay = rate_delay(live.cases_per_second)?
+    let delay = rate_delay(&CaseErrors, "cases_per_second", 1, request.cases_per_second)?
         .checked_mul(u32::try_from(cases.saturating_sub(1)).unwrap_or(u32::MAX))
         .ok_or(Error::DurationLimit {
             actual: Duration::MAX,
-            limit: MAX_DURATION,
+            limit: MAX_TIMEOUT,
         })?;
     exchange.checked_add(delay).ok_or(Error::DurationLimit {
         actual: Duration::MAX,
-        limit: MAX_DURATION,
-    })
-}
-
-pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
-        field: "cases_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
+        limit: MAX_TIMEOUT,
     })
 }

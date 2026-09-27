@@ -6,18 +6,22 @@ PacketcraftR has four directional Rust crates:
 
 - `packetcraftr-core`: packets, codecs/reflection, bounded documents, capture
   formats, filters, and offline analysis.
-- `packetcraftr-netio`: provider contracts and native resources. Platform
-  selection stays in `build.rs` and `platform::dispatch`; code outside
-  `platform/` gates on the capability cfgs `build.rs` emits (`native_route`
-  and friends), never on `target_os` directly.
+- `packetcraftr-netio`: provider contracts and native resources. `platform/`
+  holds only native code, grouped by capability then backend, with plumbing one
+  backend shares across capabilities in `platform::common`; checks that need
+  no native call belong to the capability module. Platform selection stays in
+  `build.rs` and `platform::dispatch`; code outside `platform/` gates on the
+  capability cfgs `build.rs` emits (`native_route` and friends), never on
+  `target_os` directly.
 - `packetcraftr`: live workflows, policy, preparation, budgets, and evidence.
 - `packetcraftr-cli`: arguments, provider composition, rendering, and the
   versioned machine-output contract.
 
 Keep types, behavior, and tests with their domain owner. Split modules by
-responsibility; there is no required filename for types. Expose capabilities,
-keep assembly details private, and avoid equivalent public paths. Core must
-remain independent of native I/O and workflows.
+responsibility; there is no required filename for types. Module files are
+self-named (`foo.rs` beside `foo/`); clippy denies `mod.rs`. Expose
+capabilities, keep assembly details private, and avoid equivalent public paths.
+Core must remain independent of native I/O and workflows.
 
 Use rustfmt and ordinary Cargo commands. Run the relevant tests while editing.
 The comprehensive Linux check (requires `libpcap-dev`) is:
@@ -41,10 +45,13 @@ Only `packetcraftr-netio/src/platform/` may contain unsafe code. Every unsafe
 block explains its specific invariant in a `SAFETY` comment; other crates
 forbid unsafe at their roots. Prefer typed errors with their original sources.
 
-Put unit tests beside their owner and public behavior regressions in
-`crates/*/tests/`. Test observable behavior and meaningful failure paths;
-avoid source-layout tests and duplicate verification. Keep schemas, examples,
-CLI tests, and release assets synchronized when changing machine contracts.
+Put unit tests beside their owner, in one inline `mod tests` or
+`<module>/tests.rs`, with in-crate helpers in `test_support` modules. Put public
+behavior regressions in `crates/*/tests/`, named by the test vocabulary in
+`CONTEXT.md` (schema checks go in `*_conformance.rs`, not `*_contracts.rs`).
+Test observable behavior and meaningful failure paths; avoid source-layout tests
+and duplicate verification. Keep schemas, examples, CLI tests, and release
+assets synchronized when changing machine contracts.
 
 Use focused Conventional Commits without `packetcraftr-` in scopes. Document
 breaking changes and user-visible changes in `[Unreleased]`. PRs explain the

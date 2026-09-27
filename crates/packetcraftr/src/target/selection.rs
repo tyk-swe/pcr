@@ -242,7 +242,7 @@ impl Classified for SelectionError {
             Self::Target(source) => source.classification(),
             _ => Classification::new(
                 "cli.target_selection",
-                Kind::Cli,
+                Kind::Usage,
                 Some("supply explicit bounded host/IP/CIDR targets and numeric exclusions"),
             ),
         }

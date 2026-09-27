@@ -7,8 +7,8 @@
 
 use super::super::{Ipv4Fragment, Ipv6Fragment};
 use super::{
-    Bytes, DatagramKey, DatagramState, Ecn, Error, Fragment, Ipv4Addr, Limits, MalformedError,
-    Reconstruction, ResourceError, RetainedRange,
+    Bytes, DatagramKey, DatagramState, Ecn, Error, Fragment, Ipv4Addr, Limits, Malformed,
+    Reconstruction, Resource, RetainedRange,
 };
 
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
@@ -49,7 +49,7 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
         Fragment::Ipv6(fragment) => fragment.fragment_offset,
     };
     if fragment_offset > 0x1fff {
-        return Err(MalformedError::OffsetOutOfRange {
+        return Err(Malformed::OffsetOutOfRange {
             offset: fragment_offset,
         }
         .into());
@@ -85,23 +85,23 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
         }
     };
     if fragment_offset == 0 && !more_fragments {
-        return Err(MalformedError::AtomicFragment.into());
+        return Err(Malformed::AtomicFragment.into());
     }
     if payload.is_empty() {
-        return Err(MalformedError::EmptyPayload.into());
+        return Err(Malformed::EmptyPayload.into());
     }
     if more_fragments && payload.len() % 8 != 0 {
-        return Err(MalformedError::UnalignedNonFinal {
+        return Err(Malformed::UnalignedNonFinal {
             length: payload.len(),
         }
         .into());
     }
     let offset = usize::from(fragment_offset)
         .checked_mul(8)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let end = offset
         .checked_add(payload.len())
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let incoming = Incoming {
         key,
         offset,
@@ -117,7 +117,7 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
         (!incoming.more_fragments).then_some(incoming.end),
     )?;
     if incoming.end > limits.max_bytes_per_datagram {
-        return Err(ResourceError::DatagramByteLimit {
+        return Err(Resource::DatagramByteLimit {
             limit: limits.max_bytes_per_datagram,
         }
         .into());
@@ -129,29 +129,29 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
 /// reassembly can merge it independently of the retained header bytes.
 fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
     let Some(fixed) = fragment.header.first_chunk::<IPV4_MIN_HEADER_LENGTH>() else {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "header is shorter than twenty bytes",
         }
         .into());
     };
     if fixed[0] >> 4 != 4 {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "version is not four",
         }
         .into());
     }
     let header_length = usize::from(fixed[0] & 0x0f)
         .checked_mul(4)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     if header_length < IPV4_MIN_HEADER_LENGTH || header_length != fragment.header.len() {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "IHL does not match supplied header bytes",
         }
         .into());
     }
     let total_length = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
     if header_length.checked_add(fragment.payload.len()) != Some(total_length) {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "total length does not match header and fragment payload",
         }
         .into());
@@ -160,7 +160,7 @@ fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
     if flags_offset & 0x1fff != fragment.fragment_offset
         || (flags_offset & 0x2000 != 0) != fragment.more_fragments
     {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "wire fragmentation fields do not match the adapter metadata",
         }
         .into());
@@ -170,7 +170,7 @@ fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
         || Ipv4Addr::from([fixed[12], fixed[13], fixed[14], fixed[15]]) != fragment.key.source
         || Ipv4Addr::from([fixed[16], fixed[17], fixed[18], fixed[19]]) != fragment.key.destination
     {
-        return Err(MalformedError::InvalidIpv4Header {
+        return Err(Malformed::InvalidIpv4Header {
             reason: "header identity does not match the datagram key",
         }
         .into());
@@ -186,13 +186,13 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
         .unfragmentable_prefix
         .first_chunk::<IPV6_HEADER_LENGTH>()
     else {
-        return Err(MalformedError::InvalidIpv6Prefix {
+        return Err(Malformed::InvalidIpv6Prefix {
             reason: "prefix is shorter than the IPv6 base header",
         }
         .into());
     };
     if base[0] >> 4 != 6 {
-        return Err(MalformedError::InvalidIpv6Prefix {
+        return Err(Malformed::InvalidIpv6Prefix {
             reason: "version is not six",
         }
         .into());
@@ -200,7 +200,7 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
     if ipv6_fragment_predecessor(&fragment.unfragmentable_prefix)
         != Some(fragment.predecessor_next_header_offset)
     {
-        return Err(MalformedError::InvalidIpv6Prefix {
+        return Err(Malformed::InvalidIpv6Prefix {
             reason: "predecessor is not the final structurally valid Next Header field",
         }
         .into());
@@ -211,10 +211,10 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
         .checked_sub(IPV6_HEADER_LENGTH)
         .and_then(|length| length.checked_add(IPV6_FRAGMENT_HEADER_LENGTH))
         .and_then(|length| length.checked_add(fragment.payload.len()))
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let declared = usize::from(u16::from_be_bytes([base[4], base[5]]));
     if prefix_payload_length != declared {
-        return Err(MalformedError::InvalidIpv6Prefix {
+        return Err(Malformed::InvalidIpv6Prefix {
             reason: "payload length does not match prefix, Fragment header, and payload",
         }
         .into());
@@ -232,7 +232,7 @@ fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
         .copied()
         .map(std::net::Ipv6Addr::from);
     if source != Some(fragment.key.source) || destination != Some(fragment.key.destination) {
-        return Err(MalformedError::InvalidIpv6Prefix {
+        return Err(Malformed::InvalidIpv6Prefix {
             reason: "base-header identity does not match the datagram key",
         }
         .into());
@@ -276,7 +276,7 @@ pub(super) fn validate_reconstruction_consistency(
                     .as_ref()
                     .is_some_and(|established| !ipv4_headers_match(established, header))
             {
-                return Err(MalformedError::InconsistentIpv4Header.into());
+                return Err(Malformed::InconsistentIpv4Header.into());
             }
         }
         (
@@ -338,7 +338,7 @@ pub(super) fn plan_final_length(
         if let Some(existing) = established
             && existing != incoming.end
         {
-            return Err(MalformedError::ConflictingFinalLength {
+            return Err(Malformed::ConflictingFinalLength {
                 existing,
                 new: incoming.end,
             }
@@ -351,7 +351,7 @@ pub(super) fn plan_final_length(
             .and_then(|state| state.max_non_final_end)
             .is_some_and(|end| end == final_length)
         {
-            return Err(MalformedError::NonFinalAtFinalLength { final_length }.into());
+            return Err(Malformed::NonFinalAtFinalLength { final_length }.into());
         }
         if incoming.end > final_length
             || existing.is_some_and(|state| {
@@ -362,10 +362,10 @@ pub(super) fn plan_final_length(
                     .is_some_and(|end| end > final_length)
             })
         {
-            return Err(MalformedError::BeyondFinalLength { final_length }.into());
+            return Err(Malformed::BeyondFinalLength { final_length }.into());
         }
         if incoming.more_fragments && incoming.end >= final_length {
-            return Err(MalformedError::NonFinalAtFinalLength { final_length }.into());
+            return Err(Malformed::NonFinalAtFinalLength { final_length }.into());
         }
     }
     Ok(final_length)
@@ -414,7 +414,7 @@ pub(super) fn validate_family_wire_extent(
             };
             retained
                 .checked_sub(IPV6_HEADER_LENGTH)
-                .ok_or(MalformedError::OffsetOverflow)?
+                .ok_or(Malformed::OffsetOverflow)?
         }
         _ => return Err(FAMILY_MISMATCH),
     };
@@ -422,7 +422,7 @@ pub(super) fn validate_family_wire_extent(
         .checked_add(extent)
         .is_none_or(|length| length > MAX_WIRE_LENGTH)
     {
-        return Err(MalformedError::ReconstructedLength {
+        return Err(Malformed::ReconstructedLength {
             family: incoming.key.family(),
         }
         .into());

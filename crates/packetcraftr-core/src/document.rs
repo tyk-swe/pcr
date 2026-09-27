@@ -1,12 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Versioned packet documents.
+//! Versioned packet documents, and the packet recipes that are either a
+//! document or a layer expression.
+//!
+//! Recipes ([`recipe`]), the payload fields a recipe leaves for outside
+//! bytes ([`payload`]), and the `packetcraftr.udp-profiles` document
+//! ([`udp_profiles`]) are sub-domains with their own `Error`.
 
 mod convert;
 mod error;
 mod parse;
+pub mod payload;
+pub mod recipe;
 mod types;
+pub mod udp_profiles;
 
 pub use error::Error;
 pub use types::{

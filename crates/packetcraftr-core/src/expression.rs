@@ -37,7 +37,7 @@ pub enum Error {
     UnknownProtocol { layer: usize, name: String },
     #[error("duplicate field {field} at layer {layer}")]
     DuplicateField { layer: usize, field: String },
-    #[error("could not construct layer {name} at index {layer}: {source}")]
+    #[error("could not construct layer {name} at index {layer}")]
     Layer {
         layer: usize,
         name: String,
@@ -51,7 +51,7 @@ impl Classified for Error {
         match self {
             Self::Empty | Self::Syntax { .. } | Self::DuplicateField { .. } => Classification::new(
                 "cli.expression_syntax",
-                Kind::Cli,
+                Kind::Usage,
                 Some("write one `protocol(field=value)` layer per `/`-separated segment"),
             ),
             Self::SizeLimit { .. }
@@ -59,17 +59,17 @@ impl Classified for Error {
             | Self::NestingLimit { .. }
             | Self::InvalidNestingLimit { .. } => Classification::new(
                 "cli.expression_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("shorten the expression to stay inside its byte, layer, and nesting bounds"),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
                 "cli.expression_protocol",
-                Kind::Cli,
+                Kind::Usage,
                 Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
             ),
             Self::Layer { .. } => Classification::new(
                 "cli.expression_field",
-                Kind::Cli,
+                Kind::Usage,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),
         }

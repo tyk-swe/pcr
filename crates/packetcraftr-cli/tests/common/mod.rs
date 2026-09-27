@@ -5,18 +5,25 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use serde_json::Value;
 
-#[path = "../../src/test_support.rs"]
-mod shared;
+use packetcraftr_cli::test_support;
 
 // Re-exported for the binaries that need them; an unused re-export warns
 // even though the definitions behind it are allowed to be dead.
 #[allow(unused_imports)]
-pub(crate) use shared::{
-    SharedBuffer, TestRecord, assert_contiguous, output_schema, schema_validator, stream,
+pub(crate) use packetcraftr_cli::test_support::{
+    SharedBuffer, TestRecord, assert_contiguous, output_schema, stream,
 };
+
+pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
+    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+    VALIDATOR.get_or_init(|| {
+        jsonschema::validator_for(output_schema()).expect("published output schema must compile")
+    })
+}
 
 pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
@@ -59,7 +66,7 @@ pub(crate) fn parse_json(output: &Output) -> Value {
 }
 
 pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
-    let records = shared::parse_ndjson(&output.stdout);
+    let records = test_support::parse_ndjson(&output.stdout);
     for record in &records {
         schema_validator().validate(record).unwrap_or_else(|error| {
             panic!("NDJSON record must match the published schema: {error}")

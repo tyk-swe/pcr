@@ -3,9 +3,8 @@
 
 use std::path::PathBuf;
 
-use packetcraftr_cli::output::stats::Table;
-
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
+use crate::output;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -43,4 +42,42 @@ pub(crate) struct Args {
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
+}
+
+/// The `--table` selector for [`output::stats::Table`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Table {
+    Conversations,
+    Endpoints,
+    Protocols,
+    Ports,
+    Io,
+    Fragments,
+}
+
+impl From<Table> for output::stats::Table {
+    fn from(value: Table) -> Self {
+        match value {
+            Table::Conversations => Self::Conversations,
+            Table::Endpoints => Self::Endpoints,
+            Table::Protocols => Self::Protocols,
+            Table::Ports => Self::Ports,
+            Table::Io => Self::Io,
+            Table::Fragments => Self::Fragments,
+        }
+    }
+}
+
+/// The aggregation the collector retains for the selected table.
+impl From<Table> for packetcraftr_core::analysis::stats::Table {
+    fn from(value: Table) -> Self {
+        match value {
+            Table::Conversations => Self::Conversations,
+            Table::Endpoints => Self::Endpoints,
+            Table::Protocols => Self::Protocols,
+            Table::Ports => Self::Ports,
+            Table::Io => Self::Io,
+            Table::Fragments => Self::Fragments,
+        }
+    }
 }

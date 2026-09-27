@@ -7,7 +7,7 @@ use std::fmt;
 use crate::{
     codec::LayerEncodeContext,
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::{self, FieldValue, WireValue},
     layer::Layer,
     registry::Discriminator,
 };
@@ -210,6 +210,27 @@ where
         layer.set_field(name, value.clone())?;
     }
     Ok(Box::new(layer))
+}
+
+/// Applies one document field, which may name a nested path such as
+/// `questions[0].name`, to a layer under construction. The document key is
+/// parsed here, at the document edge; a key that is not a path is an unknown
+/// field.
+pub(crate) fn set_document_field<L>(
+    layer: &mut L,
+    name: &str,
+    value: FieldValue,
+) -> Result<(), field::Error>
+where
+    L: Layer,
+{
+    let path = name
+        .parse::<field::Path>()
+        .map_err(|_| field::Error::UnknownField {
+            protocol: *layer.protocol_id(),
+            field: name.to_owned(),
+        })?;
+    layer.set_field_path(&path, value)
 }
 
 /// Rejects a field supplied under two spellings at once.

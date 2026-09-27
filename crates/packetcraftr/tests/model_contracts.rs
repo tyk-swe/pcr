@@ -12,7 +12,6 @@ use packetcraftr::{
 };
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_netio as net;
-use packetcraftr_netio::capture::Statistics;
 
 struct FixedResolver(Vec<IpAddr>);
 
@@ -205,7 +204,7 @@ fn policy_validates_address_and_operation_bounds() {
     ));
     // The published CLI contract for this refusal does not move with its home.
     assert_eq!(over_limit.classification().code, "cli.live_target");
-    assert_eq!(over_limit.classification().kind, Kind::Cli);
+    assert_eq!(over_limit.classification().kind, Kind::Usage);
     assert_eq!(
         over_limit.classification().remediation,
         Some("set the resolved-address limit to at least 1 and no more than the supported maximum")
@@ -231,35 +230,33 @@ fn policy_validates_address_and_operation_bounds() {
     );
 
     defaults
-        .authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        .authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation,
             defaults.max_bytes_per_operation,
         )))
         .expect("limits are inclusive");
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation + 1,
             0
         ))),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::PacketLimit { .. }
-        ))
+        Err(policy::Error::PacketLimit { .. })
     ));
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             0,
             defaults.max_bytes_per_operation + 1
         ))),
-        Err(packetcraftr::Error::Policy(policy::Error::ByteLimit { .. }))
+        Err(policy::Error::ByteLimit { .. })
     ));
     defaults
         .authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(
+                policy::WireLimits::new(
                     defaults.max_packets_per_operation,
                     defaults.max_bytes_per_operation,
                 ),
-                policy::SocketBudget::none(),
+                policy::SocketLimits::none(),
             )
             .unwrap(),
         ))
@@ -267,26 +264,22 @@ fn policy_validates_address_and_operation_bounds() {
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(defaults.max_packets_per_operation + 1, 0),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(defaults.max_packets_per_operation + 1, 0),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficUnitLimit { .. }
-        ))
+        Err(policy::Error::TrafficUnitLimit { .. })
     ));
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(0, defaults.max_bytes_per_operation + 1),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(0, defaults.max_bytes_per_operation + 1),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficByteLimit { .. }
-        ))
+        Err(policy::Error::TrafficByteLimit { .. })
     ));
 }
 
@@ -316,53 +309,70 @@ fn resolution_rejects_empty_and_over_limit_results() {
 }
 
 #[test]
-fn exchange_options_validate_all_aggregate_bounds() {
-    let defaults = exchange::Options::default();
-    defaults.validate().expect("default exchange options");
+fn exchange_requests_validate_all_aggregate_bounds() {
+    let defaults = exchange::Request::new(
+        packetcraftr_core::template::Template::new(packetcraftr_core::packet::Packet::new()),
+        packetcraftr::send::Options::default(),
+    );
+    defaults.validate().expect("default exchange request");
     // The single capture field is exactly what arms the provider, so the
     // aggregate ceilings and the snapshot length cannot drift from each other.
-    assert_eq!(defaults.capture, net::capture::Limits::default());
-    defaults
+    let collection = defaults.collection.clone();
+    assert_eq!(collection.capture, net::capture::Limits::default());
+    collection
         .capture
         .validate()
-        .expect("default exchange options imply valid capture limits");
+        .expect("default exchange collection implies valid capture limits");
 
     let invalid = [
-        exchange::Options {
-            timeout: exchange::MAX_EXCHANGE_TIMEOUT + Duration::from_nanos(1),
+        exchange::Request {
+            timeout: net::capture::MAX_TIMEOUT + Duration::from_nanos(1),
             ..defaults.clone()
         },
-        exchange::Options {
+        exchange::Request {
             max_template_packets: 0,
             ..defaults.clone()
         },
-        exchange::Options {
-            max_responses: defaults.capture.max_frames + 1,
-            ..defaults.clone()
+    ];
+    for request in invalid {
+        assert!(request.validate().is_err());
+    }
+    let invalid = [
+        exchange::Collection {
+            max_responses: collection.capture.max_frames + 1,
+            ..collection.clone()
         },
-        exchange::Options {
-            max_unmatched_frames: defaults.capture.max_frames + 1,
-            ..defaults.clone()
+        exchange::Collection {
+            max_unmatched_frames: collection.capture.max_frames + 1,
+            ..collection.clone()
         },
-        exchange::Options {
+        exchange::Collection {
             capture: net::capture::Limits {
                 max_frames: 0,
-                ..defaults.capture
+                ..collection.capture
             },
             max_responses: 0,
             max_unmatched_frames: 0,
-            ..defaults.clone()
+            ..collection.clone()
         },
-        exchange::Options {
+        exchange::Collection {
             capture: net::capture::Limits {
                 max_bytes: 1,
-                ..defaults.capture
+                ..collection.capture
             },
-            ..defaults
+            ..collection
         },
     ];
-    for options in invalid {
-        assert!(options.validate().is_err());
+    for collection in invalid {
+        assert!(collection.validate().is_err());
+        assert!(
+            exchange::Request {
+                collection,
+                ..defaults.clone()
+            }
+            .validate()
+            .is_err()
+        );
     }
 }
 
@@ -373,7 +383,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         packets_completed: 1,
         bytes: 10,
         elapsed: Duration::from_secs(1),
-        capture: Statistics {
+        capture: net::capture::Stats {
             received_frames: 1,
             received_bytes: 5,
             dropped_frames: 1,
@@ -400,9 +410,9 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
     assert_eq!(total, before);
 
     let overflow = Stats {
-        capture: Statistics {
+        capture: net::capture::Stats {
             receiver_dropped_frames: u64::MAX,
-            ..Statistics::default()
+            ..net::capture::Stats::default()
         },
         ..Stats::default()
     };
@@ -441,6 +451,35 @@ fn public_errors_retain_stable_policy_and_target_classification() {
             Kind::Policy,
         ),
         (
+            Box::new(policy::Error::WireFrame {
+                source: packetcraftr_core::frame::Error::CapturedLengthTooLarge {
+                    actual: usize::MAX,
+                },
+            }),
+            "policy.invalid_packet_semantics",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UndecodableWire {
+                source: packetcraftr_core::decode::Error::LayerLimit { limit: 1 },
+            }),
+            "policy.invalid_packet_semantics",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::PermissiveLiveOptIn),
+            "policy.permissive_live_opt_in",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UnsupportedOperation {
+                authorizer: "a fixture authorizer",
+                operation: "replay",
+            }),
+            "internal.unsupported_operation",
+            Kind::Internal,
+        ),
+        (
             Box::new(TargetError::AddressFamilyUnavailable { family: "IPv6" }),
             "packet.target_address_family",
             Kind::Packet,
@@ -451,7 +490,7 @@ fn public_errors_retain_stable_policy_and_target_classification() {
                 reason: "fixture",
             }),
             "cli.live_target",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Box::new(TargetError::Resolver {
@@ -508,18 +547,27 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     );
 
     let snapshot = || {
-        Box::new(packetcraftr_core::error::BoundaryError::new(
+        packetcraftr_core::error::BoundaryError::new(
             "progressive output failed",
             packetcraftr_core::error::Classification::new("io.fixture", Kind::Io, None),
             vec!["fixture disk is full".to_owned()],
-        ))
+        )
     };
-    for workflow in [
-        packetcraftr::Error::SendOutput { source: snapshot() },
-        packetcraftr::Error::ExchangeOutput { source: snapshot() },
-    ] {
-        assert_eq!(workflow.causes(), ["fixture disk is full"], "{workflow}");
-    }
+    let send = packetcraftr::send::Error::Output { source: snapshot() };
+    assert_eq!(send.to_string(), "send progressive output failed");
+    assert_eq!(
+        send.causes(),
+        ["progressive output failed", "fixture disk is full"],
+        "{send}"
+    );
+    let exchange = exchange::Error::Output {
+        source: Box::new(snapshot()),
+    };
+    assert_eq!(
+        exchange.causes(),
+        ["progressive output failed", "fixture disk is full"],
+        "{exchange}"
+    );
 
     // A hostname lookup keeps the system refusal instead of pasting it into
     // the message, so the message and the cause each say it once.

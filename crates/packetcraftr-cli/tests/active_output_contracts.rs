@@ -64,22 +64,25 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         port: Some(0),
         ..evidence_free.clone()
     };
-    let (output, _, _) = scan_output::Report::try_from_scan(scan::Report {
-        planned_duration: std::time::Duration::ZERO,
-        target: "router.example".to_owned(),
-        resolved_addresses: vec![ipv4, ipv6],
-        endpoints: vec![
-            endpoint(ipv4, true),
-            endpoint(ipv6, false),
-            evidence_free,
-            port_zero,
-        ],
-        undecoded: Vec::new(),
-        diagnostics: Vec::new(),
-        stats: Stats::default(),
-        rtt: scan::Rtt::default(),
-    })
-    .expect("in-range evidence converts");
+    let output = packetcraftr_cli::output::envelope::Published::<scan_output::Report>::try_from(
+        scan::Aggregate {
+            planned_duration: std::time::Duration::ZERO,
+            target: "router.example".to_owned(),
+            resolved_addresses: vec![ipv4, ipv6],
+            endpoints: vec![
+                endpoint(ipv4, true),
+                endpoint(ipv6, false),
+                evidence_free,
+                port_zero,
+            ],
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: Stats::default(),
+            rtt: scan::Rtt::default(),
+        },
+    )
+    .expect("in-range evidence converts")
+    .result;
 
     assert_eq!(output.endpoints[0].address, ipv4);
     assert_eq!(output.endpoints[0].port, None);
@@ -95,11 +98,11 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
     );
     assert_eq!(
         output.endpoints[0].classification,
-        packetcraftr::scan::Classification::Open
+        scan_output::Classification::Open
     );
     assert_eq!(
         output.endpoints[1].classification,
-        packetcraftr::scan::Classification::Timeout
+        scan_output::Classification::Timeout
     );
     assert_eq!(output.endpoints[2].address, ipv4);
     assert_eq!(output.endpoints[2].port, Some(443));
@@ -130,9 +133,14 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
     assert!(event["probe"].get("destination_port").is_none());
     assert!(event.get("resolved_address").is_none());
 
-    let (undecoded, diagnostics) =
-        scan_output::Event::try_from_scan(scan::Event::Undecoded { frame: frame() })
-            .expect("undecoded event converts");
+    let packetcraftr_cli::output::envelope::Published {
+        result: undecoded,
+        diagnostics,
+        ..
+    } = packetcraftr_cli::output::envelope::Published::<scan_output::Event>::try_from(
+        scan::Event::Undecoded { frame: frame() },
+    )
+    .expect("undecoded event converts");
     assert!(diagnostics.is_empty());
     assert_eq!(undecoded.event_name(), "undecoded");
     let undecoded = serde_json::to_value(undecoded).expect("undecoded payload serializes");

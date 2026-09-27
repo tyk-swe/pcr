@@ -21,15 +21,13 @@
 use std::io::Read;
 use std::sync::Arc;
 
-use thiserror::Error;
-
-use crate::error::{BoundaryError, Classification, Classified, Coordinate};
+use crate::error::BoundaryError;
 use crate::filter::{Filter, Requirements};
 use crate::registry::Registry;
 
-use super::pcap::Reader;
 use super::scope::Definition;
 use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary, run_with_ip_events};
+use crate::capture_file::Reader;
 
 /// Pipeline work a [`Collector`] reads from the records it observes.
 ///
@@ -71,7 +69,7 @@ impl CollectorNeeds {
 ///
 /// `observe` failures cross the run as [`super::Error::Sink`] attributed to
 /// the frame being folded; `finish` and trailing-drain failures surface as
-/// [`SessionError::Collector`] after the run has completed.
+/// [`Error::Collector`](super::Error::Collector) after the run has completed.
 pub trait Collector {
     /// One observation emitted while folding a frame or finishing the pass.
     type Event;
@@ -121,16 +119,19 @@ impl<C: Collector> Pass<C> {
     /// Captures [`Collector::scopes`], consumes the collector through
     /// [`Collector::finish`], and drains its trailing events through
     /// `event_sink` — in that order.
-    pub fn finish<F>(self, event_sink: &mut F) -> Result<Outcome<C>, SessionError>
+    pub fn finish<F>(self, event_sink: &mut F) -> Result<Outcome<C>, super::Error>
     where
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
         let selected_absent = self.selected_absent();
         // Scope capture precedes finish, which consumes the collector.
         let scopes = self.collector.scopes();
-        let (trailing, summary) = self.collector.finish(&self.run)?;
+        let (trailing, summary) = self
+            .collector
+            .finish(&self.run)
+            .map_err(super::Error::Collector)?;
         for event in trailing {
-            event_sink(event)?;
+            event_sink(event).map_err(super::Error::Collector)?;
         }
         Ok(Outcome {
             run: self.run,
@@ -165,52 +166,14 @@ impl<C: Collector> Outcome<C> {
     }
 }
 
-/// A session failure: the bounded run itself, or the collector contract
-/// outside it.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum SessionError {
-    /// The run failed — capture, decode, filter, and budget errors, plus
-    /// `observe` and in-run event-sink failures, each attributed to its
-    /// frame as [`Error::Sink`](super::Error::Sink).
-    #[error(transparent)]
-    Run(#[from] super::Error),
-    /// The collector's `finish` or the trailing drain failed after the run
-    /// completed.
-    #[error(transparent)]
-    Collector(#[from] BoundaryError),
-}
-
-impl Classified for SessionError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Run(source) => source.classification(),
-            Self::Collector(source) => source.classification(),
-        }
-    }
-
-    fn context(&self) -> Option<Coordinate> {
-        match self {
-            Self::Run(source) => source.context(),
-            Self::Collector(source) => source.context(),
-        }
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Run(source) => source.causes(),
-            Self::Collector(source) => source.causes(),
-        }
-    }
-}
-
 /// A prepared analysis pass: narrowed plan plus the collector lifecycle.
 ///
 /// `options.plan` is replaced — the session derives it from the filter's
 /// [`Filter::requirements`] and the collector's [`CollectorNeeds`] — while
 /// `options.tcp_events` and `options.track_sources` are raised to cover the
-/// declared needs. `selector` only feeds the [`Outcome::selected_absent`]
-/// verdict; selection itself is the already-compiled `options.filter`.
+/// declared needs. A `selector` becomes `options.stream`: the pass keeps
+/// only that conversation's frames, and the [`Outcome::selected_absent`]
+/// verdict reports whether it had any.
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -237,17 +200,20 @@ impl<'a, C: Collector> Session<'a, C> {
             .filter
             .map_or_else(Requirements::default, Filter::requirements);
         let needs = collector.needs();
+        if selector.is_some() {
+            options.stream = selector;
+        }
         options.plan = Plan::physical(requirements).union(needs.plan());
-        if options.plan.tcp_index || options.plan.udp_index {
+        if options.plan.tcp_index || options.plan.udp_index || options.stream.is_some() {
             options.plan = Plan::default();
         }
         options.tcp_events |= needs.tcp_events;
         options.track_sources |= needs.track_sources;
         Self {
             collector,
+            selector: options.stream,
             options,
             registry,
-            selector,
         }
     }
 
@@ -263,7 +229,7 @@ impl<'a, C: Collector> Session<'a, C> {
         reader: &mut Reader<R>,
         ip_sink: I,
         event_sink: F,
-    ) -> Result<Outcome<C>, SessionError>
+    ) -> Result<Outcome<C>, super::Error>
     where
         R: Read,
         I: FnMut(IpEventRecord) -> Result<(), BoundaryError>,
@@ -284,7 +250,7 @@ impl<'a, C: Collector> Session<'a, C> {
         reader: &mut Reader<R>,
         ip_sink: I,
         event_sink: &mut F,
-    ) -> Result<Pass<C>, SessionError>
+    ) -> Result<Pass<C>, super::Error>
     where
         R: Read,
         I: FnMut(IpEventRecord) -> Result<(), BoundaryError>,
@@ -308,10 +274,11 @@ impl<'a, C: Collector> Session<'a, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::pcap::Writer;
     use crate::analysis::{Error as RunError, StreamTransport};
     use crate::build::{Builder, Options as BuildOptions};
+    use crate::capture_file::Writer;
     use crate::codec::Context as BuildContext;
+    use crate::error::Classified;
     use crate::error::{Classification, Kind};
     use crate::field::WireValue;
     use crate::filter::Options as FilterOptions;
@@ -503,7 +470,7 @@ mod tests {
         probe: Probe,
         filter: Option<&Filter>,
         selector: Option<StreamRef>,
-    ) -> Result<Driven, SessionError> {
+    ) -> Result<Driven, RunError> {
         let mut reader = reader_of(frames);
         let options = Options {
             filter,
@@ -527,7 +494,7 @@ mod tests {
     }
 
     /// `Driven` is not `Debug`, so `expect_err` is unavailable.
-    fn expect_failure(result: Result<Driven, SessionError>) -> SessionError {
+    fn expect_failure(result: Result<Driven, RunError>) -> RunError {
         match result {
             Ok(_) => panic!("the session succeeded"),
             Err(error) => error,
@@ -573,7 +540,6 @@ mod tests {
     #[test]
     fn empty_selector_verdict_arrives_after_the_trailing_drain() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
@@ -583,7 +549,7 @@ mod tests {
             &registry,
             &[udp_frame(&registry, 0)],
             probe,
-            Some(&filter),
+            None,
             Some(StreamRef {
                 transport: StreamTransport::Tcp,
                 index: 42,
@@ -602,11 +568,6 @@ mod tests {
     #[test]
     fn split_phases_let_the_verdict_precede_finish() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
-        let options = Options {
-            filter: Some(&filter),
-            ..Options::default()
-        };
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let probe = Probe::new(CollectorNeeds::default(), &log, &views);
@@ -618,7 +579,7 @@ mod tests {
 
         let pass = Session::new(
             registry,
-            options,
+            Options::default(),
             probe,
             Some(StreamRef {
                 transport: StreamTransport::Tcp,
@@ -718,6 +679,57 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_selector_keeps_exactly_the_frames_its_filter_text_would() {
+        let registry = builtin::registry();
+        let frames = [
+            tcp_frame(&registry, 0, Tcp::SYN, 100),
+            udp_frame(&registry, 1),
+            tcp_frame(&registry, 2, Tcp::ACK, 101),
+            udp_frame(&registry, 3),
+        ];
+        for (selector, text) in [
+            (
+                StreamRef {
+                    transport: StreamTransport::Tcp,
+                    index: 0,
+                },
+                "tcp.stream == 0",
+            ),
+            (
+                StreamRef {
+                    transport: StreamTransport::Udp,
+                    index: 0,
+                },
+                "udp.stream == 0",
+            ),
+        ] {
+            let matched = |filter: Option<&Filter>, selector: Option<StreamRef>| {
+                let log = Log::default();
+                let views = Rc::new(RefCell::new(Vec::new()));
+                let driven = drive(
+                    &registry,
+                    &frames,
+                    Probe::new(CollectorNeeds::default(), &log, &views),
+                    filter,
+                    selector,
+                )
+                .expect("session runs");
+                assert!(!driven.outcome.selected_absent(), "{text}");
+                driven
+                    .log
+                    .iter()
+                    .filter(|entry| entry.starts_with("observe:"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let filter = compile(text, &registry);
+            let by_selector = matched(None, Some(selector));
+            assert_eq!(by_selector.len(), 2, "{text}: {by_selector:?}");
+            assert_eq!(by_selector, matched(Some(&filter), None), "{text}");
+        }
+    }
+
+    #[test]
     fn filter_requirements_union_with_collector_needs() {
         let registry = builtin::registry();
         // Reads only udp.stream, so TCP indexing must stay off even though
@@ -811,7 +823,7 @@ mod tests {
         ));
 
         match error {
-            SessionError::Run(RunError::Sink { number, .. }) => {
+            RunError::Sink { number, .. } => {
                 assert_eq!(number, 2, "the failure is attributed to its frame");
             }
             other => panic!("expected a run sink error, got {other:?}"),
@@ -840,7 +852,7 @@ mod tests {
         ));
 
         match error {
-            SessionError::Collector(source) => {
+            RunError::Collector(source) => {
                 assert_eq!(source.classification().code, "probe.failed");
             }
             other => panic!("expected a collector error, got {other:?}"),
@@ -870,7 +882,7 @@ mod tests {
             Err(error) => error,
         };
         match error {
-            SessionError::Run(RunError::Sink { number: 1, .. }) => {}
+            RunError::Sink { number: 1, .. } => {}
             other => panic!("expected a run sink error at frame 1, got {other:?}"),
         }
 
@@ -891,7 +903,7 @@ mod tests {
             Ok(())
         };
         match pass.finish(&mut failing) {
-            Err(SessionError::Collector(source)) => {
+            Err(RunError::Collector(source)) => {
                 assert_eq!(source.classification().code, "probe.failed");
             }
             Err(other) => panic!("expected a collector error, got {other:?}"),

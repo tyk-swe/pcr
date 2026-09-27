@@ -6,7 +6,7 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use super::{Error, ResourceError};
+use super::{Error, Resource};
 
 #[derive(Debug, Default)]
 pub(super) struct History {
@@ -20,7 +20,7 @@ impl History {
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(capacity)
-            .map_err(|_| ResourceError::AllocationFailed {
+            .map_err(|_| Resource::AllocationFailed {
                 requested: capacity,
             })?;
         bytes.resize(capacity, 0);

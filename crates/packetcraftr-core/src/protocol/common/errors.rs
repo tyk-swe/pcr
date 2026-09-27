@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::layer::{FieldError, Layer, Malformed};
+use crate::field;
+use crate::layer::{Layer, Malformed};
 use crate::protocol::BuiltinProtocol;
 
 pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
@@ -12,14 +13,21 @@ pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
 /// of a malformed layer, otherwise the layer's own identifier.
 pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
     layer
-        .as_any()
         .downcast_ref::<Malformed>()
         .and_then(|layer| layer.intended_protocol.as_deref())
         .unwrap_or_else(|| layer.protocol_id().as_str())
 }
 
+/// Whether a parent binds this child as `protocol`: a malformed layer by the
+/// protocol it was meant to be, any other layer by its type.
 pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
-    BuiltinProtocol::from_name(binding_protocol(layer)) == Some(protocol)
+    match layer
+        .downcast_ref::<Malformed>()
+        .and_then(|layer| layer.intended_protocol.as_deref())
+    {
+        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
+        None => protocol.identifies(layer),
+    }
 }
 
 /// Whether a child layer only preserves opaque bytes, so a parent that would
@@ -36,7 +44,6 @@ pub(crate) fn typed_layer<'a, L: Layer + 'static>(
     layer: &'a dyn Layer,
 ) -> Result<&'a L, crate::codec::Error> {
     layer
-        .as_any()
         .downcast_ref::<L>()
         .ok_or_else(|| wrong_layer(name, layer))
 }
@@ -67,20 +74,29 @@ pub(crate) fn invalid(name: &'static str, message: impl Into<String>) -> crate::
     }
 }
 
+/// Reports a protocol model's typed failure as an invalid layer, retaining it
+/// as the source.
+pub(crate) fn rejected(
+    name: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> crate::codec::Error {
+    crate::codec::Error::rejected(protocol(name), source)
+}
+
 pub(crate) fn wrong_type(
     schema: &'static crate::layer::Schema,
     field: &str,
     expected: &'static str,
-) -> FieldError {
-    FieldError::WrongType {
+) -> field::Error {
+    field::Error::WrongType {
         protocol: schema.protocol,
         field: field.to_owned(),
         expected,
     }
 }
 
-pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -> FieldError {
-    FieldError::OutOfRange {
+pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -> field::Error {
+    field::Error::OutOfRange {
         protocol: schema.protocol,
         field: field.to_owned(),
     }
@@ -89,8 +105,8 @@ pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -
 pub(crate) fn read_only(
     schema: &'static crate::layer::Schema,
     field: &str,
-) -> Result<(), FieldError> {
-    Err(FieldError::ReadOnly {
+) -> Result<(), field::Error> {
+    Err(field::Error::ReadOnly {
         protocol: schema.protocol,
         field: field.to_owned(),
     })

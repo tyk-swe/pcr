@@ -1,13 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use packetcraftr_core::analysis::pcap::{self, Error, Format, Writer};
-use packetcraftr_netio::capture::group::Source;
+use packetcraftr::capture::Source;
+use packetcraftr_core::capture_file::{self, Error, Format, Writer};
 use std::io::Write;
 pub(super) fn initialize<W: Write>(
     destination: W,
     format: Format,
     sources: &[Source],
-    limits: pcap::Limits,
+    limits: capture_file::Limits,
 ) -> Result<Writer<W>, Error> {
     let maximum = sources
         .iter()
@@ -27,7 +27,7 @@ pub(super) fn initialize<W: Write>(
         return Writer::pcap_with_options(
             destination,
             sources[0].metadata.link_type,
-            pcap::PcapOptions {
+            capture_file::PcapOptions {
                 snap_len: maximum,
                 max_size: maximum,
                 stream_limits: limits,
@@ -44,7 +44,7 @@ pub(super) fn initialize<W: Write>(
         .max(8192);
     let mut writer = Writer::pcapng_with_options(
         destination,
-        pcap::PcapNgOptions {
+        capture_file::PcapNgOptions {
             max_size: maximum,
             max_interfaces: sources.len(),
             stream_limits: limits,
@@ -52,7 +52,7 @@ pub(super) fn initialize<W: Write>(
         },
     )?;
     for source in sources {
-        let description = pcap::Interface {
+        let description = capture_file::Interface {
             link_type: source.metadata.link_type,
             snap_len: u32::try_from(source.metadata.snap_length).map_err(|_| {
                 Error::InvalidData {
@@ -60,12 +60,12 @@ pub(super) fn initialize<W: Write>(
                     reason: "snapshot exceeds capture wire range",
                 }
             })?,
-            timestamp_resolution: pcap::TimestampResolution::Decimal(9),
+            timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
             timestamp_offset: 0,
         };
         let id = writer.add_interface_description_with_options(
             description,
-            &[pcap::PcapNgOption {
+            &[capture_file::PcapNgOption {
                 code: 2,
                 value: bytes::Bytes::copy_from_slice(source.metadata.interface.name.as_bytes()),
             }],

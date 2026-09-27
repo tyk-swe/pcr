@@ -1,16 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::capture_file::Format;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
     StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
 };
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(), CliError> {
+pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<(), CliError> {
     let mut diagnostics = result.diagnostics.clone();
     for sent in &result.sent {
         diagnostics.extend(sent.built().diagnostics.iter().cloned());
@@ -28,7 +28,7 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(),
 }
 
 pub(super) fn render_capture(
-    result: &packetcraftr::exchange::Report,
+    result: &packetcraftr::exchange::Aggregate,
     format: Format,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
@@ -62,17 +62,18 @@ pub(super) fn emit_event(
     event: packetcraftr::exchange::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::exchange::Event::try_from_exchange(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
+    let published = output::envelope::Published::<output::exchange::Event>::try_from(event)
+        .map_err(CliError::classified)?;
+    Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn render_complete(
-    summary: packetcraftr::exchange::Summary,
+    summary: packetcraftr::exchange::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
+    Ok(stream.complete_published(
+        output::envelope::Published::<output::exchange::Event>::from(summary),
+    )?)
 }
 
 #[cfg(test)]

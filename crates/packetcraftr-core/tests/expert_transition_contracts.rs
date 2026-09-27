@@ -676,7 +676,7 @@ fn capture_evidence_combines_on_one_frame() {
 
 #[test]
 fn capture_evidence_names_the_declared_interface_when_present() {
-    use packetcraftr_core::analysis::pcap::{Reader, Writer};
+    use packetcraftr_core::capture_file::{Reader, Writer};
     use std::io::Cursor;
 
     let registry = registry();

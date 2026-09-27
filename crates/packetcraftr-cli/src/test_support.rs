@@ -1,22 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Test helpers shared by the crate's unit tests and, through the
+//! `test-support` feature, its integration tests. Not a supported API.
+
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use packetcraftr_cli::output::{contract::Command, stream::StreamEncoder};
+use crate::output::{contract::Command, stream::StreamEncoder};
 use serde_json::Value;
 
 /// A writer the test can still read after handing it to an encoder.
 #[derive(Clone, Default)]
-pub(crate) struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+pub struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
 
 impl SharedBuffer {
-    pub(crate) fn bytes(&self) -> Vec<u8> {
+    pub fn bytes(&self) -> Vec<u8> {
         self.0.lock().expect("shared buffer lock").clone()
     }
 
-    pub(crate) fn records(&self) -> Vec<Value> {
+    pub fn records(&self) -> Vec<Value> {
         parse_ndjson(&self.bytes())
     }
 }
@@ -36,12 +39,12 @@ impl Write for SharedBuffer {
 }
 
 /// An NDJSON encoder writing into a buffer the caller can read back.
-pub(crate) fn stream(command: Command) -> (StreamEncoder, SharedBuffer) {
+pub fn stream(command: Command) -> (StreamEncoder, SharedBuffer) {
     let buffer = SharedBuffer::default();
     (StreamEncoder::new(command, buffer.clone()), buffer)
 }
 
-pub(crate) fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {
+pub fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {
     let text = std::str::from_utf8(bytes).expect("NDJSON output must be UTF-8");
     assert!(
         text.is_empty() || text.ends_with('\n'),
@@ -55,7 +58,7 @@ pub(crate) fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {
         .collect()
 }
 
-pub(crate) fn assert_contiguous(records: &[Value]) {
+pub fn assert_contiguous(records: &[Value]) {
     for (expected, record) in records.iter().enumerate() {
         assert_eq!(
             record["sequence"].as_u64(),
@@ -65,7 +68,7 @@ pub(crate) fn assert_contiguous(records: &[Value]) {
     }
 }
 
-pub(crate) fn output_schema() -> &'static Value {
+pub fn output_schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
         serde_json::from_str(include_str!(
@@ -75,6 +78,9 @@ pub(crate) fn output_schema() -> &'static Value {
     })
 }
 
+/// Integration tests build their own validator over [`output_schema`], because
+/// `jsonschema` is only a dev-dependency.
+#[cfg(test)]
 pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
@@ -85,9 +91,9 @@ pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
 /// Arbitrary data for stream state and I/O failure tests.
 #[derive(serde::Serialize)]
 #[serde(transparent)]
-pub(crate) struct TestRecord<T>(pub(crate) T);
+pub struct TestRecord<T>(pub T);
 
-impl<T: serde::Serialize> packetcraftr_cli::output::stream::StreamRecord for TestRecord<T> {
+impl<T: serde::Serialize> crate::output::stream::StreamRecord for TestRecord<T> {
     fn event_name(&self) -> &'static str {
         "frame"
     }

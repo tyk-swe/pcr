@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use std::sync::{
@@ -10,10 +12,10 @@ use std::sync::{
 
 use packetcraftr::Client;
 use packetcraftr::policy;
-use packetcraftr::policy::Authorizer;
 use packetcraftr::target::Hostname;
 use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::{
     layer::Raw,
@@ -21,11 +23,16 @@ use packetcraftr_core::{
     protocol::{link::Ethernet, network::Ipv4},
 };
 use packetcraftr_netio::{
+    capture,
     interface::Id as InterfaceId,
-    neighbor,
     route::{Decision, Provider},
     transmit,
 };
+
+/// A deadline no fixture here comes close to spending.
+fn live() -> Deadline {
+    Deadline::new(std::time::Duration::from_secs(5))
+}
 
 struct CountingResolver {
     calls: AtomicUsize,
@@ -44,31 +51,34 @@ impl Provider for CountingRoutes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         unreachable!("denied resolved addresses must not reach route lookup")
     }
 }
 
-struct NeverNeighbors;
+#[derive(Clone)]
+struct NeverTransmit;
 
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
+impl transmit::Provider for NeverTransmit {
+    fn send(
         &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("denied targets must not reach neighbor discovery")
+        _frame: transmit::Outbound<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
+        unreachable!("denied targets must not reach transmission")
     }
 }
 
-struct NeverTransmit;
+impl capture::Provider for NeverTransmit {
+    type Capture = capture::SystemSession;
 
-impl transmit::Sender for NeverTransmit {
-    fn send(
+    fn arm_capture(
         &self,
-        _frame: transmit::Frame<'_>,
-    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
-        unreachable!("denied targets must not reach transmission")
+        _request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        unreachable!("denied targets must not reach neighbor discovery")
     }
 }
 
@@ -133,13 +143,10 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         allow_hostname_resolution: true,
         ..policy::Policy::default()
     };
-    let client = Client::new(
-        packetcraftr_core::protocol::builtin::registry(),
+    let client = client(
         CountingRoutes {
             calls: Arc::clone(&route_calls),
         },
-        NeverNeighbors,
-        NeverTransmit,
         policy.clone(),
     );
     let target = Target::from_str("example.test").expect("hostname must parse");
@@ -158,7 +165,8 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         .plan(
             &packet,
             Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
+            &live(),
         )
         .expect_err("public destination must be denied");
     assert!(error.to_string().contains("denies public destination"));
@@ -167,8 +175,8 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
 
 struct FixedRoutes;
 
-const INTERFACE_MAC: packetcraftr_core::packet::link::MacAddress =
-    packetcraftr_core::packet::link::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
+const INTERFACE_MAC: packetcraftr_core::packet::MacAddress =
+    packetcraftr_core::packet::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 const PREFERRED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 6);
 
@@ -180,6 +188,7 @@ impl Provider for FixedRoutes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -199,18 +208,40 @@ impl Provider for FixedRoutes {
     }
 }
 
-fn source_client(
-    allow_source_spoofing: bool,
-) -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
+/// A client over `routes` whose transmit and capture providers must never be
+/// reached.
+fn client<R: Provider + 'static>(
+    routes: R,
+    policy: policy::Policy,
+) -> Client<common::FakeProviders<R, NeverTransmit>> {
     Client::new(
         packetcraftr_core::protocol::builtin::registry(),
+        policy,
+        common::providers(routes, NeverTransmit),
+    )
+}
+
+fn source_client(
+    allow_source_spoofing: bool,
+) -> Client<common::FakeProviders<FixedRoutes, NeverTransmit>> {
+    client(
         FixedRoutes,
-        NeverNeighbors,
-        NeverTransmit,
         policy::Policy {
             allow_source_spoofing,
             ..policy::Policy::default()
         },
+    )
+}
+
+/// Sends `packet` once, collecting nothing.
+fn send_once<P: packetcraftr::Providers>(
+    client: &Client<P>,
+    packet: Packet,
+    options: packetcraftr::send::Options,
+) -> Result<packetcraftr::send::Report, packetcraftr::send::Error> {
+    client.send(
+        packetcraftr::send::Request::packet(packet, options),
+        packetcraftr::send::Collector::default(),
     )
 }
 
@@ -249,7 +280,8 @@ fn only_non_interface_owned_sources_require_the_spoofing_opt_in() {
         let result = source_client(allow_source_spoofing).plan(
             &sourced_packet(source_mac, source),
             Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
+            &live(),
         );
         match result {
             Ok(_) => assert!(expect_ok, "{source_mac:?}/{source} must be denied"),
@@ -272,7 +304,8 @@ fn unspecified_final_wire_ip_source_requires_the_spoofing_opt_in() {
         .plan(
             &packet,
             Some(destination),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
+            &live(),
         )
         .expect("unspecified authored source must use the planned source");
     plan.packet_source = None;
@@ -300,8 +333,7 @@ fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
     };
     options.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
 
-    let error = source_client(false)
-        .send(packet, options)
+    let error = send_once(&source_client(false), packet, options)
         .expect_err("foreign final-wire source must be denied");
 
     assert_eq!(
@@ -310,44 +342,37 @@ fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
     );
 }
 
-/// The workflow seam validated the policy before every operation; the client's
-/// own seam did not, so an unusable resolved-address bound was accepted by
-/// `send` and `exchange` and refused by scan, DNS, traceroute, and fuzz. Both
-/// front doors now refuse it with the same classification.
+/// Every workflow is admitted through the client's one admission path, which
+/// validates the policy before any operation: an unusable resolved-address
+/// bound is refused by `send` exactly as the policy itself refuses it.
 #[test]
-fn both_authorization_seams_refuse_a_malformed_policy_identically() {
+fn the_client_refuses_a_malformed_policy_as_the_policy_does() {
     let malformed = policy::Policy {
         max_resolved_addresses: 0,
         ..policy::Policy::default()
     };
-    let workflow_denial = packetcraftr::policy::PolicyAuthorizer::for_packets(&malformed)
-        .authorize_operation(packetcraftr::policy::Operation::Budgeted(
-            packetcraftr::policy::WireBudget::new(1, 1),
+    let policy_denial = malformed
+        .authorize(packetcraftr::policy::Operation::Wire(
+            packetcraftr::policy::WireLimits::new(1, 1),
         ))
-        .expect_err("the workflow seam rejects a malformed policy");
+        .expect_err("the policy rejects itself when malformed");
 
-    let client = Client::new(
-        packetcraftr_core::protocol::builtin::registry(),
-        FixedRoutes,
-        NeverNeighbors,
-        NeverTransmit,
-        malformed,
-    );
-    let client_denial = client
-        .send(
-            sourced_packet(None, SELECTED_SOURCE),
-            packetcraftr::send::Options {
-                destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-                ..packetcraftr::send::Options::default()
-            },
-        )
-        .expect_err("the client seam rejects the same malformed policy");
+    let client = client(FixedRoutes, malformed);
+    let client_denial = send_once(
+        &client,
+        sourced_packet(None, SELECTED_SOURCE),
+        packetcraftr::send::Options {
+            destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+            ..packetcraftr::send::Options::default()
+        },
+    )
+    .expect_err("the client rejects the same malformed policy");
 
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&client_denial).code,
-        workflow_denial.classification().code
+        policy_denial.classification().code
     );
-    assert_eq!(client_denial.to_string(), workflow_denial.to_string());
+    assert_eq!(client_denial.to_string(), policy_denial.to_string());
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&client_denial).code,
         "cli.live_target"
@@ -364,10 +389,8 @@ fn constrained_policy(entries: &[&str]) -> policy::Policy {
     }
 }
 
-fn code(error: &packetcraftr::Error) -> String {
-    packetcraftr_core::error::Classified::classification(error)
-        .code
-        .to_owned()
+fn code(error: &impl Classified) -> String {
+    error.classification().code.to_owned()
 }
 
 #[test]
@@ -487,15 +510,8 @@ fn final_wire_destination_outside_allowlist_is_denied_even_when_target_passed() 
     };
     options.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
 
-    let client = Client::new(
-        packetcraftr_core::protocol::builtin::registry(),
-        FixedRoutes,
-        NeverNeighbors,
-        NeverTransmit,
-        constrained_policy(&["10.0.0.0/24"]),
-    );
-    let error = client
-        .send(packet, options)
+    let client = client(FixedRoutes, constrained_policy(&["10.0.0.0/24"]));
+    let error = send_once(&client, packet, options)
         .expect_err("final wire destination must be authorized independently");
     assert_eq!(code(&error), "policy.destination_not_allowed");
     assert!(error.to_string().contains("10.9.9.9"));
@@ -532,18 +548,14 @@ fn passive_planning_validates_the_destination_constraint_count() {
         ],
         ..policy::Policy::default()
     };
-    let client = Client::new(
-        packetcraftr_core::protocol::builtin::registry(),
-        FixedRoutes,
-        NeverNeighbors,
-        NeverTransmit,
-        policy,
-    );
+    let client = client(FixedRoutes, policy);
     let mut packet = Packet::new();
     packet.push(packetcraftr_core::protocol::network::Ipv4 {
         destination: Ipv4Addr::new(10, 0, 0, 2),
         ..Default::default()
     });
-    let error = client.plan(&packet, None, &Default::default()).unwrap_err();
+    let error = client
+        .plan(&packet, None, &Default::default(), &live())
+        .unwrap_err();
     assert_eq!(code(&error), "cli.live_target");
 }

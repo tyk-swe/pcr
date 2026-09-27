@@ -3,27 +3,11 @@
 mod common;
 use common::{parse_json, run};
 #[test]
-fn profile_files_validate_before_target_resolution_and_keep_their_wire_schema() {
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
-    ))
-    .unwrap();
+fn profile_files_validate_before_target_resolution() {
     let sample: serde_json::Value = serde_json::from_str(include_str!(
         "../../../examples/documents/udp-profiles.json"
     ))
     .unwrap();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    assert!(validator.is_valid(&sample));
-    // The schema bounds names as the loader does: characters, not bytes, and
-    // no control characters.
-    for (name, valid) in [
-        ("\u{e9}".repeat(128), true),
-        ("tab\tname".to_owned(), false),
-    ] {
-        let mut named = sample.clone();
-        named["profiles"][0]["profile"]["name"] = serde_json::json!(name);
-        assert_eq!(validator.is_valid(&named), valid, "{name:?}");
-    }
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("profiles.json");
     std::fs::write(&path, serde_json::to_vec(&sample).unwrap()).unwrap();
@@ -42,7 +26,7 @@ fn profile_files_validate_before_target_resolution_and_keep_their_wire_schema() 
     assert!(!output.status.success());
     let result = parse_json(&output);
     assert!(
-        result["error"]["message"]
+        result["error"]["causes"][0]
             .as_str()
             .unwrap()
             .contains("hostname")

@@ -101,7 +101,7 @@ impl DecodeArgs {
             CliError::from_classification(
                 Classification::new(
                     "cli.decode_as",
-                    Kind::Cli,
+                    Kind::Usage,
                     Some("declare one compatible protocol per TCP or UDP port"),
                 ),
                 source.to_string(),
@@ -134,7 +134,7 @@ fn error(message: impl Into<String>) -> CliError {
     CliError::from_classification(
         Classification::new(
             "cli.decode_as",
-            Kind::Cli,
+            Kind::Usage,
             Some("declare one compatible protocol per TCP or UDP port"),
         ),
         message,

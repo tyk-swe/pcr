@@ -3,7 +3,7 @@
 
 use thiserror::Error;
 
-use crate::error::{Classification, Classified, Kind};
+use crate::error::{Classification, Classified, Kind, Source};
 
 use super::types::{DocumentLimits, Limit};
 
@@ -19,11 +19,11 @@ pub(super) struct Refused(pub(super) String);
 pub enum Error {
     #[error("packet document has {actual} bytes, exceeding limit {limit}")]
     SizeLimit { actual: usize, limit: usize },
-    #[error("could not parse {format} packet document: {source}")]
+    #[error("could not parse {format} packet document")]
     Parse {
         format: &'static str,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: Source,
     },
     #[error("unsupported packet document schema {actual}; expected {expected}")]
     Schema {
@@ -44,19 +44,19 @@ pub enum Error {
     },
     #[error("unknown protocol {protocol} at layer {layer}")]
     UnknownProtocol { layer: usize, protocol: String },
-    #[error("invalid {protocol} layer at index {layer}: {source}")]
+    #[error("invalid {protocol} layer at index {layer}")]
     Layer {
         layer: usize,
         protocol: String,
         #[source]
         source: crate::codec::Error,
     },
-    #[error("invalid {protocol} layer at index {layer}: {source}")]
+    #[error("invalid {protocol} layer at index {layer}")]
     Field {
         layer: usize,
         protocol: String,
         #[source]
-        source: crate::layer::FieldError,
+        source: crate::field::Error,
     },
 }
 
@@ -100,34 +100,34 @@ impl Classified for Error {
             | Self::NestingLimit { .. }
             | Self::ResourceLimit { .. } => Classification::new(
                 "cli.document_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "shrink the packet document to stay inside its finite byte, node, and nesting bounds",
                 ),
             ),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.document_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("lower the configured document limit to at most its stable maximum"),
             ),
             Self::Parse { .. } => Classification::new(
                 "cli.document_syntax",
-                Kind::Cli,
+                Kind::Usage,
                 Some("repair the packet document so it parses as well-formed JSON or YAML"),
             ),
             Self::Schema { .. } => Classification::new(
                 "cli.document_schema",
-                Kind::Cli,
+                Kind::Usage,
                 Some("declare the packet document schema this build supports"),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
                 "cli.document_protocol",
-                Kind::Cli,
+                Kind::Usage,
                 Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
             ),
             Self::Layer { .. } | Self::Field { .. } => Classification::new(
                 "cli.document_field",
-                Kind::Cli,
+                Kind::Usage,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),
         }

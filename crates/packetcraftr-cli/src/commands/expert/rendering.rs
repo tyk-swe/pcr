@@ -1,24 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::ToolFormat;
-
-use std::collections::BTreeMap;
+use crate::output::contract::ToolFormat;
 
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
 pub(super) struct State {
-    findings: u64,
-    errors: u64,
-    warnings: u64,
-    notes: u64,
-    codes: BTreeMap<&'static str, u64>,
+    /// Totals over the findings the selectors kept.
+    selected: analysis::expert::Summary,
     retained: Retained<output::expert::Finding>,
 }
 
@@ -26,26 +21,23 @@ impl State {
     /// `max_findings` bounds only the aggregate JSON document, which holds
     /// every finding at once. One frame can produce several findings, so the
     /// frame ceiling alone does not bound the document.
-    pub(super) const fn new(max_findings: usize) -> Self {
+    pub(super) fn new(max_findings: usize) -> Self {
         Self {
-            findings: 0,
-            errors: 0,
-            warnings: 0,
-            notes: 0,
-            codes: BTreeMap::new(),
+            selected: analysis::expert::Summary::default(),
             retained: Retained::new(max_findings),
         }
     }
 
     // u64 severity counters cannot reach u64::MAX from a bounded finding count
     pub(super) fn count(&mut self, finding: &analysis::expert::Finding) {
-        self.findings += 1;
+        let selected = &mut self.selected;
+        selected.findings += 1;
         match finding.severity {
-            packetcraftr_core::diagnostic::Severity::Error => self.errors += 1,
-            packetcraftr_core::diagnostic::Severity::Warning => self.warnings += 1,
-            packetcraftr_core::diagnostic::Severity::Info => self.notes += 1,
+            packetcraftr_core::diagnostic::Severity::Error => selected.errors += 1,
+            packetcraftr_core::diagnostic::Severity::Warning => selected.warnings += 1,
+            packetcraftr_core::diagnostic::Severity::Info => selected.notes += 1,
         }
-        *self.codes.entry(finding.code).or_default() += 1;
+        *selected.codes.entry(finding.code).or_default() += 1;
     }
 }
 
@@ -83,16 +75,17 @@ pub(super) fn render_record(
 
 pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
     crate::commands::offline_analysis::render_clock(&summary.clock)?;
+    let selected = &state.selected;
     // BTreeMap iteration is code order, so the per-code lines are deterministic.
-    for (code, findings) in &state.codes {
+    for (code, findings) in &selected.codes {
         write_stdout_line(format_args!("code={code} findings={findings}"))?;
     }
     write_stdout_line(format_args!(
         "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
-        state.findings,
-        state.errors,
-        state.warnings,
-        state.notes,
+        selected.findings,
+        selected.errors,
+        selected.warnings,
+        selected.notes,
         summary.frames_matched,
         summary.frames_read,
     ))
@@ -125,23 +118,21 @@ fn result(
     state: State,
     include_findings: bool,
 ) -> output::expert::Report {
-    output::expert::Report {
-        clock: summary.clock.clone(),
-        frames_read: summary.frames_read,
-        frames_matched: summary.frames_matched,
-        errors: state.errors,
-        warnings: state.warnings,
-        notes: state.notes,
-        codes: state
-            .codes
-            .into_iter()
-            .map(|(code, findings)| output::expert::CodeCount { code, findings })
-            .collect(),
-        findings: if include_findings {
-            state.retained.into_items()
-        } else {
-            Vec::new()
-        },
-        ip_reassembly: output::reassembly::Report::from_analysis(&summary.ip_reassembly),
-    }
+    let State {
+        mut selected,
+        retained,
+    } = state;
+    selected.clock = summary.clock.clone();
+    let findings = if include_findings {
+        retained.into_items()
+    } else {
+        Vec::new()
+    };
+    output::expert::Report::from((
+        selected,
+        summary.frames_read,
+        summary.frames_matched,
+        findings,
+        &summary.ip_reassembly,
+    ))
 }

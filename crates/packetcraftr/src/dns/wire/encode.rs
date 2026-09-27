@@ -15,7 +15,7 @@ pub fn encode_query(
     transaction_id: u16,
     recursion_desired: bool,
     edns: Option<crate::dns::EdnsRequest>,
-) -> Result<Bytes, crate::dns::error::WireError> {
+) -> Result<Bytes, super::Error> {
     use packetcraftr_core::protocol::application::dns::{
         Dns, Edns, Name, Question, Record, RecordValue,
     };
@@ -46,5 +46,10 @@ pub fn encode_query(
             }),
         });
     }
-    Ok(message.to_wire()?)
+    message.to_wire().map_err(|error| match error {
+        packetcraftr_core::protocol::application::dns::Error::Encode(source) => {
+            super::Error::Encode(source)
+        }
+        error => super::Error::Decode(error),
+    })
 }

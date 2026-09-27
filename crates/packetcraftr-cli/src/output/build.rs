@@ -3,9 +3,10 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, layout::PacketLayout};
+use packetcraftr_core::build::BuiltPacket;
 
-use super::frame::Wire;
+use super::envelope::Published;
+use super::frame::{Layout, Wire};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
@@ -15,24 +16,26 @@ pub struct Report {
     #[serde(flatten)]
     pub frame: Wire,
     pub packet: packetcraftr_core::document::Packet,
-    pub layout: PacketLayout,
+    pub layout: Layout,
     pub requires_live_opt_in: bool,
 }
 
-impl Report {
-    pub fn from_built(built: BuiltPacket) -> (Self, Vec<Diagnostic>) {
+/// A built packet, with the builder's diagnostics for the envelope.
+impl From<BuiltPacket> for Published<Report> {
+    fn from(built: BuiltPacket) -> Self {
+        let requires_live_opt_in = packetcraftr::policy::requires_live_opt_in(&built);
         let BuiltPacket {
             bytes,
             packet,
             layout,
             diagnostics,
-            requires_live_opt_in,
+            ..
         } = built;
-        (
-            Self {
-                frame: Wire::new(bytes),
+        Self::new(
+            Report {
+                frame: bytes.into(),
                 packet: packetcraftr_core::document::Packet::from_packet(&packet),
-                layout,
+                layout: layout.into(),
                 requires_live_opt_in,
             },
             diagnostics,
@@ -46,6 +49,25 @@ pub struct PacketEvent {
     pub packet_index: u64,
     #[serde(flatten)]
     pub packet: Report,
+}
+
+/// The packet at a zero-based index in the expansion.
+impl From<(u64, BuiltPacket)> for Published<PacketEvent> {
+    fn from((packet_index, built): (u64, BuiltPacket)) -> Self {
+        let Published {
+            result: packet,
+            diagnostics,
+            stats,
+        } = Published::<Report>::from(built);
+        Self {
+            result: PacketEvent {
+                packet_index,
+                packet,
+            },
+            diagnostics,
+            stats,
+        }
+    }
 }
 
 impl super::stream::StreamRecord for PacketEvent {

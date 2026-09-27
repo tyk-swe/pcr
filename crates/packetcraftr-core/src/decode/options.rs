@@ -6,22 +6,12 @@ use bytes::Bytes;
 
 use crate::diagnostic::Diagnostic;
 use crate::layout::PacketLayout;
-use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 use crate::packet::Packet;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// How one frame is decoded.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
-    pub max_layers: usize,
-    pub max_packet_size: usize,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            max_layers: DEFAULT_MAX_LAYERS,
-            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
-        }
-    }
+    pub limits: crate::packet::Limits,
 }
 
 #[derive(Clone, Debug)]

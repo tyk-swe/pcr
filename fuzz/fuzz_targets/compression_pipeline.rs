@@ -6,10 +6,8 @@ mod composed_support;
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::{
-    analysis::{
-        self,
-        pcap::{self, compression},
-    },
+    analysis,
+    capture_file::{self, compression},
     protocol::builtin,
 };
 use std::io::{self, Cursor, Read};
@@ -43,12 +41,12 @@ fuzz_target!(|data: &[u8]| {
     ) else {
         return;
     };
-    let Ok(mut reader) = pcap::Reader::with_options(
+    let Ok(mut reader) = capture_file::Reader::with_limits(
         input,
-        pcap::ReaderOptions {
+        capture_file::ReaderLimits {
             max_size: 64 * 1024,
             max_total_interfaces: 32,
-            ..pcap::ReaderOptions::default()
+            ..capture_file::ReaderLimits::default()
         },
     ) else {
         return;

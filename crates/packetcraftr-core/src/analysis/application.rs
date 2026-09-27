@@ -17,7 +17,8 @@ use crate::{
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Copy, Debug)]
+/// Ceilings for one DNS or HTTP application-analysis run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Distinct application messages the collector may count across all
     /// streams over the whole run: HTTP counts a message when its first byte
@@ -64,7 +65,7 @@ pub enum Error {
     Limit { field: &'static str, limit: usize },
     #[error("application stream lacks physical source evidence at frame {number}")]
     Sources { number: u64 },
-    #[error("application event output failed: {0}")]
+    #[error("application event output failed")]
     Output(#[source] crate::error::BoundaryError),
 }
 impl Classified for Error {
@@ -85,9 +86,21 @@ impl Classified for Error {
             ),
         }
     }
+
+    /// A [`BoundaryError`](crate::error::BoundaryError) carries a captured
+    /// `causes` snapshot its own source chain no longer holds.
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Analysis(source) => source.causes(),
+            Self::Output(source) => source.as_causes(),
+            error => crate::error::source_chain(error),
+        }
+    }
 }
 impl Limits {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    /// Rejects a zero limit and one above its fixed ceiling. The DNS and
+    /// HTTP collectors call it before reading input.
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             ("max_messages", self.max_messages, 100_000),
             ("max_streams", self.max_streams, 100_000),

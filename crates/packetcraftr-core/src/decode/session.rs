@@ -65,7 +65,7 @@ impl<'registry> DecodeSession<'registry> {
         options: super::options::Options,
     ) -> Self {
         let original = frame.bytes().clone();
-        let traversal = TraversalScope::new(&root);
+        let traversal = TraversalScope::new(registry, &root);
         Self {
             registry,
             root,
@@ -96,7 +96,7 @@ impl<'registry> DecodeSession<'registry> {
             let decoded = match self.decode_layer(codec.as_ref(), &cursor, allow_link_padding) {
                 Ok(decoded) => decoded,
                 Err(source) => {
-                    self.preserve_malformed_layer(&cursor, source.to_string());
+                    self.preserve_malformed_layer(&cursor, crate::error::render(&source));
                     break;
                 }
             };
@@ -113,9 +113,9 @@ impl<'registry> DecodeSession<'registry> {
     }
 
     fn ensure_layer_capacity(&self) -> Result<(), Error> {
-        if self.packet.len() >= self.options.max_layers {
+        if self.packet.len() >= self.options.limits.max_layers {
             return Err(Error::LayerLimit {
-                limit: self.options.max_layers,
+                limit: self.options.limits.max_layers,
             });
         }
         Ok(())
@@ -308,7 +308,7 @@ impl<'registry> DecodeSession<'registry> {
         });
         self.traversal.accept_network(decoded.network);
         self.traversal
-            .enter_child(&decoded_protocol, child.protocol.as_ref());
+            .enter_child(self.registry, &decoded_protocol, child.protocol.as_ref());
         self.packet.push_boxed(decoded.layer);
         self.diagnostics
             .extend(decoded.diagnostics.into_iter().map(|mut diagnostic| {

@@ -1,13 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::analysis::StreamTransport;
-
 use serde::Serialize;
 
-use packetcraftr_core::analysis::expert::Finding as AnalysisFinding;
+use packetcraftr_core::analysis::{self as library, expert};
 
-use packetcraftr_core::diagnostic::Severity;
+use super::analysis::{Clock, StreamTransport};
+use super::diagnostic::Severity;
 
 /// A finding attributed to one capture frame. `transport` and `stream` jointly
 /// identify its conversation.
@@ -23,13 +22,13 @@ pub struct Finding {
     pub message: String,
 }
 
-impl From<AnalysisFinding> for Finding {
-    fn from(value: AnalysisFinding) -> Self {
+impl From<expert::Finding> for Finding {
+    fn from(value: expert::Finding) -> Self {
         Self {
-            severity: value.severity,
+            severity: value.severity.into(),
             code: value.code,
             frame: value.number,
-            transport: value.stream.map(|stream| stream.transport),
+            transport: value.stream.map(|stream| stream.transport.into()),
             stream: value.stream.map(|stream| stream.index),
             message: value.message,
         }
@@ -46,7 +45,7 @@ pub struct CodeCount {
 /// findings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
-    pub clock: packetcraftr_core::analysis::ClockReport,
+    pub clock: Clock,
     pub frames_read: u64,
     pub frames_matched: u64,
     pub errors: u64,
@@ -57,16 +56,29 @@ pub struct Report {
     pub ip_reassembly: super::reassembly::Report,
 }
 
-impl Report {
-    pub fn from_summary(
-        summary: packetcraftr_core::analysis::expert::Summary,
-        frames_read: u64,
-        frames_matched: u64,
-        findings: Vec<Finding>,
-        ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
+/// The totals of the findings a run published, the frames it read and
+/// matched, the findings retained for the document, and the capture's IP
+/// reassembly.
+impl
+    From<(
+        expert::Summary,
+        u64,
+        u64,
+        Vec<Finding>,
+        &library::IpReassemblyReport,
+    )> for Report
+{
+    fn from(
+        (summary, frames_read, frames_matched, findings, ip_reassembly): (
+            expert::Summary,
+            u64,
+            u64,
+            Vec<Finding>,
+            &library::IpReassemblyReport,
+        ),
     ) -> Self {
         Self {
-            clock: summary.clock,
+            clock: summary.clock.into(),
             frames_read,
             frames_matched,
             errors: summary.errors,
@@ -78,7 +90,7 @@ impl Report {
                 .map(|(code, findings)| CodeCount { code, findings })
                 .collect(),
             findings,
-            ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
+            ip_reassembly: ip_reassembly.into(),
         }
     }
 }

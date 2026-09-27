@@ -5,18 +5,18 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::analysis::Options;
-use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions};
 use packetcraftr_core::analysis::tls::{Collector, Limits};
+use packetcraftr_core::capture_file::{Reader, ReaderLimits};
 use packetcraftr_core::protocol::builtin;
 use std::io::Cursor;
 
 // Exercises TLS collection through TCP reassembly and the analysis pipeline.
 // Record and handshake parsers have separate fuzz targets.
 fuzz_target!(|data: &[u8]| {
-    let mut reader_options = ReaderOptions::default();
+    let mut reader_options = ReaderLimits::default();
     reader_options.max_size = 64 * 1024;
     reader_options.max_total_interfaces = 16;
-    let Ok(mut reader) = Reader::with_options(Cursor::new(data), reader_options) else {
+    let Ok(mut reader) = Reader::with_limits(Cursor::new(data), reader_options) else {
         return;
     };
 

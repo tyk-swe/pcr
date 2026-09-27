@@ -14,8 +14,9 @@ use thiserror::Error;
 use crate::packet::Packet;
 
 use crate::diagnostic::Diagnostic;
-use crate::field::FieldValue;
-use crate::layer::{FieldError, Id, Layer, Schema};
+use crate::error::{Classification, Classified, Kind, Source};
+use crate::field::{self, FieldValue};
+use crate::layer::{Id, Layer, Schema};
 use crate::layout::FieldLayout;
 use crate::registry::{Discriminator, Registry};
 
@@ -38,7 +39,10 @@ pub struct Context {
     pub destination: Option<IpAddr>,
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+/// Why a codec refused to decode, encode, or construct a layer.
+///
+/// Not `Eq`: a [`Error::Rejected`] source compares by its rendered chain.
+#[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
     #[error("codec expected layer {expected}, got {actual}")]
@@ -49,14 +53,59 @@ pub enum Error {
         needed: usize,
         available: usize,
     },
+    /// The codec's own rule refused the layer; `message` states the rule.
     #[error("invalid {protocol} layer: {message}")]
     Invalid { protocol: Id, message: String },
+    /// The protocol's typed model refused the layer; `source` says why.
+    #[error("invalid {protocol} layer")]
+    Rejected {
+        protocol: Id,
+        #[source]
+        source: Source,
+    },
     #[error("unsupported {protocol} construct: {message}")]
     Unsupported { protocol: Id, message: String },
     #[error("packet length arithmetic overflow while processing {protocol}")]
     LengthOverflow { protocol: Id },
     #[error(transparent)]
-    Field(#[from] FieldError),
+    Field(#[from] field::Error),
+}
+
+impl Error {
+    /// Reports a protocol's typed failure as an invalid `protocol` layer,
+    /// retaining it as the source.
+    pub fn rejected(protocol: Id, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Rejected {
+            protocol,
+            source: Source::new(source),
+        }
+    }
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Field(source) => source.classification(),
+            Self::WrongLayer { .. } => Classification::new(
+                "internal.codec_contract",
+                Kind::Internal,
+                Some("report the codec that was handed a layer of another protocol"),
+            ),
+            Self::LengthOverflow { .. } => Classification::new(
+                "packet.length_overflow",
+                Kind::Packet,
+                Some("shrink the packet so its byte offsets stay representable"),
+            ),
+            Self::Truncated { .. }
+            | Self::Invalid { .. }
+            | Self::Rejected { .. }
+            | Self::Unsupported { .. } => Classification::new(
+                "packet.codec",
+                Kind::Packet,
+                Some("correct the layer bytes or field values the codec refused"),
+            ),
+        }
+    }
 }
 
 pub struct LayerEncodeContext<'a> {

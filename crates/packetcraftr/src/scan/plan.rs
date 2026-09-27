@@ -1,32 +1,91 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod packet;
+
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::WORKFLOW;
-use super::{Batch, Probe, Request};
-use crate::probe::{Error, ErrorKind, ProbeEndpoint};
+use packetcraftr_core::packet::Packet;
+
+use super::Error;
+use super::Request;
+use super::error::Probes;
+use crate::execution::rate_delay;
+use crate::probe::{Batch, ProbeEndpoint};
+use packetcraftr_core::error::BoundaryError;
+
+/// One planned scan probe: an authorized address and endpoint, the attempt
+/// it belongs to, and the exact UDP payload it carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Probe {
+    pub sequence: u64,
+    pub address: IpAddr,
+    pub endpoint: ProbeEndpoint,
+    pub attempt: u32,
+    /// Shared exact UDP payload from the validated request.
+    pub udp_payload: bytes::Bytes,
+    pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
+}
+
+impl Probe {
+    /// Builds the portable IPv4/IPv6 TCP, UDP, or ICMP probe represented by
+    /// this already-authorized plan. Route-dependent fields remain unspecified
+    /// for the high-level client to materialize.
+    #[must_use]
+    pub fn packet(&self) -> Packet {
+        packet::probe_packet(self)
+    }
+}
+
+impl crate::probe::runner::Sequenced for Probe {
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
+
+/// Scan executes exactly one correlated probe per batch.
+impl Batch<Probe> {
+    /// Plans the batch that executes `probe` alone.
+    pub(super) fn single(probe: Probe, timeout: Duration) -> Self {
+        Self {
+            sequence: probe.sequence,
+            probes: vec![probe],
+            timeout,
+            permit: crate::evidence::ExecutionPermit::new(),
+        }
+    }
+
+    /// The batch's only probe. Scan plans every batch with exactly one, so
+    /// only a batch reshaped outside the planner is rejected.
+    pub(crate) fn probe(&self) -> Result<&Probe, BoundaryError> {
+        match self.probes.as_slice() {
+            [probe] => Ok(probe),
+            _ => Err(super::executor::EXECUTOR_FAULT.invalid(format!(
+                "scan batch at probe {} carries {} probes instead of one",
+                self.sequence,
+                self.probes.len()
+            ))),
+        }
+    }
+}
 
 pub(super) fn build_batches<'a>(
     request: &'a Request,
     addresses: &'a [IpAddr],
     endpoints: &'a [ProbeEndpoint],
-) -> Result<impl Iterator<Item = Batch> + 'a, Error> {
+) -> Result<impl Iterator<Item = Batch<Probe>> + 'a, Error> {
     // Validate the complete sequence space before yielding any external effect.
     addresses
         .len()
         .checked_mul(request.attempts as usize)
         .and_then(|count| count.checked_mul(endpoints.len()))
         .and_then(|count| u64::try_from(count).ok())
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "probes",
-                value: u64::MAX,
-                reason: "probe sequence overflowed".to_owned(),
-            },
-        ))?;
+        .ok_or(Error::InvalidLimit {
+            field: "probes",
+            value: u64::MAX,
+            reason: "probe sequence overflowed".to_owned(),
+        })?;
     Ok(addresses
         .iter()
         .flat_map(move |address| {
@@ -63,14 +122,9 @@ pub(super) fn worst_case_duration(
     address_count: usize,
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
-    let overflow = || {
-        Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            },
-        )
+    let overflow = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
     };
     let batch_count = address_count
         .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
@@ -87,22 +141,11 @@ pub(super) fn worst_case_duration(
     let delay = if delay_count == 0 {
         Duration::ZERO
     } else {
-        rate_delay(request.probes_per_second)?
+        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
             .checked_mul(delay_count)
             .ok_or_else(&overflow)?
     };
     exchange_time.checked_add(delay).ok_or_else(overflow)
-}
-
-fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-    ))
 }
 
 #[cfg(test)]
@@ -125,6 +168,8 @@ mod tests {
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             limits: crate::scan::Limits::default(),
+            route: crate::route::Options::default(),
+            collection: crate::exchange::Collection::default(),
         };
         for (addresses, endpoints, expected) in [
             (0, 1, Duration::ZERO),
@@ -146,11 +191,8 @@ mod tests {
         );
         assert!(matches!(
             worst_case_duration(&request, 1, 2),
-            Err(Error {
-                kind: ErrorKind::InvalidLimit {
-                    field: "probes_per_second",
-                    ..
-                },
+            Err(Error::InvalidLimit {
+                field: "probes_per_second",
                 ..
             })
         ));
@@ -159,11 +201,8 @@ mod tests {
         for (addresses, endpoints) in [(usize::MAX, 2), (1, 2)] {
             assert!(matches!(
                 worst_case_duration(&request, addresses, endpoints),
-                Err(Error {
-                    kind: ErrorKind::DurationLimit {
-                        actual: Duration::MAX,
-                        ..
-                    },
+                Err(Error::DurationLimit {
+                    actual: Duration::MAX,
                     ..
                 })
             ));

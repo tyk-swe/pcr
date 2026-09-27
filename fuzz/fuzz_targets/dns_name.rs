@@ -5,8 +5,9 @@
 
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::application::dns::name::{self, MAX_LABEL_LEN, MAX_NAME_LEN};
+use packetcraftr_core::protocol::application::dns::{
+    DecodeLimits, Dns, MAX_LABEL_LEN, MAX_NAME_LEN, MAX_NAME_POINTERS, decode_name,
+};
 
 fuzz_target!(|data: &[u8]| {
     // The first two bytes select entry offset and pointer budget; the remainder
@@ -16,34 +17,37 @@ fuzz_target!(|data: &[u8]| {
     let (control, message) = data.split_at(split);
     let message = Bytes::copy_from_slice(message);
     let start = usize::from(control.first().copied().unwrap_or(0));
-    let max_pointers = usize::from(control.get(1).copied().unwrap_or(32));
+    let max_pointers = usize::from(control.get(1).copied().unwrap_or(32)).min(MAX_NAME_POINTERS);
+    let limits = |max_name_pointers| DecodeLimits {
+        max_name_pointers,
+        ..DecodeLimits::default()
+    };
 
-    let expanded = name::decompress(&message, start, max_pointers);
+    let expanded = decode_name(&message, start, limits(max_pointers));
 
     // Decompression is a pure function of its three inputs.
     assert_eq!(
         expanded,
-        name::decompress(&message, start, max_pointers),
+        decode_name(&message, start, limits(max_pointers)),
         "decompression must be deterministic"
     );
 
     // Raising the pointer ceiling can only admit more names, never fewer.
-    if expanded.is_ok() {
+    if expanded.is_ok() && max_pointers < MAX_NAME_POINTERS {
         assert!(
-            name::decompress(&message, start, max_pointers.saturating_add(1)).is_ok(),
+            decode_name(&message, start, limits(max_pointers + 1)).is_ok(),
             "a larger pointer budget must still accept an accepted name"
         );
     }
 
-    if let Ok(expanded) = expanded {
+    if let Ok((name, resume)) = expanded {
         assert!(
-            expanded.resume <= message.len(),
-            "resume offset {} is past the {}-byte message",
-            expanded.resume,
+            resume <= message.len(),
+            "resume offset {resume} is past the {}-byte message",
             message.len()
         );
         let mut wire_length = 1usize;
-        for label in &expanded.labels {
+        for label in name.labels() {
             assert!(
                 !label.is_empty() && label.len() <= MAX_LABEL_LEN,
                 "expanded label of {} octets is outside 1..={MAX_LABEL_LEN}",

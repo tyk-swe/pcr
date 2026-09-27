@@ -5,8 +5,9 @@ mod common;
 
 use common::{parse_json, parse_ndjson, path_text, run, run_success};
 use packetcraftr_core::{
-    analysis::pcap::Writer,
-    build, codec,
+    build,
+    capture_file::Writer,
+    codec,
     frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,

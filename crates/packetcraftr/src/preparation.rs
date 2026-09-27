@@ -20,8 +20,8 @@
 //!
 //! Two orders are available:
 //!
-//! - **All-before-discovery** ([`Admission`] then [`Discovery`]): every
-//!   packet is admitted before any is materialized. [`Admission::discover`]
+//! - **All-before-discovery** ([`Admitting`] then [`Discovery`]): every
+//!   packet is admitted before any is materialized. [`Admitting::discover`]
 //!   consumes the admission, so no packet can be admitted once discovery
 //!   traffic may have been emitted. Exchange keeps its admitted packets and
 //!   materializes them. The scan pipeline keeps only each packet's
@@ -30,8 +30,7 @@
 //!   differs from the admitted one.
 //! - **Streaming** ([`Streaming`]): each packet is admitted, materialized,
 //!   and transmitted before the next one is planned, so frames are confirmed
-//!   as they go and large sets are never held in memory. `send_set` uses it;
-//!   single send is streaming with one packet.
+//!   as they go and large sets are never held in memory. Send uses it.
 //!
 //! [`exact_bytes`] applies the same materialization rules to a packet and an
 //! already materialized route, without providers or authorization, so a
@@ -40,19 +39,23 @@
 mod materialize;
 
 use std::net::IpAddr;
-use std::time::Instant;
 
 use bytes::Bytes;
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::{Error as LiveIoError, interface, neighbor, route, transmit};
+use packetcraftr_netio::route::Provider as RouteProvider;
+use packetcraftr_netio::{Error as LiveIoError, capture, interface, transmit};
 
+use crate::clock::Clock;
+use crate::execution::Admission;
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
-use crate::policy::{Operation, Policy, WireBudget};
-use crate::{Client, Error, SentPacket, send};
+use crate::policy::{Operation, WireLimits};
+use crate::providers::Providers;
+use crate::route;
+use crate::{Client, Error, evidence::SentPacket, send};
 use materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
@@ -60,7 +63,7 @@ use materialize::{
 
 /// A route planned for one destination after the destination and the
 /// planning packet's declared endpoints were authorized. Only
-/// [`Admission::route`] creates one, so every packet admitted or rebuilt on it
+/// [`Admitting::route`] creates one, so every packet admitted or rebuilt on it
 /// leaves on a planned route. Each packet's own endpoints and bytes are still
 /// authorized when it is built.
 #[derive(Clone)]
@@ -146,11 +149,12 @@ impl PreparedPacket {
         check: impl FnOnce() -> Result<(), E>,
     ) -> Result<SentPacket, E>
     where
-        I: transmit::Sender + ?Sized,
+        I: transmit::Provider + ?Sized,
         E: From<LiveIoError>,
     {
         let report = {
-            let frame = transmit::Frame::try_new(&self.built.bytes, &self.route)?;
+            let frame =
+                transmit::Outbound::try_new(&self.built.bytes, self.route.transmit_route())?;
             check()?;
             io.send(frame)?
         };
@@ -233,7 +237,8 @@ impl Materializer<'_> {
     }
 }
 
-/// The operation's packet count and cumulative exact wire bytes.
+/// The operation's running wire budget: its declared packet count and the
+/// exact wire bytes charged so far, each authorized against policy limits.
 #[derive(Debug)]
 struct Budget {
     packets: u64,
@@ -242,8 +247,8 @@ struct Budget {
 
 impl Budget {
     /// Authorizes the count-only budget before any provider is consulted.
-    fn open(policy: &Policy, packets: u64) -> Result<Self, Error> {
-        policy.authorize(Operation::Budgeted(WireBudget::new(packets, 0)))?;
+    fn open(admission: &Admission<'_>, packets: u64) -> Result<Self, Error> {
+        admission.authorize(Operation::Wire(WireLimits::new(packets, 0)))?;
         Ok(Self {
             packets,
             wire_bytes: 0,
@@ -252,52 +257,44 @@ impl Budget {
 
     /// Adds one packet's exact wire bytes and authorizes the new total.
     /// Arithmetic overflow is itself a byte-limit denial.
-    fn charge(&mut self, policy: &Policy, wire_len: usize) -> Result<(), Error> {
+    fn charge(&mut self, admission: &Admission<'_>, wire_len: usize) -> Result<(), Error> {
         let wire_bytes = u64::try_from(wire_len)
             .ok()
             .and_then(|bytes| self.wire_bytes.checked_add(bytes))
             .ok_or(crate::policy::Error::ByteLimit {
                 actual: u64::MAX,
-                limit: policy.max_bytes_per_operation,
+                limit: admission.policy().max_bytes_per_operation,
             })?;
-        policy.authorize(Operation::Budgeted(WireBudget::new(
-            self.packets,
-            wire_bytes,
-        )))?;
+        admission.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
         self.wire_bytes = wire_bytes;
         Ok(())
     }
 }
 
-/// State shared by both orders: the client, one builder, the per-packet send
-/// options, and the operation's stop conditions.
-struct Stages<'c, R, N, I> {
-    client: &'c Client<R, N, I>,
+/// State shared by both orders: the client and its admission, one builder,
+/// the per-packet send options, and the operation's deadline.
+struct Stages<'c, P, K> {
+    client: &'c Client<P, K>,
+    admission: Admission<'c>,
     builder: Builder,
     options: &'c send::Options,
-    deadline: Option<Instant>,
-    /// A signal checked in addition to the client's own.
-    cancellation: Option<Cancellation>,
+    /// The operation's deadline, when it has one. It carries the client's
+    /// cancellation.
+    deadline: Option<&'c Deadline>,
 }
 
-impl<'c, R, N, I> Stages<'c, R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
+impl<'c, P: Providers, K: Clock> Stages<'c, P, K> {
     fn new(
-        client: &'c Client<R, N, I>,
+        client: &'c Client<P, K>,
         options: &'c send::Options,
-        deadline: Option<Instant>,
-        cancellation: Option<Cancellation>,
+        deadline: Option<&'c Deadline>,
     ) -> Self {
         Self {
             client,
+            admission: client.admission(),
             builder: Builder::new(client.registry.clone()),
             options,
             deadline,
-            cancellation,
         }
     }
 
@@ -308,11 +305,17 @@ where
         }
     }
 
+    /// Runs `lookup` under the operation deadline, or with none, under a
+    /// fresh client deadline of `limit`.
+    fn within<T>(&self, limit: std::time::Duration, lookup: impl FnOnce(&Deadline) -> T) -> T {
+        match self.deadline {
+            Some(deadline) => lookup(deadline),
+            None => lookup(&self.client.deadline(limit)),
+        }
+    }
+
     fn check(&self) -> Result<(), Error> {
         self.client.check_cancelled()?;
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
         if let Some(deadline) = self.deadline {
             ensure_preparation_deadline(deadline)?;
         }
@@ -320,31 +323,37 @@ where
     }
 
     /// Stage 2: plans `packet` toward `destination` through `routes`,
-    /// authorizing the destination and the packet's endpoints.
-    fn plan<P: route::Provider>(
+    /// authorizing the destination and the packet's endpoints before the
+    /// interface selector is resolved or a route is looked up. A lookup
+    /// without an operation deadline gets
+    /// [`PASSIVE_LOOKUP_TIMEOUT`](crate::deadline::PASSIVE_LOOKUP_TIMEOUT).
+    fn plan<R: RouteProvider>(
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
-        routes: &P,
+        routes: &R,
     ) -> Result<route::Plan, Error> {
         self.check()?;
-        let plan = self.client.plan_with_provider(
-            packet,
-            destination,
-            &self.options.plan,
-            routes,
-            self.deadline,
-        )?;
+        let plan = self.within(crate::deadline::PASSIVE_LOOKUP_TIMEOUT, |deadline| {
+            self.client.authorize_and_plan(
+                packet,
+                destination,
+                &self.options.plan,
+                routes,
+                deadline,
+                || self.check(),
+            )
+        })?;
         self.check()?;
         Ok(plan)
     }
 
     /// Stages 2–4 for one packet, planning its route through `routes`.
-    fn admit<P: route::Provider>(
+    fn admit<R: RouteProvider>(
         &self,
         budget: &mut Budget,
         packet: Packet,
-        routes: &P,
+        routes: &R,
     ) -> Result<Admitted, Error> {
         let plan = self.plan(&packet, self.options.destination, routes)?;
         self.charge(budget, self.build_and_authorize(packet, plan)?)
@@ -352,8 +361,18 @@ where
 
     /// Stage 4: charges an admitted packet's exact wire bytes.
     fn charge(&self, budget: &mut Budget, admitted: Admitted) -> Result<Admitted, Error> {
-        budget.charge(&self.client.policy, admitted.wire_len())?;
+        budget.charge(&self.admission, admitted.wire_len())?;
         Ok(admitted)
+    }
+
+    /// Authorizes a build's declared destinations and permissive-live
+    /// approvals, then the exact bytes that would reach the wire on `plan`,
+    /// decoded with the trusted registry.
+    fn authorize_built(&self, built: &BuiltPacket, plan: &route::Plan) -> Result<(), Error> {
+        let policy = &self.client.policy;
+        policy.authorize_built_packet(built, self.options.allow_permissive_live)?;
+        crate::policy::authorize_wire(policy, plan.wire_link_type()?, &built.bytes, Some(plan))?;
+        Ok(())
     }
 
     /// Stage 3: materializes route-dependent network fields and authorizes
@@ -363,14 +382,12 @@ where
         mut packet: Packet,
         plan: route::Plan,
     ) -> Result<Admitted, Error> {
-        let policy = &self.client.policy;
         let (build_context, preliminary_build) =
             self.materializer()
                 .preliminary(&mut packet, &plan, || self.check())?;
         self.check()?;
         validate_mtu(&preliminary_build, plan.decision.mtu)?;
-        policy.authorize_built_packet(&preliminary_build, self.options.allow_permissive_live)?;
-        policy.authorize_built_wire(&preliminary_build, &plan)?;
+        self.authorize_built(&preliminary_build, &plan)?;
         Ok(Admitted {
             packet,
             plan,
@@ -389,11 +406,19 @@ where
             build_context,
             preliminary_build,
         } = admitted;
-        let policy = &self.client.policy;
         self.check()?;
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
-        let route = match route::materialize(plan, &self.client.neighbors, self.deadline) {
+        // Without an operation deadline, the longest wait a provider accepts
+        // leaves the resolver's own options as the bound.
+        let providers = &self.client.providers;
+        let neighbors = self
+            .client
+            .neighbors
+            .over(providers.transmit(), providers.capture());
+        let route = match self.within(capture::MAX_TIMEOUT, |deadline| {
+            route::materialize(plan, &neighbors, deadline)
+        }) {
             Ok(route) => route,
             Err(error) => {
                 self.check()?;
@@ -406,25 +431,19 @@ where
                     self.check()
                 })?;
         self.check()?;
-        policy.authorize_built_packet(&built, self.options.allow_permissive_live)?;
-        policy.authorize_built_wire(&built, &route.plan)?;
+        self.authorize_built(&built, &route.plan)?;
         Ok(PreparedPacket { built, route })
     }
 }
 
 /// All-before-discovery order, admission phase: packets are planned,
 /// preliminarily authorized, and charged, and none is materialized.
-pub(crate) struct Admission<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Admitting<'c, P, K> {
+    stages: Stages<'c, P, K>,
     budget: Budget,
 }
 
-impl<'c, R, N, I> Admission<'c, R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
+impl<'c, P: Providers, K: Clock> Admitting<'c, P, K> {
     /// Checks cancellation and the operation deadline between packets.
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
@@ -432,10 +451,10 @@ where
 
     /// Plans `packet` through `routes`, checks its preliminary build, and
     /// charges its exact wire bytes to the cumulative budget.
-    pub(crate) fn admit<P: route::Provider>(
+    pub(crate) fn admit<R: RouteProvider>(
         &mut self,
         packet: Packet,
-        routes: &P,
+        routes: &R,
     ) -> Result<Admitted, Error> {
         self.stages.admit(&mut self.budget, packet, routes)
     }
@@ -448,9 +467,11 @@ where
         packet: &Packet,
         destination: IpAddr,
     ) -> Result<AuthorizedRoute, Error> {
-        let plan = self
-            .stages
-            .plan(packet, Some(destination), &self.stages.client.routes)?;
+        let plan = self.stages.plan(
+            packet,
+            Some(destination),
+            self.stages.client.providers.route(),
+        )?;
         Ok(AuthorizedRoute { plan })
     }
 
@@ -475,7 +496,7 @@ where
 
     /// Ends admission. Discovery traffic can be emitted only from here on,
     /// and no further packet can be admitted into this operation.
-    pub(crate) fn discover(self) -> Discovery<'c, R, N, I> {
+    pub(crate) fn discover(self) -> Discovery<'c, P, K> {
         Discovery {
             stages: self.stages,
         }
@@ -484,16 +505,11 @@ where
 
 /// All-before-discovery order, discovery phase: admitted packets are
 /// materialized and finally authorized.
-pub(crate) struct Discovery<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Discovery<'c, P, K> {
+    stages: Stages<'c, P, K>,
 }
 
-impl<R, N, I> Discovery<'_, R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
+impl<P: Providers, K: Clock> Discovery<'_, P, K> {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         self.stages.materialize(admitted)
     }
@@ -540,18 +556,13 @@ impl From<Error> for RebuildError {
 /// Streaming order: each packet is admitted, materialized, and finally
 /// authorized by [`prepare`](Self::prepare), then sent by
 /// [`transmit`](Self::transmit), before the next packet is planned.
-pub(crate) struct Streaming<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Streaming<'c, P, K> {
+    stages: Stages<'c, P, K>,
     budget: Budget,
 }
 
-impl<R, N, I> Streaming<'_, R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
-    /// Checks the client's and the operation's cancellation signals.
+impl<P: Providers, K: Clock> Streaming<'_, P, K> {
+    /// Checks the client's cancellation signal.
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
     }
@@ -560,46 +571,44 @@ where
     /// neighbor discovery runs only after its own preliminary checks and
     /// budget charge pass.
     pub(crate) fn prepare(&mut self, packet: Packet) -> Result<PreparedPacket, Error> {
-        let admitted = self
-            .stages
-            .admit(&mut self.budget, packet, &self.stages.client.routes)?;
+        let admitted = self.stages.admit(
+            &mut self.budget,
+            packet,
+            self.stages.client.providers.route(),
+        )?;
         self.stages.materialize(admitted)
     }
 
-    /// Transmits a finally authorized packet through the client's sender.
+    /// Transmits a finally authorized packet through the client's transmit
+    /// provider.
     pub(crate) fn transmit(&self, packet: PreparedPacket) -> Result<SentPacket, Error> {
-        packet.transmit(&self.stages.client.io, || self.stages.check())
+        packet.transmit(self.stages.client.providers.transmit(), || {
+            self.stages.check()
+        })
     }
 }
 
-impl<R, N, I> Client<R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
-    /// Starts an all-before-discovery preparation of `packets` packets,
-    /// authorizing the count-only budget first.
-    pub(crate) fn admission<'c>(
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Starts an all-before-discovery preparation of `packets` packets under
+    /// `deadline`, authorizing the count-only budget first.
+    pub(crate) fn admitting<'c>(
         &'c self,
         options: &'c send::Options,
         packets: u64,
-        deadline: Instant,
-    ) -> Result<Admission<'c, R, N, I>, Error> {
-        let (stages, budget) = self.open_stages(options, packets, Some(deadline), None)?;
-        Ok(Admission { stages, budget })
+        deadline: &'c Deadline,
+    ) -> Result<Admitting<'c, P, K>, Error> {
+        let (stages, budget) = self.open_stages(options, packets, Some(deadline))?;
+        Ok(Admitting { stages, budget })
     }
 
     /// Starts a streaming preparation of `packets` packets, authorizing the
-    /// count-only budget first. `cancellation` is checked alongside the
-    /// client's own signal.
+    /// count-only budget first.
     pub(crate) fn streaming<'c>(
         &'c self,
         options: &'c send::Options,
         packets: u64,
-        cancellation: Option<Cancellation>,
-    ) -> Result<Streaming<'c, R, N, I>, Error> {
-        let (stages, budget) = self.open_stages(options, packets, None, cancellation)?;
+    ) -> Result<Streaming<'c, P, K>, Error> {
+        let (stages, budget) = self.open_stages(options, packets, None)?;
         Ok(Streaming { stages, budget })
     }
 
@@ -607,79 +616,31 @@ where
         &'c self,
         options: &'c send::Options,
         packets: u64,
-        deadline: Option<Instant>,
-        cancellation: Option<Cancellation>,
-    ) -> Result<(Stages<'c, R, N, I>, Budget), Error> {
-        let stages = Stages::new(self, options, deadline, cancellation);
+        deadline: Option<&'c Deadline>,
+    ) -> Result<(Stages<'c, P, K>, Budget), Error> {
+        let stages = Stages::new(self, options, deadline);
         stages.check()?;
-        let budget = Budget::open(&self.policy, packets)?;
+        let budget = Budget::open(&stages.admission, packets)?;
         Ok((stages, budget))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
     use std::net::Ipv4Addr;
     use std::time::Duration;
 
     use bytes::Bytes;
-    use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::Raw;
-    use packetcraftr_core::protocol::builtin;
     use packetcraftr_core::protocol::network::Ipv4;
     use packetcraftr_core::protocol::transport::Udp;
-    use packetcraftr_netio::link::{Capability, Mode};
+    use packetcraftr_netio::link::Mode;
 
     use super::*;
+    use crate::policy::Policy;
+    use crate::test_support::{Call, fake_client};
 
     const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
-
-    /// Puts every destination on-link over one Layer 3 interface.
-    struct Layer3Routes;
-
-    impl route::Provider for Layer3Routes {
-        type Error = Infallible;
-
-        fn lookup_with_preferences(
-            &self,
-            _destination: IpAddr,
-            _interface_hint: Option<&interface::Id>,
-            _preferred_source: Option<IpAddr>,
-        ) -> Result<route::Decision, Self::Error> {
-            Ok(route::Decision {
-                interface: interface::Id {
-                    index: 1,
-                    name: "fixture0".to_owned(),
-                },
-                source_mac: None,
-                selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: route::SelectionReason::OnLink,
-                destination_scope: route::Scope::Link,
-                mtu: 1_500,
-                capability: Capability::Layer3,
-                link_type: LinkType::RAW,
-            })
-        }
-    }
-
-    struct NoNeighbors;
-
-    impl neighbor::Resolver for NoNeighbors {
-        fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
-            panic!("a Layer 3 route needs no neighbor discovery")
-        }
-    }
-
-    struct NoTransmit;
-
-    impl transmit::Sender for NoTransmit {
-        fn send(&self, _: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
-            panic!("preparation never transmits on its own")
-        }
-    }
 
     fn datagram(payload: &'static [u8]) -> Packet {
         let mut packet = Packet::new();
@@ -699,19 +660,13 @@ mod tests {
 
     #[test]
     fn a_rebuild_must_match_the_wire_bytes_its_admission_charged() {
-        let client = Client::new(
-            builtin::registry(),
-            Layer3Routes,
-            NoNeighbors,
-            NoTransmit,
-            Policy::default(),
-        );
+        let (client, providers) = fake_client();
         let mut options = send::Options::default();
         options.plan.link_mode = Mode::Layer3;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = client.deadline(Duration::from_secs(5));
         let admitted_packet = datagram(b"four");
         let mut admission = client
-            .admission(&options, 2, deadline)
+            .admitting(&options, 2, &deadline)
             .expect("two packets fit the default budget");
         let route = admission
             .route(&admitted_packet, IpAddr::V4(DESTINATION))
@@ -742,16 +697,25 @@ mod tests {
             ),
             "{error:?}"
         );
+        assert!(
+            !providers
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Call::Transmit(_))),
+            "preparation never transmits on its own"
+        );
     }
 
     #[test]
     fn cumulative_byte_overflow_is_a_byte_limit_denial() {
         let policy = Policy::default();
-        let mut budget = Budget::open(&policy, 1).expect("one packet fits");
+        let providers = crate::test_support::FakeProviders::default();
+        let admission = Admission::new(&policy, &providers);
+        let mut budget = Budget::open(&admission, 1).expect("one packet fits");
         budget.wire_bytes = u64::MAX - 1;
 
         let error = budget
-            .charge(&policy, 2)
+            .charge(&admission, 2)
             .expect_err("overflowing the cumulative total must be denied");
 
         assert!(

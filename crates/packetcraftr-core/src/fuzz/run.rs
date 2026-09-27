@@ -7,7 +7,7 @@ use crate::budget::Deadline;
 use crate::{packet::Packet, registry::Registry};
 
 use super::error::Error;
-use super::prepare::prepare_with_events;
+use super::prepare::{PreparedCases, prepare_with_events};
 use super::report::{Case, Report, Stats, Summary};
 use super::request::Request;
 
@@ -17,7 +17,8 @@ use super::request::Request;
 /// these exact cases; preparation never performs networking or capture I/O.
 #[derive(Clone, Debug)]
 pub struct Campaign {
-    pub(super) cases: Vec<Case>,
+    cases: Vec<Case>,
+    stats: Stats,
 }
 
 impl Campaign {
@@ -29,11 +30,19 @@ impl Campaign {
     ) -> Result<Self, Error> {
         request.validate()?;
         let mut cases = Vec::with_capacity(request.cases);
-        prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
+        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
             cases.push(case);
             Ok(())
         })?;
-        Ok(Self { cases })
+        Ok(Self {
+            cases,
+            stats: campaign_stats(request, &prepared),
+        })
+    }
+
+    /// What preparation generated and built, and how long it took.
+    pub fn stats(&self) -> &Stats {
+        &self.stats
     }
 
     pub fn into_cases(self) -> Vec<Case> {
@@ -71,11 +80,15 @@ where
         seed: request.seed,
         first_case: request.first_case,
         diagnostics: Vec::new(),
-        stats: Stats {
-            cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
-            cases_built: prepared.built_case_count,
-            bytes: prepared.built_byte_count,
-            elapsed: prepared.elapsed,
-        },
+        stats: campaign_stats(request, &prepared),
     })
+}
+
+fn campaign_stats(request: &Request, prepared: &PreparedCases) -> Stats {
+    Stats {
+        cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
+        cases_built: prepared.built_case_count,
+        bytes: prepared.built_byte_count,
+        elapsed: prepared.elapsed,
+    }
 }

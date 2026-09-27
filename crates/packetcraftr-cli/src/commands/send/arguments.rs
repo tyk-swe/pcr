@@ -29,7 +29,7 @@ mod tests {
     use clap::Parser as _;
 
     use crate::cli::Cli;
-    use crate::commands::Command;
+    use crate::commands::CommandLine;
 
     #[test]
     fn send_parses_axes_repetition_and_rate() {
@@ -46,7 +46,7 @@ mod tests {
             "10",
         ])
         .expect("send set options parse");
-        let Command::Send(send) = cli.command else {
+        let CommandLine::Send(send) = cli.command else {
             panic!("send command")
         };
         assert_eq!(send.repeat, 4);

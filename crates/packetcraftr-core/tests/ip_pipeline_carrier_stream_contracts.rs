@@ -16,9 +16,10 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::ipv6::{DestinationOptions, Fragment as Ipv6Fragment};
 use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, Fragment as Ipv6Fragment, Ipv4, Ipv6,
+};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
 use std::net::Ipv4Addr;

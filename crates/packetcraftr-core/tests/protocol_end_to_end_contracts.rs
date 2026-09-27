@@ -18,18 +18,15 @@ use packetcraftr_core::diagnostic::{
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
-use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::application::dns::{self, Dns};
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
-use packetcraftr_core::protocol::gre::Gre;
-use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
-use packetcraftr_core::protocol::ipv6::{
-    DestinationOptions, Fragment, HopByHop, SegmentRoutingHeader,
-};
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
-use packetcraftr_core::protocol::network::{Igmp, Ipv4};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, SegmentRoutingHeader,
+};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, TcpOption, Udp};
 use packetcraftr_core::protocol::tunnel::{
-    Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
+    Ah, Erspan, Esp, Geneve, Gre, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{build, codec, decode, field::WireValue, packet::Packet};
@@ -119,8 +116,7 @@ fn ipv4_source_route_decode_accepts_known_transport_checksums() {
     ];
 
     for (transport, checksum_code, vector) in vectors {
-        let bytes =
-            packetcraftr_core::protocol::raw::parse_hex(vector).expect("known vector is valid hex");
+        let bytes = packetcraftr_core::layer::parse_hex(vector).expect("known vector is valid hex");
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes)
             .expect("known DLT_RAW vector is a valid frame");
         let decoded = decode::Dissector::new(registry())
@@ -658,7 +654,7 @@ fn coverage_paddings_build_only_in_innermost_first_order() {
     let paddings = decoded
         .packet
         .iter()
-        .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
+        .filter_map(|layer| layer.downcast_ref::<Padding>())
         .map(|padding| (padding.outside_layer, padding.bytes.len()))
         .collect::<Vec<_>>();
     assert_eq!(paddings, [(Some(2), 3), (Some(1), 2)]);
@@ -777,11 +773,12 @@ fn pppoe_stage_is_checked_against_every_ethertype_parent() {
         let error = build::Builder::new(rooted_registry(root))
             .build(packet, codec::Context::default(), build::Options::default())
             .expect_err("a discovery code under the session EtherType is refused");
+        let causes = packetcraftr_core::error::source_chain(&error);
         assert!(
-            error
-                .to_string()
-                .contains("requires the enclosing EtherType 0x8863"),
-            "{parent}: {error}"
+            causes
+                .iter()
+                .any(|cause| cause.contains("requires the enclosing EtherType 0x8863")),
+            "{parent}: {error}: {causes:?}"
         );
     }
 }
@@ -902,7 +899,7 @@ fn overlay_and_security_tunnel_stacks_round_trip() {
         decoded
             .packet
             .iter()
-            .filter(|layer| layer.as_any().is::<Mpls>())
+            .filter(|layer| layer.is::<Mpls>())
             .count(),
         2
     );
@@ -982,10 +979,9 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
 
     assert!(matches!(
         Dns::try_from(vec![0; 11]),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 12,
-            available: 11,
-            ..
+        Err(dns::Error::MessageTooShort {
+            actual: 11,
+            minimum: 12,
         })
     ));
     let mut truncated_name = vec![0; 12];
@@ -993,39 +989,33 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_name.extend_from_slice(&[3, b'w', b'w']);
     assert!(matches!(
         Dns::try_from(truncated_name),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 16,
-            available: 15,
-            ..
-        })
+        Err(dns::Error::TruncatedLabel { end: 16, .. })
     ));
     let mut truncated_question_type = vec![0; 12];
     truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
     truncated_question_type.extend_from_slice(&[0, 0]);
     assert!(matches!(
         Dns::try_from(truncated_question_type),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 15,
-            available: 14,
-            ..
-        })
+        Err(dns::Error::TruncatedField { needed: 15, .. })
     ));
     let mut truncated_rdata = vec![0; 12];
     truncated_rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
     truncated_rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
     assert!(matches!(
         Dns::try_from(truncated_rdata),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 27,
-            available: 25,
-            ..
-        })
+        Err(dns::Error::TruncatedField { needed: 27, .. })
     ));
     let mut too_many = vec![0; 12];
     too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
     let record_cap = Dns::try_from(too_many).expect_err("record count above the cap");
     assert!(
-        matches!(record_cap, packetcraftr_core::codec::Error::Invalid { .. }),
+        matches!(
+            record_cap,
+            dns::Error::QuestionLimit {
+                actual: 65,
+                limit: 64
+            }
+        ),
         "{record_cap:?}"
     );
     let mut pointer_loop = vec![0; 18];
@@ -1034,7 +1024,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     pointer_loop[13] = 12;
     let looped = Dns::try_from(pointer_loop).expect_err("self-referential name pointer");
     assert!(
-        matches!(looped, packetcraftr_core::codec::Error::Invalid { .. }),
+        matches!(looped, dns::Error::SelfPointer { .. }),
         "{looped:?}"
     );
 
@@ -1112,7 +1102,7 @@ fn assert_ipv4_strict_and_permissive_modes(builder: &build::Builder) {
             },
         )
         .expect("permissive build preserves reserved bit with warning");
-    assert!(permissive.requires_live_opt_in);
+    assert_eq!(permissive.mode, codec::Mode::Permissive);
     assert!(
         permissive
             .diagnostics
@@ -1438,10 +1428,12 @@ fn pseudo_header_failures_name_the_calling_protocol() {
             .build(packet, codec::Context::default(), build::Options::default())
             .err()
             .unwrap_or_else(|| panic!("{protocol} without an IP envelope must not build"));
-        let message = error.to_string();
+        let causes = packetcraftr_core::error::source_chain(&error);
         assert!(
-            message.contains(&format!("invalid {protocol} layer")),
-            "{protocol}: {message}"
+            causes
+                .iter()
+                .any(|cause| cause.contains(&format!("invalid {protocol} layer"))),
+            "{protocol}: {error}: {causes:?}"
         );
     }
 }
@@ -1485,7 +1477,7 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
             .iter()
             .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
     );
-    let path = packetcraftr_core::packet::semantics::outer_ip_path(&decoded.packet)
+    let path = packetcraftr_core::protocol::semantics::outer_ip_path(&decoded.packet)
         .unwrap()
         .unwrap();
     assert_eq!(

@@ -5,7 +5,7 @@
 
 use std::time::SystemTime;
 
-use packetcraftr_core::analysis::pcap::{PcapOptions, Writer};
+use packetcraftr_core::capture_file::{PcapOptions, Writer};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 pub(crate) fn frame_at(timestamp: SystemTime, link_type: LinkType, bytes: &[u8]) -> Frame {

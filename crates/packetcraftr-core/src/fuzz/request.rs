@@ -5,13 +5,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use crate::error::{Classification, Classified, Kind};
 
 use crate::layout::DEFAULT_MAX_PACKET_SIZE;
 
-use super::error::Error;
+use super::error::{Constraint, Error};
 use super::{
     DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_LIST_ITEMS,
     DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES, MAX_DURATION, MAX_FIELD_BYTES,
@@ -54,50 +51,27 @@ impl fmt::Display for Target {
 }
 
 impl FromStr for Target {
-    type Err = TargetParseError;
+    type Err = Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (layer, field) =
-            value
-                .split_once('.')
-                .ok_or_else(|| TargetParseError::MissingSeparator {
-                    target: value.to_owned(),
-                })?;
-        let layer = layer
-            .parse::<usize>()
-            .map_err(|_| TargetParseError::InvalidLayer {
+        let (layer, field) = value
+            .split_once('.')
+            .ok_or_else(|| Error::TargetSeparator {
                 target: value.to_owned(),
             })?;
-        if field.parse::<crate::field::Path>().is_err() {
-            return Err(TargetParseError::InvalidField {
+        let layer = layer.parse::<usize>().map_err(|_| Error::TargetLayer {
+            target: value.to_owned(),
+        })?;
+        field
+            .parse::<crate::field::Path>()
+            .map_err(|source| Error::TargetField {
                 target: value.to_owned(),
-            });
-        }
+                source,
+            })?;
         Ok(Self {
             layer,
             field: field.to_owned(),
         })
-    }
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TargetParseError {
-    #[error("invalid fuzz target {target:?}; expected LAYER.FIELD")]
-    MissingSeparator { target: String },
-    #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
-    InvalidLayer { target: String },
-    #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
-    InvalidField { target: String },
-}
-
-impl Classified for TargetParseError {
-    fn classification(&self) -> Classification {
-        Classification::new(
-            "cli.fuzz_limit",
-            Kind::Cli,
-            Some("use LAYER.FIELD targets naming a layer index and a reflective field path"),
-        )
     }
 }
 
@@ -140,7 +114,9 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
+                    reason: Constraint::Within {
+                        maximum: u64::try_from(maximum).unwrap_or(u64::MAX),
+                    },
                 });
             }
         }
@@ -148,7 +124,7 @@ impl Limits {
             return Err(Error::InvalidLimit {
                 field: "max_packet_bytes",
                 value: u64::try_from(self.max_packet_bytes).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_total_bytes".to_owned(),
+                reason: Constraint::AtMostMaxTotalBytes,
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_DURATION {
@@ -199,7 +175,9 @@ impl Request {
             return Err(Error::InvalidLimit {
                 field: "cases",
                 value: self.cases as u64,
-                reason: format!("must be within 1..={}", self.limits.max_cases),
+                reason: Constraint::Within {
+                    maximum: self.limits.max_cases as u64,
+                },
             });
         }
         if self.strategies.is_empty() {
@@ -209,7 +187,7 @@ impl Request {
             return Err(Error::InvalidLimit {
                 field: "strategies",
                 value: self.strategies.len() as u64,
-                reason: format!("at most {MAX_STRATEGIES} strategies may be selected"),
+                reason: Constraint::AtMostMaxStrategies,
             });
         }
         if self.strategies.iter().enumerate().any(|(index, strategy)| {
@@ -224,13 +202,15 @@ impl Request {
         self.first_case
             .checked_add(final_case_offset)
             .ok_or(Error::CaseIndexOverflow)?;
-        if self.build.max_packet_size == 0
-            || self.build.max_packet_size > self.limits.max_packet_bytes
+        if self.build.limits.max_packet_size == 0
+            || self.build.limits.max_packet_size > self.limits.max_packet_bytes
         {
             return Err(Error::InvalidLimit {
                 field: "build.max_packet_size",
-                value: self.build.max_packet_size as u64,
-                reason: format!("must be within 1..={}", self.limits.max_packet_bytes),
+                value: self.build.limits.max_packet_size as u64,
+                reason: Constraint::Within {
+                    maximum: self.limits.max_packet_bytes as u64,
+                },
             });
         }
         Ok(())

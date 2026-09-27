@@ -1,0 +1,47 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Policy-gated traceroute to authorized destinations, with finite hop, attempt,
+//! timeout, and evidence limits.
+//!
+//! [`Client::traceroute`](crate::Client::traceroute) runs a [`Request`] one
+//! hop at a time and publishes each [`Event`] to a sink; [`Collector`]
+//! rebuilds the [`Aggregate`].
+
+use crate::probe::Workflow;
+
+pub const DEFAULT_FIRST_HOP: u8 = 1;
+pub const DEFAULT_MAX_HOPS: u8 = 30;
+pub const DEFAULT_PROBES_PER_HOP: u32 = 3;
+pub const DEFAULT_UDP_PORT: u16 = 33_434;
+pub const DEFAULT_TCP_PORT: u16 = 80;
+pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
+pub const MAX_PROBES_PER_HOP: u32 = 32;
+pub const MAX_PROBES: usize = 100_000;
+pub const MAX_RATE: u32 = 1_000_000;
+
+// A generated probe is no larger than Ethernet + IPv6 + TCP without options.
+// The deliberately conservative value makes complete byte-policy approval
+// possible before any route, capture, neighbor, or send side effect.
+const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
+const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
+const WORKFLOW: Workflow = Workflow::Traceroute;
+
+mod engine;
+mod error;
+mod evidence;
+mod executor;
+mod plan;
+mod report;
+mod request;
+#[cfg(test)]
+mod tests;
+
+pub use error::Error;
+pub use evidence::{CorrelatedResponse, classify_response};
+pub use plan::Probe;
+pub use report::{
+    Aggregate, Collector, Event, Hop, ProbeEvidence, Report, ResponseKind, Termination,
+    UndecodedEvidence,
+};
+pub use request::{Limits, Request};

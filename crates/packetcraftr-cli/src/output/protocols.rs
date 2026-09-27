@@ -3,10 +3,86 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::field::FieldKind;
+use packetcraftr_core::field;
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::registry::{FilterFieldBinding, Registry};
+
+use super::contract::Error;
+
+/// The reflective kind of a protocol field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum FieldKind {
+    #[serde(rename = "bool")]
+    Bool,
+    #[serde(rename = "unsigned")]
+    Unsigned,
+    #[serde(rename = "signed")]
+    Signed,
+    #[serde(rename = "text")]
+    Text,
+    #[serde(rename = "bytes")]
+    Bytes,
+    #[serde(rename = "ipv4")]
+    Ipv4,
+    #[serde(rename = "ipv6")]
+    Ipv6,
+    #[serde(rename = "mac")]
+    Mac,
+    #[serde(rename = "list")]
+    List,
+    #[serde(rename = "object")]
+    Object,
+}
+
+impl FieldKind {
+    /// The published name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::Unsigned => "unsigned",
+            Self::Signed => "signed",
+            Self::Text => "text",
+            Self::Bytes => "bytes",
+            Self::Ipv4 => "ipv4",
+            Self::Ipv6 => "ipv6",
+            Self::Mac => "mac",
+            Self::List => "list",
+            Self::Object => "object",
+        }
+    }
+}
+
+impl std::fmt::Display for FieldKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl TryFrom<field::FieldKind> for FieldKind {
+    type Error = Error;
+
+    fn try_from(value: field::FieldKind) -> Result<Self, Error> {
+        Ok(match value {
+            field::FieldKind::Bool => Self::Bool,
+            field::FieldKind::Unsigned => Self::Unsigned,
+            field::FieldKind::Signed => Self::Signed,
+            field::FieldKind::Text => Self::Text,
+            field::FieldKind::Bytes => Self::Bytes,
+            field::FieldKind::Ipv4 => Self::Ipv4,
+            field::FieldKind::Ipv6 => Self::Ipv6,
+            field::FieldKind::Mac => Self::Mac,
+            field::FieldKind::List => Self::List,
+            field::FieldKind::Object => Self::Object,
+            _ => {
+                return Err(Error::Unpublished {
+                    value: "protocol field kind",
+                });
+            }
+        })
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Summary {
@@ -51,8 +127,10 @@ pub struct Field {
     pub children_reference: Option<String>,
 }
 
-impl From<&FieldSchema> for Field {
-    fn from(value: &FieldSchema) -> Self {
+impl TryFrom<&FieldSchema> for Field {
+    type Error = Error;
+
+    fn try_from(value: &FieldSchema) -> Result<Self, Error> {
         Self::describe(value, "", &mut std::collections::HashMap::new())
     }
 }
@@ -61,7 +139,7 @@ impl Field {
         value: &FieldSchema,
         path: &str,
         seen: &mut std::collections::HashMap<(*const FieldSchema, usize), String>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let mut children_reference = None;
         let children = if value.children.is_empty() {
             Vec::new()
@@ -79,18 +157,18 @@ impl Field {
                     .map(|(index, child)| {
                         Self::describe(child, &format!("{path}/children/{index}"), seen)
                     })
-                    .collect()
+                    .collect::<Result<_, _>>()?
             }
         };
-        Self {
+        Ok(Self {
             name: value.name.to_owned(),
-            kind: value.kind,
+            kind: value.kind.try_into()?,
             required: value.required,
             derived: value.derived,
             description: value.description.to_owned(),
             children,
             children_reference,
-        }
+        })
     }
 }
 
@@ -201,14 +279,33 @@ pub struct Detail {
     pub filter_fields: Vec<FilterField>,
 }
 
-impl Detail {
-    pub fn new(
-        summary: Summary,
-        fields: Vec<Field>,
-        bindings: Vec<Binding>,
-        filter_fields: Vec<FilterField>,
-    ) -> Self {
-        Self {
+/// A built-in protocol described from the registry: its capabilities,
+/// reflective fields, the parents that reach it, and its filter spellings.
+impl TryFrom<(&Registry, BuiltinProtocol)> for Detail {
+    type Error = Error;
+
+    fn try_from((registry, protocol): (&Registry, BuiltinProtocol)) -> Result<Self, Error> {
+        let summary = Summary::from(protocol);
+        let fields = registry
+            .schema(protocol.as_str())
+            .map(|schema| {
+                schema
+                    .fields
+                    .iter()
+                    .map(Field::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let bindings = registry
+            .parent_bindings(protocol.as_str())
+            .into_iter()
+            .map(|(parent, discriminator)| Binding {
+                parent: parent.as_str().to_owned(),
+                discriminator: discriminator.0,
+            })
+            .collect();
+        Ok(Self {
             protocol: summary.protocol,
             aliases: summary.aliases,
             build: summary.build,
@@ -218,8 +315,8 @@ impl Detail {
             decode_only: summary.decode_only,
             fields,
             bindings,
-            filter_fields,
-        }
+            filter_fields: FilterField::for_protocol(registry, protocol.as_str()),
+        })
     }
 }
 
@@ -228,7 +325,21 @@ pub struct ListResult {
     pub protocols: Vec<Summary>,
 }
 
+impl From<&[BuiltinProtocol]> for ListResult {
+    fn from(protocols: &[BuiltinProtocol]) -> Self {
+        Self {
+            protocols: protocols.iter().copied().map(Summary::from).collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DetailResult {
     pub protocol: Detail,
+}
+
+impl From<Detail> for DetailResult {
+    fn from(protocol: Detail) -> Self {
+        Self { protocol }
+    }
 }

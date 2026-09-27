@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::{contract::ToolFormat, stream::StreamRecord};
 use crate::{
     errors::CliError,
     rendering::{StreamEncoder, bounded_json_len},
 };
-use packetcraftr_cli::output::{contract::ToolFormat, stream::StreamRecord};
 use packetcraftr_core::error::Kind;
 
 pub(super) struct EventOutput<'a> {
@@ -58,7 +58,7 @@ mod tests {
     use serde::Serialize;
     use serde::ser::{Error as _, SerializeSeq};
 
-    use packetcraftr_cli::output::contract::Command;
+    use crate::output::contract::Command;
 
     use crate::test_support::{SharedBuffer, TestRecord, assert_contiguous};
 

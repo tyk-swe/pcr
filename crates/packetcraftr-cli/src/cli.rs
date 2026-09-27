@@ -4,10 +4,11 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
+use crate::output;
+use crate::output::envelope::ErrorKind;
 use clap::{Parser, ValueEnum};
-use packetcraftr_cli::output::contract::Format;
 
-use crate::commands::Command;
+use crate::commands::CommandLine;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
 
 const ROOT_HELP_FORMATS: &str = r"Output formats:
@@ -43,7 +44,7 @@ fn root_after_help() -> String {
             help,
             "  {:<3} {}: {}",
             exit_code_for(kind),
-            kind.as_str(),
+            ErrorKind::from(kind).as_str(),
             exit_code_description(kind)
         );
     }
@@ -129,7 +130,38 @@ pub(crate) struct Cli {
     )]
     pub(crate) color: ColorChoice,
     #[command(subcommand)]
-    pub(crate) command: Command,
+    pub(crate) command: CommandLine,
+}
+
+/// The `--output` selector for [`output::contract::Format`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum Format {
+    Text,
+    Json,
+    Ndjson,
+    Csv,
+    Tsv,
+    Hex,
+    Raw,
+    Pcap,
+    #[value(name = "pcapng")]
+    PcapNg,
+}
+
+impl From<Format> for output::contract::Format {
+    fn from(value: Format) -> Self {
+        match value {
+            Format::Text => Self::Text,
+            Format::Json => Self::Json,
+            Format::Ndjson => Self::Ndjson,
+            Format::Csv => Self::Csv,
+            Format::Tsv => Self::Tsv,
+            Format::Hex => Self::Hex,
+            Format::Raw => Self::Raw,
+            Format::Pcap => Self::Pcap,
+            Format::PcapNg => Self::PcapNg,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

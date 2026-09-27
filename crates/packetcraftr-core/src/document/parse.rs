@@ -70,7 +70,7 @@ impl Packet {
                 match de::IgnoredAny::deserialize(&mut deserializer) {
                     Ok(_) => Err(Error::Parse {
                         format: "YAML",
-                        source: Box::new(super::error::Refused(
+                        source: crate::error::Source::new(super::error::Refused(
                             "multiple YAML documents are not supported".to_owned(),
                         )),
                     }),
@@ -163,7 +163,7 @@ fn map_parse_error(
         Some(limit) => Error::exceeded(limit, limits),
         None => Error::Parse {
             format,
-            source: Box::new(source),
+            source: crate::error::Source::new(source),
         },
     }
 }
@@ -222,9 +222,7 @@ mod tests {
         let two = format!("{ONE_DOCUMENT}---\n{ONE_DOCUMENT}");
         let error = Packet::parse_with_limits(&two, Format::Yaml, &DocumentLimits::DEFAULT)
             .expect_err("a second document is refused");
-        assert!(
-            error.to_string().contains("multiple YAML documents"),
-            "{error}"
-        );
+        let rendered = crate::error::render(&error);
+        assert!(rendered.contains("multiple YAML documents"), "{rendered}");
     }
 }

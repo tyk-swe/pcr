@@ -3,10 +3,11 @@
 
 use crate::{
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field::WireValue,
     layer::{Malformed, Padding, Raw},
     packet::Packet,
     protocol::BuiltinProtocol,
+    protocol::link::{Ethernet, Vlan, Vlan8021ad},
     registry::Registry,
 };
 
@@ -22,11 +23,19 @@ pub(super) fn validate_bindings(
     debug_assert_eq!(protocols.len(), packet.len());
     let mut previous_padding: Option<&Padding> = None;
     for (index, layer) in packet.iter().enumerate() {
-        let Some(padding) = layer.as_any().downcast_ref::<Padding>() else {
+        let Some(padding) = layer.downcast_ref::<Padding>() else {
             previous_padding = None;
             continue;
         };
-        validate_padding(packet, protocols, index, padding, mode, diagnostics)?;
+        validate_padding(
+            registry,
+            packet,
+            protocols,
+            index,
+            padding,
+            mode,
+            diagnostics,
+        )?;
         // Covered lengths trim trailing padding from the end, so a run must
         // list the innermost boundary first and link padding last, the order
         // dissection produces.
@@ -63,12 +72,12 @@ fn validate_adjacent_bindings(
                 discriminator
             }
         };
+        // Raw bytes carry no binding to their child, and padding or malformed
+        // bytes may follow any layer.
         if discriminator.is_some()
-            || BuiltinProtocol::from_id(*parent) == Some(BuiltinProtocol::Raw)
-            || matches!(
-                BuiltinProtocol::from_id(*child),
-                Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-            )
+            || *parent == Raw::ID
+            || *child == Padding::ID
+            || *child == Malformed::ID
         {
             continue;
         }
@@ -90,6 +99,7 @@ fn validate_adjacent_bindings(
 }
 
 fn validate_padding(
+    registry: &Registry,
     packet: &Packet,
     protocols: &[crate::layer::Id],
     index: usize,
@@ -98,7 +108,7 @@ fn validate_padding(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let Some(outside_layer) = padding.outside_layer else {
-        return validate_link_padding(protocols, index, mode, diagnostics);
+        return validate_link_padding(registry, protocols, index, mode, diagnostics);
     };
     let Some(outside) = packet
         .layer(outside_layer)
@@ -109,7 +119,7 @@ fn validate_padding(
             outside_layer,
         });
     };
-    if outside.as_any().is::<Padding>() || outside.as_any().is::<Malformed>() {
+    if outside.is::<Padding>() || outside.is::<Malformed>() {
         return Err(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
@@ -121,33 +131,44 @@ fn validate_padding(
             outside_layer,
         });
     };
-    let outside_builtin = BuiltinProtocol::from_id(*outside_protocol);
+    let outside_builtin = BuiltinProtocol::of(outside);
     let child_layer = outside_layer
         .checked_add(1)
         .ok_or(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
         })?;
-    let Some(declared_child) = protocols.get(child_layer) else {
+    let Some(child) = packet.layer(child_layer) else {
         return Err(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
         });
     };
-    let child_protocol = packet
-        .layer(child_layer)
-        .and_then(|child| child.as_any().downcast_ref::<Malformed>())
+    // A malformed child counts as the protocol it was meant to be.
+    let child_is = |protocol: BuiltinProtocol| match child
+        .downcast_ref::<Malformed>()
         .and_then(|child| child.intended_protocol.as_deref())
-        .unwrap_or(declared_child.as_str());
-    let link_declares_length = || match outside.field("ether_type") {
-        Some(FieldValue::Unsigned(value)) => value <= 1500,
-        Some(FieldValue::Bytes(value)) if value.len() == 2 => {
-            u16::from_be_bytes([value[0], value[1]]) <= 1500
+    {
+        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
+        None => protocol.identifies(child),
+    };
+    let link_declares_length = || {
+        let ether_type = outside
+            .downcast_ref::<Ethernet>()
+            .map(|link| &link.ether_type)
+            .or_else(|| outside.downcast_ref::<Vlan>().map(|link| &link.ether_type))
+            .or_else(|| {
+                outside
+                    .downcast_ref::<Vlan8021ad>()
+                    .map(|link| &link.ether_type)
+            });
+        match ether_type {
+            Some(WireValue::Exact(value)) => *value <= 1500,
+            Some(WireValue::Raw(value)) if value.len() == 2 => {
+                u16::from_be_bytes([value[0], value[1]]) <= 1500
+            }
+            _ => child_is(BuiltinProtocol::Padding) || child_is(BuiltinProtocol::Llc),
         }
-        _ => matches!(
-            BuiltinProtocol::from_name(child_protocol),
-            Some(BuiltinProtocol::Llc | BuiltinProtocol::Padding)
-        ),
     };
     let has_declared_boundary = match outside_builtin {
         Some(
@@ -190,23 +211,16 @@ fn validate_padding(
 }
 
 fn validate_link_padding(
+    registry: &Registry,
     protocols: &[crate::layer::Id],
     index: usize,
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
-    let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
-        matches!(
-            BuiltinProtocol::from_id(*protocol),
-            Some(
-                BuiltinProtocol::Ethernet
-                    | BuiltinProtocol::BsdNull
-                    | BuiltinProtocol::BsdLoop
-                    | BuiltinProtocol::LinuxSll
-                    | BuiltinProtocol::LinuxSll2
-            )
-        )
-    });
+    let enclosed_by_link = protocols
+        .iter()
+        .take(index)
+        .any(|protocol| registry.allows_trailing_padding(protocol.as_str()));
     if enclosed_by_link {
         return Ok(());
     }
@@ -237,7 +251,6 @@ fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
 
 pub(super) fn pass_through_byte_length(packet: &Packet) -> Result<usize, Error> {
     packet.iter().try_fold(0_usize, |total, layer| {
-        let layer = layer.as_any();
         let length = if let Some(layer) = layer.downcast_ref::<Raw>() {
             layer.bytes.len()
         } else if let Some(layer) = layer.downcast_ref::<Padding>() {

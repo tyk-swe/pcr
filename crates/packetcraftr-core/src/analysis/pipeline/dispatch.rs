@@ -11,15 +11,12 @@ use crate::protocol::transport::Tcp;
 use crate::analysis::Error;
 use crate::analysis::pipeline::Limits;
 use crate::analysis::pipeline::clock::CaptureClock;
+use crate::analysis::pipeline::limits::DIRECTIONS_PER_CONVERSATION;
 use crate::analysis::reassembly::tcp::{
     Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler,
-    ResourceError as TcpResourceError, ScopedFlowKey, Segment,
+    Resource as TcpResource, ScopedFlowKey, Segment,
 };
 use crate::analysis::serial::serial_range_contains;
-
-/// A conversation occupies one reassembly flow, and one half-open SYN slot,
-/// per direction.
-const DIRECTIONS_PER_CONVERSATION: usize = 2;
 
 /// Owns every piece of TCP reassembly state the loop advances.
 ///
@@ -33,15 +30,17 @@ pub(super) struct ReassemblyDispatch {
 }
 
 impl ReassemblyDispatch {
-    pub(super) fn new(enabled: bool, limits: &Limits) -> Self {
+    pub(super) fn new(enabled: bool, limits: &Limits) -> Result<Self, Error> {
         let tcp_reassembler = enabled
-            .then(|| TcpReassembler::new(limits.tcp_reassembly(DIRECTIONS_PER_CONVERSATION)));
-        Self {
+            .then(|| TcpReassembler::new(limits.tcp.clone()))
+            .transpose()?;
+        Ok(Self {
             tcp_reassembler,
             half_open_pure_syns: HashSet::new(),
+            // One half-open SYN slot per direction of each conversation.
             max_half_open_pure_syns: limits.max_flows.saturating_mul(DIRECTIONS_PER_CONVERSATION),
             clock: CaptureClock::new(),
-        }
+        })
     }
 
     pub(super) fn dispatch(
@@ -192,9 +191,9 @@ fn push_with_retry(
     match reassembler.push(segment.clone(), now) {
         Ok(produced) => events.extend(produced),
         Err(ReassemblyTcpError::Resource(
-            TcpResourceError::FlowByteLimit { .. }
-            | TcpResourceError::SegmentLimit { .. }
-            | TcpResourceError::AggregateByteLimit { .. },
+            TcpResource::FlowByteLimit { .. }
+            | TcpResource::SegmentLimit { .. }
+            | TcpResource::AggregateByteLimit { .. },
         )) => {
             events.extend(reassembler.evict_flow(&segment.flow));
             events.extend(

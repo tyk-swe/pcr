@@ -314,8 +314,8 @@ Depend on the crate that owns the capability you need:
 |---|---|
 | `packetcraftr-core` | `Packet`, protocol codecs/reflection, bounded documents, capture files, filters, and `analysis::run` |
 | `packetcraftr-netio` | Interface/route providers, capture/transmit resources, and platform backends |
-| `packetcraftr` | `Client` preparation/send/exchange, `policy`, and DNS/replay/scan/traceroute/fuzz workflows |
-| `packetcraftr-cli` | Arguments and rendering; its `output` module owns machine representations and the stream encoder |
+| `packetcraftr` | `Client` preparation/send/exchange, route planning, neighbor resolution, `policy`, and DNS/replay/scan/traceroute/fuzz workflows |
+| `packetcraftr-cli` | Arguments, composition, and rendering behind `packetcraftr_cli::main()`; its `output` module owns machine representations and the stream encoder |
 
 Core is portable and independent of native I/O. A workflow uses one policy
 implementation for operation admission and final-wire checks; resolver and
@@ -337,7 +337,7 @@ cargo run -p packetcraftr-core --example capture_analysis
 cargo run -p packetcraftr --example client_composition --no-default-features
 ```
 
-`client_composition` wires a `Client` over local route/neighbor/sender
+`client_composition` wires a `Client` over local route and recording-I/O
 providers under an explicit `Policy` (destination allowlist plus finite
 per-operation packet/byte budgets) and shows both an admitted send and an
 allowlist denial without emitting traffic.
@@ -404,11 +404,10 @@ selection, and one `--max-duration-ms` deadline. Each question reports
 attempts keep `--timeout-ms` and `--attempts`. `--transaction-id` stays
 single-question only; batches generate a fresh identifier per question.
 
-Library callers enable TCP by composing an exchange executor with
-`.with_dns_tcp(provider)`. The CLI explicitly selects
-`packetcraftr_netio::tcp::SystemProvider`; injected UDP executors default to
-unsupported TCP execution. The standard-library TCP provider is available
-independently of the native packet-I/O feature flags.
+Library callers run DNS with `client.dns(request, sink)`, whose TCP queries use
+the client's `tcp` provider. The CLI composes
+`packetcraftr_netio::tcp::SystemProvider`, which is available independently of
+the native packet-I/O feature flags.
 
 `--type` accepts `a`, `aaaa`, `caa`, `cname`, `mx`, `ns`, `ptr`, `soa`, `srv`,
 `txt`, and `any`, or any decimal code in `0..=65535`, optionally prefixed with

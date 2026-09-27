@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -9,9 +10,12 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::Stats;
+use crate::execution::Shared;
+use crate::probe::{ProbeStatus, Transport, index_or_push};
+use crate::{Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
-use crate::probe::{ProbeStatus, Transport};
+use super::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +59,11 @@ impl Classification {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Classification);
+impl std::fmt::Display for Classification {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
@@ -84,8 +92,11 @@ pub struct Endpoint {
     pub probes: Vec<ProbeEvidence>,
 }
 
+/// Every event one scan published, joined with its terminal [`Report`]:
+/// each probed endpoint with its winning classification and probes in
+/// sequence order.
 #[derive(Clone, Debug)]
-pub struct Report {
+pub struct Aggregate {
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
@@ -168,27 +179,32 @@ impl RttAccumulator {
 #[derive(Clone, Debug)]
 pub struct SentProbe {
     pub probe: super::Probe,
-    pub sent: Arc<crate::SentPacket>,
+    pub sent: Arc<crate::evidence::SentPacket>,
 }
 
+/// What a scan publishes while it runs. Each event is answered before later
+/// probes are sent.
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// The provider confirmed this probe's transmission.
     Sent(SentProbe),
+    /// A probe's final outcome.
     Probe {
         target: Arc<str>,
         probe: ProbeEvidence,
     },
+    /// A retained frame that could not be decoded.
     Undecoded {
         frame: Frame,
     },
     Diagnostic(Diagnostic),
 }
 
-/// Final scan metadata after every probe event was published. Diagnostics are
-/// not repeated here: each one already reached the caller as
-/// [`Event::Diagnostic`] when it was raised.
+/// The terminal result of one scan, returned after every probe event was
+/// published. Diagnostics are not repeated here: each one already reached the
+/// caller as [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
-pub struct Summary {
+pub struct Report {
     /// Conservative receive-window and pacing bound, validated before sending.
     pub planned_duration: Duration,
     pub target: String,
@@ -199,7 +215,7 @@ pub struct Summary {
 }
 
 /// How many probed endpoints settled on each final classification, mirroring
-/// traceroute's [`crate::traceroute::Completion`] rollup for streaming
+/// traceroute's [`crate::traceroute::Termination`] rollup for streaming
 /// consumers that never see the per-endpoint outcomes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClassificationCounts {
@@ -222,5 +238,102 @@ impl ClassificationCounts {
             Classification::Timeout => &mut self.timeout,
         };
         *counter = counter.saturating_add(1);
+    }
+}
+
+/// A sink that keeps every published probe outcome, undecoded frame, and
+/// diagnostic. Pass a clone to [`Client::scan`](crate::Client::scan) and
+/// [`finish`](Self::finish) the one kept with the report the scan returns.
+#[derive(Clone, Default)]
+pub struct Collector(Shared<Collected>);
+
+#[derive(Default)]
+struct Collected {
+    endpoints: Vec<Endpoint>,
+    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
+    probes: u64,
+    undecoded: Vec<Frame>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl Sink<Event> for Collector {
+    type Ack = ();
+
+    fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
+        self.0.update(|collected| collected.observe(event));
+        Ok(())
+    }
+}
+
+impl Collected {
+    fn observe(&mut self, event: Event) {
+        match event {
+            Event::Sent(_) => {}
+            Event::Probe { target: _, probe } => self.observe_probe(probe),
+            Event::Undecoded { frame } => self.undecoded.push(frame),
+            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
+        }
+    }
+
+    fn observe_probe(&mut self, evidence: ProbeEvidence) {
+        self.probes = self.probes.saturating_add(1);
+        let address = evidence.address;
+        let transport = evidence.transport;
+        let port = evidence.port;
+        let endpoint = index_or_push(
+            &mut self.endpoints,
+            &mut self.endpoint_indices,
+            (address, port),
+            || Endpoint {
+                address,
+                transport,
+                port,
+                classification: Classification::Timeout,
+                probes: Vec::new(),
+            },
+        );
+        endpoint.classification.promote(evidence.classification);
+        endpoint.probes.push(evidence);
+    }
+}
+
+impl Collector {
+    /// Joins the collected events with the scan's terminal `report`, ordering
+    /// each endpoint's probes, and the endpoints, by probe sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::IncoherentEvents`] when the collected probe outcomes
+    /// are not the ones the report counts.
+    pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        let Collected {
+            mut endpoints,
+            probes,
+            undecoded,
+            diagnostics,
+            ..
+        } = self.0.take();
+        if probes != report.rtt.sent {
+            return Err(Error::IncoherentEvents {
+                message: format!(
+                    "{probes} probe outcome(s) collected for {} sent probe(s)",
+                    report.rtt.sent
+                ),
+            });
+        }
+        for endpoint in &mut endpoints {
+            endpoint.probes.sort_by_key(|probe| probe.sequence);
+        }
+        endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+        Ok(Aggregate {
+            planned_duration: report.planned_duration,
+            target: report.target,
+            resolved_addresses: report.resolved_addresses,
+            endpoints,
+            undecoded,
+            diagnostics,
+            stats: report.stats,
+            rtt: report.rtt,
+        })
     }
 }

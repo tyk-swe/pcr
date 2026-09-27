@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output;
+use crate::output;
 use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 
@@ -11,10 +11,14 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
-    result: output::fuzz::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    published: output::envelope::Published<output::fuzz::Report>,
 ) -> Result<(), CliError> {
+    let output::envelope::Published {
+        result,
+        diagnostics,
+        stats,
+    } = published;
+    let stats = stats.unwrap_or_default();
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
         result.mode.as_str(),
@@ -78,18 +82,18 @@ pub(super) fn render_offline_complete(
     summary: core::fuzz::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) =
-        output::fuzz::Event::complete_from_offline(summary).map_err(CliError::classified)?;
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
+    let published = output::envelope::Published::<output::fuzz::Event>::try_from(summary)
+        .map_err(CliError::classified)?;
+    Ok(stream.complete_published(published)?)
 }
 
 pub(super) fn render_live_complete(
-    summary: packetcraftr::fuzz::Summary,
+    report: packetcraftr::fuzz::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) =
-        output::fuzz::Event::complete_from_live(summary).map_err(CliError::classified)?;
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
+    let published = output::envelope::Published::<output::fuzz::Event>::try_from(report)
+        .map_err(CliError::classified)?;
+    Ok(stream.complete_published(published)?)
 }
 
 fn mutation_json<T: serde::Serialize>(value: &T) -> Result<String, CliError> {

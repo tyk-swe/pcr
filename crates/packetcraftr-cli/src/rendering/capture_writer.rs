@@ -5,7 +5,7 @@
 
 use std::io::Write;
 
-use packetcraftr_core::analysis::pcap::{Error, Format, Interface, Writer, compression};
+use packetcraftr_core::capture_file::{Error, Format, Interface, Writer, compression};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use crate::errors::CliError;
@@ -119,7 +119,7 @@ mod tests {
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::analysis::pcap::{Limits, PcapOptions, Reader, TimestampResolution};
+    use packetcraftr_core::capture_file::{Limits, PcapOptions, Reader, TimestampResolution};
     use packetcraftr_core::error::{Classification, Kind};
 
     use super::*;
@@ -175,13 +175,13 @@ mod tests {
         assert_eq!(error.classification.kind, Kind::Policy);
         assert_eq!(
             error.message,
-            "processing failed; output finalization also failed: None capture compression I/O failed: fixture flush failed"
+            "processing failed; output finalization also failed: None capture compression I/O failed"
         );
         assert_eq!(
             error.causes,
             [
                 "processing cause",
-                "None capture compression I/O failed: fixture flush failed",
+                "None capture compression I/O failed",
                 "fixture flush failed"
             ]
         );

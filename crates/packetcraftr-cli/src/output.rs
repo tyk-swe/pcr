@@ -89,6 +89,7 @@ pub mod rewrite;
 pub mod routes;
 pub mod scan;
 pub mod send;
+pub mod split;
 pub mod stats;
 pub mod stream;
 pub mod tls;

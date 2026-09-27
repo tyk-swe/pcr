@@ -11,7 +11,7 @@ use packetcraftr_core::analysis::follow::{Chunk, PeerDirection};
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
-use crate::staged_output::StagedFile;
+use crate::staged_output::{Publishable, StagedFile, publish_ordered};
 
 use super::arguments::Direction as Selected;
 
@@ -20,6 +20,12 @@ struct Staged {
     direction: PeerDirection,
     file: StagedFile,
     bytes: u64,
+}
+
+impl Publishable for Staged {
+    fn destination(&self) -> &Path {
+        self.file.destination()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -118,56 +124,28 @@ impl DirectionFiles {
     fn publish_with(
         self,
         mut sync: impl FnMut(&StagedFile) -> Result<(), CliError>,
-        mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+        remove: impl FnMut(&Path) -> std::io::Result<()>,
     ) -> Result<Vec<Written>, CliError> {
         // No destination is published until every staged file is synchronized.
         for staged in &self.staged {
             sync(&staged.file)?;
         }
-        let mut published = Vec::new();
-        let mut written = Vec::new();
-        for staged in self.staged {
-            let destination = staged.file.destination().to_owned();
-            match staged.file.persist() {
-                Ok(()) => {
-                    written.push(Written {
+        publish_ordered(
+            self.staged
+                .into_iter()
+                .map(|staged| {
+                    let report = Written {
                         direction: staged.direction,
-                        path: destination.display().to_string(),
+                        path: staged.file.destination().display().to_string(),
                         bytes: staged.bytes,
-                    });
-                    published.push(destination);
-                }
-                Err(error) => {
-                    let mut rolled_back = 0;
-                    let mut failures = Vec::new();
-                    for path in &published {
-                        match remove(path) {
-                            Ok(()) => rolled_back += 1,
-                            Err(source) => failures.push(CliError::new(
-                                Kind::Io,
-                                format!(
-                                    "remove published follow output {}: {source}",
-                                    path.display(),
-                                ),
-                            )),
-                        }
-                    }
-                    let mut failure = CliError::from_classification(
-                        error.classification,
-                        format!(
-                            "{}; rolled back {rolled_back} published file(s)",
-                            error.message,
-                        ),
-                        error.causes,
-                    );
-                    for cleanup in failures {
-                        failure = failure.with_secondary("follow rollback", cleanup);
-                    }
-                    return Err(failure);
-                }
-            }
-        }
-        Ok(written)
+                    };
+                    (staged, report)
+                })
+                .collect(),
+            "follow",
+            |staged| staged.file.persist(),
+            remove,
+        )
     }
 }
 

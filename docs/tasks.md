@@ -50,6 +50,25 @@ For two captures, use `verify-forwarding` with explicit identity and checks.
 Its verdict is observational, not a device-loss or latency measurement.
 The [machine consumer](consumer-compatibility.md) rejects incomplete streams.
 
+To divide a capture into faithful fixed-size parts, `split` writes
+`part-NNNNNN` files into an existing directory:
+
+```sh
+mkdir -p parts
+target/debug/packetcraftr split examples/captures/tls-handshake.pcapng \
+  --frames-per-file 3 --write-dir parts
+```
+
+Every part carries the complete source metadata — headers, interface
+descriptions, and non-packet records still describe the source capture, not
+the part — so each part rereads independently while interface statistics keep
+their source meaning. Parts are contiguous physical-frame ranges and may cut
+through streams and IP datagrams; use `export` for dependency-complete
+extraction. `--compression` selects gzip or Zstd for the saved files
+independently of the input's compression, and no existing file is overwritten.
+The text and machine reports name each part's source frame range so a source
+frame number is recoverable as `first_frame + part-local frame - 1`.
+
 ## 3. Run an authorized diagnostic in an isolated lab
 
 Begin with passive `interfaces` and `routes` inspection. Live adapters depend on

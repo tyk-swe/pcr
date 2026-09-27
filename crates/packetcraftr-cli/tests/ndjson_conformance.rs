@@ -28,6 +28,11 @@ const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
         include_str!("../../../examples/documents/output-export-complete.json"),
     ),
     (
+        output::contract::Command::Split,
+        false,
+        include_str!("../../../examples/documents/output-split-complete.json"),
+    ),
+    (
         output::contract::Command::Http,
         false,
         include_str!("../../../examples/documents/output-http-complete.json"),

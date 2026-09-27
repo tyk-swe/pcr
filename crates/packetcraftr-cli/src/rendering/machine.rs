@@ -140,14 +140,12 @@ pub(crate) fn emit_published<T: Serialize>(
 /// document is published exactly once, and dropping a prepared envelope is a
 /// no-op.
 // Artifact-committing commands (body export, capture split) consume this seam.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PreparedAggregate<T> {
     envelope: output::envelope::Envelope<T>,
 }
 
 impl<T: Serialize> PreparedAggregate<T> {
     /// Sends the frozen envelope through the ordinary aggregate writer.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn publish(self) -> Result<(), CliError> {
         emit_json(&self.envelope)
     }
@@ -160,7 +158,6 @@ impl<T: Serialize> PreparedAggregate<T> {
 /// The counting-writer pass only proves the owned envelope serializes:
 /// `usize::MAX` is an overflow ceiling, not a byte budget — aggregate JSON has
 /// no record limit. Nothing is written and no second payload buffer is built.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn prepare_aggregate<T: Serialize>(
     command: output::contract::Command,
     result: T,

@@ -575,6 +575,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   source changed between passes. `split::Options`/`split::Limits` bound the
   file count, metadata cache, input pass, and exact decoded output before
   any sink callback.
+- `split` divides a PCAP or PCAPNG capture into contiguous physical-frame
+  parts, writing fixed `part-NNNNNN.pcap`/`.pcapng` names (with `.gz`/`.zst`
+  when `--compression` selects one) into an existing `--write-dir` without
+  overwriting anything. Every part carries the complete source metadata and
+  rereads independently; streams and datagrams may span part boundaries, so
+  `export` remains the command for dependency-complete extraction. Parts are
+  staged one at a time under a shared encoded-byte ceiling below the
+  compressor, sealed and synced, and published in index order only after the
+  complete report is prepared; a commit or interruption failure rolls back
+  exactly the destinations this invocation created. File input, `-` on
+  redirected stdin, and gzip/Zstd input follow the existing capture-reader
+  behavior, and all split bounds (`--max-files`,
+  `--max-split-metadata-records`, `--max-split-metadata-bytes`,
+  `--max-split-output-bytes`) are declared resource settings.
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own:
   - `cli.layer_index` (usage): `packet::Error::IndexOutOfBounds`, a layer

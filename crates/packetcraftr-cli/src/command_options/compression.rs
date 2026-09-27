@@ -21,6 +21,15 @@ pub(crate) enum Compression {
 }
 
 impl Compression {
+    /// The published compression name, matching the value-enum spelling.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Gzip => "gzip",
+            Self::Zstd => "zstd",
+        }
+    }
+
     pub(crate) fn format(self) -> compression::Format {
         match self {
             Self::None => compression::Format::None,

@@ -4,7 +4,8 @@
 //! Capture files: portable streaming PCAP/PCAPNG I/O with optional gzip/Zstd
 //! support; no native libpcap/Npcap dependency. [`rewrite`](fn@rewrite)
 //! preserves validated source records and format; [`Writer`] creates new
-//! captures from frames.
+//! captures from frames; [`split`] divides a seekable capture into contiguous
+//! physical-frame parts.
 //!
 //! This module also owns link-type knowledge: the known
 //! [`LinkType`](crate::frame::LinkType) numbers and the single mapping
@@ -24,6 +25,7 @@ mod model;
 mod pcapng;
 mod reader;
 mod rewrite;
+pub mod split;
 mod wire;
 mod writer;
 

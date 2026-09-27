@@ -27,9 +27,7 @@ pub mod ip_protocol {
     pub const DESTINATION_OPTIONS: u8 = 60;
 }
 
-pub(crate) use envelope::{
-    ipv6_extension_header_length, is_walkable_ipv6_extension, resolve_envelope,
-};
+pub(crate) use envelope::resolve_envelope;
 pub use icmp::{Icmpv4, Icmpv6};
 pub(crate) use icmp::{Icmpv4Codec, Icmpv6Codec};
 pub use igmp::Igmp;

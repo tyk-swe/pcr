@@ -8,11 +8,9 @@ use crate::decode::DecodedPacket;
 use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::packet::Packet;
+use crate::protocol::headers::{Ipv6ExtensionChain, is_walkable_ipv6_extension};
 use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};
-use crate::protocol::network::{
-    Fragment as Ipv6FragmentHeader, Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length,
-    is_walkable_ipv6_extension,
-};
+use crate::protocol::network::{Fragment as Ipv6FragmentHeader, Ipv4, Ipv6, ip_protocol};
 use crate::protocol::transport::{Tcp, Udp};
 use crate::protocol::tunnel::{Ah, Erspan, Geneve, Gre, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
@@ -536,7 +534,7 @@ fn ipv6_fragment_transport_protocol(
     fragment_index: usize,
     fragment: &Ipv6FragmentHeader,
 ) -> Option<u8> {
-    let mut next_header = fragment.next_header.exact().copied()?;
+    let next_header = fragment.next_header.exact().copied()?;
     // A nonzero fragment starts in the middle of the fragmentable part, so
     // the extension chain cannot be resolved from this frame. Deferring both
     // transport kinds would discard a visible cross-kind carrier. Keep that
@@ -559,18 +557,19 @@ fn ipv6_fragment_transport_protocol(
         .layout
         .layer(fragment_index)
         .and_then(|layout| decoded.original.get(layout.range.end..payload_end))?;
-    let mut cursor = 0usize;
+    // A further Fragment header ends the walk: its protocol is the answer,
+    // because the bytes behind it may belong to another fragment.
+    let mut chain = Ipv6ExtensionChain::new(payload, 0, next_header);
     loop {
-        if !is_walkable_ipv6_extension(next_header) {
-            return Some(next_header);
+        let (protocol, _) = chain.position();
+        if protocol == ip_protocol::FRAGMENT {
+            return Some(protocol);
         }
-        let header = payload.get(cursor..)?;
-        let (&following, &encoded_length) = header.first().zip(header.get(1))?;
-        let length = ipv6_extension_header_length(next_header, encoded_length)
-            .filter(|length| *length <= header.len())?;
-        let next_cursor = cursor.checked_add(length)?;
-        cursor = next_cursor;
-        next_header = following;
+        match chain.next() {
+            None => return Some(protocol),
+            Some(Ok(_)) => {}
+            Some(Err(_)) => return None,
+        }
     }
 }
 

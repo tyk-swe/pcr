@@ -879,6 +879,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `follow`, and `tls` now supply only a collector and an event sink; `follow`
   uses the split observe/finish phases so its missing-selector verdict still
   precedes collection teardown.
+- `protocol::headers` gains `Ipv4Header::walk_prefix` and
+  `Ipv6Header::walk_prefix`, which walk a datagram prefix whose declared
+  length may exceed the bytes present; `Ipv6ExtensionChain`, an iterator
+  over the extension headers at any offset; and
+  `Ipv6Extension::fragment_offset_and_flags`, the Fragment header's raw
+  offset/flags word.
 
 ### Changed
 

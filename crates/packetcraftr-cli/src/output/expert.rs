@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-
 use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, expert};
@@ -43,63 +41,27 @@ pub struct CodeCount {
     pub findings: u64,
 }
 
-/// The verdict a completed gate evaluation publishes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Verdict {
-    /// Triggering findings stayed within the allowance and coverage sufficed.
-    Pass,
-    /// Triggering findings exceeded the configured allowance.
-    Fail,
-    /// Coverage was too thin to establish the requested predicate.
-    Inconclusive,
-}
-
-impl Verdict {
-    /// The published name, for text output that must agree with JSON.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pass => "pass",
-            Self::Fail => "fail",
-            Self::Inconclusive => "inconclusive",
-        }
+published_enum! {
+    /// The verdict a completed gate evaluation publishes.
+    pub enum Verdict from expert::gate::Verdict {
+        /// Triggering findings stayed within the allowance and coverage sufficed.
+        Pass => "pass",
+        /// Triggering findings exceeded the configured allowance.
+        Fail => "fail",
+        /// Coverage was too thin to establish the requested predicate.
+        Inconclusive => "inconclusive",
     }
 }
 
-impl fmt::Display for Verdict {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-/// Why a gate produced its verdict.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Reason {
-    /// Triggering findings and matched coverage satisfied the gate.
-    WithinAllowance,
-    /// Triggering findings exceeded the configured allowance.
-    FindingAllowanceExceeded,
-    /// Matched frames fell below the required minimum coverage.
-    InsufficientFrames,
-}
-
-impl Reason {
-    /// The published name, for text output that must agree with JSON.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::WithinAllowance => "within_allowance",
-            Self::FindingAllowanceExceeded => "finding_allowance_exceeded",
-            Self::InsufficientFrames => "insufficient_frames",
-        }
-    }
-}
-
-impl fmt::Display for Reason {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
+published_enum! {
+    /// Why a gate produced its verdict.
+    pub enum Reason from expert::gate::Reason {
+        /// Triggering findings and matched coverage satisfied the gate.
+        WithinAllowance => "within_allowance",
+        /// Triggering findings exceeded the configured allowance.
+        FindingAllowanceExceeded => "finding_allowance_exceeded",
+        /// Matched frames fell below the required minimum coverage.
+        InsufficientFrames => "insufficient_frames",
     }
 }
 
@@ -116,6 +78,21 @@ pub struct GateReport {
     pub frames_matched: u64,
     pub findings_observed: u64,
     pub triggering_findings: u64,
+}
+
+impl From<expert::gate::Report> for GateReport {
+    fn from(value: expert::gate::Report) -> Self {
+        Self {
+            verdict: value.verdict.into(),
+            reason: value.reason.into(),
+            min_severity: value.min_severity.into(),
+            allow_findings: value.allow_findings,
+            minimum_frames: value.minimum_frames,
+            frames_matched: value.frames_matched,
+            findings_observed: value.findings_observed,
+            triggering_findings: value.triggering_findings,
+        }
+    }
 }
 
 /// Aggregate result or terminal NDJSON record; the latter omits already-streamed
@@ -136,8 +113,8 @@ pub struct Report {
 }
 
 /// The totals of the findings a run published, the frames it read and
-/// matched, the findings retained for the document, and the capture's IP
-/// reassembly.
+/// matched, the findings retained for the document, the capture's IP
+/// reassembly, and the gate the run evaluated when one was enabled.
 impl
     From<(
         expert::Summary,
@@ -145,15 +122,17 @@ impl
         u64,
         Vec<Finding>,
         &library::IpReassemblyReport,
+        Option<GateReport>,
     )> for Report
 {
     fn from(
-        (summary, frames_read, frames_matched, findings, ip_reassembly): (
+        (summary, frames_read, frames_matched, findings, ip_reassembly, gate): (
             expert::Summary,
             u64,
             u64,
             Vec<Finding>,
             &library::IpReassemblyReport,
+            Option<GateReport>,
         ),
     ) -> Self {
         Self {
@@ -170,7 +149,7 @@ impl
                 .collect(),
             findings,
             ip_reassembly: ip_reassembly.into(),
-            gate: None,
+            gate,
         }
     }
 }

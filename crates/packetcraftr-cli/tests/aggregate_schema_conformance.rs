@@ -99,6 +99,7 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::Stats, "io", stats_io_case),
     (Command::Stats, "fragments", stats_fragments_case),
     (Command::Expert, "findings", expert_case),
+    (Command::Expert, "completed gate", expert_gate_case),
     (Command::Follow, "chunks", follow_case),
     (Command::Follow, "no frames", follow_empty_case),
     (Command::Tls, "sessions", tls_case),
@@ -704,6 +705,31 @@ fn expert_case() -> Value {
         11,
         findings,
         &analysis_stats_report().ip_reassembly,
+        None,
+    ));
+    envelope(Command::Expert, report, Vec::new())
+}
+
+fn expert_gate_case() -> Value {
+    use packetcraftr_core::analysis::expert::{Summary, gate};
+
+    let gate = expert_output::GateReport::from(gate::Report {
+        verdict: gate::Verdict::Fail,
+        reason: gate::Reason::FindingAllowanceExceeded,
+        min_severity: packetcraftr_core::diagnostic::Severity::Warning,
+        allow_findings: 0,
+        minimum_frames: 1,
+        frames_matched: 11,
+        findings_observed: 2,
+        triggering_findings: 1,
+    });
+    let report = expert_output::Report::from((
+        Summary::default(),
+        12,
+        11,
+        Vec::new(),
+        &analysis_stats_report().ip_reassembly,
+        Some(gate),
     ));
     envelope(Command::Expert, report, Vec::new())
 }

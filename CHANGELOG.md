@@ -43,10 +43,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   with a nullable `transaction_summary` and `body_export`, the
   `http_transaction` NDJSON event with signed header-timing intervals, and a
   nullable expert `gate`. Until the feature tickets land, runs publish
-  `transactions: []`, `transaction_summary: null`, `body_export: null`, and
-  `gate: null`. The forwarding consumer accepts v6 and v7 with identical
-  semantics, selected by the first stream record, and release archives keep
-  the v6 schema and frozen v6 fixture alongside v7 for archival evidence.
+  `transactions: []`, `transaction_summary: null`, and `body_export: null`;
+  `gate` is live — `expert --fail-on` populates it. The forwarding consumer
+  accepts v6 and v7 with identical semantics, selected by the first stream
+  record, and release archives keep the v6 schema and frozen v6 fixture
+  alongside v7 for archival evidence.
 - Rust APIs now use standard conversion and collection traits. Wire
   constructors become `TryFrom` (`Dns`, `Dhcpv4`, and `Dhcpv6` from
   `Bytes`/`Vec<u8>`/`&[u8]`; `Http` and `Tls` from `&[u8]`; `Tls` also from
@@ -893,6 +894,22 @@ All notable changes to PacketcraftR are documented here. The format follows
   state is constant-size; its typed `Error` classifies an invalid minimum as
   `cli.expert_gate` usage and counter overflow as `policy.expert_gate_limit`
   policy.
+- `expert` publishes the gate as a CI verdict: `--fail-on
+  info|warning|error` enables it, `--allow-findings N` (default 0) is the
+  permitted triggering-finding count, and `--minimum-frames N` (positive,
+  default 1) is the required matched physical-frame coverage. The gate
+  observes every produced finding — decode diagnostics, capture evidence,
+  and trailing EOF findings — before `--min-severity`, `--code`, or
+  aggregate retention apply, so its `findings_observed` /
+  `triggering_findings` counts are exact regardless of report filtering.
+  `result.gate` carries the report in aggregate JSON and the NDJSON
+  `complete` record (null without `--fail-on`); text appends a `gate=<verdict>
+  reason=<reason> …` line. A completed `fail` or `inconclusive` verdict
+  publishes the normal report and exits 1 (output failures still win);
+  `pass` exits 0 and asserts only the declared predicate, not network
+  health. New real-run examples: `output-expert-gate-success.json`,
+  `output-expert-gate-fail.json`, `output-expert-gate-inconclusive.json`,
+  and `output-expert-gate-complete.json`.
 
 ### Changed
 

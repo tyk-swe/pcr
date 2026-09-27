@@ -1,6 +1,6 @@
 # HTTP-T02: Expose HTTP transaction evidence in the CLI
 
-Status: ready-for-agent
+Status: resolved (4428bf92; all listed tests green)
 Blocked by: HTTP-T01
 Size: small–medium
 Spec: [user behavior and complete output definition](../spec.md)
@@ -20,16 +20,16 @@ Spec: [user behavior and complete output definition](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] HT01–HT14 are observable through CLI `http_contracts`, with schema
+- [x] HT01–HT14 are observable through CLI `http_contracts`, with schema
   assertions placed in aggregate/NDJSON conformance targets; HT15 remains a
   core public-API regression.
-- [ ] Every emitted payload uses v7; disabled mode has an empty transactions
+- [x] Every emitted payload uses v7; disabled mode has an empty transactions
   array and null transaction summary; enabled empty analysis has zero counts.
-- [ ] NDJSON sequences/terminal behavior, forward message references, and EOF
+- [x] NDJSON sequences/terminal behavior, forward message references, and EOF
   ordering follow the spec, including broken-output failure.
-- [ ] Text, JSON, NDJSON, gzip/Zstd input, stdin, stream selection, and epoch
+- [x] Text, JSON, NDJSON, gzip/Zstd input, stdin, stream selection, and epoch
   bounds exercise the same core behavior and output byte allowance.
-- [ ] Control characters in existing captured text remain escaped.
+- [x] Control characters in existing captured text remain escaped.
 
 ```sh
 cargo test --locked -p packetcraftr-cli --no-default-features --test http_contracts --test aggregate_schema_conformance --test ndjson_conformance --test published_example_matrix --test generated_documentation_contracts --test resource_diagnostic_contracts

@@ -1253,6 +1253,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Library TCP connect scans reject interface, preferred-source, and explicit
+  link-mode overrides before scheduling any connections.
+- Detached provider deadlines retain inherited cancellation through every
+  parent, including native worker waits and TCP connect workers.
 - DNS TCP connects, including UDP fallback, use the admitted native worker
   pool and carry the client's cancellation signal. A stalled connect no
   longer holds the workflow after cancellation or its finite wait expires.

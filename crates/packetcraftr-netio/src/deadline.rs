@@ -20,6 +20,7 @@
 //! wait, so an expired read delivers an already queued record or `Ok(None)`.
 //! See [`capture::Session`](crate::capture::Session).
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
@@ -76,13 +77,16 @@ pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
 }
 
 /// An owned deadline with what `deadline` still allows and the same
-/// cancellation signal, for work handed to another thread.
+/// cancellation signals, including inherited ones, for work handed to another
+/// thread. The original ceilings remain in force alongside the wall-clock wait.
 ///
 /// # Errors
 ///
 /// Returns the same interruptions as [`remaining`].
 pub fn detach(deadline: &Deadline) -> Result<Deadline, Interrupted> {
-    Ok(Deadline::new(remaining(deadline)?).with_cancellation(deadline.cancellation().cloned()))
+    Ok(Deadline::new(remaining(deadline)?)
+        .with_cancellation(deadline.cancellation().cloned())
+        .with_parent(Some(Arc::new(deadline.clone()))))
 }
 
 #[cfg(test)]

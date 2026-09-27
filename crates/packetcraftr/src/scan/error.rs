@@ -31,6 +31,8 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("scan duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
+    #[error("TCP connect uses kernel route and source selection")]
+    UnsupportedTcpRoute,
     #[error("scan authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved target has no {family} address selected for this scan")]
@@ -81,6 +83,11 @@ impl Classified for Error {
         match self {
             Self::Cancelled(source) => source.classification(),
             Self::TargetSelection(source) => source.classification(),
+            Self::UnsupportedTcpRoute => Classification::new(
+                "capability.scan_tcp_route",
+                Kind::Capability,
+                Some("omit packet interface/source/link overrides for ordinary TCP"),
+            ),
             Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }
             | Self::InvalidTimeout { .. }

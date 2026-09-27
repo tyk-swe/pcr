@@ -39,6 +39,8 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// an [`Event::Probe`] on a worker admitted by the client's runtime, and
     /// the scan waits for the answer before it continues. No application
     /// bytes are read or written; every connected socket is closed at once.
+    /// Interface, preferred-source, and explicit link-mode overrides are
+    /// rejected because kernel TCP controls route and source selection.
     ///
     /// # Errors
     ///
@@ -123,6 +125,12 @@ fn planned<A: Authorizer + ResolveTarget>(
             0,
             "TCP connect requires TCP transport",
         ));
+    }
+    if request.route.interface.is_some()
+        || request.route.preferred_source.is_some()
+        || request.route.link_mode != packetcraftr_netio::link::Mode::Auto
+    {
+        return Err(Error::UnsupportedTcpRoute);
     }
     if request.max_in_flight > tcp::MAX_PENDING_CONNECTIONS {
         return Err(invalid(

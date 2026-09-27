@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 /// Cooperative operation deadline combining wall time with deterministic
 /// elapsed-time accounting. A blocked provider cannot be interrupted; callers
 /// must check immediately before and after each provider boundary.
+/// Cloning snapshots local accounting while sharing parent ceilings and stop
+/// signals; it does not restart the allowance.
+#[derive(Clone)]
 pub struct Deadline {
     parents: Vec<Arc<Self>>,
     cancellation: Option<Cancellation>,

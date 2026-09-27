@@ -1,6 +1,6 @@
 # GATE-02: Publish expert gate verdicts and CI exit codes
 
-Status: ready-for-agent
+Status: resolved (499427ea; all listed tests green)
 Blocked by: GATE-01
 Size: small–medium
 Spec: [all CLI behavior, output, EG01–EG16](../spec.md)
@@ -22,14 +22,14 @@ Spec: [all CLI behavior, output, EG01–EG16](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] EG01–EG16 are covered, including filtered-out EOF-only TCP findings,
+- [x] EG01–EG16 are covered, including filtered-out EOF-only TCP findings,
   separate incomplete-IP evidence, and a hidden warning that still fails.
-- [ ] All output modes agree on verdict/counts/exit status, and fail or
+- [x] All output modes agree on verdict/counts/exit status, and fail or
   inconclusive produces a complete record without an error record.
-- [ ] Execution and broken-output failures retain their original classification.
-- [ ] Existing `--code` and min-severity semantics and selected counters stay
+- [x] Execution and broken-output failures retain their original classification.
+- [x] Existing `--code` and min-severity semantics and selected counters stay
   unchanged; no implicit code catalog or new per-code gating is introduced.
-- [ ] Gate criteria are not mislabeled as resource ceilings or presets.
+- [x] Gate criteria are not mislabeled as resource ceilings or presets.
 
 ```sh
 cargo test --locked -p packetcraftr-cli --no-default-features --test expert_gate_contracts --test offline_workflow_contracts --test aggregate_schema_conformance --test ndjson_conformance --test process_contracts --test generated_documentation_contracts

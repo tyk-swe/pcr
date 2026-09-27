@@ -1,0 +1,78 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "http",
+  "mode": "stream",
+  "sequence": 8,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "frames_read": 15,
+    "frames_matched": 15,
+    "summary": {
+      "messages": 5,
+      "complete_messages": 5,
+      "incomplete_messages": 0,
+      "malformed_messages": 0,
+      "upgraded_connections": 0,
+      "responses_without_request": 1,
+      "requests_without_final_response": 1
+    },
+    "scopes": [
+      {
+        "id": 0,
+        "interface": 0,
+        "encapsulation": []
+      }
+    ],
+    "incomplete_datagrams": 0,
+    "source_outcomes_omitted": 0,
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    },
+    "transaction_summary": {
+      "transactions": 3,
+      "paired": 1,
+      "unanswered": 1,
+      "orphan_responses": 1,
+      "negative_header_waits": 1,
+      "negative_header_spans": 0
+    },
+    "body_export": null
+  },
+  "diagnostics": []
+}

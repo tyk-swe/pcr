@@ -41,6 +41,13 @@ HTTP message records identify framing/status and physical source evidence.
 Read the terminal completion or error as well as individual messages. A parse,
 capture, or resource limit is not proof that an application message was absent.
 
+`http --transactions` adds one settled header-association row per request
+pairing, unanswered request, or orphan response. Each row names the capture
+frames and timestamps at which its header boundaries became observable —
+capture evidence, not wire timing or processing duration — and cites this
+invocation's one-based message indices; a row can precede the message record
+it cites. Message statuses remain the authority on body completeness.
+
 For an ordinary failure, lower `--max-frames` below the physical capture count.
 Filtered-out input still counts; adding a display filter does not bypass that
 limit. Inspect resource diagnostics, then raise the specific finite ceiling or

@@ -55,6 +55,15 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     ports.extend([80, 8080]);
     let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
+    // Transaction collection closes on the first observe attempt, so the
+    // flag must reach the collector before inspection starts.
+    let collector = if args.transactions {
+        collector
+            .with_transactions()
+            .map_err(CliError::classified)?
+    } else {
+        collector
+    };
     let selector = args
         .stream
         .as_ref()
@@ -66,7 +75,7 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             "HTTP/1 inspection requires --stream tcp:INDEX",
         ));
     }
-    let (mut messages, mut issues) = (Vec::new(), Vec::new());
+    let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
     let outcome = inspect(
         Inspection {
             path: &args.path,
@@ -89,12 +98,11 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
                 &mut issues,
                 rendering::render_issue,
             ),
-            // The command never enables transactions; HTTP-T02 publishes
-            // this event once `--transactions` exists.
-            Event::Transaction(_) => Err(CliError::new(
-                Kind::Internal,
-                "HTTP collector emitted a transaction without --transactions",
-            )),
+            Event::Transaction(transaction) => output.emit(
+                wire::Transaction::try_from(*transaction).map_err(CliError::classified)?,
+                &mut transactions,
+                rendering::render_transaction,
+            ),
         },
     )?;
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
@@ -102,7 +110,7 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     match format {
         ToolFormat::Json => emit_aggregate(
             Command::Http,
-            wire::Report::from((messages, issues, complete)),
+            wire::Report::from((messages, transactions, issues, complete)),
             Vec::new(),
         ),
         ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),

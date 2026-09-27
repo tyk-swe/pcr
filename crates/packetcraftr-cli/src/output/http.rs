@@ -255,6 +255,15 @@ impl fmt::Display for TransactionOutcome {
         formatter.write_str(self.as_str())
     }
 }
+impl From<analysis::TransactionOutcome> for TransactionOutcome {
+    fn from(value: analysis::TransactionOutcome) -> Self {
+        match value {
+            analysis::TransactionOutcome::Paired => Self::Paired,
+            analysis::TransactionOutcome::Unanswered => Self::Unanswered,
+            analysis::TransactionOutcome::OrphanResponse => Self::OrphanResponse,
+        }
+    }
+}
 
 /// The physical frame that made header bytes available to the parser, and its
 /// capture timestamp.
@@ -263,6 +272,15 @@ pub struct Availability {
     pub frame: u64,
     pub timestamp: Timestamp,
 }
+impl TryFrom<analysis::Availability> for Availability {
+    type Error = Error;
+    fn try_from(value: analysis::Availability) -> Result<Self, Error> {
+        Ok(Self {
+            frame: value.frame,
+            timestamp: Timestamp::try_from(value.timestamp)?,
+        })
+    }
+}
 
 /// A signed capture-observed interval between two availability markers.
 /// Negative intervals stay visible; zero is never negative.
@@ -270,6 +288,14 @@ pub struct Availability {
 pub struct Interval {
     pub nanoseconds: u128,
     pub negative: bool,
+}
+impl From<analysis::Interval> for Interval {
+    fn from(value: analysis::Interval) -> Self {
+        Self {
+            nanoseconds: value.nanoseconds,
+            negative: value.negative,
+        }
+    }
 }
 
 /// One settled header transaction: request/response association plus the
@@ -291,6 +317,33 @@ pub struct Transaction {
     pub response_header_wait: Option<Interval>,
     pub response_header_span: Option<Interval>,
 }
+impl TryFrom<analysis::Transaction> for Transaction {
+    type Error = Error;
+    fn try_from(value: analysis::Transaction) -> Result<Self, Error> {
+        Ok(Self {
+            index: value.index,
+            stream: value.stream,
+            generation: value.generation,
+            flow: value.flow.into(),
+            outcome: value.outcome.into(),
+            request: value.request,
+            response: value.response,
+            response_status: value.response_status,
+            informational: value.informational,
+            request_headers_available: value
+                .request_headers_available
+                .map(TryInto::try_into)
+                .transpose()?,
+            response_started: value.response_started.map(TryInto::try_into).transpose()?,
+            response_headers_available: value
+                .response_headers_available
+                .map(TryInto::try_into)
+                .transpose()?,
+            response_header_wait: value.response_header_wait.map(Into::into),
+            response_header_span: value.response_header_span.map(Into::into),
+        })
+    }
+}
 impl StreamRecord for Transaction {
     fn event_name(&self) -> &'static str {
         "http_transaction"
@@ -306,6 +359,18 @@ pub struct TransactionSummary {
     pub orphan_responses: u64,
     pub negative_header_waits: u64,
     pub negative_header_spans: u64,
+}
+impl From<analysis::TransactionSummary> for TransactionSummary {
+    fn from(value: analysis::TransactionSummary) -> Self {
+        Self {
+            transactions: value.transactions,
+            paired: value.paired,
+            unanswered: value.unanswered,
+            orphan_responses: value.orphan_responses,
+            negative_header_waits: value.negative_header_waits,
+            negative_header_spans: value.negative_header_spans,
+        }
+    }
 }
 
 /// The byte domain an exported body artifact preserves.
@@ -363,6 +428,7 @@ impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Comple
     fn try_from(
         (run, summary, scopes): (&library::Summary, analysis::Summary, Vec<Definition>),
     ) -> Result<Self, Error> {
+        let transaction_summary = summary.transaction_summary.clone().map(Into::into);
         Ok(Self {
             frames_read: run.frames_read,
             frames_matched: run.frames_matched,
@@ -374,7 +440,7 @@ impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Comple
             incomplete_datagrams: run.incomplete_sources.len(),
             source_outcomes_omitted: run.source_outcomes_omitted,
             ip_reassembly: (&run.ip_reassembly).into(),
-            transaction_summary: None,
+            transaction_summary,
             body_export: None,
         })
     }
@@ -387,13 +453,20 @@ pub struct Report {
     #[serde(flatten)]
     pub complete: Complete,
 }
-/// The messages and issues retained for the document, and the terminal
-/// counters.
-impl From<(Vec<Message>, Vec<Issue>, Complete)> for Report {
-    fn from((messages, issues, complete): (Vec<Message>, Vec<Issue>, Complete)) -> Self {
+/// The messages, transactions, and issues retained for the document, and the
+/// terminal counters.
+impl From<(Vec<Message>, Vec<Transaction>, Vec<Issue>, Complete)> for Report {
+    fn from(
+        (messages, transactions, issues, complete): (
+            Vec<Message>,
+            Vec<Transaction>,
+            Vec<Issue>,
+            Complete,
+        ),
+    ) -> Self {
         Self {
             messages,
-            transactions: Vec::new(),
+            transactions,
             issues,
             complete,
         }

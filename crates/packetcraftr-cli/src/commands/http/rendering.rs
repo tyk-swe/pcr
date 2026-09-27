@@ -51,6 +51,24 @@ pub(super) fn render_issue(issue: &wire::Issue) -> Result<(), CliError> {
     ))
 }
 
+/// One settled header-association row: its emission index, outcome,
+/// connection identity, the message indices it links, and the signed
+/// capture-observed intervals between its markers (`none` when absent).
+pub(super) fn render_transaction(transaction: &wire::Transaction) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "  transaction={} outcome={} stream={} generation={} request={} response={} status={} wait={} span={}",
+        transaction.index,
+        transaction.outcome,
+        transaction.stream,
+        transaction.generation,
+        optional_display(transaction.request),
+        optional_display(transaction.response),
+        optional_display(transaction.response_status),
+        interval(transaction.response_header_wait),
+        interval(transaction.response_header_span),
+    ))
+}
+
 pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "{} HTTP/1 messages, {} complete, {} incomplete, {} malformed; {} requests without a captured final response",
@@ -59,7 +77,31 @@ pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError>
         complete.summary.incomplete_messages,
         complete.summary.malformed_messages,
         complete.summary.requests_without_final_response
-    ))
+    ))?;
+    if let Some(summary) = &complete.transaction_summary {
+        write_summary_line(format_args!(
+            "{} header transactions: {} paired, {} unanswered, {} orphan responses; {} negative waits, {} negative spans",
+            summary.transactions,
+            summary.paired,
+            summary.unanswered,
+            summary.orphan_responses,
+            summary.negative_header_waits,
+            summary.negative_header_spans,
+        ))?;
+    }
+    Ok(())
+}
+
+/// A signed capture-observed interval in nanoseconds; negative intervals
+/// stay visible, as the JSON document keeps them.
+fn interval(interval: Option<wire::Interval>) -> String {
+    interval.map_or_else(
+        || "none".to_owned(),
+        |interval| {
+            let sign = if interval.negative { "-" } else { "" };
+            format!("{sign}{}ns", interval.nanoseconds)
+        },
+    )
 }
 
 /// Captured text with every control character, quote, and non-ASCII

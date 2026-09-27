@@ -1,6 +1,6 @@
 # HTTP-B02: Stage, validate, and publish one HTTP body artifact
 
-Status: ready-for-agent
+Status: resolved (c2601d48; all listed tests green)
 Blocked by: HTTP-B01, HTTP-T02
 Size: medium
 Spec: [CLI behavior, failures, output, HB01–HB17](../spec.md)
@@ -25,15 +25,15 @@ Spec: [CLI behavior, failures, output, HB01–HB17](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] HB01–HB17 have appropriate core/CLI coverage; CLI tests assert exact
+- [x] HB01–HB17 have appropriate core/CLI coverage; CLI tests assert exact
   file contents/digests and destination absence on each failure path.
-- [ ] Public process regressions cover binary bodies, stdin/compressed input,
+- [x] Public process regressions cover binary bodies, stdin/compressed input,
   late corrupt input, existing destinations, and all three output formats.
-- [ ] Injected private writer/publication failures cover sync/persist and
+- [x] Injected private writer/publication failures cover sync/persist and
   cancellation races without depending on privileged filesystem behavior.
-- [ ] Body/report budgets remain distinct; metadata charge occurs before
+- [x] Body/report budgets remain distinct; metadata charge occurs before
   persistence; selected evidence is not inferred from retained JSON rows.
-- [ ] Generated documentation and examples accurately name coded body bytes.
+- [x] Generated documentation and examples accurately name coded body bytes.
 
 ```sh
 cargo test --locked -p packetcraftr-cli --no-default-features --test http_contracts --test aggregate_schema_conformance --test ndjson_conformance --test published_example_matrix --test generated_documentation_contracts --test resource_diagnostic_contracts

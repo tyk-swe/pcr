@@ -47,7 +47,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let result = output::interfaces::Report::from(interfaces);
-    super::render_aggregate_rows(
+    crate::rendering::render_aggregate_rows(
         output::contract::Command::Interfaces,
         format,
         &result,

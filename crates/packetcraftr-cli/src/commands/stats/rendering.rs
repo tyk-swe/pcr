@@ -42,11 +42,11 @@ pub(super) fn render_text(
             interface.link_type.0, interface.snap_len,
         ))?;
     }
-    crate::commands::offline_analysis::render_clock(&report.clock)?;
+    crate::rendering::render_clock(&report.clock)?;
     match table {
         Table::Conversations => {
             for row in &report.conversations {
-                crate::commands::offline_analysis::render_scope(&row.scope)?;
+                crate::rendering::render_scope(&row.scope)?;
                 write_stdout_line(format_args!(
                     "{} stream {}: {} <-> {} frames {} ({} fwd / {} rev) bytes {} ({} fwd / {} rev) duration {}",
                     row.transport.as_str(),

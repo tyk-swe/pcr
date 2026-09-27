@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::system::InterfaceSelector;
+use crate::command_options::InterfaceSelector;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr interfaces

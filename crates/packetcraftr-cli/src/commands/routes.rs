@@ -45,7 +45,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
     let result = output::routes::Report::from(routes);
-    super::render_aggregate_rows(
+    crate::rendering::render_aggregate_rows(
         output::contract::Command::Routes,
         format,
         &result,

@@ -10,8 +10,8 @@ use packetcraftr_core::analysis;
 
 use crate::output;
 
-use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
+use crate::rendering::Retained;
 use crate::rendering::{
     StreamEncoder, comma_separated, duration_text, emit_aggregate, encapsulation_text,
     optional_display, write_stdout_line,

@@ -1,6 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Root argument definitions, preset-aware parsing, and pre-parse error context.
+
+mod context;
+mod parsing;
+
+pub(crate) use context::{Context, MachineFormat, parse as error_context};
+pub(crate) use parsing::{Parsed, parse_from};
+
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
@@ -112,7 +120,7 @@ pub(crate) struct Cli {
     pub(crate) resource_diagnostics: bool,
     /// Versioned offline resource defaults; explicit flags override the preset.
     #[arg(long, global = true, value_enum, help_heading = "Global options")]
-    pub(crate) resource_preset: Option<crate::presets::Preset>,
+    pub(crate) resource_preset: Option<crate::resources::Preset>,
     /// NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000).
     #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options")]
     pub(crate) output_timeout_ms: Option<u64>,

@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::command_options::InterfaceSelector;
 use crate::command_options::{
     Budget, CaptureLimitsArgs, CompressionArgs, DecodeArgs, Destination, TimeoutArgs,
     TrafficBudgetArgs, Window, default_limit_bytes,
 };
-use crate::system::InterfaceSelector;
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.

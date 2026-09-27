@@ -23,6 +23,8 @@ pub(crate) enum Runtime {
     Capture,
     /// A TCP connect `scan`.
     ScanConnect,
+    /// Bounded NDJSON publication and pre-parse error output.
+    OutputWriter,
 }
 
 impl Runtime {
@@ -34,13 +36,20 @@ impl Runtime {
             Self::Fuzz => "fuzz_progress",
             Self::Capture => "capture_progress",
             Self::ScanConnect => "scan_connect",
+            Self::OutputWriter => "output_writer",
         }
     }
 }
 
-/// Registers `runtime` for the `resources` report and returns it.
+/// Constructs a runtime with its owner's capacity and registers it for diagnostics.
 pub(crate) fn runtime(runtime: Runtime) -> packetcraftr::runtime::Runtime {
-    crate::resources::runtime(runtime.name(), packetcraftr::runtime::MAX_WORKER_CAPACITY)
+    let capacity = match runtime {
+        Runtime::OutputWriter => 1,
+        _ => packetcraftr::runtime::MAX_WORKER_CAPACITY,
+    };
+    let instance = packetcraftr::runtime::Runtime::new(capacity);
+    crate::resources::register_runtime(runtime.name(), &instance);
+    instance
 }
 
 /// The one client a command runs its workflows on: every system provider,

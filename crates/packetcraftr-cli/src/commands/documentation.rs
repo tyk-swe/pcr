@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! `documentation`: writes shell completions and man pages for the finalized
-//! command tree. It publishes no contract output, so startup runs it outside
+//! command tree. It publishes no contract output, so dispatch runs it outside
 //! the output pipeline and reports failures on stderr.
 
-pub(crate) mod arguments;
+pub(super) mod arguments;
 mod rendering;
 
 use std::path::Path;
@@ -18,7 +18,7 @@ use crate::errors::CliError;
 /// Generates shell completions and man pages from the finalized command tree,
 /// so the shipped documentation always describes the binary that produced it.
 /// One file lands per supported shell and per command under the directory.
-pub(crate) fn run(arguments: &Args) -> Result<(), CliError> {
+pub(super) fn run(arguments: &Args) -> Result<(), CliError> {
     let completions = arguments.directory.join("completions");
     let man = arguments.directory.join("man");
     for directory in [&completions, &man] {

@@ -34,7 +34,7 @@ impl super::Spec for Args {
 }
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
-    crate::input::validate_capture_stream_limits(args.limits)?;
+    args.limits.validate()?;
     if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {
         return Err(CliError::new(
             Kind::Usage,

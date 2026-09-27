@@ -14,11 +14,12 @@ use packetcraftr_core::analysis;
 use crate::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{omitted_diagnostic, prepare};
+use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::output::stats::Table;
 use crate::rendering::emit_aggregate;
+use crate::rendering::omitted_diagnostic;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::AggregateFormat;

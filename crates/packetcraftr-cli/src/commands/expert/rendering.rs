@@ -7,8 +7,8 @@ use packetcraftr_core::analysis;
 
 use crate::output;
 
-use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
+use crate::rendering::{Retained, omitted_diagnostic};
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
 pub(super) struct State {
@@ -74,7 +74,7 @@ pub(super) fn render_record(
 }
 
 pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
-    crate::commands::offline_analysis::render_clock(&summary.clock)?;
+    crate::rendering::render_clock(&summary.clock)?;
     let selected = &state.selected;
     // BTreeMap iteration is code order, so the per-code lines are deterministic.
     for (code, findings) in &selected.codes {

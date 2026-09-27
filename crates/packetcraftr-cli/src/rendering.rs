@@ -1,8 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Machine, capture-file, and human-terminal rendering.
+//! Machine, capture-file, and human-terminal rendering, including bounded
+//! field projection, application-event output, and retained aggregate results.
+//! Commands own input preparation and command-specific output restrictions.
 
+mod aggregate;
+mod analysis;
+mod application;
 mod capture_file;
 mod capture_writer;
 mod dns;
@@ -10,8 +15,13 @@ mod frame;
 mod human;
 mod machine;
 mod ndjson;
+mod projection;
+mod retained;
 mod style;
 
+pub(crate) use aggregate::render_aggregate_rows;
+pub(crate) use analysis::{ip_event_sink, render_clock, render_scope};
+pub(crate) use application::EventOutput;
 pub(crate) use capture_file::{stream_capture_error, write_capture_file, write_raw};
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_compressed_output};
 
@@ -35,4 +45,6 @@ pub(crate) use ndjson::{
     OUTPUT_TIMEOUT_MS, StreamEncoder, stdout_stream, write_unattributed_error,
 };
 
+pub(crate) use projection::{Projector, missing_fields_error};
+pub(crate) use retained::{Retained, omitted_diagnostic};
 pub(crate) use style::terminal_document;

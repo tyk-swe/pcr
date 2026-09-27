@@ -15,8 +15,8 @@ use crate::{
 use packetcraftr_core::{self as core, filter::Projection};
 use std::io::{self, Write};
 
-pub(super) struct Projector {
-    pub(super) projection: Projection,
+pub(crate) struct Projector {
+    pub(crate) projection: Projection,
     command: Command,
     format: Format,
     remaining: usize,
@@ -26,7 +26,7 @@ pub(super) struct Projector {
     header_written: bool,
 }
 impl Projector {
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         columns: &[String],
         maximum: usize,
         registry: &core::registry::Registry,
@@ -47,12 +47,6 @@ impl Projector {
         }
         let projection = Projection::compile(columns.iter().map(String::as_str), registry)
             .map_err(CliError::classified)?;
-        if command == Command::Capture && projection.requirements().stream_index {
-            return Err(CliError::new(
-                core::error::Kind::Usage,
-                "capture --field cannot select stream indices; save the capture and use read --field",
-            ));
-        }
         Ok(Some(Self {
             projection,
             command,
@@ -64,7 +58,7 @@ impl Projector {
             header_written: false,
         }))
     }
-    pub(super) fn remaining(&self) -> usize {
+    pub(crate) fn remaining(&self) -> usize {
         self.remaining
     }
     fn limit(&self) -> CliError {
@@ -102,7 +96,7 @@ impl Projector {
         self.header_written = true;
         Ok(())
     }
-    pub(super) fn emit(
+    pub(crate) fn emit(
         &mut self,
         source_frame: u64,
         values: Vec<Option<core::field::FieldValue>>,
@@ -152,7 +146,7 @@ impl Projector {
         self.count = self.count.checked_add(1).ok_or_else(|| self.limit())?;
         Ok(())
     }
-    pub(super) fn finish(
+    pub(crate) fn finish(
         mut self,
         frames_read: u64,
         captured_bytes_read: u64,
@@ -215,121 +209,9 @@ fn quoted(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
 
 /// The one rejection for a command output format that requires `--field`
 /// selections; each command applies it to the formats it declared projected.
-pub(super) fn missing_fields_error() -> CliError {
+pub(crate) fn missing_fields_error() -> CliError {
     CliError::new(
         core::error::Kind::Usage,
         "this output format requires --field selections",
     )
-}
-
-pub(super) fn read(
-    args: super::read::arguments::Args,
-    format: Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    crate::input::validate_capture_stream_limits(args.limits)?;
-    let bounds = args.epoch.resolve()?;
-    let registry = args.decode.registry()?;
-    let mut projector = Projector::prepare(
-        &args.fields,
-        args.max_projection_bytes,
-        &registry,
-        Command::Read,
-        format,
-    )?
-    .expect("field selection dispatch");
-    let filter = args
-        .filter
-        .as_deref()
-        .map(|source| {
-            crate::filtering::compile(
-                source,
-                &registry,
-                crate::filtering::Capabilities::stream_capable(),
-            )
-        })
-        .transpose()?;
-    let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
-    let mut frames = 0u64;
-    let mut bytes = 0u64;
-    if projector.projection.requirements().stream_index
-        || filter
-            .as_ref()
-            .is_some_and(|filter| filter.requirements().stream_index)
-    {
-        let summary = core::analysis::run(
-            &mut reader,
-            registry,
-            &core::analysis::Options {
-                time_bounds: bounds,
-                cancellation: Some(crate::cancellation::signal().clone()),
-                limits: core::analysis::Limits {
-                    max_frames: args.limits.max_frames,
-                    max_bytes: args.limits.max_bytes,
-                    max_frame_bytes: args.limits.reader.max_frame_bytes,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            |record| {
-                let kept = filter
-                    .as_ref()
-                    .map(|filter| record.matches(filter))
-                    .transpose()
-                    .map_err(|source| CliError::classified(source).into_boundary_error())?
-                    .unwrap_or(true);
-                if kept {
-                    let values = record
-                        .project(&projector.projection, projector.remaining())
-                        .map_err(|source| CliError::classified(source).into_boundary_error())?;
-                    projector
-                        .emit(record.number, values, stream)
-                        .map_err(CliError::into_boundary_error)?;
-                }
-                Ok(())
-            },
-        )
-        .map_err(CliError::classified)?;
-        frames = summary.frames_read;
-        bytes = summary.bytes_read;
-    } else {
-        // The stream-capable filter takes the analysis branch above, so the
-        // frame-at-a-time seam applies here.
-        let decoder =
-            core::filter::FrameDecoder::new(registry, filter, args.limits.reader.max_frame_bytes)
-                .map_err(CliError::classified)?;
-        let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
-            max_frames: args.limits.max_frames,
-            max_bytes: args.limits.max_bytes,
-        })
-        .map_err(CliError::classified)?;
-        while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-            budget
-                .charge(frame.captured_length())
-                .map_err(CliError::classified)?;
-            (frames, bytes) = (budget.frames(), budget.captured_bytes());
-            if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
-                continue;
-            }
-            let Some(decoded) = decoder
-                .decode_selected(frames, &frame)
-                .map_err(|error| crate::filtering::frame_error(frames, error))?
-            else {
-                continue;
-            };
-            let context = core::filter::Context {
-                decoded: &decoded,
-                derived: &[],
-                number: frames,
-                tcp_stream: None,
-                udp_stream: None,
-            };
-            let values = projector
-                .projection
-                .values(&context, projector.remaining())
-                .map_err(CliError::classified)?;
-            projector.emit(frames, values, stream)?;
-        }
-    }
-    projector.finish(frames, bytes, stream)
 }

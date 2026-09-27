@@ -4,8 +4,10 @@
 use clap::{Args, ValueEnum};
 use packetcraftr_core::analysis;
 use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::error::{Classification, Kind};
 
 use super::{MaxDurationArgs, RunTime};
+use crate::errors::CliError;
 use crate::output::resources::Value;
 use crate::resources::{Enabled, SettingValue, Settings, declare, policy_value};
 
@@ -93,6 +95,44 @@ impl CaptureReaderBoundsArgs {
 }
 
 impl OfflineCaptureLimitsArgs {
+    /// Checks the physical capture ceilings before opening an input.
+    pub(crate) fn validate(self) -> Result<(), CliError> {
+        let Self {
+            max_frames,
+            max_bytes,
+            reader:
+                CaptureReaderBoundsArgs {
+                    max_decoded_bytes: _,
+                    max_encoded_bytes: _,
+                    max_frame_bytes,
+                    max_interfaces,
+                },
+        } = self;
+        if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
+            return Err(CliError::from_classification(
+                Classification::new(
+                    "cli.capture_limit",
+                    Kind::Usage,
+                    Some("use finite non-zero capture frame, byte, packet, and interface limits"),
+                ),
+                "capture stream limits must be non-zero",
+                Vec::new(),
+            ));
+        }
+        if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
+            return Err(CliError::from_classification(
+                Classification::new(
+                    "cli.capture_limit",
+                    Kind::Usage,
+                    Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
+                ),
+                format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
+                Vec::new(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
             max_frames: Count @ PhysicalInput preset(10000, 1000000),
@@ -239,5 +279,41 @@ impl OfflineLimitsArgs {
             ip_idle_expiry_ms: Milliseconds @ ActiveState if index,
         ]);
         self.duration.resources(settings);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_stream_limits_reject_each_zero_and_cross_limit_case() {
+        let bounds =
+            |max_frames, max_bytes, max_frame_bytes, max_interfaces| OfflineCaptureLimitsArgs {
+                max_frames,
+                max_bytes,
+                reader: CaptureReaderBoundsArgs {
+                    max_encoded_bytes: 256 * 1024 * 1024,
+                    max_decoded_bytes: 256 * 1024 * 1024,
+                    max_frame_bytes,
+                    max_interfaces,
+                },
+            };
+
+        for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
+            let error = bounds(limits.0, limits.1, limits.2, limits.3)
+                .validate()
+                .expect_err("every capture bound must be non-zero");
+            assert_eq!(error.exit_code(), 2, "limits={limits:?}");
+            assert_eq!(error.classification.code, "cli.capture_limit");
+        }
+
+        let error = bounds(1, 7, 8, 1)
+            .validate()
+            .expect_err("one frame cannot exceed the aggregate byte budget");
+        assert_eq!(error.message, "max-frame-bytes 8 exceeds max-bytes 7");
+        bounds(1, 8, 8, 1)
+            .validate()
+            .expect("equal byte bounds are valid");
     }
 }

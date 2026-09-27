@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared, bounded setup for offline analysis commands.
+//! Preparation and collector-driven inspection for bounded offline analysis.
+//! Rendering and result retention are supplied by `rendering`.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::registry::Registry;
@@ -16,13 +16,11 @@ use std::path::Path;
 use analysis::StreamRef;
 use packetcraftr_core::error::Kind;
 
-use super::application_output::EventOutput;
 use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::input::validate_capture_stream_limits;
 use crate::output::contract::ToolFormat;
-use crate::rendering::StreamEncoder;
+use crate::rendering::{EventOutput, StreamEncoder, ip_event_sink};
 
 /// Validated, I/O-free analysis state.
 pub(super) struct AnalysisSetup {
@@ -65,7 +63,7 @@ pub(super) fn prepare(
     let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
-    validate_capture_stream_limits(capture)?;
+    capture.validate()?;
     let registry = decode.registry()?;
     let filter = filter_source
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
@@ -159,144 +157,4 @@ pub(super) fn inspect<C: analysis::Collector>(
         return Err(CliError::new(Kind::Usage, "selected stream is not present"));
     }
     Ok(outcome)
-}
-
-/// Retains output items under a finite ceiling while counting omissions.
-pub(super) struct Retained<T> {
-    maximum: usize,
-    items: Vec<T>,
-    omitted: u64,
-}
-
-impl<T> Retained<T> {
-    pub(super) const fn new(maximum: usize) -> Self {
-        Self {
-            maximum,
-            items: Vec::new(),
-            omitted: 0,
-        }
-    }
-
-    /// Converts and retains one item only while capacity remains; otherwise
-    /// counts it as omitted without calling the conversion.
-    pub(super) fn push(&mut self, convert: impl FnOnce() -> T) {
-        if self.items.len() >= self.maximum {
-            self.omitted = self.omitted.saturating_add(1);
-            return;
-        }
-        self.items.push(convert());
-    }
-
-    pub(super) const fn omitted(&self) -> u64 {
-        self.omitted
-    }
-
-    pub(super) fn into_items(self) -> Vec<T> {
-        self.items
-    }
-}
-
-/// The one diagnostic a document that left items out carries, so a truncated
-/// document never looks complete.
-pub(super) fn omitted_diagnostic(
-    code: &'static str,
-    subject: &str,
-    omitted: u64,
-    ceiling: &str,
-) -> Vec<core::diagnostic::Diagnostic> {
-    if omitted == 0 {
-        return Vec::new();
-    }
-    vec![core::diagnostic::Diagnostic::warning(
-        code,
-        format!("{omitted} {subject} omitted from this document by the {ceiling} ceiling"),
-    )]
-}
-
-/// Sink for IP reassembly lifecycle events, which only the NDJSON stream
-/// carries. The other formats fold the same information into their terminal
-/// `ip_reassembly` report, so a non-NDJSON `format` drops every event.
-pub(super) fn ip_event_sink<F>(
-    format: F,
-    stream: &StreamEncoder,
-) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
-where
-    F: Into<crate::output::contract::Format>,
-{
-    let stream = (format.into() == crate::output::contract::Format::Ndjson).then(|| stream.clone());
-    move |event| {
-        if let Some(stream) = &stream {
-            stream
-                .emit_data(crate::output::reassembly::Event::from(event), Vec::new())
-                .map_err(|error| CliError::from(error).into_boundary_error())?;
-        }
-        Ok(())
-    }
-}
-
-pub(super) fn render_scope(scope: &analysis::scope::Definition) -> Result<(), CliError> {
-    let scope = crate::output::analysis::Scope::try_from(scope.clone())?;
-    crate::rendering::write_stdout_line(format_args!(
-        "scope {}: interface {}, encapsulation {}",
-        scope.id,
-        crate::rendering::optional_display(scope.interface),
-        crate::rendering::encapsulation_text(&scope.encapsulation)
-    ))
-}
-
-pub(super) fn render_clock(clock: &analysis::ClockReport) -> Result<(), CliError> {
-    crate::rendering::write_stdout_line(format_args!(
-        "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
-        clock.regressions,
-        crate::rendering::duration_text(clock.max_regression),
-        crate::rendering::duration_text(clock.max_forward_step),
-        crate::rendering::optional_display(clock.max_forward_step_frame),
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn retention_skips_conversion_for_items_the_ceiling_keeps_out() {
-        let mut conversions = 0;
-        let mut retained = Retained::new(2);
-        for value in 0..5_u8 {
-            retained.push(|| {
-                conversions += 1;
-                value
-            });
-        }
-        assert_eq!(conversions, 2);
-        assert_eq!(retained.omitted(), 3);
-        assert_eq!(retained.into_items(), vec![0, 1]);
-
-        let mut empty = Retained::new(0);
-        empty.push(|| {
-            conversions += 1;
-            1_u8
-        });
-        assert_eq!(conversions, 2);
-        assert_eq!(empty.omitted(), 1);
-        assert!(empty.into_items().is_empty());
-    }
-
-    #[test]
-    fn a_complete_document_carries_no_omission_diagnostic() {
-        assert!(
-            omitted_diagnostic("expert.findings_omitted", "finding(s)", 0, "--max-frames")
-                .is_empty()
-        );
-
-        let diagnostics =
-            omitted_diagnostic("expert.findings_omitted", "finding(s)", 4, "--max-frames");
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].code, "expert.findings_omitted");
-        assert_eq!(
-            diagnostics[0].message,
-            "4 finding(s) omitted from this document by the --max-frames ceiling",
-        );
-    }
 }

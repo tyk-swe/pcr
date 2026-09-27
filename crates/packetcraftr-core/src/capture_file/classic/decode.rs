@@ -43,9 +43,7 @@ pub(in crate::capture_file) fn read_pcap_header<R: Read>(
             reason: "snapshot length must be non-zero",
         });
     }
-    // The classic-PCAP network word uses its low 16 bits for LINKTYPE and may
-    // carry standardized FCS metadata in the high bits. Do not misclassify a
-    // flagged Ethernet capture as an unknown 32-bit DLT.
+    // The low 16 bits are the LINKTYPE; the high bits may carry standardized FCS metadata.
     let network_word = decode_u32(endianness, &remaining[16..20])?;
     let link_type = LinkType(network_word & 0xffff);
     let mut raw = Vec::with_capacity(PCAP_GLOBAL_HEADER_LEN);

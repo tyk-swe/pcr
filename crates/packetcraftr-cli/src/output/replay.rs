@@ -11,19 +11,15 @@ use packetcraftr_netio::link::Mode as NetworkLinkMode;
 use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::Captured;
-// The schema resolves both replay interface fields to `$defs.interfaceId` and
-// both link-mode fields to `$defs.linkMode`.
 use super::network::{InterfaceId, LinkMode};
 
 published_enum! {
-    /// The capture file format a replay read.
     pub enum SourceFormat from packetcraftr_core::capture_file::Format {
         Pcap => "pcap",
         PcapNg => "pcap_ng",
     }
 }
 
-/// How a replay spaced its transmissions.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub enum Timing {
     #[serde(rename = "original")]
@@ -55,8 +51,6 @@ impl TryFrom<library::Timing> for Timing {
     }
 }
 
-/// A replay publishes its source frames as packet operations: every frame
-/// read was attempted, every frame transmitted completed.
 impl From<(&library::Report, Duration)> for Stats {
     fn from((summary, elapsed): (&library::Report, Duration)) -> Self {
         Self {
@@ -69,7 +63,6 @@ impl From<(&library::Report, Duration)> for Stats {
     }
 }
 
-/// Aggregate result of `replay`; per-frame evidence is emitted separately.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub source_format: SourceFormat,
@@ -88,8 +81,6 @@ pub struct Report {
     pub frames: Vec<Frame>,
 }
 
-/// A replay summary with the interface and link mode the caller requested
-/// and the per-frame evidence retained for the aggregate.
 impl<I: Into<InterfaceId>> TryFrom<(library::Report, Option<I>, NetworkLinkMode, Vec<Frame>)>
     for Report
 {

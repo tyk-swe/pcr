@@ -1,16 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Conventional aliases and packed-field selectors. Canonical
-//! `<protocol-or-alias>.<field>` paths already resolve through schemas;
-//! registering them again is rejected to prevent ambiguous lookup.
-
 use crate::registry::FilterFieldBinding;
 
 type Direct = (&'static str, &'static str, &'static str);
 type Either = (&'static str, &'static str, &'static [&'static str]);
 
-/// Alternate names for exactly one reflective field, as `(path, protocol, field)`.
 const DIRECT: &[Direct] = &[
     ("eth.src", "ethernet", "source"),
     ("eth.dst", "ethernet", "destination"),
@@ -20,7 +15,6 @@ const DIRECT: &[Direct] = &[
     ("vlan.etype", "vlan", "ether_type"),
     ("qinq.id", "vlan8021ad", "vlan_id"),
     ("qinq.etype", "vlan8021ad", "ether_type"),
-    // ARP, whose canonical names describe the roles rather than the wire.
     ("arp.opcode", "arp", "operation"),
     ("arp.src.hw_mac", "arp", "sender_hardware"),
     ("arp.src.proto_ipv4", "arp", "sender_protocol"),
@@ -63,8 +57,6 @@ const DIRECT: &[Direct] = &[
     ("mpls.bottom", "mpls", "bottom_of_stack"),
 ];
 
-/// TCP flags in wire order, exposed as `0`/`1`. RFC 9293 bit 8 is accurate ECN,
-/// historically named NS.
 const TCP_FLAG_BITS: &[(&str, u64)] = &[
     ("tcp.flags.fin", 0x001),
     ("tcp.flags.syn", 0x002),
@@ -79,12 +71,6 @@ const TCP_FLAG_BITS: &[(&str, u64)] = &[
     ("tcp.flags.ns", 0x100),
 ];
 
-/// Paths that read either endpoint of a pair.
-///
-/// A comparison holds when either field satisfies it, so `tcp.port == 443`
-/// finds both directions of a conversation. That also means `tcp.port != 443`
-/// holds whenever *either* endpoint differs; reach for `tcp.srcport` or
-/// `tcp.dstport` when the direction matters.
 const EITHER: &[Either] = &[
     ("eth.addr", "ethernet", &["source", "destination"]),
     ("ip.addr", "ipv4", &["source", "destination"]),
@@ -113,7 +99,6 @@ pub(super) fn register_filter_fields(
                 protocol: "tcp".into(),
                 field: "flags",
                 mask,
-                // Shift flags to compare as 0 or 1.
                 shift: mask.trailing_zeros(),
             },
         )?;

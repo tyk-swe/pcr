@@ -26,7 +26,6 @@ pub enum ResponseKind {
 }
 
 impl ResponseKind {
-    /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Intermediate => "intermediate",
@@ -50,7 +49,6 @@ impl std::fmt::Display for ResponseKind {
     }
 }
 
-/// Why a trace stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Termination {
@@ -61,7 +59,6 @@ pub enum Termination {
 }
 
 impl Termination {
-    /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::DestinationReached => "destination_reached",
@@ -108,8 +105,6 @@ pub struct UndecodedEvidence {
     pub frame: Frame,
 }
 
-/// Every event one trace published, joined with its terminal [`Report`]:
-/// each hop's probes in publication order.
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     pub target: String,
@@ -124,11 +119,8 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-/// What a trace publishes while it runs. Each event is answered before a
-/// later hop starts.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// A probe's final outcome.
     Probe {
         target: Arc<str>,
         probe: ProbeEvidence,
@@ -137,8 +129,7 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
-/// The terminal result of one trace, returned after every probe event was
-/// published. Diagnostics are not repeated here: each one already reached the
+/// Diagnostics are not repeated here: each one already reached the
 /// caller as [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Report {
@@ -151,10 +142,6 @@ pub struct Report {
     pub stats: Stats,
 }
 
-/// A sink that keeps every published probe outcome, undecoded frame, and
-/// diagnostic. Pass a clone to [`Client::traceroute`](crate::Client::traceroute)
-/// and [`finish`](Self::finish) the one kept with the report the trace
-/// returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Collected>);
 
@@ -199,12 +186,6 @@ impl Collected {
 }
 
 impl Collector {
-    /// Joins the collected events with the trace's terminal `report`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::IncoherentEvents`] when the collected probe outcomes
-    /// are not the ones the report counts.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Collected {
             hops,

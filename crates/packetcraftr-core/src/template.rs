@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded packet templates.
-
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -13,12 +11,6 @@ use crate::packet::Packet;
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 
 /// An inclusive ascending unsigned range expanded by a template axis.
-///
-/// `start` is the first value, `end` is the inclusive last value, and `step`
-/// is the positive stride between values. Descending ranges and zero steps
-/// are rejected so expansion size and ordering are always well defined.
-/// Values surface as [`FieldValue::Unsigned`]; layered field types decide
-/// whether each value is assignable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NumericRange {
     start: u64,
@@ -43,13 +35,10 @@ impl NumericRange {
         u128::from(self.end - self.start) / u128::from(self.step) + 1
     }
 
-    /// An inclusive range always holds at least its start value.
     pub fn is_empty(&self) -> bool {
         false
     }
 
-    /// Values in ascending order, stopping at the inclusive end. Stepping
-    /// past `end` or overflowing `u64` terminates the sequence.
     pub fn values(&self) -> impl Iterator<Item = FieldValue> + '_ {
         let (end, step) = (self.end, self.step);
         std::iter::successors(Some(self.start), move |value| {
@@ -62,10 +51,7 @@ impl NumericRange {
 #[derive(Clone, Debug)]
 struct TemplateAxis {
     layer: usize,
-    /// The field as the caller spelled it, for errors.
     field: String,
-    /// The spelling parsed once when the axis is declared; a spelling that is
-    /// not a path is reported as an unknown field when the axes are validated.
     path: Option<Path>,
     values: Vec<FieldValue>,
 }
@@ -85,12 +71,7 @@ impl Template {
     }
 
     /// Adds a varying field to the Cartesian product. Declaration order is
-    /// stable, with the last axis varying fastest. [`Self::expand`] rejects a
-    /// repeated field (including an alias of it), but only for a non-empty
-    /// product: an empty axis yields zero packets without validating any axis.
-    ///
-    /// `field` is the caller's spelling of a [`Path`], parsed once here; one
-    /// that is not a path fails validation as an unknown field.
+    /// stable, with the last axis varying fastest.
     #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
         let field = field.into();
@@ -103,8 +84,6 @@ impl Template {
         self
     }
 
-    /// Checked size of the Cartesian product: one without axes, zero when
-    /// any axis is empty. No packets are allocated while counting.
     pub fn expansion_len(&self) -> Result<usize, Error> {
         if self.axes.iter().any(|axis| axis.values.is_empty()) {
             return Ok(0);
@@ -117,9 +96,6 @@ impl Template {
     }
 
     /// Iterates the Cartesian product, refusing one larger than `maximum`.
-    ///
-    /// Every axis is validated before the iterator is returned, unless the
-    /// product is empty: then nothing is yielded and nothing is validated.
     pub fn expand(
         &self,
         maximum: usize,
@@ -146,8 +122,6 @@ impl Template {
                     index: axis.layer,
                     len: packet_len,
                 })?;
-                // Nonempty expansions validate every axis first, so each
-                // path parsed.
                 let path = axis.path.as_ref().ok_or_else(|| {
                     axis.error(field::Error::UnknownField {
                         protocol: *layer.protocol_id(),
@@ -190,8 +164,6 @@ impl Template {
                     field: canonical,
                 });
             }
-            // Check each supplied value once before yielding any packets. Each
-            // expanded packet still applies setters in declaration order.
             let mut editable = layer.clone_box();
             for value in &axis.values {
                 editable
@@ -276,7 +248,6 @@ mod tests {
             ]
         );
 
-        // An inclusive end that the step cannot reach is still the bound.
         let unaligned = NumericRange::new(3, 8, 2).expect("unaligned range");
         assert_eq!(unaligned.len(), 3);
         assert_eq!(
@@ -291,7 +262,6 @@ mod tests {
         let single = NumericRange::new(7, 7, 1).expect("single-value range");
         assert_eq!(single.values().collect::<Vec<_>>(), [7_u8.into()]);
 
-        // Stepping beyond the end must not wrap around into extra values.
         let wide = NumericRange::new(u64::MAX - 1, u64::MAX, u64::MAX).expect("wide-step range");
         assert_eq!(wide.len(), 1);
         assert_eq!(

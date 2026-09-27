@@ -119,8 +119,6 @@ fn sack_blocks(
         .collect()
 }
 
-/// Parses a constructed `options` field value: either verbatim bytes, which
-/// are parsed like the wire form, or a list of typed option objects.
 fn parse_field(
     value: FieldValue,
     schema: &'static Schema,
@@ -128,8 +126,7 @@ fn parse_field(
 ) -> Result<Vec<TcpOption>, field::Error> {
     if let FieldValue::Bytes(bytes) = value {
         // Decoded input is bounded by the data offset, but a constructed value
-        // carries no header, so bound it here rather than allocating an entry
-        // per byte and only rejecting the size at encode time.
+        // carries no header, so bound it here.
         if bytes.len() > MAX_OPTION_BYTES {
             return Err(out_of_range(schema, field));
         }
@@ -165,8 +162,7 @@ fn parse_option(
         None => None,
     };
     // `option_value` writes `data` for `Raw` alone, so its presence decides the
-    // variant ahead of the typed arms: a standard kind whose wire length was
-    // nonstandard decodes to `Raw` and has to round-trip back to `Raw`.
+    // variant ahead of the typed arms.
     let parsed = match (kind, data) {
         (KIND_END, None) => TcpOption::End,
         (KIND_NOP, None) => TcpOption::Nop,
@@ -211,7 +207,6 @@ mod tests {
             assert!(parse_field(options_value(&options), tcp_schema(), "options").is_err());
         }
         assert_eq!(serialize(&vec![TcpOption::Nop; 40]).unwrap(), vec![1; 40]);
-        // A malformed zero-block SACK remains representable as raw wire data.
         let raw = parse(&Bytes::from_static(&[5, 2]));
         assert_eq!(serialize(&raw).unwrap(), [5, 2]);
     }

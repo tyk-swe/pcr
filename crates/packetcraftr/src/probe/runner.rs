@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared bounded lifecycle for homogeneous probe workflows.
-
 mod batch_evidence;
 
 pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, Outcome};
@@ -20,29 +18,21 @@ use crate::execution::Executor;
 use crate::execution::{Context, Errors, Grant, Receipt, rate_delay};
 use crate::{Stats, evidence::SentPacket};
 
-/// A planned batch of probes executed together: one probe per scan batch,
-/// one hop's probes per traceroute batch. Never empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Batch<P> {
     pub(crate) probes: Vec<P>,
     pub(crate) timeout: Duration,
     pub(crate) permit: ExecutionPermit,
-    /// The first probe's operation-local sequence, recorded by the planner
-    /// that built the batch; it names the batch in every error the runner
-    /// reports.
     pub(crate) sequence: u64,
 }
 
 impl<P> Batch<P> {
-    /// Binds the execution context's grant so the executor runs the batch
-    /// under the clipped timeout and returns evidence for the fresh permit.
     fn bind(&mut self, grant: Grant) {
         self.timeout = grant.timeout;
         self.permit = grant.permit;
     }
 }
 
-/// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
 pub(crate) struct Evidence {
     pub(crate) permit: ExecutionPermit,
@@ -101,12 +91,6 @@ pub(crate) trait Sequenced {
     fn sequence(&self) -> u64;
 }
 
-/// Runs already-approved homogeneous batches through the execution context,
-/// which owns deadline, pacing, permit, timeout-clipping, and checked-statistics
-/// policy, and hands each batch's evidence to `evidence`, which validates it
-/// inside the step and processes it after. The runner supplies the pacing
-/// input: each batch waits for the previous batch's probe count at
-/// `probes_per_second`. A batch whose processing breaks ends the operation.
 pub(crate) fn run_batches<E, C, K, F, G>(
     batches: impl IntoIterator<Item = impl BorrowMut<Batch<K::Probe>>>,
     probes_per_second: Option<u32>,

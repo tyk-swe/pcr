@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Canonical hello fixture encoding. Extension bodies remain authoritative
-//! opaque bytes.
-
 use bytes::Bytes;
 
 use super::super::{

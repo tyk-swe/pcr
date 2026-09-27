@@ -3,10 +3,6 @@
 
 //! Policy-gated traceroute to authorized destinations, with finite hop, attempt,
 //! timeout, and evidence limits.
-//!
-//! [`Client::traceroute`](crate::Client::traceroute) runs a [`Request`] one
-//! hop at a time and publishes each [`Event`] to a sink; [`Collector`]
-//! rebuilds the [`Aggregate`].
 
 use crate::probe::Workflow;
 

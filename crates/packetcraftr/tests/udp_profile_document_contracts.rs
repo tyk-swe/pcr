@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The `packetcraftr.udp-profiles/v1` document.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -17,7 +15,6 @@ fn sample() -> Value {
     serde_json::from_str(SAMPLE).unwrap()
 }
 
-/// Reads the document as the CLI does: core parses it, the scan compiles it.
 fn parse_document(document: &[u8]) -> Result<BTreeMap<u16, Arc<UdpProfile>>, Error> {
     profile::compile(udp_profiles::parse(document)?)
 }
@@ -36,7 +33,6 @@ fn the_published_example_maps_each_port_to_a_shared_profile() {
     assert_eq!(profiles[&53].name(), "dns-example");
     assert!(Arc::ptr_eq(&profiles[&9000], &profiles[&9001]));
 
-    // The same profile under several assignments is compiled once.
     let mut repeated = sample();
     let first = repeated["profiles"][0].clone();
     let mut again = first.clone();

@@ -68,7 +68,6 @@ impl From<Table> for output::stats::Table {
     }
 }
 
-/// The aggregation the collector retains for the selected table.
 impl From<Table> for packetcraftr_core::analysis::stats::Table {
     fn from(value: Table) -> Self {
         match value {

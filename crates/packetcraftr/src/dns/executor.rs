@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The DNS executor seam: the capture-armed UDP [`Exchange`] every attempt
-//! runs, and the optional DNS-over-TCP [`TcpQuerier`] capability, both served
-//! by the client's exchange executor.
-
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -25,8 +21,6 @@ use super::evidence::{ResponseClassification, classify_response};
 use super::plan::Probe;
 
 /// One bounded UDP DNS query the executor transmits with capture armed first.
-///
-/// Response retention is bounded by `limits.max_evidence_frames`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Exchange {
     pub(crate) probe: Probe,
@@ -35,7 +29,6 @@ pub(crate) struct Exchange {
     pub(crate) permit: ExecutionPermit,
 }
 
-/// The evidence one [`Exchange`] produced, bound to its permit.
 #[derive(Clone, Debug)]
 pub(crate) struct ExchangeEvidence {
     pub(crate) permit: ExecutionPermit,
@@ -61,37 +54,26 @@ impl crate::execution::Step for Exchange {
     type Evidence = ExchangeEvidence;
 }
 
-/// One authorized DNS-over-TCP query, direct or following validated UDP
-/// truncation. It runs on a kernel socket, so it is a query, not an exchange:
-/// nothing is captured.
+/// It runs on a kernel socket, so it is a query, not an exchange: nothing is captured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TcpQuery {
-    /// Logical retry attempt, shared with UDP when this is a continuation.
     pub(crate) attempt: u32,
-    /// Already-reauthorized numeric server and DNS port.
     pub(crate) endpoint: SocketAddr,
     /// Exact DNS query message without the TCP length prefix.
     pub(crate) query: Bytes,
-    /// Time remaining in the bounded DNS attempt window.
     pub(crate) timeout: Duration,
-    /// Maximum response message bytes allowed before allocation.
     pub(crate) max_message_bytes: usize,
     pub(crate) permit: ExecutionPermit,
 }
 
-/// The socket evidence one [`TcpQuery`] produced, bound to its permit.
 #[derive(Clone, Debug)]
 pub(crate) struct TcpEvidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) response: super::tcp::Response,
 }
 
-/// The DNS-over-TCP capability an executor provides next to its UDP
-/// [`Executor`] implementation.
 pub(crate) trait TcpQuerier {
-    /// Runs one bounded DNS-over-TCP query. Expected socket and framing
-    /// failures are returned as typed data so the workflow can apply its
-    /// normal retry precedence.
+    /// Expected socket and framing failures are typed data, so normal retry precedence applies.
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error>;
 }
 
@@ -116,8 +98,7 @@ impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
                 max_responses, self.collection.max_responses
             )));
         }
-        // Everything the client captures is DNS evidence, which must fit the
-        // request's own bounds; refuse before any I/O rather than after.
+        // Captured evidence must fit the request's bounds; refuse before any I/O, not after.
         let capture = &self.collection.capture;
         if capture.max_frames > max_responses
             || capture.max_bytes > exchange.limits.max_evidence_bytes
@@ -190,9 +171,7 @@ impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     }
 }
 
-/// Queries over the client's TCP provider. Kernel TCP cannot honor
-/// packet-oriented route overrides, so a query refuses them before any
-/// provider I/O.
+/// Kernel TCP cannot honor packet-oriented route overrides, so a query refuses them before I/O.
 impl<P: Providers, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
         validate_tcp_route_options(&self.send.plan)?;

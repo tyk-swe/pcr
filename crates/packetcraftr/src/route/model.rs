@@ -8,15 +8,11 @@ use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, SelectionReason};
 
-/// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub link_mode: Mode,
-    /// The interface the route must leave through. A client resolves a name
-    /// or index selector after admission; [`plan`](super::plan) itself takes
-    /// only a resolved [`Interface::Id`](super::Interface::Id).
     pub interface: Option<super::Interface>,
     /// Interface-owned source that constrains route selection without rewriting packet source.
     pub preferred_source: Option<IpAddr>,
@@ -28,15 +24,10 @@ pub struct Plan {
     pub mode: Mode,
     /// Route lookup destination. For an SRH this is the first visited segment;
     /// for IPv4 LSRR/SSRR it is the header destination, the first hop the
-    /// route visits. Destination-free Layer 2 frames have no lookup
-    /// destination.
+    /// route visits.
     pub lookup_destination: Option<IpAddr>,
-    /// Final network-layer destination used for transport checksums. This is
-    /// absent for a packet containing no network-layer route.
+    /// Final network-layer destination used for transport checksums.
     pub final_destination: Option<IpAddr>,
-    /// Ordered source-route visit targets: the SRH segments still to visit, or
-    /// the IPv4 header destination followed by the remaining LSRR/SSRR hops;
-    /// without a source route, the single final destination.
     pub visited_destinations: Vec<IpAddr>,
     pub packet_source: Option<IpAddr>,
     pub neighbor_source: Option<IpAddr>,
@@ -57,8 +48,6 @@ impl Plan {
                 .is_none_or(|destination| !destination.is_multicast())
     }
 
-    /// The link type of the bytes this route puts on the wire: the planned
-    /// interface's link type at Layer 2, raw IP at Layer 3.
     pub(crate) fn wire_link_type(&self) -> Result<LinkType, packetcraftr_netio::Error> {
         match self.mode {
             Mode::Layer2 => Ok(self.decision.link_type),
@@ -68,8 +57,6 @@ impl Plan {
     }
 }
 
-/// Whether `destination` is an IPv4 broadcast the route delivers without a
-/// next hop.
 pub(super) fn is_ipv4_broadcast(route: &Decision, destination: Option<IpAddr>) -> bool {
     route.next_hop.is_none()
         && matches!(destination, Some(IpAddr::V4(address)) if

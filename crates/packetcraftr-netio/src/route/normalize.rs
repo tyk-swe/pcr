@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Validates and normalizes an operating-system route snapshot into a
-//! [`Decision`]. Every native route backend hands its answer here.
-
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::interface::validation::validate_native_interface;
@@ -123,8 +120,7 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
             let IpAddr::V4(address) = assigned.address else {
                 return false;
             };
-            // Rejecting prefix_length above 30 keeps host_bits within
-            // 2..=u32::BITS, so the mask shift below cannot overflow.
+            // Rejecting prefix_length above 30 keeps the mask shift below from overflowing.
             if assigned.prefix_length > 30 {
                 return false;
             }
@@ -225,7 +221,6 @@ fn fallback_source(addresses: &[interface::Address], destination: IpAddr) -> Opt
     best.map(|(address, _)| address)
 }
 
-// the match guards bound prefix_length to 32 and 128, so neither subtraction underflows
 fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> bool {
     match (source, destination) {
         (IpAddr::V4(source), IpAddr::V4(destination)) if prefix_length <= 32 => {

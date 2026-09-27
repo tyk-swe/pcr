@@ -6,22 +6,14 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::analysis::Error;
 
 /// Capture-global clock evidence, including filtered-out physical frames.
-/// Expiry uses the maximum timestamp offset from the first frame. Regressions
-/// clamp expiry to that high-water mark; forward jumps advance it immediately.
-/// Original timestamps are never rewritten. Mixed-interface clocks share this
-/// policy: these observations describe skew as well as clock discontinuities.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ClockReport {
-    /// Frames earlier than the greatest timestamp already observed.
     pub regressions: u64,
     pub max_regression: Duration,
-    /// Largest advance beyond the high-water mark; can indicate an outlier
-    /// or a legitimate capture gap. No arbitrary anomaly threshold is applied.
     pub max_forward_step: Duration,
     pub max_forward_step_frame: Option<u64>,
 }
 
-/// Maps capture time to monotonic instants anchored at the first frame.
 /// Backward timestamps clamp to the latest instant, so idle expiry never
 /// rewinds.
 pub(super) struct CaptureClock {
@@ -33,8 +25,7 @@ pub(super) struct CaptureClock {
     report: ClockReport,
 }
 
-/// Minimum capture-time advance between pushless expiry sweeps. Pushes always
-/// expire first; only idle cleanup on pushless frames may lag by one second.
+/// Minimum capture-time advance between pushless expiry sweeps.
 const SWEEP_GRANULARITY: Duration = Duration::from_secs(1);
 
 impl CaptureClock {
@@ -50,8 +41,6 @@ impl CaptureClock {
         }
     }
 
-    /// Returns a nondecreasing monotonic instant and this frame's timestamp
-    /// regression, if any. Backward timestamps cannot rewind idle accounting.
     pub(super) fn at(
         &mut self,
         timestamp: SystemTime,
@@ -91,7 +80,6 @@ impl CaptureClock {
         &self.report
     }
 
-    /// Whether capture time has advanced enough to justify an expiry sweep.
     pub(super) fn should_sweep(&mut self, now: Instant) -> bool {
         let due = self
             .swept

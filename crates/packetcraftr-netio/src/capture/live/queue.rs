@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Synchronized bounded capture queue and checked statistics accounting.
-
 use std::{
     collections::VecDeque,
     sync::{Condvar, Mutex, MutexGuard},
@@ -32,17 +30,13 @@ impl CaptureQueue {
     }
 
     /// Recover poisoned locks: mutations commit atomically with no cross-field
-    /// invariant, and the reader must still receive the panicking worker's
-    /// terminal error.
+    /// invariant.
     pub(super) fn lock(&self) -> MutexGuard<'_, CaptureState> {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Waits for a state change, returning the guard and whether it timed out.
-    ///
-    /// Poisoning is recovered from for the reason given on [`Self::lock`].
     pub(super) fn wait_timeout<'a>(
         &self,
         state: MutexGuard<'a, CaptureState>,
@@ -132,8 +126,6 @@ impl CaptureQueue {
         Ok(())
     }
 
-    /// Whether a frame of `frame_bytes` fits beside `frames` queued frames
-    /// that already hold `queued_bytes`.
     fn admits(&self, frames: usize, queued_bytes: usize, frame_bytes: usize) -> bool {
         frames < self.limits.max_frames
             && queued_bytes
@@ -141,8 +133,6 @@ impl CaptureQueue {
                 .is_some_and(|bytes| bytes <= self.limits.max_bytes)
     }
 
-    /// Plans the oldest-first eviction that makes room for `frame_bytes`, or
-    /// `None` when the frame would not fit even in an empty queue.
     fn plan_eviction(
         &self,
         state: &CaptureState,
@@ -211,7 +201,6 @@ impl CaptureQueue {
     }
 }
 
-/// Oldest frames to discard before a new frame is admitted.
 struct Eviction {
     frames: usize,
     bytes: usize,

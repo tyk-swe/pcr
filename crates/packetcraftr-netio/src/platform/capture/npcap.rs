@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Npcap capture source and interrupt lifecycle.
-
 #![allow(unsafe_code)]
 
 use std::{
@@ -61,8 +59,7 @@ pub(in crate::platform) fn open_capture(
             netmask.unwrap_or(PCAP_NETMASK_UNKNOWN),
         )?;
     }
-    // SAFETY: handle is activated and live; pcap_datalink only reads its
-    // negotiated link-layer type.
+    // SAFETY: handle is activated and live; pcap_datalink only reads its link-layer type.
     let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
@@ -73,8 +70,7 @@ pub(in crate::platform) fn open_capture(
             ),
             source: Diagnostic::new(Some(datalink), handle.error_message()).into_source(),
         })?;
-    // SAFETY: handle is activated and live; pcap_snapshot only reads its
-    // effective snapshot length.
+    // SAFETY: handle is activated and live; pcap_snapshot only reads its snapshot length.
     let reported_snap_length = unsafe { (handle.api.pcap_snapshot)(handle.raw.as_ptr()) };
     let snap_length = validate_effective_snapshot_length(
         "Npcap",
@@ -101,8 +97,6 @@ pub(in crate::platform) fn open_capture(
     })
 }
 
-/// The timestamp types the loaded Npcap runtime advertises for this
-/// interface, read from a created-but-not-activated handle.
 pub(in crate::platform) fn timestamp_types(
     interface: &InterfaceId,
 ) -> Result<Vec<TimestampType>, Error> {
@@ -114,8 +108,7 @@ pub(in crate::platform) fn timestamp_types(
             message: "the loaded Npcap runtime does not export pcap_list_tstamp_types".into(),
         });
     };
-    // The list is an allocation only pcap_free_tstamp_types releases, so a
-    // runtime without it cannot list types without leaking.
+    // Only pcap_free_tstamp_types releases the list, so a runtime without it would leak.
     let Some(free) = handle.api.pcap_free_tstamp_types else {
         return Err(Error::UnsupportedCaptureSetting {
             setting: "timestamp_source",
@@ -136,8 +129,7 @@ pub(in crate::platform) fn timestamp_types(
             source: Diagnostic::new(Some(count), handle.error_message()).into_source(),
         });
     }
-    // A zero count means only the default timestamp type is supported;
-    // Npcap returns no allocation, so the null list must not become a slice.
+    // Npcap returns no allocation for a zero count, so the null list must not become a slice.
     if count == 0 {
         return Ok(Vec::new());
     }
@@ -162,8 +154,7 @@ pub(in crate::platform) fn timestamp_types(
         .into_iter()
         .map(|value| {
             let name = handle.api.pcap_tstamp_type_val_to_name.and_then(|name| {
-                // SAFETY: the function returns a static NUL-terminated string
-                // or NULL; any text is copied inside this call.
+                // SAFETY: `name` returns a static NUL-terminated string or NULL, copied at once.
                 unsafe { tstamp_type_string(name(value)) }
             });
             let description = handle
@@ -183,13 +174,11 @@ pub(in crate::platform) fn timestamp_types(
         .collect())
 }
 
-/// Copies a static Npcap string, returning `None` for a NULL or empty one.
 unsafe fn tstamp_type_string(raw: *const std::ffi::c_char) -> Option<String> {
     if raw.is_null() {
         return None;
     }
-    // SAFETY: `raw` is NULL-checked above and points to a NUL-terminated
-    // string Npcap owns statically; the copy happens inside this call.
+    // SAFETY: `raw` is non-NULL and points to a static NUL-terminated Npcap string.
     let value = unsafe { CStr::from_ptr(raw) }
         .to_string_lossy()
         .into_owned();
@@ -210,9 +199,8 @@ fn install_capture_filter(
         instruction_count: 0,
         instructions: null_mut(),
     };
-    // SAFETY: handle is activated and live, program is a writable SDK-layout
-    // output structure, filter is NUL-terminated, and the API owner keeps the
-    // function pointer loaded for this call.
+    // SAFETY: handle is activated and live, program is a writable SDK-layout output,
+    // filter is NUL-terminated, and the API owner keeps the function pointer loaded.
     let compile_status = unsafe {
         (handle.api.pcap_compile)(
             handle.raw.as_ptr(),
@@ -250,8 +238,6 @@ fn install_capture_filter(
 struct NpcapCaptureSource {
     handle: Arc<NpcapHandle>,
     snap_length: usize,
-    /// The fraction unit the backend delivers in `timestamp.tv_usec`; never
-    /// assumed.
     timestamp_precision: TimestampPrecision,
 }
 
@@ -273,9 +259,8 @@ impl NativeCaptureSource for NpcapCaptureSource {
                     message: "Npcap returned a packet without a header".to_owned(),
                     source: None,
                 })?;
-                // SAFETY: a successful pcap_next_ex result guarantees the
-                // header remains valid until the next handle operation; we copy
-                // the fixed-size value immediately.
+                // SAFETY: after a successful pcap_next_ex the header stays valid until the next
+                // handle operation; the fixed-size value is copied immediately.
                 let header = unsafe { *header.as_ptr() };
                 let timestamp = system_time(
                     header.timestamp.tv_sec as i64,

@@ -80,7 +80,6 @@ pub(crate) struct Args {
     pub(crate) policy: HostnamePolicyArgs,
 }
 
-/// One window per hop batch.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HopWindow;
 

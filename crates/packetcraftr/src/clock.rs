@@ -9,27 +9,16 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::deadline::POLL_INTERVAL;
 
 /// The client's source of monotonic time and pacing delays.
-///
-/// A client anchors every workflow deadline and send schedule on its clock, so
-/// a deterministic clock drives a whole run. Capture waits stay on the capture
-/// session: a fake clock must share the real monotonic base with capture
-/// timestamps, starting from [`Instant::now`] and advancing only forward.
+/// A fake clock must share the real monotonic base with capture timestamps.
 pub trait Clock: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
-    /// Current monotonic time. Deterministic clocks must advance this value
-    /// when sleeping or simulating work.
+    /// Deterministic clocks must advance this value when sleeping or simulating work.
     fn now(&self) -> Instant {
         Instant::now()
     }
 
-    /// Waits `delay`, returning early once `deadline`'s cancellation is
-    /// signaled; the caller checks the deadline again afterwards.
-    ///
-    /// # Errors
-    ///
-    /// Returns the clock's own failure while the operation could still
-    /// continue.
+    /// Waits `delay`, returning early once `deadline`'s cancellation is signaled.
     fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
 }
 
@@ -45,8 +34,6 @@ impl Clock for SystemClock {
     }
 }
 
-/// Sleeps `delay` in slices no longer than [`POLL_INTERVAL`], stopping early
-/// once `stop` reports true.
 fn interruptible_sleep(delay: Duration, stop: impl Fn() -> bool) {
     let start = Instant::now();
     loop {

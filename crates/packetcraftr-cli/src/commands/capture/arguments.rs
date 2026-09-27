@@ -209,11 +209,9 @@ impl From<Retention> for crate::output::capture::Retention {
     }
 }
 
-/// Frames this operation only receives.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Captured;
 
-/// Frames one capture may keep; independent of the transmitted ceiling.
 pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
 
 impl Budget for Captured {
@@ -229,7 +227,6 @@ impl Budget for Captured {
     const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
 }
 
-/// The whole capture.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CaptureWindow;
 
@@ -238,7 +235,6 @@ impl Window for CaptureWindow {
     const HELP: &'static str = "Overall capture window in milliseconds";
 }
 
-/// Capture bytes on stdout, or the saved files with `--write`.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CaptureDestination;
 

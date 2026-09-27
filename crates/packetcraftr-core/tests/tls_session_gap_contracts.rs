@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for TLS sessions interrupted by reassembly gaps, evictions,
-//! truncation, and four-tuple reuse.
-
 mod common;
 
 use common::tls_capture::{Capture, Stream, assemble, assemble_default, complete_handshake};
@@ -23,7 +20,6 @@ fn a_reassembly_gap_reports_the_session_as_a_gap_with_a_reason() {
         &mut stream,
         &handshake_record(&client_hello(&ClientHelloSpec::default())),
     );
-    // The answer's first bytes never arrive, but later ones do.
     let answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
     capture.server_beyond(&mut stream, 32, &answer);
     let (sessions, summary) = assemble_default(&capture);
@@ -49,8 +45,6 @@ fn an_evicted_generation_ends_the_session_as_a_gap_and_the_next_one_starts_fresh
         &mut stream,
         &handshake_record(&client_hello(&ClientHelloSpec::default())),
     );
-    // A SYN on a sequence base the tracked generation cannot explain: the
-    // reassembler evicts the old generation, which retires the handshake.
     capture.reopen(&mut stream, 90_000);
     complete_handshake(&mut capture, &mut stream, 1);
     let (sessions, summary) = assemble_default(&capture);
@@ -99,8 +93,6 @@ fn a_gap_before_any_hello_lets_the_next_handshake_on_the_four_tuple_assemble() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
-    // Server bytes past a hole, so the flow holds pending data no hello was
-    // ever read from; the reopen below evicts it and reports the gap.
     capture.server_beyond(&mut stream, 32, b"beyond-the-hole");
     capture.reopen(&mut stream, 90_000);
     complete_handshake(&mut capture, &mut stream, 1);
@@ -128,8 +120,6 @@ fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
     let segments = split(&hello, 3);
     capture.client(&mut stream, &segments[0]);
     capture.client(&mut stream, &segments[1]);
-    // The middle segment as a capture with a short snaplen holds it: the last
-    // bytes were on the wire, so the stream moves on without them.
     let cut = capture.frames.pop().expect("the segment was pushed");
     let bytes = cut.bytes().slice(..cut.bytes().len() - 16);
     capture.frames.push(
@@ -166,8 +156,6 @@ fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
     assert_eq!(summary.buffer_limit_hits, 0);
 }
 
-/// The start of a handshake record that declares far more body than it
-/// carries, so a direction holds `length` bytes it cannot yet frame.
 fn unfinished_record(length: usize) -> Vec<u8> {
     let mut bytes = vec![22, 0x03, 0x03, 0x0f, 0xa0];
     bytes.resize(length, 0x77);
@@ -176,8 +164,6 @@ fn unfinished_record(length: usize) -> Vec<u8> {
 
 #[test]
 fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
-    // Both directions may hold a full direction's worth, so one conversation
-    // on its own can reach the aggregate ceiling with nothing to report.
     let limits = TlsLimits {
         max_buffered_bytes: 1_000,
         ..TlsLimits::default()
@@ -188,7 +174,6 @@ fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
     capture.open(&mut stream);
     capture.client(&mut stream, &unfinished_record(900));
     capture.server(&mut stream, &unfinished_record(900));
-    // No SYN retires the four-tuple: the next hello has to be enough.
     complete_handshake(&mut capture, &mut stream, 1);
     let (sessions, summary) = assemble(&capture, limits);
     assert_eq!(
@@ -206,7 +191,6 @@ fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
 
 #[test]
 fn deliveries_to_a_finished_direction_never_evict_another_session() {
-    // Room for one hello in flight, and a delivery far larger than that.
     let limits = TlsLimits {
         max_buffered_bytes: 40_000,
         ..TlsLimits::default()
@@ -221,8 +205,6 @@ fn deliveries_to_a_finished_direction_never_evict_another_session() {
     capture.open(&mut bystander);
     capture.client(&mut bystander, &hello);
     capture.client(&mut talker, &hello);
-    // Encrypted traffic ends what the client's direction can contribute, so
-    // everything after it is charged to nothing.
     capture.client(&mut talker, &application_data(1_000));
     for _ in 0..3 {
         capture.client(&mut talker, &application_data(50_000));

@@ -19,7 +19,6 @@ use crate::{Client, ProviderSet};
 type Fakes<T> =
     ProviderSet<FakeProviders, FakeProviders, FakeProviders, FakeProviders, T, FakeProviders>;
 
-/// A client under the default policy whose TCP provider is `tcp`.
 fn client<T: Provider<Stream: 'static> + Send + Sync + 'static>(tcp: T) -> Client<Fakes<T>> {
     let fake = FakeProviders::default();
     Client::new(
@@ -36,7 +35,6 @@ fn client<T: Provider<Stream: 'static> + Send + Sync + 'static>(tcp: T) -> Clien
     )
 }
 
-/// Runs the scan on `client`, collecting every attempt.
 fn collect<T: Provider<Stream: 'static> + Send + Sync + 'static>(
     client: &Client<Fakes<T>>,
     request: Request,
@@ -145,9 +143,6 @@ fn connect_windows_overlap_with_stable_identity_and_closed_socket_evidence() {
     assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
 }
 
-/// Resolves each admitted connect by port: divisible by three connects,
-/// one more refuses, two more never answer, so one run exercises the
-/// sent/received/lost accounting and every RTT verdict class.
 struct Verdicts {
     closed: Arc<AtomicUsize>,
 }

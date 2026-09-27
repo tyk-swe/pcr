@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ordered layer stacks, their size limits, and the link-layer values
-//! ([`MacAddress`], [`VlanTag`]) that packet inspection, routing, and neighbor
-//! discovery share.
-
 use std::fmt;
 
 use crate::layer::{Layer, Padding};
@@ -14,10 +10,6 @@ mod link;
 pub use limits::Limits;
 pub use link::{MacAddress, VlanKind, VlanTag};
 
-/// Exactly one ordered, arbitrary wire stack.
-///
-/// Cached encoded payload lengths are invalidated by every public operation
-/// that can change the layers or a layer's fields.
 #[derive(Clone, Default)]
 pub struct Packet {
     layers: Vec<Box<dyn Layer>>,
@@ -120,11 +112,6 @@ impl Packet {
             .find_map(|layer| layer.downcast_ref::<T>())
     }
 
-    /// Returns the first layer of type `T` for mutation.
-    ///
-    /// Obtaining mutable layer access invalidates cached encoded payload
-    /// lengths before the reference is returned. A failed type lookup does
-    /// not change the packet.
     pub fn get_mut<T: Layer>(&mut self) -> Option<&mut T> {
         let index = self.layers.iter().position(|layer| layer.is::<T>())?;
         self.invalidate_encoded_payload_lengths();
@@ -135,11 +122,6 @@ impl Packet {
         self.layers.get(index).map(Box::as_ref)
     }
 
-    /// Returns a layer at `index` for mutation.
-    ///
-    /// Obtaining mutable layer access invalidates cached encoded payload
-    /// lengths before the reference is returned. An out-of-bounds index does
-    /// not change the packet.
     pub fn layer_mut(&mut self, index: usize) -> Option<&mut dyn Layer> {
         if index >= self.layers.len() {
             return None;
@@ -152,8 +134,6 @@ impl Packet {
         self.layers.iter().map(Box::as_ref)
     }
 
-    /// Returns the cached number of encoded bytes after the layer at `index`.
-    ///
     /// The value includes trailing padding and is available only for packets
     /// produced by the decoder or builder without subsequent mutable access.
     pub fn encoded_payload_length(&self, index: usize) -> Option<usize> {
@@ -161,8 +141,6 @@ impl Packet {
     }
 
     fn invalidate_encoded_payload_lengths(&mut self) {
-        // Empty means every length is unknown; mutation neither scans the
-        // layer stack nor allocates placeholder entries.
         self.encoded_payload_lengths.clear();
     }
 }
@@ -213,7 +191,6 @@ impl<'a> IntoIterator for &'a Packet {
     }
 }
 
-/// Why a structural [`crate::packet::Packet`] operation was refused.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -243,8 +220,6 @@ impl crate::error::Classified for Error {
     }
 }
 
-/// Whether removing the layer at `index` would leave a padding layer whose
-/// declared boundary no longer has a layer to sit outside of.
 fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
     layers.iter().enumerate().any(|(padding_index, layer)| {
         layer.downcast_ref::<Padding>().is_some_and(|padding| {
@@ -273,7 +248,6 @@ fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
         };
         padding.outside_layer = match padding.outside_layer {
             Some(outside_layer) if outside_layer > index => Some(outside_layer.saturating_sub(1)),
-            // The successor now occupies the removed index.
             Some(outside_layer) if outside_layer == index => Some(index),
             value => value,
         };

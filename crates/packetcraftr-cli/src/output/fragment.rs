@@ -11,7 +11,6 @@ pub struct Fragment {
     pub fragment_index: u64,
     pub frame: Captured,
 }
-/// One fragment at its zero-based position in the set.
 impl TryFrom<(u64, Frame)> for Fragment {
     type Error = Error;
 
@@ -34,7 +33,6 @@ pub struct Complete {
     pub fragments: u64,
     pub bytes: u64,
 }
-/// The MTU a fragment set was cut for, and the set's totals.
 impl From<(usize, &[Frame])> for Complete {
     fn from((mtu, frames): (usize, &[Frame])) -> Self {
         Self {
@@ -49,7 +47,6 @@ pub struct Report {
     pub summary: Complete,
     pub fragments: Vec<Fragment>,
 }
-/// The set's totals and every fragment.
 impl From<(Complete, Vec<Fragment>)> for Report {
     fn from((summary, fragments): (Complete, Vec<Fragment>)) -> Self {
         Self { summary, fragments }

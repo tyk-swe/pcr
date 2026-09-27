@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Canonical interpretation of a packet's routing fields: the outer IP path,
-//! transport keys, VLAN tags, and every destination a packet declares. The protocol identity it interprets is
-//! [`BuiltinProtocol`](crate::protocol::BuiltinProtocol).
-
 mod destination;
 mod error;
 mod ipv4_option;

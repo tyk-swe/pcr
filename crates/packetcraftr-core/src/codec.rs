@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Extension contract for packet codecs.
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -31,16 +29,12 @@ pub enum Mode {
     Permissive,
 }
 
-/// Addresses an enclosing operation supplies so codecs can derive fields the
-/// packet itself does not carry, such as a transport pseudo-header.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Context {
     pub source: Option<IpAddr>,
     pub destination: Option<IpAddr>,
 }
 
-/// Why a codec refused to decode, encode, or construct a layer.
-///
 /// Not `Eq`: a [`Error::Rejected`] source compares by its rendered chain.
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
@@ -53,10 +47,8 @@ pub enum Error {
         needed: usize,
         available: usize,
     },
-    /// The codec's own rule refused the layer; `message` states the rule.
     #[error("invalid {protocol} layer: {message}")]
     Invalid { protocol: Id, message: String },
-    /// The protocol's typed model refused the layer; `source` says why.
     #[error("invalid {protocol} layer")]
     Rejected {
         protocol: Id,
@@ -72,8 +64,6 @@ pub enum Error {
 }
 
 impl Error {
-    /// Reports a protocol's typed failure as an invalid `protocol` layer,
-    /// retaining it as the source.
     pub fn rejected(protocol: Id, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Rejected {
             protocol,
@@ -115,9 +105,7 @@ pub struct LayerEncodeContext<'a> {
     pub mode: Mode,
     pub registry: &'a Registry,
     pub child: Option<&'a dyn Layer>,
-    /// Maximum additional bytes this layer may contribute without exceeding
-    /// the operation's configured packet-size limit. External codecs should
-    /// check this before allocating output buffers.
+    /// External codecs should check this before allocating output buffers.
     pub remaining_packet_bytes: usize,
 }
 
@@ -130,9 +118,6 @@ pub struct EncodedLayer {
 }
 
 impl EncodedLayer {
-    /// A layer that contributes a header and no trailer, which is every
-    /// built-in codec. A codec that emits trailing bytes assigns
-    /// [`Self::suffix`] afterwards.
     pub fn header(prefix: Vec<u8>, materialized: Box<dyn Layer>) -> Self {
         Self {
             prefix,
@@ -157,16 +142,10 @@ impl EncodedLayer {
 }
 
 pub struct LayerDecodeContext<'a> {
-    /// The decoded parent layer, absent at the capture root.
     pub parent: Option<Id>,
     pub registry: &'a Registry,
-    /// Whether bytes outside an IP-declared length may be link-layer padding.
     pub allow_trailing_padding: bool,
-    /// Network pseudo-header context established by an enclosing IP codec.
     pub network: Option<NetworkEnvelope>,
-    /// Parent-binding discriminator; `None` at the root. Distinguishes
-    /// ambiguous headers registered under multiple discriminators, such as
-    /// PPPoE stages.
     pub discriminator: Option<Discriminator>,
 }
 
@@ -178,15 +157,12 @@ pub struct NetworkEnvelope {
 
 pub struct DecodedLayer {
     pub layer: Box<dyn Layer>,
-    /// Number of leading input bytes consumed by this layer. The child
-    /// payload, when present, begins at this offset.
     pub consumed: usize,
     pub payload_len: usize,
     pub next: Vec<Discriminator>,
     pub fields: Vec<FieldLayout>,
     pub diagnostics: Vec<Diagnostic>,
     pub stop: bool,
-    /// New pseudo-header context to carry into child decoders.
     pub network: Option<NetworkEnvelope>,
 }
 
@@ -205,21 +181,13 @@ impl DecodedLayer {
     }
 }
 
-/// Encoder, bounded decoder, and expression factory for one protocol.
 pub trait LayerCodec: Send + Sync + fmt::Debug {
-    /// The protocol this codec registers under, borrowed from the protocol's
-    /// own reflective schema so no call allocates.
     fn protocol_id(&self) -> &'static Id;
 
-    /// Whether a decoded layer protocol is a valid result for this codec.
-    /// Most codecs return their own protocol. A decode-only multiplexing root
-    /// may explicitly admit the concrete protocols it selects.
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
         protocol == self.protocol_id()
     }
 
-    /// Publishes the reflective schema without requiring a constructible
-    /// layer. The default derives the schema from a default-constructed layer.
     fn published_schema(&self) -> Option<&'static Schema> {
         let fields = BTreeMap::new();
         self.make_layer(&fields).ok().map(|layer| layer.schema())
@@ -232,14 +200,8 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, Error>;
 
-    /// Decodes one layer from `input`, a refcounted view the codec may retain
-    /// (whole or via `Bytes::slice`) without copying. Callers that only hold a
-    /// borrowed slice copy it once into `Bytes` before calling.
     fn decode(&self, input: Bytes, context: &LayerDecodeContext<'_>)
     -> Result<DecodedLayer, Error>;
 
-    /// Constructs a layer from reflective fields, optionally defaulting
-    /// omissions. Expression/document parsing and the builder enforce
-    /// [`Layer::validate_required_fields`] on the result.
     fn make_layer(&self, fields: &BTreeMap<String, FieldValue>) -> Result<Box<dyn Layer>, Error>;
 }

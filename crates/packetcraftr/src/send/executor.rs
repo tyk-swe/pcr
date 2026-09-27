@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! One staged send: preparation, pacing, and final transmission checks.
-
 use super::Error;
 use crate::{
     Client, clock::Clock, evidence::SentPacket, preparation::Streaming, providers::Providers,

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exchange events and validation of their request identities and totals.
-
 use super::{Aggregate, Error, Report};
 use crate::evidence::SentPacket;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame};
@@ -16,7 +14,6 @@ pub struct Response {
     pub latency: Duration,
 }
 
-/// One exchange outcome, published when its classification becomes final.
 #[derive(Clone, Debug)]
 pub enum Event {
     Sent {
@@ -36,7 +33,6 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
-/// The events of one exchange, in publication order.
 #[derive(Default)]
 pub(crate) struct Observed {
     sent: Vec<(usize, Arc<SentPacket>)>,

@@ -15,7 +15,6 @@ use crate::test_support::{Failure, RecordingClock, TestErrors};
 #[error("pacing timer failed")]
 struct TimerFault;
 
-/// Monotonic test time: deadlines read it and [`ScriptedClock`] advances it.
 #[derive(Clone)]
 struct Time(Arc<Mutex<Instant>>);
 
@@ -35,8 +34,6 @@ impl Time {
     }
 }
 
-/// Records every sleep, advances [`Time`] by the delay plus `overrun`, and can
-/// raise a stop request or fail while sleeping.
 #[derive(Clone)]
 struct ScriptedClock {
     recording: RecordingClock,
@@ -104,8 +101,6 @@ fn executor_failure() -> BoundaryError {
     )
 }
 
-/// Runs a step whose work returns `stats` under the granted permit, after
-/// calling `during` to simulate what happens while the executor is blocked.
 fn run_step(
     context: &mut Context<'_, impl Clock, TestErrors>,
     timeout: Duration,
@@ -313,7 +308,6 @@ fn a_spent_budget_never_executes_a_step() {
         .expect_err("no budget remains for the step");
 
         match error {
-            // Exactly spent: the gate passes, but no timeout is left to grant.
             Failure::DurationLimit(3, exceeded) => {
                 assert_eq!(spent, Duration::from_secs(1));
                 assert_eq!(exceeded.limit, Duration::from_secs(1));

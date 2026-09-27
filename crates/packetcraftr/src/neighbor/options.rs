@@ -13,7 +13,6 @@ const MAX_CONFIGURED_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_CONFIGURED_CACHE_ENTRIES: usize = 65_536;
 const MIN_NEIGHBOR_SNAPSHOT_LENGTH: usize = 128;
 
-/// Finite work, retention, and cache bounds for active neighbor resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub max_attempts: u32,

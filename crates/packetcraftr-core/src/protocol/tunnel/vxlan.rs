@@ -24,23 +24,14 @@ use crate::protocol::BuiltinProtocol;
 const NAME: &str = BuiltinProtocol::Vxlan.as_str();
 
 const VXLAN_LEN: usize = 8;
-/// The I flag: the VNI field is valid. RFC 7348 requires it set and every
-/// other flag bit clear.
 const VNI_VALID_FLAG: u8 = 0x08;
 
 /// VXLAN encapsulation header (RFC 7348).
-///
-/// The inner payload is always an Ethernet frame, so the codec advertises a
-/// single child discriminator rather than carrying a protocol field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vxlan {
-    /// Flag byte; RFC 7348 defines only the VNI-valid bit.
     pub flags: u8,
-    /// 24-bit VXLAN network identifier.
     pub vni: u32,
-    /// Reserved 24 bits between the flags and the VNI.
     pub reserved1: u32,
-    /// Reserved byte after the VNI.
     pub reserved2: u8,
 }
 
@@ -66,8 +57,6 @@ reflective_layer! {
     layout pub(crate) fn vxlan_layout();
 }
 
-/// The first reserved field holding a non-zero value, which a reserved-bits
-/// diagnostic names.
 fn nonzero_reserved_field(reserved1: u32, reserved2: u8) -> Option<&'static str> {
     if reserved1 != 0 {
         Some("reserved1")
@@ -99,10 +88,6 @@ impl LayerCodec for VxlanCodec {
         }
 
         let mut diagnostics = Vec::new();
-        // The header is only ever followed by its encapsulated frame; without
-        // one the bytes dissect into a missing-required-child error. The
-        // shared discriminator validation accepts a malformed child, so
-        // dissected captures of truncated inner frames always rebuild.
         validate_raw_child_discriminator(NAME, 0, context, &mut diagnostics)?;
         if layer.flags != VNI_VALID_FLAG {
             strict_or_diagnostic(
@@ -178,7 +163,6 @@ impl LayerCodec for VxlanCodec {
             layer: Box::new(layer),
             consumed: VXLAN_LEN,
             payload_len,
-            // The encapsulated frame is always Ethernet.
             next: vec![Discriminator(0)],
             diagnostics,
             stop: payload_len == 0,

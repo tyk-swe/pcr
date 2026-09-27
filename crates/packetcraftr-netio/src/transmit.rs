@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The transmission contract: a [`Provider`] sends one routed Layer 2 frame or
-//! Layer 3 packet, and the native [`SystemProvider`] dispatches each to the
-//! backend compiled in for its layer. Callers own policy authorization.
-
 #[cfg(native_layer3)]
 pub(crate) mod raw_ip;
 
@@ -20,9 +16,6 @@ use super::link::Mode;
 use super::route::Decision;
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
-///
-/// Each variant is one unrelated failure: they are never interchangeable and
-/// never distinguished by inspecting a message.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SendEvidenceFault {
@@ -40,22 +33,15 @@ impl Classified for SendEvidenceFault {
     }
 }
 
-/// The route facts a transmission backend checks before sending: the
-/// selected interface decision, the resolved link mode, and the destination
-/// the route was looked up for.
-///
-/// This is a borrowed view of a finished route; planning and neighbor
-/// resolution happen before a frame is built.
+/// The route facts a transmission backend checks before sending.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Route<'a> {
     pub decision: &'a Decision,
     pub mode: Mode,
-    /// Destination the route was looked up for; absent for destination-free
-    /// Layer 2 frames.
+    /// Destination the route was looked up for; absent for destination-free Layer 2 frames.
     pub lookup_destination: Option<IpAddr>,
 }
 
-/// Complete Layer 2 frame with a verified Layer 2 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {
     bytes: &'a Bytes,
@@ -77,7 +63,6 @@ impl<'a> Layer2Frame<'a> {
     }
 }
 
-/// Raw Layer 3 packet with a verified Layer 3 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer3Frame<'a> {
     bytes: &'a Bytes,
@@ -99,8 +84,6 @@ impl<'a> Layer3Frame<'a> {
     }
 }
 
-/// One routed transmission: a Layer 2 frame or a Layer 3 packet, tagged by the
-/// link mode its route resolved to.
 #[derive(Clone, Copy, Debug)]
 pub enum Outbound<'a> {
     Layer2(Layer2Frame<'a>),
@@ -108,7 +91,6 @@ pub enum Outbound<'a> {
 }
 
 impl<'a> Outbound<'a> {
-    /// Selects the layer from the route's resolved mode.
     pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         match route.mode {
             Mode::Layer2 => Layer2Frame::try_new(bytes, route).map(Self::Layer2),
@@ -141,7 +123,6 @@ fn require_link_mode(route: Route<'_>, expected: Mode) -> Result<(), Error> {
     }
 }
 
-/// A monotonic/wall-clock observation captured as one provider event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeMarker {
     monotonic: Instant,
@@ -165,12 +146,7 @@ impl TimeMarker {
     }
 }
 
-/// Provider-established transmission timing.
-///
-/// An exact marker identifies the provider's successful commit event. A
-/// submission interval means only that acceptance occurred after `started`
-/// and no later than `completed`; captures inside that interval are not proven
-/// to be post-send.
+/// Captures inside a submission interval are not proven to be post-send.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Timing {
     started: TimeMarker,
@@ -188,18 +164,13 @@ impl Timing {
         self.completed
     }
 
-    /// Whether monotonic endpoints describe a valid interval or exact event.
     pub fn is_consistent(self) -> bool {
         self.started.monotonic <= self.completed.monotonic
             && (!self.exact || self.started.monotonic == self.completed.monotonic)
     }
 }
 
-/// In-progress injected-provider submission.
-///
-/// Providers that lack an exact commit event create this immediately before
-/// entering their send operation and complete it only after success. Clock
-/// endpoints cannot be supplied independently by callers.
+/// Created immediately before entering a send operation and completed only after success.
 #[derive(Debug)]
 pub struct Submission {
     started: TimeMarker,
@@ -237,7 +208,6 @@ pub struct Report {
 }
 
 impl Report {
-    /// Records an exact successful provider commit at the call site.
     pub fn committed(bytes_sent: usize, wire_bytes: Bytes) -> Self {
         let committed = TimeMarker::now();
         Self {
@@ -263,8 +233,6 @@ impl Report {
         self.timing
     }
 
-    /// Validates count, exact accepted bytes, and provider monotonic timing for
-    /// one submitted frame.
     pub fn validate_exact(&self, expected: &Bytes) -> Result<(), super::Error> {
         if self.bytes_sent != expected.len() {
             return Err(super::Error::PartialSend {
@@ -292,15 +260,10 @@ impl Report {
     }
 }
 
-/// Sends one routed Layer 2 frame or Layer 3 packet and reports the bytes the
-/// backend accepted.
 pub trait Provider: Send + Sync {
     fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error>;
 }
 
-/// Transmission provider backed by the native backend for each layer: Layer 2
-/// injection with `native-layer2` and raw IP with `native-layer3`. A layer
-/// that isn't compiled in fails with a classified capability error.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
@@ -314,7 +277,6 @@ impl Provider for SystemProvider {
                 super::platform::send_layer2(frame)
             }
             Outbound::Layer3(packet) => {
-                // A renamed, removed, or recreated interface must not receive the packet.
                 #[cfg(native_layer3)]
                 super::platform::verify_interface_identity(&packet.route().decision.interface)?;
                 super::platform::send_layer3(packet)

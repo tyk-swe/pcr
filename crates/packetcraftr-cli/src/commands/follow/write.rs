@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Staged per-direction payload files for `follow --write`.
-
 use std::io::Write;
 use std::path::Path;
 
@@ -29,10 +27,7 @@ pub(super) struct Written {
     pub(super) bytes: u64,
 }
 
-/// Stages per-direction files under one output-byte budget. Each publishes
-/// atomically without overwriting, in deterministic order. On failure, attempts
-/// to remove files already published and reports cleanup errors; unpublished
-/// temporary files are removed on drop.
+/// Each file publishes atomically without overwriting, in deterministic order.
 #[derive(Debug)]
 pub(super) struct DirectionFiles {
     staged: Vec<Staged>,
@@ -40,8 +35,7 @@ pub(super) struct DirectionFiles {
 }
 
 impl DirectionFiles {
-    /// Stages one file per selected direction, failing before any capture is
-    /// read when the directory or a destination is unusable.
+    /// Fails before any capture is read when the directory or a destination is unusable.
     pub(super) fn stage(
         directory: &Path,
         selector: StreamRef,
@@ -74,8 +68,6 @@ impl DirectionFiles {
         })
     }
 
-    /// Appends one chunk to its direction's staged file, charging the shared
-    /// output-byte budget across every direction file.
     pub(super) fn write(&mut self, chunk: &Chunk) -> Result<(), CliError> {
         let Some(staged) = self
             .staged
@@ -108,9 +100,6 @@ impl DirectionFiles {
         Ok(())
     }
 
-    /// Flushes and publishes in deterministic order, including empty
-    /// directions. On failure, removes published files where possible and
-    /// reports cleanup errors.
     pub(super) fn publish(self) -> Result<Vec<Written>, CliError> {
         self.publish_with(StagedFile::sync, |path| std::fs::remove_file(path))
     }
@@ -258,8 +247,6 @@ mod tests {
         files
             .write(&chunk(PeerDirection::ServerToClient, b"world"))
             .unwrap();
-        // A colliding server destination appears after staging: publishing the
-        // client file must be rolled back and the colliding file untouched.
         let collision = directory.path().join("tcp-7-server.bin");
         std::fs::write(&collision, b"someone else").expect("colliding file");
         let error = files.publish().expect_err("publish fails");

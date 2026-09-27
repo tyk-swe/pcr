@@ -15,33 +15,17 @@ use crate::field::{FieldKind, FieldValue};
 use crate::layer::Layer;
 use crate::registry::FilterFieldBinding;
 
-/// Everything a compiled filter may read about one packet.
-///
-/// The dissected packet supplies protocol fields; the rest are per-frame or
-/// per-conversation facts that no layer carries.
 #[derive(Clone, Copy, Debug)]
 pub struct Context<'a> {
     pub decoded: &'a DecodedPacket,
-    /// Completed IP datagrams attached to the same physical frame, ordered
-    /// from outermost to innermost; empty for an unfragmented frame. Layer
-    /// predicates see only the layers each completion newly exposed, while
-    /// frame facts and physical fragment layers remain sourced from `decoded`.
+    /// Completed IP datagrams on the same physical frame, outermost to innermost.
     pub derived: &'a [DerivedPacket<'a>],
     /// Position of this frame in the stream, counted from 1.
     pub number: u64,
-    /// Conversation index of the frame's innermost TCP flow, when the caller
-    /// maintains an index and the frame has one. A filter that reads
-    /// `tcp.stream` while this is [`None`] simply does not match; callers
-    /// check [`super::Requirements`] up front so that never happens silently.
     pub tcp_stream: Option<u64>,
-    /// Conversation index of the frame's innermost UDP flow, kept separate so
-    /// `udp.stream` never observes a TCP index on an encapsulated frame that
-    /// belongs to both kinds of conversation.
     pub udp_stream: Option<u64>,
 }
 
-/// One reconstructed packet view and the number of its leading layers that
-/// were already visible in the view which supplied its fragments.
 #[derive(Clone, Copy, Debug)]
 pub struct DerivedPacket<'a> {
     pub decoded: &'a DecodedPacket,
@@ -77,10 +61,6 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
     }
 }
 
-/// Layers of one protocol, optionally narrowed to a single occurrence.
-///
-/// Packet order is outermost first, so occurrence 1 is the outer header of a
-/// tunnelled stack and occurrence 2 the encapsulated one.
 fn layers<'a>(
     context: &'a Context<'a>,
     protocol: &'a str,
@@ -100,14 +80,11 @@ fn layers<'a>(
         .filter(move |layer| layer.protocol_id().as_str() == protocol)
         .enumerate()
         .filter_map(move |(index, layer)| match occurrence {
-            // Occurrences are 1-based, so shift before comparing.
             Some(wanted) if index.saturating_add(1) != wanted => None,
             _ => Some(layer),
         })
 }
 
-/// Tests whether any value read by this path satisfies `predicate`, including
-/// repeated layers and `Either` bindings. This also applies to `!=`.
 pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
     F: FnMut(&FieldValue) -> bool,
@@ -120,9 +97,6 @@ where
     matched
 }
 
-/// Offers values to `consume` until it returns true. Owned layer fields can be
-/// moved into projections; nested fields stay borrowed until a consumer retains
-/// them.
 pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
 where
     F: FnMut(Cow<'_, FieldValue>) -> bool,
@@ -187,14 +161,11 @@ fn is_set(value: &FieldValue) -> bool {
         FieldValue::Bool(value) => *value,
         FieldValue::Unsigned(value) => *value != 0,
         FieldValue::Signed(value) => *value != 0,
-        // Other representations are set by presence.
         _ => true,
     }
 }
 
-/// Whether [`project`] supports byte slicing for this field kind. The compiler
-/// rejects other kinds; keep this list aligned with the projection
-/// implementation.
+/// The compiler rejects other kinds; keep this list aligned with the projection implementation.
 pub(super) fn byte_addressable(kind: FieldKind) -> bool {
     matches!(
         kind,
@@ -202,11 +173,6 @@ pub(super) fn byte_addressable(kind: FieldKind) -> bool {
     )
 }
 
-/// Applies the bit selection and byte slice a path asked for.
-///
-/// Returns [`None`] when the value cannot be read that way, for example
-/// slicing a number or masking text; such a path contributes no candidate
-/// rather than matching something unintended.
 fn project(
     value: FieldValue,
     binding: &FilterFieldBinding,
@@ -235,9 +201,6 @@ fn project(
     )?))
 }
 
-/// Applies a byte slice to a borrowed field. Unsliced values stay borrowed;
-/// sliced `Bytes` shares storage, while other byte-addressable kinds copy the
-/// range.
 fn project_nested<'a>(
     value: &'a FieldValue,
     slice: Option<ByteSlice>,
@@ -259,9 +222,6 @@ fn project_nested<'a>(
     }
 }
 
-/// Clamps a byte slice's range to `len`. A start past the end, or a non-empty
-/// bounded range starting at the end (such as `[len]`), selects no value; an
-/// open `[len:]` still selects the empty tail.
 fn slice_range(len: usize, slice: ByteSlice) -> Option<(usize, usize)> {
     if slice.start >= len && slice.end.is_some_and(|end| end > slice.start) {
         return None;
@@ -270,7 +230,6 @@ fn slice_range(len: usize, slice: ByteSlice) -> Option<(usize, usize)> {
     (slice.start <= end).then_some((slice.start, end))
 }
 
-/// Reads a fixed-size byte-addressable value as the selected byte run.
 fn sliced_bytes(bytes: &[u8], slice: ByteSlice) -> Option<FieldValue> {
     let (start, end) = slice_range(bytes.len(), slice)?;
     Some(FieldValue::Bytes(Bytes::copy_from_slice(

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Linux route lookup backed by route netlink.
-
 use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;

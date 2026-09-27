@@ -502,7 +502,6 @@ fn alpn_keeps_the_raw_bytes_of_a_name_that_is_not_utf8() {
         Some(&b"\xffh2"[..])
     );
     assert_eq!(hello.alpn_raw.len(), 2);
-    // The text form is lossy, which is why the raw bytes are kept.
     assert_eq!(hello.alpn, vec!["\u{fffd}h2".to_owned(), "h2".to_owned()]);
 }
 
@@ -531,8 +530,6 @@ fn a_server_name_list_reports_the_first_host_name_entry() {
 
 #[test]
 fn a_u16_list_past_its_entry_cap_is_malformed() {
-    // The cap sits above what one extension body can carry, so it is
-    // asserted here directly rather than through a hello.
     let limit = MAX_EXTENSION_LEN / 2;
     let input = vec![0u8; (limit + 1) * 2];
     let error =

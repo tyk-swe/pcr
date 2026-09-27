@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Why a native route or interface-route lookup failed.
-
 use std::net::IpAddr;
 
 use thiserror::Error as ThisError;
@@ -12,14 +10,11 @@ use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 
 use crate::Unsupported;
 
-/// Native route/interface errors. An operating-system refusal keeps the
-/// platform's own error as its `source`.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
-    /// The caller's deadline expired before the native lookup answered.
     #[error("live operation deadline expired while {operation}")]
     DeadlineExceeded { operation: &'static str },
     #[error(transparent)]
@@ -61,8 +56,6 @@ pub enum Error {
 }
 
 impl Error {
-    /// The failure a backend reports when its caller's deadline stopped it
-    /// while `operation` was in progress.
     pub(crate) fn interrupted(interrupted: Interrupted, operation: &'static str) -> Self {
         match interrupted {
             Interrupted::Cancelled(cancelled) => cancelled.into(),

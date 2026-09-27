@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for TLS session ceilings: direction and aggregate buffers,
-//! the session table, and the public limit and model types.
-
 mod common;
 
 use common::tls_capture::{Capture, Stream, assemble, assemble_default, complete_handshake};
@@ -21,8 +18,6 @@ fn a_direction_buffer_ceiling_reports_malformed_without_buffering_past_it() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
-    // Nine 16 KiB records of a handshake message that never completes: the
-    // ninth would take the direction past MAX_DIRECTION_BUFFER.
     let stream_bytes = unfinished_handshake(9, 16_384);
     for segment in split(&stream_bytes, 16) {
         capture.client(&mut stream, &segment);
@@ -35,7 +30,6 @@ fn a_direction_buffer_ceiling_reports_malformed_without_buffering_past_it() {
         "the fixture must exceed the ceiling"
     );
 
-    // The same stream after a hello, so the session exists and is reported.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -67,14 +61,11 @@ fn the_aggregate_buffer_ceiling_retires_the_oldest_handshake_as_a_gap() {
         ..ClientHelloSpec::default()
     }));
     let head = split(&hello, 2);
-    // Room for one hello in flight, not two.
     let limits = || TlsLimits {
         max_buffered_bytes: hello.len() + 8,
         ..TlsLimits::default()
     };
 
-    // The conversation retired for the newcomer assembled nothing, so it is
-    // dropped rather than reported.
     let mut capture = Capture::new();
     let mut first = Stream::new(40_001);
     let mut second = Stream::new(40_002);
@@ -96,8 +87,6 @@ fn the_aggregate_buffer_ceiling_retires_the_oldest_handshake_as_a_gap() {
     assert_eq!(sessions[0].status, Status::Complete);
     assert_eq!(sessions[0].client_endpoint.port, 40_002);
 
-    // With the retired conversation far enough along to be a session, the
-    // same ceiling reports it rather than dropping it.
     let mut capture = Capture::new();
     let mut first = Stream::new(40_001);
     let mut second = Stream::new(40_002);
@@ -196,8 +185,6 @@ fn mutated_handshake_bytes_never_panic_and_never_grow_past_a_ceiling() {
 
 #[test]
 fn a_many_session_capture_stays_within_its_ceilings() {
-    // Sequential conversations: each finishes before the next starts, so the
-    // session table only ever holds retired entries beyond its ceiling.
     let mut capture = Capture::new();
     for index in 0..64_u16 {
         let mut stream = Stream::new(41_000 + index);
@@ -222,8 +209,6 @@ fn a_many_session_capture_stays_within_its_ceilings() {
         );
     }
 
-    // Interleaved conversations that all stay in flight: the ceiling is what
-    // bounds memory, and every retirement is reported.
     let mut capture = Capture::new();
     let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
     let mut streams = (0..32_u16)

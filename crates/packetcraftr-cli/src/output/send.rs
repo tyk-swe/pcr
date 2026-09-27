@@ -10,7 +10,6 @@ use crate::output::frame::Captured;
 use crate::output::frame::Wire;
 use crate::output::network::Plan;
 
-/// Serializable route materialization evidence retained by send-like commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct MaterializedRoute {
     pub plan: Plan,
@@ -18,7 +17,6 @@ pub struct MaterializedRoute {
     pub neighbor: Option<NeighborEvidence>,
 }
 
-/// Per-target neighbor-resolution evidence for a transmitted packet.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NeighborEvidence {
     pub mac_address: String,
@@ -57,25 +55,20 @@ impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
     }
 }
 
-/// One confirmed transmission inside a set send.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SentFrame {
-    /// One-based pass over the packet set.
     pub pass: u32,
-    /// Zero-based index of the packet within one expansion pass.
     pub index: u64,
     pub frame: Wire,
     pub route: MaterializedRoute,
 }
 
-/// Aggregate result of `send`; operation statistics live in the envelope.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub frames: Vec<SentFrame>,
     pub passes_completed: u32,
 }
 
-/// A packet-set transmission, with each builder diagnostic code once.
 impl TryFrom<packetcraftr::send::Aggregate> for Published<Report> {
     type Error = Error;
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Captured-frame text shared by every command that prints frames.
-
 use std::fmt;
 
 use crate::errors::CliError;
@@ -10,8 +8,6 @@ use crate::output;
 
 use super::{render_diagnostics_text, render_dns_records, spaced_hex, write_stdout_line};
 
-/// One frame line for text output, with the dissected stack and its
-/// diagnostics when the command decoded the frame.
 pub(crate) fn render_frame_text(
     source_frame: output::frame::SourceFrame,
     frame: &output::frame::Captured,
@@ -47,9 +43,6 @@ pub(crate) fn render_frame_text(
     }
 }
 
-/// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
-/// so the section's format string lives here alone while each command keeps
-/// its own row type.
 pub(crate) fn render_undecoded<'a>(
     rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
 ) -> Result<(), CliError> {

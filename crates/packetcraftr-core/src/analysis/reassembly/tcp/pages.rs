@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Sparse fixed-size payload pages. Interval topology lives separately, so
-//! extending an interval never reallocates or copies its retained payload.
+//! Sparse fixed-size payload pages; extending an interval never copies its retained payload.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -40,7 +39,6 @@ pub(super) fn allocate() -> Result<Page, Error> {
     })
 }
 
-/// Visit page-local slices without narrowing a sequence offset to usize.
 fn slices(range: Range<u64>, mut visit: impl FnMut(u64, Range<usize>)) {
     for key in page_keys(range.clone()) {
         let base = key * PAGE_BYTES as u64;
@@ -89,7 +87,6 @@ pub(super) fn insert(pages: &mut BTreeMap<u64, Page>, offset: u64, bytes: &[u8])
     });
 }
 
-/// The caller supplies a retained interval exactly once.
 pub(super) fn remove(pages: &mut BTreeMap<u64, Page>, range: Range<u64>) {
     slices(range, |key, range| {
         let page = pages
@@ -105,7 +102,6 @@ pub(super) fn remove(pages: &mut BTreeMap<u64, Page>, range: Range<u64>) {
     });
 }
 
-/// Only boundary pages can hold bytes outside the contiguous delivery range.
 pub(super) fn remaining_count(
     pages: &BTreeMap<u64, Page>,
     intervals: &BTreeMap<u64, u64>,
@@ -128,7 +124,6 @@ pub(super) fn remaining_count(
 }
 
 #[cfg(test)]
-/// Per-thread copy and allocation counters the reassembly tests read back.
 pub(super) mod test_support {
     use std::cell::Cell;
     #[derive(Clone, Copy, Default, Debug)]
@@ -186,7 +181,6 @@ mod tests {
             for reverse in [false, true] {
                 let now = Instant::now();
                 let mut tcp = Reassembler::new(Limits::default()).unwrap();
-                // Exercise sequence wrapping as well as both extension directions.
                 let base = u32::MAX - 64;
                 tcp.push(segment(base.wrapping_sub(1), vec![], true), now)
                     .unwrap();
@@ -285,7 +279,6 @@ mod tests {
         tcp.push(segment(101, vec![42; 200], false), now).unwrap();
         let before = tcp.aggregate_memory_charge();
         test_support::take();
-        // Final state fits, but old page + output + new history do not.
         assert!(tcp.push(segment(100, vec![0], false), now).is_err());
         assert_eq!(tcp.aggregate_memory_charge(), before);
         assert_eq!(tcp.aggregate_bytes(), 200);

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for registry queries, build/decode bounds, and binding conflicts.
-
 mod common;
 
 use bytes::Bytes;
@@ -463,8 +461,6 @@ fn filter_enumeration_uses_custom_registrations_in_normalized_path_order() {
     );
 }
 
-/// A two-byte link header naming its payload by EtherType, registered like a
-/// custom link protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Tag {
     ether_type: u16,
@@ -555,8 +551,6 @@ impl codec::LayerCodec for TagCodec {
 
 const TAG_LINK_TYPE: LinkType = LinkType(778);
 
-/// The built-in registry plus the `tag` link protocol, with or without the
-/// trailing-padding property.
 fn tag_registry(padding: bool) -> Arc<packetcraftr_core::registry::Registry> {
     let registry = builtin::registry_with(|builder| {
         builder.register_codec(TagCodec, &[])?;
@@ -599,8 +593,6 @@ fn packet_of(link: Box<dyn Layer>, trailer: Option<&'static [u8]>) -> Packet {
     packet
 }
 
-/// The layers after the link header, with padding bytes and ownership, plus
-/// the codes of the diagnostics reporting bytes outside a declared length.
 fn decoded_tail(
     registry: &Arc<packetcraftr_core::registry::Registry>,
     link_type: LinkType,

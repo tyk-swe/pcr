@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! libpcap BPF filter compilation and kernel installation.
-
 #![allow(unsafe_code)]
 
 use std::{
@@ -28,10 +26,6 @@ unsafe extern "C" {
     fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
 }
 
-/// Owns the kernel-format program `pcap_compile` allocates.
-///
-/// A value of this type only ever exists after a successful `pcap_compile`,
-/// and `Drop` is its single release, so no exit path can leak the allocation.
 #[repr(C)]
 struct PcapBpfProgram {
     instruction_count: c_uint,
@@ -40,10 +34,8 @@ struct PcapBpfProgram {
 
 impl Drop for PcapBpfProgram {
     fn drop(&mut self) {
-        // SAFETY: this value is only ever produced by a successful
-        // `pcap_compile`, whose allocation this owns; `Drop` runs once, and
-        // `pcap_setfilter` has finished with the program by then because it
-        // borrows the value for strictly less than this scope.
+        // SAFETY: only a successful `pcap_compile` produces this value and `Drop` runs once,
+        // after `pcap_setfilter` has finished borrowing the program.
         unsafe { pcap_freecode((&raw mut *self).cast()) };
     }
 }
@@ -77,9 +69,8 @@ fn compile_capture_filter(
         message: "filter string contains interior null byte".to_owned(),
     })?;
     let mut program = MaybeUninit::<PcapBpfProgram>::zeroed();
-    // SAFETY: `capture.as_ptr()` yields a valid `pcap_t*`, `c_filter` is a
-    // null-terminated C string, and `program.as_mut_ptr()` points to uninitialized
-    // memory of the exact layout of libpcap's `struct bpf_program`.
+    // SAFETY: `capture.as_ptr()` is a valid `pcap_t*`, `c_filter` is null-terminated, and
+    // `program` points to uninitialized memory laid out as libpcap's `struct bpf_program`.
     let compile_status = unsafe {
         pcap_compile(
             handle,
@@ -92,8 +83,7 @@ fn compile_capture_filter(
     if compile_status != 0 {
         return Err(map_filter_compile_error(interface, read_pcap_error(handle)));
     }
-    // SAFETY: `pcap_compile` returned 0, guaranteeing the `struct bpf_program`
-    // fields were fully initialized.
+    // SAFETY: `pcap_compile` returned 0, so the `struct bpf_program` is fully initialized.
     Ok(unsafe { program.assume_init() })
 }
 
@@ -101,8 +91,7 @@ fn read_pcap_error(handle: *mut c_void) -> String {
     if handle.is_null() {
         return "unknown libpcap error".to_owned();
     }
-    // SAFETY: `pcap_geterr` returns a pointer to a null-terminated string
-    // owned by the pcap handle.
+    // SAFETY: `pcap_geterr` returns a null-terminated string owned by the pcap handle.
     let error_ptr = unsafe { pcap_geterr(handle) };
     if error_ptr.is_null() {
         return "unknown libpcap error".to_owned();

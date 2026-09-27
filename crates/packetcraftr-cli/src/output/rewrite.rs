@@ -6,20 +6,15 @@ use packetcraftr_core::{capture_file::MapReport, transform};
 
 use super::frame::ByteRange;
 
-/// The bounded number of per-field changes one rewrite report carries.
-/// Changes beyond it are folded into `changes_omitted`.
 pub const MAX_REPORTED_CHANGES: usize = 4096;
 
 published_enum! {
-    /// Whether a rule asked for a field change or a derived field followed.
     pub enum ChangeOrigin from transform::ChangeOrigin {
         Requested => "requested",
         Derived => "derived",
     }
 }
 
-/// One applied field-edit byte-range change attributed to its source frame
-/// and rule. `bytes` is the absolute changed range in the frame.
 #[derive(Debug, Serialize)]
 pub struct Change {
     pub frame: u64,
@@ -32,7 +27,6 @@ pub struct Change {
     pub origin: ChangeOrigin,
 }
 
-/// A field change at a one-based source frame, made by a zero-based rule.
 impl From<(u64, u64, transform::FieldChange)> for Change {
     fn from((frame, rule, change): (u64, u64, transform::FieldChange)) -> Self {
         Self {
@@ -48,7 +42,6 @@ impl From<(u64, u64, transform::FieldChange)> for Change {
     }
 }
 
-/// What the frame mapping read and changed.
 #[derive(Debug, Serialize)]
 pub struct Mapping {
     pub frames_read: u64,
@@ -78,20 +71,14 @@ pub struct Report {
     pub rule_matches: Vec<u64>,
     #[serde(flatten)]
     pub capture: Mapping,
-    /// Present when `--dry-run` reported without publishing the destination.
     #[serde(skip_serializing_if = "is_false")]
     pub dry_run: bool,
-    /// Per-field changes in application order; bounded by
-    /// [`MAX_REPORTED_CHANGES`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<Change>,
-    /// Changes withheld because the report reached [`MAX_REPORTED_CHANGES`].
     #[serde(skip_serializing_if = "super::envelope::is_zero")]
     pub changes_omitted: u64,
 }
 
-/// The destination path, the frames each rule matched, the mapping, whether
-/// it was a dry run, and the changes retained and withheld.
 impl From<(String, Vec<u64>, MapReport, bool, Vec<Change>, u64)> for Report {
     fn from(
         (path, rule_matches, capture, dry_run, changes, changes_omitted): (

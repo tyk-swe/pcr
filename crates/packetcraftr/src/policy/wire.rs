@@ -10,16 +10,11 @@ use packetcraftr_core::{
     frame::{Frame, LinkType},
 };
 
-/// Whether transmitting `built` needs the permissive-live opt-in: it was
-/// built permissively, contains a malformed layer, or carries a trailer after
-/// a network payload that a receiver may parse differently.
 #[must_use]
 pub fn requires_live_opt_in(built: &BuiltPacket) -> bool {
     built.mode == Mode::Permissive || built.contains_malformed() || built.contains_network_trailer()
 }
 
-/// Requires both the per-operation opt-in and the policy's permissive-live
-/// allowance, reporting the missing opt-in first.
 pub(crate) fn authorize_permissive_live(
     policy: &Policy,
     allow_permissive_live: bool,
@@ -33,10 +28,6 @@ pub(crate) fn authorize_permissive_live(
     Ok(())
 }
 
-/// Decodes exact wire bytes with the trusted built-in registry.
-///
-/// Bytes about to be transmitted have no capture time, interface, or original
-/// length, so the caller passes only the link type and the bytes.
 pub(crate) fn decode_wire(
     link_type: LinkType,
     bytes: &Bytes,
@@ -59,12 +50,7 @@ pub(crate) fn decode_wire(
         .map_err(|source| Error::UndecodableWire { source })
 }
 
-/// Decodes exact wire bytes with the trusted registry and applies destination
-/// policy, returning the trusted decode so a later route-aware source check
-/// can reuse it instead of decoding again.
-/// Caller registries remain outside this policy trust boundary. A decode
-/// failure is [`Error::UndecodableWire`], which callers may reclassify in
-/// their own vocabulary.
+/// Caller registries remain outside this policy trust boundary.
 pub(crate) fn authorize_wire_destinations(
     policy: &Policy,
     link_type: LinkType,
@@ -75,8 +61,6 @@ pub(crate) fn authorize_wire_destinations(
     Ok(decoded)
 }
 
-/// Applies route-dependent source policy to a packet the trusted registry
-/// already decoded from the wire bytes.
 pub(crate) fn authorize_wire_sources(
     policy: &Policy,
     decoded: &packetcraftr_core::decode::DecodedPacket,
@@ -85,11 +69,6 @@ pub(crate) fn authorize_wire_sources(
     policy.authorize_packet_sources(&decoded.packet, route)
 }
 
-/// Applies destination (and, given a route, source) policy to the packet the
-/// trusted registry decodes from the bytes that will actually reach the wire.
-/// Caller registries remain outside this policy trust boundary. A decode
-/// failure is [`Error::UndecodableWire`], which callers may reclassify in
-/// their own vocabulary.
 pub(crate) fn authorize_wire(
     policy: &Policy,
     link_type: LinkType,
@@ -104,8 +83,6 @@ pub(crate) fn authorize_wire(
 }
 
 impl Policy {
-    /// Authorizes the destinations a built packet declares, plus the two
-    /// permissive-live approvals when the build needed them.
     pub(crate) fn authorize_built_packet(
         &self,
         built: &BuiltPacket,

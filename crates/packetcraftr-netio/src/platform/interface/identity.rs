@@ -1,20 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The per-send check that the selected interface still has its name and
-//! index. Linux and macOS ask the kernel by name; other targets have no cheap
-//! name lookup and enumerate through the interface capability on every check.
-
 #![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
 
 use crate::{Error, interface::Id as InterfaceId};
 
-/// Confirms the interface a send was routed to is still current.
 pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        // `if_nametoindex` verifies the pair; `if_indextoname` supplies the
-        // current name for mismatch diagnostics.
         if current_index(&expected.name) == Some(expected.index) {
             return Ok(());
         }
@@ -25,8 +18,7 @@ pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> 
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        // A send has no deadline to give, and this target's enumeration is a
-        // synchronous snapshot that takes none.
+        // A send has no deadline to give; this target's enumeration is a synchronous snapshot.
         let unbounded = packetcraftr_core::budget::Deadline::new(std::time::Duration::MAX);
         crate::interface::current(expected, &unbounded).map(|_| ())
     }
@@ -35,9 +27,7 @@ pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn current_index(name: &str) -> Option<u32> {
     let name = std::ffi::CString::new(name).ok()?;
-    // SAFETY: `name` owns a NUL-terminated C string that outlives this call,
-    // and `if_nametoindex` only reads it. A zero return means the name is not
-    // current, which is the caller's rejection case.
+    // SAFETY: `name` owns a NUL-terminated C string that outlives this call.
     let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
     (index != 0).then_some(index)
 }
@@ -45,15 +35,12 @@ fn current_index(name: &str) -> Option<u32> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn current_name(index: u32) -> Option<String> {
     let mut buffer = [0 as std::ffi::c_char; libc::IF_NAMESIZE];
-    // SAFETY: `buffer` is writable for exactly the `IF_NAMESIZE` bytes
-    // `if_indextoname` is documented to require, and it returns null rather
-    // than writing when the index names no interface.
+    // SAFETY: `buffer` is writable for exactly the `IF_NAMESIZE` bytes `if_indextoname` requires.
     let resolved = unsafe { libc::if_indextoname(index, buffer.as_mut_ptr()) };
     if resolved.is_null() {
         return None;
     }
-    // SAFETY: a non-null return means `if_indextoname` NUL-terminated the name
-    // inside `buffer`, which is still owned and borrowed by this frame.
+    // SAFETY: a non-null return means `if_indextoname` NUL-terminated the name inside `buffer`.
     let name = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) };
     Some(name.to_string_lossy().into_owned())
 }
@@ -73,8 +60,6 @@ mod tests {
         }
     }
 
-    /// The first interface the kernel can still name, which every host has at
-    /// least one of (loopback).
     fn current_interface() -> InterfaceId {
         (1..=16_u32)
             .find_map(|index| current_name(index).map(|name| identifier(&name, index)))

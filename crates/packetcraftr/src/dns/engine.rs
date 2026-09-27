@@ -43,26 +43,9 @@ use super::{
 mod tcp;
 
 impl<P: Providers, K: Clock> Client<P, K> {
-    /// Runs one bounded DNS query and publishes attempts, accepted and
-    /// rejected records, and retained undecoded evidence as each becomes
-    /// final.
-    ///
-    /// The query's worst-case traffic is authorized before any resolution;
-    /// declared-name authorization, resolution, and resolved-answer
-    /// authorization then repeat before each attempt. Direct TCP and a
-    /// configured fallback reauthorize the selected numeric address, use only
-    /// the time left in that attempt, and query over the client's TCP
-    /// provider. `sink` runs on a one-event worker admitted by the client's
-    /// [`Runtime`](crate::runtime::Runtime); `limits.max_duration` bounds
-    /// waiting for it and live I/O, not the sink itself. A sink failure
-    /// prevents later retries, and a sink may finish after this method
-    /// returns while it holds one of the runtime's worker permits.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the policy refusal, the executor or
-    /// evidence failure, cancellation, the exhausted duration limit, or the
-    /// sink's failure.
+    /// Runs one bounded DNS query and publishes its events as each becomes final.
+    /// The query's worst-case traffic is authorized before any resolution.
+    /// A sink may finish after this method returns while it holds a runtime worker permit.
     pub fn dns<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -82,21 +65,8 @@ impl<P: Providers, K: Clock> Client<P, K> {
         )
     }
 
-    /// Runs a bounded batch of DNS questions in input order under one
-    /// deadline, the shortest `limits.max_duration` among them, and publishes
-    /// each question's events tagged with its index.
-    ///
-    /// The combined worst-case traffic of every question is authorized
-    /// before any resolution. Cancellation or deadline exhaustion leaves the
-    /// remaining questions [`Unattempted`](batch::QuestionStatus::Unattempted);
-    /// other question failures are [`Failed`](batch::QuestionStatus::Failed)
-    /// and the batch continues. A sink failure stops the batch.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid batch, the policy refusal of the combined traffic,
-    /// or the sink's failure; question failures are reported in the returned
-    /// [`batch::Report`].
+    /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
+    /// Question failures are reported in the returned [`batch::Report`], not as errors.
     pub fn dns_batch<S>(&self, request: batch::Request, sink: S) -> Result<batch::Report, Error>
     where
         S: Sink<batch::Event, Ack = ()>,
@@ -118,8 +88,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// The send settings every DNS exchange runs under: the request's route,
-/// with each attempt's destination set by the attempt itself.
 fn send_options(request: &Request) -> crate::send::Options {
     crate::send::Options {
         plan: request.route.clone(),
@@ -127,10 +95,6 @@ fn send_options(request: &Request) -> crate::send::Options {
     }
 }
 
-/// Executes bounded DNS retries, repeating declared-name authorization,
-/// resolution, and resolved-answer authorization before each attempt. Direct
-/// TCP and configured fallback reauthorize the selected numeric address and
-/// use only the time left in that attempt.
 pub(super) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -148,9 +112,7 @@ where
 {
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
-    // `Operation::Dns` is deliberately approved before any server resolution:
-    // destination authorization follows limits approval for this shape, so
-    // admission cannot route through `admit_operation`'s resolve-first order.
+    // Approved before server resolution, unlike `admit_operation`'s resolve-first order.
     approve_operation(
         authorizer,
         Operation::Dns(prepared.limits),
@@ -161,7 +123,6 @@ where
     Ok(prepared.report)
 }
 
-/// Validated query and finite cost, prepared without discovery or traffic.
 /// The report retains confirmed accounting even if execution returns an error.
 pub(super) struct PreparedOperation<'a> {
     request: &'a Request,
@@ -207,8 +168,7 @@ impl<'a> PreparedOperation<'a> {
         })
     }
 
-    /// Executes after the caller authorizes this query's cost, either on its own
-    /// or within the combined batch. Endpoint authorization still runs per attempt.
+    /// The caller authorizes the cost first; endpoint authorization still runs per attempt.
     pub(super) fn execute<A, E, C, F>(
         &mut self,
         authorizer: &mut A,
@@ -248,23 +208,16 @@ impl<'a> PreparedOperation<'a> {
     }
 }
 
-/// The retry sequence of one query: every attempt, its fallback, and the
-/// events they publish.
 struct Retries<'a, A, E, C, F> {
     request: &'a Request,
     authorizer: &'a mut A,
     registry: &'a Registry,
     executor: &'a mut E,
-    /// Owns the operation deadline, retry pacing, and the UDP execution step.
-    /// Its statistics become the report's when the operation ends, however
-    /// it ends.
     execution: Context<'a, C, Attempts>,
     query: Bytes,
     delay: Duration,
     context: Arc<EventContext>,
     report: &'a mut Report,
-    /// Operation-wide evidence retention and diagnostics, shared by every
-    /// attempt.
     evidence: EvidenceState,
     emit: &'a mut F,
 }
@@ -327,13 +280,10 @@ where
             Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
             None => timeout_evidence(&probe, sent_at),
         };
-        // Publishes what retaining the response raised.
         self.record_diagnostics(attempt, [])?;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
-        // A validated response is present exactly when the attempt was
-        // accepted.
         let terminal = match udp.response {
             None => {
                 self.record_failure_outcome(udp_status);
@@ -354,8 +304,6 @@ where
         Ok(terminal)
     }
 
-    /// Runs a direct query or an admitted continuation under the attempt's
-    /// remaining deadline, and reports whether it ended the operation.
     fn query_over_tcp(
         &mut self,
         probe: &Probe,
@@ -376,9 +324,6 @@ where
         Ok(true)
     }
 
-    /// Keeps the most informative failure seen so far as the operation
-    /// outcome. An accepted response is recorded by [`Self::accept_response`]
-    /// and ends the operation, so it never competes here.
     fn record_failure_outcome(&mut self, candidate: Outcome) {
         if candidate.retry_rank() > self.report.completion.outcome.retry_rank() {
             self.report.completion.outcome = candidate;
@@ -441,8 +386,7 @@ where
 
     fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeAttempt, Error> {
         let limits = self.request.limits;
-        // The attempt window starts before the exchange and is shared with a
-        // TCP fallback, which may use only what the exchange left of it.
+        // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
         let mut attempt_deadline = Deadline::new(self.request.timeout);
         let (execution, grant) = self.execution.step(
             probe.attempt,
@@ -556,8 +500,6 @@ where
         )
     }
 
-    /// Records the diagnostics once, publishes every one not yet published,
-    /// then checks the deadline.
     fn record_diagnostics(
         &mut self,
         attempt: u32,
@@ -575,8 +517,6 @@ where
     }
 }
 
-/// Publishes what the operation's evidence state keeps during one attempt as
-/// DNS events.
 struct AttemptEvents<'e, 'a, C, F> {
     attempt: u32,
     execution: &'e Context<'a, C, Attempts>,
@@ -629,9 +569,6 @@ fn select_response<'a>(
     )
 }
 
-/// Names admission and execution-context failures as DNS errors at the retry
-/// attempt they concern. The DNS batch runner's wait between questions
-/// concerns the next question's first attempt.
 pub(super) struct Attempts;
 
 impl crate::execution::Errors for Attempts {

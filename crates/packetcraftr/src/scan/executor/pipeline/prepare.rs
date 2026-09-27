@@ -16,9 +16,6 @@ use std::{
     net::IpAddr,
     time::Instant,
 };
-/// What the pipeline keeps after every probe was admitted: the discovery
-/// phase that rebuilds each probe at send time, one route per probe address,
-/// each probe's [`AdmittedProbe`] in send order, and the capture interfaces.
 pub(super) struct Plan<'c, P, K> {
     pub discovery: Discovery<'c, P, K>,
     pub routes: HashMap<IpAddr, AuthorizedRoute>,
@@ -26,15 +23,12 @@ pub(super) struct Plan<'c, P, K> {
     pub interfaces: Vec<interface::Id>,
     pub base_bytes: usize,
 }
-/// One admitted probe: the wire cost its send-time rebuild must match, and
-/// the prepared-description memory it holds while in flight.
 pub(super) struct AdmittedProbe {
     pub cost: AdmittedCost,
     pub memory: usize,
 }
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
-/// Preparation runs under `preparation`, the provider view of `deadline`.
 pub(super) fn plan<'c, P: Providers, K: Clock>(
     executor: &'c ExchangeExecutor<'_, P, K>,
     planned: &[Planned<'_>],

@@ -15,7 +15,6 @@ use packetcraftr_core::error::BoundaryError;
 
 use super::super::{Classification, Error, Rtt};
 
-/// How one connect attempt ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
@@ -39,7 +38,6 @@ impl Outcome {
     }
 }
 
-/// The socket evidence of one connect attempt.
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
@@ -62,23 +60,14 @@ pub struct Stats {
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
     pub elapsed: Duration,
-    /// Round-trip accounting across the admitted connect attempts: a probe
-    /// counts as sent once the kernel accepted its connect call, and as
-    /// received when it finished with a connected, refused, or unreachable
-    /// verdict before its deadline. Timed-out, deadline-expired, and
-    /// local-error attempts count as lost and contribute no sample.
     pub rtt: Rtt,
 }
 
-/// What a connect scan publishes while it runs, in the order attempts
-/// settle. Each event is answered before the scan continues.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// One connect attempt settled.
     Probe(ProbeEvidence),
 }
 
-/// The terminal result of one connect scan.
 #[derive(Clone, Debug)]
 pub struct Report {
     pub target: String,
@@ -87,8 +76,6 @@ pub struct Report {
     pub stats: Stats,
 }
 
-/// Every attempt against one endpoint, in sequence order, with the verdict
-/// they support together.
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub address: IpAddr,
@@ -97,17 +84,12 @@ pub struct Endpoint {
     pub probes: Vec<ProbeEvidence>,
 }
 
-/// Every attempt of one connect scan, grouped by endpoint in first-scheduled
-/// order, with its terminal report.
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     pub report: Report,
     pub endpoints: Vec<Endpoint>,
 }
 
-/// A sink that keeps every published attempt. Pass a clone to
-/// [`Client::scan_connect`](crate::Client::scan_connect) and
-/// [`finish`](Self::finish) the one kept with the report it returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Vec<ProbeEvidence>>);
 
@@ -123,13 +105,6 @@ impl Sink<Event> for Collector {
 }
 
 impl Collector {
-    /// Groups the collected attempts by endpoint and joins them with the
-    /// scan's terminal `report`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidEvidence`] when the collected attempts are not
-    /// the ones the report scheduled.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let mut probes = self.0.take();
         let collected = u64::try_from(probes.len()).unwrap_or(u64::MAX);

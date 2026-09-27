@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! macOS interface enumeration via `getifaddrs(3)`. It performs no neighbor
-//! discovery, capture, or transmission.
-
 #![allow(unsafe_code)]
 
 use std::collections::BTreeMap;
@@ -25,19 +22,15 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 
-/// `getifaddrs(3)` answers without waiting; the interface capability has
-/// already checked the caller's deadline.
 pub(in crate::platform) fn interfaces(
     _deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, interface::Error> {
     snapshot().map_err(interface::Error::native)
 }
 
-/// One `getifaddrs(3)` snapshot, which the route backend also reads.
 pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, route::Error> {
     let mut head = ptr::null_mut();
-    // SAFETY: `head` is a valid output pointer and a successful call owns a
-    // linked list that remains valid until the matching `freeifaddrs` below.
+    // SAFETY: `head` is a valid output pointer; the list stays valid until `freeifaddrs` below.
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
         return Err(last_os_error("getifaddrs"));
     }
@@ -72,14 +65,12 @@ pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, route::Err
                 interface.flags = interface_flags(flags);
 
                 if !entry.ifa_addr.is_null() {
-                    // SAFETY: `ifa_addr` points to a sockaddr whose length is
-                    // recorded in its first byte for the list lifetime.
+                    // SAFETY: `ifa_addr` points to a sockaddr valid for the list lifetime.
                     let address = unsafe { &*entry.ifa_addr };
                     let length = usize::from(address.sa_len);
                     match i32::from(address.sa_family) {
                         libc::AF_INET | libc::AF_INET6 => {
-                            // SAFETY: the live getifaddrs entry owns at least
-                            // the declared sockaddr bytes for this iteration.
+                            // SAFETY: the live entry owns at least the declared sockaddr bytes.
                             let bytes = unsafe {
                                 std::slice::from_raw_parts(entry.ifa_addr.cast::<u8>(), length)
                             };
@@ -144,8 +135,7 @@ fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32>
     if i32::from(family) != libc::AF_LINK || data.is_null() {
         return None;
     }
-    // SAFETY: Darwin defines AF_LINK ifa_data as a live if_data object. The
-    // family gate above is the audited conversion boundary.
+    // SAFETY: Darwin defines AF_LINK ifa_data as a live if_data object.
     let data = unsafe { ptr::read_unaligned(data.cast::<libc::if_data>()) };
     (data.ifi_mtu != 0).then_some(data.ifi_mtu)
 }
@@ -154,11 +144,9 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     if address.is_null() {
         return None;
     }
-    // SAFETY: a live sockaddr always contains its leading length byte, and
-    // getifaddrs owns the declared record for this call.
+    // SAFETY: a live sockaddr always contains its leading length byte.
     let length = usize::from(unsafe { *address.cast::<u8>() });
-    // SAFETY: getifaddrs owns the live record for this call, and its leading
-    // length byte bounds the complete sockaddr allocation.
+    // SAFETY: the leading length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
     netmask_prefix(bytes, interface_address)
 }
@@ -172,7 +160,6 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     if link.sdl_alen != 6 {
         return None;
     }
-    // sdl_data is a field of sockaddr_dl, so its length never exceeds the struct size
     let data_offset = size_of::<libc::sockaddr_dl>() - link.sdl_data.len();
     let address_offset = data_offset.checked_add(usize::from(link.sdl_nlen))?;
     if address_offset.checked_add(6)? > length {

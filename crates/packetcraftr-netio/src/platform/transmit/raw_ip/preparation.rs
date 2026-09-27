@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The target's part of preparing a raw IP send: the datagram is validated by
-//! `transmit::raw_ip`, then this target adds what its raw sockets refuse
-//! (Windows drops raw UDP from a foreign source) and rewrites the bytes it
-//! submits (macOS reads two IPv4 header fields in host byte order).
-
 use std::net::IpAddr;
 
 use bytes::Bytes;
@@ -20,8 +15,6 @@ use crate::{NativeCapability, Unsupported, link::Mode};
 pub(in crate::platform) struct PreparedRawIp {
     pub(in crate::platform) interface: InterfaceId,
     pub(in crate::platform) destination: IpAddr,
-    /// The bytes handed to the socket, which may differ from `wire_bytes`
-    /// only where the target's socket ABI reads a header field differently.
     pub(in crate::platform) submission: Bytes,
     pub(in crate::platform) wire_bytes: Bytes,
 }
@@ -54,10 +47,7 @@ fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     Ok(bytes.clone())
 }
 
-/// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte
-/// order. Callers must validate the packet first: a buffer shorter than the
-/// minimum header is rejected instead of being sent with big-endian fields the
-/// kernel would misread.
+/// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte order.
 #[cfg(target_os = "macos")]
 fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     use crate::transmit::raw_ip::{IPV4_MINIMUM_HEADER, invalid_frame};
@@ -73,7 +63,6 @@ fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     Ok(Bytes::from(submission))
 }
 
-/// Linux and macOS raw sockets send any validated datagram.
 #[cfg(not(target_os = "windows"))]
 fn target_restrictions(
     _bytes: &Bytes,

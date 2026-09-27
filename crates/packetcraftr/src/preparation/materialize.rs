@@ -81,8 +81,6 @@ pub(super) fn materialize_network_fields(
     Ok(())
 }
 
-/// The route's address for an unspecified packet address, which must be of
-/// the packet layer's family; `None` keeps an address the recipe specified.
 fn planned_address(
     current: IpAddr,
     planned: Option<IpAddr>,

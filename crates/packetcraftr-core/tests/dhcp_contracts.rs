@@ -280,7 +280,6 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
 fn borrowed_dhcp_wire_enforces_message_byte_limit() {
     use packetcraftr_core::protocol::application::dhcp::{Error, Limit};
 
-    // DHCPv4 retains trailing bytes after the end option.
     let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
     v4.resize(65_535, 0);
     assert_eq!(Dhcpv4::try_from(v4.as_slice()).unwrap().wire().as_ref(), v4);
@@ -290,7 +289,6 @@ fn borrowed_dhcp_wire_enforces_message_byte_limit() {
         Err(Error::Limit(Limit::MessageBytes))
     ));
 
-    // One unknown DHCPv6 option fills the remaining message bytes.
     let mut v6 = vec![1, 0, 0, 0, 0xfd, 0xe8];
     v6.extend_from_slice(&65_527u16.to_be_bytes());
     v6.resize(65_535, 0);
@@ -396,7 +394,6 @@ fn dhcp_limits_above_their_ceiling_are_refused_rather_than_lowered() {
         assert_eq!(expected.classification().code, "policy.dhcp_limit");
     }
 
-    // Every ceiling at its maximum is accepted as given.
     let widest = Limits {
         max_message_bytes: MAX_MESSAGE_BYTES,
         max_options: MAX_OPTIONS,

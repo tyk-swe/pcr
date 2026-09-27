@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Generic exchange attributes structured DNS replies by message identity, so
-//! concurrent requests on one UDP tuple stay distinct while malformed or
-//! mismatched replies remain unsolicited evidence.
 mod common;
 
 use std::collections::VecDeque;
@@ -37,7 +34,6 @@ const ROUTER: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const CLIENT_PORT: u16 = 40_000;
 const DNS_PORT: u16 = 53;
 
-/// Builds the reply packets once every expected request was transmitted.
 type Responder = fn(&[Packet], &[Vec<u8>]) -> Vec<Packet>;
 
 struct State {
@@ -161,8 +157,6 @@ fn query_packet(id: u16, name: &str) -> Packet {
     packet
 }
 
-/// Echoes the request's question section back as a response on the reversed
-/// tuple.
 fn dns_reply(request: &Packet) -> Packet {
     let request_ipv4 = request.get::<Ipv4>().expect("request IPv4");
     let request_udp = request.get::<Udp>().expect("request UDP");
@@ -187,7 +181,6 @@ fn dns_reply(request: &Packet) -> Packet {
     response
 }
 
-/// A UDP reply whose payload looks like a DNS response but fails to decode.
 fn malformed_reply(request: &Packet) -> Packet {
     let request_ipv4 = request.get::<Ipv4>().expect("request IPv4");
     let request_udp = request.get::<Udp>().expect("request UDP");
@@ -202,8 +195,6 @@ fn malformed_reply(request: &Packet) -> Packet {
         destination_port: request_udp.source_port,
         ..Udp::default()
     });
-    // Response-shaped header, then a question name truncated mid-label: the
-    // payload dissects as a malformed DNS layer on the registered port.
     response.push(packetcraftr_core::layer::Malformed::new(
         Some("dns".to_owned()),
         vec![
@@ -427,8 +418,6 @@ fn non_dns_udp_and_quoted_icmp_errors_keep_their_exchange_semantics() {
     assert_eq!(report.responses.len(), 1);
     assert_eq!(report.responses[0].request_index, 0);
 
-    // A quoted ICMP error for a DNS request stays transport-error evidence
-    // attributed to the request, never a DNS application response.
     let template = Template::new(query_packet(0x1234, "example.com."));
     let report = run(
         &template,

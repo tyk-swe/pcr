@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Interface discovery and portable interface descriptions.
-
 mod error;
 pub(crate) mod validation;
 
@@ -17,7 +15,6 @@ use super::link::Capability;
 pub use error::Error;
 pub(crate) use error::discovery_classification;
 
-/// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Id {
     pub name: String,
@@ -46,20 +43,15 @@ pub struct Info {
     pub mac_address: Option<MacAddress>,
     pub addresses: Vec<Address>,
     pub flags: Flags,
-    /// Native MTU, if reported by the adapter.
     pub mtu: Option<u32>,
     pub capability: Capability,
     pub link_type: packetcraftr_core::frame::LinkType,
 }
 
-/// Enumerates interfaces without exposing a native handle or wrapper type.
-/// Enumeration follows the [deadline convention](crate::deadline).
 pub trait Provider: Send + Sync {
     fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error>;
 }
 
-/// Provider backed by the backend selected for the current target and feature
-/// set. Portable profiles return a typed capability error.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
@@ -70,11 +62,6 @@ impl Provider for SystemProvider {
     }
 }
 
-/// The current snapshot of the interface `expected` names, or the live I/O
-/// failure for one that was renamed, removed, or recreated since it was
-/// selected. Capture reads the snapshot's addresses; a target with no cheap
-/// name lookup verifies each send this way too.
-///
 /// Linux and macOS sends verify by name lookup instead, so a build with only
 /// Layer 3 there has no caller.
 #[cfg(native_send)]
@@ -94,8 +81,6 @@ pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate:
     Err(identity_changed(expected, actual.as_deref()))
 }
 
-/// The live I/O failure for an interface whose name/index pair changed
-/// before native I/O; `actual` is the name now holding the expected index.
 #[cfg(native_send)]
 pub(crate) fn identity_changed(expected: &Id, actual: Option<&str>) -> crate::Error {
     let actual = actual.map_or_else(
@@ -112,8 +97,6 @@ pub(crate) fn identity_changed(expected: &Id, actual: Option<&str>) -> crate::Er
     }
 }
 
-/// Refuses a native snapshot with an incomplete identity, an impossible
-/// prefix, or a duplicate interface.
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
     validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
         message: "the native route backend returned an invalid interface snapshot".to_owned(),
@@ -151,7 +134,6 @@ mod tests {
             vec![valid.clone(), valid],
         ] {
             let error = validate_snapshot(snapshot).unwrap_err();
-            // A `Source` field exposes the wrapped error itself.
             let source = error
                 .source()
                 .unwrap()

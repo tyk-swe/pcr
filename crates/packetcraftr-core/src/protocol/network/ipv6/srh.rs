@@ -35,7 +35,6 @@ pub struct SegmentRoutingHeader {
     pub tag: u16,
     /// Visit order (first visited segment through final destination).
     pub segments: Vec<Ipv6Addr>,
-    /// Type-length-value bytes following the segment list, including padding.
     pub tlvs: Bytes,
 }
 
@@ -88,8 +87,6 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         if layer.flags != 0 {
             return Err(invalid(NAME, "unsupported SRH flags must be zero"));
         }
-        // the guard above rejects an empty segment list and any list longer than 127, so the
-        // decremented length is at most 126
         let expected_last = layer.segments.len().saturating_sub(1) as u8;
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
@@ -153,8 +150,6 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         materialized.next_header = materialized_next;
         materialized.segments_left = materialized_left;
         materialized.last_entry = materialized_last;
-        // `prefix` was resized to `header_len`, which `srh_lengths` guarantees is at least
-        // `segments_end`
         let tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
         materialized.tlvs = tlvs;
         Ok(EncodedLayer::header(prefix, Box::new(materialized))

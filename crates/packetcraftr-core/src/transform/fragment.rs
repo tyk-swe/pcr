@@ -10,7 +10,7 @@ use crate::protocol::{
     network::ip_protocol,
 };
 
-/// IP MTU excludes the link header. Limits apply before retaining output.
+/// IP MTU excludes the link header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FragmentOptions {
     pub mtu: usize,
@@ -30,9 +30,6 @@ impl Default for FragmentOptions {
     }
 }
 
-/// The link type to frame a built `packet` with before [`fragment`]: its
-/// outermost layer must be Ethernet, IPv4, or IPv6, and the link type is the
-/// one [`LinkType::for_root_protocol`] records for that root.
 pub fn fragment_link_type(packet: &Packet) -> Result<LinkType, Error> {
     packet
         .layer(0)
@@ -47,18 +44,7 @@ pub fn fragment_link_type(packet: &Packet) -> Result<LinkType, Error> {
         .ok_or(Error::Unsupported(Unsupported::PacketRoot))
 }
 
-/// Fragments raw-IP or Ethernet/VLAN datagrams. Existing fragments, IPv4 DF,
-/// IPv6 AH/ESP, jumbograms and unknown extension chains are rejected.
-/// IPv4 copied options appear on later fragments. IPv6 per-fragment headers
-/// follow RFC 8200; the complete upper-layer header must fit in fragment zero.
-/// A datagram already within MTU is returned unchanged. When splitting, link
-/// trailers are omitted and Ethernet padding is regenerated without an FCS.
-///
-/// Each fragment is assembled from captured bytes: the link header, the
-/// original IP header (or its unfragmentable part) with only the length,
-/// fragment, and checksum fields rewritten, and a slice of the payload. A
-/// codec re-encode of the header could normalize options, reserved bits, and
-/// extension headers the fragments must repeat exactly.
+/// Fragments raw-IP or Ethernet/VLAN datagrams.
 pub fn fragment(frame: &Frame, options: FragmentOptions) -> Result<Vec<Frame>, Error> {
     if options.max_fragments == 0 || options.max_fragments > 8192 {
         return Err(Error::Limit {
@@ -187,8 +173,7 @@ fn ipv6(
     }
     let length = ipv6.datagram_length();
     // The unfragmentable part ends after the last Hop-by-Hop or Routing
-    // header; `prefix_next` is the Next Header byte that announces the
-    // fragmentable part and becomes the Fragment header's announcement.
+    // header.
     let mut prefix_len = Ipv6Header::LENGTH;
     let mut prefix_next = 6;
     for (index, extension) in ipv6.extensions().iter().enumerate() {
@@ -319,9 +304,6 @@ fn append(
             field: Limit::MaxOutputBytes,
             limit: options.max_output_bytes,
         })?;
-    // The captured link header (addresses and VLAN tags) prefixes every
-    // fragment unchanged; its trailer is dropped and Ethernet padding is
-    // regenerated as zeros.
     let mut bytes = Vec::with_capacity(length);
     bytes.extend_from_slice(&frame.bytes()[..offset]);
     bytes.extend_from_slice(header);

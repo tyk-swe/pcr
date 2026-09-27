@@ -210,7 +210,6 @@ fn named_object_documents_charge_members_keys_and_nesting_in_both_formats() {
 
 #[test]
 fn borrowed_dns_wire_enforces_message_byte_limit() {
-    // One opaque record fills the maximum message without other decoder limits.
     let mut wire = vec![0; 12];
     wire[7] = 1;
     wire.extend_from_slice(&[0, 0xfd, 0xe8, 0, 1, 0, 0, 0, 0]);

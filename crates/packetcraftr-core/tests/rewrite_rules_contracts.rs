@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The `packetcraftr.rewrite/v1` and `/v2` documents and ordered rule
-//! application.
-
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
@@ -51,7 +48,6 @@ fn udp_frame(ttl: u8) -> Frame {
     Frame::new(UNIX_EPOCH, LinkType::IPV4, built.bytes).unwrap()
 }
 
-/// The published error: its code, kind, message, and causes.
 fn published(error: &rules::Error) -> (&'static str, Kind, String, Vec<String>) {
     let classification = error.classification();
     (

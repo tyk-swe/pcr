@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded paths shared by reflective readers and editors.
-
 use super::FieldValue;
 use crate::layer::{FieldSchema, Schema};
 
@@ -13,13 +11,6 @@ enum Component {
 }
 
 /// A parsed layer-relative path such as `questions[0].name`.
-///
-/// List indices are zero based; a path may contain at most 64 components.
-/// Parse a caller's spelling once with [`str::parse`] at the document or
-/// command-line edge, then read and edit with
-/// [`Layer::field_path`](crate::layer::Layer::field_path) and
-/// [`Layer::set_field_path`](crate::layer::Layer::set_field_path).
-/// [`Display`](std::fmt::Display) writes the path back in the same syntax.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Path {
     root: String,
@@ -92,7 +83,6 @@ impl std::fmt::Display for Path {
 }
 
 impl Path {
-    /// The top-level field `name` of a schema, which needs no parsing.
     pub(crate) fn top_level(name: &str) -> Self {
         Self {
             root: name.to_owned(),
@@ -107,7 +97,6 @@ impl Path {
         !self.components.is_empty()
     }
 
-    /// Normalizes a resolved root alias and numeric indices for duplicate checks.
     pub(crate) fn canonical(&self, root: &str) -> String {
         Self {
             root: root.to_owned(),
@@ -116,7 +105,6 @@ impl Path {
         .to_string()
     }
 
-    /// Resolves declared members; indices address an element of a list field.
     pub fn schema<'a>(&self, schema: &'a Schema) -> Option<&'a FieldSchema> {
         let mut field = schema
             .fields

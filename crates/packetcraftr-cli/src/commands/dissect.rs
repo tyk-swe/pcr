@@ -71,8 +71,7 @@ pub(super) fn run(
         ));
     }
     let max_packet_size = arguments.budget.max_packet_size;
-    // A bad filter fails before any input is read, so it cannot leave the
-    // command waiting on standard input for frame bytes it would never use.
+    // A bad filter fails before any input is read.
     let filter = arguments
         .filter
         .as_deref()
@@ -93,9 +92,7 @@ pub(super) fn run(
             arguments.budget.decode_options(),
         )
         .map_err(CliError::classified)?;
-    // The filter selects emission, not validity: a frame it rejects is still
-    // decoded successfully, while an unsupported output format is refused
-    // whether or not the frame matched.
+    // The filter selects emission, not validity.
     let kept = match &filter {
         Some(filter) => filtering::matches_decoded(
             filter,
@@ -128,8 +125,7 @@ pub(super) fn run(
         }
         return projector.finish(1, u64::from(decoded.frame.captured_length()), stream);
     }
-    // An unmatched frame keeps byte-oriented stdout empty on success; the
-    // notice goes to stderr through the shared human renderer.
+    // An unmatched frame keeps byte-oriented stdout empty on success.
     if !kept && !matches!(format, DissectFormat::Json) {
         return emit_stderr_message("frame did not match the filter");
     }

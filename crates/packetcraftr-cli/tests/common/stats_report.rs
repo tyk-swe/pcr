@@ -1,7 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-//! One representative `stats` analysis report shared by the conversion and
-//! schema-conformance test binaries; per-test differences are parameters.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
@@ -17,8 +15,6 @@ use packetcraftr_core::analysis::{
     IpCounters, IpDatagramOutcome, IpFamilyCounters, IpReassemblyReport, StreamTransport,
 };
 
-/// A report exercising every statistics table. The conversation addresses and
-/// the incomplete outcome's known final length vary per test.
 pub(crate) fn report(
     address_a: Ipv4Addr,
     address_b: Ipv4Addr,

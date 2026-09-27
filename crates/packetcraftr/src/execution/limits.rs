@@ -1,13 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Range and cross-limit checks every live workflow request validates.
-
 use std::time::Duration;
 
-/// Rejects the first zero or excessive range limit, then the first cross-limit
-/// violation. `invalid` constructs the owning workflow's error and
-/// classification.
 pub(crate) fn check_limits<E>(
     ranges: &[(&'static str, usize, usize)],
     bounded_by: &[(&'static str, usize, usize, &str)],
@@ -30,10 +25,6 @@ pub(crate) fn check_limits<E>(
     Ok(())
 }
 
-/// The evidence-retention limits of one workflow run: the exact frames and
-/// bytes it may retain, and how many of those frames may be undecodable. A
-/// workflow that does not bound undecodable frames separately sets
-/// `max_undecoded` to `max_frames`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EvidenceLimits {
     pub(crate) max_frames: usize,
@@ -42,9 +33,6 @@ pub(crate) struct EvidenceLimits {
 }
 
 impl EvidenceLimits {
-    /// Rejects retention limits above the capture queue ceilings, then an
-    /// undecoded limit above the frame limit. Fields are named as requests
-    /// publish them.
     pub(crate) fn validate<E>(
         &self,
         invalid: impl Fn(&'static str, u64, String) -> E,
@@ -73,7 +61,6 @@ impl EvidenceLimits {
     }
 }
 
-/// Reports a duration limit that is zero or above `maximum`.
 pub(crate) const fn duration_violation(value: Duration, maximum: Duration) -> bool {
     value.is_zero() || value.as_nanos() > maximum.as_nanos()
 }

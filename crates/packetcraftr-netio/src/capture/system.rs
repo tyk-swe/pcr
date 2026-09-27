@@ -1,17 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The native capture path behind [`SystemProvider`](super::SystemProvider):
-//! every request check, the current-interface lookup, and the BPF netmask
-//! happen here before the selected backend opens its source.
-
 use packetcraftr_core::budget::Deadline;
 
 use super::{Request, Session, TimestampType};
 use crate::{Error, interface::Id as InterfaceId};
 
-/// Checks the caller's deadline before discovery and bounds native activation
-/// by the same deadline and cancellation signal.
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;

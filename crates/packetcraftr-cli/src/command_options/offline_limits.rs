@@ -95,7 +95,6 @@ impl CaptureReaderBoundsArgs {
 }
 
 impl OfflineCaptureLimitsArgs {
-    /// Checks the physical capture ceilings before opening an input.
     pub(crate) fn validate(self) -> Result<(), CliError> {
         let Self {
             max_frames,
@@ -141,27 +140,19 @@ impl OfflineCaptureLimitsArgs {
         self.reader.resources(settings);
     }
 
-    /// The ceiling on what an aggregate JSON document retains: the run's frame
-    /// budget, so the document is bounded by a caller-set limit.
     pub(crate) fn retention_ceiling(self) -> usize {
         usize::try_from(self.max_frames).unwrap_or(usize::MAX)
     }
 }
 
-/// Which optional analysis stages an offline command runs, for its resource
-/// diagnostics.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AnalysisStages {
-    /// TCP stream reassembly.
     pub(crate) tcp: bool,
-    /// The capture-global conversation index and IP reassembly.
     pub(crate) index: Enabled,
-    /// Physical-frame provenance retention.
     pub(crate) provenance: bool,
 }
 
 impl AnalysisStages {
-    /// Indexing and provenance always run; TCP reassembly as given.
     pub(crate) const fn with_tcp(tcp: bool) -> Self {
         Self {
             tcp,
@@ -240,7 +231,6 @@ pub(crate) struct OfflineLimitsArgs {
     pub(crate) duration: MaxDurationArgs<Analysis>,
 }
 
-/// One pass over a capture file.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Analysis;
 

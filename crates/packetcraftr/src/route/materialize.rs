@@ -10,8 +10,6 @@ use packetcraftr_netio::transmit;
 use super::error::Error;
 use super::model::Plan;
 
-/// Materializes a route, passing `deadline` to neighbor resolution so the
-/// operation budget bounds every discovery attempt.
 pub(crate) fn materialize<N: neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
@@ -68,8 +66,6 @@ pub struct Materialized {
 }
 
 impl Materialized {
-    /// The route facts a transmission backend checks before sending this
-    /// route's frame.
     pub fn transmit_route(&self) -> transmit::Route<'_> {
         transmit::Route {
             decision: &self.plan.decision,

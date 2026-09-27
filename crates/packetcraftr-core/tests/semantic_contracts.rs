@@ -39,7 +39,6 @@ reflective_layer! {
     layout pub fn route_mimic_layout();
 }
 
-/// A custom layer that names itself after a built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Ipv4Impostor {
     destination: Ipv4Addr,
@@ -259,7 +258,6 @@ fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
             ..Ipv4::default()
         })
         .push(Vxlan::default())
-        // This invalid inner tag must not affect directly transmitted metadata.
         .push(Vlan {
             priority: 8,
             ..Vlan::default()

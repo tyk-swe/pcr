@@ -36,9 +36,7 @@ pub(super) fn validate_bindings(
             mode,
             diagnostics,
         )?;
-        // Covered lengths trim trailing padding from the end, so a run must
-        // list the innermost boundary first and link padding last, the order
-        // dissection produces.
+        // Covered lengths trim padding from the end, so a run lists the innermost boundary first.
         if let (Some(previous), Some(outside_layer)) = (previous_padding, padding.outside_layer)
             && outside_layer > previous.outside_layer.unwrap_or(0)
         {
@@ -72,8 +70,6 @@ fn validate_adjacent_bindings(
                 discriminator
             }
         };
-        // Raw bytes carry no binding to their child, and padding or malformed
-        // bytes may follow any layer.
         if discriminator.is_some()
             || *parent == Raw::ID
             || *child == Padding::ID
@@ -144,7 +140,6 @@ fn validate_padding(
             outside_layer,
         });
     };
-    // A malformed child counts as the protocol it was meant to be.
     let child_is = |protocol: BuiltinProtocol| match child
         .downcast_ref::<Malformed>()
         .and_then(|child| child.intended_protocol.as_deref())

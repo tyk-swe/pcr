@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Fragmented IPv4/IPv6 capture fixtures shared by the IP pipeline contracts.
-
 use super::{CLIENT, SERVER};
 use bytes::Bytes;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};

@@ -51,7 +51,6 @@ pub struct LinuxSll2 {
     pub interface_index: u32,
     pub arp_hardware_type: u16,
     pub packet_type: u8,
-    /// The sender's full link-address length; see [`LinuxSll::address_length`].
     pub address_length: u8,
     pub address: [u8; 8],
 }

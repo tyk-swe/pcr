@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Offline-read and live-capture stream output.
-
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture as native;
@@ -13,7 +11,6 @@ use super::envelope::{self, is_zero};
 use super::frame::{Captured, SourceFrame, Stack};
 use super::network::InterfaceId;
 
-/// Native capture counters one source, or a whole operation, reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Stats {
     pub received_frames: u64,
@@ -39,8 +36,6 @@ impl From<native::Stats> for Stats {
 }
 
 published_enum! {
-    /// A native packet timestamp source, named as libpcap and
-    /// `--timestamp-source` spell it.
     pub enum TimestampSource from native::TimestampSource {
         Host => "host",
         HostLowPrec => "host_lowprec",
@@ -50,15 +45,12 @@ published_enum! {
 }
 
 published_enum! {
-    /// Timestamp fraction precision a native backend delivers.
     pub enum TimestampPrecision from native::TimestampPrecision {
         Micro => "micro",
         Nano => "nano",
     }
 }
 
-/// Requested, applied, and confirmed values of one native setting.
-/// `effective` null means unreported, never zero or default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Realized<T> {
     pub requested: Option<T>,
@@ -76,7 +68,6 @@ impl<T, U: Into<T>> From<native::Realized<U>> for Realized<T> {
     }
 }
 
-/// The native driver-buffer and timestamp settings one source realized.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct RealizedSettings {
     pub buffer_size: Realized<usize>,
@@ -95,7 +86,6 @@ impl From<native::RealizedSettings> for RealizedSettings {
 }
 
 published_enum! {
-    /// Why a capture stopped delivering frames.
     pub enum StopReason from packetcraftr::capture::StopReason {
         Window => "window",
         FrameBudget => "frame_budget",
@@ -104,7 +94,6 @@ published_enum! {
     }
 }
 
-/// One NDJSON event produced by `capture`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {
@@ -116,7 +105,6 @@ pub enum Event {
     },
 }
 
-/// A frame record at its one-based source position.
 impl TryFrom<(u64, Frame)> for Event {
     type Error = Error;
 
@@ -129,7 +117,6 @@ impl TryFrom<(u64, Frame)> for Event {
     }
 }
 
-/// A frame record that also publishes its dissected stack and diagnostics.
 impl TryFrom<(u64, Frame, &DecodedPacket)> for Event {
     type Error = Error;
 
@@ -192,10 +179,6 @@ pub struct Source {
     pub native_interface: InterfaceId,
     pub link_type: u32,
     pub snap_length: usize,
-    /// The native driver-buffer/timestamp settings this source realized:
-    /// requested values the backend applied, and — only where the backend can
-    /// confirm — the effective value. `effective` null means unreported, never
-    /// zero or default. Absent when the backend reported nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capture_settings: Option<RealizedSettings>,
     pub queue_frames: usize,
@@ -213,8 +196,6 @@ pub struct Source {
     pub emitted_frames: u64,
     pub late_frames: u64,
 }
-/// The machine-output enum value, which spells words with underscores where
-/// the `--overflow-policy` argument uses hyphens.
 fn overflow_policy_name(policy: native::OverflowPolicy) -> &'static str {
     use native::OverflowPolicy;
     match policy {
@@ -261,7 +242,6 @@ pub struct Summary {
     pub capture_statistics_complete: bool,
     pub files: Option<Files>,
 }
-/// A capture report with the rotated files the CLI wrote, if any.
 impl From<(&packetcraftr::capture::Report, Option<Files>)> for Summary {
     fn from((report, files): (&packetcraftr::capture::Report, Option<Files>)) -> Self {
         Self {
@@ -279,14 +259,12 @@ impl From<(&packetcraftr::capture::Report, Option<Files>)> for Summary {
         }
     }
 }
-/// Partial capture evidence retained even when a consumer or cleanup fails.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     pub summary: Summary,
     pub stats: envelope::Stats,
 }
 
-/// A capture report, with the rotated files the CLI wrote, and its totals.
 impl From<(&packetcraftr::capture::Report, Option<Files>)> for Snapshot {
     fn from((report, files): (&packetcraftr::capture::Report, Option<Files>)) -> Self {
         Self {

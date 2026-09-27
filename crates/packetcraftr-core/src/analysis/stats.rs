@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Aggregate capture statistics computed over the analysis pipeline.
-
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
@@ -18,8 +16,6 @@ use crate::analysis::{Constraint, Error};
 mod report;
 pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
 
-/// Aggregations retained by a statistics collector. Shared frame/byte/time
-/// totals and capture-global fragment evidence are available for every choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Table {
     #[default]
@@ -66,8 +62,6 @@ struct EndpointTally {
     rx: Tally,
 }
 
-/// Aggregates physical-frame statistics under the pipeline's frame and flow
-/// budgets. Capture-global fragment accounting is attached at completion.
 #[derive(Debug)]
 pub struct Collector {
     table: Table,
@@ -90,7 +84,6 @@ impl Collector {
         Self::for_table(interval, Table::All)
     }
 
-    /// Retains only the requested aggregation; unselected tables remain empty.
     pub fn for_table(interval: Duration, table: Table) -> Result<Self, Error> {
         if interval.is_zero() {
             return Err(Error::InvalidLimit {
@@ -116,7 +109,6 @@ impl Collector {
         })
     }
 
-    /// Folds one matched physical frame into the selected tables.
     pub fn observe(&mut self, record: &FrameRecord<'_>) {
         let bytes = u64::from(record.decoded.frame.captured_length());
         let timestamp = record.timestamp;
@@ -125,7 +117,6 @@ impl Collector {
         self.observe_time(timestamp, bytes);
 
         if self.collects(Table::Protocols) {
-            // Protocol presence: once per distinct protocol per frame.
             let mut seen: Vec<&str> = Vec::new();
             for layer in record.decoded.packet.iter() {
                 let name = layer.protocol_id().as_str();
@@ -151,7 +142,6 @@ impl Collector {
             self.endpoints.entry(destination).or_default().rx.add(bytes);
         }
 
-        // Use pipeline-assigned stream IDs for stable conversation and port stats.
         for (transport, conversation) in [
             (
                 StreamTransport::Tcp,
@@ -201,7 +191,6 @@ impl Collector {
         if timestamp < origin {
             self.io_underflow_frames = self.io_underflow_frames.saturating_add(1);
         }
-        // Bucket timestamps before the capture origin at zero and report clamping.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
         self.io
@@ -243,7 +232,6 @@ impl Collector {
     }
 
     fn record_ports(&mut self, transport: StreamTransport, flow: &ScopedFlowKey, bytes: u64) {
-        // Each distinct port a frame touches counts once.
         let mut ports = [flow.flow.source_port, flow.flow.destination_port];
         ports.sort_unstable();
         let distinct = if ports[0] == ports[1] {
@@ -256,11 +244,6 @@ impl Collector {
         }
     }
 
-    /// Finishes the pass and attaches the run's capture-global IP fragment
-    /// accounting.
-    ///
-    /// Physical frame and byte totals remain those observed by this collector;
-    /// derived datagram and payload bytes live only in `ip_reassembly`.
     pub fn finish(self, summary: &RunSummary) -> Report {
         let ip_reassembly = summary.ip_reassembly.clone();
         let mut protocols = self

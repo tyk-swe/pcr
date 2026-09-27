@@ -8,10 +8,6 @@ use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
 
-/// Why preparing a live packet failed: the operation's cancellation, policy,
-/// packet building and materialization, route planning (including neighbor
-/// resolution), or a provider. Every workflow that transmits prepared packets
-/// wraps it in its own error.
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
@@ -19,8 +15,6 @@ pub enum Error {
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error(transparent)]
     Target(#[from] target::Error),
-    /// Route planning or materialization failed, including active neighbor
-    /// resolution performed while materializing the route.
     #[error(transparent)]
     Plan(#[from] crate::route::Error),
     #[error(transparent)]
@@ -32,8 +26,6 @@ pub enum Error {
     #[error("packet template expansion failed: {message}")]
     Template {
         message: String,
-        /// The expansion failure the template reported, when this refusal is
-        /// not the workflow's own empty-expansion check.
         #[source]
         source: Option<packetcraftr_core::template::Error>,
     },
@@ -42,9 +34,6 @@ pub enum Error {
         layer: usize,
         field: &'static str,
         message: String,
-        /// The packet-layer failure the materialization step ran into, when
-        /// one exists; a missing route value is the packet's own refusal and
-        /// has none.
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
@@ -97,7 +86,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walks retained sources, delegating transparent errors.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Target(error) => error.causes(),

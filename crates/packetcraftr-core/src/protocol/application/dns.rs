@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded, lossless DNS message dissection and resource-record decoding.
-//!
-//! [`Dns`] and its records live in `model`, the wire decoder, encoder, and
-//! layer codec in `codec`, and field reflection in `reflection`. Every wire
-//! API returns [`Error`].
-
 mod codec;
 mod model;
 mod reflection;
@@ -15,23 +9,14 @@ pub(crate) use codec::DnsCodec;
 pub use codec::decode_name;
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
-/// Largest accepted [`DecodeLimits::max_message_bytes`] and
-/// [`DecodeLimits::max_txt_bytes`]: one DNS message.
 pub const MAX_MESSAGE_BYTES: usize = 65_535;
-/// Largest accepted [`DecodeLimits::max_records`] and
-/// [`DecodeLimits::max_txt_strings`].
 pub const MAX_RECORDS: usize = 4_096;
-/// Largest accepted [`DecodeLimits::max_name_pointers`].
 pub const MAX_NAME_POINTERS: usize = 128;
-/// The largest label a name may carry, in octets (RFC 1035 §2.3.4).
 pub const MAX_LABEL_LEN: usize = 63;
-/// The largest expanded name, in wire octets including each length byte
-/// (RFC 1035 §2.3.4).
+/// The largest expanded name, in wire octets including each length byte (RFC 1035 §2.3.4).
 pub const MAX_NAME_LEN: usize = 255;
 
-/// Per-message resource bounds. Each is at most its `MAX_*` constant, and a
-/// message may carry at most 64 questions. [`DecodeLimits::validate`] refuses
-/// a larger limit rather than lowering it; zero permits none.
+/// Each is at most its `MAX_*` constant, and a message may carry at most 64 questions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecodeLimits {
     pub max_message_bytes: usize,
@@ -41,7 +26,6 @@ pub struct DecodeLimits {
     pub max_txt_bytes: usize,
 }
 impl DecodeLimits {
-    /// Rejects a limit above its `MAX_*` constant.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             (
@@ -81,7 +65,6 @@ impl Default for DecodeLimits {
     }
 }
 
-/// A DNS message, name, or record that the bounded wire codec rejects.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -101,15 +84,10 @@ pub enum Error {
         offset: usize,
         needed: usize,
     },
-    /// The label-length byte at `offset` is past the end of the message.
     #[error("DNS name label length at byte {offset} is truncated")]
     TruncatedLabelLength { offset: usize },
-    /// The second byte of the compression pointer starting at `offset` is
-    /// past the end of the message.
     #[error("DNS name compression pointer at byte {offset} is truncated")]
     TruncatedPointer { offset: usize },
-    /// The label body starting at `offset` needs octets through `end`, which
-    /// the message does not have.
     #[error("DNS name label at byte {offset} is truncated before byte {end}")]
     TruncatedLabel { offset: usize, end: usize },
     #[error("DNS name compression pointer {pointer} is outside the {length}-byte message")]
@@ -123,16 +101,13 @@ pub enum Error {
     PointerLoop { offset: usize },
     #[error("DNS name uses more than {limit} compression pointers")]
     PointerLimit { limit: usize },
-    /// A label length byte uses one of the two reserved tag values.
     #[error("DNS label at byte {offset} uses a reserved length encoding")]
     ReservedLabelLength { offset: usize },
-    /// A label declares more than [`MAX_LABEL_LEN`] octets.
     #[error(
         "DNS label at byte {offset} is {actual} bytes; maximum is {}",
         MAX_LABEL_LEN
     )]
     LabelTooLong { offset: usize, actual: usize },
-    /// The expanded name exceeds [`MAX_NAME_LEN`] wire octets.
     #[error("DNS name exceeds the {}-byte wire limit", MAX_NAME_LEN)]
     NameTooLong,
     #[error("DNS EDNS metadata is invalid: {message}")]
@@ -149,14 +124,12 @@ pub enum Error {
     TxtByteLimit { limit: usize },
     #[error("DNS message has {remaining} trailing byte(s) after declared sections")]
     TrailingBytes { remaining: usize },
-    /// A configured [`DecodeLimits`] field above its ceiling.
     #[error("DNS limit {field}={value} exceeds the maximum of {maximum}")]
     InvalidLimit {
         field: &'static str,
         value: usize,
         maximum: usize,
     },
-    /// The message could not be encoded under the strict DNS wire rules.
     #[error("DNS message cannot be encoded")]
     Encode(#[source] crate::codec::Error),
 }

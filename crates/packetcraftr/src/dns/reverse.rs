@@ -4,8 +4,7 @@
 use std::fmt::Write as _;
 use std::net::IpAddr;
 
-/// PTR name: reversed IPv4 octets under `in-addr.arpa`, or all 32 IPv6 nibbles
-/// reversed under `ip6.arpa`.
+/// PTR name: reversed IPv4 octets under `in-addr.arpa` or IPv6 nibbles under `ip6.arpa`.
 pub fn reverse_name(address: IpAddr) -> String {
     match address {
         IpAddr::V4(address) => {
@@ -45,7 +44,6 @@ mod tests {
 
     #[test]
     fn ipv6_addresses_reverse_all_thirty_two_nibbles_under_ip6_arpa() {
-        // 2001:db8::1 expands to 32 nibbles; leading zero groups are present.
         assert_eq!(
             reverse_name(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1).into()),
             "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Forwarding output with capture-local numbering and per-capture evidence.
-//! Uses shared timestamps/source references and makes no claims about device
-//! behavior.
-
 use serde::Serialize;
 
 use packetcraftr_core::analysis::forwarding as analysis;
@@ -13,8 +9,6 @@ use packetcraftr_core::field::FieldValue;
 use super::contract::Error;
 use super::frame::{SourceFrame, Timestamp};
 
-/// A value the same on both captures: `ingress` belongs to the ingress
-/// capture, `egress` to the egress capture, always.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Sided<T> {
     pub ingress: T,
@@ -22,7 +16,6 @@ pub struct Sided<T> {
 }
 
 published_enum! {
-    /// The comparison result.
     pub enum Verdict from analysis::Verdict {
         Pass => "pass",
         Fail => "fail",
@@ -31,7 +24,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// Why an observation's evidence is incomplete.
     pub enum Incomplete from analysis::Incomplete {
         Truncated => "truncated",
         FieldBudget => "field_budget",
@@ -39,7 +31,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// What one projected cell establishes.
     pub enum ValueState from analysis::ValueState {
         Observed => "observed",
         Absent => "absent",
@@ -50,7 +41,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// The kind of property a check asserts.
     pub enum CheckKind from analysis::CheckKind {
         Preserve => "preserve",
         Expect => "expect",
@@ -60,7 +50,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// How one requested check resolved.
     pub enum Outcome from analysis::Outcome {
         Satisfied => "satisfied",
         Violated => "violated",
@@ -69,14 +58,12 @@ published_enum! {
 }
 
 published_enum! {
-    /// The scope of a pass: correspondence alone or requested properties.
     pub enum ComparisonKind from analysis::ComparisonKind {
         CorrespondenceOnly => "correspondence_only",
         PropertyChecks => "property_checks",
     }
 }
 
-/// One rule echoed beside the outcome it produced.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Check {
     pub kind: CheckKind,
@@ -95,7 +82,6 @@ impl From<analysis::Check> for Check {
     }
 }
 
-/// One requested check applied to a uniquely matched pair.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CheckEvaluation {
     pub check: Check,
@@ -121,21 +107,18 @@ impl From<analysis::CheckEvaluation> for CheckEvaluation {
     }
 }
 
-/// A warning about what the declared rules can establish.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RuleWarning {
     pub code: &'static str,
     pub message: String,
 }
 
-/// One `FIELD=VALUE` expectation as declared.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ExpectationRule {
     pub field: String,
     pub value: String,
 }
 
-/// The rules exactly as declared, so the report stands alone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RequestedRules {
     pub comparison: ComparisonKind,
@@ -175,7 +158,6 @@ impl From<analysis::RequestedRules> for RequestedRules {
     }
 }
 
-/// Aggregate comparison counters over complete evidence.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub unique_matches: u64,
@@ -207,7 +189,6 @@ impl From<analysis::Summary> for Summary {
     }
 }
 
-/// How many report entries each detail ceiling dropped, per category.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Omissions {
     pub matches: u64,
@@ -235,23 +216,19 @@ impl From<analysis::Omissions> for Omissions {
     }
 }
 
-/// SHA-256 of the exact encoded source stream consumed through successful
-/// EOF. It binds a completed report to bytes, not merely a mutable pathname.
+/// SHA-256 of the exact encoded source stream consumed through successful EOF.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureSource {
     pub sha256: String,
     pub encoded_bytes: u64,
 }
 
-/// Decoder overrides are part of the interpretation, not acquisition facts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DecodeContext {
     pub tls_ports: Vec<u16>,
     pub bindings: Vec<String>,
 }
 
-/// One capture's place in the comparison: the path it was read from plus its
-/// observation census, counted over its own frames only.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Capture {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,34 +237,23 @@ pub struct Capture {
     pub selection_filter: Option<String>,
     /// The input path as invoked; `-` for a capture read from stdin.
     pub path: String,
-    /// Physical frames the capture reader yielded, selected or not.
     pub read: u64,
-    /// Frames the side's selection kept.
     pub selected: u64,
-    /// Selected frames whose declared identity resolved completely.
     pub keyed: u64,
-    /// Selected frames missing at least one identity field.
     pub unkeyed: u64,
-    /// Selected frames whose evidence was truncated or budget-limited.
     pub incomplete: u64,
 }
 
 /// A reference to one frame inside its own capture.
-///
-/// `frame` is the capture-local 1-based physical frame number: frame 1 of the
-/// ingress capture is never frame 1 of the egress capture.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Evidence {
     pub frame: SourceFrame,
     /// The frame's capture timestamp, retained as per-capture evidence. It is
     /// never subtracted across captures and never labelled latency.
     pub timestamp: Timestamp,
-    /// The capture-global interface identity, when the source declared one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
     pub link_type: u32,
-    /// Present when the observation's evidence was truncated by the capture
-    /// snap length or limited by the field-projection budget.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<Incomplete>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -313,20 +279,15 @@ fn evidence_list(values: &[analysis::Evidence]) -> Result<Vec<Evidence>, Error> 
     values.iter().map(Evidence::try_from).collect()
 }
 
-/// A uniquely matched observation pair, listed in ingress observation order.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Match {
-    /// The identity cells both observations carried, in declared order.
     pub key: Vec<FieldValue>,
     pub ingress: Evidence,
     pub egress: Evidence,
     /// Zero-based order among keyed observations of each capture.
     pub ingress_order: u64,
     pub egress_order: u64,
-    /// True when an earlier-ingress pair matched a later-egress observation;
-    /// order evidence only, not a claim about device behavior.
     pub reordered: bool,
-    /// Per-requested-check outcomes in declaration order.
     pub checks: Vec<CheckEvaluation>,
 }
 
@@ -346,22 +307,16 @@ impl TryFrom<&analysis::Match> for Match {
     }
 }
 
-/// A demonstrably violated check attributed to concrete observations.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Violation {
     pub check: Check,
-    /// The shared identity; absent when the violating egress observation was
-    /// unkeyed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<Vec<FieldValue>>,
-    /// The matched ingress observation, when the pair was unique.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ingress: Option<Evidence>,
     pub egress: Evidence,
-    /// For `preserve`, the ingress value that did not survive.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected: Option<FieldValue>,
-    /// The egress observation's offending value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actual: Option<FieldValue>,
 }
@@ -381,11 +336,9 @@ impl TryFrom<&analysis::Violation> for Violation {
     }
 }
 
-/// A selected observation whose identity could not fully resolve.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Unkeyed {
     pub evidence: Evidence,
-    /// Identity cells in declared order; null marks the absent fields.
     pub key: Vec<Option<FieldValue>>,
 }
 
@@ -400,8 +353,6 @@ impl TryFrom<&analysis::UnkeyedObservation> for Unkeyed {
     }
 }
 
-/// An identity carried by more than one observation on at least one side.
-/// Members are listed in capture order and never paired.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AmbiguousGroup {
     pub key: Vec<FieldValue>,
@@ -410,7 +361,6 @@ pub struct AmbiguousGroup {
     /// True member counts; the listed evidence is bounded.
     pub ingress_total: u64,
     pub egress_total: u64,
-    /// Members indistinguishable under the requested non-identity rules.
     pub ingress_indistinguishable: bool,
     pub egress_indistinguishable: bool,
 }
@@ -431,7 +381,6 @@ impl TryFrom<&analysis::AmbiguousGroup> for AmbiguousGroup {
     }
 }
 
-/// Decoder overrides the comparison ran under.
 impl From<(Vec<u16>, Vec<String>)> for DecodeContext {
     fn from((tls_ports, bindings): (Vec<u16>, Vec<String>)) -> Self {
         Self {
@@ -441,45 +390,28 @@ impl From<(Vec<u16>, Vec<String>)> for DecodeContext {
     }
 }
 
-/// The complete comparison result; the aggregate `result` and the NDJSON
-/// terminal `complete` record carry the same document.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode: Option<DecodeContext>,
     pub verdict: Verdict,
-    /// The rules exactly as declared, so the report stands alone.
     pub rules: RequestedRules,
-    /// The epistemic limits the comparison ran under, repeated verbatim.
     pub assumptions: &'static [&'static str],
-    /// Per-capture censuses; each side's counts cover its own frames only.
     pub captures: Sided<Capture>,
     /// Counters computed over complete evidence before any detail bound.
     pub summary: Summary,
-    /// Uniquely paired observations, in ingress observation order.
     pub matches: Vec<Match>,
     pub violations: Vec<Violation>,
-    /// Keyed observations with no keyed counterpart on the other side. An
-    /// unmatched ingress observation is not evidence of device loss; an
-    /// unmatched egress observation is not evidence of duplication.
     pub unmatched: Sided<Vec<Evidence>>,
-    /// Selected observations without a complete identity.
     pub unkeyed: Sided<Vec<Unkeyed>>,
-    /// Identity groups that are not 1:1; members are never paired.
     pub ambiguous: Vec<AmbiguousGroup>,
-    /// Per-category counts of detail entries the `--max-details` bound kept
-    /// out of this document.
     pub omitted: Omissions,
 }
 
-/// One capture as invoked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Input {
-    /// The capture path as given on the command line.
     pub path: String,
-    /// The digest of the stream the comparison consumed, when known.
     pub source: Option<CaptureSource>,
-    /// The side's selection filter, as written.
     pub selection_filter: Option<String>,
 }
 
@@ -519,8 +451,6 @@ fn unkeyed_list(values: &[analysis::UnkeyedObservation]) -> Result<Vec<Unkeyed>,
     values.iter().map(Unkeyed::try_from).collect()
 }
 
-/// The core comparison, with each capture as invoked and the decoder
-/// overrides, in the shared output timestamp and source-frame forms.
 impl
     TryFrom<(
         &analysis::Report,

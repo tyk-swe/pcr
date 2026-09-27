@@ -1,15 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Exit code 4 and the fail-closed native stubs: the commands that need a
-//! native capability report `capability.*` and exit 4 when the capability is
-//! compiled out, and enumerate the loopback interface when it is compiled in.
 
 mod common;
 
 use common::{parse_json, run};
 
-/// Every failed process here must exit 4 with a `capability.*` code in both
-/// renderings; text goes to stderr with nothing on stdout, JSON goes to stdout.
 #[cfg(not(any(feature = "native-layer2", feature = "native-layer3")))]
 fn assert_capability_failure(arguments: &[&str]) {
     let text = run(arguments);
@@ -68,7 +63,6 @@ fn interfaces_enumerates_the_loopback_interface() {
     assert!(text.status.success(), "{text:?}");
     let stdout = String::from_utf8_lossy(&text.stdout);
     assert!(stdout.contains("127.0.0.1"), "{stdout}");
-    // Every text row spells the fields the JSON document carries.
     for key in [
         "mtu=",
         "capability=",

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Question-relevance filtering and bounded rejected-record auditing.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::dns::{CLASS_IN, TYPE_OPT};

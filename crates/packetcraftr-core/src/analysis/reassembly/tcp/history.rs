@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! A bounded byte ring whose exposed storage extent is its allocation charge.
-//! No assumption about VecDeque/allocator capacity rounding is required.
 
 use std::ops::{Bound, RangeBounds};
 

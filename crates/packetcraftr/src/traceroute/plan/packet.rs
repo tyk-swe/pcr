@@ -14,9 +14,6 @@ use crate::correlation::{icmp_identity, nonzero_ipv4_identification, packet_shap
 use super::Probe;
 use crate::probe::ProbeEndpoint;
 
-// the operation-local sequence is reduced to the 32-bit wire field the probe carries;
-// sent_probe_matches applies the same reduction when comparing, so even a wrapped counter still
-// matches
 pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {

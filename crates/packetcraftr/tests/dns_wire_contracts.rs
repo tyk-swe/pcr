@@ -393,8 +393,6 @@ fn decoder_error_precedence_is_stable() {
         }))
     ));
 
-    // Size limits and the remaining question checks each surface their own
-    // variant once the header has been accepted.
     assert!(matches!(
         dns::wire::decode_response(
             &[0; 11],
@@ -1133,8 +1131,6 @@ fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
     let error =
         dns::wire::decode_response(&[], "example.test", QueryType::A, ID, Limits::default())
             .unwrap_err();
-    // The core error is the variant's transparent payload: it keeps its type
-    // and message, and nothing repeats it as a cause.
     let wire::Error::Decode(cause) = &error else {
         panic!("a structural failure is the core decode error: {error:?}");
     };

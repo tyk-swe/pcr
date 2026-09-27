@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Command lifecycle: output negotiation, diagnostics, cancellation, publication,
-//! and terminal cleanup. The publication deadline ends before error cleanup.
+//! The publication deadline ends before error cleanup.
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -37,7 +36,6 @@ pub(crate) fn run(parsed: Parsed) -> ExitCode {
     })
 }
 
-/// The global options a selected command starts under.
 pub(super) struct Launch<'a> {
     format: output::contract::Format,
     resource_diagnostics: bool,
@@ -49,9 +47,6 @@ pub(super) struct Launch<'a> {
 }
 
 impl Launch<'_> {
-    /// Generates documentation files. They are not contract output, so no
-    /// output stream, diagnostics, or cancellation is set up, and failures
-    /// report on stderr.
     pub(super) fn generate(self, arguments: documentation::arguments::Args) -> ExitCode {
         match documentation::run(&arguments) {
             Ok(()) => ExitCode::SUCCESS,
@@ -62,8 +57,6 @@ impl Launch<'_> {
         }
     }
 
-    /// Runs a contract command and publishes its result, or its failure,
-    /// through the selected output format.
     pub(super) fn publish<T: Spec>(
         self,
         command: output::contract::Command,
@@ -158,9 +151,7 @@ impl Launch<'_> {
             Ok(exit) => {
                 if let Err(error) = crate::cancellation::check() {
                     if format == output::contract::Format::Json {
-                        // The aggregate document has already been published. A
-                        // late interrupt changes the exit status, but a second
-                        // stdout document would invalidate the completed JSON.
+                        // A second stdout document would invalidate the completed JSON.
                         let _ = emit_stderr_error(&error);
                         return ExitCode::from(CANCELLED_EXIT_CODE);
                     }
@@ -176,8 +167,6 @@ impl Launch<'_> {
     }
 }
 
-/// Runs one contract command: enters its publication deadline, rejects an
-/// unsupported output format before any work, and dispatches.
 fn execute<T: Spec>(
     kind: Command,
     arguments: T,

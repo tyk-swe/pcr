@@ -8,8 +8,6 @@ use packetcraftr_core::analysis::{self as library, expert};
 use super::analysis::{Clock, StreamTransport};
 use super::diagnostic::Severity;
 
-/// A finding attributed to one capture frame. `transport` and `stream` jointly
-/// identify its conversation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub severity: Severity,
@@ -41,8 +39,6 @@ pub struct CodeCount {
     pub findings: u64,
 }
 
-/// Aggregate result or terminal NDJSON record; the latter omits already-streamed
-/// findings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub clock: Clock,
@@ -56,9 +52,6 @@ pub struct Report {
     pub ip_reassembly: super::reassembly::Report,
 }
 
-/// The totals of the findings a run published, the frames it read and
-/// matched, the findings retained for the document, and the capture's IP
-/// reassembly.
 impl
     From<(
         expert::Summary,

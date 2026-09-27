@@ -83,8 +83,7 @@ pub(super) fn plan_push_accounting(
     let prospective_memory = if retains_flow_state {
         flow_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
     } else {
-        // An immediately closed generation never enters the flow table, but
-        // buffers materialized while processing it remain budgeted.
+        // A closed generation never enters the flow table, but its buffers remain budgeted.
         buffer_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
     }
     .ok_or(Resource::AggregateByteLimit {

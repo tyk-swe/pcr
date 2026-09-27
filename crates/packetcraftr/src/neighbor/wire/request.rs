@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! ARP requests and neighbor solicitations built from core layers.
-
 use std::net::IpAddr;
 
 use bytes::Bytes;
@@ -18,7 +16,6 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Ipv6, ndp};
 
-/// Shortest Ethernet frame without its frame check sequence.
 const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
 const ARP_REQUEST: u16 = 1;
 /// Hop limit RFC 4861 requires on every Neighbor Discovery message.
@@ -73,7 +70,6 @@ pub(in crate::neighbor) fn build_request_frame(
     }
 }
 
-/// The Ethernet header and the request's VLAN tags, sent from the interface.
 fn link_header(request: &NeighborRequest, destination: MacAddress) -> Packet {
     let mut packet = Packet::new();
     packet.push(Ethernet {
@@ -87,9 +83,6 @@ fn link_header(request: &NeighborRequest, destination: MacAddress) -> Packet {
     packet
 }
 
-/// Builds `packet`, checks the bytes from its `network` layer on against the
-/// route MTU, and pads the frame.
-///
 /// Padding brings the frame without its VLAN tags to the Ethernet minimum,
 /// so a switch that strips the tags still forwards a full-size frame.
 fn finish(

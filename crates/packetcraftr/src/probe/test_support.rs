@@ -17,10 +17,6 @@ pub(crate) fn private_policy() -> crate::policy::Policy {
     }
 }
 
-/// Counts executions and shutdowns while optionally failing the `fail_at`-th
-/// call, so progressive-output tests share one failure-injection executor
-/// across request types. `failure_message` and `failure_code` keep the induced
-/// failure workflow-specific.
 pub(crate) struct ProgressiveExecutor<I> {
     pub(crate) inner: I,
     pub(crate) calls: Arc<AtomicUsize>,

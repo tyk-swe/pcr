@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for the `tls` command and the `--tls-port` remap shared by the
-//! offline dissection and analysis commands.
-
 use std::path::PathBuf;
 
 mod common;
@@ -16,7 +13,6 @@ use tls_capture::{
     write_fragmented_capture,
 };
 
-/// The capture published for the README and `--help` examples.
 fn published_capture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures/tls-handshake.pcapng")
 }
@@ -182,8 +178,6 @@ fn session_selectors_narrow_the_report_without_touching_assembly() {
     assert_eq!(selected(&["--server-port", "8443"]), ["files.example.test"]);
     assert_eq!(selected(&["--stream", "tcp:1"]), ["files.example.test"]);
 
-    // The stream selector is the one selector pushed down to the frames, so
-    // the counters it reports are the filtered ones.
     let scoped = parse_json(&run_success(&[
         "--output", "json", "tls", path, "--stream", "tcp:1",
     ]));
@@ -225,7 +219,6 @@ fn an_extra_tls_port_reaches_the_per_frame_view_that_assembly_never_needed() {
     let capture = write_capture(&[Handshake::complete(40_000, 4433, "api.example.test")]);
     let path = path_text(capture.path());
 
-    // Assembly reads every TCP stream, so the session is found either way.
     for arguments in [
         vec!["--output", "json", "tls", path],
         vec!["--output", "json", "tls", path, "--tls-port", "4433"],
@@ -262,8 +255,6 @@ fn an_extra_tls_port_reaches_the_per_frame_view_that_assembly_never_needed() {
         "the default port list leaves 4433 raw"
     );
 
-    // `stats` counts the same per-frame layer in its protocols table, so the
-    // remap adds a `tls` row while the defaults leave 4433 raw.
     let protocols_with = parse_json(&run_success(&[
         "--output",
         "json",
@@ -299,8 +290,6 @@ fn an_extra_tls_port_reaches_the_per_frame_view_that_assembly_never_needed() {
         "defaults leave 4433 raw: {rows_without:?}"
     );
 
-    // The `tls` display filter sees the same layer, so it matches the two
-    // hello frames only with the remap, in both `stats` and `expert`.
     let stats_filtered = parse_json(&run_success(&[
         "--output",
         "json",
@@ -446,7 +435,6 @@ fn the_retention_ceiling_reports_what_it_left_out() {
     assert_eq!(aggregate["result"]["summary"]["sessions_selected"], 3);
     assert_eq!(aggregate["result"]["summary"]["sessions_omitted"], 1);
 
-    // NDJSON streams instead of retaining, so the ceiling never applies.
     let records = parse_ndjson(&run_success(&[
         "--output",
         "ndjson",
@@ -458,7 +446,6 @@ fn the_retention_ceiling_reports_what_it_left_out() {
     assert_eq!(records.len(), 4);
     assert_eq!(records[3]["result"]["sessions_omitted"], 0);
 
-    // Text writes each session as it completes, so it omits none either.
     let rendered = text(&run_success(&["tls", path, "--max-tls-sessions", "2"]));
     let lines = rendered.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 4, "{rendered}");
@@ -501,7 +488,6 @@ fn selectors_that_keep_nothing_say_so_without_claiming_the_capture_has_no_tls() 
         "{rendered}"
     );
 
-    // Nothing assembled at all is the other answer, and it keeps its hint.
     let empty = text(&run_success(&["tls", path_text(write_capture(&[]).path())]));
     assert!(empty.contains("no TLS sessions assembled"), "{empty}");
     assert!(empty.contains("hint: no ClientHello"), "{empty}");
@@ -561,9 +547,6 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // The floor is the per-direction buffer, and the flag that set it is the
-    // one named back. Zero is below the floor like any other small value; it
-    // is not a "no buffering" escape hatch.
     for value in ["0", "1024"] {
         let floored = run(&["tls", path_text(&missing), "--max-tls-buffer-bytes", value]);
         assert_eq!(floored.status.code(), Some(2), "{value}");

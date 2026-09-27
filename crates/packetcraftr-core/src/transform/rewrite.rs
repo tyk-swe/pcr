@@ -92,10 +92,6 @@ impl HeaderRewrite {
         Ok(())
     }
 }
-/// Ceilings for one [`rewrite`].
-///
-/// Every value is honored as given, so there is nothing to validate: a frame
-/// longer than `max_output_bytes` is refused, and zero refuses every frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RewriteLimits {
     pub max_output_bytes: usize,
@@ -108,16 +104,7 @@ impl Default for RewriteLimits {
     }
 }
 /// Rewrite outer Ethernet/VLAN, IP addresses, and TCP/UDP ports while retaining
-/// payload and capture identity. Address edits regenerate applicable transport
-/// pseudo-header checksums; IPv4 UDP checksum zero remains disabled. Frames must
-/// exclude a link FCS. Capture adapters must reject declared FCS/authentication
-/// metadata. IP fragments needing reconstruction, source-routing options, IPv6
-/// routing/home-address headers, AH/ESP, and unknown upper layers are rejected
-/// for network/port edits. MAC/VLAN-only edits do not interpret the IP payload.
-///
-/// The output is the captured frame with only the named header bytes and the
-/// checksums covering them changed, so link trailers and malformed or unknown
-/// bytes survive byte for byte. A codec round trip would re-encode them.
+/// payload and capture identity.
 pub fn rewrite(
     frame: &Frame,
     patch: &HeaderRewrite,
@@ -159,9 +146,6 @@ pub fn rewrite(
         })?;
     let mut bytes = Vec::with_capacity(length);
     if let LinkHeader::Ethernet(ethernet) = &link {
-        // The addresses are copied and then overwritten in place, and a
-        // replaced VLAN stack is spliced in as bytes: the payload behind the
-        // link header is carried over exactly as captured.
         bytes.extend_from_slice(&frame.bytes()[..12]);
         if let Some(tags) = &patch.vlans {
             for tag in tags {
@@ -203,10 +187,6 @@ pub fn rewrite(
     Ok(output)
 }
 
-/// Writes the patched addresses and ports into `ip` in place and regenerates
-/// the checksums that cover them. IPv4 options, IPv6 extension headers, and
-/// the upper-layer payload keep their captured encoding, which a codec
-/// re-encode could normalize.
 fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<(), Error> {
     super::ensure_checksum_coverage(ip, header)?;
     let (source, destination) = match header {
@@ -250,7 +230,6 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
     let end = header.datagram_length();
     transport(&mut ip[start..end], patch, protocol, addresses)?;
     if let IpHeader::V4(ipv4) = header {
-        // The header checksum covers the rewritten addresses.
         ip[Ipv4Header::CHECKSUM].fill(0);
         let value = checksum(&ip[..ipv4.header_length()]);
         ip[Ipv4Header::CHECKSUM].copy_from_slice(&value.to_be_bytes());
@@ -258,8 +237,6 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
     Ok(())
 }
 
-/// Writes the patched ports and regenerates the transport checksum over the
-/// captured segment, whose options and payload stay as captured.
 fn transport(
     segment: &mut [u8],
     patch: &HeaderRewrite,

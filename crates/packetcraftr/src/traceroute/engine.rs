@@ -31,22 +31,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Traces the route to the request's authorized destination one hop at a
     /// time and publishes each probe's final outcome, each retained undecoded
     /// frame, and each diagnostic to `sink`.
-    ///
-    /// The target and the complete packet, byte, and duration budget are
-    /// authorized before any probe is built or any provider is consulted.
-    /// Each hop's probes run as one exchange, and the trace stops after the
-    /// hop that reaches the destination or reports it unreachable. The
-    /// duration limit and the hop pacing are anchored on the client's clock.
-    /// Each event is published on a worker admitted by the client's runtime,
-    /// and the trace waits for the sink's answer before a later hop; the
-    /// duration limit bounds that wait, not the sink itself, and confirmed
-    /// sends are not undone.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the denied target or budget, the
-    /// executor failure, inconsistent evidence, the exhausted duration limit
-    /// or cancellation, or the sink's failure.
     pub fn traceroute<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -75,10 +59,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// Validates the request, authorizes every resolved target and the complete
-/// operation budget before constructing probes, then executes hop batches until
-/// checksum-valid evidence reaches the destination or reports it unreachable,
-/// or `deadline` passes.
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,

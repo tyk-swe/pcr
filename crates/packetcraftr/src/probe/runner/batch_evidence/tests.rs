@@ -111,8 +111,6 @@ fn untimestamped_capture_evidence_is_invalid() {
     );
 }
 
-/// Validates `execution` as the evidence for a one-probe batch at sequence 7,
-/// reporting an invalid-evidence rejection as its sequence and typed cause.
 fn validate(execution: &Evidence, sent_matches: bool) -> Result<(), (u64, crate::evidence::Error)> {
     validate_batch_evidence(
         &TestErrors,
@@ -128,7 +126,6 @@ fn validate(execution: &Evidence, sent_matches: bool) -> Result<(), (u64, crate:
     })
 }
 
-/// One sent raw packet whose statistics report `bytes` sent.
 fn execution(sent: &'static [u8], bytes: u64) -> Evidence {
     Evidence {
         permit: crate::evidence::ExecutionPermit::new(),

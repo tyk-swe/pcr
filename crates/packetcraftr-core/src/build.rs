@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact packet construction.
-
 use std::sync::Arc;
 
 use crate::codec::{Context, LayerEncodeContext, Mode};
@@ -39,12 +37,6 @@ impl Builder {
         Self { registry }
     }
 
-    /// Encodes a packet into exact wire bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the builder corrupts its validated state; malformed input returns
-    /// [`Error`].
     pub fn build(
         &self,
         packet: Packet,
@@ -72,8 +64,7 @@ impl Builder {
                 limit: options.limits.max_layers,
             });
         }
-        // Only pass-through bytes are a safe pre-encoding lower bound; other fields might not
-        // reach the wire.
+        // Only pass-through bytes are a safe pre-encoding lower bound.
         let pass_through_bytes = validation::pass_through_byte_length(packet)?;
         if pass_through_bytes > options.limits.max_packet_size {
             return Err(Error::PacketSizeLimit {

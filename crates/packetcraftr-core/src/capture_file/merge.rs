@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Timestamp-ordered streaming merge with distinct source interface identities.
-
 use super::pcapng::validate_rewritable_packet_flags;
 use super::wire::{PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_IF_FCSLEN};
 use super::{
@@ -22,18 +20,13 @@ pub struct MergeSource<R> {
     pub name: String,
     pub reader: Reader<R>,
 }
-/// Most capture sources one [`merge`] accepts.
 pub const MAX_MERGE_SOURCES: usize = 64;
 
-/// Ceilings for one [`merge`]: the merged output stream, the number of
-/// sources, and the interfaces they declare together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MergeLimits {
     pub streams: Limits,
-    /// Sources accepted, within `1..=`[`MAX_MERGE_SOURCES`].
     pub max_sources: usize,
-    /// Interfaces declared across every source. Zero accepts only sources
-    /// that declare none.
+    /// Interfaces declared across every source; zero accepts only sources that declare none.
     pub max_interfaces: usize,
 }
 impl Default for MergeLimits {
@@ -46,8 +39,6 @@ impl Default for MergeLimits {
     }
 }
 impl MergeLimits {
-    /// Rejects stream ceilings [`Limits::validate`] refuses and a source
-    /// ceiling outside `1..=`[`MAX_MERGE_SOURCES`].
     pub fn validate(&self) -> Result<(), Error> {
         self.streams.validate()?;
         if !(1..=MAX_MERGE_SOURCES).contains(&self.max_sources) {
@@ -88,12 +79,7 @@ struct State {
     endianness: Endianness,
 }
 
-/// Merges complete inputs into PCAPNG. Ties retain source argument order and
-/// physical frame order. Each input must have nondecreasing, present times.
-/// Packet bytes/lengths, direction and interface timestamp metadata are retained;
-/// source sections, comments, unknown blocks and statistics are normalized away.
-/// Semantic metadata this writer cannot preserve (FCS overrides and extended
-/// packet flags) is rejected explicitly. Errors may leave partial output.
+/// Merges complete inputs into PCAPNG; ties retain source argument order and physical frame order.
 pub fn merge<R: Read, W: Write>(
     sources: &mut [MergeSource<R>],
     output: &mut Writer<W>,

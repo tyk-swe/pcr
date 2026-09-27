@@ -12,15 +12,12 @@ use crate::rendering::{Retained, omitted_diagnostic};
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
 pub(super) struct State {
-    /// Totals over the findings the selectors kept.
     selected: analysis::expert::Summary,
     retained: Retained<output::expert::Finding>,
 }
 
 impl State {
-    /// `max_findings` bounds only the aggregate JSON document, which holds
-    /// every finding at once. One frame can produce several findings, so the
-    /// frame ceiling alone does not bound the document.
+    /// `max_findings` bounds only the aggregate JSON document.
     pub(super) fn new(max_findings: usize) -> Self {
         Self {
             selected: analysis::expert::Summary::default(),
@@ -76,7 +73,6 @@ pub(super) fn render_record(
 pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
     crate::rendering::render_clock(&summary.clock)?;
     let selected = &state.selected;
-    // BTreeMap iteration is code order, so the per-code lines are deterministic.
     for (code, findings) in &selected.codes {
         write_stdout_line(format_args!("code={code} findings={findings}"))?;
     }

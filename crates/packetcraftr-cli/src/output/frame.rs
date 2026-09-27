@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared wire, captured, and decoded frame representations.
-
 use std::num::NonZeroU64;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -19,7 +17,6 @@ use super::hex::CompactHex;
 const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
 
-/// Validated one-based position in an input capture stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct SourceFrame(NonZeroU64);
@@ -47,7 +44,6 @@ impl std::fmt::Display for SourceFrame {
     }
 }
 
-/// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Timestamp {
     pub unix_seconds: i64,
@@ -89,19 +85,13 @@ impl Timestamp {
             if seconds > MAX_SIGNED_SECONDS {
                 return Err(Error::TimestampOutOfRange);
             }
-            // A fractional instant before the epoch uses floor seconds: `i64::MAX`
-            // seconds plus a fraction maps to `(i64::MIN, positive nanos)`, still
-            // in range. In the remaining arm `seconds` is below
-            // `MAX_SIGNED_SECONDS`, so `signed_seconds + 1` and its negation fit `i64`.
+            // A fractional instant before the epoch uses floor seconds.
             let unix_seconds = if seconds == MAX_SIGNED_SECONDS {
                 i64::MIN
             } else {
-                // the guard above returns TimestampOutOfRange for seconds greater than i64::MAX, so
-                // this conversion stays positive
                 let signed_seconds = seconds as i64;
                 -(signed_seconds + 1)
             };
-            // `subsec_nanos` is always below 1_000_000_000, so the subtraction cannot underflow
             let nanoseconds = NANOS_PER_SECOND - duration.subsec_nanos();
             Ok(Self {
                 unix_seconds,
@@ -111,10 +101,6 @@ impl Timestamp {
     }
 }
 
-/// The inverse of the pre-epoch floor-seconds encoding above: `(-3,
-/// 750_000_000)` is 0.75 s after -3 s, which is -2.25 s in conventional signed
-/// decimal notation. Every renderer prints a timestamp through this, so the two
-/// halves of the rule cannot drift apart.
 impl std::fmt::Display for Timestamp {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.unix_seconds >= 0 || self.nanoseconds == 0 {
@@ -127,7 +113,6 @@ impl std::fmt::Display for Timestamp {
 }
 
 published_enum! {
-    /// The direction a capture source recorded for a frame.
     pub enum Direction from library_frame::Direction {
         Inbound => "inbound",
         Outbound => "outbound",
@@ -135,7 +120,6 @@ published_enum! {
     }
 }
 
-/// A half-open byte range within an encoded packet.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ByteRange {
     pub start: usize,
@@ -151,7 +135,6 @@ impl From<layout::ByteRange> for ByteRange {
     }
 }
 
-/// Where one reflective field sits in the encoded packet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct FieldLayout {
     pub name: &'static str,
@@ -167,7 +150,6 @@ impl From<layout::FieldLayout> for FieldLayout {
     }
 }
 
-/// Where one layer and its fields sit in the encoded packet.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayerLayout {
     pub index: usize,
@@ -187,7 +169,6 @@ impl From<layout::LayerLayout> for LayerLayout {
     }
 }
 
-/// The byte layout of every layer of an encoded packet, in packet order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Layout {
     pub layers: Vec<LayerLayout>,
@@ -207,7 +188,6 @@ impl From<&layout::PacketLayout> for Layout {
     }
 }
 
-/// Exact complete-frame bytes used by raw/hex/capture renderers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wire {
     bytes: Bytes,
@@ -228,8 +208,6 @@ impl Wire {
         &self.bytes
     }
 
-    /// Formats the exact bytes as compact lowercase hexadecimal without
-    /// retaining a second owned representation.
     pub fn bytes_hex(&self) -> impl std::fmt::Display + '_ {
         CompactHex(&self.bytes)
     }
@@ -257,7 +235,6 @@ impl Serialize for Wire {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Captured {
     bytes: Bytes,
-    /// Capture time, omitted when the source record does not provide one.
     pub timestamp: Option<Timestamp>,
     pub captured_length: u32,
     pub original_length: u32,
@@ -287,8 +264,6 @@ impl Captured {
         &self.bytes
     }
 
-    /// Formats the exact bytes as compact lowercase hexadecimal without
-    /// retaining a second owned representation.
     pub fn bytes_hex(&self) -> impl std::fmt::Display + '_ {
         CompactHex(&self.bytes)
     }
@@ -326,8 +301,6 @@ impl Serialize for Captured {
     }
 }
 
-/// A dissected frame's layer stack, excluding the raw frame to avoid serializing
-/// it twice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Stack {
     pub packet: packetcraftr_core::document::Packet,
@@ -345,7 +318,6 @@ impl From<&DecodedPacket> for Stack {
     }
 }
 
-/// A decoded frame retained by exchange-like tools.
 #[derive(Clone, Debug, Serialize)]
 pub struct Decoded {
     pub frame: Captured,
@@ -379,8 +351,6 @@ mod tests {
 
     use super::*;
 
-    /// The floor-seconds pair and its rendering are inverses: `(-3,
-    /// 750_000_000)` is 0.75 s after -3 s, so it reads as -2.25 s.
     #[test]
     fn timestamp_display_uses_conventional_signed_decimal_notation() {
         for ((unix_seconds, nanoseconds), expected) in [
@@ -398,8 +368,6 @@ mod tests {
         }
     }
 
-    /// Encoding an instant and rendering it recovers the offset it was built
-    /// from, on both sides of the epoch. Windows SystemTime uses 100 ns ticks.
     #[test]
     fn every_encoded_instant_renders_its_own_offset_from_the_epoch() {
         for (offset, before_epoch, expected) in [

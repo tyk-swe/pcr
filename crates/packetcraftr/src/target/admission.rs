@@ -1,16 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Operation admission for live workflows.
-//!
-//! Admission owns the ordering between a declared target set and the first
-//! live side effect: authorized resolution, the empty/family gate, the
-//! workflow's worst-case budget arithmetic, then [`approve_operation`]. Two
-//! workflows deliberately compose the lower-level gates instead: DNS approves
-//! [`Operation::Dns`] before any server resolution (destination authorization
-//! follows budget approval for that shape), and fuzz admits declared packets
-//! with no declared target to resolve.
-
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -23,8 +13,6 @@ use super::{Family, Selection, SelectionError, Specification, Target};
 use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation};
 
-/// The address family every admitted address must belong to, and how the
-/// workflow names an authorized resolution that holds none.
 pub(crate) struct FamilyGate<E> {
     family: Family,
     unavailable: fn(Family) -> E,
@@ -42,9 +30,6 @@ impl<E> FamilyGate<E> {
         self.family
     }
 
-    /// The empty/family gate every admitted resolution passes before budget
-    /// planning: an authorized set holding no address of the family fails
-    /// the operation.
     pub(crate) fn require(&self, addresses: &[IpAddr]) -> Result<(), E> {
         if addresses.is_empty() {
             return Err((self.unavailable)(self.family));
@@ -61,9 +46,6 @@ impl<E> Clone for FamilyGate<E> {
 
 impl<E> Copy for FamilyGate<E> {}
 
-/// The declared set [`admit_selection`] resolves and admits: the selection to
-/// expand, the family every admitted address must match, and the bound on
-/// admitted addresses.
 pub(crate) struct DeclaredTargets<'a, E> {
     pub(crate) selection: &'a Selection,
     pub(crate) family: FamilyGate<E>,
@@ -73,13 +55,6 @@ pub(crate) struct DeclaredTargets<'a, E> {
 /// Admits one declared target for a live operation: authorized resolution,
 /// the empty/family gate, the workflow's budget plan over the admitted
 /// addresses, then [`approve_operation`].
-///
-/// Request validation stays with the caller before this call. `plan` runs the
-/// workflow's budget arithmetic — unit count, worst-case wire bytes and
-/// duration — and `operation` builds the approved shape from it, so an
-/// [`Operation`] may borrow the plan for the duration of the approval call.
-/// The returned selection is the family-filtered, deduplicated address set
-/// the operation may address.
 pub(crate) fn admit_operation<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
@@ -102,14 +77,6 @@ where
 }
 
 /// [`admit_operation`] over a declared [`Selection`].
-///
-/// Each distinct specification is expanded and authorized once, in declared
-/// order; an oversized network fails through `invalid` before any of its own
-/// addresses reach the authorizer, though earlier specifications may already
-/// have been authorized; numeric addresses already excluded, seen, or
-/// family-mismatched are skipped without spending an authorization call; and
-/// admitted addresses are deduplicated and capped at `targets.max_targets` in
-/// declared order.
 pub(crate) fn admit_selection<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
@@ -132,7 +99,6 @@ where
     )
 }
 
-/// Gate → plan → approve over an already-authorized selection.
 fn admit_selected<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
@@ -155,8 +121,6 @@ where
     Ok((selected, plan))
 }
 
-/// Expands a declared selection into authorized addresses, checking the
-/// deadline's cooperative `enforce` gate inside both loops.
 fn resolve_selection<A, G>(
     authorizer: &mut A,
     targets: DeclaredTargets<'_, G::Error>,
@@ -251,16 +215,12 @@ mod tests {
     use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
     use packetcraftr_core::error::BoundaryError;
 
-    /// One authorizer boundary call, in order.
     #[derive(Debug, PartialEq, Eq)]
     enum Call {
         Resolve(Target),
         Approve(&'static str),
     }
 
-    /// Records the call sequence and scripts refusals, cancellation, and a
-    /// clock jump so the admission ordering is asserted without sockets, real
-    /// resolution, or execution.
     #[derive(Default)]
     struct RecordingAuthorizer {
         calls: Vec<Call>,
@@ -316,7 +276,6 @@ mod tests {
         )
     }
 
-    /// A gate adapter whose marker errors identify which method produced them.
     struct StubGates;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -329,7 +288,6 @@ mod tests {
         Plan,
         Operation,
         Limit(&'static str),
-        /// A step failure, which admission never raises.
         Step,
     }
 
@@ -370,12 +328,10 @@ mod tests {
         }
     }
 
-    /// The family gate naming a miss as the stub's marker error.
     fn gate(family: Family) -> FamilyGate<StubError> {
         FamilyGate::new(family, |family| StubError::Family(family.label()))
     }
 
-    /// Selection-expansion failures surface as their bounded `field` name.
     fn selection_error(source: SelectionError) -> StubError {
         match source {
             SelectionError::Limit { field, .. } => StubError::Selection(field),
@@ -391,8 +347,6 @@ mod tests {
         Target::Hostname("documentation.invalid".parse().unwrap())
     }
 
-    /// Target authorization precedes the operation approval: the call order
-    /// is resolve, then approve — never approve first.
     #[test]
     fn target_authorization_precedes_budget_approval() {
         let mut authorizer = RecordingAuthorizer::default();
@@ -418,7 +372,6 @@ mod tests {
         );
     }
 
-    /// A denied declared target stops admission before `authorize_operation`.
     #[test]
     fn declared_target_denial_short_circuits_approval() {
         let mut authorizer = RecordingAuthorizer {
@@ -439,8 +392,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(target())]);
     }
 
-    /// The empty/family gate runs after resolution and before budget planning
-    /// and approval.
     #[test]
     fn a_family_mismatched_resolution_gates_before_approval() {
         let mut authorizer = RecordingAuthorizer {
@@ -466,7 +417,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
     }
 
-    /// A budget-arithmetic failure stops admission before approval.
     #[test]
     fn a_failed_budget_plan_skips_approval() {
         let mut authorizer = RecordingAuthorizer::default();
@@ -484,8 +434,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(target())]);
     }
 
-    /// A failure building the operation — an over-budget socket set, for
-    /// example — stops admission before approval.
     #[test]
     fn a_failed_operation_build_skips_approval() {
         let mut authorizer = RecordingAuthorizer::default();
@@ -503,8 +451,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(target())]);
     }
 
-    /// Borrowed operation shapes stay alive through approval: the plan owns
-    /// the endpoints `Operation::Socket` borrows.
     #[test]
     fn borrowed_operations_survive_the_approval_call() {
         let mut authorizer = RecordingAuthorizer::default();
@@ -534,7 +480,6 @@ mod tests {
         );
     }
 
-    /// An already-spent deadline fails before the authorizer is called at all.
     #[test]
     fn a_spent_deadline_precedes_target_authorization() {
         let mut deadline = Deadline::new(Duration::from_secs(1));
@@ -554,8 +499,6 @@ mod tests {
         assert!(authorizer.calls.is_empty());
     }
 
-    /// A deadline spent inside `authorize_operation` reports the duration
-    /// error even when the authorizer also refused.
     #[test]
     fn a_deadline_spent_in_authorization_outranks_denial() {
         let now = Arc::new(Mutex::new(Instant::now()));
@@ -586,10 +529,6 @@ mod tests {
         );
     }
 
-    /// `admit_operation`'s gates check elapsed time only: cancellation raised
-    /// inside the authorizer completes the call and surfaces at the caller's
-    /// next cooperative `enforce` boundary, matching the engines' existing
-    /// placement.
     #[test]
     fn cancellation_deferred_to_the_next_cooperative_boundary() {
         let signal = Cancellation::default();
@@ -617,8 +556,6 @@ mod tests {
         assert!(matches!(deadline.enforce(), Err(Interrupted::Cancelled(_))));
     }
 
-    /// Numeric candidates the selection already excluded, already expanded,
-    /// or the family cannot use never reach the authorizer.
     #[test]
     fn selection_skips_filtered_numeric_candidates_before_authorization() {
         let selection = Selection {
@@ -671,8 +608,6 @@ mod tests {
         );
     }
 
-    /// The `max_targets` bound fails through the caller's selection adapter
-    /// without an approval call.
     #[test]
     fn selection_caps_admitted_addresses_through_the_adapter() {
         let selection = Selection {
@@ -704,7 +639,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
     }
 
-    /// An oversized network fails before any authorizer call.
     #[test]
     fn oversized_networks_fail_before_authorization() {
         let selection = Selection {
@@ -730,8 +664,6 @@ mod tests {
         assert!(authorizer.calls.is_empty());
     }
 
-    /// The expansion loop keeps its cooperative gate: cancellation raised
-    /// inside `resolve_and_authorize` stops admission before approval.
     #[test]
     fn selection_expansion_stops_at_cancellation() {
         let signal = Cancellation::default();
@@ -764,8 +696,6 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
     }
 
-    /// The family gate is the shared empty-selection gate for workflows that
-    /// compose the lower-level pieces directly.
     #[test]
     fn the_family_gate_rejects_an_empty_address_set() {
         assert_eq!(

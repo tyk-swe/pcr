@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Builds a packet from a recipe expression, dissects the exact wire bytes,
-//! and evaluates a display filter — fully offline against the built-in
-//! protocol registry. No native features or network access required.
-//!
-//!     cargo run -p packetcraftr-core --example build_decode_filter
-
 use std::sync::Arc;
 
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
@@ -20,8 +14,6 @@ use packetcraftr_core::protocol::builtin;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = builtin::registry();
 
-    // Build exact wire bytes for a UDP datagram between documentation
-    // (TEST-NET-1) addresses; nothing leaves the process.
     let packet = expression::parse(
         "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=12345,dport=9)/raw(text=hello)",
         &registry,
@@ -34,7 +26,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("built {} bytes: {:x}", built.bytes.len(), built.bytes);
 
-    // Dissect the same bytes as a bare IPv4 (linktype 228) frame.
     let frame = Frame::without_timestamp(LinkType::IPV4, built.bytes.clone())?;
     let decoded = Dissector::new(Arc::clone(&registry)).decode(frame, DecodeOptions::default())?;
     let layers: Vec<&str> = decoded

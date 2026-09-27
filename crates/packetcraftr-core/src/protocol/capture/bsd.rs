@@ -85,9 +85,7 @@ pub(crate) enum FamilyHeader {
     Loop,
 }
 
-/// Maps an address family to the registry's synthetic discriminators: 4 for
-/// IPv4, 6 for any platform's IPv6 family, and 0 for the raw fallback. Every
-/// other family is moved above the 32-bit family range, so families whose
+/// Every other family is moved above the 32-bit family range, so families whose
 /// numbers happen to be 4 or 6 (AF_PUP, AF_IPX, AF_NS) cannot select IP.
 pub(crate) fn family_discriminator(family: u32) -> u64 {
     match family {

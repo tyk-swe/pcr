@@ -583,8 +583,6 @@ fn link_capture_and_raw_ip_roots_round_trip() {
     }
 }
 
-/// A permissive raw Next Header is emitted verbatim and stays raw in the built
-/// packet, as every other codec keeps a raw discriminator.
 #[test]
 fn ipv6_option_headers_keep_a_raw_next_header_raw() {
     for raw_first in [true, false] {
@@ -628,8 +626,6 @@ fn ipv6_option_headers_keep_a_raw_next_header_raw() {
     }
 }
 
-/// Trailing paddings list the innermost coverage boundary first, as dissection
-/// orders them, so each layer's declared length excludes exactly its outside bytes.
 #[test]
 fn coverage_paddings_build_only_in_innermost_first_order() {
     let packet = |paddings: [Padding; 2]| {
@@ -733,8 +729,6 @@ fn ipv4_options_the_decoder_refuses_are_not_built_strictly() {
         .expect("a walkable source route still builds strictly");
 }
 
-/// A PPPoE discovery code needs the discovery EtherType from whichever parent
-/// carries it, not only from an Ethernet or VLAN header.
 #[test]
 fn pppoe_stage_is_checked_against_every_ethertype_parent() {
     let parents: Vec<(&str, Vec<Box<dyn Layer>>)> = vec![
@@ -783,8 +777,6 @@ fn pppoe_stage_is_checked_against_every_ethertype_parent() {
     }
 }
 
-/// Linux cooked headers carry the sender's full address length while the slot
-/// keeps only its first eight bytes, as an IPoIB capture's 20-byte addresses do.
 #[test]
 fn cooked_capture_link_addresses_longer_than_the_slot_round_trip() {
     const ARPHRD_INFINIBAND: u16 = 32;
@@ -1293,8 +1285,6 @@ fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
 
     let registry = registry();
 
-    // Reflection accepts an alias wherever it accepts the canonical name, so a
-    // template axis or fuzz target may name `dst`.
     let mut ipv4 = Ipv4 {
         source: Ipv4Addr::new(192, 0, 2, 1),
         destination: Ipv4Addr::new(198, 51, 100, 2),
@@ -1305,8 +1295,6 @@ fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
         .expect("an alias is settable");
     assert_eq!(ipv4.destination, Ipv4Addr::new(203, 0, 113, 9));
 
-    // Construction accepts the alias too, and refuses both spellings at once
-    // rather than silently dropping one value.
     let codec = registry.codec_named("ipv4").expect("IPv4 codec");
     let mut fields = BTreeMap::new();
     fields.insert(
@@ -1330,8 +1318,6 @@ fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
         "{conflict}"
     );
 
-    // Aliases stay out of the published field list and the canonical filter
-    // namespace: `ip.src` keeps resolving through its registered binding.
     let schema = registry.schema("ipv4").expect("IPv4 schema");
     assert!(
         schema.fields.iter().all(|field| field.name != "dst"),
@@ -1354,8 +1340,6 @@ fn icmp_body_views_construct_and_decode_verbatim() {
     let registry = registry();
     let codec = registry.codec_named("icmpv4").expect("ICMPv4 codec");
 
-    // Typed views edit the same bytes `body` preserves, so construction may
-    // name echo fields or error fields without learning wire offsets.
     let mut fields = std::collections::BTreeMap::new();
     fields.insert("identifier".to_owned(), FieldValue::Unsigned(0xbeef));
     fields.insert("sequence".to_owned(), FieldValue::Unsigned(7));
@@ -1387,8 +1371,6 @@ fn icmp_body_views_construct_and_decode_verbatim() {
         Some(FieldValue::Bytes(Bytes::from_static(b"PCR!")))
     );
 
-    // An error body's typed views decode at their wire offsets while unknown
-    // and trailing bytes stay verbatim in `body`.
     let mut fields = std::collections::BTreeMap::new();
     fields.insert("type".to_owned(), FieldValue::Unsigned(3));
     fields.insert("code".to_owned(), FieldValue::Unsigned(4));

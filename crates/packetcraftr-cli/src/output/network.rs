@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared serialized interface, endpoint, and route representations.
-
 use std::net::IpAddr;
 
 use serde::Serialize;
@@ -12,7 +10,6 @@ use packetcraftr_netio::{interface, link, route};
 
 use super::capture::TimestampSource;
 
-/// A native interface, identified by its name and OS index.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct InterfaceId {
     pub name: String,
@@ -34,8 +31,6 @@ impl From<&interface::Id> for InterfaceId {
     }
 }
 
-/// A requested interface publishes the half its selector names, leaving the
-/// other half empty.
 impl From<packetcraftr::route::Interface> for InterfaceId {
     fn from(value: packetcraftr::route::Interface) -> Self {
         match value {
@@ -71,7 +66,6 @@ impl From<interface::Flags> for Flags {
 }
 
 published_enum! {
-    /// The link layers an interface can transmit at.
     pub enum Capability from link::Capability {
         Layer2 => "layer2",
         Layer3 => "layer3",
@@ -80,7 +74,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// The link layer a transmission uses or requested.
     pub enum LinkMode from link::Mode {
         Auto => "auto",
         Layer2 => "layer2",
@@ -89,7 +82,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// Why a route lookup chose its next hop.
     pub enum SelectionReason from route::SelectionReason {
         Local => "local",
         OnLink => "on_link",
@@ -100,7 +92,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// The address scope of a route's destination.
     pub enum Scope from route::Scope {
         Host => "host",
         Link => "link",
@@ -111,11 +102,9 @@ published_enum! {
     }
 }
 
-/// A 48-bit MAC address, published as its six octets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct MacAddress(pub [u8; 6]);
 
-/// Colon-separated lowercase octets, as text output prints them.
 impl std::fmt::Display for MacAddress {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let [a, b, c, d, e, f] = self.0;
@@ -130,14 +119,12 @@ impl From<library_packet::MacAddress> for MacAddress {
 }
 
 published_enum! {
-    /// The 802.1Q tag family a VLAN tag belongs to.
     pub enum VlanKind from library_packet::VlanKind {
         Ieee8021Q => "ieee8021_q",
         Ieee8021Ad => "ieee8021_ad",
     }
 }
 
-/// One VLAN tag a neighbor was resolved through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct VlanTag {
     pub kind: VlanKind,
@@ -157,7 +144,6 @@ impl From<library_packet::VlanTag> for VlanTag {
     }
 }
 
-/// One packet timestamp type a native backend advertises for an interface.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TimestampType {
     pub value: i32,
@@ -191,8 +177,6 @@ pub struct Interface {
     pub mtu: Option<u32>,
     pub capability: Capability,
     pub link_type: u32,
-    /// Timestamp types the capture backend advertises for this interface;
-    /// present only when `interfaces --timestamp-types` enumerated them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp_types: Option<Vec<TimestampType>>,
 }
@@ -251,12 +235,8 @@ impl From<route::Decision> for Decision {
     }
 }
 
-/// A materialized send path: the route that was selected, plus everything the
-/// link layer needed on top of it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Plan {
-    /// Serialized as `route`, which is also what [`super::plan::Report`] calls
-    /// this whole plan one level up.
     #[serde(rename = "route")]
     pub decision: Decision,
     pub mode: LinkMode,

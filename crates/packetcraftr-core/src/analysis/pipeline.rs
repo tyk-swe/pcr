@@ -59,53 +59,37 @@ impl DerivedDatagram {
     }
 }
 
-/// One matched frame, dispatched in capture order.
 #[derive(Debug)]
 pub struct FrameRecord<'a> {
     /// 1-based position in the capture, counting unmatched frames too, so
     /// numbers agree with every other command reading the same file.
     pub number: u64,
-    /// The frame's capture timestamp, already validated as present by the
-    /// loop that read it.
     pub timestamp: SystemTime,
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
     scopes: &'a Interner,
     physical_sources: Option<&'a crate::analysis::provenance::SourceSet>,
-    /// Innermost TCP and UDP observations, each tied to the decoded view
-    /// that supplied it. A tunnel can carry one of each.
     pub tcp: Option<TcpView<'a>>,
     pub udp: Option<UdpView<'a>>,
-    /// Reassembly events in delivery order, including expiry of other flows.
     pub tcp_events: &'a [TcpEvent],
-    /// The rollback this frame's timestamp showed against the capture's
-    /// high-water mark, when it regressed. The shared capture clock detects
-    /// the regression for every physical frame; matched frames carry it so
-    /// downstream evidence can attribute it here.
     pub clock_regression: Option<Duration>,
 }
 
-/// A capture-global stream index and the scoped flow it identifies.
 #[derive(Clone, Copy, Debug)]
 pub struct Conversation<'a> {
     pub index: u64,
     pub flow: &'a ScopedFlowKey,
 }
 
-/// One TCP header and its exact source view. A visible carrier of a fragmented
-/// TCP child has no conversation until the child can be reconstructed.
 #[derive(Clone, Copy, Debug)]
 pub struct TcpView<'a> {
     pub decoded: &'a DecodedPacket,
     pub layer: usize,
     pub header: &'a Tcp,
     pub conversation: Option<Conversation<'a>>,
-    /// Indexed segment bytes; control segments and unindexed carriers are empty.
     pub payload: &'a [u8],
 }
 
-/// One UDP header and its exact source view, with the same carrier convention
-/// as [`TcpView`].
 #[derive(Clone, Copy, Debug)]
 pub struct UdpView<'a> {
     pub decoded: &'a DecodedPacket,
@@ -136,7 +120,6 @@ impl FrameRecord<'_> {
             .and_then(|datagram| datagram.sources.as_ref())
     }
 
-    /// Filter context containing only this physical frame's packet and indexes.
     pub fn physical_context(&self) -> crate::filter::Context<'_> {
         crate::filter::Context {
             decoded: self.decoded,
@@ -153,7 +136,6 @@ impl FrameRecord<'_> {
         }
     }
 
-    /// Projects physical and newly reconstructed fields using scoped stream indexes.
     pub fn project(
         &self,
         projection: &crate::filter::Projection,
@@ -162,7 +144,6 @@ impl FrameRecord<'_> {
         self.with_filter_context(|context| projection.values(context, max_bytes))
     }
 
-    /// Evaluates a filter against this physical record and its reconstructed children.
     pub fn matches(&self, filter: &crate::filter::Filter) -> Result<bool, crate::filter::Error> {
         self.with_filter_context(|context| filter.matches(context))
     }
@@ -189,70 +170,39 @@ impl FrameRecord<'_> {
         })
     }
 
-    /// Resolves a run-local scope into its capture interface and tunnel path.
     pub fn scope_definition(&self, id: ScopeId) -> Option<&crate::analysis::scope::Definition> {
         self.scopes.definition(id)
     }
 
-    /// Capture-global scope definitions observed through this frame.
     pub fn scope_definitions(&self) -> &[crate::analysis::scope::Definition] {
         self.scopes.definitions()
     }
 
-    /// Innermost completed network-layer view attached to this physical
-    /// frame. It is never a second physical pipeline record and never
-    /// contributes bytes to physical capture accounting.
     #[must_use]
     pub fn derived(&self) -> Option<&DerivedDatagram> {
         self.derived_datagrams.last()
     }
 
-    /// All completed datagram views attached to this physical frame, ordered
-    /// from outermost to innermost.
     #[must_use]
     pub fn derived_datagrams(&self) -> &[DerivedDatagram] {
         self.derived_datagrams
     }
 }
 
-/// Terminal counters and residue for a completed analysis run.
-///
-/// Every collector closes its pass with this one value, so the trailing
-/// events and the frame number a finding is attributed to cannot be supplied
-/// separately and cannot disagree.
 #[derive(Clone, Debug, Default)]
 pub struct Summary {
     pub incomplete_sources: Vec<crate::analysis::provenance::IncompleteSources>,
     pub source_outcomes_omitted: u64,
     pub clock: ClockReport,
     pub frames_read: u64,
-    /// Captured bytes charged to input budgets, including excluded frames.
     pub bytes_read: u64,
     pub frames_matched: u64,
-    /// Data still buffered when the capture ended, flushed flow by flow.
-    /// Streams that never saw FIN or RST surface their bytes here.
     pub trailing_tcp_events: Vec<TcpEvent>,
-    /// Capture-global bounded fragment counters and retained datagram
-    /// outcomes, including bounded EOF incomplete outcomes, which the IP
-    /// event sink also observes. Additional outcomes increment
-    /// `outcomes_omitted`.
     pub ip_reassembly: IpReassemblyReport,
-    /// Source interfaces in global [`crate::frame::Frame::interface`] order.
-    /// Classic PCAP has one entry; PCAPNG without interface-description blocks
-    /// has none.
     pub interfaces: Vec<crate::capture_file::Interface>,
-    /// Every capture scope interned during the run, including scopes of
-    /// frames the sink never saw, which `incomplete_sources` keys may name.
     pub scopes: Vec<crate::analysis::scope::Definition>,
 }
 
-/// Dispatches matched frames to `sink`: dissects under
-/// `limits.max_frame_bytes`, updates capture-global IP state and conversation
-/// indices, filters, then drives TCP reassembly. Enforces aggregate frame,
-/// byte, flow, and processing-duration limits; the reader's own
-/// [`ReaderLimits`](crate::capture_file::ReaderLimits) bound individual frames
-/// and interfaces.
-///
 /// Reassembly idle expiry follows capture timestamps, independent of wall-clock
 /// time.
 pub fn run<R, F>(
@@ -270,11 +220,6 @@ where
 
 /// [`run`], additionally delivering capture-global IP lifecycle events before
 /// any downstream record enabled by the same physical frame.
-///
-/// Unlike the matched-frame sink, `ip_sink` observes bounded events revealed
-/// by every physical frame and by the EOF flush. Additional outcomes remain
-/// reflected in counters and `outcomes_omitted`. This keeps fragment
-/// accounting faithful when a display filter narrows transport analysis.
 pub fn run_with_ip_events<R, I, F>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
@@ -338,11 +283,7 @@ where
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
     // One physical frame can introduce at most a fragment base scope plus one
-    // TCP and one UDP analysis scope. Tying the persistent interner to the
-    // input frame budget avoids changing the meaning of the per-transport
-    // flow and concurrent-datagram ceilings.
-    // The identity space bounds the table no matter how many frames the
-    // input may carry, so the derived count stops there.
+    // TCP and one UDP analysis scope.
     let max_scopes = usize::try_from(limits.max_frames)
         .unwrap_or(usize::MAX)
         .saturating_mul(3)
@@ -394,8 +335,7 @@ where
             .map_err(|source| Error::Decode { number, source })?;
 
         // Every physical frame advances capture-global IP state before any
-        // transport indexing or display filter. A completion is decoded as a
-        // derived network-layer view attributed to this same physical frame.
+        // transport indexing or display filter.
         let physical_sources = provenance
             .as_ref()
             .map(|tracker| {
@@ -584,12 +524,6 @@ struct PhysicalFrame<'a> {
     timestamp: SystemTime,
 }
 
-/// Advances capture-global IP reassembly for one physical frame, returning
-/// the derived datagram views its arrival completed, outermost first.
-///
-/// Every lifecycle event this reveals reaches `ip_sink` before the frame's
-/// own record does. The deadline is checked between callbacks; synchronous
-/// callbacks must bound their own work because the pipeline cannot interrupt them.
 fn advance_ip_reassembly<I>(
     ip_dispatch: &mut IpDispatch,
     stage: &FrameStage<'_>,
@@ -619,9 +553,6 @@ where
     let (now, clock_regression) = ip_dispatch.at(timestamp, number)?;
     let (expired, removed) = ip_dispatch.expire(now);
     emit(expired, ip_sink)?;
-    // The scan reconciles tracked keys with datagrams the reassembler
-    // dropped; completions release their keys through `Tracker::completed`,
-    // so only an expiry sweep that removed something can leave work here.
     if let Some(tracker) = provenance
         && removed
     {
@@ -679,10 +610,7 @@ where
     Ok((derived, clock_regression))
 }
 
-/// The transport of one kind a frame's records are attributed to, together
-/// with the decoded view it was found in.
 struct ElectedTransport<'a, T> {
-    /// Position in the derived cascade, or [`None`] for the physical frame.
     derived_index: Option<usize>,
     decoded: &'a DecodedPacket,
     transport: T,
@@ -693,8 +621,6 @@ struct TransportViews<'a> {
     udp: Option<ElectedTransport<'a, UdpTransport>>,
 }
 
-/// Selects the innermost transport of each kind across physical and derived
-/// views. A tunneled frame can belong to both UDP and TCP conversations.
 fn elect_transport_views<'a>(
     decoded: &'a DecodedPacket,
     derived: &'a [DerivedDatagram],
@@ -796,8 +722,6 @@ fn decode_derived(
     })
 }
 
-/// Reads one physical frame and charges it against the input
-/// [`capture_file::Budget`](crate::capture_file::Budget).
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
     input: &mut crate::capture_file::Budget,
@@ -847,7 +771,6 @@ mod tests {
         .expect("fixture frame is valid")
     }
 
-    /// A non-atomic IPv4 fragment: one pending datagram per identification.
     fn fragment_frame(registry: &Arc<Registry>, seconds: u64, identification: u16) -> Frame {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
@@ -862,7 +785,6 @@ mod tests {
         build(registry, packet, seconds)
     }
 
-    /// An unfragmented datagram: in scope for provenance but never pending.
     fn datagram_frame(registry: &Arc<Registry>, seconds: u64) -> Frame {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
@@ -879,8 +801,6 @@ mod tests {
         build(registry, packet, seconds)
     }
 
-    /// The per-frame IP stage of `run`, driven directly so the provenance
-    /// tracker stays observable between frames.
     struct Rig {
         decoder: Dissector,
         deadline: Deadline,
@@ -1017,7 +937,6 @@ mod tests {
         rig.advance(fragment_frame(&registry, 0, 7), 1);
         assert_eq!(rig.scans(), 0);
 
-        // The next frame's sweep expires idle datagram 7, so the scan runs.
         rig.advance(datagram_frame(&registry, 40), 2);
         assert_eq!(rig.scans(), 1);
         assert_eq!(
@@ -1025,7 +944,6 @@ mod tests {
             1
         );
 
-        // Frame three retires nothing on its own; its scan is skipped again.
         rig.advance(fragment_frame(&registry, 41, 8), 3);
         assert_eq!(rig.scans(), 1);
 

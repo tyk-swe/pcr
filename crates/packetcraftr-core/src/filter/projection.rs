@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Field-only queries sharing filter path resolution and evaluation.
-
 use super::{
     Context, Error, Requirements,
     ast::{Op, Predicate},
@@ -17,7 +15,6 @@ pub struct Projection {
     fields: Vec<FieldRef>,
     requirements: Requirements,
 }
-/// Attributes a column's filter failure to the projection field it names.
 fn invalid_field(source: Error) -> Error {
     Error::ProjectionField {
         source: Box::new(source),
@@ -84,9 +81,6 @@ impl Projection {
         self.requirements
     }
 
-    /// Whether each column selects one value independently of later layer
-    /// occurrences. A scalar result alone does not establish this: an
-    /// unqualified layer path can have additional, undecoded occurrences.
     pub(crate) fn selects_single_values(&self) -> impl Iterator<Item = bool> + '_ {
         self.fields.iter().map(|field| match &field.source {
             FieldSource::Frame(_) | FieldSource::Stream(_) => true,
@@ -98,8 +92,6 @@ impl Projection {
         })
     }
 
-    /// Independent columns for consumers that must retain earlier successful
-    /// evidence when a later column exhausts a shared projection budget.
     pub(crate) fn single_columns(&self) -> Vec<Self> {
         self.columns
             .iter()
@@ -107,15 +99,12 @@ impl Projection {
             .map(|(column, field)| Self {
                 columns: vec![column.clone()],
                 fields: vec![field.clone()],
-                // A conservative superset; never hide a required context.
                 requirements: self.requirements,
             })
             .collect()
     }
 
-    /// Missing fields are `None`; repeated occurrences become ordered lists.
-    /// The ceiling counts compact JSON cell bytes (byte values encoded as hex),
-    /// before cloning values into the result. Container nesting is capped at 64.
+    /// The ceiling counts compact JSON cell bytes (byte values encoded as hex).
     pub fn values(
         &self,
         context: &Context<'_>,
@@ -125,7 +114,6 @@ impl Projection {
         self.values_with_budget(context, &mut remaining)
     }
 
-    /// Projects cells while charging a budget shared with other projections.
     pub(crate) fn values_with_budget(
         &self,
         context: &Context<'_>,
@@ -170,8 +158,7 @@ impl Projection {
     }
 }
 
-// Retained cells are charged by their visible bytes. A small decoded slice
-// must not keep an entire source frame alive behind that charge.
+// A small decoded slice must not keep an entire source frame alive.
 fn detach_bytes(value: &mut FieldValue) {
     match value {
         FieldValue::Bytes(bytes) => *bytes = bytes::Bytes::copy_from_slice(bytes),
@@ -191,18 +178,12 @@ fn string_size(value: &str) -> Option<usize> {
     })
 }
 
-/// Decimal digit count of an unsigned value, counted rather than rendered.
 fn unsigned_len(value: u64) -> usize {
     value
         .checked_ilog10()
         .map_or(1, |digits| digits as usize + 1)
 }
 
-/// The exact length of a `Display` rendering, counted without allocating.
-///
-/// The cell budget needs the encoded size, not the string, so address-like
-/// values — IPv6's `::` elision above all — are measured by writing them into
-/// a sink that keeps only the byte count.
 fn display_len(value: impl std::fmt::Display) -> usize {
     use std::fmt::Write;
 
@@ -262,8 +243,6 @@ mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    /// The cell encoding the budget accounts for: bare scalars, hex bytes and
-    /// `Display` addresses as quoted strings, and serde's escaping for text.
     fn cell_len(value: &FieldValue) -> usize {
         match value {
             FieldValue::Bool(value) => {
@@ -297,8 +276,6 @@ mod tests {
         }
     }
 
-    /// The budget's cell accounting must match the encoded rendering exactly,
-    /// at every edge the counted helpers replace a formatted string for.
     #[test]
     fn measured_sizes_equal_the_rendered_encoding() {
         let cases = [
@@ -316,8 +293,6 @@ mod tests {
             FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED),
             FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
             FieldValue::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1234)),
-            // Equal-length zero runs elide the first; a single zero segment
-            // never elides.
             FieldValue::Ipv6(Ipv6Addr::new(1, 0, 0, 2, 0, 0, 3, 4)),
             FieldValue::Ipv6(Ipv6Addr::new(1, 2, 3, 4, 5, 0, 7, 8)),
             FieldValue::Ipv6(Ipv6Addr::new(

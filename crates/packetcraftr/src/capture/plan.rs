@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Request validation and the initial policy budget, before native I/O.
-
 use super::error::failure;
 use super::{Cause, Error, Report, StopReason};
 use crate::{Client, Stats, clock::Clock, policy::CaptureBudget, providers::Providers};
@@ -11,8 +9,6 @@ use packetcraftr_netio::capture::GroupRequest;
 use std::time::{Duration, Instant};
 
 impl<P: Providers, K: Clock> Client<P, K> {
-    /// Validates the request before any provider is consulted, and returns
-    /// the report skeleton every later failure carries.
     pub(super) fn plan_capture(
         &self,
         request: &GroupRequest,

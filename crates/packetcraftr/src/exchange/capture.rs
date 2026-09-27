@@ -1,19 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture readiness, bounded draining, and post-send collection.
-
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use super::executor::OperationError;
 use super::executor::Transaction;
 use super::{ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
 
-/// Deadline handling for drains before and after the last send.
 #[derive(Clone, Copy)]
 pub(super) enum DrainPolicy {
-    /// Requests remain to be sent, so the window closing aborts the
-    /// operation.
+    /// Requests remain to be sent, so the window closing aborts the operation.
     Enforced,
     /// Every request is sent; the window closing just ends correlation.
     BestEffort,
@@ -120,9 +116,7 @@ impl<C: Session> Transaction<C> {
             window: &self.window,
             collection: &self.collection,
         };
-        // A duplicated ingress record aborts the operation, so nothing that
-        // depends on it — promotion, the stop predicate, event draining —
-        // runs for the frame that carried it.
+        // A duplicated ingress record aborts, so nothing downstream runs for its frame.
         let processed = self
             .captured
             .process(frame, context)
@@ -159,9 +153,7 @@ impl<C: Session> Transaction<C> {
         let Some(stop_predicate) = stop_predicate.as_deref_mut() else {
             return false;
         };
-        // Response events are created only for decoded frames whose ingress
-        // marker proves they followed the corresponding completed send. By
-        // waiting for the event, a stop can never discard its own evidence.
+        // By waiting for the event, a stop can never discard its own evidence.
         self.captured.pending_events.iter().any(|event| {
             let super::Event::Response(response) = event else {
                 return false;

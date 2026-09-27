@@ -41,7 +41,6 @@ fuzz_target!(|data: &[u8]| {
                 },
             };
             if let Ok(decoded) = dissector.decode(frame, options) {
-                // Reflective field access on every decoded layer must not panic
                 for layer in decoded.packet.iter() {
                     let schema = layer.schema();
                     for field in schema.fields {

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `build`'s per-packet text, hex, raw, and JSON output.
-
 use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 

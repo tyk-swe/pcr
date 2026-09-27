@@ -269,7 +269,6 @@ mod tests {
             );
             assert_eq!(cache.get(&key(4)).unwrap(), None);
             let entries = cache.entries.lock().unwrap();
-            // Hits and misses leave unrelated entries alone; insertion bounds cleanup.
             assert_eq!(entries.len(), 3);
             assert_eq!(entries[&key(1)].inserted_at, inserted);
             assert_eq!(entries[&key(1)].expires_at, expires);

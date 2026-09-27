@@ -97,9 +97,6 @@ fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("invalid value"), "{label}: {stderr}");
     }
-    // Valid explicit settings proceed past validation to interface resolution,
-    // which reports the unknown interface (or an unavailable native capability
-    // in portable builds) rather than a setting rejection.
     let output = run(&[
         "--output",
         "text",
@@ -130,8 +127,6 @@ fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
 
 #[test]
 fn decoded_output_options_are_checked_before_interface_lookup() {
-    // --dissect/--field only apply to text and NDJSON; the rejection names the
-    // accepted formats before any native interface work runs.
     for extra in [
         vec!["--dissect"],
         vec!["--field", "ipv4.destination"],
@@ -147,8 +142,6 @@ fn decoded_output_options_are_checked_before_interface_lookup() {
             ];
             args.extend(extra.clone());
             if format == "json" {
-                // JSON capture summaries require --write; decoded output is
-                // still rejected first.
                 args.extend(["--write", "/dev/null"]);
             }
             let output = run(&args);
@@ -160,7 +153,6 @@ fn decoded_output_options_are_checked_before_interface_lookup() {
                     "{args:?}"
                 );
             } else {
-                // Binary formats cannot carry the machine error envelope.
                 assert!(
                     String::from_utf8_lossy(&output.stderr).contains("cli.capture_decode_format"),
                     "{args:?} stderr"
@@ -168,7 +160,6 @@ fn decoded_output_options_are_checked_before_interface_lookup() {
             }
         }
     }
-    // --field and --dissect conflict outright.
     let output = run(&[
         "--output",
         "ndjson",

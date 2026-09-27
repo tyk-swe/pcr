@@ -42,7 +42,6 @@ pub(crate) struct Args {
     /// tcp.acknowledgment, tcp/udp ports, and dns.id. Header edits apply first
     /// when combined with them; conflicts with --rules-file.
     #[arg(long = "set", value_name = "FIELD=VALUE", value_parser = assignment)]
-    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
     #[allow(rustdoc::invalid_html_tags)]
     pub(crate) sets: Vec<FieldAssignment>,
     /// Checksum behavior for field assignments: repair recomputes covering
@@ -73,7 +72,6 @@ pub(crate) struct Args {
     pub(crate) destination_port: Option<u16>,
     /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
     #[arg(long = "vlan", value_parser = vlan, conflicts_with = "strip_vlans")]
-    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
     #[allow(rustdoc::broken_intra_doc_links)]
     pub(crate) vlans: Vec<VlanRewrite>,
     /// Remove the outer VLAN stack.
@@ -89,7 +87,6 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }
 
-/// The whole rewrite.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RewriteRunTime;
 
@@ -117,7 +114,6 @@ impl From<ChecksumArg> for ChecksumMode {
     }
 }
 
-/// Parses one `--set <field>=<value>` assignment.
 fn assignment(value: &str) -> Result<FieldAssignment, CliError> {
     value
         .parse()

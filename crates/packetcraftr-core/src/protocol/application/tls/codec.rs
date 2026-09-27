@@ -2,27 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! The per-frame `tls` layer codec.
-//!
-//! One TCP segment in, one layer out. The codec is total: it never returns an
-//! error and never raises a warning, because packet loss, retransmission, and
-//! mid-stream capture starts are ordinary on a TLS port and must not inflate
-//! `expert` error counts.
-//!
-//! ```text
-//! segment ─▶ looks_like_record_start?
-//!    no  ─▶ raw layer over the whole segment, no diagnostics
-//!    yes ─▶ parse_record loop (≤ MAX_RECORDS_PER_SEGMENT)
-//!             0 complete records ─▶ raw layer, no diagnostics
-//!            ≥1 complete records ─▶ tls layer over those records,
-//!                                   remainder becomes a raw child
-//! ```
-//!
-//! Handshake fields are published only when the whole handshake message lies
-//! inside this segment; the stream collector is the authority for hellos split
-//! across segments.
-//!
-//! The `ja3`, `ja3_raw`, and `ja4` fields are advisory: a fingerprint is
-//! computed from client-controlled bytes and can be shaped at will by the peer.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -53,11 +32,8 @@ pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record}
 
 pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 
-/// Records dissected from one segment before the remainder becomes a raw tail.
-///
 /// A hostile peer can pack thousands of one-byte records into a single
-/// segment; the cap keeps per-frame work linear in the segment length with a
-/// small constant.
+/// segment; the cap keeps per-frame work linear in the segment length.
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 
 pub(crate) const RECORD_CONTINUES: &str = "tls.record_continues";
@@ -67,7 +43,6 @@ pub(crate) const SNI_INVALID: &str = "tls.sni_invalid";
 
 struct Dissection {
     layer: Tls,
-    /// Bytes after the last complete record.
     remainder: usize,
     diagnostics: Vec<Diagnostic>,
 }
@@ -75,7 +50,6 @@ struct Dissection {
 impl TryFrom<Hello> for Tls {
     type Error = Error;
 
-    /// Constructs bounded hello records and derives their inspection fields.
     fn try_from(hello: Hello) -> Result<Self, Self::Error> {
         let wire = hello.to_wire()?;
         let parsed = Self::from_records(&wire)
@@ -90,7 +64,6 @@ impl TryFrom<Hello> for Tls {
 impl TryFrom<&[u8]> for Tls {
     type Error = Error;
 
-    /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
         let parsed = Self::parse_records(wire, |end| Bytes::copy_from_slice(&wire[..end]))
             .ok_or_else(|| Error::invalid("no complete TLS record"))?;
@@ -102,10 +75,6 @@ impl TryFrom<&[u8]> for Tls {
 }
 
 impl Tls {
-    /// Reads every complete record from the front of `wire`.
-    ///
-    /// Returns `None` when no complete record is present, which is how a
-    /// coincidental record header inside opaque bytes stays `raw`.
     fn from_records(wire: &Bytes) -> Option<Dissection> {
         Self::parse_records(wire, |end| wire.slice(..end))
     }
@@ -188,8 +157,6 @@ impl Tls {
         })
     }
 
-    /// Publishes handshake fields when a whole handshake message fits in the
-    /// leading run of handshake records.
     fn apply_handshake(&mut self, records: &[Record], diagnostics: &mut Vec<Diagnostic>) {
         if self.content_type != CONTENT_TYPE_HANDSHAKE {
             return;
@@ -263,8 +230,7 @@ impl Tls {
     fn validate_wire_consistency(&self) -> Result<(), crate::codec::Error> {
         let reparsed = Self::from_records(&self.wire).map(|dissection| dissection.layer);
         // `incomplete` describes the bytes after the retained records, which
-        // this layer deliberately does not keep; every other field is a pure
-        // function of the wire.
+        // this layer deliberately does not keep.
         let matches = reparsed.is_some_and(|mut parsed| {
             parsed.incomplete = self.incomplete;
             parsed == *self
@@ -280,17 +246,11 @@ impl Tls {
     }
 }
 
-/// Escapes text read from the wire the way DNS escapes label bytes:
-/// graphic ASCII stays, everything else (including the space that would split
-/// a `key=value` text line) becomes `\DDD` per byte. Unlike a
-/// DNS label, `.` is not a separator here and is kept verbatim.
 #[must_use]
 pub(crate) fn escape_wire_text(value: &str) -> String {
     escape_wire_bytes(value.as_bytes())
 }
 
-/// Escapes raw wire bytes with the same rule as [`escape_wire_text`], so a
-/// value that is not UTF-8 keeps its exact octets instead of U+FFFD.
 #[must_use]
 pub(crate) fn escape_wire_bytes(value: &[u8]) -> String {
     let mut escaped = String::with_capacity(value.len());
@@ -305,7 +265,6 @@ pub(crate) fn escape_wire_bytes(value: &[u8]) -> String {
 }
 
 impl From<Error> for crate::codec::Error {
-    /// Reports a TLS wire failure through the layer codec contract.
     fn from(error: Error) -> Self {
         match error {
             Error::Invalid { message } => invalid(NAME, message),
@@ -322,8 +281,7 @@ impl LayerCodec for TlsCodec {
         &tls_schema().protocol
     }
 
-    /// A segment on a TLS port that is not TLS decodes as `raw`, so this codec
-    /// produces either protocol.
+    /// A segment on a TLS port that is not TLS decodes as `raw`.
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
         matches!(protocol.as_str(), NAME | "raw")
     }
@@ -398,9 +356,6 @@ impl LayerCodec for TlsCodec {
     }
 }
 
-/// Preserves a segment that is not TLS as opaque bytes, with no diagnostics:
-/// a bound port carrying something else, or the middle of a split record, is
-/// not a defect.
 fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
     let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
     decoded.fields = Raw::layout(input.len());
@@ -509,8 +464,6 @@ mod tests {
         assert_eq!(escape_wire_text("h2 x"), "h2\\032x");
     }
 
-    /// Encodes `layer` the way the builder does, with an empty packet around
-    /// it: the codec writes back only the bytes the layer retained.
     fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let packet = crate::packet::Packet::new();

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `--compression`, defined once for every command that writes captures.
-
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -34,7 +32,6 @@ impl Compression {
     }
 }
 
-/// What a command's `--compression` compresses.
 pub(crate) trait Destination:
     Clone + Copy + fmt::Debug + Default + Send + Sync + 'static
 {
@@ -55,12 +52,6 @@ pub(crate) struct CompressionArgs<D: Destination> {
 }
 
 impl<D: Destination> CompressionArgs<D> {
-    /// The compression of capture bytes written to stdout in `format`.
-    ///
-    /// # Errors
-    ///
-    /// A usage error when compression is requested for a format other than
-    /// PCAP or PCAPNG.
     pub(crate) fn for_output(self, format: impl Into<Format>) -> Result<Compression, CliError> {
         if !matches!(self.compression, Compression::None)
             && !matches!(format.into(), Format::Pcap | Format::PcapNg)
@@ -73,13 +64,11 @@ impl<D: Destination> CompressionArgs<D> {
         Ok(self.compression)
     }
 
-    /// The compression of a saved capture file, whatever stdout reports.
     pub(crate) const fn for_file(self) -> Compression {
         self.compression
     }
 }
 
-/// Capture bytes written to stdout.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CaptureStdout;
 
@@ -88,7 +77,6 @@ impl Destination for CaptureStdout {
         "Compress binary capture output; independent of the input's detected format";
 }
 
-/// A saved PCAPNG file.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SavedPcapNg;
 

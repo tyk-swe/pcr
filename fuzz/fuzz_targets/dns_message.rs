@@ -27,15 +27,11 @@ fuzz_target!(|data: &[u8]| {
         assert!(
             decoded.answers.len() + decoded.authorities.len() + decoded.additionals.len() <= 64
         );
-        // Reflection must remain bounded for binary names, TXT, OPT options,
-        // and unknown records as well as ordinary address answers.
         use packetcraftr_core::layer::Layer;
         for section in ["answers", "authorities", "additionals"] {
             assert!(decoded.field(section).is_some());
         }
     }
-    // Numeric query types must preserve all wire codes and reject adjacent
-    // question codes, independent of whether their RDATA is understood.
     let code = data
         .first_chunk::<2>()
         .copied()

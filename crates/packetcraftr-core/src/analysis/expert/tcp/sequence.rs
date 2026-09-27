@@ -237,7 +237,6 @@ pub(super) fn record_clean_closures(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     events: &[TcpEvent],
 ) {
-    // A clean close proves delivery only after this frame's header analysis.
     for event in events {
         if let TcpEvent::Closed { flow, reset: false } = event {
             flows.entry(flow.clone()).or_default().closed = true;

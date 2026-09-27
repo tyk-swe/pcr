@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `dns-read`'s text output. Every field prints in its JSON spelling, and
-//! captured names reach the terminal only through the sanitizing writer.
+//! Captured names reach the terminal only through the sanitizing writer.
 
 use std::fmt::Display;
 
@@ -14,7 +13,6 @@ use crate::rendering::{
     comma_separated, optional_display, render_dns_fields, write_stdout_line, write_summary_line,
 };
 
-/// One message line, then its questions and records and any decode error.
 pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
     let flow = &message.flow.flow;
     write_stdout_line(format_args!(
@@ -68,7 +66,6 @@ fn endpoint(address: impl Display, port: impl Display) -> String {
     format!("{address}:{port}")
 }
 
-/// The physical frame numbers a message was assembled from.
 fn frames(sources: &[crate::output::provenance::Source]) -> String {
     or_none(comma_separated(sources.iter().map(|source| source.number)))
 }
@@ -81,8 +78,6 @@ fn or_none(list: String) -> String {
     }
 }
 
-/// A signed capture-clock interval in nanoseconds; negative intervals stay
-/// visible, as the JSON document keeps them.
 fn latency(latency: Latency) -> String {
     let sign = if latency.negative { "-" } else { "" };
     format!("{sign}{}ns", latency.nanoseconds)

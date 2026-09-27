@@ -136,8 +136,6 @@ fn a_fragment_selector_and_derived_filter_expand_to_physical_dependencies() {
         .is_err()
     );
 }
-/// An incomplete group's key names a capture scope, so the plan defines it
-/// even when no frame of the group reached the selection within time bounds.
 #[test]
 fn every_selected_incomplete_group_scope_is_defined() {
     let (frames, _) = frames();

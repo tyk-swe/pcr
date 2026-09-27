@@ -9,27 +9,16 @@ use packetcraftr_netio::capture::GroupRequest;
 
 use packetcraftr_core::error::BoundaryError;
 
-/// The boxed frame selector a request carries.
 type SelectFrame = Box<dyn FnMut(u64, &Frame) -> Result<bool, BoundaryError> + Send>;
 
-/// One capture: the interfaces and native settings every source arms with,
-/// how long frames are delivered, and which of them are published.
 pub struct Request {
-    /// The interfaces to capture from, with the queue limits, filter, and
-    /// native settings every source shares.
     pub group: GroupRequest,
-    /// How long frames are delivered, measured on the client's clock from the
-    /// start of the capture. Arming and readiness count against it. A zero
-    /// window still arms every source, reports their metadata, and stops
-    /// without delivering a frame.
+    /// Arming and readiness count against it.
     pub window: Duration,
-    /// Chooses the admitted frames to publish; `None` publishes all of them.
-    /// Set with [`with_selector`](Self::with_selector).
     pub(crate) select: Option<SelectFrame>,
 }
 
 impl Request {
-    /// A capture of `group` for `window` that publishes every admitted frame.
     #[must_use]
     pub fn new(group: GroupRequest, window: Duration) -> Self {
         Self {
@@ -39,10 +28,7 @@ impl Request {
         }
     }
 
-    /// Publishes only the admitted frames `select` keeps. `select` receives
-    /// each frame's one-based position among every frame the capture
-    /// delivered; it runs on the capture's own thread, before the frame is
-    /// published, and a failure stops the capture.
+    /// `select` receives each frame's one-based position among every frame the capture delivered.
     #[must_use]
     pub fn with_selector(
         mut self,

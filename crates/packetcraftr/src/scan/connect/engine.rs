@@ -30,23 +30,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Scans the request's targets and ports with kernel TCP connects
     /// through the client's TCP provider, keeping at most `max_in_flight`
     /// attempts pending at once.
-    ///
-    /// The declared targets and the complete socket budget are admitted
-    /// before any connection is scheduled, and each attempt's endpoint is
-    /// authorized again just before it starts. Pacing runs on the client's
-    /// clock, and the scan stops at the request's duration limit or the
-    /// client's cancellation. Each settled attempt is published to `sink` as
-    /// an [`Event::Probe`] on a worker admitted by the client's runtime, and
-    /// the scan waits for the answer before it continues. No application
-    /// bytes are read or written; every connected socket is closed at once.
-    /// Interface, preferred-source, and explicit link-mode overrides are
-    /// rejected because kernel TCP controls route and source selection.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the admission refusal, the provider's
-    /// failure outside a socket verdict, the clock's failure, the sink's
-    /// failure, or the duration limit.
     pub fn scan_connect<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -100,9 +83,6 @@ fn execution(
     }
 }
 
-/// The authorized connect plan: every endpoint to probe, the total attempt
-/// count, the pacing delay, and the approved socket limits. The admitted
-/// addresses accompany the plan in the return value for the summary.
 struct Planned {
     endpoints: Vec<SocketAddr>,
     count: usize,
@@ -111,8 +91,6 @@ struct Planned {
     planned_duration: Duration,
 }
 
-/// Validates the connect-specific request, admits the declared targets, and
-/// approves the complete socket limits before any connection is scheduled.
 fn planned<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
@@ -205,7 +183,6 @@ fn planned<A: Authorizer + ResolveTarget>(
     Ok((selected.addresses, planned))
 }
 
-/// Approves and starts one connection attempt, returning the pending socket.
 /// `None` means every native connect admission is still held, for example by
 /// a cancelled attempt whose provider call has not returned or a finished one
 /// whose worker has not yet released it, so the caller retries this endpoint.
@@ -257,8 +234,6 @@ where
     }))
 }
 
-/// Polls one pending connection, removing and settling it when it finished or
-/// exceeded its deadline. `None` means it is still pending.
 fn settle_active<S: tcp::Stream>(
     active: &mut Vec<Active<S>>,
     index: usize,
@@ -292,8 +267,6 @@ fn settle_active<S: tcp::Stream>(
     }))
 }
 
-/// Runs one admitted connect scan under `deadline`, publishing each settled
-/// attempt through `emit`. `started` is the scan's start on `clock`.
 fn run<Q, A, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -480,10 +453,6 @@ fn finish_probe<S: tcp::Stream>(
     Ok(probe)
 }
 
-/// The socket evidence a failed connection publishes: the provider's own
-/// socket error, or, for a connection that failed around it, an error of the
-/// kind that failure means (a spent deadline timed out; cancellation
-/// interrupted the attempt) that keeps it as its source.
 fn socket_error(error: tcp::Error) -> io::Error {
     match error {
         tcp::Error::Socket(source) => source,

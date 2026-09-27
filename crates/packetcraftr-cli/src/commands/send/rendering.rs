@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `send`'s text output.
-
 pub(super) fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
     let route = frame.packet.route();
     format!(

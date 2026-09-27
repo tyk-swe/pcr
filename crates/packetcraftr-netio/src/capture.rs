@@ -1,17 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The capture contract: a [`Provider`] arms an owned [`Session`] for one
-//! interface, and the native [`SystemProvider`] does so through the backend
-//! compiled in for this target.
-//!
-//! A [`Session`] reads one or more sources. A provider arms a single-interface
-//! session; a [`Group`] composes up to [`MAX_SOURCES`] of them into one
-//! session, and each [`Captured`] record names the source that delivered it.
-//! Queue limits are in [`Limits`], native driver settings in
-//! [`NativeSettings`] and what the backend made of them in
-//! [`RealizedSettings`].
-
 #[cfg(native_layer2)]
 mod activation;
 #[cfg(native_layer2)]
@@ -41,49 +30,28 @@ pub use settings::{
     TimestampPrecision, TimestampSource, TimestampType,
 };
 
-/// Longest native capture filter, in bytes, that a single session or a group
-/// accepts.
 pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 
 /// Owned capture session: arm through [`Provider`] (or compose a [`Group`]),
 /// pass [`Session::wait_ready`] before transmission, read records, then call
-/// [`Session::shutdown`] to join every backend. Stats are final only
-/// after successful shutdown.
-///
-/// A session reads [`Session::source_count`] sources, numbered from zero; a
-/// provider's single-interface session has exactly one. Every record carries
-/// its source number in [`Captured::source`].
-///
-/// Waits follow the [deadline convention](crate::deadline): they end at the
-/// caller's deadline and stop with [`Error::Cancelled`] once its cancellation
-/// is signaled. Shutdown keeps its own bounded lifecycle so cleanup still runs
-/// after cancellation.
+/// [`Session::shutdown`] to join every backend.
 pub trait Session: Send {
-    /// Returns the backend-confirmed properties fixed when the session was
-    /// activated. A multi-source session reports its first source here.
+    /// A multi-source session reports its first source here.
     fn metadata(&self) -> &Metadata;
-    /// Number of activated sources.
     fn source_count(&self) -> usize {
         1
     }
-    /// Activation metadata of `source`, the number a record carries in
-    /// [`Captured::source`]; `None` outside `0..source_count()`.
     fn source_metadata(&self, source: usize) -> Option<&Metadata> {
         (source == 0).then(|| self.metadata())
     }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
-    /// A session not ready by `deadline` fails.
     fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), Error>;
     /// Waits until `deadline` for a record. `Ok(None)` means no record was
     /// delivered during this wait, not that none was captured or that the
-    /// session ended. A spent deadline waits for nothing: it delivers a record
-    /// that is already queued, or `Ok(None)`. Only [`Session::shutdown`] ends
-    /// the session; [`Session::stats`] reports loss.
+    /// session ended.
     fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
-    /// Returns cumulative counters, including undelivered queue loss, summed
-    /// over every source.
     fn stats(&self) -> Stats;
 }
 
@@ -117,21 +85,16 @@ impl<T: Session + ?Sized> Session for Box<T> {
     }
 }
 
-/// Configuration for one single-interface capture session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub interface: InterfaceId,
     pub limits: Limits,
-    /// Native filter that the provider must install before delivery or reject.
     pub filter: Option<String>,
     pub promiscuous: bool,
-    /// Optional native-driver settings; defaults preserve backend behavior.
     pub native: NativeSettings,
 }
 
 impl Request {
-    /// Checks everything that needs no interface: queue limits, native
-    /// settings, and the [`MAX_FILTER_BYTES`] filter limit.
     pub fn validate(&self) -> Result<(), Error> {
         validate_filter_length(self.filter.as_deref())?;
         self.limits.validate()?;
@@ -139,7 +102,6 @@ impl Request {
     }
 }
 
-/// The filter-size limit single sessions and groups share.
 fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
     match filter {
         Some(filter) if filter.len() > MAX_FILTER_BYTES => Err(Error::CaptureFilterTooLong {
@@ -150,11 +112,6 @@ fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
     }
 }
 
-/// The instant a capture wait ends: `None` once the caller's deadline is
-/// spent, so the wait takes only what is already queued. A remainder above
-/// [`deadline::MAX_WAIT`](crate::deadline::MAX_WAIT) is refused as
-/// [`Error::InvalidCaptureTimeout`] rather than clipped, and a signaled
-/// cancellation stops the wait. Single sessions and groups share this rule.
 pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {
     deadline.check_cancelled()?;
     let Some(timeout) = deadline
@@ -179,28 +136,19 @@ pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {
         })
 }
 
-/// Backend-confirmed properties of an activated capture session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
     pub interface: InterfaceId,
     pub link_type: LinkType,
     pub snap_length: usize,
-    /// What the backend made of the session's [`NativeSettings`].
     pub native: RealizedSettings,
 }
 
-/// Starts an owned capture stream using platform-neutral interface data.
 pub trait Provider: Send + Sync {
     type Capture: Session;
 
-    /// Arms and activates one session, following the
-    /// [deadline convention](crate::deadline).
     fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error>;
 
-    /// The packet timestamp types this provider's backend advertises for
-    /// `interface`, in backend order. Providers without native timestamp-type
-    /// discovery reject with [`Error::Unsupported`]. Discovery follows the
-    /// [deadline convention](crate::deadline).
     fn timestamp_types(
         &self,
         _interface: &InterfaceId,
@@ -217,7 +165,6 @@ pub trait Provider: Send + Sync {
     }
 }
 
-/// Platform-native capture session with private handle and worker.
 pub type SystemSession = Box<dyn Session>;
 
 /// Target-selected native capture provider; requires `native-layer2`.

@@ -233,8 +233,7 @@ impl Option4 {
         Ok(output.into())
     }
 }
-/// Noncanonical fixed-width bodies remain raw, including pieces of RFC 3396
-/// concatenated options. TLV truncation still fails before reading past input.
+/// Noncanonical fixed-width bodies remain raw, including pieces of RFC 3396 concatenated options.
 fn value(code: u8, data: Bytes) -> Value4 {
     match (code, data.len()) {
         (53, 1) => Value4::MessageType(data[0]),

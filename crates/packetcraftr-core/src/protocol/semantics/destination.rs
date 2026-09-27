@@ -11,8 +11,6 @@ use crate::protocol::BuiltinProtocol;
 use crate::protocol::link::Arp;
 use crate::protocol::network::Ipv6;
 
-/// Field names that carry a route on a built-in layer. A layer of an unknown
-/// protocol that declares or reflects one is refused rather than trusted.
 const ROUTE_FIELDS: [&str; 3] = ["destination", "segments", "target_protocol"];
 
 /// Enumerates every address that can determine where the packet is routed. Unknown

@@ -16,7 +16,6 @@ use packetcraftr_netio::link::Mode;
 
 const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
 
-/// A network where the destination is three hops away.
 fn network() -> Arc<Mutex<State>> {
     Arc::new(Mutex::new(State {
         hops: Some(3),
@@ -32,7 +31,6 @@ fn client(state: &Arc<Mutex<State>>, policy: Policy) -> Client<common::FakeProvi
     )
 }
 
-/// A TCP trace to [`DESTINATION`] over hops 1 to 5, one probe per hop.
 fn request() -> traceroute::Request {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Plans physical source-record selections with stream and IP dependencies.
-//! Copy from the same immutable capture using `capture_file::select` after rewinding.
-
 use super::{
     Options, StreamRef, StreamTransport,
     provenance::{IncompleteSources, SourceSet},
@@ -21,11 +18,7 @@ pub const MAX_SELECTED_FRAMES: usize = 1_000_000;
 #[derive(Clone, Debug)]
 pub struct Selection<'a> {
     pub streams: Vec<StreamRef>,
-    /// Include every known IP datagram whose physical source set contains one
-    /// of these frame positions, including incomplete groups at capture end.
     pub datagram_frames: Vec<u64>,
-    /// Matching physical records also include every datagram reconstructed on
-    /// that record. Stream indexes and derived protocol fields are available.
     pub filter: Option<&'a Filter>,
     pub max_selected_frames: usize,
 }
@@ -99,8 +92,6 @@ pub struct Plan {
     pub unmatched_datagram_frames: Vec<u64>,
     pub selected_complete_datagrams: u64,
     pub selected_incomplete_datagrams: Vec<IncompleteSources>,
-    /// Incomplete groups not attributable to the requested selection. Missing
-    /// transport headers cannot be used to guess their conversation index.
     pub unselected_incomplete_datagrams: usize,
     pub source_outcomes_omitted: u64,
     pub frames_read: u64,

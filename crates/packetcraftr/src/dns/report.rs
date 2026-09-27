@@ -79,7 +79,6 @@ pub enum Outcome {
     NetworkFailure,
 }
 
-/// Transport used by one DNS attempt phase or accepted response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
@@ -88,7 +87,6 @@ pub enum Transport {
 }
 
 impl Transport {
-    /// The stable text and structured-output name.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Udp => "udp",
@@ -104,11 +102,7 @@ impl fmt::Display for Transport {
 }
 
 impl Outcome {
-    /// Precedence across retries and across several correlated frames in one
-    /// attempt: the most informative outcome seen is the one reported.
-    ///
-    /// A timeout ranks last precisely because it carries no evidence, so any
-    /// later attempt that learns something replaces it.
+    /// A timeout ranks last: it carries no evidence, so any attempt that learns more replaces it.
     pub(in crate::dns) const fn retry_rank(self) -> u8 {
         match self {
             Self::Response => 5,
@@ -120,7 +114,6 @@ impl Outcome {
         }
     }
 
-    /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Response => "response",
@@ -139,8 +132,6 @@ impl fmt::Display for Outcome {
     }
 }
 
-/// Transport-specific evidence. Kernel TCP never carries a captured frame;
-/// a transmitted UDP query always has a source port and transmission time.
 #[derive(Clone, Debug)]
 pub enum TransportEvidence {
     Udp {
@@ -193,13 +184,11 @@ impl AttemptEvidence {
     }
 }
 
-/// Incoherent independently supplied DNS result parts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("incoherent DNS evidence: {0}")]
 pub struct IncoherentReport(pub(in crate::dns) &'static str);
 
-/// The terminal DNS decision and its accepted response metadata. Private
-/// fields prevent a successful outcome without an accepted transport/header.
+/// Private fields prevent a successful outcome without an accepted transport/header.
 #[derive(Clone, Debug)]
 pub struct Completion {
     pub(in crate::dns) outcome: Outcome,
@@ -259,19 +248,13 @@ impl Completion {
     }
 }
 
-/// One captured frame this operation could not correlate to its query.
-///
-/// There is no transport field: DNS-over-TCP runs on a kernel socket and never
-/// yields captured frames, so undecoded evidence is always UDP.
+/// No transport field: DNS-over-TCP never yields captured frames, so this is always UDP.
 #[derive(Clone, Debug)]
 pub struct UndecodedEvidence {
     pub attempt: u32,
     pub frame: Frame,
 }
 
-/// Every event of one DNS query joined with its [`Report`]: the attempts,
-/// the accepted response's records, and the retained evidence. Private fields
-/// keep the parts coherent with the report's completion.
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     report: Report,
@@ -355,8 +338,6 @@ impl Aggregate {
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
-    /// Separates the terminal report from its retained evidence without
-    /// copying captured bytes or record collections.
     pub fn into_parts(
         self,
     ) -> (
@@ -407,9 +388,7 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
-/// The terminal result of one DNS query, returned after every attempt and
-/// record event was published. Diagnostics are not repeated here: each one
-/// already reached the caller as [`Event::Diagnostic`] when it was raised.
+/// Diagnostics are not repeated here; each already reached the caller as [`Event::Diagnostic`].
 #[derive(Clone, Debug)]
 pub struct Report {
     pub server: String,
@@ -422,9 +401,6 @@ pub struct Report {
     pub stats: Stats,
 }
 
-/// A sink that rebuilds the [`Aggregate`] from published events. Pass a
-/// clone to [`Client::dns`](crate::Client::dns) and [`finish`](Self::finish)
-/// the one kept with the report it returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Observed>);
 
@@ -438,18 +414,11 @@ impl Sink<Event> for Collector {
 }
 
 impl Collector {
-    /// Joins the collected events with the query's terminal `report`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::IncoherentReport`] when the events disagree with the
-    /// report.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         self.0.take().finish(report)
     }
 }
 
-/// The events of one DNS query, in publication order.
 #[derive(Default)]
 pub(super) struct Observed {
     attempts: Vec<AttemptEvidence>,

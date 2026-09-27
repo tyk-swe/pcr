@@ -23,7 +23,6 @@ use packetcraftr_netio::route::Decision;
 
 use super::*;
 
-/// A Layer 2 transmit fake; neighbor discovery never transmits at Layer 3.
 trait Layer2Link: Send + Sync {
     fn send_layer2(
         &self,
@@ -31,8 +30,6 @@ trait Layer2Link: Send + Sync {
     ) -> Result<transmit::Report, packetcraftr_netio::Error>;
 }
 
-/// Composes a Layer 2 fake and a capture fake into the one I/O value a
-/// client resolves over.
 struct FixtureIo<L, C> {
     layer2: L,
     capture: C,
@@ -62,7 +59,6 @@ impl<L: Send + Sync, C: capture::Provider> capture::Provider for FixtureIo<L, C>
     }
 }
 
-/// Client-owned resolution state over one fixture I/O pair.
 struct ActiveResolver<L, C> {
     io: FixtureIo<L, C>,
     state: State,
@@ -80,7 +76,6 @@ where
         })
     }
 
-    /// Resolves with no operation deadline: only the options bound it.
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
         self.resolve_within(request, &unbounded())
     }
@@ -108,13 +103,10 @@ where
     }
 }
 
-/// An operation with no deadline of its own.
 fn unbounded() -> Deadline {
     Deadline::new(packetcraftr_netio::deadline::MAX_WAIT)
 }
 
-/// Compares every field through `Debug`, including the non-comparable
-/// platform source a netio failure retains.
 fn same_failure(left: &packetcraftr_netio::Error, right: &packetcraftr_netio::Error) -> bool {
     format!("{left:?}") == format!("{right:?}")
 }
@@ -177,7 +169,6 @@ struct FixtureLayer2 {
     state: Arc<FixtureLayer2State>,
 }
 
-/// An owned copy of the route view a discovery frame was sent with.
 #[derive(Clone, Debug)]
 struct SentRoute {
     decision: Decision,
@@ -248,8 +239,6 @@ impl Layer2Link for FixtureLayer2 {
     }
 }
 
-/// A capture that sees nothing: every wait runs its full timeout, as a
-/// real capture does on a quiet link.
 struct SilentCaptureProvider;
 
 impl capture::Provider for SilentCaptureProvider {
@@ -564,8 +553,6 @@ fn successful_resolution_arms_before_send_and_reuses_the_cached_result() {
     assert_eq!(sent[0].1.decision.interface, request.interface);
     assert_eq!(sent[0].1.decision.source_mac, Some(request.interface_mac));
     assert_eq!(sent[0].0[..6], [0xff; 6]);
-    // The discovery frame is already complete, so the route invents no
-    // lookup destination, source address, or next hop.
     assert_eq!(sent[0].1.lookup_destination, None);
     assert_eq!(sent[0].1.decision.selected_source, None);
     assert_eq!(sent[0].1.decision.next_hop, None);

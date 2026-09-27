@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Frame-at-a-time decoding and selection under one bounded budget.
-
 use std::sync::Arc;
 
 use crate::decode::{self, DecodedPacket, Dissector};
@@ -11,13 +9,6 @@ use crate::registry::Registry;
 
 use super::{Context, Error, Filter};
 
-/// Decodes complete frames under a per-frame byte budget and applies an
-/// optional display filter, so every frame-at-a-time consumer dissects,
-/// budgets, and selects identically.
-///
-/// Frames are judged one at a time with no conversation state, so a filter
-/// that reads `tcp.stream` or `udp.stream` is refused when the decoder is
-/// built rather than silently matching nothing.
 #[derive(Clone, Debug)]
 pub struct FrameDecoder {
     dissector: Dissector,
@@ -26,13 +17,6 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
-    /// A decoder that dissects frames of at most `max_frame_bytes` and keeps
-    /// only those `filter` matches, or every frame without one.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::StreamIndexUnavailable`] when `filter` reads a
-    /// conversation index.
     pub fn new(
         registry: Arc<Registry>,
         filter: Option<Filter>,
@@ -51,11 +35,6 @@ impl FrameDecoder {
         })
     }
 
-    /// Dissects `frame` under this decoder's packet budget.
-    ///
-    /// # Errors
-    ///
-    /// Returns the dissection failure, including a frame over the budget.
     pub fn decode(&self, frame: &Frame) -> Result<DecodedPacket, decode::Error> {
         self.dissector.decode(
             frame.clone(),
@@ -68,14 +47,7 @@ impl FrameDecoder {
         )
     }
 
-    /// Decodes the one-based frame `number`, then evaluates the filter with
-    /// no derived datagrams or conversation indexes. `Ok(None)` means the
-    /// frame decoded but was not selected.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::Decode`] for an undissectable frame, which is never
-    /// a silent mismatch, or the filter's evaluation failure.
+    /// `Ok(None)` means the frame decoded but was not selected.
     pub fn decode_selected(
         &self,
         number: u64,
@@ -98,20 +70,10 @@ impl FrameDecoder {
     }
 }
 
-/// Decides which complete frames a compiled display filter keeps.
-///
-/// Undissectable frames are errors rather than silent mismatches.
 #[derive(Clone, Debug)]
 pub struct FrameSelector(FrameDecoder);
 
 impl FrameSelector {
-    /// A selector that keeps the frames of at most `max_frame_bytes` that
-    /// `filter` matches.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::StreamIndexUnavailable`] when `filter` reads a
-    /// conversation index.
     pub fn new(
         registry: Arc<Registry>,
         filter: Filter,
@@ -121,11 +83,6 @@ impl FrameSelector {
     }
 
     /// Whether the one-based frame `number` is kept.
-    ///
-    /// # Errors
-    ///
-    /// Returns the decode or filter failure, as
-    /// [`FrameDecoder::decode_selected`] does.
     pub fn keep(&self, number: u64, frame: &Frame) -> Result<bool, Error> {
         self.0
             .decode_selected(number, frame)

@@ -43,8 +43,7 @@ impl TryFrom<&[u8]> for Http {
     }
 }
 impl Head {
-    /// RFC 9112 message-body precedence. Ambiguous framing is rejected before
-    /// payload consumption; transfer/content encodings are never decoded here.
+    /// RFC 9112 message-body precedence. Ambiguous framing is rejected before payload consumption.
     pub fn body(&self, request_method: Option<&str>) -> Result<Body, Error> {
         if let Some(status) = self.status() {
             if status == 101 || (request_method == Some("CONNECT") && (200..300).contains(&status))
@@ -120,9 +119,6 @@ impl Head {
     }
 }
 /// Parses a complete header block. `None` means more bytes are required.
-/// Limits apply even while the terminator is absent; binary body bytes are untouched.
-/// `input` is a refcounted handle so the retained wire and header values slice
-/// rather than copy.
 pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
     let end = input[..input.len().min(MAX_HEADER_BYTES)]
         .windows(4)
@@ -251,9 +247,6 @@ fn version(input: &[u8]) -> Result<String, Error> {
         _ => Err(Error::Invalid("version is not HTTP/1.0 or HTTP/1.1")),
     }
 }
-/// Parses one `Transfer-Encoding` field value (`1#transfer-coding`),
-/// pushing each coding name lowercased. Commas and semicolons inside a
-/// parameter's quoted-string separate nothing.
 fn transfer_codings(mut input: &[u8], codings: &mut Vec<Vec<u8>>) -> Result<(), Error> {
     loop {
         input = ows(input);
@@ -287,8 +280,6 @@ fn transfer_codings(mut input: &[u8], codings: &mut Vec<Vec<u8>>) -> Result<(), 
         }
     }
 }
-/// Consumes a `quoted-string` that opens at `input[0]`, returning the bytes
-/// after its closing quote. A quoted-pair skips its escaped byte.
 fn quoted_string(input: &[u8]) -> Result<&[u8], Error> {
     let mut index = 1;
     while index < input.len() {

@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Handshake message parsing on top of the shared bounded [`Reader`].
-//!
-//! `parse_handshake` frames one message; the hello parsers and the extension
-//! helpers below it interpret the declared body. Everything reports through
-//! the same [`Outcome`] the record layer uses.
-
 use std::net::IpAddr;
 
 use bytes::Bytes;
@@ -19,11 +13,8 @@ use super::super::super::{
 };
 use super::{Outcome, Reader};
 
-/// Reads one handshake message from the front of `input`.
-///
 /// `input` is the concatenation of handshake record bodies, not a record
-/// stream: a handshake message may span several records, and several messages
-/// may share one record.
+/// stream: a handshake message may span several records.
 pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
     let Some(header) = input.first_chunk::<HANDSHAKE_HEADER_LEN>() else {
         return Outcome::NeedMore {
@@ -64,7 +55,6 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
     }
 }
 
-/// Parses a ClientHello body: the bytes after the handshake header.
 fn parse_client_hello(body: &[u8]) -> Result<ClientHello, Error> {
     let mut reader = Reader::new(body);
     let mut hello = ClientHello {
@@ -85,7 +75,6 @@ fn parse_client_hello(body: &[u8]) -> Result<ClientHello, Error> {
     Ok(hello)
 }
 
-/// Parses a ServerHello body: the bytes after the handshake header.
 pub(super) fn parse_server_hello(body: &[u8]) -> Result<ServerHello, Error> {
     let mut reader = Reader::new(body);
     let mut hello = ServerHello {
@@ -107,9 +96,6 @@ pub(super) fn parse_server_hello(body: &[u8]) -> Result<ServerHello, Error> {
     Ok(hello)
 }
 
-/// Rejects a hello or extension body that carries bytes after the fields this
-/// parser reads: the length is declared, so anything left over is not a body
-/// this parser read correctly. `what` names the body.
 fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
     let remaining = reader.remaining();
     if remaining == 0 {
@@ -296,8 +282,6 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
     Ok(())
 }
 
-/// Accepts a host name only when it is a non-empty, printable-ASCII name that
-/// is not an IP literal. Anything else keeps its raw bytes and no text form.
 fn validated_host_name(name: &[u8]) -> Option<String> {
     if name.is_empty() || !name.iter().all(u8::is_ascii_graphic) {
         return None;
@@ -309,8 +293,6 @@ fn validated_host_name(name: &[u8]) -> Option<String> {
     Some(text.to_owned())
 }
 
-/// Reads the ALPN protocol list as raw wire bytes. The text form is derived
-/// by the caller: JA4 reads the bytes, display reads the text.
 fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);

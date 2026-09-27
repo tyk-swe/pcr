@@ -154,7 +154,6 @@ fn ipv6_fragment(
     })
 }
 
-/// Rewrites an IPv4 fragment's TOS byte and repairs its header checksum.
 fn ipv4_with_tos(fragment: Fragment, tos: u8) -> Fragment {
     let Fragment::Ipv4(mut fragment) = fragment else {
         unreachable!("fixture is IPv4");
@@ -168,8 +167,6 @@ fn ipv4_with_tos(fragment: Fragment, tos: u8) -> Fragment {
     Fragment::Ipv4(fragment)
 }
 
-/// Rewrites an IPv6 fragment's Traffic Class without touching its declared
-/// payload length.
 fn ipv6_with_traffic_class(fragment: Fragment, traffic_class: u8) -> Fragment {
     let Fragment::Ipv6(mut fragment) = fragment else {
         unreachable!("fixture is IPv6");
@@ -817,9 +814,7 @@ fn final_length_rejects_a_retained_nonfinal_endpoint_regardless_of_arrival_order
 
 #[test]
 fn wire_offset_guard_rejects_values_before_checked_byte_conversion() {
-    // A valid 13-bit wire offset cannot overflow usize after multiplication
-    // by eight. The reachable overflow defense is therefore the public input
-    // guard that rejects values outside those 13 bits before conversion.
+    // A valid 13-bit wire offset cannot overflow usize after multiplication by eight.
     let key = ipv6_key();
     let mut fragment = match ipv6_fragment(&key, 0, true, &b"abcdefgh"[..]) {
         Fragment::Ipv6(fragment) => fragment,
@@ -942,8 +937,6 @@ fn unrepresentable_idle_expiry_is_refused_at_construction() {
 
 #[test]
 fn idle_expiry_past_a_late_capture_clock_fails_before_state_mutation() {
-    // The largest whole-second expiry the clock can add to `base`, less a
-    // margin for the time construction takes to validate it.
     let base = Instant::now();
     let (mut fits, mut overflows) = (0_u64, u64::MAX);
     while overflows - fits > 1 {
@@ -1158,8 +1151,7 @@ fn ipv4_unspecified_ecn_mixtures_resolve_conservatively() {
     let key = ipv4_key();
     let now = Instant::now();
 
-    // Not-ECT with ECT(x) and no CE is unspecified by RFC 3168; reassembly
-    // keeps Not-ECT.
+    // Not-ECT with ECT(x) and no CE is unspecified by RFC 3168; reassembly keeps Not-ECT.
     let not_ect = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x00);
     let ect0 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x02);
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
@@ -1173,7 +1165,6 @@ fn ipv4_unspecified_ecn_mixtures_resolve_conservatively() {
     );
     assert_eq!(datagram.bytes[1] & 0x03, 0x00);
 
-    // ECT(0) with ECT(1): the lower marking wins in either arrival order.
     let ect0 = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x02);
     let ect1 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x01);
     for (first, second) in [(ect0.clone(), ect1.clone()), (ect1, ect0)] {

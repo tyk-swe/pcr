@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How scan classifies, ranks, and reports one probe's evidence.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -20,8 +18,6 @@ use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
-/// A checksum-valid response correlated to one probe: how it classifies the
-/// probed endpoint, who answered, and why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CorrelatedResponse {
     pub classification: Classification,
@@ -56,8 +52,6 @@ pub fn classify_response(
     })
 }
 
-/// One correlated scan response: its transport classification and, for a
-/// profiled UDP port, the application evidence it carries.
 pub(super) struct Observation {
     pub(super) response: CorrelatedResponse,
     pub(super) application: Option<profile::Evidence>,
@@ -86,8 +80,6 @@ impl Observation {
     }
 }
 
-/// Scan's batch-evidence hook. It also tallies what the summary reports: the
-/// winning classification per endpoint and the round-trip samples.
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,

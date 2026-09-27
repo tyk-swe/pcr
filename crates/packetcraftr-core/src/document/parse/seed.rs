@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The seeds that read a packet document, each charging [`Budget`] before it
-//! allocates.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -268,8 +265,7 @@ impl<'de> Visitor<'de> for FieldsSeed<'_, '_> {
         let mut fields = BTreeMap::new();
         loop {
             if fields.len() >= maximum {
-                // The layer is full: any further key is a breach, and probing
-                // with `IgnoredAny` allocates nothing for it.
+                // Any further key is a breach; probing with `IgnoredAny` allocates nothing for it.
                 if map.next_key::<IgnoredAny>()?.is_some() {
                     return Err(self.budget.exceeded(Limit::FieldsPerLayer));
                 }
@@ -296,8 +292,6 @@ impl<'de> Visitor<'de> for FieldsSeed<'_, '_> {
     }
 }
 
-/// The schema identifier is bounded by the configured text width, but does not
-/// compete with field-value payload budgets.
 struct SchemaString<'b, 'l> {
     budget: &'b Budget<'l>,
 }
@@ -330,8 +324,6 @@ impl Visitor<'_> for SchemaString<'_, '_> {
     }
 }
 
-/// A string whose byte length is checked before it is copied out of the
-/// deserializer.
 #[derive(Clone, Copy)]
 pub(super) struct BoundedString<'b, 'l> {
     pub(super) budget: &'b Budget<'l>,
@@ -377,8 +369,6 @@ impl<'de> Visitor<'de> for BoundedString<'_, '_> {
     }
 }
 
-/// One tagged `{"type": ..., "value": ...}` field value at `depth` enclosing
-/// lists. Charges one node before anything else.
 #[derive(Clone, Copy)]
 pub(super) struct FieldValueSeed<'b, 'l> {
     pub(super) budget: &'b Budget<'l>,
@@ -408,7 +398,6 @@ impl<'de> Visitor<'de> for FieldValueSeed<'_, '_> {
     where
         A: MapAccess<'de>,
     {
-        // Both key orders use identical staging and semantic charging.
         let _temporary = self.budget.temporary_scope();
         let mut tag: Option<Tag> = None;
         let mut buffered: Option<Buffered> = None;

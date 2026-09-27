@@ -7,9 +7,6 @@ use crate::error::{Classification, Classified, Kind, Source};
 
 use super::types::{DocumentLimits, Limit};
 
-/// A parse refusal that is the document module's own invariant rather than a
-/// syntax failure reported by the underlying parser, so `Parse` can retain it
-/// as its typed source.
 #[derive(Debug, Error)]
 #[error("{0}")]
 pub(super) struct Refused(pub(super) String);
@@ -61,7 +58,6 @@ pub enum Error {
 }
 
 impl Error {
-    /// The configured limit this error reports, if it is a resource rejection.
     #[must_use]
     pub const fn limit(&self) -> Option<Limit> {
         match self {

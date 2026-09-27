@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Owned native capture worker and bounded queue shared by libpcap and Npcap.
-
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 

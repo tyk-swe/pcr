@@ -10,17 +10,12 @@ use crate::analysis::{
 use serde::Serialize;
 use std::{collections::BTreeMap, time::SystemTime};
 
-/// The terminal state of a query/response transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransactionStatus {
-    /// A response matching the query's key was captured.
     Matched,
-    /// No matching response was captured before the transaction closed.
     Unanswered,
-    /// A response arrived for which no query was ever seen.
     OrphanResponse,
-    /// A second response arrived after one already matched the query.
     DuplicateResponse,
 }
 /// Difference between response's first captured byte and query's last captured
@@ -45,14 +40,12 @@ impl Latency {
         }
     }
 }
-/// A settled query/response transaction, keyed on wire identity and questions.
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub status: TransactionStatus,
     pub transport: Transport,
     pub stream: u64,
     pub generation: u64,
-    /// Query direction, including for orphan responses.
     pub flow: ScopedFlowKey,
     pub dns_id: u16,
     pub queries: Vec<u64>,

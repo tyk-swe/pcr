@@ -86,7 +86,6 @@ fn set_errors_precede_output_or_live_preparation() {
             assert!(output.stdout.is_empty());
         }
     }
-    // No recipe or interface lookup is needed to reject the product itself.
     let output = run(&[
         "--output",
         "ndjson",
@@ -131,7 +130,6 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
     }
     assert_eq!(records[9]["result"]["packets_built"], 9);
 
-    // Hex endpoints and an explicit step work identically.
     let output = run_success(&[
         "--output",
         "hex",
@@ -143,8 +141,6 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
     ]);
     assert_eq!(String::from_utf8(output.stdout).unwrap().lines().count(), 3);
 
-    // Values beyond the field's wire width fail validation before any packet
-    // is emitted, as do reversed or zero-stepped ranges.
     for axis in ["0.ttl=1..300", "0.ttl=3..1", "0.ttl=1..3:0"] {
         let output = run(&[
             "--output", "ndjson", "build", "--packet", PACKET, "--axis", axis,
@@ -164,7 +160,6 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
     let spec = format!("2.bytes={}", payload_path.display());
     let recipe = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/raw()";
 
-    // The file bytes land verbatim, identical to an inline hex literal.
     let from_file = run_success(&[
         "--output",
         "raw",
@@ -183,7 +178,6 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
     ]);
     assert_eq!(from_file.stdout, inline.stdout);
 
-    // Binary and empty payloads both build.
     std::fs::write(&payload_path, [0x00, 0xff, 0x80]).expect("binary payload");
     let binary = run_success(&[
         "--output",
@@ -208,8 +202,6 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
     let without_file = run_success(&["--output", "raw", "build", "--packet", recipe]);
     assert_eq!(empty.stdout, without_file.stdout);
 
-    // A saved document embeds the literal bytes, so it still rebuilds after
-    // the payload file is gone.
     std::fs::write(&payload_path, [0xde, 0xad]).expect("payload fixture");
     let document = parse_json(&run_success(&[
         "--output",
@@ -233,8 +225,6 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
     ]);
     assert!(rebuilt.stdout.ends_with(&[0xde, 0xad]));
 
-    // Missing files, non-bytes fields, embedded conflicts, bad selectors, and
-    // oversized payloads all fail as typed errors with no output bytes.
     let missing = format!("2.bytes={}", payload_path.display());
     let oversized_path = directory.path().join("oversized.bin");
     std::fs::write(
@@ -262,7 +252,6 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
         assert!(output.stdout.is_empty(), "{spec} emitted bytes on failure");
     }
 
-    // A recipe that already fills the field conflicts with the file option.
     let output = run(&[
         "--output",
         "raw",
@@ -312,8 +301,6 @@ fn exchange_authorizes_expanded_destinations_before_route_preparation() {
 
 #[test]
 fn destination_allowlist_denies_before_route_preparation_on_every_send_command() {
-    // The invalid interface keeps every provider out of reach in every
-    // feature profile, so the policy failure must precede it.
     for command in ["send", "exchange"] {
         let denied = run(&[
             "--output",
@@ -337,8 +324,6 @@ fn destination_allowlist_denies_before_route_preparation_on_every_send_command()
         assert!(message.contains("10.0.0.2"), "{command}: {message}");
         assert!(message.contains("192.0.2.0/24"), "{command}: {message}");
 
-        // Admitting the destination moves the failure past policy onto the
-        // interface check.
         let allowed = run(&[
             "--output",
             "json",
@@ -374,7 +359,6 @@ fn read_capture(bytes: &[u8]) -> Vec<packetcraftr_core::frame::Frame> {
 fn build_capture_output_round_trips_through_read_and_the_capture_reader() {
     use packetcraftr_core::frame::LinkType;
 
-    // A single packet, verified byte-for-byte against the raw build output.
     let raw = run_success(&[
         "--output", "raw", "build", "--packet", PACKET, "--mode", "strict",
     ]);
@@ -398,7 +382,6 @@ fn build_capture_output_round_trips_through_read_and_the_capture_reader() {
         Some(std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123_456_700))
     );
 
-    // An expanded set keeps Cartesian order and deterministic timestamps.
     let built = run_success(&[
         "--output",
         "pcapng",
@@ -421,7 +404,6 @@ fn build_capture_output_round_trips_through_read_and_the_capture_reader() {
     );
     assert!(frames.iter().all(|frame| frame.link_type == LinkType::IPV4));
 
-    // `read` consumes both captures through the ordinary offline path.
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("built.pcapng");
     std::fs::write(&path, &built.stdout).expect("capture write");
@@ -439,8 +421,6 @@ fn build_capture_output_round_trips_through_read_and_the_capture_reader() {
 
 #[test]
 fn build_capture_output_requires_a_compatible_explicit_link_type() {
-    // Capture formats require --link-type; other formats reject capture-only
-    // arguments before any packet is built.
     for arguments in [
         vec!["--output", "pcap", "build", "--packet", PACKET],
         vec![
@@ -486,8 +466,6 @@ fn build_capture_output_requires_a_compatible_explicit_link_type() {
         );
     }
 
-    // A registered root that does not match the recipe's first layer, and a
-    // number with no built-in decode root, are both rejected before building.
     for link_type in ["276", "999"] {
         let output = run(&[
             "--output",

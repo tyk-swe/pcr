@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Stable classifications and bounds of active neighbor resolution.
-
 use std::{fmt, net::IpAddr, time::Duration};
 
 use packetcraftr::neighbor::{self, Error as NeighborError};
@@ -13,8 +11,6 @@ fn ipv4(value: &str) -> IpAddr {
     value.parse().expect("fixture IPv4 address")
 }
 
-/// One table row: the published code and kind, a remediation, and a
-/// non-empty message.
 fn assert_row(
     error: &(impl Classified + fmt::Display),
     expected_code: &'static str,
@@ -138,9 +134,6 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
     }
 }
 
-/// A combined operation-and-cleanup failure exposes the operation failure as
-/// its standard source, so generic error walkers see the same chain `causes`
-/// reports.
 #[test]
 fn neighbor_operation_and_cleanup_failures_expose_the_operation_as_a_source() {
     let error = NeighborError::OperationAndCleanup {
@@ -212,8 +205,6 @@ fn neighbor_options_reject_every_unbounded_value() {
     }
 }
 
-/// Options whose capture bounds fail keep the capture-limit refusal as their
-/// source, so it is published once, as a cause.
 #[test]
 fn neighbor_options_retain_the_capture_limit_refusal_as_a_source() {
     let error = neighbor::Options {

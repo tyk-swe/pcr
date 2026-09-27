@@ -16,10 +16,6 @@ pub struct Policy {
     /// address scope until after a resolver side effect.
     pub allow_hostname_resolution: bool,
     pub allow_permissive_packets: bool,
-    /// Single opt-in for an explicit outer IP or Ethernet source the selected
-    /// interface or final route does not own. Replay transmits captured
-    /// sources verbatim and therefore applies this check after passive route
-    /// selection and before transmission.
     pub allow_source_spoofing: bool,
     /// Exact address and CIDR constraints on destinations. An empty list adds
     /// no constraint; entries only narrow permission and never grant access
@@ -33,15 +29,11 @@ pub struct Policy {
 pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
 pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
 
-/// Maximum destination constraints accepted in a policy.
 pub const MAX_DESTINATION_CONSTRAINTS: usize = 1_024;
 
-/// An exact address or same-family CIDR constraint. `ADDR/PREFIX` must be a
-/// canonical network (host bits are rejected); bare `ADDR` matches one host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestinationConstraint {
     Exact(IpAddr),
-    /// Host bits are already masked by [`crate::target::Network::new`].
     Network(crate::target::Network),
 }
 
@@ -109,8 +101,6 @@ impl Default for Policy {
     }
 }
 
-/// Every refusal the traffic policy reports, from its own configuration
-/// checks, operation authorization, and exact wire authorization.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -132,20 +122,14 @@ pub enum Error {
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
     InvalidPacketSemantics {
         reason: String,
-        /// The semantics traversal failure this refusal reports, when it
-        /// came from the packet rather than from policy's own checks.
         #[source]
         source: Option<packetcraftr_core::protocol::semantics::Error>,
     },
-    /// The exact wire bytes do not form a frame the trusted built-in
-    /// registry could decode.
     #[error("traffic policy cannot authorize wire bytes that do not form a frame")]
     WireFrame {
         #[source]
         source: packetcraftr_core::frame::Error,
     },
-    /// The exact wire bytes did not decode with the trusted built-in
-    /// registry, so their routing semantics cannot be authorized.
     #[error("traffic policy cannot authorize undecodable packet routing semantics")]
     UndecodableWire {
         #[source]
@@ -155,7 +139,6 @@ pub enum Error {
     HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]
     PermissivePacket,
-    /// The policy allows permissive packets, but the operation did not opt in.
     #[error("permissively built packets require allow_permissive_live")]
     PermissiveLiveOptIn,
     #[error("traffic policy denies source {packet_source} that interface {interface} does not own")]
@@ -171,8 +154,6 @@ pub enum Error {
     TrafficUnitLimit { actual: u64, limit: u64 },
     #[error("operation wire/application byte count {actual} exceeds policy limit {limit}")]
     TrafficByteLimit { actual: u64, limit: u64 },
-    /// An authorizer was asked to approve an operation shape it was not
-    /// built for; this is a wiring fault, not a policy denial.
     #[error("{authorizer} does not authorize {operation} operations")]
     UnsupportedOperation {
         authorizer: &'static str,
@@ -203,9 +184,6 @@ impl Classified for Error {
                 "policy.destination_not_allowed",
                 "permit the destination with an exact address or CIDR allowlist entry, or choose a permitted destination",
             ),
-            // Malformed destination constraints and a constraint list beyond
-            // its bound are caller request errors, like the resolved-address
-            // bound, and share the `cli.live_target` code with target input.
             Self::InvalidDestinationConstraint { .. } => (
                 "cli.live_target",
                 "use an IP address or canonical CIDR network as the destination constraint",
@@ -303,7 +281,6 @@ mod tests {
         assert!(v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
         assert!(v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 255))));
         assert!(!v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 3, 1))));
-        // A constraint never crosses address families.
         assert!(!v4.contains("2001:db8::1".parse().unwrap()));
 
         let v6 = constraint("2001:db8::/32").expect("canonical v6 network parses");

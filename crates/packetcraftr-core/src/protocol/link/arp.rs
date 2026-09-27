@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! ARP message model and codec.
-//!
-//! This is a wire-format encoder and decoder only. It models the header fields
-//! so ARP frames can be built and dissected out of captures; it performs no
-//! address resolution, caching, or announcement of its own.
-
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
@@ -27,7 +21,6 @@ use crate::protocol::BuiltinProtocol;
 const NAME: &str = BuiltinProtocol::Arp.as_str();
 
 const ARP_ETHERNET_IPV4_LEN: usize = 28;
-/// The fixed head that names the address families and their lengths.
 const ARP_HEAD_LEN: usize = 8;
 
 fn arp_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {

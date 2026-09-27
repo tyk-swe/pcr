@@ -3,32 +3,6 @@
 
 //! Policy-gated live workflows, budgets, and evidence.
 //!
-//! The intended use is protocol engineering, interoperability testing, and
-//! authorized network diagnostics.
-//!
-//! `packetcraftr-core` owns packets and offline analysis;
-//! `packetcraftr-netio` owns provider contracts and native resources.
-//!
-//! # The client
-//!
-//! Every live workflow runs on a [`Client`]: [`send`], [`exchange`], [`dns`],
-//! [`scan`] (and its TCP [`scan::connect`] variant), [`traceroute`], [`fuzz`],
-//! [`replay`], and [`capture`]. The client holds the [`policy::Policy`], the
-//! protocol registry, a [`clock::Clock`], the [`runtime::Runtime`] that admits
-//! event workers, an optional cancellation signal, and the [`Providers`]
-//! every workflow reaches the network through: a [`ProviderSet`] of route,
-//! interface, capture, transmit, TCP, and resolver providers, or
-//! [`SystemProviders`] for the native ones.
-//!
-//! A workflow method takes the workflow's `Request` and a [`Sink`] for its
-//! events, and returns its terminal `Report`. The client admits the request
-//! through its policy, with finite limits, before any provider is consulted;
-//! an interface selector is resolved and a declared target is resolved only
-//! after that. Each event reaches the sink on a worker the runtime admits, and
-//! the workflow waits for the sink's answer before it continues. The
-//! workflow's `Collector` is a sink that rebuilds the full `Aggregate` of
-//! every event joined with the report.
-//!
 //! ```rust,no_run
 //! use packetcraftr::{Client, SystemProviders, policy::Policy, send};
 //! use packetcraftr_core::{expression, protocol::builtin};
@@ -49,26 +23,6 @@
 //! println!("sent {} bytes", aggregate.stats.bytes);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
-//!
-//! # Workflow roles
-//!
-//! Each workflow module splits its work into the same roles, named as in the
-//! project glossary: the `request` a caller validates, the `plan` of bounded
-//! steps derived from it before any traffic leaves, the `engine` that runs the
-//! plan on the client, the `executor` that carries out one approved step
-//! against the providers, the `evidence` a step produced and its validation,
-//! the `report`, `Event`, `Aggregate`, and `Collector` it publishes, and its
-//! one `Error`. Engines and executors are internal: the client is the only way
-//! to run a workflow.
-//!
-//! [`route`] plans each packet's route over the client's route provider, and
-//! [`neighbor`] resolves an admitted route's next hop over its transmit and
-//! capture providers. [`probe`] holds the probe vocabulary scan and traceroute
-//! share.
-//!
-//! Every workflow duration and timeout is at most
-//! [`packetcraftr_netio::deadline::MAX_WAIT`], the longest a capture stays
-//! armed for one wait, so no workflow has a ceiling of its own.
 
 #![forbid(unsafe_code)]
 

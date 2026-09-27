@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The synchronous CLI dispatch scope. Library operations receive their
-//! deadlines explicitly; this scope joins input, rendering and publication
-//! boundaries without changing every command's argument model.
-
 use crate::errors::CliError;
 use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Kind};
@@ -47,9 +43,6 @@ pub(crate) fn deadline() -> Option<Arc<Deadline>> {
     CURRENT.with(|current| current.borrow().clone())
 }
 
-/// The deadline a passive route, interface, or timestamp-type lookup gets:
-/// the library's passive allowance, within the invocation deadline, under the
-/// installed interrupt signal.
 pub(crate) fn passive_lookup() -> Deadline {
     Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
         .with_parent(deadline())
@@ -83,7 +76,6 @@ pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
     Ok(())
 }
 
-/// Attach the same clock to every reader, including seekable snapshots.
 pub(crate) fn reader<R: std::io::Read>(
     reader: packetcraftr_core::capture_file::Reader<R>,
 ) -> packetcraftr_core::capture_file::Reader<R> {

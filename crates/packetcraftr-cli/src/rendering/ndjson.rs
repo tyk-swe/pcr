@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The NDJSON stream every structured command writes through.
-
 use std::io;
 use std::time::Duration;
 
@@ -15,9 +13,7 @@ use crate::output;
 
 pub(crate) use crate::output::stream::StreamEncoder;
 
-/// Per-write ceiling when `--output-timeout-ms` is absent; max-duration
-/// publishers clip it to their remaining budget. A terminal error may use this
-/// separate cleanup allowance.
+/// Per-write ceiling when `--output-timeout-ms` is absent.
 pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
 const OUTPUT_TIMEOUT: Duration = Duration::from_millis(OUTPUT_TIMEOUT_MS);
 
@@ -31,8 +27,6 @@ pub(crate) fn stdout_stream(
         .map_err(CliError::classified)
 }
 
-/// Writes the one NDJSON error record a failure before command selection can
-/// publish, which has no stream to join.
 pub(crate) fn write_unattributed_error(
     command: Option<output::contract::Command>,
     error: output::envelope::Error,

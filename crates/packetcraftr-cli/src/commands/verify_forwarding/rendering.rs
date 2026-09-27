@@ -62,8 +62,7 @@ pub(super) fn render(
                     document,
                     diagnostics,
                 ));
-                // Measure the complete pretty-printed envelope, including its
-                // indentation and resources, and reserve the final newline.
+                // Measure the complete pretty-printed envelope and reserve the final newline.
                 crate::rendering::bounded_pretty_json_len(
                     &envelope,
                     output::stream::MAX_RECORD_BYTES - 1,
@@ -72,8 +71,6 @@ pub(super) fn render(
                 crate::cancellation::check()?;
                 emit_json(&envelope)
             } else {
-                // Guard the composition, not just individual detail lists.
-                // The stream encoder also bounds the complete compact record.
                 crate::rendering::bounded_json_len(
                     &document,
                     output::stream::MAX_RECORD_BYTES - 1024 * 1024,

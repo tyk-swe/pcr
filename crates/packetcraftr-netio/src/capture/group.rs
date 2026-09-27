@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! A capture group: one composite [`Session`] with bounded ownership,
-//! readiness, and fair delivery across selected interfaces. Queue limits are
-//! partitioned across sources; each source keeps its native metadata and
-//! records. Workflow/file layers choose capture-global output IDs.
-
 use super::{
     Captured, Limits, Metadata, NativeSettings, Provider, Realized, RealizedSettings, Request,
     Session, Stats,
@@ -18,36 +13,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Most interfaces one [`Group`] captures from.
-///
-/// A separate limit from the native worker pool
-/// ([`WORKER_CAPACITY`](crate::resources::WORKER_CAPACITY)): every armed
-/// native source holds one pool slot, so a group this large needs the whole
-/// pool and its last sources are refused while other work, such as a Linux
-/// route worker, holds a slot. Sources from other providers hold none.
 pub const MAX_SOURCES: usize = 16;
-/// Longest wait on one source before the group checks the others. A
-/// [`Session`] offers no handle to wait on several sources at once, so the
-/// group rotates short waits across them.
+/// Longest wait on one source before the group checks the others.
 const POLL_SLICE: Duration = Duration::from_millis(5);
 
-/// Configuration for a [`Group`]: the shared queue limits are partitioned
-/// across `interfaces`, and every source gets the same filter and settings.
 #[derive(Clone, Debug)]
 pub struct GroupRequest {
     pub interfaces: Vec<Id>,
     pub limits: Limits,
     pub filter: Option<String>,
     pub promiscuous: bool,
-    /// Optional native-driver settings applied to every source; each session
-    /// reports its own realized values.
     pub native: NativeSettings,
 }
 
 impl GroupRequest {
-    /// Validate the complete set before arming anything: the filter limit a
-    /// single session applies, the source count, the shared limits, distinct
-    /// interfaces, and room for one full snapshot in every source.
     pub fn validate(&self) -> Result<(), Error> {
         super::validate_filter_length(self.filter.as_deref())?;
         let count = self.interfaces.len();
@@ -71,8 +50,6 @@ impl GroupRequest {
         Ok(())
     }
 
-    /// Splits both queue ceilings exactly, retaining a full snapshot's
-    /// capacity in every source. Callers validate first.
     fn partition(&self) -> Vec<Request> {
         let count = self.interfaces.len();
         self.interfaces
@@ -99,7 +76,6 @@ fn invalid(reason: &'static str) -> Error {
     Error::InvalidCaptureGroup { reason }
 }
 
-/// The group operation during which a source failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Arm,
@@ -121,7 +97,6 @@ impl fmt::Display for Phase {
     }
 }
 
-/// What a group knows about one admitted source.
 #[derive(Clone, Debug)]
 pub struct Source {
     pub index: usize,
@@ -142,9 +117,7 @@ struct Owned<C: Session> {
     shutdown_attempted: bool,
 }
 
-/// Reported by [`Session::metadata`] for a group that admitted no source,
-/// because arming failed at its first interface or never ran. It names no
-/// interface and holds no snapshot.
+/// Reported by [`Session::metadata`] for a group that admitted no source.
 static UNARMED: Metadata = Metadata {
     interface: Id {
         name: String::new(),
@@ -171,16 +144,6 @@ static UNARMED: Metadata = Metadata {
     },
 };
 
-/// A composite [`Session`] over one provider session per interface.
-///
-/// Create it with [`Group::new`], then [`Group::arm`] it. Arming and every
-/// wait take the caller's [`Deadline`], whose cancellation stops the group
-/// (see the [deadline convention](crate::deadline)). Any failure shuts
-/// down every admitted source at once; [`Group::snapshot`] stays readable
-/// afterwards, including after an arming failure, and [`Session::shutdown`]
-/// then reports the cleanup failures. Every admitted session is shut down
-/// exactly once. Drop attempts remaining cleanup but cannot report errors;
-/// callers should explicitly call `shutdown`.
 pub struct Group<C: Session> {
     requests: Vec<Request>,
     sources: Vec<Owned<C>>,
@@ -192,7 +155,6 @@ pub struct Group<C: Session> {
 }
 
 impl<C: Session> Group<C> {
-    /// Validates `request` and partitions its limits; arms nothing yet.
     pub fn new(request: &GroupRequest) -> Result<Self, Error> {
         request.validate()?;
         let requests = request.partition();
@@ -207,10 +169,6 @@ impl<C: Session> Group<C> {
         })
     }
 
-    /// Arms one provider session per interface, in request order, and checks
-    /// each one's activation metadata against its request. Every provider call
-    /// receives the caller's `deadline`. A failure shuts down every source
-    /// admitted so far.
     pub fn arm<P: Provider<Capture = C>>(
         &mut self,
         provider: &P,
@@ -303,13 +261,10 @@ impl<C: Session> Group<C> {
         Ok(())
     }
 
-    /// Every admitted source, in source order.
     pub fn sources(&self) -> impl ExactSizeIterator<Item = &Source> {
         self.sources.iter().map(|source| &source.source)
     }
 
-    /// Every admitted source with its current statistics; final after
-    /// shutdown, and still readable after any failure.
     pub fn snapshot(&self) -> Vec<Source> {
         self.sources
             .iter()
@@ -380,8 +335,6 @@ impl<C: Session> Group<C> {
         }
     }
 
-    /// Shuts every source down, keeps the cleanup failures for
-    /// [`Session::shutdown`], and returns `error`.
     fn fail(&mut self, error: Error) -> Error {
         self.shutdown_all();
         error
@@ -430,8 +383,6 @@ impl<C: Session> Session for Group<C> {
         self.sources.get(source).map(|owned| &owned.source.metadata)
     }
 
-    /// Waits for every source in order; all must be ready by the caller's
-    /// deadline.
     fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
         if !self.armed || self.closed || self.ready {
             return Err(self.fail(Error::CaptureGroupState));
@@ -485,11 +436,8 @@ impl<C: Session> Session for Group<C> {
         Ok(())
     }
 
-    /// Check all sources without waiting before taking one short blocking wait.
     /// Rotation after every returned record prevents a busy interface starving
-    /// the others. An empty individual source never ends the group operation.
-    ///
-    /// A spent `deadline` polls every source once without waiting.
+    /// the others.
     fn next_captured_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
         if !self.ready || self.closed {
             return Err(self.fail(Error::CaptureGroupState));
@@ -498,7 +446,6 @@ impl<C: Session> Session for Group<C> {
             Ok(deadline) => deadline,
             Err(error) => return Err(self.fail(error)),
         };
-        // Sources are first polled without waiting.
         let immediate = Deadline::new(Duration::ZERO);
         loop {
             if let Err(error) = check_cancelled(caller) {
@@ -522,18 +469,13 @@ impl<C: Session> Session for Group<C> {
             if let Some(captured) = self.poll(index, &slice, caller)? {
                 return Ok(Some(captured));
             }
-            // Test/injected providers may return early, and there is no
-            // handle to wait on every source at once. Keep an empty source
-            // from making the shared live wait a busy loop.
+            // Test/injected providers may return early: keep the wait from busy-looping.
             if let Some(pause) = wait.checked_sub(started.elapsed()) {
                 std::thread::sleep(pause.min(Duration::from_millis(1)));
             }
         }
     }
 
-    /// Shuts down every source not yet shut down, then reports every cleanup
-    /// failure so far, including those from an earlier failed operation.
-    /// Repeated calls report the same outcome.
     fn shutdown(&mut self) -> Result<(), Error> {
         self.shutdown_all();
         let mut failures = self.cleanup.iter().cloned();
@@ -547,7 +489,6 @@ impl<C: Session> Session for Group<C> {
         }
     }
 
-    /// Sums every source's counters, saturating each one.
     fn stats(&self) -> Stats {
         self.snapshot()
             .iter()

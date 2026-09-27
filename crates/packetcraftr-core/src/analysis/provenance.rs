@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded physical-frame provenance shared by reassembly consumers.
-
 use crate::{
     analysis::{
         adapter::IpFragments,
@@ -54,8 +52,6 @@ impl Classified for Error {
 struct Budget {
     used: AtomicUsize,
     limit: usize,
-    /// Allocations [`SourceSet::union`] committed against this budget; tests
-    /// observe allocation-free paths through it instead of timing anything.
     #[cfg(test)]
     union_reservations: AtomicUsize,
 }
@@ -85,8 +81,7 @@ struct Data {
     frames: Vec<SourceFrame>,
     lease: Lease,
 }
-/// Immutable source frames in physical capture order. Clones share both data
-/// and its memory charge, including after a collector retains a reference.
+/// Immutable source frames in physical capture order; clones share the memory charge.
 #[derive(Clone)]
 pub struct SourceSet(Arc<Data>);
 impl fmt::Debug for SourceSet {
@@ -157,14 +152,8 @@ impl SourceSet {
         Ok(Self(Arc::new(Data { frames, lease })))
     }
 
-    /// Whether every frame number `other` holds is already present here.
-    /// Frame lists are sorted and deduplicated by number, so one ordered
-    /// pass decides; since the merge keeps the left-hand frame on duplicate
-    /// numbers, such a union would reproduce `self` exactly.
     fn includes(&self, other: &[SourceFrame]) -> bool {
-        // A larger set, or one reaching past this set's last frame number,
-        // cannot be a subset; both checks are constant-time so ordinary
-        // disjoint unions never pay for the ordered scan.
+        // Constant-time rejects, so ordinary disjoint unions never pay for the ordered scan.
         if other.len() > self.frames().len()
             || match (self.frames().last(), other.last()) {
                 (Some(mine), Some(theirs)) => theirs.number > mine.number,
@@ -200,8 +189,6 @@ pub(crate) struct Tracker {
     incomplete: Vec<IncompleteSources>,
     max_outcomes: usize,
     pub(crate) outcomes_omitted: u64,
-    /// Times [`Self::retire`] ran its reconciliation scan, for tests that
-    /// prove callers skip it when the reassembler retired nothing.
     #[cfg(test)]
     retire_scans: usize,
 }
@@ -437,8 +424,6 @@ mod tests {
         assert_eq!(tracker.union_reservations(), baseline);
         assert_eq!(used(&tracker), limit);
 
-        // The no-op union returned another handle on `pair`; both must drop
-        // before the merged lease is released.
         drop(merged);
         drop(pair);
         assert_eq!(
@@ -448,10 +433,6 @@ mod tests {
         );
     }
 
-    /// Timing fixture, not a contract; run with
-    /// `cargo test --release -p packetcraftr-core --lib -- --ignored --nocapture`.
-    /// Uses only the public-to-crate union surface so the identical fixture
-    /// measures base and patched trees.
     #[test]
     #[ignore = "timing fixture; not a CI assertion"]
     fn measure_union_repeated_work() {

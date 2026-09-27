@@ -24,10 +24,6 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
     let mut rejected = Vec::new();
     let mut round_trip_count = 0_usize;
 
-    // `dissect` is true for every built-in row, so it selects nothing here.
-    // `exact_round_trip` is false only for a codec that cannot encode at all,
-    // which today is never a constructible one; this guard makes adding such a
-    // protocol a test failure rather than a silently skipped row.
     assert!(
         BuiltinProtocol::ALL
             .iter()

@@ -4,7 +4,6 @@
 use crate::output;
 use crate::rendering::optional_display;
 
-/// One text row per interface, spelling every field the JSON document carries.
 pub(super) fn interface_line(interface: &output::network::Interface) -> String {
     let timestamp_types = interface.timestamp_types.as_deref().map(|types| {
         if types.is_empty() {
@@ -14,8 +13,7 @@ pub(super) fn interface_line(interface: &output::network::Interface) -> String {
             .iter()
             .map(|timestamp_type| {
                 let name = timestamp_type.name.as_deref().unwrap_or("<unnamed>");
-                // Types outside the representable clock domains cannot be
-                // selected for capture.
+                // Types outside the representable clock domains cannot be selected.
                 if timestamp_type.source.is_some() {
                     name.to_owned()
                 } else {
@@ -43,8 +41,6 @@ pub(super) fn interface_line(interface: &output::network::Interface) -> String {
     )
 }
 
-/// The set flags as one comma-separated word, so text stays greppable while
-/// JSON keeps the structured object.
 pub(super) fn interface_flags(flags: &crate::output::network::Flags) -> String {
     let mut set = Vec::new();
     if flags.up {

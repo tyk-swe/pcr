@@ -52,9 +52,6 @@ pub(super) fn run(
     )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
-    // The collector declares what expert reads: transport indexes, the
-    // reassembler's byte-exact retransmission evidence, and reconstructed-
-    // datagram diagnostics.
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(),

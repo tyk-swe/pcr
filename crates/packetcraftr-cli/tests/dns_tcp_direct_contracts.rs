@@ -118,8 +118,6 @@ fn direct_tcp_rejects_incompatible_options_before_any_connection() {
     }
 }
 
-/// Answers `count` framed DNS-over-TCP queries by echoing each as a
-/// response, returning the framed response bytes written in total.
 fn answer_tcp_queries(listener: TcpListener, count: usize) -> usize {
     listener.set_nonblocking(true).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -154,8 +152,6 @@ fn answer_tcp_queries(listener: TcpListener, count: usize) -> usize {
     total
 }
 
-/// Per-question counters are not retained in a batch, so a question's block
-/// must not report zeros for them; only the batch total carries counters.
 #[test]
 fn batch_text_reports_counters_only_in_the_batch_total() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

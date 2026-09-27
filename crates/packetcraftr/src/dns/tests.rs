@@ -38,8 +38,6 @@ use super::executor::{Exchange, ExchangeEvidence, TcpEvidence, TcpQuerier, TcpQu
 use super::DEFAULT_SERVER_PORT;
 use super::report::Observed;
 
-/// UDP fixtures never reach DNS-over-TCP: each test using one runs a
-/// transport or response that cannot continue over TCP.
 macro_rules! udp_only {
     ($($fixture:ty),+ $(,)?) => {
         $(impl TcpQuerier for $fixture {
@@ -60,9 +58,6 @@ udp_only!(
     OvertimeExecutor,
 );
 
-/// Runs `request` through the engine under its own deadline, as
-/// [`Client::dns`](crate::Client::dns) does, and joins every event into the
-/// aggregate.
 fn run<A, E, C>(
     request: &super::Request,
     authorizer: &mut A,
@@ -91,8 +86,6 @@ where
     observed.finish(report)
 }
 
-/// Runs `request` with each event published to `sink` on a `runtime` worker,
-/// as [`Client::dns`](crate::Client::dns) does.
 fn run_with_events<A, E, C, S>(
     request: &super::Request,
     authorizer: &mut A,
@@ -122,8 +115,6 @@ where
     )
 }
 
-/// Runs `questions` as one batch under their shared deadline, as
-/// [`Client::dns_batch`](crate::Client::dns_batch) does.
 fn run_batch<A, E, C>(
     questions: &[super::Request],
     authorizer: &mut A,
@@ -1643,10 +1634,6 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
     );
 }
 
-/// The same query-count overrun used to report `policy.packet_limit` with
-/// `--udp-only` and `policy.traffic_unit_limit` with fallback enabled, because
-/// the operation shape changed with a runtime flag. It is one condition, so it
-/// is one code.
 #[test]
 fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
@@ -2167,8 +2154,6 @@ impl Executor<Exchange> for CancellingExecutor {
     }
 }
 
-/// Reports an executor elapsed time that overflows any operation deadline, so
-/// the shared batch budget is spent deterministically after the first question.
 struct OvertimeExecutor;
 
 impl Executor<Exchange> for OvertimeExecutor {
@@ -2222,8 +2207,6 @@ fn batch_completes_every_question_in_input_order() {
     for (question, id) in batch.questions.iter().zip([1_u16, 2, 3]) {
         assert_eq!(question.transaction_id, id);
         let report = question.result.as_ref().expect("completed report");
-        // The outcome names the declared question; the report holds the
-        // canonical wire name with its root label.
         assert_eq!(report.query_name, format!("{}.", question.query_name));
     }
 }

@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Operating-system native interface snapshot validation.
-//!
-//! Every rejection is a [`route::Error::InvalidResponse`]: the snapshot came
-//! from the operating system, so an inconsistency in it is a native backend
-//! fault rather than a caller error.
-
 use crate::{interface, route};
 
 pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), route::Error> {

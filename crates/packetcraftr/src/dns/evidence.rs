@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Judging what one attempt produced: classifying captured frames and TCP
-//! receipts against the authorized query, turning them into attempt
-//! evidence, and validating the exchange evidence an executor returned.
-
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
 
@@ -57,14 +53,10 @@ pub const fn response_code_name(code: u16) -> &'static str {
     }
 }
 
-/// Classifies a decoded frame against a DNS probe. Invalid correlated frames
-/// are decode failures, never accepted responses.
+/// Invalid correlated frames are decode failures, never accepted responses.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ResponseClassification {
     Response(ValidatedResponse),
-    /// A wire error the caller can match on; `reason` keeps its message for
-    /// the report, and a correlation refusal that is not a wire failure has
-    /// no source.
     Unrelated {
         reason: String,
         source: Option<wire::Error>,
@@ -89,8 +81,6 @@ impl ResponseClassification {
         }
     }
 
-    /// Precedence when several correlated frames arrive for one attempt; the
-    /// same table [`Outcome::retry_rank`] applies across attempts.
     pub(crate) const fn rank(&self) -> u8 {
         self.outcome().retry_rank()
     }
@@ -151,9 +141,7 @@ pub fn classify_response(
     None
 }
 
-/// The sent packet carries a typed DNS layer, which owns registry-level
-/// matching for the pair; this workflow correlates replies at the UDP tuple
-/// and leaves every application check to [`decode_response`].
+/// Correlates at the UDP tuple; [`decode_response`] owns every application check.
 fn direct_udp_match(request: &Packet, response: &Packet) -> bool {
     transport_tuple_reversed(request, response, BuiltinProtocol::Udp).is_some()
 }
@@ -178,11 +166,6 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
     }
 }
 
-/// One classified attempt: either an accepted response, or the failure the
-/// attempt is reported as.
-///
-/// The two shapes are separate because only an acceptance carries a validated
-/// response; a 4-tuple could express a timeout that somehow also produced one.
 #[derive(Debug)]
 enum AttemptClassification {
     Accepted {
@@ -238,8 +221,6 @@ fn classify_attempt(classification: ResponseClassification) -> AttemptClassifica
     }
 }
 
-/// Turns the best correlated UDP response into attempt evidence, retaining the
-/// exact frame only while the operation's evidence budget allows it.
 pub(super) fn candidate_evidence(
     probe: &Probe,
     sent_at: SystemTime,
@@ -332,9 +313,7 @@ pub(super) fn tcp_failure_evidence(
     }
 }
 
-/// Validates one DNS-over-TCP receipt against the request it answers, then
-/// classifies its message. TCP socket bytes are never represented as captured
-/// frame evidence.
+/// TCP socket bytes are never represented as captured frame evidence.
 pub(super) fn classify_tcp_response(
     probe: &Probe,
     timeout: Duration,

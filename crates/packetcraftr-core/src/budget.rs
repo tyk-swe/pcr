@@ -1,16 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Finite time budgets shared by offline analysis and live workflows.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Cooperative operation deadline combining wall time with deterministic
-/// elapsed-time accounting. A blocked provider cannot be interrupted; callers
-/// must check immediately before and after each provider boundary.
-/// Cloning snapshots local accounting while sharing parent ceilings and stop
-/// signals; it does not restart the allowance.
+/// A blocked provider cannot be interrupted; callers check before and after each provider boundary.
 #[derive(Clone)]
 pub struct Deadline {
     parents: Vec<Arc<Self>>,
@@ -33,8 +27,6 @@ impl std::fmt::Debug for Deadline {
 }
 
 impl Deadline {
-    /// Applies an immutable operation-wide ceiling in addition to this
-    /// phase's allowance. Accounting a child never restarts the parent.
     #[must_use]
     pub fn with_parent(mut self, parent: Option<Arc<Self>>) -> Self {
         if let Some(parent) = parent {
@@ -43,16 +35,12 @@ impl Deadline {
         self
     }
 
-    /// Starts a deadline that expires once accounted time exceeds `limit`.
     #[must_use]
     pub fn new(limit: Duration) -> Self {
         Self::with_time_source(limit, Instant::now)
     }
 
-    /// Starts a deadline using an explicit monotonic time source.
-    ///
-    /// This constructor supports deterministic hosts and tests. The source
-    /// must never move backward.
+    /// The source must never move backward.
     #[must_use]
     pub fn with_time_source(
         limit: Duration,
@@ -69,22 +57,17 @@ impl Deadline {
         }
     }
 
-    /// Shares a cooperative stop signal with the operation. Deadline checks
-    /// and cancellation checks remain distinct so cancellation is never reported
-    /// as fabricated elapsed time.
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: Option<Cancellation>) -> Self {
         self.cancellation = cancellation;
         self
     }
 
-    /// The operation's total allowance.
     #[must_use]
     pub fn limit(&self) -> Duration {
         self.limit
     }
 
-    /// The cooperative stop signal shared with this operation, if any.
     #[must_use]
     pub fn cancellation(&self) -> Option<&Cancellation> {
         self.cancellation.as_ref()
@@ -99,34 +82,17 @@ impl Deadline {
             .map_or(Ok(()), Cancellation::check)
     }
 
-    /// Cooperative work-boundary gate; cancellation takes precedence over
-    /// elapsed time.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Interrupted::Cancelled`] if signaled, otherwise
-    /// [`Interrupted::Exceeded`] when accounted time passes the limit.
+    /// Cooperative work-boundary gate; cancellation takes precedence over elapsed time.
     pub fn enforce(&self) -> Result<(), Interrupted> {
         self.check_cancelled()?;
         self.check()?;
         Ok(())
     }
 
-    /// Reports whether the budget has already been spent.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] once accounted time passes the limit.
     pub fn check(&self) -> Result<(), DeadlineExceeded> {
         self.check_elapsed(self.elapsed_at((self.now)())?)
     }
 
-    /// Checks prospective deterministic time without committing it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] when the prospective time would pass the
-    /// limit, leaving the accounted total untouched.
     pub fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
         for parent in &self.parents {
             parent.check_additional(additional)?;
@@ -140,11 +106,6 @@ impl Deadline {
 
     /// Commits wall time from prior work and begins a phase whose reported
     /// elapsed time may overlap its wall time.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] when committed plus prospective time passes
-    /// the limit.
     pub fn start_accounting(&mut self, prospective: Duration) -> Result<(), DeadlineExceeded> {
         let now = (self.now)();
         let elapsed = self.elapsed_at(now)?;
@@ -183,12 +144,6 @@ impl Deadline {
         Ok(())
     }
 
-    /// Returns the wall-clock duration still available to an interruptible
-    /// boundary.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] after the operation budget is spent.
     pub fn remaining(&self) -> Result<Duration, DeadlineExceeded> {
         let elapsed = self.elapsed_at((self.now)())?;
         self.check_elapsed(elapsed)?;
@@ -201,10 +156,6 @@ impl Deadline {
 
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] when the committed total passes the limit.
     pub fn account(&mut self, elapsed: Duration) -> Result<(), DeadlineExceeded> {
         let now = (self.now)();
         let phase_elapsed = now.duration_since(self.baseline).max(elapsed);
@@ -234,7 +185,6 @@ impl crate::error::Classified for DeadlineExceeded {
     }
 }
 
-/// Why a [`Deadline::enforce`] gate refused to continue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Interrupted {
@@ -245,7 +195,6 @@ pub enum Interrupted {
 }
 
 impl Interrupted {
-    /// Converts into any workflow error that already accepts both causes.
     pub fn into_error<E: From<Cancelled> + From<DeadlineExceeded>>(self) -> E {
         match self {
             Self::Cancelled(cancelled) => cancelled.into(),
@@ -263,8 +212,6 @@ impl crate::error::Classified for Interrupted {
     }
 }
 
-/// Implements the two conversions a core error with a `DurationLimit` variant
-/// needs to accept [`Interrupted`] through `?`.
 macro_rules! deadline_error_conversions {
     ($error:ty) => {
         impl ::std::convert::From<$crate::budget::DeadlineExceeded> for $error {
@@ -286,8 +233,6 @@ macro_rules! deadline_error_conversions {
 
 pub(crate) use deadline_error_conversions;
 
-/// Cloneable cooperative stop signal. Construction starts no threads, and
-/// cancelling one operation does not affect independently constructed signals.
 #[derive(Clone, Debug, Default)]
 pub struct Cancellation(Arc<std::sync::atomic::AtomicBool>);
 

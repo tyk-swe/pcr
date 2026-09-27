@@ -1,36 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The versioned `packetcraftr.udp-profiles/v1` document, which assigns UDP
-//! application profiles to destination ports.
-//!
-//! [`parse`] reads the document into neutral data: each [`Assignment`] names
-//! its ports and the profile's [`Config`] as written. Compiling a profile's
-//! request and checking its bounds is the job of the workflow that sends it.
-
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Classification, Classified, Kind, Source};
 
-/// The schema of a UDP profiles document.
 pub const UDP_PROFILES_SCHEMA_V1: &str = "packetcraftr.udp-profiles/v1";
-/// The most port assignments one UDP profiles document may hold.
 pub const MAX_PROFILE_ASSIGNMENTS: usize = 256;
-/// The most destination ports one document maps, and one assignment names.
 pub const MAX_PROFILE_PORTS: usize = 4096;
-/// The largest UDP profiles document, in bytes, and the most storage its
-/// compiled profiles may charge.
 pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
-/// The most bytes a hexadecimal request payload or byte check decodes to:
-/// the largest UDP payload an IPv4 datagram carries.
+/// The most bytes a request payload or byte check decodes to: the largest IPv4 UDP payload.
 pub const MAX_PAYLOAD_BYTES: usize = 65_507;
 
-/// A profile's request payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Payload {
-    /// Exact bytes, written as hexadecimal.
     Bytes {
         #[serde(with = "hex")]
         data: Bytes,
@@ -61,7 +46,6 @@ fn maximum_response() -> usize {
     65_535
 }
 
-/// Response bytes at `offset` that must equal `data` under `mask`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ByteCheck {
@@ -72,15 +56,11 @@ pub struct ByteCheck {
     pub mask: Option<Bytes>,
 }
 
-/// How a profile judges a reply.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResponseCheck {
-    /// Any reply; nothing is checked.
     Any,
-    /// A DNS response answering the request.
     Dns,
-    /// A reply within the length bounds that passes every byte check.
     Bytes {
         checks: Vec<ByteCheck>,
         #[serde(default)]
@@ -90,7 +70,6 @@ pub enum ResponseCheck {
     },
 }
 
-/// One named profile as the document writes it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -99,7 +78,6 @@ pub struct Config {
     pub response: ResponseCheck,
 }
 
-/// The ports one profile is assigned to, in document order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Assignment {
@@ -107,8 +85,7 @@ pub struct Assignment {
     pub profile: Config,
 }
 
-// serde names this type in syntax messages, which are published, so the name
-// stays as it was.
+// serde names this type in published syntax messages, so the name stays as it was.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
@@ -116,12 +93,6 @@ struct Document {
     profiles: Vec<Assignment>,
 }
 
-/// Reads a `packetcraftr.udp-profiles/v1` document into its assignments, in
-/// document order.
-///
-/// The document is at most [`MAX_PROFILE_BYTES`], declares
-/// [`UDP_PROFILES_SCHEMA_V1`], and holds 1..=[`MAX_PROFILE_ASSIGNMENTS`]
-/// assignments. The ports and profiles are the compiler's to check.
 pub fn parse(document: &[u8]) -> Result<Vec<Assignment>, Error> {
     if document.len() > MAX_PROFILE_BYTES {
         return Err(Error::DocumentSize {
@@ -144,22 +115,15 @@ pub fn parse(document: &[u8]) -> Result<Vec<Assignment>, Error> {
     Ok(document.profiles)
 }
 
-/// Why a UDP profiles document could not be read.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The document is larger than [`MAX_PROFILE_BYTES`].
     #[error("UDP profiles document has {actual} bytes, exceeding limit {limit}")]
     DocumentSize { actual: usize, limit: usize },
-    /// The document is not JSON of the published shape; the parser's reason
-    /// is the source.
     #[error("invalid UDP profiles")]
     Syntax(#[source] Source),
-    /// The document declares another schema.
     #[error("unsupported UDP profiles schema {schema}; expected {UDP_PROFILES_SCHEMA_V1}")]
     Schema { schema: String },
-    /// The document holds no assignments or more than
-    /// [`MAX_PROFILE_ASSIGNMENTS`].
     #[error("UDP profiles hold {count} assignments; expected 1 to {MAX_PROFILE_ASSIGNMENTS}")]
     AssignmentCount { count: usize },
 }

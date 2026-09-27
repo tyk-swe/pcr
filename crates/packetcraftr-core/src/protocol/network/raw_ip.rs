@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Version-dispatching raw IP capture-root codec.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -24,9 +22,6 @@ const NAME: &str = BuiltinProtocol::RawIp.as_str();
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RawIpCodec;
 
-/// `raw_ip` has no reflective layer of its own — it only dispatches on the
-/// version nibble — so its identifier is interned here instead of borrowed
-/// from a schema.
 fn raw_ip_protocol() -> &'static crate::layer::Id {
     static PROTOCOL: std::sync::OnceLock<crate::layer::Id> = std::sync::OnceLock::new();
     PROTOCOL.get_or_init(|| protocol(NAME))

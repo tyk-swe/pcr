@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Helpers shared by the built-in `LayerCodec` implementations.
-//!
-//! Each submodule owns one concern; this module is a flat facade so codecs
-//! keep importing from `protocol::common` regardless of where a helper lives.
-
 mod checksum;
 mod errors;
 mod fields;

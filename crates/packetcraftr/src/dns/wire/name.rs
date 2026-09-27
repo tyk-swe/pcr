@@ -3,8 +3,7 @@
 
 use packetcraftr_core::protocol::application::dns::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
-/// Canonicalizes a bounded ASCII DNS name for wire construction and
-/// case-insensitive correlation. The returned form always has a trailing dot.
+/// The returned form always has a trailing dot.
 pub fn canonical_query_name(value: &str) -> Result<String, super::Error> {
     if value == "." {
         return Ok(".".to_owned());

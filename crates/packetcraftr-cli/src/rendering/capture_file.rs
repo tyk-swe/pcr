@@ -26,9 +26,6 @@ pub(crate) fn write_capture_file(
 
 /// Encodes every frame into a spool and opens the destination only once the
 /// whole capture has encoded, so a failure leaves the destination untouched.
-///
-/// Opening it earlier is not enough: dropping an unfinished gzip compressor
-/// still writes a complete, empty container.
 fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     format: Format,
     frames: impl IntoIterator<Item = Frame>,
@@ -112,11 +109,6 @@ fn capture_io_error(operation: &str, source: io::Error) -> CliError {
     )
 }
 
-/// The one mapping for a capture-file writer that writes straight to stdout,
-/// as `capture` and `replay` do.
-///
-/// An I/O failure there is a stdout failure and is classified as one; anything
-/// else keeps the capture error's own classification.
 pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> CliError {
     match source {
         CaptureError::Io(source) => stdout_error(operation, source),

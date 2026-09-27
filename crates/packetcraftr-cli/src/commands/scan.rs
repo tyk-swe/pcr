@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Scan CLI command logic.
-
 pub(super) mod arguments;
 mod connect;
 mod payload;
@@ -191,5 +189,4 @@ pub(super) fn run(
     )
 }
 
-/// Every scan exchange carries exactly one correlated probe.
 const MAX_TEMPLATE_PACKETS: usize = 1;

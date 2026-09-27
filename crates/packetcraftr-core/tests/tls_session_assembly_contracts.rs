@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for TLS session assembly over reassembled TCP streams.
-
 mod common;
 
 use common::tls_capture::{Capture, Stream, assemble_default, complete_handshake};
@@ -17,8 +15,6 @@ use packetcraftr_core::protocol::transport::Tcp;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-/// A session's content with its frame numbering and timing removed, so two
-/// captures that carry the same handshake compare equal.
 fn without_framing(session: &Session) -> String {
     let mut normalized = session.clone();
     normalized.session = 0;
@@ -107,8 +103,6 @@ fn two_records_in_one_segment_and_one_record_spanning_segments_both_assemble() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
-    // One segment carrying a change_cipher_spec record and the hello's first
-    // record, then the hello's remaining records spread over two segments.
     let hello = client_hello(&ClientHelloSpec::default());
     let mut first = change_cipher_spec();
     first.extend_from_slice(&handshake_records(&hello, 64));
@@ -197,8 +191,6 @@ fn a_capture_ending_mid_hello_reports_truncated() {
     assert_eq!(summary.sessions, 0);
     assert_eq!(summary.tcp_streams, 1, "the stream is still visible");
 
-    // With the hello complete but the answer missing, the session is what was
-    // in flight when the capture ended.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -339,8 +331,6 @@ fn a_server_hello_timestamped_before_the_client_hello_reports_a_negative_round_t
     server_spec.acknowledgment = stream
         .client_sequence
         .wrapping_add(u32::try_from(hello.len()).expect("hello fits"));
-    // A capture merged from two clocks: the answer is stamped a quarter of a
-    // second before the question it answers.
     capture.frames.push(tcp_frame(
         &registry,
         base + Duration::from_millis(500),

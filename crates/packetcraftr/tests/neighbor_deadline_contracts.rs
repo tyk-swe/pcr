@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The operation deadline bounds neighbor discovery, the one preparation step
-//! that waits on the network, rather than being checked only after it.
-
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,8 +20,6 @@ mod common;
 
 use common::{FixedRoutes, SELECTED_SOURCE};
 
-/// I/O on a link where no neighbor ever answers. It confirms every send, and
-/// each capture wait records its timeout and then waits all of it out.
 #[derive(Clone, Default)]
 struct SilentLink {
     waits: Arc<Mutex<Vec<Duration>>>,
@@ -125,8 +120,6 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
     })
     .expect("bounded neighbor options");
     let timeout = Duration::from_millis(200);
-    // An IP-rooted packet on a dual-capability link defaults to Layer 3;
-    // Layer 2 framing is what needs the neighbor's MAC address.
     let mut send = packetcraftr::send::Options::default();
     send.plan.link_mode = Mode::Layer2;
     let request = packetcraftr::exchange::Request {

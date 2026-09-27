@@ -2,31 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Bounded offline ingress/egress capture comparison.
-//!
-//! Two captures are read through the shared analysis pipeline independently,
-//! each selected frame is reduced to an [`Observation`] — identity cells,
-//! preserved-field cells, egress expectation outcomes, and evidence metadata —
-//! and [`verify`] compares the two observation sets under explicit rules.
-//!
-//! The comparison is evidence, not device attribution: an unmatched ingress
-//! observation says only that no selected egress observation carried its
-//! declared identity, never that a device dropped it. Timestamps are retained
-//! as per-capture evidence only; no clock relationship between the captures is
-//! assumed and no cross-capture difference is labelled latency. No NAT
-//! inference, tunnel reconstruction, stream reassembly, or fragment
-//! correspondence is performed; identity keys must name packet content fields.
-//!
-//! Verdict semantics:
-//!
-//! - [`Verdict::Pass`]: every selected keyed ingress observation pairs uniquely
-//!   with a keyed egress observation, every requested check evaluated with
-//!   complete evidence and satisfied, and nothing was unkeyable, ambiguous,
-//!   truncated, or budget-limited.
-//! - [`Verdict::Fail`]: at least one attributable observation demonstrably
-//!   violates an explicit preservation or expectation rule.
-//! - [`Verdict::Inconclusive`]: missing, ambiguous, truncated, unkeyable, or
-//!   budget-limited evidence prevents the requested conclusion. An empty
-//!   selection is always inconclusive.
 
 mod evaluate;
 mod limits;
@@ -51,20 +26,13 @@ use crate::filter::{Filter, Projection};
 use crate::frame::LinkType;
 use crate::registry::Registry;
 
-/// Which capture an observation belongs to. Capture identity is part of every
-/// evidence reference: frame numbers are meaningful only within their own
-/// capture, so frame 1 of the ingress capture is never frame 1 of the egress
-/// capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Side {
-    /// The capture taken before forwarding (the input under test).
     Ingress,
-    /// The capture taken after forwarding (the output under test).
     Egress,
 }
 
-/// Why an observation's acquisition or projection evidence is incomplete.
 /// Readable fields can still establish a violation; unavailable cells cannot
 /// satisfy a check. Incompleteness prevents an overall pass, not an otherwise
 /// established failure.
@@ -74,18 +42,14 @@ pub enum Incomplete {
     /// The capture record holds fewer bytes than the frame had on the wire;
     /// any projected variable-length value may silently be a prefix.
     Truncated,
-    /// The per-observation field budget was exhausted mid-projection.
     FieldBudget,
 }
 
-/// What a projection actually establishes, independently of other cells.
 /// A missing value is never silently treated as a successfully read value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ValueState {
     Observed,
-    /// No value was returned in a complete, diagnostic-free decoded frame.
-    /// This describes the declared decoder view, not unknown wire protocols.
     Absent,
     Truncated,
     DecodeIncomplete,
@@ -112,7 +76,6 @@ pub struct Declarations<'a> {
     pub expect_absent: &'a [String],
 }
 
-/// One selected frame reduced to the evidence the comparison needs.
 #[derive(Clone, Debug)]
 pub struct Observation {
     frame: u64,
@@ -132,8 +95,6 @@ pub struct Observation {
 }
 
 impl Observation {
-    /// The complete, readable identity key. This clones values; use
-    /// `is_keyed` when only testing whether a key exists.
     pub fn key(&self) -> Option<Vec<FieldValue>> {
         self.is_keyed().then(|| {
             self.key_cells
@@ -172,17 +133,13 @@ impl Observation {
     }
 }
 
-/// One egress-side expectation result retained on the observation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExpectationOutcome {
-    /// Whether the declared `field == value` predicate held on this frame.
     pub satisfied: bool,
-    /// The field's observed value, for violation evidence.
     pub actual: Option<FieldValue>,
     pub state: ValueState,
 }
 
-/// One declared `FIELD=VALUE` egress expectation, compiled once.
 #[derive(Debug)]
 pub struct Expectation {
     field: String,
@@ -204,9 +161,6 @@ const CAPTURE_LOCAL_FIELDS: &[(&str, &str)] = &[
     ("udp.stream", "a per-capture conversation index"),
 ];
 
-/// Shared comparison rules: identity selects corresponding observations,
-/// preservation compares matched fields, and expectations constrain egress
-/// values.
 #[derive(Debug)]
 pub struct Rules {
     identity: Projection,
@@ -219,20 +173,6 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// Compiles the rules against `registry`.
-    ///
-    /// `identity` must hold at least one field and at most the projection
-    /// column limit. Identity and preservation fields may not name
-    /// capture-local fields (`frame.number`, `frame.interface_id`,
-    /// `frame.time_epoch`, `frame.cap_len`, `frame.link_type`, `tcp.stream`,
-    /// `udp.stream`), because those describe how one capture recorded a
-    /// packet, not what it carried.
-    /// Expectations use the existing field-path/literal syntax as
-    /// `FIELD=VALUE` and are evaluated on every selected egress observation.
-    ///
-    /// `max_field_bytes` bounds each observation's total projected cell size;
-    /// a frame exceeding it is retained but flagged
-    /// [`Incomplete::FieldBudget`].
     pub fn compile(
         identity: &[String],
         preserve: &[String],
@@ -252,8 +192,6 @@ impl Rules {
         )
     }
 
-    /// Compiles value and explicit decoder-view presence rules under one
-    /// declaration budget. Ordinary preservation never equates two absences.
     pub fn compile_declarations(
         declarations: Declarations<'_>,
         registry: &Registry,
@@ -312,12 +250,10 @@ impl Rules {
         })
     }
 
-    /// The identity field paths, in declared order.
     pub fn identity_fields(&self) -> &[String] {
         self.identity.columns()
     }
 
-    /// The preserved field paths, in declared order.
     pub fn preserve_fields(&self) -> &[String] {
         &self.preserve_names
     }
@@ -337,7 +273,6 @@ impl Rules {
             )
     }
 
-    /// Value expectations only; absence assertions are a separate operation.
     pub fn expectation_specs(&self) -> impl Iterator<Item = (&str, &str)> {
         self.expectations
             .iter()
@@ -352,7 +287,6 @@ impl Rules {
             .map(|e| e.field.as_str())
     }
 
-    /// Context needed even when only physical observations are compared.
     pub fn requirements(&self) -> crate::filter::Requirements {
         let mut requirements = self.identity.requirements();
         for projection in self
@@ -403,11 +337,6 @@ impl Rules {
         Ok(())
     }
 
-    /// Reduces one matched frame to its retained observation.
-    ///
-    /// Identity cells that cannot resolve leave the observation unkeyable;
-    /// projection-budget exhaustion and snaplen truncation flag it
-    /// `incomplete`. Expectation predicates evaluate only on egress records.
     pub fn observe(
         &self,
         side: Side,
@@ -494,7 +423,6 @@ impl Rules {
                 Ok((cells, states))
             }
             Err(crate::filter::Error::ProjectionLimit { .. }) => {
-                // Preserve truncation as acquisition evidence when both limits apply.
                 if incomplete.is_none() {
                     *incomplete = Some(Incomplete::FieldBudget);
                 }
@@ -519,9 +447,6 @@ fn cell_state(
     let decode_incomplete = !record.decoded.diagnostics.is_empty();
     // Fixed-size decoded values can establish a contradiction despite missing
     // unrelated payload bytes. Lists and variable-size values may be prefixes.
-    // An unqualified path can also be a prefix when decoding stopped before a
-    // later occurrence, even if only one value was returned. A selected scalar
-    // or a diagnostic-free decoded traversal establishes occurrence completeness.
     let fixed = (single || !decode_incomplete)
         && matches!(
             value,
@@ -549,7 +474,6 @@ fn cell_state(
 
 const MAX_OBSERVATION_DIAGNOSTICS: usize = 8;
 
-/// Conservative per-observation structural charge on top of encoded cells.
 const OBSERVATION_OVERHEAD_BYTES: usize = 256;
 
 fn encoded_len(values: &[Option<FieldValue>]) -> usize {
@@ -578,7 +502,6 @@ fn retained_bytes(observation: &Observation) -> usize {
         .saturating_add(observation.diagnostics.len().saturating_mul(32))
 }
 
-/// Compiles a non-capture-local projection for `role`, or explains the refusal.
 fn compile_fields(
     role: &'static str,
     fields: &[String],
@@ -607,11 +530,6 @@ impl Expectation {
         }
     }
 
-    /// Parses `FIELD=VALUE` and compiles `FIELD == VALUE` plus a one-column
-    /// projection that reads the actual value back for violation evidence.
-    ///
-    /// The `==` spelling is also accepted for convenience; the value side is
-    /// an ordinary display-filter literal.
     fn compile(rule: &str, registry: &Registry) -> Result<Self, Error> {
         let (field, value) = rule
             .split_once('=')
@@ -648,11 +566,8 @@ impl Expectation {
     }
 }
 
-/// Collects one capture's observations under a retained-evidence budget.
-///
 /// Every selected frame becomes exactly one [`Observation`]; nothing is ever
-/// silently evicted. Exhausting the budget is an explicit failure, not a
-/// partial result.
+/// silently evicted.
 pub struct Collector<'a> {
     rules: &'a Rules,
     side: Side,
@@ -672,7 +587,6 @@ impl<'a> Collector<'a> {
         }
     }
 
-    /// Reduces one matched frame into the retained observation set.
     pub fn observe(&mut self, record: &crate::analysis::FrameRecord<'_>) -> Result<(), Error> {
         let observation = self.rules.observe(self.side, record)?;
         self.retained_bytes = self
@@ -686,7 +600,6 @@ impl<'a> Collector<'a> {
         Ok(())
     }
 
-    /// The collected observations in capture order.
     pub fn into_observations(self) -> Vec<Observation> {
         self.observations
     }
@@ -701,8 +614,6 @@ pub enum Error {
     Filter(#[from] crate::filter::Error),
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
-    /// The field describes a position inside one capture, so it cannot serve
-    /// as cross-capture identity or a preservation rule.
     #[error(
         "{role} field {field:?} is {why}; rules must name packet fields, not per-capture positions"
     )]
@@ -727,7 +638,6 @@ pub enum Error {
         #[source]
         source: crate::filter::Error,
     },
-    /// The retained-evidence budget was exhausted; nothing was evicted.
     #[error("retained observation evidence exceeds the {limit} byte budget")]
     EvidenceBudget { limit: usize },
     #[error("verification declarations exceed 256 rules or 65536 source bytes")]

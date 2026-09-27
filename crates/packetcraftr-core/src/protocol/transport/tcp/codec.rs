@@ -32,7 +32,6 @@ pub(super) const NAME: &str = BuiltinProtocol::Tcp.as_str();
 
 const TCP_MIN_LEN: usize = 20;
 
-/// The option area the four-bit TCP data offset can address.
 pub(super) const MAX_OPTION_BYTES: usize = 40;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -89,7 +88,6 @@ impl LayerCodec for TcpCodec {
         );
         prefix.push(flags_low);
         prefix.extend_from_slice(&layer.window.to_be_bytes());
-        // The checksum bytes stay zero while the segment checksum is computed.
         prefix.extend_from_slice(&[0, 0]);
         prefix.extend_from_slice(&layer.urgent_pointer.to_be_bytes());
         prefix.extend_from_slice(&options);
@@ -175,11 +173,6 @@ impl LayerCodec for TcpCodec {
             }),
             consumed: header_len,
             payload_len,
-            // Both endpoints are offered before the raw fallback so a payload
-            // protocol bound to a well-known TCP port dissects in either
-            // direction. Unlike UDP there is no content preference between
-            // them: a TLS segment looks the same in both directions and the
-            // codec gates on the payload itself.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
@@ -256,7 +249,6 @@ impl TcpOption {
     }
 }
 
-/// Serializes options in order into the TCP option area (at most 40 bytes).
 pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, crate::codec::Error> {
     let invalid = |message: &str| invalid(NAME, message);
     let mut output = Vec::with_capacity(MAX_OPTION_BYTES);
@@ -296,8 +288,6 @@ pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, crate::codec::
     Ok(output)
 }
 
-/// Parses the option area, preserving order and every byte. Input is already
-/// bounded by the 40-byte TCP maximum, so parsing cannot allocate beyond it.
 pub(super) fn parse(bytes: &Bytes) -> Vec<TcpOption> {
     let mut options = Vec::new();
     let mut cursor = 0;
@@ -337,8 +327,6 @@ pub(super) fn parse(bytes: &Bytes) -> Vec<TcpOption> {
     options
 }
 
-/// Maps a well-formed TLV onto its typed variant; nonstandard lengths and
-/// unknown kinds stay raw.
 fn typed(kind: u8, body: Bytes) -> TcpOption {
     match (kind, body.as_ref()) {
         (KIND_MSS, [hi, lo]) => TcpOption::Mss(u16::from_be_bytes([*hi, *lo])),
@@ -399,9 +387,6 @@ mod tests {
 
     #[test]
     fn malformed_tails_and_unknown_kinds_stay_byte_exact() {
-        // A missing length byte, a length below two, and a length that runs
-        // past the option area each end option parsing; every byte is
-        // retained verbatim and re-serializes identically.
         for bytes in [
             vec![1, 1, 2],
             vec![2, 1, 0xff],
@@ -415,12 +400,10 @@ mod tests {
             ));
             assert_eq!(wire(&parsed), bytes, "{bytes:?} must round-trip");
         }
-        // The unparseable tail keeps the full malformed remainder.
         match parse(&Bytes::from_static(&[2, 8, 0x05, 0xb4])).as_slice() {
             [TcpOption::Trailing(bytes)] => assert_eq!(bytes.as_ref(), &[2, 8, 0x05, 0xb4]),
             other => panic!("expected trailing bytes, got {other:?}"),
         }
-        // Padding after EOL is opaque, not additional options.
         assert_eq!(
             parse(&Bytes::from_static(&[0, 0, 0])),
             vec![

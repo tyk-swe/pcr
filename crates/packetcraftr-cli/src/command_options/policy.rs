@@ -1,13 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Policy opt-ins and budgets, as clap groups.
-//!
-//! Every command builds its policy from the same leaf groups below, so one
-//! flag means one thing everywhere. The command-shaped groups at the bottom
-//! are the combinations several commands flatten; a combination only one
-//! command uses lives in that command's `arguments`.
-
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -56,11 +49,6 @@ pub(crate) struct DestinationAllowlistArgs {
     allow_destination: Vec<packetcraftr::policy::DestinationConstraint>,
 }
 
-/// What `--max-packets` and `--max-bytes` default to, and what they are called,
-/// for one kind of operation.
-///
-/// Replay starts from far larger defaults than a hand-built send, and a
-/// receive-only command's help must not mention transmission.
 pub(crate) trait Budget: Clone + fmt::Debug + Default {
     fn max_packets() -> u64;
     fn max_bytes() -> u64;
@@ -68,15 +56,11 @@ pub(crate) trait Budget: Clone + fmt::Debug + Default {
     const BYTES_HELP: &'static str;
 }
 
-/// Packets this operation puts on the wire itself.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Transmitted;
 
-/// Packets one hand-built operation may put on the wire before the policy
-/// stops it.
 pub(crate) const DEFAULT_TRANSMITTED_PACKETS: u64 = 10_000;
 
-/// The byte ceiling the capture defaults publish, as the policy counts it.
 pub(crate) fn default_limit_bytes() -> u64 {
     u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
 }

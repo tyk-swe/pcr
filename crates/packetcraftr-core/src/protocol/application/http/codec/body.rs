@@ -16,8 +16,6 @@ enum State {
     ChunkLf,
     Trailers,
 }
-/// Incremental HTTP/1 body framing. Entity bytes are counted and discarded;
-/// compression and representation decoding are outside this parser.
 #[derive(Clone, Debug)]
 pub struct BodyDecoder {
     state: State,
@@ -193,8 +191,7 @@ impl BodyDecoder {
 }
 fn parse_size(input: &[u8]) -> Result<u64, Error> {
     let (size, extension) = match input.iter().position(|b| *b == b';') {
-        // Whitespace between the size and the extension delimiter is
-        // recipient-tolerated; whitespace inside the digits still fails.
+        // Whitespace between the size and the extension delimiter is recipient-tolerated.
         Some(i) => {
             let size = &input[..i];
             let end = size
@@ -208,7 +205,6 @@ fn parse_size(input: &[u8]) -> Result<u64, Error> {
     if size.is_empty() || size.len() > 16 || !size.iter().all(u8::is_ascii_hexdigit) {
         return Err(Error::Invalid("chunk size is not bounded hexadecimal"));
     }
-    // Extensions are opaque but must have balanced quotes and no control bytes.
     let (mut quoted, mut escaped) = (false, false);
     for byte in extension {
         if (*byte < 0x20 && *byte != b'\t') || *byte == 0x7f {

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Preset-aware parsing, retaining the finalized definition for diagnostics.
-
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
@@ -10,16 +8,12 @@ use clap::{ArgMatches, CommandFactory, FromArgMatches};
 
 use super::Cli;
 
-/// The typed invocation and the parser metadata that produced it.
 pub(crate) struct Parsed {
     pub(crate) cli: Cli,
     pub(crate) matches: ArgMatches,
     pub(crate) definition: clap::Command,
 }
 
-/// The command-line definition with `defaults`, the preset values the
-/// selected command's typed arguments declare, as the named subcommand's
-/// defaults.
 fn preset_definition(
     subcommand: &str,
     defaults: &BTreeMap<&'static str, &'static str>,

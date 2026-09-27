@@ -1,18 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Which findings a consumer keeps.
-
 use crate::diagnostic::Severity;
 
 use super::Finding;
 
-/// Selects findings at or above a severity, optionally narrowed to codes.
-///
-/// The default keeps every finding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selector {
-    /// The least severe finding kept.
     pub min_severity: Severity,
     /// Keeps only findings with one of these codes; empty keeps every code.
     pub codes: Vec<String>,
@@ -28,8 +22,6 @@ impl Default for Selector {
 }
 
 impl Selector {
-    /// Whether `finding` is severe enough and, when codes are named, has one
-    /// of them.
     #[must_use]
     pub fn matches(&self, finding: &Finding) -> bool {
         finding.severity >= self.min_severity

@@ -8,7 +8,6 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::{capture::Stats, interface::Id};
 
-/// Interface-owned context for one active ARP/NDP lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub interface: Id,
@@ -20,7 +19,6 @@ pub struct Request {
     pub link_type: LinkType,
 }
 
-/// Bounded evidence returned by an active resolver.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolution {
     pub mac_address: MacAddress,

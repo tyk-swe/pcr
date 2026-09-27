@@ -14,32 +14,14 @@ use crate::{Client, Sink};
 
 impl<P: Providers, K: Clock> Client<P, K> {
     /// Runs one capture-ready exchange and publishes each event when final.
-    ///
-    /// The count-only budget and every packet's destinations are authorized
-    /// before any provider is consulted, and every packet is admitted before
-    /// neighbor discovery or capture starts. Confirmed sends are published
-    /// before later requests, capture evidence when its classification is
-    /// final, and unanswered requests after capture shutdown. `sink` runs on
-    /// a one-event worker admitted by the client's
-    /// [`Runtime`](crate::runtime::Runtime); a failure aborts later work. The
-    /// timeout bounds waiting for the sink, not the sink itself: once for the
-    /// collection window and once more for the events published after it
-    /// closes. A sink may finish after this method returns and holds one of
-    /// the runtime's worker permits until then.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the preparation or provider failure, a
-    /// route the packets do not share, or the sink's failure, together with
-    /// any capture shutdown failure.
+    /// Every packet is admitted before neighbor discovery or capture starts.
+    /// A sink may finish after this method returns and holds a runtime worker permit until then.
     pub fn exchange<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
     {
         let collection = self.deadline(request.timeout);
-        // Unanswered requests and the final best-effort drain are published
-        // only after the collection window closes, so they get one further
-        // finite allowance instead of the window they cannot fall inside.
+        // Post-window events get one more finite allowance; they cannot fall inside the window.
         let finalization_limit = request.timeout;
         let mut finalization: Option<Deadline> = None;
         let prepared = self.prepare_exchange(request)?;
@@ -61,9 +43,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
         })
     }
 
-    /// Exchange with optional fallback matching and early capture
-    /// termination, collected inline without a worker. Workflow executors
-    /// use this entry point.
     pub(crate) fn exchange_hooked(
         &self,
         request: Request,

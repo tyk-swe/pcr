@@ -12,24 +12,6 @@
 // requires.
 
 //! JA3, JA3S, and JA4 client fingerprints.
-//!
-//! JA4 has the form
-//!
-//! ```text
-//! JA4   = (t|q)(version)(d|i)(NN ciphers)(NN extensions)(alpn)_JA4_b_JA4_c
-//! JA4_b = sha256(sorted cipher suites, comma separated)[..12]
-//! JA4_c = sha256(sorted extensions minus server_name and ALPN, then "_",
-//!                then signature algorithms in offer order)[..12]
-//! ```
-//!
-//! GREASE code points are excluded everywhere except the EC point formats.
-//! A fingerprint that starts `t13d1516h2` therefore reads as: TCP, TLS 1.3
-//! offered, a server name present, 15 cipher suites, 16 extensions, `h2`
-//! first in ALPN.
-//!
-//! Fingerprints are advisory. Every input is chosen by the client, so any
-//! client can change or copy another client's fingerprint at will: treat a
-//! match as a hint about software identity, never as authentication.
 
 use std::fmt::Write as _;
 
@@ -44,13 +26,10 @@ const JA4_HASH_LEN: usize = 12;
 const JA4_EMPTY_HASH: &str = "000000000000";
 const JA4_MAX_COUNT: usize = 99;
 
-/// The transport a hello was carried over, which selects JA4's first character.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Transport {
-    /// TLS over TCP, rendered `t`.
     #[default]
     Tcp,
-    /// TLS over QUIC, rendered `q`.
     Quic,
 }
 
@@ -64,12 +43,9 @@ impl Transport {
     }
 }
 
-/// A JA3-family fingerprint: the raw string and its MD5 digest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ja3 {
-    /// The comma-separated field string the digest is taken over.
     pub raw: String,
-    /// Lowercase hex MD5 of [`Self::raw`].
     pub md5: String,
 }
 
@@ -80,10 +56,6 @@ impl Ja3 {
     }
 }
 
-/// Reports whether `value` is a GREASE code point (RFC 8701).
-///
-/// GREASE values have both bytes equal and their low nibble set to `a`, which
-/// is the `0x?a?a` pattern JA3 and JA4 exclude.
 #[must_use]
 fn is_grease(value: u16) -> bool {
     let high = value >> 8;
@@ -91,13 +63,6 @@ fn is_grease(value: u16) -> bool {
     high == low && high & 0x0f == 0x0a
 }
 
-/// Computes the JA3 fingerprint of a ClientHello.
-///
-/// The raw string is
-/// `version,ciphers,extensions,supported_groups,ec_point_formats` with `-`
-/// between elements. GREASE is removed from the ciphers, extensions, and
-/// groups; the EC point formats are single bytes and cannot be GREASE, so
-/// they are left alone.
 #[must_use]
 pub fn ja3(hello: &ClientHello) -> Ja3 {
     let mut raw = String::new();
@@ -119,8 +84,6 @@ pub fn ja3(hello: &ClientHello) -> Ja3 {
     Ja3::new(raw)
 }
 
-/// Computes the JA3S fingerprint of a ServerHello.
-///
 /// The raw string is `version,cipher,extensions`, where `version` is the
 /// ServerHello's legacy version field rather than the version negotiated
 /// through `supported_versions`, matching the original JA3S implementations.
@@ -132,8 +95,6 @@ pub fn ja3s(hello: &ServerHello) -> Ja3 {
     Ja3::new(raw)
 }
 
-/// Computes the JA4 fingerprint of a ClientHello.
-///
 /// On a HelloRetryRequest exchange the caller fingerprints the first
 /// ClientHello, so that a retry does not change a client's identity.
 #[must_use]
@@ -186,9 +147,6 @@ fn ja4_c(hello: &ClientHello) -> String {
     truncated_sha256(&input)
 }
 
-/// Returns JA4's two-character version code: the highest non-GREASE
-/// `supported_versions` entry when the extension carried one, otherwise the
-/// hello's legacy version.
 fn ja4_version(hello: &ClientHello) -> &'static str {
     let negotiated = without_grease(hello.supported_versions.iter().copied()).max();
     version_code(negotiated.unwrap_or(hello.legacy_version))
@@ -207,15 +165,6 @@ fn version_code(version: u16) -> &'static str {
     }
 }
 
-/// Returns the two ALPN characters: `00` without ALPN, and otherwise the
-/// first and last byte of the first offered protocol.
-///
-/// When either of those bytes is not alphanumeric ASCII, JA4 substitutes the
-/// hexadecimal form: the first character of the first byte's two-digit hex,
-/// then the last character of the last byte's two-digit hex. A protocol of
-/// `0x01 0x02` therefore reads `02`, and a single `0xab` byte reads `ab`.
-/// The raw wire bytes are used, so a protocol name that is not UTF-8 still
-/// fingerprints as it was sent.
 fn ja4_alpn(hello: &ClientHello) -> String {
     let Some(first) = hello.alpn_raw.first() else {
         return "00".to_owned();
@@ -308,8 +257,6 @@ mod tests {
         }
     }
 
-    /// The reference digest, taken over a literal string rather than over
-    /// anything this module built, so the test pins the string format.
     fn sha256_prefix(input: &str) -> String {
         let mut digest = hex(Sha256::digest(input.as_bytes()).as_slice());
         digest.truncate(12);
@@ -436,7 +383,6 @@ mod tests {
         client.alpn_raw = vec![Bytes::from_static(&[0xab])];
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "ab");
 
-        // Only one end has to break the rule for the hex form to apply.
         client.alpn_raw = vec![Bytes::from_static(b"h2\x00")];
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "60");
 
@@ -447,8 +393,6 @@ mod tests {
     #[test]
     fn ja4_reads_the_raw_alpn_bytes_rather_than_their_lossy_text() {
         let mut client = hello();
-        // The text form of these bytes is the replacement character, whose
-        // first byte is not what the wire carried.
         client.alpn = vec!["\u{fffd}\u{fffd}".to_owned()];
         client.alpn_raw = vec![Bytes::from_static(&[0xc3, 0x28])];
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "c8");

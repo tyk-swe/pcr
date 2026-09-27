@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for datagram completion dispatch through the analysis pipeline.
-
 mod common;
 
 use common::ip_fragments::{UDP_DATA, build, ipv4_fragments, reader_with_link_type};
@@ -603,8 +601,6 @@ fn partial_ipv6_extension_fragment_does_not_read_link_padding() {
         more_fragments: true,
         identification: 86,
     });
-    // The fragment carries one Destination Options header that points to a
-    // second one. The link padding must not supply that second header.
     packet.push(Raw::new(vec![60, 0, 0, 0, 0, 0, 0, 0]));
     packet.push(Padding::new(vec![17, 0, 0, 0, 0, 0, 0, 0]));
     let frame = Frame::new(

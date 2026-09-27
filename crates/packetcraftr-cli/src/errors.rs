@@ -21,8 +21,6 @@ pub(crate) struct CliError {
 }
 
 impl CliError {
-    /// A CLI-originated failure with the fallback classification for `kind`;
-    /// the exit code follows from the kind.
     pub(crate) fn new(kind: Kind, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -41,8 +39,6 @@ impl CliError {
         Self::from_classification(classification, error.to_string(), causes).with_context(context)
     }
 
-    /// A CLI-originated failure retaining the typed source's rendered chain
-    /// in `causes` — for sources that carry no classification of their own.
     pub(crate) fn caused(kind: Kind, source: &(impl std::error::Error + ?Sized)) -> Self {
         Self::from_classification(
             Classification::new(fallback_code(kind), kind, None),
@@ -51,8 +47,6 @@ impl CliError {
         )
     }
 
-    /// A refused option: the option's own usage message, with the library's
-    /// refusal and its sources as the causes.
     pub(crate) fn refused_option(
         message: impl Into<String>,
         source: &(impl std::error::Error + ?Sized),
@@ -79,8 +73,6 @@ impl CliError {
         }
     }
 
-    /// The process exit code this failure ends in, which is a function of its
-    /// classification kind and nothing else.
     pub(crate) const fn exit_code(&self) -> u8 {
         exit_code_for(self.classification.kind)
     }
@@ -128,9 +120,6 @@ impl CliError {
     }
 }
 
-/// `CliError` renders its headline message; implementing [`std::error::Error`]
-/// lets clap value parsers return it and preserves the classification for
-/// callers that read it back.
 impl std::fmt::Display for CliError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message)
@@ -139,15 +128,12 @@ impl std::fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
-/// The NDJSON encoder reports failures without an exit code, and every CLI
-/// failure path starts from a [`CliError`].
 impl From<output::stream::EncodeError> for CliError {
     fn from(error: output::stream::EncodeError) -> Self {
         Self::classified(error)
     }
 }
 
-/// Format-contract failures keep their own classification.
 impl From<output::contract::Error> for CliError {
     fn from(error: output::contract::Error) -> Self {
         Self::classified(error)
@@ -165,8 +151,7 @@ const fn fallback_code(kind: Kind) -> &'static str {
     }
 }
 
-/// Every failure class in exit-code order; the root `--help` renders its
-/// exit-code table from this list.
+/// Every failure class in exit-code order.
 pub(crate) const KINDS: [Kind; 6] = [
     Kind::Usage,
     Kind::Packet,
@@ -176,9 +161,6 @@ pub(crate) const KINDS: [Kind; 6] = [
     Kind::Internal,
 ];
 
-/// The process exit code after a cooperative interrupt, following the shell
-/// convention for SIGINT. It is not a failure [`Kind`]; cancellation is not an
-/// error class of the operation itself.
 pub(crate) const CANCELLED_EXIT_CODE: u8 = 130;
 
 pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
@@ -192,7 +174,6 @@ pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
     }
 }
 
-/// The one-line meaning of `kind` shown beside its exit code in the root help.
 pub(crate) const fn exit_code_description(kind: Kind) -> &'static str {
     match kind {
         Kind::Usage => "the invocation or its input was invalid.",

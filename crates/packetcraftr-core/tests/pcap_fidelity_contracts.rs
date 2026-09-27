@@ -427,8 +427,6 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
         },
     )
     .expect_err("statistics require capture time");
-    // The collector reads `record.timestamp` and cannot fail; this is the
-    // guarantee that makes that sound.
     assert_eq!(
         observed, 0,
         "an untimestamped frame is refused before any sink observes it"

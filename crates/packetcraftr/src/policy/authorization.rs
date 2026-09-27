@@ -13,8 +13,6 @@ use crate::address::is_public;
 use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 
 impl Policy {
-    /// Validates policy configuration without invoking resolver, route,
-    /// capture, or transmission providers.
     pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
             return Err(Error::InvalidAddressLimit {
@@ -31,11 +29,6 @@ impl Policy {
         Ok(())
     }
 
-    /// Authorizes one already-resolved or packet-declared destination.
-    ///
-    /// A non-empty `allowed_destinations` list must contain the destination
-    /// before the remaining checks run; the constraint can deny but never
-    /// grants what the other stages refuse.
     pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), Error> {
         if !self.allowed_destinations.is_empty()
             && !self
@@ -60,8 +53,6 @@ impl Policy {
         Ok(())
     }
 
-    /// Applies the operation-wide packet and exact wire-byte limits together.
-    /// Callers provide prospective totals before starting live side effects.
     pub(super) fn authorize_wire_limits(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
         if packets > self.max_packets_per_operation {
             return Err(Error::PacketLimit {
@@ -78,8 +69,6 @@ impl Policy {
         Ok(())
     }
 
-    /// Applies the shared policy ceilings to DNS's explicit aggregate of raw
-    /// packets and bounded socket connection/message traffic units.
     pub(super) fn authorize_traffic_limits(
         &self,
         traffic_units: u64,
@@ -109,8 +98,6 @@ impl Policy {
         Ok(())
     }
 
-    /// Authorizes every route-bearing address declared by a packet before
-    /// route, capture, neighbor, or transmission providers can observe it.
     pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), Error> {
         let destinations = semantics::live_destinations(packet).map_err(|source| {
             Error::InvalidPacketSemantics {
@@ -124,8 +111,6 @@ impl Policy {
         Ok(())
     }
 
-    /// Authorizes the packet's outer IP and Ethernet sources against what the
-    /// selected interface owns. Unspecified sources use planned values when available.
     pub fn authorize_packet_sources(&self, packet: &Packet, plan: &Plan) -> Result<(), Error> {
         if self.allow_source_spoofing {
             return Ok(());
@@ -170,10 +155,6 @@ impl Policy {
         })
     }
 
-    /// Authorizes a declared target before resolution, invokes the resolver at
-    /// most once, then authorizes every selected address before returning any
-    /// address to route planning. Calling this method again for re-resolution
-    /// repeats both policy stages against the current policy.
     pub fn resolve_target<R: Resolver + ?Sized>(
         &self,
         target: &Target,

@@ -9,14 +9,12 @@ use packetcraftr_netio::route::Provider as _;
 use crate::command_options::InterfaceSelector;
 use crate::errors::CliError;
 
-/// The system's interfaces, keeping only the ones `selector` names.
 pub(crate) fn interfaces(
     selector: Option<&InterfaceSelector>,
 ) -> Result<Vec<net::interface::Info>, CliError> {
     select_interfaces(&net::interface::SystemProvider, selector)
 }
 
-/// The one interface `selector` names on this system.
 pub(crate) fn resolve(selector: InterfaceSelector) -> Result<net::interface::Id, CliError> {
     select_interfaces(&net::interface::SystemProvider, Some(&selector))?
         .into_iter()
@@ -25,8 +23,6 @@ pub(crate) fn resolve(selector: InterfaceSelector) -> Result<net::interface::Id,
         .ok_or_else(|| CliError::new(Kind::Internal, "interface selection returned no match"))
 }
 
-/// The packet timestamp types the system capture backend advertises for
-/// `interface`.
 pub(crate) fn timestamp_types(
     interface: &net::interface::Id,
 ) -> Result<Vec<net::capture::TimestampType>, CliError> {
@@ -35,7 +31,6 @@ pub(crate) fn timestamp_types(
         .map_err(CliError::classified)
 }
 
-/// The system route that leaves through `interface`, if it has one.
 pub(crate) fn interface_route(
     interface: &net::interface::Id,
 ) -> Result<Option<net::route::Decision>, CliError> {
@@ -44,9 +39,6 @@ pub(crate) fn interface_route(
         .map_err(CliError::classified)
 }
 
-/// Enumerates interfaces, keeping only the ones `selector` names. A selector
-/// nothing matches fails with the one "no interface matches" error every
-/// command reports.
 fn select_interfaces<I: net::interface::Provider>(
     provider: &I,
     selector: Option<&InterfaceSelector>,

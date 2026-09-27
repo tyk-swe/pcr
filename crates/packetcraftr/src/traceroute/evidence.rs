@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How traceroute classifies, ranks, and reports one probe's evidence.
-
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -20,8 +18,6 @@ use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 
-/// A checksum-valid response correlated to one probe: what kind of hop
-/// answered, who answered, and why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CorrelatedResponse {
     pub kind: ResponseKind,
@@ -78,8 +74,6 @@ fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
     Some(path.final_destination)
 }
 
-/// Traceroute's batch-evidence hook. It also tracks how the trace completes;
-/// a destination or unreachable answer ends the trace after its hop.
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,

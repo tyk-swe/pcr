@@ -1,15 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! NTPv3/v4 client, server, and broadcast message model and codec.
-//!
-//! The fixed 48-byte header is fully typed, including the signed `poll` and
-//! `precision` exponents and the four 64-bit timestamps kept as exact wire
-//! integers so fractional precision is never lost. Extension fields and MAC
-//! bytes after the header stay bounded opaque `extensions` data. Mode 6/7
-//! control messages are outside this codec's scope: they and any input
-//! shorter than the base header decode as `raw`.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -32,11 +23,8 @@ pub const NTP_HEADER_LEN: usize = 48;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ntp {
-    /// Leap indicator (2 bits).
     pub leap: u8,
-    /// NTP version number (3 bits); supported construction is 3 or 4.
     pub version: u8,
-    /// Association mode (3 bits); supported construction is 1 through 5.
     pub mode: u8,
     pub stratum: u8,
     /// Log2 polling interval, signed.
@@ -54,7 +42,6 @@ pub struct Ntp {
     pub origin_timestamp: u64,
     pub receive_timestamp: u64,
     pub transmit_timestamp: u64,
-    /// Extension fields and optional MAC bytes after the base header.
     pub extensions: Bytes,
 }
 
@@ -80,8 +67,6 @@ impl Default for Ntp {
 }
 
 impl Ntp {
-    /// Edits `reference_id`: exactly four bytes, or a four-character ASCII
-    /// kiss-code string such as `RATE`.
     fn set_reference_id(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let bytes = match value {
             FieldValue::Bytes(value) => value,
@@ -188,8 +173,6 @@ reflective_layer! {
     layout fn ntp_layout(extensions_len: usize);
 }
 
-/// Whether the message's declared version and mode fall inside this codec's
-/// NTPv3/v4 client/server/broadcast scope.
 fn is_supported(version: u8, mode: u8) -> bool {
     matches!(version, 3 | 4) && matches!(mode, 1..=5)
 }
@@ -260,8 +243,7 @@ impl LayerCodec for NtpCodec {
         input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        // Unsupported modes, other versions, and truncated headers stay
-        // byte-faithful as `raw` instead of failing the packet's decode.
+        // Unsupported modes, other versions, and truncated headers stay byte-faithful as `raw`.
         let supported = input
             .first_chunk::<NTP_HEADER_LEN>()
             .is_some_and(|header| is_supported(header[0] >> 3 & 0x07, header[0] & 0x07));
@@ -332,7 +314,6 @@ mod tests {
     }
 
     fn fixture() -> [u8; NTP_HEADER_LEN] {
-        // leap 0, version 4, mode 3, stratum 2, poll 6, precision -20.
         let mut message = [0_u8; NTP_HEADER_LEN];
         message[0] = 0x23;
         message[1] = 2;

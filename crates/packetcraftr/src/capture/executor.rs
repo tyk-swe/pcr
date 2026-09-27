@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture-group activation and readiness, retaining every armed resource.
-
 use super::error::failure;
 use super::{Cause, Error, Report};
 use crate::{Client, clock::Clock, providers::Providers};
@@ -11,10 +9,6 @@ use packetcraftr_netio::capture::{self as native, Group, GroupRequest, Session a
 use std::time::Duration;
 
 impl<P: Providers, K: Clock> Client<P, K> {
-    /// Arms the capture group and waits for it to become ready within the
-    /// window. A failure before the group exists carries the report skeleton
-    /// inside its error; a later one becomes the primary failure of the
-    /// returned group.
     pub(super) fn arm_capture_group(
         &self,
         request: &GroupRequest,
@@ -22,9 +16,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
         deadline: &Deadline,
         report: Report,
     ) -> Result<Armed<<P::Capture as native::Provider>::Capture>, Error> {
-        // The window bounds arming and readiness. A zero window still arms its
-        // sources, bounded only by the longest wait a provider accepts, and
-        // then stops without waiting.
+        // A zero window still arms its sources, then stops without waiting.
         let unbounded;
         let arming = if window.is_zero() {
             unbounded = self.deadline(packetcraftr_netio::deadline::MAX_WAIT);
@@ -58,9 +50,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// The capture after activation: the group, the report skeleton, and the
-/// first activation failure if arming, `wait_ready`, or the window produced
-/// one.
 pub(super) struct Armed<C: native::Session> {
     pub(super) group: Group<C>,
     pub(super) report: Report,

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Workflow error variants render stable messages with the classification the
-//! CLI relies on, and the budget and wire-authorization variants are reached
-//! through the public replay and send seams, not only constructed by hand.
-
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, UNIX_EPOCH};
@@ -221,8 +217,6 @@ fn operation_and_capture_shutdown_reports_the_operation_and_both_causes() {
     );
 }
 
-/// The fixture interface, up and owning [`SELECTED_SOURCE`], so a captured
-/// frame from it passes every replay check but the one under test.
 fn replay_interfaces() -> Interfaces {
     let mut interface = common::fixture_interface();
     interface.flags.up = true;
@@ -236,7 +230,6 @@ fn replay_interfaces() -> Interfaces {
     }
 }
 
-/// A 42-byte ICMP echo the fixture interface owns, identified by `ttl`.
 fn owned_ethernet_frame(ttl: u8) -> Vec<u8> {
     let mut packet = Packet::new();
     packet
@@ -336,17 +329,12 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
     );
     assert_eq!(error.classification().code, "policy.replay_limit");
     assert_eq!(error.context(), Some(Coordinate::SourceFrame(2)));
-    // Only the frame that fit was admitted and transmitted; the ceiling is
-    // enforced before the offending frame reaches policy or the wire.
     assert_eq!(
         steps.take(),
         [Step::Transmit(frames[0].clone()), Step::Published(0)]
     );
 }
 
-/// An IPv4 header whose IHL promises 8 option bytes that the wire does not
-/// carry, sourced from the interface's own address so that only the hidden
-/// options can be the reason for refusal.
 fn ipv4_with_truncated_options() -> Vec<u8> {
     vec![
         0x47, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0xfd, 0x00, 0x00, 0x0a, 0x00, 0x00,
@@ -402,9 +390,6 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
     assert_eq!(error.classification().kind, Kind::Policy);
 }
 
-/// A workflow failure that carries a boundary failure (an authorization
-/// refusal, a failed step, a refusing sink) names what failed and leaves the
-/// boundary's own text to the causes, so each sentence is published once.
 #[test]
 fn boundary_sourced_workflow_failures_state_their_source_once() {
     let source = || {

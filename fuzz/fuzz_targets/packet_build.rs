@@ -20,9 +20,6 @@ use std::time::SystemTime;
 const MAX_LAYERS: usize = 16;
 const MAX_PACKET_SIZE: usize = 64 * 1024;
 
-// Every encoder runs behind the expression and document parsers, so a packet
-// that either one accepts must encode without panicking in both modes, stay
-// within the packet size ceiling, and decode again from its own bytes.
 fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else {
         return;
@@ -68,8 +65,6 @@ fn build_both_modes(registry: &Arc<Registry>, packet: &Packet) {
             "built packet exceeds the size ceiling it was built under"
         );
 
-        // A successfully built packet must decode from its own bytes on the
-        // link type the builder chose for it; the root layer decides.
         let root = built.packet.iter().next().map(|layer| layer.schema().name);
         let link_type = match root {
             Some("ethernet") => LinkType::ETHERNET,

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `documentation`: writes shell completions and man pages for the finalized
-//! command tree. It publishes no contract output, so dispatch runs it outside
-//! the output pipeline and reports failures on stderr.
-
 pub(super) mod arguments;
 mod rendering;
 
@@ -15,9 +11,6 @@ use packetcraftr_core::error::{Classification, Kind};
 use self::arguments::Args;
 use crate::errors::CliError;
 
-/// Generates shell completions and man pages from the finalized command tree,
-/// so the shipped documentation always describes the binary that produced it.
-/// One file lands per supported shell and per command under the directory.
 pub(super) fn run(arguments: &Args) -> Result<(), CliError> {
     let completions = arguments.directory.join("completions");
     let man = arguments.directory.join("man");

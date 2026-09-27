@@ -9,8 +9,6 @@ use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
 use super::{Error, Event, Limits, Reassembler, Resource, ScopedFlowKey, Segment};
 
 impl Reassembler {
-    /// A reassembler bounded by `limits`, after [`Limits::validate`]
-    /// accepts them.
     pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
         limits.validate()?;
         Ok(Self {
@@ -22,12 +20,7 @@ impl Reassembler {
         })
     }
 
-    /// Admits one segment, returning the events its arrival resolved.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if planning and commit disagree about an unchanged flow;
-    /// input errors return [`enum@Error`] without mutating the flow table.
+    /// Input errors return [`enum@Error`] without mutating the flow table.
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         if segment.payload.is_empty()
             && !segment.syn
@@ -64,7 +57,6 @@ impl Reassembler {
         };
 
         let plan = {
-            // Plan replacements against empty state without mutating the established flow.
             let empty = TcpFlowState::new(
                 first_payload_sequence,
                 now,
@@ -101,8 +93,6 @@ impl Reassembler {
         self.remove_flows(keys)
     }
 
-    /// Immediately evicts a flow, allowing four-tuple reuse with a new sequence
-    /// base. Returns eviction evidence; unknown flows are a no-op.
     pub fn evict_flow(&mut self, flow: &ScopedFlowKey) -> Vec<Event> {
         self.remove_flows(vec![flow.clone()])
     }
@@ -111,28 +101,17 @@ impl Reassembler {
         self.flows.len()
     }
 
-    /// The sequence anchoring a tracked flow's current generation, when the
-    /// flow is tracked at all. A caller compares this against a SYN's
-    /// implied base to tell a retransmitted handshake from four-tuple reuse.
     pub fn flow_base_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
         self.flows.get(flow).map(|state| state.base_sequence)
     }
 
-    /// The sequence one past a tracked flow's contiguously delivered bytes,
-    /// when the flow is tracked at all. Together with the base this brackets
-    /// the acknowledgment a current-generation SYN-ACK may carry — a Fast
-    /// Open SYN's payload moves it past the base.
-    // next_offset counts every delivered byte and can pass 2^32 on a long stream; the `as u32`
-    // deliberately keeps it modulo 2^32, which is what wire sequence arithmetic needs
+    // The `as u32` deliberately keeps next_offset modulo 2^32, as wire sequence arithmetic needs.
     pub fn flow_next_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
         self.flows
             .get(flow)
             .map(|state| state.base_sequence.wrapping_add(state.next_offset as u32))
     }
 
-    /// Whether a tracked flow has carried any payload or a FIN — as opposed
-    /// to a bare opening SYN. A caller uses this to tell an in-progress
-    /// handshake's half-open state from a previous connection's remains.
     pub fn flow_observed_payload(&self, flow: &ScopedFlowKey) -> bool {
         self.flows.get(flow).is_some_and(|state| {
             state.next_offset > 0 || !state.pending.is_empty() || state.fin_offset.is_some()
@@ -140,8 +119,6 @@ impl Reassembler {
     }
 
     pub fn aggregate_bytes(&self) -> usize {
-        // Includes both out-of-order bytes and the bounded emitted-byte
-        // history retained for contradictory retransmission detection.
         self.aggregate_bytes
     }
 
@@ -178,8 +155,7 @@ impl Reassembler {
         Ok((aggregate_bytes, aggregate_memory_charge))
     }
 
-    // Stream offsets are cumulative and can pass 2^32 on a long stream; the `as u32` casts
-    // deliberately keep them modulo 2^32 inside the wrapping sequence arithmetic
+    // Offsets are cumulative; the `as u32` casts deliberately wrap them modulo 2^32.
     fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>) -> Vec<Event> {
         keys.sort();
         let mut events = Vec::new();
@@ -228,8 +204,6 @@ mod tests {
     fn syn(flow: ScopedFlowKey) -> Segment {
         Segment {
             flow,
-            // A SYN one before zero anchors the flow's first payload byte at
-            // sequence zero.
             sequence: u32::MAX,
             payload: Bytes::new(),
             syn: true,

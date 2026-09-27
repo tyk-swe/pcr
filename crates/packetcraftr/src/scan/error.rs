@@ -11,7 +11,6 @@ use crate::StatsOverflow;
 use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 
-/// Why a scan stopped.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -65,7 +64,6 @@ pub enum Error {
         #[source]
         source: BoundaryError,
     },
-    /// A collector saw events that disagree with the report.
     #[error("scan events are incoherent: {message}")]
     IncoherentEvents { message: String },
 }
@@ -145,9 +143,6 @@ impl Classified for Error {
         }
     }
 
-    /// Boundary-sourced variants list the boundary's message and its
-    /// captured `causes` snapshot, which its own source chain no longer
-    /// holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(source)
@@ -159,8 +154,6 @@ impl Classified for Error {
     }
 }
 
-/// Names shared admission and execution failures as scan errors at the probe
-/// sequence of the batch they concern.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Probes;
 

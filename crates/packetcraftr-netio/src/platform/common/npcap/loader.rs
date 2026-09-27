@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Secure Npcap library discovery, loading, and symbol ownership.
-
 #![allow(unsafe_code)]
 
 use std::{
@@ -47,8 +45,6 @@ pub(in crate::platform) struct NpcapApi {
     pub(in crate::platform) pcap_set_promisc: PcapSetInteger,
     pub(in crate::platform) pcap_set_timeout: PcapSetInteger,
     pub(in crate::platform) pcap_set_immediate_mode: PcapSetInteger,
-    // Optional capture-configuration exports: a runtime without them still
-    // captures with defaults, while explicit requests fail typed.
     pub(in crate::platform) pcap_set_buffer_size: Option<PcapSetInteger>,
     pub(in crate::platform) pcap_set_tstamp_type: Option<PcapSetInteger>,
     pub(in crate::platform) pcap_set_tstamp_precision: Option<PcapSetInteger>,
@@ -74,9 +70,8 @@ pub(in crate::platform) struct NpcapApi {
 impl NpcapApi {
     fn load() -> Result<Self, Error> {
         let path = npcap_library_path()?;
-        // SAFETY: the path is obtained from the operating system rather than
-        // process environment, and the flags restrict dependent DLL lookup to
-        // Npcap's directory plus System32.
+        // SAFETY: the path is obtained from the operating system rather than process environment,
+        // and the flags restrict dependent DLL lookup to Npcap's directory plus System32.
         let library = unsafe {
             Library::load_with_flags(
                 &path,
@@ -124,8 +119,7 @@ impl NpcapApi {
         });
 
         let mut error_buffer = [0 as c_char; PCAP_ERROR_BUFFER_SIZE];
-        // SAFETY: the function pointer came from the pinned DLL and the
-        // writable error buffer has PCAP_ERRBUF_SIZE bytes.
+        // SAFETY: the writable error buffer has PCAP_ERRBUF_SIZE bytes.
         let initialization = unsafe { pcap_init(PCAP_CHAR_ENC_UTF_8, error_buffer.as_mut_ptr()) };
         if initialization != 0 {
             return Err(Error::MissingDependency {
@@ -196,8 +190,6 @@ pub(in crate::platform) fn npcap_device_name(interface: &InterfaceId) -> Result<
     Ok(format_npcap_device(guid))
 }
 
-/// Renders the adapter GUID in the registry form Npcap's device namespace
-/// uses, from the GUID's own fields.
 fn format_npcap_device(guid: GUID) -> String {
     format!(
         r"\Device\NPF_{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
@@ -216,18 +208,14 @@ fn format_npcap_device(guid: GUID) -> String {
 }
 
 fn npcap_library_path() -> Result<PathBuf, Error> {
-    // A fixed maximum path buffer avoids environment-controlled DLL lookup.
     let mut windows_directory = vec![0_u16; 32_768];
-    // SAFETY: the entire mutable UTF-16 buffer is provided to the system API,
-    // which returns the number of initialized code units.
+    // SAFETY: the entire mutable UTF-16 buffer is provided to the system API.
     let length = unsafe { GetSystemWindowsDirectoryW(Some(&mut windows_directory)) } as usize;
     if length == 0 || length >= windows_directory.len() {
         return Err(Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: "Windows did not return a valid system directory for secure DLL lookup"
                 .to_owned(),
-            // A zero length is the call's failure, whose reason is the thread's
-            // last error; an oversized answer is a check of our own.
             source: (length == 0).then(|| Source::new(std::io::Error::last_os_error())),
         });
     }
@@ -239,13 +227,10 @@ fn npcap_library_path() -> Result<PathBuf, Error> {
     Ok(path)
 }
 
-/// Binds each listed export to a local of the same name, typed with the
-/// signature the pinned SDK declares for it.
 macro_rules! load_symbols {
     ($library:expr, { $($symbol:ident : $signature:ty),* $(,)? }) => {
         $(
-            // SAFETY: every requested symbol and function signature is copied
-            // directly from the pinned Npcap SDK 1.16 pcap.h ABI.
+            // SAFETY: every symbol and signature is from the pinned Npcap SDK 1.16 pcap.h ABI.
             let $symbol = unsafe {
                 load_symbol::<$signature>($library, concat!(stringify!($symbol), "\0").as_bytes())?
             };
@@ -254,13 +239,10 @@ macro_rules! load_symbols {
 }
 use load_symbols;
 
-/// Binds optional exports the same way, keeping `None` where the loaded
-/// runtime does not export a symbol so callers degrade to typed rejection.
 macro_rules! load_optional_symbols {
     ($library:expr, { $($symbol:ident : $signature:ty),* $(,)? }) => {
         $(
-            // SAFETY: the pinned SDK signature applies; an absent export only
-            // means this runtime cannot honor the capability it names.
+            // SAFETY: the pinned SDK signature applies.
             let $symbol = unsafe {
                 load_symbol::<$signature>($library, concat!(stringify!($symbol), "\0").as_bytes())
                     .ok()

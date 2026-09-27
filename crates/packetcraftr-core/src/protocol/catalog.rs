@@ -8,15 +8,6 @@ use std::any::{Any, TypeId};
 use super::{application, capture, link, network, transport, tunnel};
 use crate::layer::{Id, Layer};
 
-/// Built-in protocol identities and capabilities. `codec`/`matcher` tokens are
-/// interpreted by consumers, keeping this catalog independent of
-/// implementations.
-///
-/// `exact_round_trip` means decoded bytes can be reproduced. Only decode-only
-/// `raw_ip` lacks it; construct IPv4 or IPv6 directly instead.
-///
-/// `layer` is the concrete layer type that carries the protocol's identity.
-/// Only `raw_ip` has none: it decodes to an IPv4 or IPv6 layer.
 macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
@@ -80,30 +71,22 @@ macro_rules! define_builtin_protocol {
             codec: $codec:ident
         }
     )*) => {
-        /// Built-in protocol capabilities. [`Self::from_name`] accepts
-        /// canonical names; [`Self::from_name_or_alias`] also accepts
-        /// [`Self::aliases`].
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum BuiltinProtocol {
             $($variant),*
         }
 
         impl BuiltinProtocol {
-            /// Every built-in protocol in stable manifest order.
             pub const ALL: &'static [Self] = &[$(Self::$variant),*];
 
             pub const fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $canonical),* }
             }
 
-            /// Whether a packet document may construct this layer. A protocol
-            /// that is not constructible is decode-only.
             pub const fn is_constructible(self) -> bool {
                 match self { $(Self::$variant => $constructible),* }
             }
 
-            /// Whether encoding a decoded layer reproduces its wire bytes
-            /// exactly. False only for a codec that cannot encode at all.
             pub const fn exact_round_trip(self) -> bool {
                 match self { $(Self::$variant => $exact_round_trip),* }
             }
@@ -135,14 +118,10 @@ macro_rules! define_builtin_protocol {
                 None
             }
 
-            /// The built-in protocol a registry identifier names. Identifiers
-            /// are open, so this compares names; use [`Self::of`] to identify
-            /// a layer.
             pub fn from_id(protocol: Id) -> Option<Self> {
                 Self::from_name(protocol.as_str())
             }
 
-            /// The built-in protocol of a layer, decided by its concrete type.
             /// A layer of another type is never built-in, even when its schema
             /// uses a built-in protocol name.
             pub fn of(layer: &dyn Layer) -> Option<Self> {
@@ -156,7 +135,6 @@ macro_rules! define_builtin_protocol {
                 None
             }
 
-            /// Whether `layer` is this protocol's concrete layer type.
             pub fn identifies(self, layer: &dyn Layer) -> bool {
                 match self {
                     $(Self::$variant => define_builtin_protocol!(@is layer $($layer)?)),*
@@ -178,19 +156,10 @@ macro_rules! define_builtin_protocol {
                 )
             }
 
-            /// Whether this protocol's payload is a complete encapsulated
-            /// frame. Layers after such a boundary form their own stack: they
-            /// end the enclosing network envelope and carry no link-layer or
-            /// routing intent for the packet that is transmitted directly.
             pub const fn is_encapsulation_boundary(self) -> bool {
                 matches!(self, Self::Erspan | Self::Geneve | Self::Gre | Self::Vxlan)
             }
 
-            /// Whether this protocol carries bytes verbatim rather than a
-            /// structure a codec would round-trip. These three are the only
-            /// layers a parent may hold without announcing the child's
-            /// protocol on the wire, so a binding, discriminator, or payload
-            /// check that would reject a typed child accepts them.
             pub const fn preserves_opaque_bytes(self) -> bool {
                 matches!(self, Self::Raw | Self::Padding | Self::Malformed)
             }
@@ -198,7 +167,6 @@ macro_rules! define_builtin_protocol {
 
         display_via_as_str!(BuiltinProtocol);
 
-        /// Parses a canonical name or one of [`Self::aliases`].
         impl ::std::str::FromStr for BuiltinProtocol {
             type Err = UnknownProtocolName;
 
@@ -237,8 +205,6 @@ builtin_protocol_catalog!(define_builtin_protocol);
 mod tests {
     use super::BuiltinProtocol;
 
-    /// Each catalog row's layer type is the type its codec constructs, so the
-    /// type identifies the same protocol the schema names.
     #[test]
     fn the_catalog_layer_type_is_the_type_each_codec_constructs() {
         let registry = crate::protocol::builtin::registry();

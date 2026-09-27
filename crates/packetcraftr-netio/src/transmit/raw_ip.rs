@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! What a raw IP socket send requires of its datagram, checked before the
-//! native backend opens a socket: the packet fits the route, names the route's
-//! destination, carries a source the kernel would keep, and its IP header
-//! holds nothing the kernel would rewrite. No native call happens here; the
-//! backend adds only its target's own restrictions.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -18,8 +12,6 @@ use packetcraftr_core::protocol::checksum;
 pub(crate) const IPV4_MINIMUM_HEADER: usize = 20;
 pub(crate) const IPV6_HEADER: usize = 40;
 
-/// A datagram that passed every check a raw IP send makes before the
-/// backend's own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Validated {
     pub(crate) interface: InterfaceId,
@@ -27,9 +19,6 @@ pub(crate) struct Validated {
     pub(crate) bytes: Bytes,
 }
 
-/// Checks `frame` against its route and IP header, then lets
-/// `target_restrictions` refuse what this target's raw sockets cannot send,
-/// given the bytes, the packet's source, and the interface-owned source.
 pub(crate) fn validate(
     frame: Layer3Frame<'_>,
     target_restrictions: impl FnOnce(&Bytes, IpAddr, IpAddr) -> Result<(), Error>,
@@ -157,7 +146,6 @@ fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
     Ipv6Addr::from(address)
 }
 
-/// The refusal for a datagram a raw IP send cannot transmit faithfully.
 pub(crate) fn invalid_frame(message: String) -> Error {
     Error::InvalidTransmissionFrame { message }
 }

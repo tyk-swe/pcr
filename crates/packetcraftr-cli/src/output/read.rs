@@ -10,7 +10,6 @@ use super::frame::{Captured, SourceFrame};
 
 use super::frame::Stack;
 
-/// One frame `read` publishes, optionally with its dissected layer stack.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
     pub source_frame: SourceFrame,
@@ -19,7 +18,6 @@ pub struct Frame {
     pub decoded: Option<Stack>,
 }
 
-/// A frame at its one-based source position.
 impl TryFrom<(u64, CaptureFrame)> for Frame {
     type Error = Error;
 
@@ -32,7 +30,6 @@ impl TryFrom<(u64, CaptureFrame)> for Frame {
     }
 }
 
-/// A frame at its one-based source position, with its dissected stack.
 impl TryFrom<(u64, CaptureFrame, &DecodedPacket)> for Frame {
     type Error = Error;
 
@@ -47,7 +44,6 @@ impl TryFrom<(u64, CaptureFrame, &DecodedPacket)> for Frame {
     }
 }
 
-/// What a `read` stream accounted for when it ended.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Totals {
     pub frames_read: u64,

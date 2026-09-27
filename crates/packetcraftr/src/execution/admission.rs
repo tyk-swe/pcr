@@ -1,16 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one path through which a client's workflows are admitted.
-
 use crate::policy::{self, Authorizer, Operation, Policy};
 use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 use packetcraftr_core::error::BoundaryError;
 
-/// A client's policy together with the resolver its declared targets resolve
-/// through. [`Client::admission`](crate::Client) vends it; staged preparation
-/// authorizes packet budgets through [`authorize`](Self::authorize), and
-/// target workflows use it as their [`Authorizer`] and [`ResolveTarget`].
 pub(crate) struct Admission<'c> {
     policy: &'c Policy,
     resolver: &'c dyn Resolver,
@@ -21,12 +15,10 @@ impl<'c> Admission<'c> {
         Self { policy, resolver }
     }
 
-    /// The policy every decision applies.
     pub(crate) fn policy(&self) -> &'c Policy {
         self.policy
     }
 
-    /// Authorizes `operation`, keeping the typed policy failure.
     pub(crate) fn authorize(&self, operation: Operation<'_>) -> Result<(), policy::Error> {
         self.policy.authorize(operation)
     }

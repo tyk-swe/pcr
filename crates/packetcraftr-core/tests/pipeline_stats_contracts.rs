@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for the statistics collector.
-
 mod common;
 
 use common::{CLIENT, SERVER, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame};
@@ -201,7 +199,6 @@ fn selected_stats_equal_all_tables_without_retaining_other_aggregations() {
 fn stats_derives_duration_rates_and_average_from_matched_extremes() {
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH;
-    // Out-of-order and regressed timestamps still bound a non-negative span.
     let frames = [
         udp_frame(
             &registry,
@@ -255,8 +252,6 @@ fn stats_derives_duration_rates_and_average_from_matched_extremes() {
     assert_eq!(report.packet_rate(), Some(1.5));
     assert_eq!(report.byte_rate(), Some(bytes as f64 / 2.0));
 
-    // The classic-PCAP source declares exactly one interface with its
-    // link type and snap length; nothing is invented.
     assert_eq!(report.interfaces.len(), 1);
     assert_eq!(
         report.interfaces[0].link_type,
@@ -278,7 +273,6 @@ fn stats_derived_metrics_stay_absent_for_empty_and_zero_span_captures() {
     assert_eq!(empty.byte_rate(), None);
     assert!(empty.interfaces.is_empty());
 
-    // One matched frame: duration exists but is zero, so rates stay absent.
     let frames = [udp_frame(
         &registry,
         SystemTime::UNIX_EPOCH + Duration::from_secs(7),
@@ -332,8 +326,6 @@ fn stats_reports_every_declared_pcapng_interface_without_collapsing() {
         9_999,
         b"one",
     );
-    // A declared Ethernet interface expects link-layer bytes; build a minimal
-    // Ethernet-wrapped datagram rather than reusing the bare IPv4 packet.
     let mut packet = packetcraftr_core::packet::Packet::new();
     packet.push(packetcraftr_core::protocol::link::Ethernet::default());
     packet.push(packetcraftr_core::protocol::network::Ipv4 {

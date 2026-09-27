@@ -36,22 +36,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
     /// send and final outcome, each retained undecoded frame, and each
     /// diagnostic to `sink`.
-    ///
-    /// Every resolved target and the complete packet, byte, and duration
-    /// budget are authorized before any probe is built or any provider is
-    /// consulted. A request with `max_in_flight` of one runs each probe as
-    /// its own exchange; a wider one overlaps that many response windows
-    /// over one capture group. The duration limit is anchored on the client's
-    /// clock, and so is the probe start schedule. Each event is published on
-    /// a worker admitted by the client's runtime, and the scan waits for the
-    /// sink's answer before later probes; the duration limit bounds that
-    /// wait, not the sink itself, and confirmed sends are not undone.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the denied target or budget, the
-    /// executor or pipeline failure, inconsistent evidence, the exhausted
-    /// duration limit or cancellation, or the sink's failure.
     pub fn scan<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -74,10 +58,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// Validates the request, authorizes every resolved target and the complete
-/// operation budget before constructing probes, then executes and classifies
-/// checksum-valid correlated responses, serially or through the executor's
-/// rolling window as the request asks, until `deadline`.
 pub(crate) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -145,9 +125,6 @@ where
     })
 }
 
-/// Executes the scan through the executor's rolling packet window, publishing
-/// the same events the serial path emits. The completion check rejects a
-/// pipeline whose reported statistics disagree with the validated sends.
 fn run_pipelined<E, F, B>(
     request: &Request,
     executor: &mut E,
@@ -268,7 +245,6 @@ struct ApprovedScan {
     endpoints: Vec<ProbeEndpoint>,
 }
 
-/// The complete cost charged to the operation budget before any probe.
 struct ScanPlan {
     total_probes: usize,
     maximum_bytes: u64,

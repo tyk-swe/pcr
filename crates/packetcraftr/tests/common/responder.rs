@@ -1,15 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! A scripted layer-3 network for the probe workflows: one on-link route, a
-//! transmitter that answers each IPv4 TCP probe, and capture sessions that
-//! hand those answers back.
-//!
-//! The destination answers a probe with a SYN/ACK (or, with
-//! [`State::tied_resets`], two equally ranked resets). With [`State::hops`]
-//! set, a probe whose TTL is below it is answered instead by the router at
-//! that hop with an ICMP time-exceeded error quoting the probe.
-
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -29,7 +20,6 @@ use packetcraftr_netio::interface::Id;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::{self as net, capture, route, transmit};
 
-/// What the scripted network has seen, and how it answers.
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) ready: bool,
@@ -37,41 +27,26 @@ pub(crate) struct State {
     pub(crate) shutdowns: usize,
     pub(crate) sends: usize,
     pub(crate) pending: usize,
-    /// The most answers queued at once.
     pub(crate) peak: usize,
     pub(crate) replies: VecDeque<capture::Captured>,
-    /// Fails the send after this many confirmed sends.
     pub(crate) fail_after: Option<usize>,
-    /// When each probe was sent, on [`send_clock`](Self::send_clock).
     pub(crate) send_times: Vec<Instant>,
-    /// The time source send times are recorded on; real time when absent.
     pub(crate) send_clock: Option<Arc<dyn Fn() -> Instant + Send + Sync>>,
-    /// Hands the next answer back once with this ingress marker instead of
-    /// its own.
     pub(crate) bad_ingress: Option<Option<Instant>>,
     pub(crate) suppress_replies: bool,
-    /// Holds every answer back until this many probes were sent.
     pub(crate) hold_replies_until: usize,
-    /// Answers each probe at once with two equally ranked resets that share
-    /// one ingress time and differ only in their IP identification.
     pub(crate) tied_resets: bool,
-    /// The TTL at which a probe reaches the destination; lower TTLs are
-    /// answered by the router at that hop.
     pub(crate) hops: Option<u8>,
-    /// The TTL of every probe sent, in send order.
     pub(crate) ttls: Vec<u8>,
 }
 
-/// The address of the router that answers a probe sent with `ttl`.
 pub(crate) fn router(ttl: u8) -> Ipv4Addr {
     Ipv4Addr::new(192, 0, 2, 100 + ttl)
 }
 
-/// Transmits and captures over one shared [`State`].
 #[derive(Clone)]
 pub(crate) struct Io(pub(crate) Arc<Mutex<State>>);
 
-/// Puts every destination on-link over one layer-3 interface.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Routes;
 
@@ -190,7 +165,6 @@ impl transmit::Provider for Io {
     }
 }
 
-/// A capture session over the shared [`State`].
 pub(crate) struct Capture {
     state: Arc<Mutex<State>>,
     metadata: capture::Metadata,

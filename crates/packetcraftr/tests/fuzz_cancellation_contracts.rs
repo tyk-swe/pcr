@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Cancellation stops a live campaign before its first case reaches any
-//! provider.
-
 mod common;
 
 use std::collections::BTreeMap;
@@ -29,10 +26,6 @@ use packetcraftr_core::registry::Registry;
 
 use common::{RecordingRoutes, RecordingTransmit, Steps};
 
-/// Runs `request` on a client over `registry` whose every provider records
-/// into the returned steps, sharing `signal`, publishing either to a
-/// collector or to a sink that must never be reached. Returns the error, the
-/// recorded provider steps, and how many captures were armed.
 fn run_cancelled(
     registry: Arc<Registry>,
     signal: Cancellation,

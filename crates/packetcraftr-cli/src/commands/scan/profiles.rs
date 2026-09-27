@@ -6,7 +6,6 @@ use packetcraftr_core::document::udp_profiles::{self, MAX_PROFILE_BYTES};
 use packetcraftr_core::error::Kind;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
-/// Reads the `--udp-profiles` document, which only a UDP scan accepts.
 pub(super) fn load(
     path: Option<&Path>,
     transport: super::arguments::Transport,

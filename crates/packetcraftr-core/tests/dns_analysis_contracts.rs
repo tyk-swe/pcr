@@ -254,7 +254,6 @@ fn suffix_overlapping_tcp_gap_fill_keeps_dns_message_sources() {
     stream.server_port = 53;
     capture.open(&mut stream);
     let query = framed(&message(11, false, "overlap.test"));
-    // The tail arrives first; the gap fill repeats only that suffix.
     let earlier = capture.client_spec(&stream, 0x10);
     stream.client_sequence += 4;
     capture.client(&mut stream, &query[4..]);
@@ -444,12 +443,6 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
 
 #[test]
 fn udp_dns_evidence_does_not_retain_the_frame_allocation() {
-    // The DNS payload is carved out of a much larger frame record. A `Bytes`
-    // slice into the record's backing would keep the entire frame alive per
-    // emitted message and reflected byte field. The detached copy the
-    // collector must make is allocated while the record is still alive, so it
-    // can never share that backing's pointer range: pointer-range membership
-    // is a deterministic probe, no RSS sampling.
     let registry = registry();
     let payload = txt_response(6, "example.test", b"fixture");
     let frame = udp_frame(&registry, UNIX_EPOCH, CLIENT, SERVER, 40000, 53, &payload);
@@ -516,8 +509,6 @@ fn udp_dns_evidence_does_not_retain_the_frame_allocation() {
             "decoded TXT bytes alias the frame allocation"
         );
     }
-    // The reflected field carries the exact `Bytes` the aggregate JSON output
-    // serializes as dns.answers[].value.strings.
     let Some(FieldValue::List(records)) = dns.field("answers") else {
         panic!("answers must project as a list")
     };
@@ -561,8 +552,6 @@ fn service_ports_normalize_and_bound_distinct_values() {
             "{error:?}"
         );
     }
-    // Unsorted duplicates collapse before the distinct-port bound, port 65535
-    // is valid, and more than 256 inputs may still normalize within the limit.
     for ports in [
         vec![5353, 53, 5353, 65535],
         (1..=256u16).collect(),
@@ -570,7 +559,6 @@ fn service_ports_normalize_and_bound_distinct_values() {
     ] {
         assert!(Collector::new(Limits::default(), ports).is_ok());
     }
-    // Limit validation runs before port normalization.
     let error = Collector::new(
         Limits {
             max_messages: 0,

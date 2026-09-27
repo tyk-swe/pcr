@@ -21,7 +21,6 @@ pub enum Error {
         value: u64,
         reason: Constraint,
     },
-    /// A server-name pattern puts `*` somewhere other than its ends.
     #[error("SNI pattern '{pattern}' has '*' somewhere other than its start or end")]
     SniPattern { pattern: String },
     #[error("capture read failed at frame {number}")]
@@ -88,26 +87,18 @@ pub enum Error {
         #[source]
         source: crate::error::BoundaryError,
     },
-    /// A [`Session`](super::Session) collector's `finish` or its trailing
-    /// event drain failed after the run completed.
     #[error(transparent)]
     Collector(crate::error::BoundaryError),
 }
 
-/// The rule an [`Error::InvalidLimit`] value breaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Constraint {
     NonZero,
-    /// The per-frame byte limit cannot exceed the total byte limit.
     AtMostMaxBytes,
-    /// A TCP per-flow window must stay below the serial-number half-space.
     BelowSerialHalfSpace,
-    /// A duration must fit the platform monotonic clock.
     WithinClockRange,
-    /// A TLS buffer must hold one direction's largest handshake.
     AtLeastTlsDirectionBuffer,
-    /// A duration cannot exceed the one-hour invocation ceiling.
     AtMostOneHour,
 }
 
@@ -153,8 +144,6 @@ impl Classified for Error {
                 Some("write '*' only at the start, the end, or both ends of the pattern"),
             ),
             Self::Capture { source, .. } => source.classification(),
-            // Refusals for exceeding a configured finite budget are resource
-            // conditions, not malformed input.
             Self::Decode {
                 source:
                     crate::decode::Error::PacketSizeLimit { .. }
@@ -196,11 +185,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The consumer variant delegates instead: a [`BoundaryError`] carries a
-    /// captured `causes` snapshot that its own source chain no longer holds.
-    ///
-    /// [`BoundaryError`]: crate::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Sink { source, .. } => source.as_causes(),
@@ -221,9 +205,6 @@ pub(super) fn resource_limit(remediation: &'static str) -> Classification {
     )
 }
 
-/// Reassembly fails for two distinct reasons: a finite budget was exhausted,
-/// or the capture itself carries conflicting data. Only the former is
-/// answered by raising budgets, so the latter has its own classification.
 pub(super) fn malformed_reassembly() -> Classification {
     Classification::new(
         "packet.reassembly",

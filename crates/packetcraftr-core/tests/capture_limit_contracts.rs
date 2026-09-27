@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture-file limits are validated where they are accepted, and a stream
-//! budget charges frames against them without ever lowering them.
-
 use std::io::Cursor;
 use std::time::{Duration, UNIX_EPOCH};
 

@@ -14,7 +14,6 @@ pub struct Incomplete {
     pub key: DatagramKey,
     pub sources: Vec<Source>,
 }
-/// What the physical selection read and copied.
 #[derive(Debug, Serialize)]
 pub struct Selection {
     pub format: &'static str,
@@ -54,7 +53,6 @@ pub struct Report {
     pub scopes: Vec<Scope>,
     pub ip_reassembly: super::reassembly::Report,
 }
-/// The destination path, the physical selection, and the plan it executed.
 impl TryFrom<(String, capture_file::SelectionReport, Plan)> for Report {
     type Error = Error;
     fn try_from(

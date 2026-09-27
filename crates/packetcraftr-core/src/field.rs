@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Reflective field kinds and values.
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -15,16 +13,11 @@ mod path;
 pub use error::Error;
 pub use path::Path;
 
-/// Derived, exact, or raw wire value. Fresh layers normally use
-/// [`WireValue::Auto`] for computed fields; decoders use [`WireValue::Exact`]
-/// for byte-faithful rebuilds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "value", rename_all = "snake_case")]
 pub enum WireValue<T> {
-    /// Derive the value from the final packet and build context.
     #[default]
     Auto,
-    /// Emit and validate this exact typed value.
     Exact(T),
     /// Emit these bytes verbatim in permissive mode.
     Raw(Bytes),
@@ -39,7 +32,6 @@ impl<T> WireValue<T> {
     }
 }
 
-/// Stable reflective field types exposed by [`crate::layer::Schema`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -75,7 +67,6 @@ impl FieldKind {
 
 display_via_as_str!(FieldKind);
 
-/// A dynamically inspectable or editable layer-field value.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(
@@ -94,7 +85,6 @@ pub enum FieldValue {
     Ipv6(Ipv6Addr),
     Mac([u8; 6]),
     List(Vec<Self>),
-    /// Named, recursively typed fields, ordered by name for stable serialization.
     Object(BTreeMap<String, Self>),
 }
 
@@ -131,7 +121,6 @@ mod bytes_as_array {
 }
 
 impl FieldValue {
-    /// The concrete reflective kind, independent of a layer's declared kind.
     pub const fn kind(&self) -> FieldKind {
         match self {
             Self::Bool(_) => FieldKind::Bool,

@@ -40,7 +40,6 @@ pub(super) fn plan_push(
         segment,
         &incoming,
     )?;
-    // Includes old generations until commit, plus every prepared buffer.
     let error = || Resource::AggregateByteLimit {
         limit: limits.max_aggregate_bytes,
     };
@@ -131,8 +130,7 @@ struct IncomingPayload<'a> {
     conflicting: bool,
 }
 
-// next_offset counts every delivered byte and can pass 2^32 on a long stream; the `as u32`
-// deliberately keeps it modulo 2^32, which is what wire sequence arithmetic needs
+// The `as u32` deliberately keeps next_offset modulo 2^32 for wire sequence arithmetic.
 fn normalize_payload<'a>(
     limits: &Limits,
     state: &TcpFlowState,
@@ -375,8 +373,6 @@ pub(super) struct PushPlan {
 struct PendingMergePlan {
     added_bytes: usize,
     overlapping_bytes: usize,
-    /// Each pending interval's overlap with the incoming payload, in stream
-    /// offsets. They need not form a prefix of the segment.
     overlapping_ranges: Vec<Range<u64>>,
     has_conflicting_overlap: bool,
     segment_count: usize,

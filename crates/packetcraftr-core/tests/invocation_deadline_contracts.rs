@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deterministic operation clocks; no sleeps or wall-time thresholds.
 mod common;
 
 use std::io::{self, Cursor, Read};
@@ -78,7 +77,6 @@ impl Read for Ticking {
 fn metadata_and_eof_share_the_packet_analysis_clock() {
     let (deadline, ticks) = clock(5);
     let mut bytes = Vec::new();
-    // PCAPNG section, followed by valid opaque 12-byte blocks.
     bytes.extend_from_slice(&0x0a0d0d0au32.to_le_bytes());
     bytes.extend_from_slice(&28u32.to_le_bytes());
     bytes.extend_from_slice(&0x1a2b3c4du32.to_le_bytes());
@@ -146,7 +144,6 @@ fn a_panicking_sink_does_not_leave_its_phase_clock_on_the_reader() {
     assert!(result.is_err());
     phase_ticks.store(6, Ordering::SeqCst);
     parent_ticks.store(6, Ordering::SeqCst);
-    // Only the original 60ms parent remains; the failed run's 5ms parent is gone.
     reader.rewind().unwrap();
     assert!(reader.next_frame().unwrap().is_some());
 }

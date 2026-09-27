@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DHCP fixture construction and lossless option inspection.
 //! This module performs no address configuration, discovery, or server workflow.
-//!
-//! DHCPv4 and DHCPv6 each keep their model, codec, and reflection in `v4`
-//! and `v6`; both share [`Limits`], [`Error`], and the codec helpers in `codec`.
 
 mod codec;
 mod v4;
@@ -16,19 +12,12 @@ pub use v4::{Dhcpv4, Option4, Value4};
 pub(crate) use v6::Dhcpv6Codec;
 pub use v6::{Dhcpv6, Duid, Option6, Value6};
 
-/// Largest accepted [`Limits::max_message_bytes`]: one UDP payload.
 pub const MAX_MESSAGE_BYTES: usize = 65_535;
-/// Largest accepted [`Limits::max_options`].
 pub const MAX_OPTIONS: usize = 4_096;
-/// Largest accepted [`Limits::max_nesting`].
 pub const MAX_NESTING: usize = 8;
 
-/// Ceilings for decoding or encoding one DHCP message. Each is at most its
-/// `MAX_*` constant; [`Limits::validate`] refuses a larger one rather than
-/// lowering it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// At most [`MAX_MESSAGE_BYTES`].
     pub max_message_bytes: usize,
     /// Options counted across every nesting level, at most [`MAX_OPTIONS`].
     pub max_options: usize,
@@ -45,7 +34,6 @@ impl Default for Limits {
     }
 }
 impl Limits {
-    /// Rejects a ceiling above its `MAX_*` constant.
     pub fn validate(&self) -> Result<(), Error> {
         for (limit, value, maximum) in [
             (
@@ -80,7 +68,6 @@ pub enum Error {
     },
     #[error("invalid DHCP value: {0}")]
     Invalid(&'static str),
-    /// A configured [`Limits`] field above its ceiling.
     #[error("DHCP {limit} limit {value} exceeds the maximum of {maximum}")]
     InvalidLimit {
         limit: Limit,
@@ -88,7 +75,6 @@ pub enum Error {
         maximum: usize,
     },
 }
-/// The DHCP bound an [`Error::Limit`] exceeds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Limit {

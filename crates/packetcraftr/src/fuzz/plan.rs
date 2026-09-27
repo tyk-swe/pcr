@@ -9,8 +9,6 @@ use super::Request;
 use super::error::{CaseErrors, Error};
 use crate::execution::rate_delay;
 
-/// The longest the live part of a campaign may take: every built case's
-/// collection window plus the pacing delay between them.
 pub(super) fn worst_case_duration(request: &Request, cases: usize) -> Result<Duration, Error> {
     let exchange = request
         .timeout

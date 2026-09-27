@@ -100,8 +100,6 @@ pub(crate) struct Args {
     pub(crate) policy: PolicyArgs,
 }
 
-/// Frames read from a capture file and replayed onto the wire, which run to
-/// far larger counts than a hand-built operation.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Streamed;
 
@@ -149,7 +147,6 @@ impl PolicyArgs {
     }
 }
 
-/// The whole replay, scheduled delay included.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ReplayRunTime;
 

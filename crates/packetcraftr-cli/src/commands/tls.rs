@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! TLS session assembly CLI command.
-
 use crate::output::contract::ToolFormat;
 
 use packetcraftr_core::error::Kind;
@@ -64,9 +62,6 @@ pub(super) fn run(
         .as_ref()
         .map(tcp_stream_index)
         .transpose()?;
-    // Selection runs on finished sessions: a frame filter would drop the
-    // ServerHello and turn each session into `client_only`, which is why the
-    // command has no `--filter` and only `--stream` narrows the frames.
     let selector = Selector {
         sni: arguments.sni.as_deref().map(sni_pattern).transpose()?,
         server_port: arguments.server_port,
@@ -87,10 +82,6 @@ pub(super) fn run(
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
     let prepared = prepare(arguments.limits, None, &arguments.decode)?;
-    // Assembly consumes the reassembler's in-order deliveries; the session
-    // raises the pipeline flags from the collector's declared needs. The
-    // stream selector narrows reassembly to one conversation while indices
-    // stay capture-global, so the index reported is the one asked for.
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(),
@@ -117,8 +108,6 @@ pub(super) fn run(
         )
         .map_err(CliError::classified)?;
 
-    // Stream indices are assigned before filtering, so no matched frame
-    // means the requested conversation is absent.
     if let Some(index) = selected_stream
         && outcome.selected_absent()
     {
@@ -137,10 +126,6 @@ pub(super) fn run(
     }
 }
 
-/// Rejects a whole-run buffer ceiling that one direction alone could fill.
-///
-/// The per-direction buffer is a core constant rather than a limit any flag
-/// sets, so the error names the flag that set the ceiling instead.
 fn buffer_floor_error(value: usize) -> CliError {
     CliError::classified(analysis::Error::InvalidLimit {
         field: "--max-tls-buffer-bytes",
@@ -149,7 +134,6 @@ fn buffer_floor_error(value: usize) -> CliError {
     })
 }
 
-/// The `--sni` pattern, refused in the option's own words.
 fn sni_pattern(pattern: &str) -> Result<SniPattern, CliError> {
     pattern.parse().map_err(|error: analysis::Error| {
         CliError::refused_option(
@@ -162,8 +146,6 @@ fn sni_pattern(pattern: &str) -> Result<SniPattern, CliError> {
     })
 }
 
-/// The TCP index `--stream` selects, rejecting the transports this command
-/// cannot assemble.
 fn tcp_stream_index(
     selector: &crate::command_options::Selector<analysis::StreamRef>,
 ) -> Result<u64, CliError> {

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Linux interface enumeration backed by route netlink link and address
-//! dumps, which the route backend also reads for the interface a route
-//! leaves through.
-
 use std::{collections::BTreeMap, net::IpAddr};
 
 use futures_util::TryStreamExt;
@@ -32,7 +28,6 @@ pub(in crate::platform) fn interfaces(
     snapshot(deadline).map_err(interface::Error::native)
 }
 
-/// One link and address dump, which the route backend also reads.
 pub(in crate::platform) fn snapshot(
     deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, route::Error> {
@@ -48,9 +43,6 @@ async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, route
     Ok(interfaces.into_values().collect())
 }
 
-/// Resolves the one interface a route landed on: a filtered link get answers
-/// with a single reply. The address iterator filters the host-wide kernel dump
-/// in userspace, retaining only addresses belonging to that interface.
 pub(in crate::platform) async fn query_interface(
     handle: &Handle,
     index: u32,
@@ -63,7 +55,6 @@ pub(in crate::platform) async fn query_interface(
     let mut interfaces = query_links(handle, Some(index))
         .await
         .map_err(|error| match error {
-            // Attach the hinted name to the ENODEV translation.
             route::Error::InterfaceNotFound { .. } => not_found(),
             error => error,
         })?;
@@ -158,8 +149,6 @@ async fn query_links(
     Ok(interfaces)
 }
 
-/// A filtered link get reports an interface that vanished since the route
-/// lookup as ENODEV, matching the full dump that would have omitted it.
 fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> route::Error {
     if let Some(index) = index_filter
         && let rtnetlink::Error::NetlinkError(reply) = &error

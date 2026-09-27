@@ -2,26 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! One bounded walker over raw link, VLAN, and IP header bytes.
-//!
-//! Codecs decode a frame into typed layers, but re-encoding those layers
-//! reproduces the input only when every byte is canonical. Code that edits or
-//! inspects captured bytes a codec round trip would not reproduce (malformed
-//! or unknown bytes, non-canonical encodings, link trailers) finds its headers
-//! here instead of parsing them by hand (ADR 0004). [`crate::transform`]
-//! rewrites and fragments frames through it.
-//!
-//! The walker only reads. It checks exactly what it needs to step over each
-//! header (its fixed size and the length fields it follows) and reports where
-//! each header sits. Checksums, flags, and options are left to the caller,
-//! which decides what a fragment, a routing header, or an unknown option
-//! means for its own edit.
-//!
-//! Offsets are relative to the slice a walk starts from:
-//! [`LinkHeader`] offsets count from the frame start, and [`IpHeader`],
-//! [`Ipv4Header`], [`Ipv6Header`], and their options count from the IP header
-//! start. Every walk is bounded by [`MAX_VLAN_DEPTH`] or
-//! [`MAX_IPV6_EXTENSIONS`].
-//!
 //! ```
 //! use packetcraftr_core::{
 //!     frame::LinkType,
@@ -54,18 +34,14 @@ use crate::packet::{MacAddress, VlanKind, VlanTag};
 use super::BuiltinProtocol;
 use super::network::{ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension};
 
-/// The most VLAN tags one Ethernet walk steps over.
 pub const MAX_VLAN_DEPTH: usize = 64;
-/// The most IPv6 extension headers one chain walk steps over.
 pub const MAX_IPV6_EXTENSIONS: usize = 64;
 
-/// The header a walk failed in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Header {
     Ethernet,
     Vlan,
-    /// An IP header whose version nibble is not yet known.
     Ip,
     Ipv4,
     Ipv4Option,
@@ -95,36 +71,23 @@ impl fmt::Display for Header {
     }
 }
 
-/// Why a header walk stopped before reaching the requested header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The bytes end inside the header.
     #[error("truncated {0}")]
     Truncated(Header),
-    /// A length field of the header is smaller than the header's fixed part
-    /// or points past its enclosing header.
     #[error("invalid {0} length")]
     Length(Header),
-    /// The walk would step over more headers than its bound allows.
     #[error("{header} depth exceeds {limit}")]
     Depth { header: Header, limit: usize },
-    /// The version nibble is neither 4 nor 6.
     #[error("unknown IP version {0}")]
     UnknownIpVersion(u8),
-    /// The link type or EtherType announced one IP version and the header
-    /// carries another.
     #[error("link announces IPv{expected} but the IP header is version {found}")]
     IpVersionMismatch { expected: u8, found: u8 },
-    /// An IPv6 header with a zero payload length that is not an empty
-    /// datagram; its length lives in a Jumbo Payload option (RFC 2675).
     #[error("IPv6 jumbograms are not walked")]
     Jumbogram,
 }
 
-/// Header walks run on packet-transform input, so their failures classify as
-/// transform failures: a jumbogram is unsupported, an exceeded depth bound is
-/// a limit, and everything else is malformed input.
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
@@ -150,23 +113,13 @@ impl Classified for Error {
     }
 }
 
-/// The link framing in front of a network header.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkHeader {
-    /// Ethernet II with any 802.1Q/802.1ad tags.
     Ethernet(EthernetHeader),
-    /// A link type whose frames begin with the IP header.
-    RawIp {
-        /// The IP version the link type fixes (`LinkType::IPV4` or
-        /// `LinkType::IPV6`), or `None` when the version nibble decides.
-        version: Option<u8>,
-    },
+    RawIp { version: Option<u8> },
 }
 
 impl LinkHeader {
-    /// Walks the framing `link_type` puts in front of the network header.
-    ///
-    /// Returns `Ok(None)` for link types other than Ethernet and raw IP.
     pub fn walk(link_type: LinkType, frame: &[u8]) -> Result<Option<Self>, Error> {
         if link_type == LinkType::ETHERNET {
             return EthernetHeader::walk(frame).map(|header| Some(Self::Ethernet(header)));
@@ -182,7 +135,6 @@ impl LinkHeader {
         Ok(Some(Self::RawIp { version }))
     }
 
-    /// Where the network header starts in the frame.
     pub fn network_offset(&self) -> usize {
         match self {
             Self::Ethernet(ethernet) => ethernet.payload_offset(),
@@ -190,8 +142,6 @@ impl LinkHeader {
         }
     }
 
-    /// Whether the network header is IPv4 or IPv6: always for raw IP, and for
-    /// Ethernet when the innermost EtherType is 0x0800 or 0x86dd.
     pub fn carries_ip(&self) -> bool {
         match self {
             Self::Ethernet(ethernet) => ethernet.ip_version().is_some(),
@@ -199,7 +149,6 @@ impl LinkHeader {
         }
     }
 
-    /// The IP version the framing announces, if it announces one.
     pub fn announced_ip_version(&self) -> Option<u8> {
         match self {
             Self::Ethernet(ethernet) => ethernet.ip_version(),
@@ -207,11 +156,6 @@ impl LinkHeader {
         }
     }
 
-    /// Walks the IP header this framing carries in `frame`.
-    ///
-    /// Returns `Ok(None)` when the framing carries no IP, and
-    /// [`Error::IpVersionMismatch`] when the header's version disagrees with
-    /// the one the framing announces.
     pub fn walk_ip(&self, frame: &[u8]) -> Result<Option<IpHeader>, Error> {
         if !self.carries_ip() {
             return Ok(None);
@@ -230,7 +174,6 @@ impl LinkHeader {
     }
 }
 
-/// An Ethernet II header and the VLAN tags that follow its addresses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EthernetHeader {
     destination: MacAddress,
@@ -240,13 +183,9 @@ pub struct EthernetHeader {
 }
 
 impl EthernetHeader {
-    /// Destination, source, and EtherType, without tags.
     pub const LENGTH: usize = 14;
-    /// One VLAN tag: its announcing EtherType and Tag Control Information.
     pub const VLAN_TAG_LENGTH: usize = 4;
 
-    /// Walks the addresses and every 802.1Q/802.1ad tag at the start of
-    /// `frame`, outermost tag first, up to [`MAX_VLAN_DEPTH`].
     pub fn walk(frame: &[u8]) -> Result<Self, Error> {
         let header = frame
             .first_chunk::<{ Self::LENGTH }>()
@@ -291,17 +230,14 @@ impl EthernetHeader {
         self.source
     }
 
-    /// The tags in wire order, outermost first.
     pub fn vlan_tags(&self) -> &[VlanTag] {
         &self.vlan_tags
     }
 
-    /// The innermost EtherType, which announces the payload.
     pub fn ether_type(&self) -> u16 {
         self.ether_type
     }
 
-    /// Where the payload starts, after the last tag.
     pub fn payload_offset(&self) -> usize {
         Self::LENGTH + self.vlan_tags.len() * Self::VLAN_TAG_LENGTH
     }
@@ -315,7 +251,6 @@ impl EthernetHeader {
     }
 }
 
-/// An IPv4 or IPv6 header.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IpHeader {
     V4(Ipv4Header),
@@ -323,7 +258,6 @@ pub enum IpHeader {
 }
 
 impl IpHeader {
-    /// Walks the header at the start of `ip`, chosen by its version nibble.
     pub fn walk(ip: &[u8]) -> Result<Self, Error> {
         match ip.first().map(|byte| byte >> 4) {
             None => Err(Error::Truncated(Header::Ip)),
@@ -340,8 +274,6 @@ impl IpHeader {
         }
     }
 
-    /// The datagram length the header declares. Bytes past it are link
-    /// padding or a trailer.
     pub fn datagram_length(&self) -> usize {
         match self {
             Self::V4(header) => header.total_length(),
@@ -349,7 +281,6 @@ impl IpHeader {
         }
     }
 
-    /// Whether the datagram is one fragment of a larger one.
     pub fn is_fragment(&self) -> bool {
         match self {
             Self::V4(header) => header.is_fragment(),
@@ -357,9 +288,6 @@ impl IpHeader {
         }
     }
 
-    /// The upper-layer protocol number and the offset where its header
-    /// starts. For a non-initial fragment the bytes there are fragment
-    /// payload, not a header.
     pub fn upper_layer(&self) -> (u8, usize) {
         match self {
             Self::V4(header) => (header.protocol(), header.header_length()),
@@ -368,7 +296,6 @@ impl IpHeader {
     }
 }
 
-/// An IPv4 header whose lengths fit the walked bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ipv4Header {
     header_length: usize,
@@ -379,15 +306,11 @@ pub struct Ipv4Header {
 }
 
 impl Ipv4Header {
-    /// The header without options.
     pub const MIN_LENGTH: usize = 20;
     pub const CHECKSUM: Range<usize> = 10..12;
     pub const SOURCE: Range<usize> = 12..16;
     pub const DESTINATION: Range<usize> = 16..20;
 
-    /// Walks the IPv4 header at the start of `ip`. The header length must
-    /// cover the fixed header, and the total length must cover the header and
-    /// fit in `ip`.
     pub fn walk(ip: &[u8]) -> Result<Self, Error> {
         let fixed = ip
             .first_chunk::<{ Self::MIN_LENGTH }>()
@@ -415,12 +338,10 @@ impl Ipv4Header {
         })
     }
 
-    /// The header length including options.
     pub fn header_length(&self) -> usize {
         self.header_length
     }
 
-    /// The datagram length the header declares.
     pub fn total_length(&self) -> usize {
         self.total_length
     }
@@ -429,7 +350,6 @@ impl Ipv4Header {
         self.identification
     }
 
-    /// The flags and fragment-offset word as it appears on the wire.
     pub fn flags_and_offset(&self) -> u16 {
         self.flags_and_offset
     }
@@ -442,7 +362,6 @@ impl Ipv4Header {
         self.flags_and_offset & 0x4000 != 0
     }
 
-    /// Whether More Fragments is set or the fragment offset is nonzero.
     pub fn is_fragment(&self) -> bool {
         self.flags_and_offset & 0x3fff != 0
     }
@@ -451,9 +370,6 @@ impl Ipv4Header {
         self.protocol
     }
 
-    /// The options between the fixed header and `header_length` in `ip`, up
-    /// to End of Options List. Each item's range counts from the IPv4
-    /// header start; No-Operation is one byte long.
     pub fn options<'a>(&self, ip: &'a [u8]) -> Ipv4Options<'a> {
         Ipv4Options {
             header: &ip[..self.header_length.min(ip.len())],
@@ -462,15 +378,12 @@ impl Ipv4Header {
     }
 }
 
-/// One IPv4 or IPv6 option: its type byte and where it sits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IpOption {
     pub kind: u8,
     pub range: Range<usize>,
 }
 
-/// Iterator over the options of one [`Ipv4Header`]. It yields an error once
-/// and then ends.
 #[derive(Clone, Debug)]
 pub struct Ipv4Options<'a> {
     header: &'a [u8],
@@ -511,8 +424,6 @@ impl Iterator for Ipv4Options<'_> {
     }
 }
 
-/// An IPv6 header, its extension-header chain, and the upper layer the
-/// chain ends at.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ipv6Header {
     payload_length: usize,
@@ -523,20 +434,10 @@ pub struct Ipv6Header {
 }
 
 impl Ipv6Header {
-    /// The fixed header.
     pub const LENGTH: usize = 40;
     pub const SOURCE: Range<usize> = 8..24;
     pub const DESTINATION: Range<usize> = 24..40;
 
-    /// Walks the IPv6 header at the start of `ip` and its extension chain.
-    ///
-    /// The declared datagram must fit in `ip`, and every extension header
-    /// must fit in the datagram. The chain steps over Hop-by-Hop, Routing,
-    /// Fragment, AH, and Destination Options headers, up to
-    /// [`MAX_IPV6_EXTENSIONS`], and ends at the first other Next Header value
-    /// (including ESP and No Next Header). It also ends after a Fragment
-    /// header with a nonzero offset, because the bytes behind it continue an
-    /// earlier fragment rather than start a header.
     pub fn walk(ip: &[u8]) -> Result<Self, Error> {
         let fixed = ip
             .first_chunk::<{ Self::LENGTH }>()
@@ -607,35 +508,27 @@ impl Ipv6Header {
         self.payload_length
     }
 
-    /// The fixed header and the payload it declares.
     pub fn datagram_length(&self) -> usize {
         Self::LENGTH + self.payload_length
     }
 
-    /// The Next Header value of the fixed header.
     pub fn next_header(&self) -> u8 {
         self.next_header
     }
 
-    /// The walked extension headers in wire order.
     pub fn extensions(&self) -> &[Ipv6Extension] {
         &self.extensions
     }
 
-    /// Whether a Fragment header makes this datagram one fragment of a
-    /// larger one. An atomic fragment (RFC 6946) is complete.
     pub fn is_fragment(&self) -> bool {
         self.extensions.iter().any(Ipv6Extension::is_fragment)
     }
 
-    /// The protocol number the chain ends at and the offset where its bytes
-    /// start.
     pub fn upper_layer(&self) -> (u8, usize) {
         (self.upper_layer, self.upper_layer_offset)
     }
 }
 
-/// One walked IPv6 extension header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ipv6Extension {
     protocol: u8,
@@ -646,17 +539,14 @@ pub struct Ipv6Extension {
 }
 
 impl Ipv6Extension {
-    /// The Next Header value that announced this header.
     pub fn protocol(&self) -> u8 {
         self.protocol
     }
 
-    /// Where the header sits, counted from the IPv6 header start.
     pub fn range(&self) -> Range<usize> {
         self.offset..self.offset + self.length
     }
 
-    /// The Next Header value this header carries.
     pub fn next_header(&self) -> u8 {
         self.next_header
     }
@@ -666,20 +556,14 @@ impl Ipv6Extension {
         self.fragment.map(|word| word >> 3)
     }
 
-    /// For a Fragment header, the More Fragments flag.
     pub fn more_fragments(&self) -> Option<bool> {
         self.fragment.map(|word| word & 1 != 0)
     }
 
-    /// Whether this is a Fragment header with a nonzero offset or More
-    /// Fragments set.
     pub fn is_fragment(&self) -> bool {
         self.fragment.is_some_and(|word| word & 0xfff9 != 0)
     }
 
-    /// The type-length-value options of a Hop-by-Hop or Destination Options
-    /// header in `ip`; empty for every other extension. Each item's range
-    /// counts from the IPv6 header start; Pad1 is one byte long.
     pub fn options<'a>(&self, ip: &'a [u8]) -> Ipv6Options<'a> {
         let carries_options = matches!(
             self.protocol,
@@ -697,8 +581,6 @@ impl Ipv6Extension {
     }
 }
 
-/// Iterator over the options of one [`Ipv6Extension`]. It yields an error
-/// once and then ends.
 #[derive(Clone, Debug)]
 pub struct Ipv6Options<'a> {
     ip: &'a [u8],
@@ -966,8 +848,6 @@ mod tests {
 
     #[test]
     fn ipv6_walk_stops_behind_a_later_fragment_and_bounds_the_chain() {
-        // A non-initial fragment announces Destination Options, but the bytes
-        // behind it continue an earlier fragment and are not walked.
         let ip = ipv6(44, &[60, 0, 0x05, 0x01, 0, 0, 0, 9], 16);
         let header = Ipv6Header::walk(&ip).unwrap();
         assert!(header.is_fragment());

@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IANA TLS names in sorted, allocation-free lookup tables. Numeric values
-//! remain authoritative; unknown codes return `None` and render as hex. JSON
-//! adds known names as `*_name` companions.
-
-/// Cipher suites from the IANA TLS Cipher Suite registry, limited to the
-/// suites clients and servers still negotiate in practice.
 const CIPHER_SUITES: &[(u16, &str)] = &[
     (0x0000, "TLS_NULL_WITH_NULL_NULL"),
     (0x0001, "TLS_RSA_WITH_NULL_MD5"),
@@ -73,7 +67,6 @@ const CIPHER_SUITES: &[(u16, &str)] = &[
     (0xccae, "TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256"),
 ];
 
-/// Named groups from the IANA TLS Supported Groups registry.
 const NAMED_GROUPS: &[(u16, &str)] = &[
     (0x0012, "secp192k1"),
     (0x0013, "secp192r1"),
@@ -94,10 +87,6 @@ const NAMED_GROUPS: &[(u16, &str)] = &[
     (0x6399, "X25519Kyber768Draft00"),
 ];
 
-/// Protocol versions as hello version fields carry them. Unlike the record
-/// header (floor `0x0300`) those fields are not range-checked, so SSL 2.0 is
-/// named at its SSLv2 wire value `0x0002`, not the `0x0200` JA4 codes as `s2`;
-/// the DTLS versions share the registry.
 const VERSIONS: &[(u16, &str)] = &[
     (0x0002, "SSL 2.0"),
     (0x0300, "SSL 3.0"),
@@ -110,7 +99,6 @@ const VERSIONS: &[(u16, &str)] = &[
     (0xfeff, "DTLS 1.0"),
 ];
 
-/// Alert descriptions from RFC 8446 section 6 and its predecessors.
 const ALERT_DESCRIPTIONS: &[(u8, &str)] = &[
     (0, "close_notify"),
     (10, "unexpected_message"),

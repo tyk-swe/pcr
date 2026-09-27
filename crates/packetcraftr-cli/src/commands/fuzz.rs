@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Fuzz CLI command logic.
-
 use crate::output::contract::ToolFormat;
 
 pub(super) mod arguments;
@@ -22,8 +20,6 @@ use crate::system::{Runtime, Workflow, prepare_workflow};
 
 use super::execution;
 
-/// A validated live campaign still waiting for its template packet, and the
-/// prepared workflow its client runs it under.
 struct PreparedLive {
     request: packetcraftr::fuzz::Request,
     workflow: Workflow,
@@ -163,7 +159,6 @@ fn execute_and_render(
     }
 }
 
-/// The shared inputs both offline campaign entry points consume.
 struct OfflineSession {
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
@@ -245,8 +240,6 @@ fn execute_live(
         collection: workflow.collection,
         ..request
     };
-    // The client admits, paces, and publishes the campaign itself, so the
-    // driver vends no session state.
     execution::run_workflow(
         &mut (),
         format,
@@ -285,9 +278,6 @@ fn execute_live(
     )
 }
 
-/// Generates the offline campaign, publishing each case to `emit` on a
-/// worker admitted by the command's own runtime and waiting, within the
-/// campaign deadline, for each answer.
 fn publish_offline(
     request: &core::fuzz::Request,
     packet: core::packet::Packet,
@@ -301,7 +291,6 @@ fn publish_offline(
         worker.emit(case, deadline).map_err(|error| match error {
             packetcraftr::runtime::Error::Deadline(error) => error.into(),
             packetcraftr::runtime::Error::Output(source) => core::fuzz::Error::Output { source },
-            // A publication failure this command does not know yet.
             error => core::fuzz::Error::Output {
                 source: CliError::new(
                     core::error::Kind::Internal,

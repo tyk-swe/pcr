@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Sourced cleartext HTTP/1 messages over reassembled TCP. Body bytes are counted
-//! without retaining or decompressing content. Feed complete conversations.
+//! Sourced cleartext HTTP/1 messages over reassembled TCP.
 
 use super::{
     FrameRecord, Summary as RunSummary,
@@ -38,7 +37,6 @@ pub struct Message {
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
-    /// The request message index associated with this response, if captured.
     pub request: Option<u64>,
     pub status: Status,
     pub head: Option<Head>,
@@ -212,8 +210,6 @@ impl Collector {
         }
         Ok(())
     }
-    /// Returns the direction state for this delivery, flushing and resetting
-    /// retained state when a reused stream carries a new generation.
     fn direction_for(
         &mut self,
         data: &application::Delivery,
@@ -257,9 +253,6 @@ impl Collector {
         let connection = (data.stream, data.generation);
         let mut direction = self.direction_for(&data, output)?;
         let mut input = data.bytes.as_ref();
-        // A message still open from an earlier delivery merges this
-        // delivery's sources once; a message this delivery opens already
-        // starts from its set.
         let mut merged = direction.live.is_none();
         let mut upgraded = self.upgraded.contains(&connection);
         while !input.is_empty() && !direction.disabled && !upgraded {
@@ -298,8 +291,6 @@ impl Collector {
                 // complete on an LF, so interior bytes append unchecked.
                 let run = &input[..memchr(b'\n', input).map_or(input.len(), |i| i + 1)];
                 let bare = bare_crlf_offset(live.header.last().copied(), run);
-                // The byte that first exceeds MAX_HEADER_BYTES is the last
-                // one appended; inside a run it precedes the other checks.
                 let room = (http::MAX_HEADER_BYTES + 1).saturating_sub(live.header.len());
                 let take = run.len().min(room).min(bare.map_or(usize::MAX, |i| i + 1));
                 self.check_buffer(live.buffered().saturating_add(take))?;
@@ -564,7 +555,6 @@ impl session::Collector for Collector {
     type Event = Event;
     type Summary = Summary;
 
-    /// Sourced messages over reassembled TCP deliveries.
     fn needs(&self) -> CollectorNeeds {
         CollectorNeeds {
             tcp_stream: true,
@@ -586,18 +576,11 @@ impl session::Collector for Collector {
         Self::finish(self, run).map_err(BoundaryError::from_error)
     }
 }
-/// Offset in `run` of the first byte that breaks header CR/LF pairing, or
-/// `None` when the run is clean. `run` covers the bytes through the next LF
-/// (or the rest of the input), so its last byte is the only possible LF;
-/// `prev` is the last buffered header byte, which may be a CR still
-/// awaiting its LF.
 fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
     if prev == Some(b'\r') && run.first() != Some(&b'\n') {
         return Some(0);
     }
     if let Some(cr) = memchr(b'\r', run) {
-        // The run's first CR decides: only a following LF pairs it, while
-        // a CR ending the run still awaits its pair.
         return match run.get(cr + 1) {
             Some(&b'\n') | None => None,
             Some(_) => Some(cr + 1),
@@ -779,8 +762,6 @@ mod tests {
             .data(delivery(&tracker, &flow, 5, b" HTTP/1.1"), &mut output)
             .expect("second delivery");
         let baseline = tracker.union_reservations();
-        // The third delivery contributes only a frame the message already
-        // holds, so the one permitted merge is allocation-free.
         collector
             .data(delivery(&tracker, &flow, 5, b"\r\n\r\n"), &mut output)
             .expect("subset delivery");
@@ -803,7 +784,6 @@ mod tests {
 
     #[test]
     fn bare_cr_and_lf_flush_at_the_offending_byte() {
-        // Interior CR not followed by LF.
         let tracker = Tracker::new(1 << 20, 8).expect("tracker");
         let flow = flow();
         let mut collector =
@@ -826,7 +806,6 @@ mod tests {
             Some(http::Error::Invalid("header uses a bare CR or LF"))
         ));
 
-        // Interior LF not preceded by CR.
         let mut collector =
             Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
         output.clear();
@@ -872,7 +851,6 @@ mod tests {
         assert_eq!(message.status, Status::Malformed);
         assert_eq!(message.header_wire.as_ref(), b"GET /c HTTP/1.1\rX");
 
-        // The same boundary completes cleanly when the next byte is LF.
         let mut collector =
             Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
         output.clear();

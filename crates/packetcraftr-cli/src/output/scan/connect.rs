@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Socket-only scan evidence; no packet counts or fabricated capture frames.
-
 use crate::output::{contract::Error, frame::Timestamp, stream::StreamRecord};
 use packetcraftr::scan::connect;
 use serde::Serialize;
@@ -14,7 +12,6 @@ use std::{
 use super::{Classification, Rtt};
 
 published_enum! {
-    /// How one connect attempt ended.
     pub enum Outcome from connect::Outcome {
         Connected => "connected",
         Refused => "refused",
@@ -25,7 +22,6 @@ published_enum! {
     }
 }
 
-/// Socket-level accounting for one connect scan.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Stats {
     pub connections_scheduled: u64,

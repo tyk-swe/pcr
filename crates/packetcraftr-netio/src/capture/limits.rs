@@ -1,20 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The bounded-queue limits a capture session is armed with, and their
-//! stable maxima.
-
 use crate::Error;
 
-/// Aggregate backend capture-queue frame ceiling; also the value
-/// [`Limits::default`] uses.
 pub const MAX_CAPTURE_QUEUE_FRAMES: usize = 4_096;
-/// Aggregate backend capture-queue byte ceiling; also the value
-/// [`Limits::default`] uses.
 pub const MAX_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
-/// Largest per-frame snapshot a capture session will retain (16 MiB), matching
-/// the default captured-frame size limit in `packetcraftr-core`; also the value
-/// [`Limits::default`] uses.
 pub const MAX_SNAP_LENGTH: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -26,9 +16,6 @@ pub enum OverflowPolicy {
 }
 
 impl OverflowPolicy {
-    /// The one spelling this policy is named by, in help text, in the
-    /// `--overflow-policy` values a caller passes, and in the diagnostics that
-    /// report which policy was in force.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -65,7 +52,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Validates bounded nonzero limits and byte/snap consistency before capture.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),

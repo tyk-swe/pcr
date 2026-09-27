@@ -49,8 +49,6 @@ fn segment(
     }
 }
 
-/// Anchors a flow at `first_payload_sequence` with a bare SYN, the way a
-/// capture opens a conversation.
 fn open(
     reassembler: &mut TcpReassembler,
     key: ScopedFlowKey,
@@ -305,7 +303,6 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
     let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
 
-    // A clean gap fill overlapping nothing reports no retransmission.
     assert!(
         reassembler
             .push(segment(key.clone(), 104, b"efgh", false, false, false), now)
@@ -324,7 +321,6 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
         }] if bytes.as_ref() == b"abcdefgh"
     ));
 
-    // A fill whose suffix repeats pending data reports only the shared span.
     let key = flow(10_104);
     let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
@@ -353,8 +349,6 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
             && bytes.as_ref() == b"abcdefgh"
     ));
 
-    // Two pending intervals overlapped by one fill produce two ranges, and
-    // conflicting pending content wins the emitted stream.
     let key = flow(10_204);
     let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");

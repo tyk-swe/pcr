@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `build`'s arguments that write generated packets to a capture stream.
-
 use std::time::SystemTime;
 
 use clap::Args;
@@ -34,7 +32,6 @@ pub(crate) struct CaptureOutputArgs {
     pub(crate) compression: CompressionArgs<GeneratedCapture>,
 }
 
-/// The validated capture-stream destination for generated frames.
 pub(crate) struct CaptureOutput {
     pub(crate) link_type: LinkType,
     pub(crate) timestamp: SystemTime,
@@ -43,8 +40,6 @@ pub(crate) struct CaptureOutput {
 }
 
 impl CaptureOutputArgs {
-    /// Validates capture-only arguments against the selected format, returning
-    /// the destination when the output is a capture stream.
     pub(crate) fn resolve(
         self,
         format: crate::output::contract::Format,
@@ -91,14 +86,12 @@ impl CaptureOutputArgs {
 }
 
 impl CaptureOutput {
-    /// Confirms the recipe's first layer decodes under the selected link type.
     pub(crate) fn validate_root(&self, packet: &Packet) -> Result<(), CliError> {
         let registry = builtin::registry();
         validate_link_type(&registry, packet, self.link_type)
     }
 
-    /// Confirms that the emitted header actually decodes under this root.
-    /// Permissive builds can otherwise produce a malformed root even though
+    /// Permissive builds can produce a malformed root even though
     /// the recipe's protocol name matched the selected link type.
     pub(crate) fn validate_wire(
         &self,
@@ -143,7 +136,6 @@ impl CaptureOutput {
         Ok(())
     }
 
-    /// Opens the bounded streaming writer on stdout under compression.
     pub(crate) fn writer(
         &self,
     ) -> Result<capture_file::Writer<capture_file::compression::Output<std::io::Stdout>>, CliError>
@@ -155,9 +147,6 @@ impl CaptureOutput {
     }
 }
 
-/// Confirms `link_type` names a registered decode root the packet's first
-/// layer satisfies — either directly, or through a decode-only dispatch root
-/// such as `raw_ip`.
 fn validate_link_type(
     registry: &Registry,
     packet: &Packet,
@@ -213,7 +202,6 @@ fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
     })
 }
 
-/// Generated frames written to stdout as a capture stream.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GeneratedCapture;
 

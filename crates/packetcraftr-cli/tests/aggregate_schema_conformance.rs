@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Validates real Rust aggregate payloads against the published schema,
-//! catching type drift that handwritten examples cannot. Checks required fields
-//! and frozen vocabularies while allowing additive payload fields.
-
 use packetcraftr_core::protocol::application::dns as dns_wire;
 
 use std::collections::BTreeSet;
@@ -65,11 +61,8 @@ mod stats_report;
 
 use common::{output_schema, schema_validator};
 
-/// One representative aggregate payload, already wrapped in its envelope.
 type Case = fn() -> Value;
 
-/// Every aggregate payload the CLI can publish, keyed by its command and a
-/// name for the branch it exercises.
 const CASES: &[(Command, &str, Case)] = &[
     (Command::Build, "built packet", build_case),
     (Command::Fragment, "fragment set", fragment_case),
@@ -171,7 +164,6 @@ fn envelope_with_stats<T: serde::Serialize>(
         .expect("aggregate envelope serializes")
 }
 
-/// A converted payload with the diagnostics and stats its conversion carried.
 fn published<T: serde::Serialize>(command: Command, published: Published<T>) -> Value {
     serde_json::to_value(Envelope::published(command, published))
         .expect("aggregate envelope serializes")
@@ -983,9 +975,6 @@ fn dns_timeout_case() -> Value {
     published(Command::Dns, report)
 }
 
-/// A batch result exercises the `questions` shape: one completed question with
-/// its full report, one failed question carrying its classified error, and one
-/// the shared deadline never reached.
 fn dns_batch_case() -> Value {
     let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let summary = packetcraftr::dns::Report {
@@ -1086,8 +1075,6 @@ fn dns_edns() -> dns_wire::Edns {
     }
 }
 
-/// Every `RecordValue` shape the v1 contract publishes, so a record variant
-/// the schema does not know about fails here.
 fn dns_records() -> Vec<dns_wire::Record> {
     let record = |value| dns_wire::Record {
         owner: dns_name("example.test."),
@@ -1234,9 +1221,6 @@ fn dns_response_case() -> Value {
     published(Command::Dns, report)
 }
 
-/// A campaign over the IPv4 fixture: an IPv4 root has a registered capture
-/// link type, so each built case also carries the `decoded` evidence the
-/// schema declares.
 fn offline_fuzz_report() -> packet_fuzz::Report {
     let request = packet_fuzz::Request {
         cases: 2,
@@ -1509,8 +1493,6 @@ fn unknown_envelope_fields_and_invalid_known_payload_fields_are_rejected() {
     assert!(schema_validator().validate(&document).is_err());
 }
 
-/// One enum whose serialized names the schema pins: where its vocabulary lives
-/// in the schema, and every variant the Rust type can produce.
 struct Vocabulary {
     name: &'static str,
     pointer: &'static str,
@@ -1532,9 +1514,6 @@ fn vocabulary<T: serde::Serialize>(
     }
 }
 
-/// The CLI-owned enums that publish these vocabularies mirror library enums
-/// variant for variant. The aggregate fixtures above only exercise the
-/// variants they happen to carry; this pins every one.
 fn frozen_vocabularies() -> Vec<Vocabulary> {
     use packetcraftr_cli::output::diagnostic::Severity;
     use packetcraftr_cli::output::dns::{
@@ -1711,8 +1690,6 @@ fn every_frozen_enum_serializes_exactly_the_vocabulary_the_schema_declares() {
     }
 }
 
-/// `tlsStatus` publishes its vocabulary as annotated `const`s rather than a
-/// bare `enum` list, so the CLI's `tls::Status` is compared against those.
 #[test]
 fn tls_status_serializes_exactly_the_vocabulary_the_schema_declares() {
     let declared = output_schema()["$defs"]["tlsStatus"]["oneOf"]

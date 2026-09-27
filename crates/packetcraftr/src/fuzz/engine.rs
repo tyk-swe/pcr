@@ -21,24 +21,6 @@ use super::plan::worst_case_duration;
 use super::{Event, Report, Request, Trial};
 
 impl<P: Providers, K: Clock> Client<P, K> {
-    /// Runs one live fuzz campaign.
-    ///
-    /// Every case is generated and built offline first, exactly as
-    /// [`packetcraftr_core::fuzz::run`] would, and the whole campaign — its
-    /// packet count, worst-case bytes, destination, and permissive-live
-    /// position — is admitted once before any provider is consulted. Each
-    /// built case then runs as one capture-ready exchange, paced by the
-    /// client's clock, and must have sent exactly the bytes its route
-    /// prepares. Each case is published to `sink` in case order on a worker
-    /// admitted by the client's runtime, and the campaign waits for the
-    /// sink's answer before it sends the next case. The campaign deadline
-    /// bounds waiting for the sink, not the sink itself.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request or campaign, the refused admission, the
-    /// executed case's failure or invalid evidence, the sink's failure, or
-    /// the clock's failure.
     pub fn fuzz<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -60,9 +42,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// Builds and validates all cases offline, admits the campaign, then
-/// executes it and publishes cases in deterministic case order as soon as
-/// each live outcome is final.
 pub(super) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -100,8 +79,6 @@ where
         context.enforce(case_index)?;
         let mut evidence = None;
         if case.built.is_some() {
-            // Cases per second: every built case after the first waits one
-            // case's share of a second.
             if executed_before {
                 context.pace(case_index, delay)?;
             }
@@ -165,8 +142,7 @@ fn prepare_campaign(
         .map_err(duration_limit)?;
     let maximum_wire_bytes = maximum_wire_bytes(&request.campaign, &cases)?;
     // Whether the opt-in is *needed* is decided here; whether it was *given*
-    // is decided later by the authorizer that `authorize_campaign` calls, so
-    // `policy.allow_permissive_packets` also applies.
+    // is decided later by the authorizer that `authorize_campaign` calls.
     let requires_permissive_live = cases.iter().any(|case| {
         case.built
             .as_ref()
@@ -202,11 +178,6 @@ fn maximum_wire_bytes(
     })
 }
 
-/// Admits the declared campaign through the client's one admission path.
-/// Fuzz deliberately stays outside `target::admit_operation`: there is no
-/// declared target to resolve, and the caller's cancellation-aware `enforce`
-/// brackets let a refusal outrank a deadline spent during the call —
-/// `approve_operation`'s elapsed-only gate would report the deadline first.
 fn authorize_campaign<A>(
     request: &Request,
     prepared: &PreparedCampaign,
@@ -239,10 +210,6 @@ where
         .map_err(Error::Authorization)
 }
 
-/// Judges one case's evidence before any of it is recorded: the executor must
-/// have sent exactly the route-materialized authorized case, within the
-/// campaign's packet limit, and every response must arrive within the
-/// granted, already clipped, timeout.
 fn validate_case(
     request: &Request,
     builder: &Builder,

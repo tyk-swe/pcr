@@ -57,8 +57,6 @@ impl Limits {
         }
     }
 
-    /// Rejects any bound above the ceiling this crate enforces, and any pair
-    /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
@@ -103,8 +101,7 @@ impl Limits {
     }
 }
 
-/// One requested destination-port selection: a single port, or an inclusive
-/// range. A range whose `end` precedes its `start` selects nothing.
+/// A range whose `end` precedes its `start` selects nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortSpec {
     Single(u16),
@@ -143,39 +140,25 @@ pub fn select_ports(
     Ok(ports)
 }
 
-/// One scan: the targets and ports to probe, how often and how fast, and the
-/// route and collection bounds every probe exchange runs under.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
-    /// Maximum overlapping probe response windows, at most
-    /// [`MAX_IN_FLIGHT`]. One runs every probe as its own exchange; more
-    /// share one capture group across a rolling window.
     pub max_in_flight: usize,
     pub targets: Selection,
     pub transport: Transport,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
-    /// Non-empty payloads are rejected for TCP and ICMP.
     pub udp_payload: bytes::Bytes,
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
     pub address_family: Family,
-    /// TCP or UDP destination ports. ICMP scans require this to be empty and
-    /// produce one portless endpoint per selected address.
     pub ports: Vec<u16>,
     pub attempts: u32,
     pub timeout: Duration,
-    /// Maximum probe start rate; rolling windows share one pacing schedule.
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
-    /// How each probe's route is planned.
     pub route: crate::route::Options,
-    /// How each probe exchange's capture is armed and what it retains.
     pub collection: crate::exchange::Collection,
 }
 
 impl Request {
-    /// Rejects every request this workflow cannot execute: an out-of-range
-    /// limit, attempt count, timeout, or rate, and a transport that disagrees
-    /// with the declared ports.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.max_in_flight == 0 || self.max_in_flight > MAX_IN_FLIGHT {
@@ -260,8 +243,6 @@ impl Request {
         Ok(())
     }
 
-    /// The de-duplicated destination ports this request scans, in first-seen
-    /// order, after [`Request::validate`] accepts it. Empty for ICMP.
     pub fn selected_ports(&self) -> Result<Vec<u16>, Error> {
         self.validate()?;
         select_ports(

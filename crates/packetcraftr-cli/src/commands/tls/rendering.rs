@@ -20,11 +20,6 @@ use crate::rendering::{
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
 use output::tls::{Client, Server, Session, Summary};
 
-/// What has been reported so far.
-///
-/// The retention ceiling applies only to the JSON document, which holds every
-/// session in memory: past `--max-output-sessions` it keeps what it has and reports
-/// the rest as omitted. Text and NDJSON write each session as it completes.
 pub(super) struct State {
     retained: Retained<Session>,
     selected: u64,
@@ -38,8 +33,6 @@ impl State {
         }
     }
 
-    /// The sessions the selectors kept, and those the retention ceiling
-    /// omitted from the document.
     pub(super) const fn counts(&self) -> (u64, u64) {
         (self.selected, self.retained.omitted())
     }
@@ -99,10 +92,6 @@ pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<
     Ok(stream.complete(output::tls::Event::from(summary), Vec::new())?)
 }
 
-/// The single line for selectors that kept none of the sessions that were
-/// assembled.
-///
-/// `None` when nothing was assembled at all; [`render_empty`] answers that case.
 fn unmatched_note(summary: &Summary) -> Option<String> {
     (summary.sessions > 0).then(|| {
         format!(
@@ -112,8 +101,6 @@ fn unmatched_note(summary: &Summary) -> Option<String> {
     })
 }
 
-/// Says what was read and where to look next, so an empty report is never
-/// mistaken for "this capture has no TLS".
 fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "no TLS sessions assembled: {} frame(s) read, {} matched, {} TCP conversation(s)",
@@ -143,7 +130,6 @@ fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Resul
     ))
 }
 
-/// One session, one line, so the output survives grep, sort, and cut.
 fn session_line(session: &Session) -> String {
     let client = session.client.as_ref();
     let server = session.server.as_ref();
@@ -219,7 +205,6 @@ fn summary_line(summary: &Summary) -> String {
     )
 }
 
-/// `TLS1.3`, with the registry's space removed so one field stays one token.
 fn version_text(server: &Server) -> String {
     server.selected_version_name.map_or_else(
         || format!("0x{:04x}", server.selected_version),

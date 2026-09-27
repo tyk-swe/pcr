@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured diagnostics produced by build and decode operations.
-
 use serde::{Deserialize, Serialize};
 
 pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
@@ -14,8 +12,6 @@ pub const ICMPV6_CHECKSUM: &str = "decode.icmpv6_checksum";
 pub const IGMP_CHECKSUM: &str = "decode.igmp_checksum";
 pub const GRE_CHECKSUM: &str = "decode.gre_checksum";
 
-/// Integrity rejection matches these codes exactly; no other code counts as a
-/// checksum failure.
 pub const CHECKSUM_FAILURE_CODES: &[&str] = &[
     IPV4_CHECKSUM,
     TCP_CHECKSUM,
@@ -37,7 +33,6 @@ pub enum Severity {
 }
 
 impl Severity {
-    /// The serialized spelling, so text and machine output never disagree.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -50,16 +45,13 @@ impl Severity {
 
 display_via_as_str!(Severity);
 
-/// A machine-readable build, decode, session, or policy finding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
-    /// Stable machine-readable code; always a literal from the published set.
     pub code: &'static str,
     pub severity: Severity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<usize>,
-    /// Reflective field name the finding concerns, when it concerns one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<&'static str>,
 }
@@ -99,14 +91,12 @@ impl Diagnostic {
         self
     }
 
-    /// True only for a built-in checksum verification failure.
     #[must_use]
     pub fn is_checksum_failure(&self) -> bool {
         CHECKSUM_FAILURE_CODES.contains(&self.code)
     }
 }
 
-/// Appends `diagnostic` unless one with the same code is already present.
 pub fn push_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
     if !diagnostics
         .iter()

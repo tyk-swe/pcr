@@ -236,7 +236,6 @@ fn pcap_writer_options_and_metadata_rejections_are_atomic() {
             ..
         })
     ));
-    // Every rejection above was atomic: none of them reached the output.
     assert_eq!(writer.frames_written(), 0);
     assert_eq!(writer.captured_bytes_written(), 0);
 }
@@ -310,8 +309,6 @@ fn writer_stream_limits_are_fixed_at_construction_and_account_committed_output()
     .expect("valid writer");
     assert_eq!(writer.stream_limits(), limits);
     writer.write_frame(&first).expect("first frame fits");
-    // A refused frame commits nothing, so the byte total still reflects only
-    // what was written.
     assert!(matches!(
         writer.write_frame(&second),
         Err(Error::StreamByteLimitExceeded {

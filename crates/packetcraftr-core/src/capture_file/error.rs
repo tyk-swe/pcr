@@ -102,19 +102,16 @@ pub enum Error {
     FrameLimitExceeded { actual: u64, limit: u64 },
     #[error("capture stream payload bytes {actual} exceed the configured limit of {limit}")]
     StreamByteLimitExceeded { actual: u64, limit: u64 },
-    /// A stream ceiling that would refuse every frame.
     #[error("invalid capture stream limit {field}={value}: must be non-zero")]
     InvalidLimit { field: &'static str, value: u64 },
     #[error("capture timestamp resolution {base}^{exponent} cannot be represented")]
     InvalidTimestampResolution { base: u8, exponent: u8 },
-    /// A [`select`](super::select) predicate failed on frame `number`.
     #[error("selection failed at frame {number}")]
     Predicate {
         number: u64,
         #[source]
         source: BoundaryError,
     },
-    /// A [`map_frames`](super::map_frames) mapper failed on frame `number`.
     #[error("capture frame {number} transformation failed")]
     Transform {
         number: u64,
@@ -127,7 +124,6 @@ pub enum Error {
     TransformIdentity { number: u64 },
     #[error("capture merge requires 1..={maximum} sources with names of at most 4096 bytes")]
     MergeSources { maximum: usize },
-    /// Reading merge input `input` failed at its frame `frame`.
     #[error("merge source {input}, frame {frame} failed")]
     MergeSource {
         input: usize,
@@ -245,8 +241,7 @@ impl Classified for Error {
         }
     }
 
-    /// A caller's [`BoundaryError`] carries a captured `causes` snapshot that
-    /// its own source chain no longer holds, so it leads the causes itself.
+    /// A caller's `BoundaryError` carries a `causes` snapshot its source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Predicate { source, .. } | Self::Transform { source, .. } => source.as_causes(),

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Required command examples, their validity against the output schema, and
-//! published error-code consistency.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -33,10 +30,6 @@ fn published_example_names() -> BTreeSet<String> {
         .collect()
 }
 
-/// Expected example kinds per command. Aggregate-only commands publish
-/// `success`; streaming-only commands publish `event` and `complete` (or
-/// `success` where the stream ends in an aggregate). Every command publishes
-/// `error`.
 fn expected_kinds(command: Command) -> &'static [&'static str] {
     match command {
         Command::Rewrite
@@ -112,7 +105,6 @@ fn every_published_output_example_validates_against_the_schema() {
     }
 }
 
-/// Every published `output-*` document whose name ends in `suffix`, parsed.
 fn published_output_documents(suffix: &str) -> Vec<(String, Value)> {
     published_example_names()
         .into_iter()
@@ -128,8 +120,6 @@ fn published_output_documents(suffix: &str) -> Vec<(String, Value)> {
         .collect()
 }
 
-/// Every stable error code the published documents name, with the `kind` each
-/// was published under.
 fn published_error_codes() -> BTreeMap<String, BTreeSet<(String, String)>> {
     let mut codes: BTreeMap<String, BTreeSet<(String, String)>> = BTreeMap::new();
     for (name, document) in published_output_documents("-error.json") {
@@ -144,14 +134,8 @@ fn published_error_codes() -> BTreeMap<String, BTreeSet<(String, String)>> {
     codes
 }
 
-/// The stable code vocabulary carries its class in its own prefix, so
-/// `policy.public_destination` cannot be published as anything but
-/// `"kind": "policy"`. Nothing else enforces the pairing, and the pairing is
-/// what makes a code readable without the schema in hand.
 #[test]
 fn every_published_error_code_agrees_with_its_kind() {
-    // The schema is the authority on the class vocabulary, so this check moves
-    // with the contract rather than with any one crate's enum.
     let vocabulary = output_schema()["$defs"]["error"]["properties"]["kind"]["enum"]
         .as_array()
         .expect("the schema enumerates the failure classes")

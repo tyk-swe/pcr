@@ -9,7 +9,6 @@ use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// Validated, canonical ASCII DNS hostname used by live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Hostname(String);
@@ -75,7 +74,6 @@ impl FromStr for Hostname {
     }
 }
 
-/// Declared live destination before any hostname-resolution side effect.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Target {
@@ -103,7 +101,6 @@ impl FromStr for Target {
     }
 }
 
-/// Address-family selection shared by target-oriented live operations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Family {
@@ -217,9 +214,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain, except for the transparent
-    /// policy variant, whose own `Display` is already this error's message and
-    /// which therefore delegates.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Policy(error) => error.causes(),
@@ -236,15 +230,7 @@ pub trait Resolver: Send + Sync {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error>;
 }
 
-/// Resolves a declared target and authorizes every address it yields, for a
-/// workflow that takes a declared target (DNS servers, scan and traceroute
-/// targets).
 pub(crate) trait ResolveTarget {
-    /// Resolves `target` and authorizes each resolved address.
-    ///
-    /// # Errors
-    ///
-    /// Returns the resolution failure or the policy denial of any address.
     fn resolve_and_authorize(
         &mut self,
         target: &Target,
@@ -252,7 +238,6 @@ pub(crate) trait ResolveTarget {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-/// Uses the operating system resolver and its configured timeouts.
 pub struct SystemResolver;
 
 impl Resolver for SystemResolver {

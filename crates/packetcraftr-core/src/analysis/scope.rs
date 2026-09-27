@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact capture-domain identities shared by indexing and reassembly.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -12,7 +10,6 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-/// One semantic identifier in the ordered encapsulation path enclosing a flow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -57,11 +54,7 @@ pub enum EncapsulationIdentifier {
     },
 }
 
-/// Run-local compact identity of one exact capture domain: an interface and
-/// the ordered encapsulation path enclosing a flow.
-///
-/// All keys offered to one index or reassembler must use IDs issued by the
-/// same [`Interner`].
+/// Keys offered to one index or reassembler must use IDs issued by the same [`Interner`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ScopeId(u32);
@@ -73,8 +66,6 @@ impl ScopeId {
     }
 }
 
-/// Interpretable capture domain. `id` and `interface` are run-local, with
-/// `interface` indexing the reader's capture-wide interface table (across sections).
 /// Encapsulation preserves its enclosing order; reverse traffic shares a domain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Definition {
@@ -120,21 +111,12 @@ impl Classified for Error {
     }
 }
 
-/// Most scopes one [`Interner`] can issue: every [`ScopeId`] is a distinct
-/// 32-bit value.
 pub const MAX_SCOPES: usize = u32::MAX as usize;
 
-/// Finite entry-count and retained-byte ceilings for [`Interner`].
-///
-/// The two ceilings use unrelated units, so they travel in one named struct
-/// rather than adjacent `usize` parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum number of interned scopes, at most [`MAX_SCOPES`]. Zero
-    /// refuses new entries.
     pub max_scopes: usize,
-    /// Conservative retained-byte ceiling covering path copies and table
-    /// capacity headroom, not RSS. Zero refuses new entries.
+    /// Conservative retained-byte ceiling, not RSS. Zero refuses new entries.
     pub max_bytes: usize,
 }
 
@@ -148,7 +130,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Rejects a scope count the 32-bit identity space cannot name.
     pub fn validate(&self) -> Result<(), Error> {
         if self.max_scopes > MAX_SCOPES {
             return Err(Error::InvalidLimit {
@@ -160,7 +141,6 @@ impl Limits {
     }
 }
 
-/// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug, Default)]
 pub struct Interner {
     scopes: HashMap<(Option<u32>, Vec<EncapsulationIdentifier>), ScopeId>,
@@ -176,8 +156,6 @@ impl Interner {
         Self::default()
     }
 
-    /// An interner bounded by `limits`, after [`Limits::validate`] accepts
-    /// them.
     pub fn with_limits(limits: Limits) -> Result<Self, Error> {
         limits.validate()?;
         Ok(Self {
@@ -198,7 +176,6 @@ impl Interner {
         self.retained_bytes
     }
 
-    /// Returns the compact ID for an exact interface and encapsulation path.
     pub fn intern(
         &mut self,
         interface: Option<u32>,
@@ -213,7 +190,6 @@ impl Interner {
                 limit: self.limits.max_scopes,
             });
         }
-        // Two owned paths, plus conservative table/header/capacity overhead.
         let charge = scope
             .1
             .capacity()
@@ -244,8 +220,6 @@ impl Interner {
         Ok(id)
     }
 
-    /// Replaces identifiers replayed while decoding a reconstructed datagram
-    /// before appending the complete derived encapsulation path.
     pub(crate) fn replace_suffix(
         &mut self,
         base: ScopeId,

@@ -3,10 +3,6 @@
 
 use super::error::Error;
 
-/// Comparison operators accepted by the display-filter grammar.
-///
-/// Each has a symbolic and a worded spelling so the same filter reads the same
-/// way whether it was typed at a shell prompt or embedded in a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CompareOperator {
     Equal,
@@ -30,12 +26,9 @@ pub(super) enum Token {
     In,
     Contains,
     Compare(CompareOperator),
-    /// An unquoted run of path, number, address, or keyword characters. The
-    /// parser decides whether it names a field or spells a literal.
     Word(String),
     /// A quoted string, already unescaped. Always a text literal, never a path.
     Text(String),
-    /// The raw contents of a `[..]` byte-slice suffix.
     Slice(String),
 }
 
@@ -45,12 +38,6 @@ pub(super) struct Spanned {
     pub(super) offset: usize,
 }
 
-/// Characters that may appear unquoted inside a path or literal.
-///
-/// Deliberately excludes every operator and delimiter character, so `a&&b`,
-/// `tcp.port==443`, and `x[0:2]` tokenize correctly without whitespace. `:`
-/// carries IPv6 and MAC literals, `/` carries prefix lengths, `#` selects a
-/// layer occurrence, and `-` carries negative numbers and dashed MACs.
 fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'/' | b'#' | b'-')
 }
@@ -62,11 +49,6 @@ fn syntax(offset: usize, message: impl Into<String>) -> Error {
     }
 }
 
-/// Splits a display filter into tokens.
-///
-/// Operates on bytes rather than characters: every token character is ASCII,
-/// and any non-ASCII byte can only appear inside a quoted string, where it is
-/// copied through untouched.
 pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
@@ -160,8 +142,6 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
     Ok(tokens)
 }
 
-/// Recognizes the worded spellings of operators. Matching is case-insensitive
-/// so `AND` and `and` behave alike, but field paths stay case-sensitive.
 fn keyword(word: &str) -> Option<Token> {
     let lowered = word.to_ascii_lowercase();
     Some(match lowered.as_str() {
@@ -180,8 +160,6 @@ fn keyword(word: &str) -> Option<Token> {
     })
 }
 
-/// Reads a `[..]` suffix, returning its contents and the index after the `]`.
-/// Slice contents are parsed later, once the field it applies to is known.
 fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
     let start = open.saturating_add(1);
     let mut index = start;
@@ -203,7 +181,6 @@ fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
     Ok((contents, index.saturating_add(1)))
 }
 
-/// Reads a double-quoted string, honouring `\\` and `\"` escapes.
 fn read_quoted(source: &str, open: usize) -> Result<(String, usize), Error> {
     let bytes = source.as_bytes();
     let mut contents = Vec::new();

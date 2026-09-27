@@ -89,8 +89,12 @@ fn wait_empty() {
     }
 }
 
+/// Serializes tests that sample the process-wide pool's counters.
+static POOL: Mutex<()> = Mutex::new(());
+
 #[test]
 fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
+    let _pool = POOL.lock().unwrap();
     let (entered, started) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let closed = Arc::new(AtomicUsize::new(0));
@@ -177,6 +181,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
 fn a_spent_or_cancelled_caller_starts_no_connection() {
     use packetcraftr_core::budget::Cancellation;
 
+    let _pool = POOL.lock().unwrap();
     let (entered, started) = mpsc::channel();
     let (_release, gate) = mpsc::channel();
     let provider = Arc::new(Gate {
@@ -217,6 +222,7 @@ fn tcp_workers_observe_parent_cancellation_after_dispatch() {
         }
     }
 
+    let _pool = POOL.lock().unwrap();
     let signal = Cancellation::default();
     let parent = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal.clone()));
     let child = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));

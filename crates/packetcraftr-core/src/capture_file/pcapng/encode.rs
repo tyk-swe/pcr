@@ -34,8 +34,6 @@ impl InterfacePlan {
     }
 }
 
-/// Interface description block length before custom options: header, fields,
-/// the generated timestamp options, end of options, and trailing length.
 pub(in crate::capture_file) fn interface_description_base_length(timestamp_offset: i64) -> usize {
     if timestamp_offset == 0 { 32 } else { 44 }
 }
@@ -77,8 +75,7 @@ pub(in crate::capture_file) fn write_interface_description<W: Write>(
     )?;
     write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
-    // validate_new_interface rejects a link type above u16::MAX with Error::LinkTypeOutOfRange
-    // before any interface description is written
+    // validate_new_interface rejects a link type above u16::MAX before any IDB is written
     let link_type_field = link_type.0 as u16;
     write_u16(writer, endianness, link_type_field)?;
     write_u16(writer, endianness, 0)?;
@@ -123,8 +120,7 @@ pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
 ) -> Result<(), Error> {
     let mut header = [0; 28];
     let mut fields = header.as_mut_slice();
-    // the PCAPNG enhanced packet block stores its 64-bit timestamp as two 32-bit halves, so
-    // discarding the upper bits of each half is the format
+    // the EPB stores its 64-bit timestamp as two 32-bit halves
     let (timestamp_high, timestamp_low) = ((timestamp >> 32) as u32, timestamp as u32);
     for value in [
         PCAPNG_ENHANCED_PACKET_BLOCK,
@@ -139,7 +135,6 @@ pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
     }
 
     // At most three padding bytes, twelve option bytes, and the block footer.
-    // The payload stays borrowed and is written directly, regardless of its size.
     let mut tail = [0; 3 + 12 + 4];
     let capacity = tail.len();
     let mut fields = tail.as_mut_slice();

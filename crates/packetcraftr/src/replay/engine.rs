@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Streams, authorizes, schedules, and transmits without retaining more than one frame.
-
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -31,25 +29,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Replays the request's capture: every selected frame is admitted by the
     /// client's policy, routed through the client's providers, authorized
     /// again against its final route, and transmitted exactly as captured.
-    ///
-    /// Each frame is admitted before any provider is consulted for it, and the
-    /// replay keeps no more than one frame. Each confirmed frame is published
-    /// to `sink` on a worker admitted by the client's runtime, and the replay
-    /// waits for the sink's answer before it reads the next frame, so
-    /// evidence published before a failure is preserved. The request's
-    /// timing runs on the client's clock, within one deadline of
-    /// `limits.max_duration`.
-    ///
-    /// A sink that fails because the run was interrupted (its error's source
-    /// is a [`Cancelled`], [`DeadlineExceeded`], or [`Interrupted`]) stops the
-    /// replay as interrupted rather than as an output failure, and so does any
-    /// sink failure once the replay's own deadline is spent or cancelled.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the capture, policy, provider, or clock
-    /// failure, the sink's failure, or the interruption, each at the source
-    /// frame it stopped at.
     pub fn replay<R, E>(&self, request: Request<R>, sink: E) -> Result<Report, Error>
     where
         R: Read,
@@ -98,7 +77,6 @@ fn publication_error(source_index: u64, deadline: &Deadline, source: BoundaryErr
     }
 }
 
-/// The interruption a sink failure reports as its source, if any.
 fn interruption(error: &BoundaryError) -> Option<Interrupted> {
     let source = std::error::Error::source(error)?;
     source
@@ -122,7 +100,6 @@ struct ReadFrame {
     number: u64,
 }
 
-/// One replay in progress: its deadline, totals, and schedule anchor.
 struct Session {
     deadline: Deadline,
     tally: Tally,
@@ -139,10 +116,6 @@ struct Run<'a, 'x, 'c, S, A, X, C, F> {
     emit: F,
 }
 
-/// Replays the frames the parts' selector selects under `deadline`,
-/// authorizing through `authorizer`, sending through `executor`, and handing
-/// each confirmed frame to `emit`. A seekable source is rewound before every
-/// pass under one aggregate budget and schedule.
 pub(crate) fn run<R, S, A, X, C, F>(
     parts: Parts<R, S>,
     authorizer: &mut A,
@@ -229,7 +202,6 @@ where
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
-    /// Waits the inter-pass delay and restarts the schedule's anchor after it.
     fn pause_between_passes(&mut self, session: &mut Session) -> Result<(), Error> {
         let options = self.options;
         let overflow = || Error::InvalidDuration {
@@ -263,8 +235,6 @@ where
         Ok(())
     }
 
-    /// Replays one pass and returns the source index one past its last
-    /// frame, the coordinate its end-of-capture deadline gate reports.
     fn pass<R: Read>(
         &mut self,
         reader: &mut Reader<R>,
@@ -372,7 +342,6 @@ where
         Ok(selected)
     }
 
-    /// The interface the selector routes the frame to.
     fn interface(
         &mut self,
         source_index: u64,
@@ -517,8 +486,6 @@ fn authorize_final_wire<A: FinalWire>(
     })
 }
 
-/// Waits a source-timing delay in the shared pacing order. Replay keeps its
-/// own schedule in its [`Tally`] and no execution statistics.
 fn pace<C: Clock>(
     clock: &mut C,
     deadline: &mut Deadline,

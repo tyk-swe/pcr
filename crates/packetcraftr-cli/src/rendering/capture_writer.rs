@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture writer state shared by command renderers.
-
 use std::io::Write;
 
 use packetcraftr_core::capture_file::{Error, Format, Interface, Writer, compression};
@@ -10,23 +8,15 @@ use packetcraftr_core::frame::{Frame, LinkType};
 
 use crate::errors::CliError;
 
-/// A streaming writer plus the interface mapping its callers register.
-///
-/// `K` is the identity each output interface is mapped by, so a writer only
-/// exposes the registration its format was opened for.
 pub(crate) struct CaptureWriter<W, K> {
     writer: Writer<W>,
     interface_map: Vec<(K, u32)>,
 }
 
-/// Maps PCAPNG interfaces by link type as generated frames arrive.
 pub(crate) type LinkCaptureWriter<W> = CaptureWriter<W, LinkType>;
 
-/// Maps declared interface descriptions into a newly generated capture.
 pub(crate) type SourceCaptureWriter<W> = CaptureWriter<W, Option<u32>>;
 
-/// Finishes an initialized compressor after capture processing, retaining the
-/// processing failure as primary when finalization also fails.
 pub(crate) fn finish_compressed_output<W: Write, T>(
     result: Result<T, CliError>,
     output: compression::Output<W>,
@@ -49,8 +39,6 @@ impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
         }
     }
 
-    /// Resolves the output interface ID for `key`, registering it once.
-    ///
     /// Classic PCAP carries no interface IDs, so it maps to `None`.
     fn map_interface(
         &mut self,
@@ -78,13 +66,10 @@ impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
 }
 
 impl<W: Write> LinkCaptureWriter<W> {
-    /// Declares a link type before the first frame when callers need eager
-    /// validation, and returns its PCAPNG interface ID.
     pub(crate) fn add_link_type(&mut self, link_type: LinkType) -> Result<Option<u32>, Error> {
         self.map_interface(link_type, |writer| writer.add_interface(link_type))
     }
 
-    /// Writes a generated frame, mapping each PCAPNG link type once.
     pub(crate) fn write_link_mapped(&mut self, mut frame: Frame) -> Result<(), Error> {
         frame.interface = self.add_link_type(frame.link_type)?;
         self.writer.write_frame(&frame)

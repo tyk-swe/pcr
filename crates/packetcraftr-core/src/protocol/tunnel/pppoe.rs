@@ -27,25 +27,15 @@ const PPP_NAME: &str = BuiltinProtocol::Ppp.as_str();
 const PPPOE_LEN: usize = 6;
 const PPP_LEN: usize = 2;
 
-/// Discriminator for a session-stage payload: a PPP frame.
 pub(crate) const PPPOE_SESSION: u64 = 0;
-/// Discriminator for a discovery-stage payload: opaque tag bytes.
 pub(crate) const PPPOE_DISCOVERY: u64 = 1;
 
 /// PPPoE header (RFC 2516), covering both stages.
-///
-/// A zero `code` is session-stage data whose payload is a PPP frame; any
-/// other code is a discovery packet — PADI, PADO, PADR, PADS, PADT — whose
-/// tag list is preserved as opaque payload bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pppoe {
-    /// 4-bit version; RFC 2516 defines only version 1.
     pub version: u8,
-    /// 4-bit type; RFC 2516 defines only type 1.
     pub type_code: u8,
-    /// Stage code: zero for session data, a discovery code otherwise.
     pub code: u8,
-    /// Session identifier assigned during discovery.
     pub session_id: u16,
     /// Payload length in bytes, excluding this header.
     pub length: WireValue<u16>,
@@ -154,8 +144,7 @@ impl LayerCodec for PppoeCodec {
         }
         // The EtherType that selected this layer is authoritative for the
         // stage; the code is a heuristic fallback for roots and synthetic
-        // parents. A disagreeing code never turns discovery tags into a PPP
-        // frame or session data into tags.
+        // parents.
         let discovery = match context.discriminator.map(|discriminator| discriminator.0) {
             Some(0x8863) => true,
             Some(0x8864) => false,
@@ -183,12 +172,8 @@ impl LayerCodec for PppoeCodec {
             consumed: PPPOE_LEN,
             payload_len: length,
             next: if !discovery {
-                // Session payloads must start with the PPP protocol field,
-                // so an empty session frame surfaces the missing header
-                // rather than dissecting as complete.
                 vec![Discriminator(PPPOE_SESSION)]
             } else if length == 0 {
-                // A tag-free discovery packet — PADT — is complete.
                 Vec::new()
             } else {
                 vec![Discriminator(PPPOE_DISCOVERY)]
@@ -264,8 +249,6 @@ fn validate_parent_stage(
             parent
                 .field("ether_type")
                 .or_else(|| parent.field("protocol"))
-                // GRE and SNAP carry the same EtherType under their own names;
-                // SNAP only when its OUI selects the EtherType space.
                 .or_else(|| parent.field("protocol_type"))
                 .or_else(|| {
                     (parent.field("oui") == Some(FieldValue::Unsigned(0)))
@@ -294,11 +277,9 @@ fn validate_parent_stage(
     Ok(())
 }
 
-/// PPP frame header as carried by PPPoE session data (RFC 1661): the 2-byte
-/// protocol field that selects the network payload.
+/// PPP frame header as carried by PPPoE session data (RFC 1661).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ppp {
-    /// PPP protocol number: 0x0021 IPv4, 0x0057 IPv6, 0xc021 LCP, ….
     pub protocol: WireValue<u16>,
 }
 
@@ -378,8 +359,6 @@ impl LayerCodec for PppCodec {
         };
         let protocol_number = u16::from_be_bytes([header[0], header[1]]);
         let payload_len = input.len().saturating_sub(PPP_LEN);
-        // Unregistered protocols — LCP, IPCP, CHAP — fall through to the
-        // typed raw child rather than a diagnostic, mirroring UDP ports.
         let mut next = Vec::with_capacity(2);
         if protocol_number != 0 {
             next.push(Discriminator(u64::from(protocol_number)));

@@ -36,7 +36,6 @@ use crate::target::Resolver;
 use crate::target::Target;
 use packetcraftr_core::error::BoundaryError;
 
-/// One provider call a [`FakeProviders`] recorded, in call order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Call {
     Route(IpAddr),
@@ -47,11 +46,6 @@ pub(crate) enum Call {
     Resolve(String),
 }
 
-/// Every provider capability over one fixture: each destination is on-link
-/// over the Layer 3 interface `fixture0` (index 1, source 192.0.2.1), which
-/// is also the one interface enumerated; capture sessions never observe a
-/// frame; transmissions are confirmed in full; TCP connects are refused; and
-/// hostnames resolve to `addresses`. Every call is recorded in `calls`.
 #[derive(Clone, Default)]
 pub(crate) struct FakeProviders {
     pub(crate) calls: Arc<Mutex<Vec<Call>>>,
@@ -63,13 +57,11 @@ impl FakeProviders {
         self.calls.lock().expect("fake provider calls").push(call);
     }
 
-    /// The calls recorded so far, in order.
     pub(crate) fn calls(&self) -> Vec<Call> {
         self.calls.lock().expect("fake provider calls").clone()
     }
 }
 
-/// A client with the default policy over [`FakeProviders`].
 pub(crate) fn fake_client() -> (crate::Client<FakeProviders>, FakeProviders) {
     let providers = FakeProviders::default();
     let client = crate::Client::new(
@@ -203,7 +195,6 @@ impl Resolver for FakeProviders {
     }
 }
 
-/// A capture session that is ready at once and never yields a frame.
 pub(crate) struct IdleSession(capture::Metadata);
 
 impl capture::Session for IdleSession {
@@ -231,7 +222,6 @@ impl capture::Session for IdleSession {
     }
 }
 
-/// A deadline no fixture comes close to spending.
 pub(crate) fn live() -> Deadline {
     Deadline::new(Duration::from_secs(5))
 }
@@ -247,8 +237,6 @@ impl Clock for NoopClock {
     }
 }
 
-/// A clock that starts at the real monotonic time and advances only by the
-/// delays it is asked to sleep, recording each one.
 #[derive(Clone, Default)]
 pub(crate) struct RecordingClock(Arc<Mutex<RecordedTime>>);
 
@@ -259,7 +247,6 @@ struct RecordedTime {
 }
 
 impl RecordingClock {
-    /// Every delay slept so far, in order.
     pub(crate) fn delays(&self) -> Vec<Duration> {
         self.0.lock().expect("recording clock").delays.clone()
     }
@@ -286,7 +273,6 @@ impl Clock for RecordingClock {
     }
 }
 
-/// An authorizer that approves every operation and hands back fixed addresses.
 pub(crate) struct AddressListAuthorizer {
     pub(crate) addresses: Vec<IpAddr>,
 }
@@ -310,7 +296,6 @@ impl Authorizer for AddressListAuthorizer {
     }
 }
 
-/// A resolver that replays a queued script of answers and counts its calls.
 pub(crate) struct ScriptedResolver {
     pub(crate) calls: Arc<AtomicUsize>,
     answers: Mutex<VecDeque<Vec<IpAddr>>>,
@@ -337,7 +322,6 @@ impl Resolver for ScriptedResolver {
     }
 }
 
-/// An executor that refuses every request and counts how often it was asked.
 pub(crate) struct RejectingExecutor {
     pub(crate) calls: Arc<AtomicUsize>,
 }
@@ -353,7 +337,6 @@ impl<S: Step> Executor<S> for RejectingExecutor {
     }
 }
 
-/// A trusted sent-packet record for `packet` on a fixed Layer 3 route.
 pub(crate) fn sent_packet(packet: Packet) -> SentPacket {
     use packetcraftr_netio::transmit::Submission;
 
@@ -362,7 +345,6 @@ pub(crate) fn sent_packet(packet: Packet) -> SentPacket {
     SentPacket::try_new(built, materialized_route(), report).expect("valid trusted sent fixture")
 }
 
-/// A trusted sent-packet record carrying the given transmission report.
 pub(crate) fn sent_packet_with_report(packet: Packet, report: TransmissionReport) -> SentPacket {
     SentPacket::try_new(built_packet(packet), materialized_route(), report)
         .expect("valid trusted sent fixture")
@@ -415,9 +397,6 @@ fn materialized_route() -> crate::route::Materialized {
     }
 }
 
-/// Builds decoded evidence for `packet` with an explicit timestamp, wire bytes,
-/// and diagnostics. Scan, traceroute, fuzz, and evidence-selection tests share
-/// this constructor; each keeps only a thin adapter when it needs fixed bytes.
 pub(crate) fn decoded_packet(
     packet: Packet,
     timestamp: SystemTime,
@@ -439,8 +418,6 @@ pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
         .expect("probe test fixture frame carries bytes")
 }
 
-/// Every failure the shared execution machinery raises, as [`TestErrors`]
-/// names it: the step it concerns and the original source.
 #[derive(Debug)]
 pub(crate) enum Failure {
     DurationLimit(u64, DeadlineExceeded),
@@ -453,7 +430,6 @@ pub(crate) enum Failure {
     StatsOverflow(u64, StatsOverflow),
 }
 
-/// An error adapter that records each failure as a [`Failure`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TestErrors;
 

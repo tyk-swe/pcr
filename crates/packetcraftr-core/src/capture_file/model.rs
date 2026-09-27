@@ -8,20 +8,13 @@ use crate::frame::{DEFAULT_SIZE_LIMIT, LinkType};
 
 use super::error::Error;
 
-/// Default maximum number of interface descriptions retained per PCAPNG section.
 pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
-/// Default maximum interface descriptions retained across all PCAPNG sections.
 pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
-/// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
-/// Default maximum metadata bytes consumed before one packet is returned.
 pub const DEFAULT_METADATA_BYTE_LIMIT: usize = 64 * 1024 * 1024;
-/// Default maximum frames accepted by one streaming capture writer or copy.
 pub const DEFAULT_STREAM_FRAMES: u64 = 10_000;
-/// Default maximum captured payload bytes accepted by one streaming writer or copy.
 pub const DEFAULT_STREAM_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Aggregate frame and captured-byte ceilings for a streaming capture operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
     pub max_frames: u64,
@@ -38,7 +31,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Rejects a zero ceiling, which would refuse every frame of the stream.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
@@ -52,9 +44,6 @@ impl Limits {
     }
 }
 
-/// The frames and captured bytes one stream has charged against its
-/// [`Limits`].
-///
 /// A charge that would exceed either ceiling fails and leaves the budget
 /// unchanged.
 ///
@@ -75,7 +64,6 @@ pub struct Budget {
 }
 
 impl Budget {
-    /// An empty budget for `limits`, after [`Limits::validate`] accepts them.
     pub fn new(limits: Limits) -> Result<Self, Error> {
         limits.validate()?;
         Ok(Self {
@@ -90,19 +78,16 @@ impl Budget {
         self.limits
     }
 
-    /// Frames charged so far.
     #[must_use]
     pub fn frames(&self) -> u64 {
         self.frames
     }
 
-    /// Captured payload bytes charged so far.
     #[must_use]
     pub fn captured_bytes(&self) -> u64 {
         self.captured_bytes
     }
 
-    /// A budget that has already charged `frames` and `captured_bytes`.
     #[cfg(test)]
     pub(super) fn charged(limits: Limits, frames: u64, captured_bytes: u64) -> Self {
         Self {
@@ -112,14 +97,11 @@ impl Budget {
         }
     }
 
-    /// Charges one frame of `frame_bytes` captured bytes.
     pub fn charge(&mut self, frame_bytes: u32) -> Result<(), Error> {
         *self = self.after(frame_bytes)?;
         Ok(())
     }
 
-    /// The budget after charging one frame, without changing this one, so a
-    /// caller can check a frame before committing its output.
     pub fn after(&self, frame_bytes: u32) -> Result<Self, Error> {
         let frames = self
             .frames
@@ -157,11 +139,7 @@ impl Budget {
     }
 }
 
-/// Resource ceilings applied while streaming an offline capture.
-///
-/// Limits are enforced where their corresponding input is encountered. A zero
-/// value therefore disables that class of input rather than being rejected
-/// uniformly during construction.
+/// A zero value disables that class of input rather than being rejected.
 ///
 /// ```rust
 /// use std::io::Cursor;
@@ -178,7 +156,6 @@ impl Budget {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReaderLimits {
-    /// Maximum packet or PCAPNG block size, in bytes.
     pub max_size: usize,
     pub max_interfaces_per_section: usize,
     pub max_total_interfaces: usize,
@@ -198,8 +175,6 @@ impl Default for ReaderLimits {
     }
 }
 
-/// Classic PCAP file configuration.
-///
 /// ```rust
 /// use packetcraftr_core::capture_file::{Endianness, PcapOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
@@ -215,17 +190,10 @@ impl Default for ReaderLimits {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapOptions {
-    /// Byte order used for the global header and every packet record.
     pub endianness: Endianness,
-    /// Timestamp precision. Classic PCAP supports decimal microseconds or nanoseconds.
     pub timestamp_resolution: TimestampResolution,
-    /// Snapshot length written to the global header, in bytes.
     pub snap_len: usize,
-    /// Maximum captured packet size accepted by the writer, in bytes.
     pub max_size: usize,
-    /// Aggregate frame and captured-payload ceilings for the whole stream.
-    /// Fixed at construction, so a writer's limits cannot be retuned once it
-    /// has begun producing output.
     pub stream_limits: Limits,
 }
 
@@ -241,8 +209,6 @@ impl Default for PcapOptions {
     }
 }
 
-/// PCAPNG section configuration.
-///
 /// ```rust
 /// use packetcraftr_core::capture_file::{PcapNgOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
@@ -257,14 +223,9 @@ impl Default for PcapOptions {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapNgOptions {
-    /// Byte order used for the section and its blocks.
     pub endianness: Endianness,
-    /// Maximum block and captured packet size, in bytes.
     pub max_size: usize,
     pub max_interfaces: usize,
-    /// Aggregate frame and captured-payload ceilings for the whole stream.
-    /// Fixed at construction, so a writer's limits cannot be retuned once it
-    /// has begun producing output.
     pub stream_limits: Limits,
 }
 
@@ -287,7 +248,6 @@ pub enum Format {
 }
 
 impl Format {
-    /// The stable lowercase name, matching the serialized form.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -307,7 +267,6 @@ pub enum Endianness {
     Big,
 }
 
-/// Timestamp tick resolution declared by classic PCAP or one PCAPNG interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampResolution {
@@ -315,11 +274,6 @@ pub enum TimestampResolution {
     Binary(u8),
 }
 
-/// Metadata associated with one capture interface.
-///
-/// The index in [`crate::capture_file::Reader::interfaces`] is the global interface
-/// ID used by [`crate::frame::Frame::interface`]. Source-local
-/// section and interface identifiers remain available on [`CaptureRecord`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interface {
     pub link_type: LinkType,
@@ -328,14 +282,12 @@ pub struct Interface {
     pub timestamp_offset: i64,
 }
 
-/// One option carried by a PCAPNG section, interface, or packet block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcapNgOption {
     pub code: u16,
     pub value: Bytes,
 }
 
-/// Parsed classic-PCAP global-header fields that affect packet interpretation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcapHeader {
     pub endianness: Endianness,
@@ -347,7 +299,6 @@ pub struct PcapHeader {
     pub(super) raw: Bytes,
 }
 
-/// Parsed PCAPNG section-header fields.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Section {
     pub index: u64,
@@ -360,7 +311,6 @@ pub struct Section {
     pub(super) raw: Bytes,
 }
 
-/// Header consumed when a streaming reader is opened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaptureHeader {
     Pcap(PcapHeader),
@@ -383,7 +333,6 @@ impl CaptureHeader {
     }
 }
 
-/// Packet-block representation retained by one [`CaptureRecord`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketBlockKind {
@@ -393,7 +342,6 @@ pub enum PacketBlockKind {
     Obsolete,
 }
 
-/// Metadata-block representation retained by one [`CaptureRecord`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetadataBlockKind {
@@ -422,7 +370,6 @@ pub enum MetadataBlockKind {
     },
 }
 
-/// Kind and source location of one capture record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
@@ -435,7 +382,6 @@ pub enum RecordKind {
     Metadata(MetadataBlockKind),
 }
 
-/// One bounded source record, including its validated raw representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaptureRecord {
     pub kind: RecordKind,
@@ -454,7 +400,6 @@ impl CaptureRecord {
     }
 }
 
-/// Input and output accounting for a bounded capture selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectionReport {
     pub format: Format,
@@ -463,7 +408,6 @@ pub struct SelectionReport {
     pub captured_bytes_read: u64,
     pub captured_bytes_selected: u64,
     pub interfaces: usize,
-    /// Copied metadata records, excluding the initial capture header.
     pub metadata_records: u64,
 }
 

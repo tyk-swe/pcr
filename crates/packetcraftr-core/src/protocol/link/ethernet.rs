@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ethernet II frame model and codec.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -37,10 +35,6 @@ fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]
         .copied()
 }
 
-/// The 802.3 length-versus-EtherType split shared by Ethernet II and the
-/// VLAN tags: a value at or below 1500 is a payload length framing an LLC
-/// header, 1536 and above is an EtherType, and the undefined band between
-/// them falls through to the raw payload.
 pub(super) fn link_payload_selection(
     name: &'static str,
     ether_type: u16,
@@ -59,7 +53,6 @@ pub(super) fn link_payload_selection(
                 header_len.saturating_add(available),
             ));
         }
-        // A zero-length frame is complete: there is no LLC header to select.
         let next = if length == 0 {
             Vec::new()
         } else {
@@ -67,15 +60,9 @@ pub(super) fn link_payload_selection(
         };
         return Ok((length, next));
     }
-    // 1501–1535: neither a length nor an EtherType; the unknown
-    // discriminator preserves the payload as raw with a warning.
     Ok((available, vec![Discriminator(u64::from(ether_type))]))
 }
 
-/// Resolves the `ether_type` expectation for a link header: the encoded
-/// payload length when an LLC frame follows — including a malformed layer
-/// preserving broken LLC bytes from a length-framed capture — and the
-/// registered discriminator otherwise.
 pub(super) fn link_type_expectation(
     name: &'static str,
     context: &LayerEncodeContext<'_>,
@@ -107,11 +94,6 @@ pub(super) fn link_type_expectation(
     Ok(expected_discriminator(name, context, 0_u16, value))
 }
 
-/// Rejects a length-form `ether_type` over anything other than LLC framing:
-/// dissection treats every value at or below 1500 as an 802.3 payload
-/// length and selects an LLC header, so any other child would come back as
-/// a different layer stack. The zero-length empty frame is the one
-/// length-form value with no payload to misframe.
 pub(super) fn validate_link_length_form(
     name: &'static str,
     ether_type: u16,

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Offline-analysis vocabulary several commands publish: capture scopes,
-//! the capture clock, stream identities, and endpoints.
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -13,7 +10,6 @@ use packetcraftr_core::analysis::{self as library, reassembly::tcp, scope};
 
 use super::contract::Error;
 
-/// One semantic identifier in the ordered encapsulation path enclosing a flow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind")]
 pub enum EncapsulationIdentifier {
@@ -44,8 +40,6 @@ pub enum EncapsulationIdentifier {
     Ah { spi: u32 },
 }
 
-/// The identifier as human text: its kind and the values that identify it,
-/// such as `vlan:10` or `network:192.0.2.1<->198.51.100.2`.
 impl std::fmt::Display for EncapsulationIdentifier {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -111,8 +105,6 @@ impl TryFrom<scope::EncapsulationIdentifier> for EncapsulationIdentifier {
     }
 }
 
-/// An interpretable capture domain: a run-local scope identity, the
-/// capture-global interface, and the enclosing encapsulation path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Scope {
     pub id: u32,
@@ -145,7 +137,6 @@ impl TryFrom<&scope::Definition> for Scope {
     }
 }
 
-/// Capture-clock irregularities an analysis observed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Clock {
     pub regressions: u64,
@@ -166,14 +157,12 @@ impl From<library::ClockReport> for Clock {
 }
 
 published_enum! {
-    /// The transport a conversation index counts.
     pub enum StreamTransport from library::StreamTransport {
         Tcp => "tcp",
         Udp => "udp",
     }
 }
 
-/// One conversation, as `tcp.stream`/`udp.stream` index it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct StreamRef {
     pub transport: StreamTransport,
@@ -189,14 +178,12 @@ impl From<library::StreamRef> for StreamRef {
     }
 }
 
-/// One side of a conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
 }
 
-/// `address:port`, bracketing an IPv6 address.
 impl std::fmt::Display for Endpoint {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::net::SocketAddr::new(self.address, self.port).fmt(formatter)
@@ -212,7 +199,6 @@ impl From<library::Endpoint> for Endpoint {
     }
 }
 
-/// One direction of a transport flow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FlowKey {
     pub source: IpAddr,
@@ -232,7 +218,6 @@ impl From<tcp::FlowKey> for FlowKey {
     }
 }
 
-/// One direction of a transport flow within its capture scope.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ScopedFlowKey {
     pub scope: u32,

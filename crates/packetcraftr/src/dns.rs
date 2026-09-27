@@ -1,22 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS query construction, response validation, relevance filtering,
-//! and retry execution on the [`Client`](crate::Client).
-//!
-//! [`Client::dns`](crate::Client::dns) runs one [`Request`] and
-//! [`Client::dns_batch`](crate::Client::dns_batch) a [`batch::Request`]; both
-//! publish [`Event`]s to a [`Sink`](crate::Sink) and return the terminal
-//! report, and [`Collector`] rebuilds the full [`Aggregate`].
-//!
-//! [`Request::transport`] selects UDP, direct TCP, or UDP with TCP fallback.
-//! In the default mode, one matching validated truncated response may continue over
-//! DNS-over-TCP to the same reauthorized numeric endpoint. Both phases share
-//! the attempt timeout. DNS-over-TCP is a query over the client's TCP
-//! provider, not a capture-armed exchange: TCP framing and allocation are
-//! bounded, accepted responses receive the same transaction/question
-//! validation as UDP, and TCP socket bytes are never represented as captured
-//! [`Frame`](packetcraftr_core::frame::Frame) evidence.
+//! Bounded DNS query construction, response validation, and retry execution.
 
 use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 
@@ -46,8 +31,7 @@ const FLAG_RECURSION_AVAILABLE: u16 = 0x0080;
 const FLAG_AUTHENTICATED_DATA: u16 = 0x0020;
 const FLAG_CHECKING_DISABLED: u16 = 0x0010;
 const OPCODE_MASK: u16 = 0x7800;
-// Bit 6 is the sole reserved Z bit. AD (bit 5) and CD (bit 4) are defined by
-// DNSSEC and therefore must not be rejected as reserved header data.
+// Bit 6 is the sole reserved Z bit; AD (bit 5) and CD (bit 4) are DNSSEC flags.
 const RESERVED_MASK: u16 = 0x0040;
 const RCODE_MASK: u16 = 0x000f;
 const CLASS_IN: u16 = 1;

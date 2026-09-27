@@ -6,10 +6,7 @@ use std::fmt;
 
 use super::{Classification, Classified, Coordinate, Kind};
 
-/// Classified failure propagated across a workflow authorization or execution seam.
-///
-/// The classification is boxed deliberately: it is five words, and this type
-/// rides inside every workflow error enum, whose `Err` size clippy bounds.
+/// Boxed classification: this rides in every workflow error, whose `Err` size clippy bounds.
 #[derive(Debug)]
 pub struct BoundaryError {
     message: String,
@@ -35,7 +32,6 @@ impl BoundaryError {
         }
     }
 
-    /// Erases an owned classified error, retaining it in the source chain.
     pub fn from_error<E>(error: E) -> Self
     where
         E: Classified + Error + Send + Sync + 'static,
@@ -53,8 +49,6 @@ impl BoundaryError {
         }
     }
 
-    /// Builds a boundary error that reports its own message while retaining
-    /// an unrelated source error.
     pub fn with_source<E>(
         message: impl Into<String>,
         classification: Classification,
@@ -73,8 +67,6 @@ impl BoundaryError {
         }
     }
 
-    /// Its message followed by its captured causes: the causes of a wrapper
-    /// that reports this error as its source without repeating its text.
     #[must_use]
     pub fn as_causes(&self) -> Vec<String> {
         std::iter::once(self.message.clone())
@@ -82,14 +74,12 @@ impl BoundaryError {
             .collect()
     }
 
-    /// Attaches the stable domain coordinate of a boundary failure.
     #[must_use]
     pub fn with_context(mut self, context: Option<Coordinate>) -> Self {
         self.context = context;
         self
     }
 
-    /// Reports a broken executor contract as an internal invariant failure.
     #[must_use]
     pub fn internal_execution(
         message: impl Into<String>,
@@ -99,7 +89,6 @@ impl BoundaryError {
         Self::execution_error(message, code, Kind::Internal, remediation)
     }
 
-    /// Reports invalid executor input as a caller validation failure.
     #[must_use]
     pub fn execution_validation(
         message: impl Into<String>,

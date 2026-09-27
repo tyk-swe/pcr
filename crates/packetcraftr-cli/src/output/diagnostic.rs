@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The published diagnostic record and its severity vocabulary.
-
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic as library;
 
 published_enum! {
-    /// Diagnostic weight, ordered from least to most severe.
     pub enum Severity from library::Severity {
         Info => "info",
         Warning => "warning",
@@ -16,7 +13,6 @@ published_enum! {
     }
 }
 
-/// A machine-readable build, decode, session, or policy finding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: &'static str,

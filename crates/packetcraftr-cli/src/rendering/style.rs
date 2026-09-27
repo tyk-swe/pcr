@@ -48,10 +48,6 @@ fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
     safe
 }
 
-/// Colors the leading [`Severity::as_str`][severity] token shared with JSON
-/// output.
-///
-/// [severity]: packetcraftr_core::diagnostic::Severity::as_str
 pub(crate) fn style_human_line(value: &str) -> String {
     if let Some((prefix, rest)) = split_leading_token(value) {
         let style = match prefix {
@@ -76,12 +72,6 @@ pub(crate) fn style_human_line(value: &str) -> String {
     value.to_owned()
 }
 
-/// Colours the leading word of a command's terminal summary line.
-///
-/// Only [`write_summary_line`][summary] reaches this, so a rendered value that
-/// happens to start with a summary verb is never mistaken for one.
-///
-/// [summary]: super::human::write_summary_line
 pub(crate) fn style_summary_line(value: &str) -> String {
     let style = success_style();
     match split_leading_token(value) {
@@ -178,9 +168,6 @@ mod tests {
         }
     }
 
-    /// Severity colour keys off the three serde spellings and nothing else, so
-    /// a rendered value that happens to open with a summary verb — a `stats`
-    /// row, a `follow` payload line — is never coloured by accident.
     #[test]
     fn severity_colour_follows_the_serialized_spellings_alone() {
         for severity in [

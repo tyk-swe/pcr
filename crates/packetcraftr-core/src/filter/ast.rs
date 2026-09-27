@@ -8,13 +8,11 @@ use super::path::FieldRef;
 
 #[derive(Clone, Debug)]
 pub(super) enum Predicate {
-    /// A bare protocol name: does the packet carry such a layer at all?
     LayerPresent {
         protocol: crate::layer::Id,
         occurrence: Option<usize>,
     },
-    /// A bare field path. For a flag this reads the flag's value; for every
-    /// other field it asks whether the packet exposes a value at all.
+    /// A bare field path: a flag reads its value; any other field tests for a value.
     Bare {
         field: FieldRef,
         flag: bool,
@@ -34,12 +32,7 @@ pub(super) enum Predicate {
     },
 }
 
-/// One instruction of a compiled filter.
-///
-/// Filters compile to postfix order rather than a tree. Evaluation is then a
-/// flat pass over a vector with a small boolean stack, which keeps it
-/// non-recursive by construction — the same property the dissector relies on
-/// so that untrusted input cannot drive stack depth.
+/// Postfix order keeps evaluation non-recursive, so untrusted input cannot drive stack depth.
 #[derive(Clone, Debug)]
 pub(super) enum Op {
     Leaf(Predicate),

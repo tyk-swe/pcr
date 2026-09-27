@@ -31,7 +31,6 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
 }
 
-/// One window for the whole exchange.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ResponseWindow;
 

@@ -1,16 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded offline capture analysis. [`run`] dissects, indexes, filters, and
-//! dispatches to collectors over frames read with
-//! [`capture_file`](crate::capture_file). [`reassembly`] is also available as
-//! a standalone algorithm API. Core has no native I/O or live-workflow
-//! dependencies.
-//!
-//! Conversation indices and IP fragment state cover all frames before
-//! filtering. A completing frame exposes both its physical layers and
-//! reconstructed child layers/transport index to filters. TCP reassembly
-//! consumes only matched frames.
+//! Bounded offline capture analysis.
 
 mod adapter;
 pub mod application;

@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Checked wall-clock and monotonic capture-time conversion.
-
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{Error, capture::TimestampPrecision};
 
-// the guard below rejects fractions outside 0..precision bound and the branch
-// below only converts seconds once it is known to be non-negative
+// the guard below rejects fractions outside 0..precision bound
 pub(crate) fn system_time(
     seconds: i64,
     fraction: i64,
@@ -46,8 +43,6 @@ pub(crate) fn system_time(
     })
 }
 
-/// Projects a wall-clock timestamp to monotonic time; returns `None` for future
-/// or unrepresentably old packets.
 pub(crate) fn monotonic_packet_time(
     packet_timestamp: SystemTime,
     observed_wall: SystemTime,
@@ -96,8 +91,6 @@ mod tests {
     #[test]
     fn nanosecond_fractions_are_not_read_as_microseconds() {
         let nano = TimestampPrecision::Nano;
-        // A nanosecond field over the microsecond bound is accepted and lands
-        // at its own value, never divided or clamped into microseconds.
         assert_eq!(
             system_time(0, 999_999_999, nano).expect("upper bound"),
             UNIX_EPOCH + Duration::from_nanos(999_999_999)
@@ -106,13 +99,10 @@ mod tests {
             system_time(0, 1, nano).expect("one nanosecond"),
             UNIX_EPOCH + Duration::from_nanos(1)
         );
-        // The same fraction value means different durations per precision.
         assert_eq!(
             system_time(0, 500_000, nano).expect("nano fraction"),
             UNIX_EPOCH + Duration::from_nanos(500_000)
         );
-        // Pre-epoch seconds keep a positive sub-second fraction. Use a
-        // fraction representable by Windows SystemTime's 100 ns ticks.
         assert_eq!(
             system_time(-1, 999_999_900, nano).expect("pre-epoch nano"),
             UNIX_EPOCH - Duration::from_nanos(100)
@@ -127,9 +117,6 @@ mod tests {
 
     #[test]
     fn representability_edges_are_exact_or_rejected_never_clamped() {
-        // Conversion must match checked arithmetic: 64-bit timespec supports
-        // every i64 second; narrower SystemTime implementations reject overflow
-        // without clamping.
         for (seconds, fraction, precision, fractional) in [
             (
                 i64::MAX,

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Aggregate JSON and streaming NDJSON envelopes.
-
 use std::fmt;
 use std::time::Duration;
 
@@ -15,10 +13,6 @@ use super::capture::Stats as CaptureStats;
 use super::contract::{Command, Mode, SCHEMA_V6};
 use super::diagnostic::Diagnostic;
 
-/// The failure class an `error` object publishes.
-///
-/// The CLI's name for each neutral [`Kind`]: a usage failure is published as
-/// `"cli"`, the frozen v6 vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
@@ -31,7 +25,6 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    /// The published name, as it appears in `error.kind`.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Cli => "cli",
@@ -57,10 +50,6 @@ impl From<Kind> for ErrorKind {
     }
 }
 
-/// The one coordinate an `error` object may locate its failure at.
-///
-/// Externally tagged, so each variant serializes as a one-key object:
-/// `{"source_frame": 7}`, `{"attempt": 3}`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ErrorContext {
     #[serde(rename = "source_frame")]
@@ -74,7 +63,6 @@ pub enum ErrorContext {
 }
 
 impl TryFrom<Coordinate> for ErrorContext {
-    /// A coordinate the published contract has no key for.
     type Error = Coordinate;
 
     fn try_from(coordinate: Coordinate) -> Result<Self, Coordinate> {
@@ -139,8 +127,6 @@ impl Error {
         self
     }
 
-    /// Locates the failure. A coordinate the contract has no key for is
-    /// omitted, like any other optional error metadata.
     #[must_use]
     pub fn with_context(mut self, context: Option<Coordinate>) -> Self {
         self.context = context.and_then(|coordinate| ErrorContext::try_from(coordinate).ok());
@@ -148,7 +134,6 @@ impl Error {
     }
 }
 
-/// Totals every live operation publishes in the envelope's `stats`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Stats {
     pub packets_attempted: u64,
@@ -176,8 +161,6 @@ impl From<&packetcraftr::Stats> for Stats {
     }
 }
 
-/// A converted result together with the envelope metadata its source
-/// carried: the diagnostics it raised and, for live operations, its totals.
 #[derive(Clone, Debug)]
 pub struct Published<T> {
     pub result: T,
@@ -186,7 +169,6 @@ pub struct Published<T> {
 }
 
 impl<T> Published<T> {
-    /// A result that raised the given library diagnostics.
     pub(crate) fn new(result: T, diagnostics: Vec<LibraryDiagnostic>) -> Self {
         Self {
             result,
@@ -213,8 +195,6 @@ enum OutputPayload<T> {
     Error { error: Error },
 }
 
-/// One structured record: an aggregate JSON result, or the same shape plus the
-/// `sequence` that makes it one NDJSON stream record.
 #[derive(Clone, Debug, Serialize)]
 pub struct Envelope<T> {
     schema: &'static str,
@@ -238,7 +218,6 @@ impl<T> Envelope<T> {
         Self::published(command, Published::new(result, diagnostics))
     }
 
-    /// One aggregate document carrying a converted result and its metadata.
     pub fn published(command: Command, published: Published<T>) -> Self {
         let Published {
             result,
@@ -278,7 +257,6 @@ impl<T> Envelope<T> {
         }
     }
 
-    /// Adds explicitly requested resource metadata without changing default records.
     #[must_use]
     pub fn with_resources(mut self, resources: super::resources::Report) -> Self {
         self.resources = Some(resources);
@@ -293,8 +271,6 @@ impl<T> Envelope<T> {
 }
 
 impl Envelope<()> {
-    /// One aggregate JSON error. `command` is absent when the failure happened
-    /// before command selection.
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
             schema: SCHEMA_V6,

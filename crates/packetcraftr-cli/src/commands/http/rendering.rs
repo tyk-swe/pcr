@@ -1,15 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `http`'s text output. Captured start lines and header fields are
-//! escaped, then written through the sanitizing writer, and every status
-//! prints in its JSON spelling.
-
 use crate::errors::CliError;
 use crate::output::http as wire;
 use crate::rendering::{comma_separated, optional_display, write_stdout_line, write_summary_line};
 
-/// One message line, then its header fields and any parse error.
 pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
     let start = match &message.start {
         Some(wire::StartLine::Request { method, target, .. }) => {
@@ -62,9 +57,7 @@ pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError>
     ))
 }
 
-/// Captured text with every control character, quote, and non-ASCII
-/// character spelled as a Rust escape, so header bytes can neither drive the
-/// terminal nor forge another line.
+/// Escaped so captured header bytes can neither drive the terminal nor forge another line.
 fn escaped(value: &str) -> String {
     value.chars().flat_map(char::escape_default).collect()
 }

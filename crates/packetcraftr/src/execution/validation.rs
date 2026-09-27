@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact validation of what executors return: sent bytes and packets, matched
-//! and unsolicited responses, capture statistics, and aggregate evidence
-//! limits, checked before any evidence is charged or published.
-
 use std::time::Duration;
 
 use crate::evidence::{self, SentPacket};

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded multi-question DNS batches under one operation deadline, run by
-//! [`Client::dns_batch`](crate::Client::dns_batch).
-
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
@@ -24,20 +21,13 @@ use super::{Error, QueryType};
 
 pub const MAX_QUESTIONS: usize = 256;
 
-/// The questions of one batch, in the order they run. Every question shares
-/// the first one's server, server port, route, and collection bounds.
+/// Every question shares the first one's server, port, route, and collection bounds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub questions: Vec<super::Request>,
 }
 
 impl Request {
-    /// Rejects an empty or oversized batch and questions that disagree on
-    /// the server or on the route and collection their exchanges share.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLimit`] for the `questions` field.
     pub fn validate(&self) -> Result<(), Error> {
         let questions = &self.questions;
         if questions.is_empty() || questions.len() > MAX_QUESTIONS {
@@ -69,8 +59,6 @@ impl Request {
         Ok(())
     }
 
-    /// The one deadline every question shares: the shortest
-    /// `limits.max_duration` in the batch.
     pub(super) fn max_duration(&self) -> Result<Duration, Error> {
         self.validate()?;
         Ok(self
@@ -82,31 +70,21 @@ impl Request {
     }
 }
 
-/// One event of the question at index `question` in the batch.
 #[derive(Clone, Debug)]
 pub struct Event {
     pub question: usize,
     pub event: super::Event,
 }
 
-/// How one batch question ended, in the request's declared order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionStatus {
-    /// The question ran to completion; `result` carries it, with the
-    /// completed [`Outcome`](super::Outcome) (which may itself be a timeout or
-    /// failure classification).
     Completed,
-    /// The question started — or reached its pre-execution gates — and
-    /// returned an error; `error` carries the classified failure.
     Failed,
-    /// The shared deadline or a cancellation stopped the batch before this
-    /// question began; no request traffic was generated for it.
     Unattempted,
 }
 
 impl QuestionStatus {
-    /// The stable text and structured-output name.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Completed => "completed",
@@ -122,9 +100,6 @@ impl std::fmt::Display for QuestionStatus {
     }
 }
 
-/// How one batch question ended, in input order. `R` is the question's
-/// terminal [`Report`](super::Report) in a batch [`Report`], and its
-/// [`Aggregate`](super::Aggregate) in a batch [`Aggregate`].
 #[derive(Debug)]
 pub struct Question<R = super::Report> {
     pub query_name: String,
@@ -133,8 +108,7 @@ pub struct Question<R = super::Report> {
     pub status: QuestionStatus,
     /// Present exactly when `status` is [`QuestionStatus::Completed`].
     pub result: Option<R>,
-    /// The classified failure; present exactly when `status` is
-    /// [`QuestionStatus::Failed`].
+    /// Present exactly when `status` is [`QuestionStatus::Failed`].
     pub error: Option<Error>,
 }
 
@@ -158,11 +132,8 @@ impl<R> Question<R> {
     }
 }
 
-/// The terminal result of one batch: one entry per declared question, in
-/// input order, plus the exact totals confirmed across all questions.
 #[derive(Debug)]
 pub struct Report {
-    /// The server target every question shared, exactly as declared.
     pub server: String,
     pub server_port: u16,
     pub questions: Vec<Question>,
@@ -184,8 +155,6 @@ impl Report {
     }
 }
 
-/// Every event of one batch joined with its [`Report`]: each completed
-/// question carries its full [`Aggregate`](super::Aggregate).
 #[derive(Debug)]
 pub struct Aggregate {
     pub server: String,
@@ -194,9 +163,6 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-/// A sink that rebuilds the batch [`Aggregate`] from published events. Pass
-/// a clone to [`Client::dns_batch`](crate::Client::dns_batch) and
-/// [`finish`](Self::finish) the one kept with the report it returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Vec<(usize, Observed)>>);
 
@@ -219,13 +185,6 @@ impl Sink<Event> for Collector {
 }
 
 impl Collector {
-    /// Joins each completed question's events with its terminal report.
-    /// Events of a question that failed are not retained.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::IncoherentReport`] when a question's events disagree
-    /// with its report.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let mut observed = self.0.take().into_iter().peekable();
         let Report {
@@ -265,17 +224,10 @@ impl Collector {
     }
 }
 
-/// The wait between questions precedes the next question's first attempt,
-/// so its failures name that attempt.
+/// The inter-question wait precedes the next question's first attempt, so its failures name it.
 const FIRST_ATTEMPT: u32 = 1;
 
-/// Runs the batch's questions in input order under `deadline`.
-///
-/// Prepares and authorizes the combined worst-case traffic limits before
-/// discovery. Cancellation or deadline exhaustion leaves remaining questions
-/// [`QuestionStatus::Unattempted`]; other question failures are
-/// [`QuestionStatus::Failed`] and allow the batch to continue. Output failures
-/// stop execution immediately.
+/// Authorizes the combined worst-case traffic limits before discovery.
 pub(super) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -306,15 +258,12 @@ where
     let mut stats = Stats::default();
     let mut previous_delay: Option<Duration> = None;
     for (index, (request, mut prepared)) in requests.iter().zip(prepared).enumerate() {
-        // Cancellation wins over elapsed-time reporting, matching every other
-        // deadline gate.
+        // Cancellation wins over elapsed-time reporting, matching every other deadline gate.
         if stop || deadline.enforce().is_err() {
             questions.push(Question::ended(request, QuestionStatus::Unattempted));
             continue;
         }
-        // Retries already observe this interval inside the query engine.
-        // Preserve it across question boundaries too; a batch must not turn
-        // single-attempt questions into an unpaced burst.
+        // Pace across question boundaries too; a batch must not become an unpaced burst.
         if let Some(previous) = previous_delay {
             let delay = previous.max(prepared.delay);
             if !delay.is_zero() {
@@ -367,8 +316,6 @@ where
             }),
             Err(error @ Error::Output { .. }) => return Err(error),
             Err(error) => {
-                // A stop request or an exhausted shared deadline ends the
-                // batch; remaining questions are unattempted, not failed.
                 stop = matches!(error, Error::Cancelled(_) | Error::DurationLimit { .. });
                 questions.push(Question::failed(request, error));
             }

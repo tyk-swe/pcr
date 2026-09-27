@@ -32,27 +32,15 @@ const OPTION_HEADER_LEN: usize = 4;
 const CRITICAL_OPTION_FLAG: u8 = 0x80;
 
 /// GENEVE encapsulation header (RFC 8926).
-///
-/// The `protocol_type` EtherType selects the encapsulated frame — Transparent
-/// Ethernet Bridging (0x6558), IPv4, or IPv6 — and the variable options are
-/// carried verbatim so every captured chain rebuilds byte-for-byte.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Geneve {
-    /// 2-bit version; RFC 8926 defines only version 0.
     pub version: u8,
-    /// The O bit: this is a control packet.
     pub control: bool,
-    /// The C bit: one or more options are critical.
     pub critical: bool,
-    /// Reserved 6 bits after the O and C bits.
     pub reserved1: u8,
-    /// EtherType of the encapsulated frame.
     pub protocol_type: WireValue<u16>,
-    /// 24-bit virtual network identifier.
     pub vni: u32,
-    /// Reserved byte after the VNI.
     pub reserved2: u8,
-    /// Verbatim option TLV bytes; the wire length field is derived.
     pub options: Bytes,
 }
 
@@ -86,15 +74,12 @@ reflective_layer! {
     layout pub(crate) fn geneve_layout(options_end: usize);
 }
 
-/// What a well-formed option chain declares: whether any option carries the
-/// critical bit, and whether any option header sets its three reserved bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OptionChain {
     critical: bool,
     reserved_bits: bool,
 }
 
-/// `None` when the bytes do not parse as an exact option chain.
 fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
     let mut chain = OptionChain {
         critical: false,
@@ -118,8 +103,6 @@ fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
     Some(chain)
 }
 
-/// The first fixed-header reserved field holding a non-zero value, which a
-/// reserved-bits diagnostic names.
 fn nonzero_reserved_field(reserved1: u8, reserved2: u8) -> Option<&'static str> {
     if reserved1 != 0 {
         Some("reserved1")

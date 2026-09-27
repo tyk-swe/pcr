@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Tag-independent, bounded staging. Numbers in arrays occupy one byte;
-//! only tagged objects consume semantic list items and nodes.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -173,9 +170,7 @@ impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
         Ok(u64::try_from(value).map_or(Buffered::Signed(value), Buffered::Unsigned))
     }
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Buffered, E> {
-        // The only possible string tags are text, IPv4 and IPv6. Even an
-        // uncompressed IPv6 address with a dotted IPv4 tail is at most 45
-        // bytes. Reject impossible candidates before copying their text.
+        // String tags are text, IPv4 or IPv6, and an IPv6 address is at most 45 bytes.
         if value.len() > self.budget.limits.max_text_bytes.max(45) {
             return Err(self.budget.exceeded(Limit::TextBytes));
         }
@@ -259,7 +254,6 @@ impl<'de> Visitor<'de> for ItemSeed<'_, '_> {
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Item, E> {
         let byte = u8::try_from(value)
             .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a byte"))?;
-        // Until the tag arrives the array can be bytes or a six-byte MAC.
         if self.count
             >= self
                 .parent

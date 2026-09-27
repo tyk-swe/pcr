@@ -42,7 +42,6 @@ fn field_range(
     (field.range.start, field.range.end)
 }
 
-/// One eth/ipv4/tcp capture with `count` identical frames.
 fn tcp_capture(path: &std::path::Path, count: usize) {
     use packetcraftr_core::{
         build::Builder,
@@ -120,7 +119,6 @@ fn set_assignments_patch_bytes_and_report_requested_and_derived_changes() {
             .iter()
             .any(|change| { change["field"] == "tcp#1.checksum" && change["origin"] == "derived" })
     );
-    // Every changed byte belongs to a reported range.
     let before = frames(&source);
     let after = frames(&target);
     assert_eq!(before.len(), after.len());
@@ -224,7 +222,6 @@ fn preserve_mode_retains_checksum_bytes_and_conflicts_are_explicit() {
     );
     let before = frames(&source);
     let after = frames(&preserved);
-    // The TCP checksum field keeps its exact bytes under preserve.
     for (source, edited) in before.iter().zip(&after) {
         let (start, end) = field_range(source, "tcp", "checksum");
         assert_eq!(
@@ -376,8 +373,6 @@ fn a_failing_edit_publishes_nothing() {
     let source = examples().join("captures/dns-response.pcap");
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("failed.pcapng");
-    // dns-response.pcap's UDP datagram has no tcp layer: the assignment fails
-    // mid-map and the staged destination must never be published.
     let output = run(&[
         "rewrite",
         path_text(&source),
@@ -388,7 +383,6 @@ fn a_failing_edit_publishes_nothing() {
     ]);
     assert!(!output.status.success());
     assert!(!target.exists());
-    // dns.id succeeds on the same capture and stays inside its byte range.
     let target = directory.path().join("dns.pcapng");
     let report = parse_json(&run_success(&[
         "--output",
@@ -417,7 +411,6 @@ fn a_failing_edit_publishes_nothing() {
 fn change_reporting_is_bounded_and_discloses_omissions() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("many.pcapng");
-    // 1100 identical frames, five changes each, exceed the 4096 bound.
     tcp_capture(&source, 1100);
     let target = directory.path().join("edited.pcapng");
     let report = parse_json(&run_success(&[

@@ -13,8 +13,6 @@ pub struct Report {
     pub interfaces: Vec<Interface>,
 }
 
-/// Interfaces, each with the timestamp types enumerated for it when they were
-/// requested, in index-then-name order with sorted addresses.
 impl From<Vec<(Info, Option<Vec<TimestampType>>)>> for Report {
     fn from(interfaces: Vec<(Info, Option<Vec<TimestampType>>)>) -> Self {
         let mut interfaces = interfaces

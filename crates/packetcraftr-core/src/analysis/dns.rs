@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Offline DNS framing and transaction evidence over scoped UDP and TCP flows.
-//! Feed unfiltered records with TCP events and physical-source tracking enabled.
-//! A missing response means only that no matching response was captured.
-
 mod transactions;
 
 use super::{
@@ -34,24 +30,17 @@ pub enum Transport {
     Udp,
     Tcp,
 }
-/// The terminal state of a framed message on a stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
-    /// The declared wire body was fully captured.
     Complete,
-    /// The message violated wire rules or length limits.
     Malformed,
-    /// The stream ended before the declared wire body arrived.
     Incomplete,
-    /// A sequence gap in the stream made the message unrecoverable.
     Gap,
-    /// The same stream position carried conflicting bytes.
     Conflict,
     Reset,
     Evicted,
 }
-/// One framed DNS message on a UDP flow or TCP stream.
 #[derive(Clone, Debug)]
 pub struct Message {
     pub index: u64,
@@ -68,17 +57,12 @@ pub struct Message {
     pub error: Option<dns::Error>,
     pub sources: SourceSet,
 }
-/// What the collector reports for each processed record.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// A stream-level condition that invalidated pending messages.
     Issue(StreamIssue),
-    /// A framed message reached a terminal state.
     Message(Box<Message>),
-    /// A query/response pair settled into a final status.
     Transaction(Transaction),
 }
-/// A stream-level condition attributed to one direction of a flow.
 #[derive(Clone, Debug, Serialize)]
 pub struct StreamIssue {
     pub number: u64,
@@ -86,7 +70,6 @@ pub struct StreamIssue {
     pub stream: u64,
     pub status: Status,
 }
-/// Cumulative counts over every record the collector has processed.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Summary {
     pub messages: u64,
@@ -124,11 +107,8 @@ impl Direction {
         self.prefix.len() + self.body.len()
     }
 }
-/// Collects DNS messages and transactions from reassembled flow deliveries.
-///
 /// Feed it unfiltered records with TCP events and physical-source tracking
-/// enabled; it owns the wire framing, decode attempts, and query/response
-/// correlation for every configured port.
+/// enabled.
 pub struct Collector {
     limits: Limits,
     ports: Vec<u16>,
@@ -142,7 +122,6 @@ pub struct Collector {
     summary: Summary,
 }
 impl Collector {
-    /// Ports are explicit and bounded; use `[53]` for standard DNS.
     pub fn new(limits: Limits, ports: impl IntoIterator<Item = u16>) -> Result<Self, Error> {
         limits.validate()?;
         let ports = application::normalize_ports(ports, "dns_ports")?;
@@ -480,8 +459,6 @@ impl session::Collector for Collector {
     type Event = Event;
     type Summary = Summary;
 
-    /// Sourced messages and transactions over reassembled TCP and indexed
-    /// UDP flows.
     fn needs(&self) -> CollectorNeeds {
         CollectorNeeds {
             tcp_stream: true,

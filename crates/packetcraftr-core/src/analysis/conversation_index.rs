@@ -8,11 +8,6 @@ use super::Error;
 use super::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::scope::ScopeId;
 
-/// One conversation, with its two endpoints in a direction-neutral order.
-///
-/// Both directions of a flow map onto the same canonical value, which is what
-/// lets one index describe the conversation an operator follows rather than
-/// the two one-way flows the wire carries.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct CanonicalFlow {
     pub(super) scope: ScopeId,
@@ -48,10 +43,6 @@ pub(super) struct StreamIndex {
 }
 
 impl StreamIndex {
-    /// Returns the conversation index for `flow`, assigning the next index
-    /// on first sight. `number` is the capture frame being processed and
-    /// `max_flows` the table bound; exceeding it is an error rather than a
-    /// silent misattribution.
     pub(super) fn assign(
         &mut self,
         flow: &ScopedFlowKey,

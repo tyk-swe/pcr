@@ -32,15 +32,12 @@ pub enum Error {
         source: Box<dyn StdError + Send + Sync>,
         failure: Classification,
     },
-    /// Enumerating interfaces to resolve the requested selector failed.
     #[error(transparent)]
     InterfaceDiscovery(#[from] packetcraftr_netio::interface::Error),
     #[error(
         "network device {selector} is unavailable: no interface matches the requested name or index"
     )]
     UnknownInterface { selector: String },
-    /// A name or index selector reached the planner without being resolved
-    /// through an interface provider first.
     #[error("interface selector {selector} was not resolved before route planning")]
     UnresolvedInterface { selector: String },
     #[error(
@@ -70,8 +67,6 @@ pub enum Error {
     MissingNeighborTarget { interface: String },
     #[error("interface {interface} has no source MAC for Layer 2 transmission")]
     MissingSourceMac { interface: String },
-    /// Active neighbor resolution failed while materializing this route.
-    ///
     /// Boxed because a neighbor failure carries the captured discovery
     /// evidence, which no other route failure should have to make room for.
     #[error(transparent)]
@@ -95,14 +90,12 @@ pub enum Error {
     #[error("invalid Segment Routing Header route state: {message}")]
     InvalidSegmentRouting {
         message: String,
-        /// Original packet-semantics rejection, absent for locally detected route failures.
         #[source]
         source: Option<Box<dyn StdError + Send + Sync>>,
     },
     #[error("invalid IPv4 source-route state: {message}")]
     InvalidSourceRouting {
         message: String,
-        /// Original packet-semantics rejection, absent for locally detected route failures.
         #[source]
         source: Option<Box<dyn StdError + Send + Sync>>,
     },
@@ -184,9 +177,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walks the retained `#[source]` chain, except for the transparent
-    /// neighbor variant, whose own `Display` is already this error's message
-    /// and which therefore delegates.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Neighbor(error) => error.causes(),

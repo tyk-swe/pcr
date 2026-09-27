@@ -37,21 +37,12 @@ use packetcraftr_netio::tcp;
 use packetcraftr_netio::transmit;
 use serde_json::Value;
 
-/// The MAC address of the one interface [`FixedRoutes`] selects.
 pub(crate) const INTERFACE_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
-/// The source address [`FixedRoutes`] selects; packets sourced from it pass
-/// the source-ownership check and fail only for the reason under test.
 pub(crate) const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 
-/// The fake provider bundle: the given route provider and one value serving
-/// transmit and capture, with the fixture interface list, scripted TCP, and a
-/// scripted resolver.
 pub(crate) type FakeProviders<R, I> =
     ProviderSet<R, Interfaces, I, I, ScriptedTcp, ScriptedResolver>;
 
-/// Composes [`FakeProviders`] from `route` and `io`, which transmits and
-/// captures, with the default fixture interface list, refusing TCP, and a
-/// resolver that answers nothing.
 pub(crate) fn providers<R, I: Clone>(route: R, io: I) -> FakeProviders<R, I> {
     ProviderSet {
         route,
@@ -63,8 +54,6 @@ pub(crate) fn providers<R, I: Clone>(route: R, io: I) -> FakeProviders<R, I> {
     }
 }
 
-/// The one interface [`FixedRoutes`] selects, as an interface provider
-/// enumerates it.
 pub(crate) fn fixture_interface() -> interface::Info {
     interface::Info {
         id: InterfaceId {
@@ -81,8 +70,6 @@ pub(crate) fn fixture_interface() -> interface::Info {
     }
 }
 
-/// An interface provider answering a fixed list, [`fixture_interface`] by
-/// default, recording [`Step::Interfaces`] for each enumeration.
 #[derive(Clone)]
 pub(crate) struct Interfaces {
     pub(crate) list: Vec<interface::Info>,
@@ -105,9 +92,6 @@ impl interface::Provider for Interfaces {
     }
 }
 
-/// A TCP provider that records [`Step::Connect`] for each attempt and then
-/// refuses it, or with `loopback` set connects through the system provider,
-/// which it allows only for loopback endpoints.
 #[derive(Clone, Default)]
 pub(crate) struct ScriptedTcp {
     pub(crate) loopback: bool,
@@ -134,8 +118,6 @@ impl tcp::Provider for ScriptedTcp {
     }
 }
 
-/// A resolver answering every hostname with `addresses`, recording
-/// [`Step::Resolve`] for each call.
 #[derive(Clone, Default)]
 pub(crate) struct ScriptedResolver {
     pub(crate) addresses: Vec<IpAddr>,
@@ -153,7 +135,6 @@ impl Resolver for ScriptedResolver {
     }
 }
 
-/// [`FixedRoutes`] that records [`Step::Route`] for each lookup.
 #[derive(Clone, Default)]
 pub(crate) struct RecordingRoutes(pub(crate) Steps);
 
@@ -172,8 +153,6 @@ impl Provider for RecordingRoutes {
     }
 }
 
-/// A route provider that puts every destination on-link over one dual
-/// capability Ethernet interface.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct FixedRoutes;
 
@@ -205,9 +184,6 @@ impl Provider for FixedRoutes {
     }
 }
 
-/// I/O for workflows that must fail before transmission: capture is armed
-/// before routes are materialized, so it exists but never observes anything.
-/// Neighbor discovery transmits, so it never runs over this I/O either.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct NeverTransmit;
 
@@ -234,30 +210,19 @@ impl capture::Provider for NeverTransmit {
     }
 }
 
-/// The MAC address [`RecordingTransmit`] answers every ARP request with.
 pub(crate) const NEIGHBOR_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
 
-/// One observable step recorded by the recording fakes, in the order it
-/// happened. Tests may add their own [`Step::Published`] entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// An ARP request for this target was handed to the transmitter.
     Neighbor(IpAddr),
-    /// These exact bytes were handed to the transmitter.
     Transmit(Vec<u8>),
-    /// The workflow published the evidence of this confirmed send.
     Published(usize),
-    /// The route provider was asked for a route to this destination.
     Route(IpAddr),
-    /// The interface provider enumerated interfaces.
     Interfaces,
-    /// A TCP connection to this endpoint was attempted.
     Connect(SocketAddr),
-    /// This hostname was resolved.
     Resolve(String),
 }
 
-/// A shared, ordered record of provider calls.
 #[derive(Clone, Default)]
 pub(crate) struct Steps(Arc<Mutex<Vec<Step>>>);
 
@@ -273,11 +238,6 @@ impl Steps {
 
 type Replies = Arc<Mutex<VecDeque<capture::Captured>>>;
 
-/// I/O that records every frame it is handed and confirms it in full.
-///
-/// It answers each ARP request it transmits with [`NEIGHBOR_MAC`], recorded as
-/// [`Step::Neighbor`], through the capture session armed last (the one neighbor
-/// discovery armed for that request). Other captures never observe anything.
 #[derive(Clone, Default)]
 pub(crate) struct RecordingTransmit {
     steps: Steps,
@@ -293,7 +253,6 @@ impl RecordingTransmit {
         }
     }
 
-    /// How many capture sessions have been armed.
     pub(crate) fn armed(&self) -> usize {
         self.armed.load(Ordering::SeqCst)
     }
@@ -343,8 +302,6 @@ impl capture::Provider for RecordingTransmit {
     }
 }
 
-/// The target of an untagged Ethernet ARP request, and the reply that
-/// resolves it to [`NEIGHBOR_MAC`].
 fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH,
@@ -381,8 +338,6 @@ fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
     Some((arp.target_protocol, reply.bytes))
 }
 
-/// A capture session that is ready at once and yields the replies queued
-/// for it.
 pub(crate) struct ReplyCapture {
     metadata: capture::Metadata,
     replies: Replies,
@@ -413,7 +368,6 @@ impl capture::Session for ReplyCapture {
     }
 }
 
-/// A capture session that is ready at once and never yields a frame.
 pub(crate) struct IdleCapture(capture::Metadata);
 
 impl capture::Session for IdleCapture {
@@ -441,7 +395,6 @@ impl capture::Session for IdleCapture {
     }
 }
 
-/// A compiled validator for the published packet-document schema.
 pub(crate) fn packet_schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {

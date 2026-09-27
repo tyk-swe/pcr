@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Per-frame TLS dissection: which TCP segments become a `tls` layer, which
-//! stay `raw`, and what each one publishes.
-
 mod common;
 
 use common::registry;
@@ -25,23 +22,18 @@ use packetcraftr_core::{build, codec, decode, packet::Packet};
 use common::tls_frames::{ClientHelloSpec, application_data, client_hello, handshake_record};
 use common::tls_vectors::{CLIENT_HELLO_VECTORS, SERVER_HELLO_VECTORS, decode_hex};
 
-/// The ports the default registry binds to TLS.
 const TLS_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
 
 const CLIENT_PORT: u16 = 40_000;
 
-/// A whole ClientHello record, from the published-JA4 vector.
 fn client_hello_record() -> Vec<u8> {
     decode_hex(CLIENT_HELLO_VECTORS[1].record_hex)
 }
 
-/// A whole ServerHello record.
 fn server_hello_record() -> Vec<u8> {
     decode_hex(SERVER_HELLO_VECTORS[0].record_hex)
 }
 
-/// A ClientHello record whose `server_name` carries exactly `name`, so a test
-/// can choose which name bytes the dissector sees.
 fn client_hello_record_with_server_name(name: &str) -> Vec<u8> {
     handshake_record(&client_hello(&ClientHelloSpec {
         sni: Some(name.to_owned()),
@@ -52,8 +44,6 @@ fn client_hello_record_with_server_name(name: &str) -> Vec<u8> {
     }))
 }
 
-/// Builds `eth/ipv4/tcp/raw(payload)`, dissects it, and asserts the exact
-/// round trip the whole registry contract rests on.
 fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::DecodedPacket {
     let registry = registry();
     let mut packet = Packet::new();
@@ -211,14 +201,11 @@ fn a_client_hello_publishes_its_handshake_fields() {
         tls_field(&decoded, "supported_versions"),
         Some(FieldValue::List(values)) if !values.is_empty()
     ));
-    // ServerHello-only fields stay absent, so a filter on them cannot match.
     assert_eq!(tls_field(&decoded, "cipher_suite"), None);
     assert_eq!(tls_field(&decoded, "selected_version"), None);
     assert!(decoded.diagnostics.is_empty());
 }
 
-/// Replaces the first occurrence of `marker` in `record` with `replacement`,
-/// keeping every length field valid because both have the same size.
 fn patch(mut record: Vec<u8>, marker: &[u8], replacement: &[u8]) -> Vec<u8> {
     assert_eq!(marker.len(), replacement.len());
     let start = record
@@ -308,7 +295,6 @@ fn a_layer_retains_the_records_it_covered_byte_for_byte() {
         &record[..]
     );
 
-    // A tail the parser cannot read stays outside the layer's wire.
     let mut segment = record.clone();
     segment.extend_from_slice(b"\x00\x00\x00\x00\x00\x00\x00\x00");
     let decoded = dissect(CLIENT_PORT, 443, &segment);
@@ -356,8 +342,6 @@ fn a_segment_starting_mid_record_stays_raw() {
 
 #[test]
 fn a_plausible_header_with_no_complete_record_stays_raw() {
-    // A record header the gate accepts, over bytes that never complete it:
-    // a coincidence inside opaque data, not a defect.
     let mut segment = vec![23, 0x03, 0x03, 0x40, 0x00];
     segment.extend((0..64_u8).map(|value| value.wrapping_mul(37)));
     let decoded = dissect(CLIENT_PORT, 443, &segment);
@@ -470,7 +454,6 @@ fn two_complete_records_in_one_segment_are_one_layer() {
         tls_field(&decoded, "record_count"),
         Some(FieldValue::from(2_u16))
     );
-    // The first record still names the layer, and its handshake still parses.
     assert_eq!(
         tls_field(&decoded, "handshake_type"),
         Some(FieldValue::from(1_u8))

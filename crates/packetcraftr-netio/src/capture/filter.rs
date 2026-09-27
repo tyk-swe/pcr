@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Resolver-free native capture-filter validation.
-
 use crate::{Error, interface::Id as InterfaceId};
 
 pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {
@@ -16,7 +14,6 @@ pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Erro
 }
 
 // indices stay below bytes.len() and every str slice boundary is an ASCII byte
-// offset and end only advance by one within bytes.len(), which cannot overflow usize
 fn has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;

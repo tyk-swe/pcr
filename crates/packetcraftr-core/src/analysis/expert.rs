@@ -38,13 +38,9 @@ const fn udp_stream_ref(index: u64) -> StreamRef {
     }
 }
 
-/// Cross-frame finding attributed to the revealing frame. Layer-scoped decode
-/// diagnostics are also included with their own codes and severities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     pub severity: Severity,
-    /// Stable machine-readable code, such as `tcp.retransmission`; always a
-    /// literal from the published set.
     pub code: &'static str,
     /// 1-based capture frame number that revealed the condition.
     pub number: u64,
@@ -52,7 +48,6 @@ pub struct Finding {
     pub message: String,
 }
 
-/// Per-severity and per-code totals for a completed pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
     pub clock: crate::analysis::ClockReport,
@@ -60,7 +55,6 @@ pub struct Summary {
     pub errors: u64,
     pub warnings: u64,
     pub notes: u64,
-    /// Total findings per code, in code order.
     pub codes: BTreeMap<&'static str, u64>,
 }
 
@@ -77,11 +71,6 @@ impl Summary {
     }
 }
 
-/// Detects TCP conditions from headers. Reassembly events supply retransmission
-/// evidence, and bytes still pending when the run's trailing evictions flush a
-/// flow supply end-of-capture incompleteness; header sequence, acknowledgment,
-/// window, and flag fields supply missed-segment, duplicate ACK, zero window,
-/// window-full, keep-alive, and reset findings.
 #[derive(Debug, Default)]
 pub struct Collector {
     flows: HashMap<ScopedFlowKey, DirectionState>,
@@ -94,7 +83,6 @@ impl Collector {
         Self::default()
     }
 
-    /// Folds one matched frame, returning the findings it revealed.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
         let mut findings = finding::from_capture_evidence(record);
         findings.extend(finding::from_diagnostics(record));
@@ -111,10 +99,6 @@ impl Collector {
         findings
     }
 
-    /// Finishes the pass, folding in the run's trailing reassembly events: a
-    /// flow flushed with bytes still buffered never healed its holes, which
-    /// is evidence the per-frame view cannot carry. Returned findings are
-    /// attributed to the run's last frame read.
     pub fn finish(mut self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
         self.summary.clock = summary.clock.clone();
         let findings = tcp::finish(
@@ -133,8 +117,6 @@ impl session::Collector for Collector {
     type Event = Finding;
     type Summary = Summary;
 
-    /// Findings read transport indexes, the reassembler's byte-exact
-    /// retransmission evidence, and reconstructed-datagram diagnostics.
     fn needs(&self) -> CollectorNeeds {
         CollectorNeeds {
             tcp_stream: true,

@@ -1,7 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Semantic resource limits of the packet-document parser, enforced
-//! identically for JSON and YAML.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +13,6 @@ use serde::Deserialize;
 
 const SCHEMA: &str = PACKET_DOCUMENT_SCHEMA_V2;
 
-/// Wraps layer JSON in a complete document.
 fn document(layers: &str) -> String {
     document_with_schema(SCHEMA, layers)
 }
@@ -24,7 +21,6 @@ fn document_with_schema(schema: &str, layers: &str) -> String {
     format!("{{\"schema\":\"{schema}\",\"layers\":[{layers}]}}")
 }
 
-/// One layer with the given field entries (`"name": value` fragments).
 fn layer(protocol: &str, fields: &[String]) -> String {
     format!(
         "{{\"protocol\":\"{protocol}\",\"fields\":{{{}}}}}",
@@ -50,7 +46,6 @@ fn list_of_unsigned(name: &str, length: usize) -> String {
     format!("\"{name}\":{{\"type\":\"list\",\"value\":[{items}]}}")
 }
 
-/// A field holding `depth` nested lists, innermost empty.
 fn nested_lists(name: &str, depth: usize) -> String {
     let mut value = "[]".to_owned();
     for _ in 1..depth {
@@ -59,8 +54,6 @@ fn nested_lists(name: &str, depth: usize) -> String {
     format!("\"{name}\":{{\"type\":\"list\",\"value\":{value}}}")
 }
 
-/// The same document as YAML, produced from the JSON value tree so the two
-/// inputs are structurally identical.
 fn to_yaml(json: &str) -> String {
     let mut deserializer = serde_json::Deserializer::from_str(json);
     deserializer.disable_recursion_limit();
@@ -70,8 +63,6 @@ fn to_yaml(json: &str) -> String {
     noyalib::to_string(&value).unwrap_or_else(|_| json.to_owned())
 }
 
-/// Parses the JSON fixture in both formats and requires the same verdict:
-/// equal documents, or the same limit (or both a format error).
 fn parse_both(json: &str, limits: &DocumentLimits) -> Result<Packet, Error> {
     let yaml = to_yaml(json);
     let from_json = Packet::parse_with_limits(json, Format::Json, limits);
@@ -106,8 +97,6 @@ fn limit_of(result: Result<Packet, Error>) -> Limit {
     }
 }
 
-/// Every limit at its boundary and one unit over, with the same verdict in
-/// both formats.
 #[test]
 fn every_limit_is_exact_at_the_boundary_and_rejects_one_unit_over() {
     struct Case {
@@ -321,7 +310,6 @@ fn invalid_limits_are_rejected_before_any_parsing() {
                 ..
             }
         ));
-        // The fix is the configuration, not the document.
         let classification = error.classification();
         assert_eq!(classification.code, "cli.document_limit");
         assert!(
@@ -370,14 +358,11 @@ fn deeply_nested_lists_are_bounded_without_exhausting_the_stack() {
         limit_of(parse_both(&over, &DocumentLimits::DEFAULT)),
         Limit::Nesting
     );
-    // Deep enough to exceed every configured depth, shallow enough for the
-    // test helper that builds the YAML twin from a value tree.
     let absurd = document(&layer("raw", &[nested_lists("f", 300)]));
     assert_eq!(
         limit_of(parse_both(&absurd, &DocumentLimits::DEFAULT)),
         Limit::Nesting
     );
-    // A nested list consumes nodes and aggregate list items as well as depth.
     let counted = DocumentLimits {
         max_total_nodes: 3,
         ..DocumentLimits::DEFAULT
@@ -479,7 +464,6 @@ fn many_small_scalars_exhaust_the_total_payload_budget() {
         ..limits
     };
     parse_both(&json, &exact).expect("100 integers are 800 payload bytes");
-    // Byte values and text share the same budget.
     let mixed = document(&layer(
         "raw",
         &[bytes("b", 500), text("t", &"a".repeat(301))],
@@ -544,7 +528,6 @@ fn malformed_input_near_each_threshold_is_a_format_error_not_a_limit() {
             }
         }
     }
-    // Wrong value types at a threshold are format errors too.
     let wrong = document_with_schema(
         "v",
         &layer(
@@ -635,7 +618,6 @@ fn value_before_type_has_the_same_semantic_budget() {
     parse_both(value_first, &narrow).expect("byte elements are not list items");
     parse_both(&document(&layer("raw", &[bytes("b", 4)])), &narrow)
         .expect("type-first bytes are not list items");
-    // Type mismatches after buffering are format errors.
     let mismatch = "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,300],\"type\":\"bytes\"}}}]}";
     assert!(matches!(
         Packet::parse_with_limits(mismatch, Format::Json, &DocumentLimits::DEFAULT),
@@ -793,17 +775,13 @@ fn shipped_examples_remain_valid_under_default_limits() {
     );
 }
 
-/// Regressions found by the packet-document fuzz targets while the semantic
-/// limits were introduced.
 #[test]
 fn fuzz_regressions_stay_fixed() {
     let cases: [(&str, Format); 6] = [
-        // Layer probe past the layer limit must not recurse without bound.
         (
             "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{},{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"list\",\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[",
             Format::Json,
         ),
-        // Unknown tags and keys stay format errors.
         (
             "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"float\",\"value\":1.5}}}]}",
             Format::Json,
@@ -812,7 +790,6 @@ fn fuzz_regressions_stay_fixed() {
             "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"unsigned\",\"value\":1,\"extra\":0}}}]}",
             Format::Json,
         ),
-        // Value-first with an unusable shape.
         (
             "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":[[1]],\"type\":\"list\"}}}]}",
             Format::Json,
@@ -821,7 +798,6 @@ fn fuzz_regressions_stay_fixed() {
             "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":{\"type\":\"bool\",\"value\":true},\"type\":\"bool\"}}}]}",
             Format::Json,
         ),
-        // YAML anchors and multiple documents remain refused.
         (
             "schema: &a packetcraftr.packet/v2\nlayers: *a\n",
             Format::Yaml,
@@ -890,7 +866,6 @@ fn recursive_key_permutations_preserve_semantic_acceptance() {
                     max_list_items: 1,
                     max_total_list_items: 2,
                     max_total_nodes: 7,
-                    // A long IPv6 address must not consume the text budget.
                     max_text_bytes: SCHEMA.len(),
                     ..DocumentLimits::DEFAULT
                 };
@@ -898,7 +873,6 @@ fn recursive_key_permutations_preserve_semantic_acceptance() {
                     let expected = Packet::parse_with_limits(&value.to_string(), format, &limits);
                     assert_eq!(expected.is_ok(), maximum >= size + 34);
                     for mut seed in 0..8 {
-                        // JSON is also a YAML flow document, preserving key order.
                         let actual =
                             Packet::parse_with_limits(&render(&value, &mut seed), format, &limits);
                         match (&expected, actual) {

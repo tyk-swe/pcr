@@ -3,10 +3,6 @@
 
 //! Send: transmitting every packet a template expands to, a bounded number of
 //! passes, under one operation budget.
-//!
-//! [`Client::send`](crate::Client::send) publishes each confirmed
-//! transmission as an [`Event`] and returns the terminal [`Report`]; a
-//! [`Collector`] sink rebuilds the full [`Aggregate`].
 
 mod engine;
 mod error;

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Opt-in runtime observations, separate from setting declarations and presets.
-//! Observations never govern admission, protocol mechanics, or runtime construction.
-
 mod settings;
 pub(crate) use settings::{
     Enabled, Field, Preset, PresetDefaults, SettingValue, Settings, Stage, Unit, collect_settings,
@@ -27,7 +24,6 @@ struct Context {
 }
 static CONTEXT: OnceLock<Context> = OnceLock::new();
 
-/// Installs the selected command's declared settings for runtime diagnostics.
 pub(crate) fn configure(settings: Vec<(Setting, Enabled)>) {
     let _ = CONTEXT.set(Context {
         settings,
@@ -36,16 +32,12 @@ pub(crate) fn configure(settings: Vec<(Setting, Enabled)>) {
     });
 }
 
-/// Reports whether the comparison needs the capture stream index, which
-/// enables or disables the [`Enabled::StreamIndex`] stages.
 pub(crate) fn stream_index_needed(needed: bool) {
     if let Some(context) = CONTEXT.get() {
         context.stream_index.store(needed, Ordering::Relaxed);
     }
 }
 
-/// Registers an already-constructed runtime. Keeping a clone observes admission;
-/// it neither holds permits nor keeps callback captures alive.
 pub(crate) fn register_runtime(name: &'static str, runtime: &Runtime) {
     if let Some(context) = CONTEXT.get() {
         let mut runtimes = context

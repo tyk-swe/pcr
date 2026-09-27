@@ -255,9 +255,6 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
     true
 }
 
-// Re-encode the layers after the transport header so the exact UDP payload bytes are compared
-// directly, whatever typed or opaque form carries them, without changing the matcher signature used
-// by sent-evidence validation.
 fn sent_payload_matches(
     probe: &Probe,
     sent: &Packet,
@@ -294,8 +291,6 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
         .map(|built| built.bytes)
 }
 
-// the observed packet is compared against the same reduction probe_packet applied, so the narrowing
-// is symmetric on both sides of the comparison
 pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     if probe.udp_profile.as_ref().is_some_and(|profile| {
         probe.endpoint.transport() != crate::probe::Transport::Udp

@@ -28,7 +28,6 @@ pub(super) fn mutation_value(
     }
 }
 
-// `index_from` reduces the selector below the length of the table it indexes
 fn boundary_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -66,8 +65,6 @@ fn boundary_value(
         FieldKind::Bytes => {
             let lengths = [0, 1, limits.max_field_bytes.min(64), limits.max_field_bytes];
             let length = lengths[index_from(selector, lengths.len())];
-            // The fill byte reads a selector bit the length index does not, so
-            // every (length, fill) pair is reachable rather than half of them.
             let fill = if selector & 0b100 == 0 { 0x00 } else { 0xff };
             FieldValue::Bytes(Bytes::from(vec![fill; length]))
         }
@@ -110,8 +107,6 @@ fn boundary_value(
     }
 }
 
-// each arm reinterprets or narrows uniformly random bits to fill the requested field width, so
-// discarding the surplus bits is the generator's purpose
 pub(super) fn random_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -187,10 +182,6 @@ pub(super) fn random_value(
     }
 }
 
-/// Measures one reflected value against the bytes a budget still allows.
-///
-/// Returns [`None`] when the value does not fit, holds more list items than
-/// `max_list_items`, or nests deeper than [`MAX_VALUE_NESTING`].
 pub(super) fn bounded_value_size(
     value: &FieldValue,
     remaining: usize,
@@ -239,9 +230,7 @@ fn bounded_size_at(
             if values.len() > max_list_items {
                 return None;
             }
-            // Charge every list node even when it contains an otherwise
-            // zero-byte nested list. This bounds structural cloning as well
-            // as scalar and byte payload retention.
+            // Charge every list node, even a zero-byte nested list, to bound structural cloning.
             let mut total = values.len();
             if total > remaining {
                 return None;
@@ -273,16 +262,11 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
     }
     if bytes.len() > maximum {
         if maximum == 0 {
-            // A zero field budget leaves no byte to flip, so the bounded
-            // prefix is empty and the mutation reduces to the empty value.
             return FieldValue::Bytes(Bytes::new());
         }
-        // Replacing an oversized value with a bounded prefix keeps allocation
-        // within the mutation budget and makes the reduction explicit.
         // the branch is entered only when `bytes.len() > maximum`
         let mut value = bytes[..maximum].to_vec();
         let index = index_below(random, value.len());
-        // `index_below` reduces below `value.len()`
         {
             value[index] ^= 1 << (random.next_u64() % 8);
         }
@@ -306,14 +290,11 @@ fn malformed_value(
 ) -> FieldValue {
     if kind == FieldKind::Unsigned {
         if limits.max_field_bytes == 0 {
-            // No field budget leaves no room for a reflective type change, so
-            // the malformed value stays inside the numeric domain.
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
         if round & 1 == 0 {
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
-        // `index_below` returns at most 3 here, so the increment cannot overflow
         let length = 1 + index_below(random, limits.max_field_bytes.min(4));
         return FieldValue::Bytes(Bytes::from(random.bytes(length)));
     }
@@ -328,21 +309,12 @@ fn bounded_length(random: &mut SplitMix64, maximum: usize) -> usize {
     }
 }
 
-/// Reduce an arbitrary 64-bit word into `0..exclusive_maximum`.
-///
-/// Every selector in this module indexes a slice this way, so the one narrowing
-/// conversion the reduction needs lives here rather than at each call site.
-///
-/// A zero bound has no valid index; validated [`Limits`] never produce one,
-/// and the reduction yields `0` rather than dividing by zero if one arrives.
-///
-/// [`Limits`]: Limits
+/// A zero bound yields `0` rather than dividing by zero.
 pub(super) fn index_from(word: u64, exclusive_maximum: usize) -> usize {
     debug_assert!(exclusive_maximum != 0);
     let Some(remainder) = word.checked_rem(exclusive_maximum as u64) else {
         return 0;
     };
-    // the remainder is below exclusive_maximum, which is a usize
     remainder as usize
 }
 
@@ -399,7 +371,6 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         FieldValue::List(value) => {
             push(FieldValue::List(Vec::new()));
             if value.len() > 1 {
-                // `value.len() / 2` is below `value.len()`, which the guard proves is above 1
                 {
                     push(FieldValue::List(value[..value.len() / 2].to_vec()));
                 }

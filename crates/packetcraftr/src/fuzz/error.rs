@@ -40,8 +40,6 @@ pub enum Error {
     },
     #[error("fuzz executor returned invalid evidence at case {case_index}: {message}")]
     InvalidEvidence { case_index: u64, message: String },
-    /// The case's exact bytes could not be prepared on the route the executor
-    /// reported, so its transmission cannot be verified.
     #[error("fuzz executor returned invalid evidence at case {case_index}")]
     UnverifiableRoute {
         case_index: u64,
@@ -104,12 +102,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants list the boundary's message and its
-    /// captured `causes` snapshot instead, which its own source chain no
-    /// longer holds.
-    ///
-    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Campaign(error) => error.causes(),
@@ -127,7 +119,6 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
     }
 }
 
-/// Names execution-context failures at the index of the case they concern.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CaseErrors;
 

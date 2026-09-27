@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Windows passive route selection backed by `GetBestRoute2`.
-
 #![allow(unsafe_code)]
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -30,8 +28,6 @@ use crate::{
 };
 use packetcraftr_core::budget::Deadline;
 
-/// Runs on the worker pool. IP Helper calls take no timeout, so the deadline
-/// is also checked between them, stopping work nobody waits for.
 pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -91,7 +87,6 @@ pub(in crate::platform) fn route(
             index: output_index,
         })?;
     let mut interface = adapter.interface;
-    // Use the family-specific IP Helper index with portable adapter metadata.
     interface.id.index = output_index;
     let normalized_constraint = constrained_interface.as_ref().map(|adapter| InterfaceId {
         name: adapter.interface.id.name.clone(),
@@ -153,8 +148,7 @@ fn query_best_route(
     let source_address = preferred_source.map(|source| encode_address(source, interface_index));
     let mut row = MIB_IPFORWARD_ROW2::default();
     let mut source = SOCKADDR_INET::default();
-    // SAFETY: all pointers refer to initialized input/output structures for
-    // the duration of this synchronous IP Helper call.
+    // SAFETY: all pointers refer to initialized structures for this synchronous IP Helper call.
     let result = unsafe {
         GetBestRoute2(
             constrained_interface.map(|adapter| &adapter.luid as *const NET_LUID_LH),
@@ -182,7 +176,6 @@ fn query_best_route(
     Ok(BestRoute { row, source })
 }
 
-/// One synchronous `GetAdaptersAddresses` snapshot, run on the worker pool.
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
 ) -> Result<Decision, route::Error> {
@@ -232,14 +225,12 @@ fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
     let family = unsafe { address.si_family };
     match family {
         AF_INET => {
-            // SAFETY: AF_INET identifies the active IPv4 union member and its
-            // active IN_ADDR scalar representation.
+            // SAFETY: AF_INET identifies the active IPv4 union member.
             let bytes = unsafe { address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes() };
             Some(IpAddr::V4(Ipv4Addr::from(bytes)))
         }
         AF_INET6 => {
-            // SAFETY: AF_INET6 identifies the active IPv6 union member and its
-            // active byte-array address representation.
+            // SAFETY: AF_INET6 identifies the active IPv6 union member.
             let bytes = unsafe { address.Ipv6.sin6_addr.u.Byte };
             Some(IpAddr::V6(Ipv6Addr::from(bytes)))
         }

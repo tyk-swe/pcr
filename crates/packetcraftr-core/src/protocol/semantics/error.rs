@@ -6,10 +6,6 @@ use std::net::Ipv6Addr;
 use crate::layer::Id;
 
 /// Why a packet's route interpretation is ambiguous or cannot be determined.
-///
-/// Each variant describes the packet, not what a caller does about it; a new
-/// ambiguity gets a variant here, never a prose string assembled at the throw
-/// site.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -83,19 +79,13 @@ impl Error {
     }
 }
 
-/// The rule a route-bearing field breaks in an [`Error::Field`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Constraint {
-    /// An SRH segment list holds at least one address.
     NonEmptySegments,
-    /// An SRH segment list holds at most 256 addresses.
     AtMost256Segments,
-    /// A derived one-byte field is `Auto`, an exact `u8`, or one raw byte.
     OneByte,
-    /// A VLAN priority is within `0..=7`.
     PriorityAtMost7,
-    /// A VLAN identifier is within `0..=4095`.
     VlanIdAtMost4095,
 }
 

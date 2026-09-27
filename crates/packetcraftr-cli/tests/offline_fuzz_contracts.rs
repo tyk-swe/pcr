@@ -30,9 +30,6 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
     let second = run(&arguments);
     assert!(first.status.success(), "{:?}", first.stderr);
     assert!(second.status.success(), "{:?}", second.stderr);
-    // Everything the campaign derives from its seed repeats exactly. The one
-    // measured column is `stats.elapsed`, which reports how long generation
-    // actually took, so it is required to be present rather than equal.
     let mut documents = [parse_json(&first), parse_json(&second)];
     for document in &mut documents {
         assert!(document["stats"]["elapsed"].is_object(), "{document}");
@@ -210,9 +207,6 @@ fn fuzz_aggregate_is_collected_from_the_streamed_case_path() {
     for field in ["cases_generated", "cases_built", "cases_rejected"] {
         assert_eq!(aggregate["result"][field], complete["result"][field]);
     }
-    // The aggregate document is exactly the collected stream, statistics
-    // included. `elapsed` measures the run that produced each document, so
-    // only that column may differ between the two runs.
     let mut statistics = [aggregate["stats"].clone(), complete["stats"].clone()];
     for stats in &mut statistics {
         assert!(stats["elapsed"].is_object(), "{stats}");

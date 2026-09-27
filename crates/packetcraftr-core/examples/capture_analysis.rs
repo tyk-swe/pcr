@@ -1,13 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Records a small classic-PCAP fixture in memory, then runs the shared
-//! analysis pipeline with the stats collector over it — the same pipeline the
-//! CLI's `stats`/`expert`/`follow` commands drive for files. Fully offline;
-//! no native features required.
-//!
-//!     cargo run -p packetcraftr-core --example capture_analysis
-
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -23,8 +16,6 @@ use packetcraftr_core::protocol::builtin;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = builtin::registry();
 
-    // Materialize two datagrams between documentation (TEST-NET-1) addresses
-    // and record them as a classic-PCAP fixture held entirely in memory.
     let mut capture = Vec::new();
     {
         let mut writer = Writer::new(&mut capture, Format::Pcap, LinkType::IPV4)?;
@@ -49,7 +40,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Run the analysis loop and fold matched frames into the stats tables.
     let mut reader = Reader::new(Cursor::new(&capture))?;
     let mut collector = stats::Collector::new(Duration::from_secs(1))?;
     let options = analysis::Options::default();

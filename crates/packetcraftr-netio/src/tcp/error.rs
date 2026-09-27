@@ -1,21 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Why a bounded TCP connection could not be admitted, started, or completed.
-
 use std::io;
 
 use packetcraftr_core::budget::{Cancelled, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// Why a bounded TCP connection could not be admitted, started, or
-/// completed, including the provider's own socket failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The provider's socket call failed. Its [`io::ErrorKind`] says how: the
-    /// peer refused, the attempt timed out, the destination was unreachable,
-    /// or a local failure.
     #[error(transparent)]
     Socket(#[from] io::Error),
     #[error("could not inspect the connected {operation} endpoint")]
@@ -24,11 +17,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
-    /// The caller's deadline allows a connection longer than
-    /// [`deadline::MAX_WAIT`](crate::deadline::MAX_WAIT).
     #[error("TCP connect timeout must be nonzero and at most one hour")]
     Timeout,
-    /// The caller's deadline was spent before the connection could start.
     #[error("live operation deadline expired while starting a TCP connection")]
     DeadlineExceeded,
     #[error("TCP connect admission reached its process-wide limit of {limit}")]
@@ -39,14 +29,11 @@ pub enum Error {
     Worker,
     #[error("TCP connect attempt was already completed")]
     Completed,
-    /// The caller cancelled the connection before it started.
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
 }
 
 impl Error {
-    /// The failure a connection reports when its caller's deadline stopped it
-    /// before it started.
     pub(super) fn interrupted(interrupted: Interrupted) -> Self {
         match interrupted {
             Interrupted::Cancelled(cancelled) => cancelled.into(),

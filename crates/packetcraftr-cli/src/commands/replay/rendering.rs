@@ -1,13 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `replay`'s text output.
-
 use crate::errors::CliError;
 use crate::output;
 use crate::rendering::{duration_text, spaced_hex, write_summary_line};
 
-/// One transmitted frame: where it went and its exact bytes.
 pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
     format!(
         "{}: sent {} bytes via {} (index {}, {}) dlt={} {}",
@@ -21,7 +18,6 @@ pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
     )
 }
 
-/// The closing line; a filtered replay also names how many frames it read.
 pub(super) fn render_summary(
     report: &packetcraftr::replay::Report,
     filtered: bool,

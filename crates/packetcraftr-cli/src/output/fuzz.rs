@@ -11,8 +11,6 @@ use super::diagnostic::Diagnostic;
 use super::envelope::{Error as OutputError, Published, Stats};
 use super::frame::{Captured, Wire};
 
-/// An offline campaign publishes its cases as packet operations: every
-/// generated case was attempted, every built case completed.
 impl From<&packet_fuzz::Stats> for Stats {
     fn from(value: &packet_fuzz::Stats) -> Self {
         Self {
@@ -33,7 +31,6 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The serialized name, for text output that must agree with JSON.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -44,7 +41,6 @@ impl Mode {
 }
 
 published_enum! {
-    /// How a case's field value was chosen.
     pub enum Strategy from packet_fuzz::Strategy {
         Boundary => "boundary",
         Random => "random",
@@ -53,9 +49,6 @@ published_enum! {
     }
 }
 
-/// What became of one case: built or rejected offline, and answered or
-/// timed out once transmitted. No library enum carries all four: core owns
-/// the offline outcomes and the live workflow the transmitted ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum Outcome {
     #[serde(rename = "built")]
@@ -69,7 +62,6 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// The published name, for text output that must agree with JSON.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -87,7 +79,6 @@ impl std::fmt::Display for Outcome {
     }
 }
 
-/// A transmitted case was answered or timed out.
 impl From<live_fuzz::Outcome> for Outcome {
     fn from(value: live_fuzz::Outcome) -> Self {
         match value {
@@ -97,8 +88,6 @@ impl From<live_fuzz::Outcome> for Outcome {
     }
 }
 
-/// An offline case is only ever built or rejected; the live outcomes are
-/// reached only after transmission.
 impl From<packet_fuzz::CaseOutcome> for Outcome {
     fn from(value: packet_fuzz::CaseOutcome) -> Self {
         match value {
@@ -174,8 +163,6 @@ pub struct Report {
     pub cases: Vec<Case>,
 }
 
-/// An offline campaign, checked for coherence, with its diagnostics and its
-/// cases counted as packet operations.
 impl TryFrom<packet_fuzz::Report> for Published<Report> {
     type Error = ContractError;
 
@@ -200,8 +187,6 @@ impl TryFrom<packet_fuzz::Report> for Published<Report> {
     }
 }
 
-/// A live campaign, checked for coherence. Diagnostics stay with the case
-/// that raised them.
 impl TryFrom<live_fuzz::Aggregate> for Published<Report> {
     type Error = ContractError;
 
@@ -247,8 +232,6 @@ impl TryFrom<packet_fuzz::Case> for Case {
     }
 }
 
-/// A transmitted case publishes its live outcome and evidence; a rejected
-/// one, never sent, publishes as it would offline.
 impl TryFrom<live_fuzz::Trial> for Case {
     type Error = ContractError;
 
@@ -332,7 +315,6 @@ fn convert_case(
     })
 }
 
-/// Independently useful events in deterministic `fuzz` streaming output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {
@@ -375,8 +357,6 @@ impl TryFrom<live_fuzz::Event> for Event {
     }
 }
 
-/// The terminal record of an offline campaign, with its diagnostics and
-/// totals.
 impl TryFrom<packet_fuzz::Summary> for Published<Event> {
     type Error = ContractError;
 
@@ -390,7 +370,6 @@ impl TryFrom<packet_fuzz::Summary> for Published<Event> {
     }
 }
 
-/// The terminal record of a live campaign, with its totals.
 impl TryFrom<live_fuzz::Report> for Published<Event> {
     type Error = ContractError;
 

@@ -22,12 +22,9 @@ use super::report::{Case, CaseFailure, CaseOutcome, Mutation};
 use super::request::{Limits, Request, Strategy, Target};
 use super::rng::case_seed;
 
-/// One reflectively readable field a campaign may mutate, resolved against the
-/// base packet once so every case reuses the same schema answers.
 #[derive(Clone)]
 pub(super) struct ResolvedField {
     pub(super) target: Target,
-    /// `target.field`, parsed once when the target is resolved.
     pub(super) path: Path,
     pub(super) protocol: String,
     pub(super) kind: FieldKind,
@@ -95,8 +92,6 @@ struct Counters {
 pub(super) struct PreparedCases {
     pub(super) built_case_count: u64,
     pub(super) built_byte_count: u64,
-    /// How long generation took. This is the duration charged against the
-    /// campaign deadline, and it is what the campaign publishes as elapsed.
     pub(super) elapsed: Duration,
 }
 
@@ -146,7 +141,6 @@ fn prepare_case(
     let selection_index = index_from(index, compatible_mutations.len());
     // `prepare` returns before preparing cases when `compatible_mutations` is empty
     let strategy_round = index / compatible_mutations.len() as u64;
-    // `index_from` reduces below `compatible_mutations.len()`
     let (strategy, field_index) = compatible_mutations[selection_index];
     // every `compatible_mutations` entry stores an index into `inputs.fields`
     let field = &inputs.fields[field_index];
@@ -278,7 +272,6 @@ fn build_case(
             }
             case.built = Some(built);
             case.outcome = CaseOutcome::Built;
-            // a u64 case counter cannot reach u64::MAX from the validated case budget
             {
                 counters.built_cases += 1;
             }
@@ -360,11 +353,6 @@ fn packet_reflected_value_bytes(packet: &Packet, limits: Limits) -> Result<u64, 
     Ok(total)
 }
 
-/// Adds one reflected value's retained size to a running total.
-///
-/// The value is measured against what the total-byte budget still allows, so
-/// an oversized value is refused by its own limit rather than folded into a
-/// byte count nobody can act on.
 fn charge_value(total: u64, value: &FieldValue, limits: Limits) -> Result<u64, Error> {
     let limit = total_byte_limit(limits);
     let remaining = limits

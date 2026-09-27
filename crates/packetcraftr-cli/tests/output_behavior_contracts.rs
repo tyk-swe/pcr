@@ -137,8 +137,6 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");
 
-    // A failure before command selection publishes one command-less NDJSON
-    // error record, which is the whole document.
     let mut output = Vec::new();
     packetcraftr_cli::output::stream::write_unattributed_error(&mut output, None, classified)
         .expect("error stream serializes");
@@ -188,9 +186,6 @@ fn domain_failures_preserve_typed_error_context() {
     });
     assert_eq!(fuzz.context, Some(ErrorContext::CaseIndex(11)));
 
-    // Each coordinate publishes exactly the one-key object the output
-    // contract's `errorContext` declares, and a coordinate-free failure
-    // publishes no `context` key at all.
     for (error, expected) in [
         (replay, json!({"source_frame": 8})),
         (scan, json!({"probe_sequence": 8})),

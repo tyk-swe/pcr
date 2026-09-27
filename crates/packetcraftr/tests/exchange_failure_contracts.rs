@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Faults at external-effect boundaries use existing provider contracts.
 mod common;
 
 use packetcraftr::{Client, exchange, policy::Policy};
@@ -34,7 +33,6 @@ enum Fault {
 #[derive(Default)]
 struct State {
     ready: bool,
-    /// Every frame handed to the sender, in transmission order.
     sent: Vec<Vec<u8>>,
     shutdowns: usize,
     reads: usize,
@@ -220,8 +218,6 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
     }
 }
 
-/// Unanswered requests are only known once the collection window closes, so
-/// publishing them must not be charged to that already-spent window.
 #[test]
 fn an_unanswered_request_is_published_after_the_collection_window() {
     let (client, state) = fixture(Fault::None);
@@ -255,9 +251,6 @@ fn an_unanswered_request_is_published_after_the_collection_window() {
     assert_eq!(state.lock().unwrap().shutdowns, 1);
 }
 
-/// An output failure stops the exchange before its next send, and a capture
-/// shutdown failure during that cleanup is reported alongside it rather than
-/// replacing it.
 #[test]
 fn cleanup_failure_after_an_output_error_reports_both_without_a_further_send() {
     let (client, state) = fixture(Fault::CallbackAndShutdown);
@@ -319,8 +312,6 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
     assert!(state.lock().unwrap().sent.is_empty());
 }
 
-/// A DNS request whose evidence bounds are narrower than what the client
-/// captures could only fail after I/O, so it is refused before transmission.
 #[test]
 fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
     use packetcraftr::{
@@ -358,8 +349,6 @@ fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
     assert!(state.lock().unwrap().sent.is_empty());
 }
 
-/// Each scan probe reaches the wire with its own destination port, sequence
-/// number, and IPv4 identification, so responses correlate to one probe.
 #[test]
 fn scan_materializes_distinct_correlated_identities_per_probe() {
     use packetcraftr::{

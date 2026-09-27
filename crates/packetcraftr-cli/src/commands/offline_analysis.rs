@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Preparation and collector-driven inspection for bounded offline analysis.
-//! Rendering and result retention are supplied by `rendering`.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +19,6 @@ use crate::filtering::{self, Capabilities};
 use crate::output::contract::ToolFormat;
 use crate::rendering::{EventOutput, StreamEncoder, ip_event_sink};
 
-/// Validated, I/O-free analysis state.
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,
     pub(super) filter: Option<Filter>,
@@ -32,10 +28,6 @@ pub(super) struct AnalysisSetup {
 }
 
 impl AnalysisSetup {
-    /// Analysis options from every prepared analysis-wide setting, with every
-    /// optional stage at its base setting. Commands that drive a collector
-    /// through [`analysis::Session`] declare their needs there instead; the
-    /// session raises `plan`, `tcp_events`, and `track_sources` to cover them.
     pub(super) fn options(&self) -> analysis::Options<'_> {
         analysis::Options {
             plan: analysis::Plan::default(),
@@ -52,8 +44,6 @@ impl AnalysisSetup {
     }
 }
 
-/// Validates capture bounds, prepares registry/filter state, then validates
-/// analysis bounds.
 pub(super) fn prepare(
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
@@ -111,8 +101,6 @@ pub(super) fn prepare(
     })
 }
 
-/// What one application-layer inspection (`dns-read`, `http`) reads: the
-/// capture, its bounds and decoding, and the one conversation it may keep.
 pub(super) struct Inspection<'a> {
     pub(super) path: &'a Path,
     pub(super) limits: OfflineLimitsArgs,
@@ -121,12 +109,6 @@ pub(super) struct Inspection<'a> {
     pub(super) selector: Option<StreamRef>,
 }
 
-/// Runs one collector over a capture file, publishing each event through
-/// `publish` under the shared `--max-application-output-bytes` budget, and
-/// fails when a selected conversation is absent.
-///
-/// The selector narrows the pass to its conversation; IP reassembly events
-/// reach the NDJSON stream only.
 pub(super) fn inspect<C: analysis::Collector>(
     inspection: Inspection<'_>,
     collector: C,
@@ -142,8 +124,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         selector,
     } = inspection;
     let setup = prepare(limits, None, decode)?;
-    // The session narrows the plan and raises the TCP/source-tracking flags
-    // from the collector's declared needs.
+    // The session raises the TCP/source-tracking flags from the collector's declared needs.
     let session =
         analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
     let mut reader = crate::input::open_capture(path, limits.capture.reader)?;

@@ -131,10 +131,7 @@ where
     prefix.extend_from_slice(options);
     prefix.resize(header_len, 0);
     let mut materialized = layer.clone_box();
-    // A raw value stays raw, as every other codec keeps its discriminator.
     materialized.set_field("next_header", reflect_get(&materialized_next))?;
-    // `prefix` was resized to `header_len`, which is the option length plus the two-byte fixed
-    // header rounded up to an eight-byte boundary
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
     materialized.set_field("options", FieldValue::Bytes(padded_options))?;
     Ok(EncodedLayer::header(prefix, materialized)

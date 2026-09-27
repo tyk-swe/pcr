@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured capture-statistics output.
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -14,7 +12,6 @@ use super::analysis::{Clock, Scope, StreamTransport as Transport};
 use super::contract::Error;
 use super::frame::Timestamp;
 
-/// Which statistics table a result carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Table {
     Conversations,
@@ -25,7 +22,6 @@ pub enum Table {
     Fragments,
 }
 
-/// Traffic one IP address sent and received.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
@@ -47,7 +43,6 @@ impl From<library::EndpointStat> for Endpoint {
     }
 }
 
-/// Frames and bytes one protocol appeared in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Protocol {
     pub protocol: String,
@@ -65,7 +60,6 @@ impl From<library::ProtocolStat> for Protocol {
     }
 }
 
-/// Frames and bytes one transport port carried.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Port {
     pub transport: Transport,
@@ -85,7 +79,6 @@ impl From<library::PortStat> for Port {
     }
 }
 
-/// One I/O interval's frames and bytes, offset from the series origin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IoBucket {
     pub offset: Duration,
@@ -121,7 +114,6 @@ pub struct Conversation {
     pub duration: Duration,
 }
 
-/// The I/O series with the bucket width it was computed under.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Io {
     pub origin: Option<Timestamp>,
@@ -130,8 +122,6 @@ pub struct Io {
     pub buckets: Vec<IoBucket>,
 }
 
-/// One capture-source interface description, identified by the global
-/// interface ID that frame records reference.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Interface {
     pub id: u32,
@@ -139,15 +129,11 @@ pub struct Interface {
     pub snap_length: u32,
 }
 
-/// Aggregate result of `stats`, carrying exactly the requested table.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub clock: Clock,
     #[serde(flatten)]
     pub table: TableData,
-    /// Frames the capture yielded, matched or not, and the frames the
-    /// filter kept. Physical tables describe matched frames; fragment
-    /// reassembly accounting remains capture-global across the filter.
     pub frames_read: u64,
     pub frames_matched: u64,
     pub bytes_matched: u64,
@@ -155,30 +141,17 @@ pub struct Report {
     pub first_timestamp: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_timestamp: Option<Timestamp>,
-    /// Earliest-to-latest matched-timestamp span; absent when nothing
-    /// matched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<Duration>,
-    /// Mean captured length over matched frames; absent when the match set
-    /// is empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub average_packet_size: Option<f64>,
-    /// Matched frames per second over `duration`; absent when the duration
-    /// is missing or zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packets_per_second: Option<f64>,
-    /// Matched captured bytes per second over `duration`; absent under the
-    /// same rules as `packets_per_second`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<f64>,
-    /// Interface descriptions the capture source declared, in the global
-    /// interface-ID order `interface` fields reference; empty when the
-    /// source describes none.
     pub interfaces: Vec<Interface>,
 }
 
-/// Exactly one selected table. A report cannot publish several tables or omit
-/// the selected one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "table", rename_all = "snake_case")]
 pub enum TableData {
@@ -202,8 +175,6 @@ pub enum TableData {
     },
 }
 
-/// The one requested table of a statistics report, with the number of
-/// frames the capture yielded.
 impl TryFrom<(Table, library::Report, u64)> for Report {
     type Error = Error;
 

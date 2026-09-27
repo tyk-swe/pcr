@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The replay driver against scripted providers and failing sinks.
-
 use std::convert::Infallible;
 use std::io::{self, Cursor, Read};
 use std::net::{IpAddr, Ipv4Addr};
@@ -19,7 +17,6 @@ use packetcraftr_netio as net;
 use super::*;
 use crate::test_support::{SharedBuffer, assert_contiguous, stream};
 
-/// The one up interface replay frames leave through; it owns their source.
 #[derive(Clone, Copy, Default)]
 struct FixtureInterfaces;
 
@@ -47,7 +44,6 @@ impl net::interface::Provider for FixtureInterfaces {
     }
 }
 
-/// Routes every destination on-link through the fixture interface.
 #[derive(Clone, Copy, Default)]
 struct FixtureRoutes;
 
@@ -76,7 +72,6 @@ impl net::route::Provider for FixtureRoutes {
     }
 }
 
-/// Confirms every frame in full.
 #[derive(Clone, Copy, Default)]
 struct ConfirmingTransmit;
 
@@ -90,8 +85,6 @@ impl net::transmit::Provider for ConfirmingTransmit {
     }
 }
 
-/// A client over the fixture providers whose policy admits at most
-/// `max_packets` frames, each needing the permissive rebuild replay does.
 fn client(max_packets: u64) -> packetcraftr::Client<impl packetcraftr::Providers> {
     crate::system::fixture::transmitting(
         packetcraftr_core::protocol::builtin::registry(),
@@ -106,7 +99,6 @@ fn client(max_packets: u64) -> packetcraftr::Client<impl packetcraftr::Providers
     )
 }
 
-/// Selects only the one-based frame `number`.
 fn only_frame(number: u64) -> packetcraftr_core::filter::FrameSelector {
     filtering::frame_selector(
         &format!("frame.number == {number}"),
@@ -148,7 +140,6 @@ fn options() -> packetcraftr::replay::Options {
     }
 }
 
-/// A raw ICMP datagram from the fixture interface, told apart by its TTL.
 fn frame_bytes(ttl: u8) -> Vec<u8> {
     let mut packet = Packet::new();
     packet
@@ -252,8 +243,6 @@ fn replay_output_failure_retains_source_frame_context_and_remediation() {
     assert!(!stream.is_terminal());
 }
 
-/// A deadline whose clock jumps past its one-second limit after the
-/// baseline sample, so the first check made through it fails.
 fn expired_deadline() -> Deadline {
     let start = Instant::now();
     let sampled = AtomicBool::new(false);
@@ -370,8 +359,6 @@ fn failed_replay_finalizes_zstd_and_keeps_completed_frames() {
     assert!(output.next_frame().unwrap().is_none());
 }
 
-/// Each input section holds one interface; the single output section
-/// carries both, since a per-section input bound does not apply to it.
 #[test]
 fn pcapng_capture_output_gathers_interfaces_from_every_source_section() {
     let mut bytes = Vec::new();

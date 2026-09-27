@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Application-event publication and retention under a shared byte budget.
-
 use crate::output::{contract::ToolFormat, stream::StreamRecord};
 use crate::{
     errors::CliError,

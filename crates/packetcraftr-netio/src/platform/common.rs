@@ -1,18 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native plumbing shared across the capability → backend tree.
-//!
-//! A submodule holds what one backend's capabilities have in common (the
-//! route-netlink connection worker, the Darwin socket-address parsers, the
-//! Npcap library, libpcap's open handling) or what two backends speaking one
-//! ABI share (`pcap_api`, the pcap API rules for libpcap and Npcap). The
-//! functions below are the route and interface backends' shared failure and
-//! worker-pool handling; they make no native call themselves, but only a
-//! target gate says which backends use them, so they stay beside those
-//! backends rather than in a capability module. Interface enumeration
-//! reports `route::Error` as the native source its capability wraps.
-
 #[cfg(all(native_route, target_os = "macos"))]
 pub(in crate::platform) mod af_route;
 #[cfg(pcap_backend)]
@@ -30,8 +18,6 @@ use packetcraftr_core::error::Source;
 #[cfg(native_route)]
 use crate::route;
 
-/// Wraps a native failure as the operating-system route diagnostic.
-///
 /// Windows keeps its own because it also renders the Win32 status code.
 #[cfg(all(native_route, any(target_os = "linux", target_os = "macos")))]
 pub(in crate::platform) fn os_error(
@@ -45,7 +31,6 @@ pub(in crate::platform) fn os_error(
     }
 }
 
-/// The route failure for a full native worker pool.
 #[cfg(native_route)]
 pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> route::Error {
     route::Error::OperatingSystem {
@@ -55,11 +40,6 @@ pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> rout
     }
 }
 
-/// Runs a route or interface backend's synchronous native calls on the
-/// worker pool. The
-/// caller waits at most until its deadline; calls still running then finish
-/// on their pooled thread, which keeps its slot, reported as retained
-/// cleanup, until they return. `query` receives what the deadline allows.
 #[cfg(all(native_route, any(test, target_os = "macos", target_os = "windows")))]
 pub(in crate::platform) fn on_worker<T: Send + 'static>(
     deadline: &packetcraftr_core::budget::Deadline,
@@ -71,7 +51,6 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     let detached = crate::deadline::detach(deadline)
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     // Native calls spend wall time even when the caller's clock is frozen.
-    // Both sides keep the initial allowance and the caller's stop signal.
     let wait = crate::deadline::detach(&detached)
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     let permit = crate::workers::shared()

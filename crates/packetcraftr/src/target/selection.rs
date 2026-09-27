@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Explicit finite target sets, without discovery or I/O.
-
 use super::Target;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use serde::{Deserialize, Serialize};
@@ -178,7 +176,6 @@ impl From<Target> for Selection {
     }
 }
 impl Selection {
-    /// Bounds specification count and numeric expansion before any hostname work.
     pub fn validate(&self) -> Result<(), SelectionError> {
         if self.include.is_empty() {
             return Err(SelectionError::Empty);

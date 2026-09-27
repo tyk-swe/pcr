@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IPv4 header model and codec.
-
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -159,7 +157,6 @@ impl LayerCodec for Ipv4Codec {
         prefix.extend_from_slice(&flags_offset.to_be_bytes());
         prefix.push(layer.ttl);
         prefix.push(next_protocol);
-        // The checksum bytes stay zero while the header checksum is computed.
         prefix.extend_from_slice(&[0, 0]);
         prefix.extend_from_slice(&source.octets());
         prefix.extend_from_slice(&destination.octets());
@@ -173,7 +170,6 @@ impl LayerCodec for Ipv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        // the fixed twenty-byte prefix above always reserves bytes 10..12 for the checksum
         {
             prefix[10..12].copy_from_slice(&header_checksum.to_be_bytes());
         }

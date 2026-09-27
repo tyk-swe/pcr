@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
 
 use std::path::Path;
@@ -75,12 +74,6 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
     records
 }
 
-// Facility prerequisites for the compile-time capability gates the package
-// build script declares. Each assertion fails the scenario explicitly; a
-// missing prerequisite is a failed test, never a silent pass.
-
-/// Process cancellation contracts inspect `/proc` and deliver signals through
-/// a `kill` utility.
 #[cfg(packetcraftr_test_procfs)]
 pub(crate) fn require_procfs() {
     assert!(
@@ -96,9 +89,6 @@ pub(crate) fn require_procfs() {
     );
 }
 
-/// Terminal-stdin contracts allocate a pty with the util-linux `script` flags
-/// `--quiet --return --command`; other `script` implementations do not accept
-/// them.
 #[cfg(packetcraftr_test_util_linux)]
 pub(crate) fn require_util_linux_script() {
     let output = Command::new("script")
@@ -111,7 +101,6 @@ pub(crate) fn require_util_linux_script() {
     );
 }
 
-/// Write-failure contracts sink stdout into `/dev/full`.
 #[cfg(packetcraftr_test_dev_full)]
 pub(crate) fn require_dev_full() {
     assert!(

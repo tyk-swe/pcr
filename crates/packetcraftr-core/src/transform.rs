@@ -2,23 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Explicit, bounded transformations of complete packet bytes.
-//!
-//! Transforms take captured frames, whose bytes a codec round trip does not
-//! reproduce in general: malformed and unknown bytes, link trailers,
-//! non-canonical option and length encodings, and stale checksums in layers
-//! the edit does not touch would all be re-encoded. So, per ADR 0004, no
-//! transform re-encodes a frame. Each one copies the captured bytes and
-//! changes only the bytes its edit names:
-//!
-//! - [`FieldEdits`] locates fields through the codecs' decoded layout.
-//! - [`rewrite()`] and [`fragment()`] locate the link, VLAN, and IP headers with
-//!   the shared [`protocol::headers`](crate::protocol::headers) walker.
-//! - [`rules::Rules`] applies ordered header patches and field assignments,
-//!   read from a versioned `packetcraftr.rewrite` document or built from
-//!   direct edits. Rewrite rules are their own sub-domain, with their own
-//!   [`rules::Error`].
-//!
-//! Every byte-level edit says which faithfulness gap it avoids.
 
 mod error;
 mod fields;
@@ -36,10 +19,6 @@ pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 use crate::protocol::headers::IpHeader;
 use crate::protocol::network::ip_protocol;
 
-/// Refuses a datagram whose transport pseudo-header an in-place edit cannot
-/// recompute. An incomplete fragment hides the rest of the segment, and IPv4
-/// source routing, an IPv6 routing header, or a Home Address option changes
-/// which addresses the pseudo-header covers.
 fn ensure_checksum_coverage(ip: &[u8], header: &IpHeader) -> Result<(), Error> {
     const LOOSE_SOURCE_ROUTE: u8 = 131;
     const STRICT_SOURCE_ROUTE: u8 = 137;

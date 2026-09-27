@@ -11,8 +11,6 @@ use crate::field::FieldValue;
 
 pub const PACKET_DOCUMENT_SCHEMA_V2: &str = "packetcraftr.packet/v2";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
-/// Absolute recursive `FieldValue::List` and `FieldValue::Object` nesting
-/// accepted by the stable packet-document parser.
 pub const MAX_DOCUMENT_NESTING: usize = 64;
 
 pub(super) const DOCUMENT_BASE_CONTAINER_DEPTH: usize = 6;
@@ -23,52 +21,24 @@ pub enum Format {
     Yaml,
 }
 
-/// Resource envelope one packet document may occupy while it is parsed.
-///
-/// Semantic limits are enforced inside the JSON and YAML deserializers when
-/// a value's tag is resolved, independent of object-key order. Temporary values
-/// use a separate input-derived storage envelope before becoming typed values,
-/// so staging cannot consume semantic list/node budgets for byte arrays.
-/// [`DocumentLimits::default`] is conservative for the documents the registry
-/// can describe and is far below the raw byte ceiling; widen individual fields
-/// with struct update syntax.
-///
-/// Object values are containers like lists: each one enters a nesting level,
-/// and each member counts as one item against the per-container and aggregate
-/// item limits.
-///
-/// Payload bytes count the retained value width: text and byte values their
-/// length, object member names their length, and fixed-width scalars their
-/// wire width (booleans one byte, integers eight, IPv4 four, IPv6 sixteen,
-/// MAC six).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DocumentLimits {
-    /// Maximum UTF-8 input bytes, checked before any parsing.
     pub max_input_bytes: usize,
     pub max_layers: usize,
-    /// Maximum recursive list and object nesting; at most
-    /// [`MAX_DOCUMENT_NESTING`].
     pub max_nesting: usize,
     pub max_fields_per_layer: usize,
-    /// Maximum field-value nodes (scalars, lists, and objects) across the
-    /// document.
     pub max_total_nodes: usize,
     /// Maximum items in one list, or members in one object.
     pub max_list_items: usize,
-    /// Maximum list items and object members summed across the document.
     pub max_total_list_items: usize,
     pub max_protocol_name_bytes: usize,
-    /// Maximum bytes in one layer field name or object member name.
     pub max_field_name_bytes: usize,
-    /// Maximum bytes in one text value (or the schema string).
     pub max_text_bytes: usize,
     pub max_byte_value_bytes: usize,
-    /// Maximum retained payload bytes summed across every value.
     pub max_total_payload_bytes: usize,
 }
 
 impl DocumentLimits {
-    /// The stable defaults every simple parse entry point uses.
     pub const DEFAULT: Self = Self {
         max_input_bytes: DEFAULT_MAX_DOCUMENT_BYTES,
         max_layers: crate::layout::DEFAULT_MAX_LAYERS,
@@ -84,7 +54,6 @@ impl DocumentLimits {
         max_total_payload_bytes: 4 * 1024 * 1024,
     };
 
-    /// Rejects limits the stable parser cannot honor.
     pub fn validate(&self) -> Result<(), Error> {
         if self.max_nesting > MAX_DOCUMENT_NESTING {
             return Err(Error::InvalidLimit {
@@ -121,7 +90,6 @@ impl Default for DocumentLimits {
     }
 }
 
-/// Which [`DocumentLimits`] field a rejected document exceeded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Limit {
@@ -140,7 +108,6 @@ pub enum Limit {
 }
 
 impl Limit {
-    /// Every limit, in [`DocumentLimits`] field order.
     pub const ALL: [Self; 12] = [
         Self::InputBytes,
         Self::Layers,
@@ -156,7 +123,6 @@ impl Limit {
         Self::TotalPayloadBytes,
     ];
 
-    /// The stable `DocumentLimits` field name for this limit.
     #[must_use]
     pub const fn field(self) -> &'static str {
         match self {

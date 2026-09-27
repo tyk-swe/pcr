@@ -342,9 +342,7 @@ impl<C: Session> Transaction<C> {
     }
 }
 
-/// A live operation never aborts while accounting for traffic it has already
-/// emitted: an overflowing total is reported saturated, and the evidence
-/// validator that recomputes the same fold rejects it as an overflow there.
+/// Never aborts while accounting for emitted traffic: an overflowing total is reported saturated.
 fn sent_bytes(sent: &[std::sync::Arc<crate::evidence::SentPacket>]) -> u64 {
     crate::evidence::total_bytes_sent(sent.iter().map(std::sync::Arc::as_ref)).unwrap_or(u64::MAX)
 }

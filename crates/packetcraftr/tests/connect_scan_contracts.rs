@@ -54,8 +54,6 @@ impl Stream for Socket {
     }
 }
 
-/// A silent host, returning a little after the bound it was given, as a
-/// system connect may.
 struct Silent;
 
 impl Provider for Silent {
@@ -89,13 +87,9 @@ fn request() -> scan::Request {
     }
 }
 
-/// Attempts cancelled at their deadline keep their native admission until the
-/// provider call returns, so refilling every slot at once must wait for it
-/// instead of failing the whole scan.
 #[test]
 fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
     let request = request();
-    // Connect scans reach only the TCP provider.
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),

@@ -24,22 +24,15 @@ use crate::analysis::reassembly::ip::{
 use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
 use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner, ScopeId};
 
-/// At most one non-atomic fragment is visible per physical frame: its payload
-/// is opaque. Atomic IPv6 Fragment headers remain transparent and may precede
-/// it.
 pub(crate) struct IpFragments {
     pub(crate) atomic: Vec<IpFamily>,
     pub(crate) non_atomic: Option<ReassemblyFragment>,
 }
 
-/// Innermost transport of each kind. A tunneled frame can contribute both an
-/// outer UDP conversation and an inner TCP conversation.
+/// Innermost transport of each kind.
 pub(crate) struct Transports<'a> {
     pub(crate) tcp: Option<TcpTransport<'a>>,
     pub(crate) udp: Option<UdpTransport>,
-    /// Index of the outermost transport layer of either kind. In a
-    /// same-transport tunnel this differs from the retained innermost
-    /// occurrence, marking headers whose conversation carries no index.
     pub(crate) outermost: Option<usize>,
 }
 
@@ -56,27 +49,18 @@ pub(crate) struct UdpTransport {
     pub(crate) encapsulation: Vec<EncapsulationIdentifier>,
 }
 
-/// The IPv4 header at this layer, when it is a fragment reassembly must see.
-///
-/// Offset zero with no More Fragments is an *atomic* fragment: a complete
-/// datagram that is not reassembly input and whose payload stays transparent
-/// to dissection.
 fn ipv4_fragment(layer: &dyn Layer) -> Option<&Ipv4> {
     layer
         .downcast_ref::<Ipv4>()
         .filter(|ipv4| ipv4.fragment_offset != 0 || ipv4.more_fragments)
 }
 
-/// The IPv6 Fragment header at this layer, when it is non-atomic. The atomic
-/// rule is the same one [`ipv4_fragment`] documents.
 fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
     layer
         .downcast_ref::<Ipv6FragmentHeader>()
         .filter(|fragment| fragment.fragment_offset != 0 || fragment.more_fragments)
 }
 
-/// Scope identity contributed by one tunnel or tag layer.
-///
 /// The transport walk and the fragment walk must agree on the encapsulation
 /// path or the same conversation would land in two scopes.
 fn tunnel_identifier(
@@ -215,10 +199,6 @@ fn path_without(path: &[EncapsulationIdentifier], excluded: usize) -> Vec<Encaps
         .collect()
 }
 
-/// Extracts the exact fragment payload and reconstruction metadata from one
-/// physical frame. Scope interning uses the same path vocabulary as transport
-/// indexing, excluding the fragmented network header whose endpoints already
-/// live in the datagram key.
 pub(crate) fn ip_fragments(
     decoded: &DecodedPacket,
     scopes: &mut Interner,
@@ -226,8 +206,6 @@ pub(crate) fn ip_fragments(
     ip_fragments_with_scope(decoded, None, &[], scopes)
 }
 
-/// Extracts fragments from a derived datagram while preserving the parent
-/// datagram's already-interned capture scope.
 pub(crate) fn ip_fragments_in_scope(
     decoded: &DecodedPacket,
     source: &DecodedPacket,
@@ -238,8 +216,6 @@ pub(crate) fn ip_fragments_in_scope(
     ip_fragments_with_scope(decoded, Some(base_scope), &replayed, scopes)
 }
 
-/// Base for scope interning: [`None`] for a physical frame, or the fragment
-/// source and already-interned base scope for a derived datagram view.
 pub(crate) type ScopeBase<'a> = Option<(&'a DecodedPacket, ScopeId)>;
 
 fn ip_fragments_with_scope(
@@ -416,7 +392,6 @@ fn fragment_scope(
     }
 }
 
-/// Exact TCP payload from the decode layout, including typed child layers.
 /// Excludes padding identified at or above TCP (such as link padding), but
 /// retains bytes a protocol inside the payload treated as padding.
 pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize) -> Bytes {
@@ -449,10 +424,6 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     }
 }
 
-/// Maps a located TCP transport to a reassembly segment, retaining empty
-/// control segments. Returns [`None`] for a fragmented same-transport carrier
-/// whose child will be indexed on completion. `base` preserves the fragments'
-/// source and scope.
 pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
     transport: TcpTransport<'_>,
@@ -476,8 +447,6 @@ pub(crate) fn tcp_segment(
     }))
 }
 
-/// Maps an already-located UDP transport onto its scoped flow. `base` and
-/// the [`None`] outcome follow the same convention as [`tcp_segment`].
 pub(crate) fn udp_flow(
     decoded: &DecodedPacket,
     transport: UdpTransport,
@@ -509,9 +478,6 @@ fn transport_scope(
     }
 }
 
-/// A directly declared same-kind transport below an opaque fragment is the
-/// eventual innermost conversation. Do not allocate an index to its visible
-/// carrier merely because fragmentation has temporarily hidden the child.
 fn transport_hidden_by_fragment(
     decoded: &DecodedPacket,
     transport_index: usize,
@@ -538,10 +504,7 @@ fn ipv6_fragment_transport_protocol(
 ) -> Option<u8> {
     let mut next_header = fragment.next_header.exact().copied()?;
     // A nonzero fragment starts in the middle of the fragmentable part, so
-    // the extension chain cannot be resolved from this frame. Deferring both
-    // transport kinds would discard a visible cross-kind carrier. Keep that
-    // carrier unless a first fragment or completed datagram proves its child
-    // has the same transport protocol.
+    // the extension chain cannot be resolved from this frame.
     if fragment.fragment_offset != 0 && is_walkable_ipv6_extension(next_header) {
         return None;
     }
@@ -595,7 +558,6 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
     Vec::new()
 }
 
-/// Number of leading derived layers already decoded on a physical fragment.
 pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
     let mut ipv6_start = None;
     for (index, layer) in decoded.packet.iter().enumerate() {

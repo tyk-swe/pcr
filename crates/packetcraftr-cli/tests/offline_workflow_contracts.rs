@@ -78,8 +78,6 @@ fn write_capture_byte_frames(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
     file
 }
 
-/// A microsecond-resolution PCAP whose records carry the given timestamps as
-/// `(seconds, microseconds)` pairs, in the given capture order.
 fn write_timed_capture(frames: &[((u32, u32), &str)]) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     file.write_all(&[
@@ -173,8 +171,6 @@ fn write_truncated_capture() -> tempfile::NamedTempFile {
     file
 }
 
-/// A capture whose second record is snaplen-truncated (incl < orig) and whose
-/// third record regresses below the established high-water timestamp.
 fn write_capture_evidence_capture() -> tempfile::NamedTempFile {
     let truncated = decode_hex(UDP_SERVER);
     let captured = u32::try_from(truncated.len() - 5).expect("fixture truncates");
@@ -486,14 +482,12 @@ fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
     assert_eq!(std::fs::read(&client).unwrap(), b"hello");
     assert_eq!(std::fs::read(&server).unwrap(), b"world");
 
-    // A second run collides without touching the first files.
     let output = run(&["follow", path, "--stream", "udp:0", "--write", dir]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("already exists"));
     assert_eq!(std::fs::read(&client).unwrap(), b"hello");
     assert_eq!(std::fs::read(&server).unwrap(), b"world");
 
-    // --direction narrows which files publish.
     let only = tempfile::tempdir().expect("destination dir");
     run_success(&[
         "follow",
@@ -511,8 +505,6 @@ fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
         b"world"
     );
 
-    // The output-byte budget is shared across the operation's files, and a
-    // mid-run failure publishes nothing.
     let capped = tempfile::tempdir().expect("destination dir");
     let output = run(&[
         "follow",
@@ -528,7 +520,6 @@ fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--max-application-output-bytes"));
     assert_eq!(std::fs::read_dir(capped.path()).unwrap().count(), 0);
 
-    // A missing directory fails before the capture is read.
     let missing = directory.path().join("absent");
     let output = run(&[
         "follow",
@@ -1108,7 +1099,6 @@ fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
 
 #[test]
 fn read_epoch_bounds_select_inclusive_subsecond_endpoints() {
-    // Three frames share one second; selection distinguishes the fractions.
     let capture = write_timed_capture(&[
         ((1, 100_000), UDP_CLIENT),
         ((1, 500_000), UDP_SERVER),
@@ -1132,8 +1122,6 @@ fn read_epoch_bounds_select_inclusive_subsecond_endpoints() {
     assert_eq!(records[2]["result"]["frames_read"], 3);
     assert_eq!(records[2]["result"]["frames_matched"], 2);
 
-    // One-sided bounds leave the other end open; sub-microsecond bound
-    // precision still applies exactly, past the capture's own resolution.
     for (arguments, expected) in [
         (vec!["--start-epoch", "1.5"], vec![2, 3]),
         (vec!["--stop-epoch", "1.5"], vec![1, 2]),
@@ -1788,8 +1776,7 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
         ],
         vec!["tls", missing, "--tcp-idle-expiry-ms", "0"],
         // The per-flow window doubles as the reordering window, so the
-        // serial half-space is refused before the capture is opened rather
-        // than by the first pushed segment.
+        // serial half-space is refused before the capture is opened.
         vec!["stats", missing, "--max-tcp-bytes-per-flow", "2147483648"],
         vec!["stats", missing, "--ip-overlap", "invalid"],
     ] {
@@ -2230,6 +2217,5 @@ fn bounded_analysis_and_stream_projection_skip_missing_timestamps_but_charge_inp
         "1",
     ]);
     assert!(!limited.status.success());
-    // The unbounded analysis contract still refuses missing timestamps.
     assert!(!run(&["stats", path]).status.success());
 }

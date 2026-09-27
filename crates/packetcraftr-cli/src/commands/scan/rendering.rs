@@ -36,8 +36,6 @@ pub(super) fn render_text(
         duration_text(stats.elapsed)
     ))?;
     for endpoint in &result.endpoints {
-        // ICMP has no port, so it names itself; the port-bearing transports
-        // name the endpoint they probed.
         let endpoint_name = match endpoint.transport {
             output::probe::Transport::Icmp => endpoint.transport.to_string(),
             output::probe::Transport::Tcp | output::probe::Transport::Udp => {
@@ -137,7 +135,6 @@ pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
     cli
 }
 
-/// A TCP connect scan's endpoints and socket statistics.
 pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
     for endpoint in &report.endpoints {
         write_stdout_line(format_args!(

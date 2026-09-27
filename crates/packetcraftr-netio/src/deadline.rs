@@ -1,51 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one deadline and cancellation convention for provider calls, and the
-//! wall-clock helpers providers use to follow it.
-//!
-//! Every provider call that can block takes the caller's core
-//! [`Deadline`] by reference. The deadline carries the caller's
-//! [`Cancellation`](packetcraftr_core::budget::Cancellation) too, so there is
-//! no separate cancellation input. A provider:
-//!
-//! - checks cancellation before it starts and while it waits;
-//! - treats a zero remainder as expired: an expired call starts no work and
-//!   reports its error type's deadline variant, classified
-//!   `io.deadline_exceeded`;
-//! - never waits past the remainder, and never replaces it with a timeout of
-//!   its own.
-//!
-//! A capture read is the one call whose expiry is not a failure: it ends the
-//! wait, so an expired read delivers an already queued record or `Ok(None)`.
-//! See [`capture::Session`](crate::capture::Session).
-//!
-//! Three calls take no deadline by design. A [send](crate::transmit::Provider::send)
-//! stays on the caller's thread and never waits on the network. A session
-//! [shutdown](crate::capture::Session::shutdown) keeps its own bounded
-//! lifecycle so cleanup still runs after cancellation. A connected
-//! [`tcp::Stream`](crate::tcp::Stream) bounds each read and write with the
-//! socket timeouts its caller sets.
+//! The one deadline and cancellation convention for provider calls.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 
-/// Longest slice an uninterruptible wait should take between checks of a
-/// cancellation signal, so a stop request is honored promptly without
-/// spinning.
+/// Longest slice an uninterruptible wait should take between checks of a cancellation signal.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-/// The longest wait a provider derives from one deadline, and the ceiling
-/// every bounded live operation accepts for its run time or response window:
-/// one hour. A capture or connect refuses a longer remainder; [`expires_at`]
-/// clips one so its instant stays inside the monotonic clock's range, and
-/// callers re-check the deadline after each wait.
 pub const MAX_WAIT: Duration = Duration::from_secs(60 * 60);
 
-/// Wall-clock time remaining, or `None` at or after `deadline`. Treat `None` as
-/// expiry before calling providers that reject a zero timeout.
+/// Treat `None` as expiry before calling providers that reject a zero timeout.
 #[must_use]
 pub fn remaining_before(deadline: Instant) -> Option<Duration> {
     deadline
@@ -53,13 +21,6 @@ pub fn remaining_before(deadline: Instant) -> Option<Duration> {
         .filter(|remaining| !remaining.is_zero())
 }
 
-/// What `deadline` still allows a provider call to spend.
-///
-/// # Errors
-///
-/// Returns [`Interrupted::Cancelled`] when the caller's cancellation is
-/// signaled, otherwise [`Interrupted::Exceeded`] once the deadline is spent,
-/// including when exactly nothing remains.
 pub fn remaining(deadline: &Deadline) -> Result<Duration, Interrupted> {
     deadline.check_cancelled()?;
     let remaining = deadline.remaining()?;
@@ -73,25 +34,12 @@ pub fn remaining(deadline: &Deadline) -> Result<Duration, Interrupted> {
     Ok(remaining)
 }
 
-/// The wall-clock instant at which `deadline` expires, for a backend that
-/// bounds its own waits by an [`Instant`].
-///
-/// # Errors
-///
-/// Returns the same interruptions as [`remaining`].
 pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
     let remaining = remaining(deadline)?.min(MAX_WAIT);
     let now = Instant::now();
     Ok(now.checked_add(remaining).unwrap_or(now))
 }
 
-/// An owned deadline with what `deadline` still allows and the same
-/// cancellation signals, including inherited ones, for work handed to another
-/// thread. The original ceilings remain in force alongside the wall-clock wait.
-///
-/// # Errors
-///
-/// Returns the same interruptions as [`remaining`].
 pub fn detach(deadline: &Deadline) -> Result<Deadline, Interrupted> {
     Ok(Deadline::new(remaining(deadline)?)
         .with_cancellation(deadline.cancellation().cloned())

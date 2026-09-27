@@ -1,11 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded aggregate retention and diagnostics for omitted items.
-
 use packetcraftr_core as core;
 
-/// Retains output items under a finite ceiling while counting omissions.
 pub(crate) struct Retained<T> {
     maximum: usize,
     items: Vec<T>,
@@ -21,8 +18,6 @@ impl<T> Retained<T> {
         }
     }
 
-    /// Converts and retains one item only while capacity remains; otherwise
-    /// counts it as omitted without calling the conversion.
     pub(crate) fn push(&mut self, convert: impl FnOnce() -> T) {
         if self.items.len() >= self.maximum {
             self.omitted = self.omitted.saturating_add(1);
@@ -40,8 +35,6 @@ impl<T> Retained<T> {
     }
 }
 
-/// The one diagnostic a document that left items out carries, so a truncated
-/// document never looks complete.
 pub(crate) fn omitted_diagnostic(
     code: &'static str,
     subject: &str,

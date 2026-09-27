@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `verify-forwarding` process contracts: verdicts, exit statuses, terminal
-//! records, and rule rejection.
-
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
@@ -18,9 +15,7 @@ const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f
 /// `UDP_CLIENT` forwarded: TTL decremented to 63 with the checksum updated.
 const UDP_CLIENT_FORWARDED: &str =
     "45000021000000003f118f95c0000201c633640230390009000d9f8868656c6c6f";
-/// 198.51.100.2:9 → 192.0.2.1:12345 UDP carrying "world".
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
-/// A TCP segment; never matches a `udp` selection filter.
 const TCP_CLIENT: &str =
     "4500002b0000000040068e96c0000201c63364023039005000000001000000005002ffffb7b80000676574";
 
@@ -80,8 +75,6 @@ fn write_capture_bytes(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
     file
 }
 
-/// A capture whose single record retains fewer bytes than the wire length:
-/// the UDP datagram is absent, so the frame is truncated evidence.
 fn write_snaplen_truncated_capture() -> tempfile::NamedTempFile {
     let bytes = decode_hex(UDP_CLIENT);
     let captured = 20_u32; // IPv4 header only.
@@ -131,8 +124,6 @@ fn exact_correspondence_passes_with_zero_status() {
 
 #[test]
 fn a_preserved_field_mismatch_is_a_concrete_failure() {
-    // Forwarding decremented the TTL; ipv4.identification still pairs the
-    // observations so the violated preservation names both sides.
     let ingress = write_capture(&[UDP_CLIENT]);
     let egress = write_capture(&[UDP_CLIENT_FORWARDED]);
     let mut args = verify(&ingress, &egress);
@@ -169,7 +160,6 @@ fn missing_egress_is_inconclusive_not_loss() {
     assert_eq!(result["summary"]["ingress_only"], 1);
     assert_eq!(result["unmatched"]["ingress"].as_array().unwrap().len(), 1);
     assert_eq!(result["unmatched"]["ingress"][0]["frame"], 2);
-    // Missing egress is reported as unmatched evidence, never as a drop.
     let text = document.to_string();
     assert!(!text.contains("dropped"), "{text}");
 }
@@ -215,8 +205,6 @@ fn repeated_identity_stays_ambiguous_and_unpaired() {
 
 #[test]
 fn per_side_filters_select_independently() {
-    // The ingress filter selects only UDP; without it the extra TCP frame
-    // would be unmatched evidence on the ingress side.
     let ingress = write_capture(&[UDP_CLIENT, TCP_CLIENT]);
     let egress = write_capture(&[UDP_CLIENT]);
 
@@ -261,7 +249,6 @@ fn an_empty_selection_never_passes() {
     let result = parse_json(&output)["result"].clone();
     assert_eq!(result["verdict"], "inconclusive");
     assert_eq!(result["captures"]["egress"]["selected"], 0);
-    // The unpaired ingress observations still surface as evidence.
     assert_eq!(result["summary"]["ingress_only"], 1);
 }
 
@@ -278,7 +265,6 @@ fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
 
     let result = parse_json(&output)["result"].clone();
     assert_eq!(result["verdict"], "inconclusive");
-    // The truncated record fails dissection: unkeyed and incomplete.
     assert_eq!(result["captures"]["egress"]["incomplete"], 1);
     assert_eq!(result["captures"]["egress"]["unkeyed"], 1);
     assert_eq!(result["unkeyed"]["egress"][0]["evidence"]["frame"], 1);
@@ -313,8 +299,6 @@ fn an_expectation_violation_is_attributable_failure() {
 
 #[test]
 fn satisfied_expectation_and_preservation_pass() {
-    // The forwarded frame kept its destination and total length; the changed
-    // TTL is not a declared rule, so nothing is violated.
     let ingress = write_capture(&[UDP_CLIENT]);
     let egress = write_capture(&[UDP_CLIENT_FORWARDED]);
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
@@ -368,7 +352,6 @@ fn detail_lists_are_bounded_and_omissions_counted() {
 
     let document = parse_json(&output);
     let result = &document["result"];
-    // The summary counts complete evidence; the lists are bounded samples.
     assert_eq!(result["summary"]["ingress_only"], 4);
     assert_eq!(result["summary"]["egress_only"], 1);
     assert_eq!(result["unmatched"]["ingress"].as_array().unwrap().len(), 1);
@@ -417,8 +400,6 @@ fn a_fail_verdict_ndjson_still_terminates_with_complete() {
     let output = run(&args.iter().map(String::as_str).collect::<Vec<_>>());
     assert_eq!(output.status.code(), Some(1));
 
-    // A completed report is one terminal success record carrying the verdict;
-    // the non-zero exit status lives on the process, not a second record.
     let records = parse_ndjson(&output);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["event"], "complete");
@@ -496,7 +477,6 @@ fn malformed_expectations_are_rejected_before_input_is_read() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cli.verify_rule"), "{stderr}");
-    // The rule fails before the missing input files are opened.
     assert!(!stderr.contains("does-not-exist"), "{stderr}");
 }
 
@@ -793,7 +773,6 @@ fn aggregate_publication_bounds_the_pretty_envelope_before_writing() {
     let output = run(&args);
     assert!(!output.status.success());
     assert!(output.stdout.len() <= packetcraftr_cli::output::stream::MAX_RECORD_BYTES);
-    // Parsing the entire output also rejects any partially written success.
     let envelope = parse_json(&output);
     assert_eq!(envelope["status"], "error");
     assert_eq!(envelope["error"]["code"], "policy.verify_report_limit");

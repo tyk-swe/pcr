@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Which output interface each selected frame of a replay leaves through:
-//! the [`Routing`] of a request, its [`Rule`]s, and the [`Error`] for a
-//! refused rule or rule set.
-
 use std::num::ParseIntError;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
@@ -16,21 +12,16 @@ use crate::route::Interface;
 
 use crate::replay;
 
-/// The most rules one [`Routing`] holds.
 pub const MAX_RULES: usize = 256;
 
-/// The frames a [`Rule`] applies to.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Condition {
-    /// Frames captured on this capture-global interface ID. A classic PCAP
-    /// capture has one interface, ID 0.
+    /// Frames captured on this capture-global interface ID.
     Source(u32),
-    /// Frames this selector keeps.
     Filter(FrameSelector),
 }
 
-/// Sends the frames that meet `condition` through `interface`.
 #[derive(Clone, Debug)]
 pub struct Rule {
     pub condition: Condition,
@@ -40,11 +31,6 @@ pub struct Rule {
 impl Rule {
     /// Parses a `SOURCE_ID=INTERFACE` rule, leaving the interface text to
     /// `interface`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::SourceSyntax`] without `=`, [`Error::SourceId`]
-    /// when the source is not a `u32`, or the interface parser's failure.
     pub fn parse_source<E>(
         text: &str,
         interface: impl FnOnce(&str) -> Result<Interface, E>,
@@ -65,11 +51,6 @@ impl Rule {
 
     /// Parses an `EXPR=>INTERFACE` rule, compiling the text before the last
     /// `=>` with `filter` and leaving the interface text to `interface`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::FilterSyntax`] without `=>`, or the filter or
-    /// interface parser's failure.
     pub fn parse_filter<E>(
         text: &str,
         filter: impl FnOnce(&str) -> Result<FrameSelector, E>,
@@ -87,7 +68,6 @@ impl Rule {
     }
 }
 
-/// A refused routing rule or rule set.
 #[derive(Debug, ThisError, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -120,11 +100,6 @@ impl Classified for Error {
     }
 }
 
-/// Where a replay sends each selected frame: the one interface its matching
-/// rules agree on, or the fallback when no rule matches.
-///
-/// A frame whose rules name different interfaces, or that no rule matches
-/// without a fallback, stops the replay before it is authorized.
 #[derive(Clone, Debug, Default)]
 pub struct Routing {
     rules: Vec<Rule>,
@@ -132,11 +107,6 @@ pub struct Routing {
 }
 
 impl Routing {
-    /// Routes by `rules`, in order, and otherwise through `fallback`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::TooMany`] for more than [`MAX_RULES`] rules.
     pub fn new(rules: Vec<Rule>, fallback: Option<Interface>) -> Result<Self, Error> {
         if rules.len() > MAX_RULES {
             return Err(Error::TooMany { count: rules.len() });
@@ -144,13 +114,11 @@ impl Routing {
         Ok(Self { rules, fallback })
     }
 
-    /// The interface for frames no rule matches.
     #[must_use]
     pub fn fallback(&self) -> Option<&Interface> {
         self.fallback.as_ref()
     }
 
-    /// The rules, in evaluation order.
     #[must_use]
     pub fn rules(&self) -> &[Rule] {
         &self.rules
@@ -192,7 +160,6 @@ impl Routing {
     }
 }
 
-/// Sends every frame through `interface`.
 impl From<Interface> for Routing {
     fn from(interface: Interface) -> Self {
         Self {

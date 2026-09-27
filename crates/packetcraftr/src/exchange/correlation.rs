@@ -62,8 +62,7 @@ fn select_attribution(
         let Some(received_at) = received_at else {
             continue;
         };
-        // `request_index` comes from an enumerate over `prepared` truncated by `.take(sent.len())`,
-        // so it is below `sent.len()`
+        // `request_index` comes from an enumerate truncated to `sent.len()`, so it indexes `sent`.
         let timing = sent[request_index].timing();
         if received_at > deadline.ends_at() || !capture_follows_send(received_at, timing) {
             continue;
@@ -272,15 +271,11 @@ impl Accumulator {
                 }
                 if self.reserve_decoded_evidence(decoded.original.len(), context.collection) {
                     self.mark_record_retained(identity);
-                    // a unique attribution indexes a request that was already sent, so
-                    // `request_index` is below both `sent.len()` and `response_counts.len()`; both
-                    // counters stay under `max_responses`, which is checked just above
+                    // The attributed request was sent; counters stay under `max_responses`.
                     {
                         self.response_counts[request_index] += 1;
                         self.response_count += 1;
                     }
-                    // a unique attribution indexes a request that was already sent, so
-                    // `request_index` is below `sent.len()`
                     self.pending_events.push(super::Event::Response(Response {
                         request_index,
                         response: decoded,
@@ -381,8 +376,7 @@ impl Accumulator {
                     continue;
                 }
             };
-            // `request_index` is within the sent prefix of `prepared`; both
-            // counters were checked against `max_responses` before acceptance.
+            // Both counters were checked against `max_responses` before acceptance.
             {
                 self.response_counts[request_index] += 1;
                 self.response_count += 1;
@@ -391,8 +385,7 @@ impl Accumulator {
                 .retained_unmatched
                 .checked_sub(1)
                 .expect("workflow candidates are retained unmatched evidence");
-            // `request_index` is below `freshness.eligible_requests`, a partition point in `sent`,
-            // so it is below `sent.len()`
+            // `request_index` is below a partition point in `sent`, so it is in bounds.
             let sent_timing_monotonic = sent[request_index].timing().freshness_marker().monotonic();
             self.pending_events.push(super::Event::Response(Response {
                 request_index,

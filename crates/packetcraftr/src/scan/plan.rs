@@ -15,23 +15,17 @@ use crate::execution::rate_delay;
 use crate::probe::{Batch, ProbeEndpoint};
 use packetcraftr_core::error::BoundaryError;
 
-/// One planned scan probe: an authorized address and endpoint, the attempt
-/// it belongs to, and the exact UDP payload it carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
     pub endpoint: ProbeEndpoint,
     pub attempt: u32,
-    /// Shared exact UDP payload from the validated request.
     pub udp_payload: bytes::Bytes,
     pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
 }
 
 impl Probe {
-    /// Builds the portable IPv4/IPv6 TCP, UDP, or ICMP probe represented by
-    /// this already-authorized plan. Route-dependent fields remain unspecified
-    /// for the high-level client to materialize.
     #[must_use]
     pub fn packet(&self) -> Packet {
         packet::probe_packet(self)
@@ -44,9 +38,7 @@ impl crate::probe::runner::Sequenced for Probe {
     }
 }
 
-/// Scan executes exactly one correlated probe per batch.
 impl Batch<Probe> {
-    /// Plans the batch that executes `probe` alone.
     pub(super) fn single(probe: Probe, timeout: Duration) -> Self {
         Self {
             sequence: probe.sequence,
@@ -56,8 +48,6 @@ impl Batch<Probe> {
         }
     }
 
-    /// The batch's only probe. Scan plans every batch with exactly one, so
-    /// only a batch reshaped outside the planner is rejected.
     pub(crate) fn probe(&self) -> Result<&Probe, BoundaryError> {
         match self.probes.as_slice() {
             [probe] => Ok(probe),

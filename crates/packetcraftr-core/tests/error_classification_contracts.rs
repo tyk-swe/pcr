@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Every public error variant renders a stable, non-empty message and, where
-//! the type is classified, carries the code and kind the CLI contract relies on.
-
 use std::net::Ipv6Addr;
 
 use packetcraftr_core::codec;
@@ -30,8 +27,6 @@ fn field_error() -> field::Error {
     }
 }
 
-/// A message is "stable-looking" when it names the failing thing without
-/// leaking debug formatting of the enum itself.
 fn assert_message_is_stable(message: &str, variant: &str) {
     assert!(!message.is_empty(), "{variant} must render a message");
     assert!(
@@ -521,9 +516,6 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
     }
 }
 
-/// An Ethernet frame carrying an IPv4 header whose IHL promises 8 option
-/// bytes that the wire does not carry. The trusted decoder cannot see the
-/// options, so it cannot know whether they source-route the datagram elsewhere.
 fn ethernet_ipv4_with_truncated_options() -> Vec<u8> {
     vec![
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00, 0x47,
@@ -559,8 +551,6 @@ fn ipv4_wire_with_truncated_options_may_hide_a_destination() {
         "{error:?}"
     );
 
-    // A hand-built layer naming the protocol in another case is held to the
-    // same check the registry's case-insensitive lookup would apply.
     for spelling in ["IPv4", " IPV6 "] {
         let mut packet = packetcraftr_core::packet::Packet::new();
         packet.push(Malformed::new(

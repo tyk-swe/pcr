@@ -10,8 +10,6 @@ use packetcraftr_netio::{
     transmit::SendEvidenceFault,
 };
 
-/// The live-I/O failures a native backend raises keep the platform refusal as
-/// a source, and the retained failure is published exactly once.
 #[test]
 fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     let error = Error::Capture {
@@ -22,7 +20,6 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     assert_eq!(error.causes(), ["device is not up"]);
     assert_eq!(error.classification().code, "io.capture");
 
-    // A provider-invariant failure names its own fault and nothing else.
     let invariant = Error::InvalidSendEvidence {
         fault: SendEvidenceFault::AcceptedBytesDiffer,
     };
@@ -40,7 +37,6 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
         Kind::Internal,
     );
 
-    // A route backend refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
         source: Some(Source::new(route::Error::OperatingSystem {
@@ -58,8 +54,6 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     );
 }
 
-/// Interface enumeration failures publish the live-I/O classes, and become
-/// the matching live-I/O failure with the same message and source chain.
 #[test]
 fn interface_errors_keep_live_io_classes_and_their_source() {
     let unsupported = interface::Error::Unsupported(Unsupported::new(
@@ -88,10 +82,6 @@ fn interface_errors_keep_live_io_classes_and_their_source() {
     }
 }
 
-/// Every "unsupported" failure is one [`Unsupported`] whose capability
-/// decides its class: route lookups publish `capability.route`, everything
-/// else `capability.unsupported`. The three error types that carry it publish
-/// the same message, class, and causes.
 #[test]
 fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
     for (capability, code, subject) in [
@@ -149,9 +139,6 @@ fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
     }
 }
 
-/// `tcp::Error` is `#[non_exhaustive]`; the table lists all 9 variants
-/// exactly once. A socket failure is the provider's own error: its message
-/// and kind pass through, and every other socket error stays a source.
 #[test]
 fn tcp_errors_keep_stable_classes_and_their_socket_source() {
     let socket = tcp::Error::from(io::Error::new(
@@ -214,8 +201,6 @@ fn ipv6(value: &str) -> IpAddr {
     value.parse().expect("fixture IPv6 address")
 }
 
-/// One table row: the published code and kind, a remediation, and a
-/// non-empty message.
 fn assert_row(
     error: &(impl Classified + fmt::Display),
     expected_code: &'static str,
@@ -228,8 +213,6 @@ fn assert_row(
     assert!(!error.to_string().is_empty());
 }
 
-/// `route::Error` is `#[non_exhaustive]`; the table lists all 10
-/// variants exactly once, so a new variant must add a row here.
 #[test]
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
@@ -310,8 +293,6 @@ fn system_route_errors_keep_stable_provider_classes() {
     }
 }
 
-/// `packetcraftr_netio::Error` is `#[non_exhaustive]`; the table lists all 22
-/// variants exactly once, so a new variant must add a row here.
 #[test]
 fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     let cases = [

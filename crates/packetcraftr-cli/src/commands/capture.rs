@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `capture`: streams live frames from one or more interfaces to text,
-//! NDJSON, a capture stream, or rotating capture files.
-
 pub(super) mod arguments;
 mod files;
 mod rendering;
@@ -171,9 +168,7 @@ pub(super) fn run(
         &registry,
         limits.snap_length,
     )?;
-    // The raw selector remains the filter's owner when no output decoding was
-    // requested; `Decoding` otherwise evaluates the same filter itself so a
-    // frame is decoded at most once.
+    // `Decoding` evaluates the same filter itself so a frame is decoded at most once.
     let selector = if decoding.is_none() {
         filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
     } else {
@@ -240,7 +235,6 @@ pub(super) fn run(
     )
 }
 
-/// Shared per-frame decoding for `--filter`, `--dissect`, and `--field`.
 /// Selection decodes a kept frame once and parks it so emission republishes
 /// the same dissection; decoded state never outlives one frame.
 struct Decoding {
@@ -249,8 +243,6 @@ struct Decoding {
 }
 
 impl Decoding {
-    /// Builds the shared decoding state, or `None` when neither `--dissect`
-    /// nor `--field` asked for decoded output. `parked` starts empty.
     fn prepare(
         dissect: bool,
         projector: bool,
@@ -267,8 +259,6 @@ impl Decoding {
         }))
     }
 
-    /// The filter half of frame selection, run by the capture's selector; a
-    /// kept frame's dissection is parked for the sink.
     fn select(&mut self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
         let Some(decoded) = self
             .frames
@@ -281,8 +271,6 @@ impl Decoding {
         Ok(true)
     }
 
-    /// Reuses the dissection `select` parked for this frame, decoding only
-    /// when no selection ran for it (the no-filter case).
     fn take_or_decode(
         &mut self,
         source_frame: u64,
@@ -297,7 +285,6 @@ impl Decoding {
     }
 }
 
-/// Where a capture's frames and summary go.
 struct Output<'a> {
     format: CaptureFormat,
     compression: Compression,
@@ -307,16 +294,12 @@ struct Output<'a> {
     files: Option<Files>,
     stream: &'a StreamEncoder,
 }
-/// What the capture sink writes to while the capture runs. The command
-/// finalizes it afterwards, whether or not the capture succeeded.
 struct Destinations {
     files: Option<Files>,
     writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     projector: Option<crate::rendering::Projector>,
 }
 
-/// The client is injected so normal capture, rotation, and mixed interfaces
-/// all exercise the same workflow and finalization path.
 fn drive<P: packetcraftr::Providers>(
     client: &packetcraftr::Client<P>,
     request: workflow::Request,
@@ -430,8 +413,7 @@ fn drive<P: packetcraftr::Providers>(
     };
     let result = client.capture(request, sink);
     let mut destinations = lock(&destinations);
-    // Finalize every initialized destination even when capture or a consumer
-    // failed, retaining whatever complete records reached the writer.
+    // Finalize every initialized destination even when capture or a consumer failed.
     let file_finish = destinations
         .files
         .as_mut()
@@ -471,8 +453,7 @@ fn drive<P: packetcraftr::Providers>(
     if let Some(error) = error {
         return Err(error.with_capture(snapshot));
     }
-    // A projection that never matched a frame still owes its text header; the
-    // NDJSON terminal is the capture summary, never a second complete record.
+    // A projection that never matched a frame still owes its text header.
     if format == CaptureFormat::Text
         && let Some(projector) = destinations.projector.take()
     {
@@ -484,15 +465,11 @@ fn drive<P: packetcraftr::Providers>(
         .map_err(|error| error.with_capture(snapshot))
 }
 
-/// Locks state the capture's selector, sink, and command share. A panic in
-/// one of them leaves the state as it was, which finalization still needs.
+/// A panic in the selector or sink leaves the state as it was, which finalization still needs.
 fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Publishes one matched frame. Decoded output reuses the dissection the
-/// admission callback parked, projections stream as bounded `fields` records,
-/// and every sink error propagates so capture cleanup still runs.
 fn emit_frame(
     decoding: Option<&mut Decoding>,
     projector: Option<&mut crate::rendering::Projector>,
@@ -522,8 +499,6 @@ fn emit_frame(
         }
         return match format {
             CaptureFormat::Text => {
-                // Only the text rendering needs a stack here; the NDJSON event
-                // builds its own in its conversion.
                 let stack = output::frame::Stack::from(&decoded);
                 let frame =
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;

@@ -177,7 +177,6 @@ mod tests {
     }
 }
 
-/// One window per attempt.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct AttemptWindow;
 
@@ -186,7 +185,6 @@ impl Window for AttemptWindow {
     const HELP: &'static str = "Response window for each attempt, shared with any TCP continuation";
 }
 
-/// Every attempt window plus retry delay.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Resolution;
 

@@ -1,26 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! TLS record and handshake dissection, with JA3 and JA4 fingerprints.
-//!
-//! The parts are deliberately separate:
-//!
-//! ```text
-//! parse        bytes  -> Outcome<Record> / Outcome<Handshake>   (pure, no state)
-//! model        the bounded record, handshake, hello, and layer types
-//! names        IANA code point -> registered name
-//! fingerprint  ClientHello/ServerHello -> JA3, JA3S, JA4
-//! codec        one TCP segment -> one `tls` layer               (per-frame view)
-//! ```
-//!
-//! [`parse_record`] and [`parse_handshake`] know nothing about TCP: they
-//! report how many bytes a record or handshake message needs, and the caller
-//! decides whether to buffer. That keeps the per-frame codec stateless and
-//! lets the stream collector reuse the same parser over reassembled payloads.
-//!
-//! [`Hello`] constructs bounded ClientHello and ServerHello fixtures. Every
-//! wire API returns [`Error`].
-
 mod codec;
 mod model;
 mod reflection;
@@ -40,14 +20,11 @@ pub use model::{
     RECORD_HEADER_LEN, Record, ServerHello, Tls, extension,
 };
 
-/// A TLS record, handshake, or hello that breaks a wire rule or a bound.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The bytes break a TLS wire rule or exceed a TLS bound.
     #[error("invalid tls layer: {message}")]
     Invalid { message: String },
-    /// A hello fixture could not be encoded within its bounds.
     #[error("TLS hello cannot be encoded")]
     Encode(#[source] crate::codec::Error),
 }
@@ -79,10 +56,6 @@ impl From<crate::codec::Error> for Error {
     }
 }
 
-/// Renders bytes as lowercase hexadecimal, two characters per byte.
-///
-/// Shared by the fingerprint digests and the codec's raw-byte fields so both
-/// spell a digest the same way.
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 

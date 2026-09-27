@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Captured-evidence validation and retention bounds for active neighbor resolution.
-
 use std::collections::VecDeque;
 
 use bytes::Bytes;
@@ -95,9 +93,6 @@ pub(super) fn validate_neighbor_send(
         .map_err(|source| map_io_error(request, "validating discovery send evidence", source))
 }
 
-/// Captured frames retained as resolution evidence within the configured
-/// frame and byte budget. `truncated` records that at least one frame was
-/// dropped or evicted to stay within it.
 pub(super) struct EvidenceBuffer {
     max_frames: usize,
     max_bytes: usize,
@@ -117,8 +112,6 @@ impl EvidenceBuffer {
         }
     }
 
-    /// Keeps `frame` if it fits; otherwise drops it and marks the evidence
-    /// truncated.
     pub(super) fn retain(&mut self, frame: Frame) {
         if self.over_budget(frame.bytes().len()) {
             self.truncated = true;
@@ -140,16 +133,12 @@ impl EvidenceBuffer {
             self.truncated = true;
         }
         if self.over_budget(frame_length) {
-            // The frame alone exceeds the budget: dropping it is the only
-            // bounded outcome, and the caller learns about it through
-            // `truncated`.
             self.truncated = true;
             return;
         }
         self.push(frame);
     }
 
-    /// The retained frames, oldest first, and whether any were dropped.
     pub(super) fn into_evidence(self) -> (Vec<Frame>, bool) {
         (Vec::from(self.frames), self.truncated)
     }
@@ -364,7 +353,6 @@ mod tests {
         assert_eq!(evidence.bytes, 0);
         assert!(evidence.truncated);
 
-        // The same oversized frame on an empty queue must not panic either.
         evidence.truncated = false;
         evidence.retain_matching(frame(&[7, 7, 7, 7, 7]));
         assert!(evidence.frames.is_empty());

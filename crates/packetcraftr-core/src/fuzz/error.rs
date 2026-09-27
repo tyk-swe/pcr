@@ -114,8 +114,6 @@ impl Classified for Error {
         }
     }
 
-    /// The output variant delegates to its [`BoundaryError`], which carries a
-    /// captured `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Output { source } => source.as_causes(),
@@ -126,15 +124,14 @@ impl Classified for Error {
 
 crate::budget::deadline_error_conversions!(Error);
 
-/// The rule an [`Error::InvalidLimit`] value breaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Constraint {
     /// The value must be within `1..=maximum`.
-    Within { maximum: u64 },
-    /// The per-packet byte limit cannot exceed the total byte limit.
+    Within {
+        maximum: u64,
+    },
     AtMostMaxTotalBytes,
-    /// At most [`MAX_STRATEGIES`] strategies may be selected.
     AtMostMaxStrategies,
 }
 
@@ -153,15 +150,11 @@ impl std::fmt::Display for Constraint {
     }
 }
 
-/// Why an [`Error::InvalidTarget`] cannot be resolved against the base packet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TargetFault {
-    /// The target's layer index is not below the packet's `layers`.
     LayerOutOfRange { layers: usize },
-    /// The field path is not registered in the layer's schema.
     UnregisteredPath,
-    /// The layer does not return a value for the field path.
     Unreadable,
 }
 
@@ -177,19 +170,13 @@ impl std::fmt::Display for TargetFault {
     }
 }
 
-/// Why an [`Error::InvalidBasePacket`] cannot be fuzzed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BaseFault {
-    /// The packet has more layers than the build's `max_layers`.
     Layers { layers: usize, max_layers: usize },
-    /// Counting the packet's schema fields overflowed.
     FieldCountOverflow,
-    /// The packet's schemas declare more than [`MAX_TARGET_FIELDS`] fields.
     SchemaFields { fields: usize },
-    /// The packet reflects more than [`MAX_TARGET_FIELDS`] fields.
     ReflectedFields,
-    /// The request selects more than [`MAX_TARGET_FIELDS`] targets.
     Targets { targets: usize },
 }
 

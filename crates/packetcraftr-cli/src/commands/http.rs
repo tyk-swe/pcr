@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `http`: inspects the cleartext HTTP/1 messages carried on captured TCP
-//! streams. Bodies are counted and discarded, never retained.
+//! Bodies are counted and discarded, never retained.
 
 pub(super) mod arguments;
 mod rendering;

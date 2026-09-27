@@ -9,10 +9,6 @@ use crate::{
 
 use super::{ReversedProtocolLayers, response_source, reversed_protocol_layers};
 
-/// A structured DNS answer owns its reversed UDP conversation. Verifying the
-/// application identity means a wrong identifier, opcode, direction, or
-/// question can never attribute the reply through the weaker transport-tuple
-/// match, so the confidence sits above stateful transport correlation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DnsMatcher;
 
@@ -27,9 +23,6 @@ impl ResponseMatcher for DnsMatcher {
     }
 }
 
-/// Whether `pair` is a DNS answer to the request's query: the layers sit
-/// directly on UDP, the reply flips the direction bit, and the transaction
-/// identifier, opcode, and complete ordered question section all echo.
 fn answers(pair: &ReversedProtocolLayers<'_, '_>) -> bool {
     let (Some(query), Some(reply)) = (
         pair.request.downcast_ref::<Dns>(),
@@ -40,9 +33,6 @@ fn answers(pair: &ReversedProtocolLayers<'_, '_>) -> bool {
     answers_query(query, reply)
 }
 
-/// The scope is unicast DNS-over-UDP: the layer must sit directly on a UDP
-/// header. DNS-over-TCP replies carry a length prefix this matcher does not
-/// adjudicate.
 pub(super) fn udp_child(packet: &Packet, index: usize) -> bool {
     index > 0
         && packet

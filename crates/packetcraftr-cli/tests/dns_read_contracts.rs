@@ -51,7 +51,6 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
     assert_eq!(error["command"], "dns-read");
 }
 
-/// `--dns-port` adds nonstandard services; port 53 is always analyzed.
 #[test]
 fn additional_dns_ports_keep_the_standard_port() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -193,8 +192,6 @@ fn ndjson_budget_shares_the_charge_across_event_kinds() {
     );
 }
 
-/// One IPv4/UDP DNS response from 192.0.2.53 whose question name and TXT
-/// answer carry terminal escape and bidirectional-override bytes.
 fn hostile_dns_capture() -> tempfile::NamedTempFile {
     let label: &[u8] = b"ev\x1b[31mil\xe2\x80\xae";
     let txt: &[u8] = b"x\x1b]0;owned\x07\x1b[2Jy";
@@ -234,9 +231,6 @@ fn hostile_dns_capture() -> tempfile::NamedTempFile {
     file
 }
 
-/// Captured DNS names and record text reach the terminal escaped: no escape,
-/// control, or bidirectional-override character survives into text output,
-/// from `dns-read` or from `read --dissect`.
 #[test]
 fn captured_dns_names_and_record_text_render_without_terminal_escapes() {
     let capture = hostile_dns_capture();

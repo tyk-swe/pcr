@@ -123,8 +123,6 @@ impl Classifier for TestClassifier {
     }
 }
 
-/// What the fake executor returns for one batch, beyond one exact send
-/// receipt per probe.
 #[derive(Default)]
 struct Script {
     /// `(request index, frame bytes, latency in milliseconds)` in arrival order.
@@ -134,8 +132,6 @@ struct Script {
     foreign_permit: bool,
 }
 
-/// Returns scripted executions in order (no responses once the script runs
-/// out) and records every batch it was handed.
 #[derive(Default)]
 struct ScriptedExecutor {
     scripts: VecDeque<Script>,
@@ -202,7 +198,6 @@ impl Executor<Batch<TestProbe>> for ScriptedExecutor {
     }
 }
 
-/// Plans `sizes.len()` consecutive batches with consecutive probe sequences.
 fn batches(sizes: &[u64]) -> Vec<Batch<TestProbe>> {
     let mut sequence = 0;
     sizes
@@ -366,8 +361,6 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
     ));
     assert_eq!(run.events, [probe(0)]);
 
-    // A pipelined completion reaches processing without the execution
-    // context; processing itself still rejects the foreign permit.
     let batch = batches(&[1]).remove(0);
     let execution = ScriptedExecutor::new([foreign()])
         .execute(&batch)
@@ -407,7 +400,6 @@ fn diagnostics_are_published_before_each_probes_event() {
             ..Script::default()
         },
     ]);
-    // One retained frame: the second probe's reply exceeds the budget.
     let limits = EvidenceLimits {
         max_frames: 1,
         ..LIMITS
@@ -452,20 +444,14 @@ fn diagnostics_are_published_before_each_probes_event() {
 fn ties_break_by_rank_then_responder_then_latency_then_bytes() {
     let mut executor = ScriptedExecutor::new([Script {
         responses: vec![
-            // A later, slower reply with a higher rank wins.
             (0, &[1, 1], 1),
             (0, &[2, 9], 5),
-            // At equal rank the lower responder wins even though it arrives
-            // second; first arrival does not decide.
             (1, &[1, 9], 1),
             (1, &[1, 3], 5),
-            // At equal rank and responder the shorter latency wins.
             (2, &[1, 3, 2], 5),
             (2, &[1, 3, 9], 1),
-            // Then the lower exact bytes win.
             (3, &[1, 3, 9], 1),
             (3, &[1, 3, 2], 1),
-            // Uncorrelated responses never win.
             (4, &[0, 1], 1),
         ],
         ..Script::default()

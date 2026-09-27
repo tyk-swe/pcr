@@ -23,8 +23,7 @@ pub(crate) struct RouteSelectionArgs {
 }
 
 impl RouteSelectionArgs {
-    /// Kernel-managed TCP cannot preserve packet-oriented interface, source,
-    /// or link-mode overrides from the raw UDP path.
+    /// Kernel-managed TCP cannot preserve interface, source, or link-mode overrides.
     pub(crate) const fn supports_kernel_tcp(&self) -> bool {
         self.interface.is_none()
             && self.source.is_none()

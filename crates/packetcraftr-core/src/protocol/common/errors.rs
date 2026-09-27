@@ -9,8 +9,6 @@ pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
     crate::layer::Id::new(name)
 }
 
-/// The protocol name a parent binds this child under: the intended protocol
-/// of a malformed layer, otherwise the layer's own identifier.
 pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
     layer
         .downcast_ref::<Malformed>()
@@ -18,8 +16,6 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
         .unwrap_or_else(|| layer.protocol_id().as_str())
 }
 
-/// Whether a parent binds this child as `protocol`: a malformed layer by the
-/// protocol it was meant to be, any other layer by its type.
 pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
     match layer
         .downcast_ref::<Malformed>()
@@ -30,15 +26,11 @@ pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
     }
 }
 
-/// Whether a child layer only preserves opaque bytes, so a parent that would
-/// otherwise reject a typed payload accepts it.
 pub(crate) fn child_is_opaque(child: &dyn Layer) -> bool {
     crate::protocol::BuiltinProtocol::of(child)
         .is_some_and(crate::protocol::BuiltinProtocol::preserves_opaque_bytes)
 }
 
-/// Borrows the concrete layer a codec encodes, or reports the mismatch as
-/// [`crate::codec::Error::WrongLayer`].
 pub(crate) fn typed_layer<'a, L: Layer + 'static>(
     name: &'static str,
     layer: &'a dyn Layer,
@@ -74,8 +66,6 @@ pub(crate) fn invalid(name: &'static str, message: impl Into<String>) -> crate::
     }
 }
 
-/// Reports a protocol model's typed failure as an invalid layer, retaining it
-/// as the source.
 pub(crate) fn rejected(
     name: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,

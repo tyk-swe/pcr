@@ -36,17 +36,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// A probe still waiting for its response window when the pipeline failed,
-/// with the best response it had so far.
 #[derive(Clone, Debug)]
 pub struct PendingEvidence {
     pub sent: SentProbe,
     pub response: Option<Frame>,
 }
-/// Why a rolling probe window failed, with its partial statistics, every
-/// probe still pending, and each capture source's lifecycle. It reaches the
-/// caller as the source of
-/// [`scan::Error::PipelineExecution`](crate::scan::Error::PipelineExecution).
 #[derive(Debug, thiserror::Error)]
 #[error("packet scan pipeline failed")]
 pub struct PipelineFailure {
@@ -56,7 +50,6 @@ pub struct PipelineFailure {
     pub pending: Vec<PendingEvidence>,
     pub failed_probe: Option<Probe>,
     pub capture_sources: Vec<capture::Source>,
-    /// Capture shutdown failure that followed the primary failure.
     pub cleanup: Option<Box<LiveIoError>>,
 }
 impl Classified for PipelineFailure {
@@ -90,8 +83,6 @@ struct Pending {
     last_response: Option<Frame>,
     charge: usize,
 }
-/// The response a pending probe would report if it completed now, with what
-/// the shared candidate ordering compares about it.
 struct Best {
     response: crate::exchange::Response,
     rank: u8,
@@ -107,9 +98,6 @@ impl Best {
         }
     }
 }
-/// One batch as the pipeline runs it: its only probe and the permit its
-/// evidence must carry. Every batch is checked for exactly one probe before
-/// anything is planned.
 #[derive(Clone, Copy)]
 struct Planned<'b> {
     probe: &'b Probe,
@@ -125,9 +113,6 @@ impl<'b> Planned<'b> {
     }
 }
 
-/// Rejects an empty or out-of-budget pipeline configuration before any
-/// resource is armed, so a scan that cannot proceed arms no capture. The
-/// refusal names the first bound that does not hold.
 fn validate_options(
     batches: &[Batch<Probe>],
     options: &PipelineOptions,
@@ -186,9 +171,6 @@ fn validate_options(
     }
 }
 
-/// Observes every pending probe a captured record could complete: interface,
-/// freshness window, transport classification, and application evidence. An
-/// empty or ambiguous result leaves the frame unattributed.
 fn candidates(
     pending: &BTreeMap<usize, Pending>,
     planned: &[Planned<'_>],
@@ -235,8 +217,6 @@ pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryErr
         Vec::new(),
     )
 }
-/// The provider deadline for work bounded by `end` on the client's clock,
-/// carrying the client's cancellation.
 fn until<P: Providers, K: Clock>(client: &Client<P, K>, end: Instant) -> Deadline {
     Deadline::new(end.saturating_duration_since(client.now()))
         .with_cancellation(client.cancellation.clone())
@@ -257,9 +237,6 @@ fn check<P: Providers, K: Clock>(
     }
     Ok(())
 }
-/// Runs every batch through one capture group, sending on the client's clock:
-/// the operation deadline and the probe start schedule are read from it,
-/// while each wait for a captured frame stays on the capture group.
 pub(super) fn run<P: Providers, K: Clock>(
     executor: &ExchangeExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
@@ -311,8 +288,6 @@ pub(super) fn run<P: Providers, K: Clock>(
         let mut next = 0usize;
         let mut next_send = executor.client.now();
         let mut retained = plan.base_bytes;
-        // One admitted probe per batch, consumed in send order: the next one
-        // belongs to `batches[next]`.
         let mut admitted = std::mem::take(&mut plan.probes).into_iter().peekable();
         let source_count = group.sources().len();
         let capture_drain_limit = group
@@ -337,10 +312,7 @@ pub(super) fn run<P: Providers, K: Clock>(
                 capture_drain_remaining = capture_drain_limit;
             }
             // A callback can consume the rest of another probe's timeout after
-            // its reply has already entered a capture queue. Give each expired
-            // cohort enough fair rotations to reach every record that could
-            // occupy the partitioned queues, even if newer traffic refills
-            // slots. Correlation below still enforces each ingress deadline.
+            // its reply has already entered a capture queue.
             let draining_captures = !expired.is_empty() && capture_drain_remaining > 0;
             if !draining_captures {
                 if !expired.is_empty() {

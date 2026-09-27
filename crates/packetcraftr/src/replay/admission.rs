@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Per-frame admission: the client's policy approves each captured frame's
-//! budget, its exact bytes, and finally the route it would leave through,
-//! before replay performs live I/O.
-
 use std::sync::Arc;
 
 use packetcraftr_core::error::{Classification, Kind};
@@ -32,20 +28,14 @@ pub(crate) trait FinalWire {
     ) -> Result<(), BoundaryError>;
 }
 
-/// Validates complete capture evidence, applies the client's policy to raw
-/// routing destinations before I/O, and requires an exact decode/build round
-/// trip.
 pub(super) struct FrameAdmission<'c> {
     admission: Admission<'c>,
     registry: Arc<Registry>,
     allow_permissive_live: bool,
-    /// The trusted decode `authorize_frame` already produced, retained for
-    /// `authorize_final_wire` to reuse when it judges the same wire bytes.
     wire_decode: Option<decode::DecodedPacket>,
 }
 
 impl<'c> FrameAdmission<'c> {
-    /// Uses `registry` for the caller's normal decode/rebuild round trip.
     /// Destination policy is applied through an independent built-in decoder.
     pub(super) fn new(
         admission: Admission<'c>,
@@ -64,8 +54,6 @@ impl<'c> FrameAdmission<'c> {
         self.admission.policy()
     }
 
-    /// Authorizes the frame before route planning and retains the trusted
-    /// decode so the final wire check can reuse it for the same bytes.
     fn authorize_frame(&mut self, frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
@@ -155,8 +143,6 @@ impl<'c> FrameAdmission<'c> {
     }
 }
 
-/// Replay reports undecodable captured bytes as a packet failure rather than
-/// a policy refusal.
 fn wire_error(error: crate::policy::Error) -> BoundaryError {
     match error {
         crate::policy::Error::UndecodableWire { source } => decode_error(source),
@@ -177,8 +163,6 @@ fn decode_error(source: decode::Error) -> BoundaryError {
     )
 }
 
-/// Replay's denial names captured bytes rather than a built packet, and the
-/// flag that unblocks them.
 fn permissive_live_error(error: crate::policy::Error) -> BoundaryError {
     match error {
         crate::policy::Error::PermissiveLiveOptIn => BoundaryError::new(
@@ -233,10 +217,6 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 }
 
 impl Authorizer for FrameAdmission<'_> {
-    /// Limits pass the client's admission before the frame is decoded or
-    /// rebuilt, so a request that exceeds policy never reaches the expensive
-    /// round trip. Shapes without an exact frame are rejected: replay cannot
-    /// be authorized from limits alone or a declared packet list.
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.admission
             .authorize(Operation::Wire(operation.limits()))
@@ -255,9 +235,6 @@ impl Authorizer for FrameAdmission<'_> {
 }
 
 impl FinalWire for FrameAdmission<'_> {
-    /// Reuses the trusted decode retained by `authorize_frame` when the wire
-    /// bytes match, so only the route-aware source check runs again. Frames
-    /// without a retained decode are authorized from scratch.
     fn authorize_final_wire(
         &mut self,
         frame: &Frame,
@@ -311,7 +288,6 @@ mod tests {
         packetcraftr_core::protocol::builtin::registry()
     }
 
-    /// Admission under `policy`, which outlives the test.
     fn frame_admission(
         registry: Arc<Registry>,
         policy: crate::policy::Policy,
@@ -325,8 +301,6 @@ mod tests {
         )
     }
 
-    /// A caller codec that preserves every root byte while exposing no IP
-    /// semantics to consumers of its decoded packet.
     #[derive(Clone, Copy, Debug)]
     struct OpaqueRawCodec;
 

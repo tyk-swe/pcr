@@ -69,8 +69,6 @@ fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_ca
     );
 }
 
-/// `--max-interfaces` bounds each input section, so a rewrite gathering two
-/// one-interface sections into its single output section stays within it.
 #[test]
 fn per_section_interface_limit_does_not_bound_the_rewritten_output() {
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

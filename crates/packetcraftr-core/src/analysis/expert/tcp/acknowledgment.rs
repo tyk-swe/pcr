@@ -75,7 +75,6 @@ pub(super) fn update(
     }
 
     let sent = flows.entry(flow.clone()).or_default();
-    // Acknowledgments advance with TCP serial arithmetic.
     let backward = ack
         && sent
             .acknowledgment

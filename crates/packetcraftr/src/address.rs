@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Address-scope classification used by destination policy.
-
 use std::net::IpAddr;
 
 pub(super) fn is_public(address: IpAddr) -> bool {

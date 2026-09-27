@@ -24,7 +24,6 @@ pub(super) fn render_text(
     ))?;
     if let Some(duration) = report.duration() {
         let average = report.average_packet_size().unwrap_or_default();
-        // Both rates share one zero-span guard, so they are present together.
         match report.packet_rate().zip(report.byte_rate()) {
             Some((packets, bytes)) => write_stdout_line(format_args!(
                 "duration {}; {packets:.3} frame(s)/s, {bytes:.3} byte(s)/s; average packet size {average:.3} byte(s)",
@@ -186,8 +185,6 @@ fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliErro
     Ok(())
 }
 
-// counter magnitudes that exceed the f64 mantissa are far beyond any capture this renders, and the
-// result is a display percentage
 fn percent(part: u64, whole: u64) -> f64 {
     if whole == 0 {
         0.0

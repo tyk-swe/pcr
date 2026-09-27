@@ -26,12 +26,10 @@ use super::error::duration_limit;
 use super::executor::{CaseEvidence, CaseStep};
 use super::{Aggregate, Collector, Error, Event, Outcome, Report, Request, Trial};
 
-/// A live run of `campaign` over the fixture packet.
 fn request(campaign: packet_fuzz::Request) -> Request {
     Request::new(campaign, packet())
 }
 
-/// Runs the engine, publishing each case to `sink` on a worker.
 fn publish<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
@@ -48,8 +46,6 @@ where
     publish_cancellable(request, authorizer, executor, clock, None, sink)
 }
 
-/// [`publish`] under a deadline carrying `cancellation`, as the client
-/// builds one from its own.
 fn publish_cancellable<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
@@ -81,7 +77,6 @@ where
     )
 }
 
-/// Runs the engine into its aggregate through a [`Collector`].
 fn collect<A, E, C>(
     request: &Request,
     authorizer: &mut A,
@@ -96,7 +91,6 @@ where
     collect_cancellable(request, authorizer, executor, clock, None)
 }
 
-/// [`collect`] under a deadline carrying `cancellation`.
 fn collect_cancellable<A, E, C>(
     request: &Request,
     authorizer: &mut A,
@@ -170,9 +164,6 @@ struct AllowAll;
 
 impl Authorizer for AllowAll {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        // The fuzz workflow always states its packets, its chosen destination,
-        // and its permissive-live position; a budget-only request would skip
-        // the destination gate.
         assert!(
             matches!(operation, Operation::Declared(_)),
             "fuzz submits a declared-packet request, got {operation:?}"
@@ -302,7 +293,6 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
     }
 }
 
-/// Cancels the campaign while approving it.
 struct CancellingAuthorizer {
     signal: Cancellation,
     calls: usize,
@@ -350,8 +340,6 @@ fn cancellation_during_authorization_prevents_the_first_live_case() {
     assert_eq!(error.classification().code, "io.cancelled");
 }
 
-/// Reports the first case as having spent most of the campaign budget, then
-/// answers the next case after `latency`.
 struct BudgetSpendingExecutor {
     latency: Duration,
     executions: usize,
@@ -440,7 +428,6 @@ fn live_cases_are_classified_and_their_statistics_summarized() {
         ),
         (2, 2)
     );
-    // Both executions plus the scheduled pacing delay.
     assert_eq!(
         aggregate.stats,
         Stats {
@@ -486,8 +473,6 @@ fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication
     assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
-/// Answers every case with one response, one unmatched and one undecodable
-/// frame.
 struct ThreeFrameExecutor;
 
 impl Executor<CaseStep> for ThreeFrameExecutor {
@@ -625,7 +610,6 @@ pub(super) fn packet() -> Packet {
     packet
 }
 
-/// A bit-flip campaign of `cases` cases over the fixture's raw payload.
 fn bit_flip(cases: usize) -> packet_fuzz::Request {
     packet_fuzz::Request {
         seed: 0x5eed,
@@ -836,8 +820,6 @@ fn transmissions(providers: &FakeProviders) -> usize {
         .count()
 }
 
-/// Permissive live traffic requires both the request opt-in and the client
-/// policy's allowance to pass admission before any provider is consulted.
 #[test]
 fn a_permissive_live_campaign_is_refused_by_client_admission_before_any_provider_call() {
     let permissive_build = packetcraftr_core::build::Options {
@@ -904,8 +886,6 @@ fn a_permissive_live_campaign_is_refused_by_client_admission_before_any_provider
         );
     }
 
-    // The same gate approves when both are present: a permissively built
-    // campaign whose cases still encode exactly runs to completion.
     let (client, providers) = client(&permissive_policy);
     let collector = Collector::default();
     let report = client

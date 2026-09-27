@@ -24,7 +24,6 @@ pub(crate) struct EpochBoundsArgs {
 }
 
 impl EpochBoundsArgs {
-    /// Resolves the flag pair into bounds, rejecting a start after the stop.
     pub(crate) fn resolve(&self) -> Result<Option<TimeBounds>, CliError> {
         if self.start_epoch.is_none() && self.stop_epoch.is_none() {
             return Ok(None);
@@ -35,8 +34,6 @@ impl EpochBoundsArgs {
     }
 }
 
-/// Reuses the capture timestamp parser: non-negative Unix seconds with an
-/// optional fraction of at most nine digits, never rounded.
 fn epoch(input: &str) -> Result<SystemTime, String> {
     super::parse_timestamp(input).map_err(|error| error.message)
 }

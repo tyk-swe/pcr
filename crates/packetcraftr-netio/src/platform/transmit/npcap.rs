@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Npcap Layer-2 transmission.
-
 #![allow(unsafe_code)]
 
 use crate::platform::common::npcap::{
@@ -32,8 +30,7 @@ pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmi
         &NativeSettings::default(),
     )?;
     let submission = Submission::start();
-    // SAFETY: the byte slice remains valid for the synchronous call and length
-    // is its exact checked c_int representation.
+    // SAFETY: the byte slice remains valid for the synchronous call and length is its exact size.
     let result = unsafe {
         (handle.api.pcap_sendpacket)(handle.raw.as_ptr(), frame.bytes().as_ptr(), length)
     };

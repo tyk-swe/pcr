@@ -1,16 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Output and command attribution for failures before typed parsing succeeds.
-
 use std::ffi::OsString;
 
 use crate::output;
 
 use crate::cli::{ColorChoice, Format};
 
-/// The formats that can carry a structured error document. A clap failure is
-/// reported in one of these or, for everything else, as prose on stderr.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MachineFormat {
     Json,
@@ -24,9 +20,6 @@ pub(crate) struct Context {
     pub(crate) command: Option<output::contract::Command>,
 }
 
-/// Selects error rendering from global output/color options and the first
-/// root positional. This scan never interprets command-specific options or
-/// decides argument validity; Clap remains the argument parser.
 pub(crate) fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
@@ -41,8 +34,7 @@ pub(crate) fn parse(arguments: &[OsString]) -> Context {
                 .split_once('=')
                 .map_or((argument, None), |(name, value)| (name, Some(value)))
         });
-        // Every global option that takes a value, so its value is never
-        // mistaken for the root positional.
+        // Global options that take a value, so it is never mistaken for the root positional.
         if matches!(
             name,
             "--output" | "--color" | "--output-timeout-ms" | "--resource-preset"
@@ -76,8 +68,7 @@ pub(crate) fn parse(arguments: &[OsString]) -> Context {
 }
 
 /// `None` for a value clap would reject, so the earlier choice stands;
-/// `Some(None)` for a format clap accepts that cannot carry a structured
-/// error document, so a parse failure is reported as prose.
+/// `Some(None)` for a format that cannot carry a structured error document.
 fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
     let format = <Format as clap::ValueEnum>::from_str(value, false).ok()?;
     Some(match format {
@@ -93,10 +84,6 @@ fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
     })
 }
 
-/// `None` for a value clap would reject, so the earlier choice stands.
-///
-/// Delegating to `ValueEnum` keeps this pre-clap scan on exactly the spellings
-/// clap itself accepts, as [`parse_machine_format`] does.
 fn parse_color_choice(value: &str) -> Option<ColorChoice> {
     <ColorChoice as clap::ValueEnum>::from_str(value, false).ok()
 }
@@ -112,8 +99,6 @@ fn parse_command(value: &str) -> Option<output::contract::Command> {
 mod tests {
     use super::*;
 
-    /// The startup scan runs before clap, so it has to agree with clap on
-    /// which repeat of a global option counts: the last one.
     #[test]
     fn startup_context_scans_global_options_without_guessing_commands() {
         struct Case {
@@ -162,8 +147,6 @@ mod tests {
                 color: "auto",
                 command: Some(output::contract::Command::Tls),
             },
-            // Every global option that takes a value consumes it, so the
-            // value is never mistaken for the command.
             Case {
                 arguments: &[
                     "packetcraftr",
@@ -202,16 +185,12 @@ mod tests {
                 color: "auto",
                 command: None,
             },
-            // A dangling repeat is clap's to reject, and the error document
-            // still goes out in the format the earlier value asked for.
             Case {
                 arguments: &["packetcraftr", "--output", "json", "build", "--output"],
                 format: Some(MachineFormat::Json),
                 color: "auto",
                 command: Some(output::contract::Command::Build),
             },
-            // A later format clap accepts wins even when it cannot carry a
-            // structured document: the parse failure is then prose.
             Case {
                 arguments: &[
                     "packetcraftr",
@@ -237,8 +216,6 @@ mod tests {
                 color: "auto",
                 command: Some(output::contract::Command::Build),
             },
-            // clap is case-sensitive here, so a case-mismatched repeat is one
-            // it rejects and the earlier choice stands.
             Case {
                 arguments: &["packetcraftr", "--output=json", "--output=JSON", "build"],
                 format: Some(MachineFormat::Json),

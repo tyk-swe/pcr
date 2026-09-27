@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The route contract: passive route and interface lookups answered by a
-//! [`Provider`], and the native [`SystemProvider`].
-//!
-//! Planning a packet's route from these answers belongs to
-//! `packetcraftr::route`.
-
 mod error;
 mod models;
 #[cfg(native_route)]
@@ -23,15 +17,9 @@ pub use error::Error;
 pub use models::{Decision, Scope, SelectionReason};
 
 /// Passive route and interface lookups.
-///
-/// Provider errors classify themselves, so injected providers choose their
-/// own stable codes without exposing native operating-system error types.
-/// Both lookups follow the [deadline convention](crate::deadline): they stop
-/// when the caller's `deadline` is cancelled or spent.
 pub trait Provider: Send + Sync {
     type Error: Classified + Send + Sync + 'static;
 
-    /// Passively selects a consistent per-exchange route snapshot without neighbor traffic.
     /// `preferred_source` constrains interface selection but never rewrites packet source.
     fn lookup_with_preferences(
         &self,
@@ -41,8 +29,7 @@ pub trait Provider: Send + Sync {
         deadline: &Deadline,
     ) -> Result<Decision, Self::Error>;
 
-    /// Passively selects an interface for destination-free packets without default-route IP
-    /// lookup or neighbor traffic. Defaults to `None` for IP-only providers.
+    /// Passively selects an interface for destination-free packets.
     fn lookup_interface(
         &self,
         _interface: &InterfaceId,
@@ -52,9 +39,6 @@ pub trait Provider: Send + Sync {
     }
 }
 
-/// Route provider backed by the backend selected for the current target and
-/// the explicit `native-route` feature. Every backend bounds its native query
-/// by the caller's deadline; none has a timeout of its own.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
@@ -83,16 +67,12 @@ impl Provider for SystemProvider {
     }
 }
 
-/// Refuses a lookup whose caller is already cancelled or out of time, before
-/// any backend is asked.
 fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
     crate::deadline::remaining(deadline)
         .map(drop)
         .map_err(|interrupted| Error::interrupted(interrupted, operation))
 }
 
-/// Rejects a preferred source of the wrong address family before any backend
-/// sees it; the backends verify only what the operating system answers.
 fn validate_preferred_source_family(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,

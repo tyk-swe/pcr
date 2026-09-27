@@ -179,7 +179,6 @@ fn capture_retention_is_reported_as_a_policy_setting() {
 }
 #[test]
 fn a_probe_workflow_reports_its_one_event_runtime() {
-    // The scan is refused inside its client, after the client is composed.
     let output = run(&[
         "--resource-diagnostics",
         "--output",

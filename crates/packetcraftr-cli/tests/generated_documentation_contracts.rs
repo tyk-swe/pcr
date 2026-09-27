@@ -5,9 +5,6 @@ mod common;
 
 use common::{path_text, run, run_success};
 
-/// The `Commands:` section of `--help` is the clap-published command list, so
-/// comparing it against the generated man pages keeps the assertion in step
-/// with the tree without a second handwritten schema.
 fn subcommands() -> Vec<String> {
     let help = run_success(&["--help"]);
     let stdout = String::from_utf8(help.stdout).expect("help is UTF-8");

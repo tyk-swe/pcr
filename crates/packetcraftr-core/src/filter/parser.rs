@@ -15,7 +15,6 @@ pub const MAX_FILTER_NESTING: usize = 64;
 pub const MAX_FILTER_TERMS: usize = 1024;
 pub const MAX_FILTER_SET_MEMBERS: usize = 1024;
 
-/// Bounds applied while compiling a display filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub max_bytes: usize,
@@ -35,22 +34,13 @@ impl Default for Options {
     }
 }
 
-/// What a compiled filter needs from its caller beyond the packet itself.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
     /// The filter reads `tcp.stream` or `udp.stream`.
-    ///
-    /// Callers that prepare indexes per transport inspect
-    /// [`tcp_stream`](Self::tcp_stream) and [`udp_stream`](Self::udp_stream)
-    /// instead.
     pub stream_index: bool,
-    /// The filter reads `tcp.stream`, so TCP conversation indexes are needed.
     pub tcp_stream: bool,
-    /// The filter reads `udp.stream`, so UDP conversation indexes are needed.
     pub udp_stream: bool,
-    /// The filter reads `frame.time_epoch`, so frames without captured time
-    /// must be diagnosed by the caller.
     pub timestamp: bool,
 }
 
@@ -64,10 +54,6 @@ impl Requirements {
     }
 }
 
-/// A boolean operator waiting for its operands.
-///
-/// Only these three can wait: a predicate is pushed straight onto the program,
-/// so the operator stack has no way to hold one.
 #[derive(Clone, Copy)]
 enum Operator {
     Not,
@@ -76,8 +62,6 @@ enum Operator {
 }
 
 impl Operator {
-    /// Binding power. `not` binds tightest, then `and`, then `or`, matching
-    /// the conventional reading of `a || b && c`.
     const fn precedence(self) -> u8 {
         match self {
             Self::Not => 3,
@@ -118,11 +102,7 @@ struct Compiler<'a> {
     index: usize,
 }
 
-/// Compiles a display filter into postfix form.
-///
-/// Uses an explicit operand/operator stack rather than recursive descent, so
-/// parser stack depth is constant no matter how deeply the source nests; the
-/// configured nesting bound then caps the operator stack itself.
+/// Uses an explicit operand/operator stack rather than recursive descent, so stack depth is constant.
 pub(super) fn compile(
     source: &str,
     registry: &Registry,
@@ -319,9 +299,6 @@ impl<'a> Compiler<'a> {
     }
 }
 
-/// Parses one comparison, membership test, or presence test.
-///
-/// Returns the predicate and the index of the first token after it.
 fn parse_predicate(
     tokens: &[Spanned],
     start: usize,
@@ -397,7 +374,6 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
             protocol,
             occurrence,
         } => {
-            // Bare protocols are presence tests, not comparable or sliceable fields.
             if let Some(Spanned {
                 token: Token::Slice(_),
                 offset: slice_offset,
@@ -453,7 +429,6 @@ fn parse_field_predicate(
         }) => {
             let (value, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
             check_literal(&field, &value, *operator_offset)?;
-            // Prefixes describe a set, so only `==` and `!=` test membership.
             if value.is_prefix()
                 && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
             {
@@ -501,7 +476,6 @@ fn parse_field_predicate(
     }
 }
 
-/// Parses either a braced set or a single unbraced literal after `in`.
 fn parse_membership(
     tokens: &[Spanned],
     start: usize,
@@ -516,7 +490,6 @@ fn parse_membership(
         });
     };
     if !matches!(first.token, Token::LeftBrace) {
-        // Accept one unbraced `in` value.
         let (value, next) = parse_literal(tokens, start, offset)?;
         check_literal(&field, &value, offset)?;
         return Ok((
@@ -582,9 +555,7 @@ fn parse_literal(
     };
     let value = match token {
         Token::Text(text) => Literal::Text(text.clone()),
-        Token::Word(word) => literal::parse(word)
-            // Remaining unquoted words are text literals.
-            .unwrap_or_else(|| Literal::Text(word.clone())),
+        Token::Word(word) => literal::parse(word).unwrap_or_else(|| Literal::Text(word.clone())),
         other => {
             return Err(Error::Syntax {
                 offset: *offset,
@@ -595,7 +566,6 @@ fn parse_literal(
     Ok((value, index.saturating_add(1)))
 }
 
-/// Rejects a literal that no value of the field's declared kinds could match.
 fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), Error> {
     if field.specs.is_empty() {
         return Ok(());
@@ -610,11 +580,7 @@ fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(),
     Err(incompatible(field, value, offset))
 }
 
-/// Rejects a `contains` whose field is not a byte haystack, or whose needle is
-/// not a byte sequence.
-///
-/// Without this, a mistyped `contains` compiles and then filters out every
-/// packet, which reads as "no matches" rather than as the mistake it is.
+/// Without this, a mistyped `contains` compiles and then filters out every packet.
 fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result<(), Error> {
     if !literal::searchable_needle(needle) {
         return Err(incompatible(field, needle, offset));

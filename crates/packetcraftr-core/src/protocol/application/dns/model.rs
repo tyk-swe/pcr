@@ -9,7 +9,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use super::{Error, MAX_LABEL_LEN, MAX_NAME_LEN};
 use crate::field::WireValue;
 
-/// The bounded, exact DNS-over-UDP layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dns {
     pub id: u16,
@@ -27,7 +26,6 @@ pub struct Dns {
     pub authority_count: WireValue<u16>,
     pub additional_count: WireValue<u16>,
     pub questions: Vec<Question>,
-    /// Reserved header bit retained for protocol fixtures.
     pub reserved: bool,
     pub answers: Vec<Record>,
     pub authorities: Vec<Record>,
@@ -36,12 +34,10 @@ pub struct Dns {
 }
 
 impl Dns {
-    /// Returns the complete original DNS payload, including opaque records.
     pub fn wire(&self) -> &Bytes {
         &self.wire
     }
 
-    /// Begins an explicit edit, deriving section counts from the new record sets.
     pub fn edit(&mut self, edit: impl FnOnce(&mut Self)) {
         self.wire = Bytes::new();
         self.question_count = WireValue::Auto;
@@ -52,9 +48,7 @@ impl Dns {
     }
 }
 
-/// A lossless DNS wire name. Labels retain their exact octets; DNS semantic
-/// equality folds ASCII letters only, and presentation escaping is deferred
-/// to [`fmt::Display`].
+/// Labels retain their exact octets; DNS semantic equality folds ASCII letters only.
 #[derive(Clone, Debug, Eq)]
 pub struct Name {
     pub(super) labels: Vec<Bytes>,
@@ -102,7 +96,6 @@ impl Name {
 impl std::str::FromStr for Name {
     type Err = Error;
 
-    /// Parses presentation names, including `\\DDD` escaped label octets.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let invalid = || Error::InvalidName {
             message: "invalid DNS presentation name".to_owned(),
@@ -156,7 +149,6 @@ impl std::str::FromStr for Name {
     }
 }
 
-/// One DNS question with a lossless owner name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Question {
     pub name: Name,
@@ -296,7 +288,6 @@ pub struct Record {
 }
 
 impl Record {
-    /// Constructs a root-owner OPT record with matching class/TTL metadata.
     pub fn opt(edns: Edns) -> Self {
         Self {
             owner: Name::root(),

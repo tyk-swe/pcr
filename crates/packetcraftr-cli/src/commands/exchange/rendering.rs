@@ -57,7 +57,6 @@ fn stable_timestamp_order<'a>(
     frames
 }
 
-/// Adapts one engine event into its wire record on the stream.
 pub(super) fn emit_event(
     event: packetcraftr::exchange::Event,
     stream: &StreamEncoder,

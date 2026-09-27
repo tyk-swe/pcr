@@ -33,7 +33,6 @@ pub(super) fn update_advertisement(
 ) {
     let TcpObservation { flow, tcp, syn, .. } = *observation;
     let sent = flows.entry(flow.clone()).or_default();
-    // SND.WL1/WL2 compare sequence and acknowledgment with serial arithmetic.
     let window_update = match (sent.window_sequence, sent.window_acknowledgment) {
         (Some(update_sequence), Some(update_acknowledgment)) => {
             serial_gt(tcp.sequence, update_sequence)
@@ -154,7 +153,6 @@ pub(super) fn analyze_sender(
 }
 
 pub(in crate::analysis::expert) fn scale(options: &[TcpOption]) -> Option<u8> {
-    // An end-of-list marker or an unparseable tail ends the option scan.
     options
         .iter()
         .take_while(|option| !matches!(option, TcpOption::End | TcpOption::Trailing(_)))

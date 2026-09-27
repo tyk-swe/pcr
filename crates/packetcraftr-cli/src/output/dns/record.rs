@@ -9,7 +9,6 @@ use serde::Serialize;
 
 use crate::output::hex::compact_hex;
 
-/// Typed DNS record data; unknown records preserve exact RDATA as hexadecimal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RecordData {
@@ -21,10 +20,8 @@ pub enum RecordData {
     },
     Caa {
         flags: u8,
-        /// UTF-8 display projection. `tag_hex` remains the exact value.
         tag: String,
         tag_hex: String,
-        /// UTF-8 display projection. `value_hex` remains the exact value.
         value: String,
         value_hex: String,
     },
@@ -57,7 +54,6 @@ pub enum RecordData {
         target: String,
     },
     Txt {
-        /// UTF-8 display projections. `strings_hex` remains the exact value.
         strings: Vec<String>,
         strings_hex: Vec<String>,
     },

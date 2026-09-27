@@ -47,8 +47,6 @@ fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
     assert!(!absent.exists());
 }
 
-/// `--max-interfaces` bounds each input section, so the single merged output
-/// section may hold one interface per source without tripping it.
 #[test]
 fn per_section_interface_limit_does_not_bound_the_merged_output() {
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

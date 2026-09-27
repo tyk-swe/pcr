@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deterministic case seeding: one generator, seeded per case so a campaign
-//! reproduces exactly from its operation seed and case index.
-
 use super::{CASE_DOMAIN, SPLITMIX_INCREMENT};
 
 pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
@@ -12,10 +9,6 @@ pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
     random.next_u64()
 }
 
-/// SplitMix64: the one deterministic generator this crate uses.
-///
-/// The fuzz engine seeds cases with it, and the TLS parser's mutation test
-/// reuses it.
 pub(crate) struct SplitMix64 {
     state: u64,
 }

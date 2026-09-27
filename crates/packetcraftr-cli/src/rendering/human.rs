@@ -15,7 +15,6 @@ use super::style::{
 use crate::errors::CliError;
 use crate::output;
 
-/// One diagnostic line, severity spelled exactly as the JSON document spells it.
 fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> String {
     let diagnostic = diagnostic.into();
     format!(
@@ -26,7 +25,6 @@ fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> Str
     )
 }
 
-/// Library or published diagnostics, one line each on stdout.
 pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagnostic>>(
     diagnostics: &[D],
 ) -> Result<(), CliError> {
@@ -36,8 +34,6 @@ pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagno
     Ok(())
 }
 
-/// The same lines on stderr, for a command whose stdout carries capture bytes
-/// or NDJSON records a diagnostic must not be interleaved with.
 pub(crate) fn render_diagnostics_stderr<D: Clone + Into<output::diagnostic::Diagnostic>>(
     diagnostics: &[D],
 ) -> Result<(), CliError> {
@@ -64,8 +60,6 @@ pub(crate) fn optional_duration(value: Option<std::time::Duration>) -> String {
     render_optional(value, duration_text)
 }
 
-/// An encapsulation path, outermost first, such as `vlan:10,vxlan:42`, or
-/// `none` for an unencapsulated scope.
 pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifier]) -> String {
     if path.is_empty() {
         "none".to_owned()
@@ -74,8 +68,6 @@ pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifi
     }
 }
 
-/// A unit enum value spelled exactly as the JSON document spells it, so text
-/// output never shows a Rust variant name.
 pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(name)) => name,
@@ -141,17 +133,11 @@ pub(crate) fn write_stdout_line_with_interrupt(
     write_human_stdout(&rendered, true)
 }
 
-/// The one line a text renderer ends with, naming what the command completed.
-///
-/// Success colour is a property of this call, not of the words the line
-/// happens to start with.
 pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = style_summary_line(&terminal_safe(&arguments.to_string()));
     write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
-/// One `--output hex` line: the bytes as contiguous lowercase hex.
-///
 /// Every other stdout line goes through terminal sanitization; this one
 /// holds only hex digits by construction, so it is written unstyled and
 /// byte-exact.
@@ -272,8 +258,6 @@ mod tests {
         anstream::adapter::strip_str(&render_human_error(error)).to_string()
     }
 
-    /// Text and JSON name a severity one way. The CLI prints `as_str`, the
-    /// document serializes the same enum, and this pins them to each other.
     #[test]
     fn diagnostic_lines_spell_severity_exactly_as_the_document_does() {
         for diagnostic in [

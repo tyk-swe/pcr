@@ -9,7 +9,6 @@ use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::{Captured, Decoded, Wire};
 
-/// One response correlated with a sent request, with its measured latency.
 #[derive(Clone, Debug, Serialize)]
 pub struct Response {
     pub request_index: u64,
@@ -17,7 +16,6 @@ pub struct Response {
     pub latency: Duration,
 }
 
-/// Aggregate result of `exchange`; diagnostics and statistics live in the envelope.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     pub sent: Vec<Wire>,
@@ -27,7 +25,6 @@ pub struct Report {
     pub undecoded: Vec<Captured>,
 }
 
-/// An exchange, with the request builder's diagnostics and the totals.
 impl TryFrom<packetcraftr::exchange::Aggregate> for Published<Report> {
     type Error = Error;
 
@@ -101,7 +98,6 @@ pub enum Event {
     },
 }
 
-/// One exchange event, with any diagnostic it carried for the envelope.
 impl TryFrom<packetcraftr::exchange::Event> for Published<Event> {
     type Error = Error;
 
@@ -159,7 +155,6 @@ impl TryFrom<packetcraftr::exchange::Event> for Published<Event> {
     }
 }
 
-/// The terminal record, with the exchange's diagnostics and totals.
 impl From<packetcraftr::exchange::Report> for Published<Event> {
     fn from(summary: packetcraftr::exchange::Report) -> Self {
         let packetcraftr::exchange::Report {

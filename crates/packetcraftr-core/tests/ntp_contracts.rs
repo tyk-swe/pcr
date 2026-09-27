@@ -94,8 +94,6 @@ fn ntp_construction_rejects_unsupported_versions_modes_and_bad_fields() {
         };
         assert!(rejected, "{recipe} must be rejected");
     }
-    // In strict mode a raw child cannot stand in for the typed message on the
-    // bound port; permissive mode only warns.
     let packet = expression::parse(
         "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/raw()",
         &registry,
@@ -132,7 +130,6 @@ fn truncated_and_out_of_scope_wire_decodes_as_terminal_raw() {
         "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/ntp()",
     );
     let wire = built.bytes.to_vec();
-    // Truncate inside the 48-byte base header; the UDP payload survives as raw.
     let mut truncated = wire.clone();
     truncated.truncate(wire.len() - 8);
     // Keep the length consistent so IPv4/UDP checksums still verify.

@@ -18,13 +18,9 @@ mod pages;
 mod pending;
 mod state;
 
-// Conservative accounting for an interval BTree entry. The allocator may
-// use more; without a fixed charge, sparse one-byte segments
-// bypass the aggregate resource ceiling entirely.
+// Without a fixed charge, sparse one-byte segments bypass the aggregate ceiling.
 const PENDING_SEGMENT_METADATA_CHARGE: usize = 64;
-// Conservative accounting for the flow-table entry, expiry-index entry, key,
-// and otherwise-empty TCP state. Without a fixed charge, opening payload-free
-// flows bypasses the aggregate resource ceiling entirely.
+// Without a fixed charge, payload-free flows bypass the aggregate ceiling.
 const TCP_FLOW_STATE_METADATA_CHARGE: usize = 256;
 
 #[derive(Debug)]

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How the client carries out scan batches: one exchange per probe, or a
-//! rolling window of probes over one capture group.
-
 mod pipeline;
 mod registry;
 
@@ -32,7 +29,6 @@ pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use one correlated probe per scan batch and retain at least one response",
 );
 
-/// The bounds one rolling probe window runs under.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PipelineOptions {
     pub(crate) max_in_flight: usize,
@@ -44,8 +40,6 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_undecoded: usize,
 }
 
-/// What a rolling probe window reports while it runs, keyed by the index of
-/// the batch it concerns.
 #[derive(Clone, Debug)]
 pub(crate) enum PipelineEvent {
     Sent {
@@ -62,13 +56,7 @@ pub(crate) enum PipelineEvent {
     Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
 }
 
-/// The capability to run scan batches as one rolling window of overlapping
-/// probes instead of one exchange at a time. The engine uses it only when a
-/// request asks for more than one probe in flight.
 pub(crate) trait Pipelined: Executor<Batch<Probe>> {
-    /// Runs every batch, keeping at most `options.max_in_flight` probes
-    /// waiting for a response at once, and reports each send, completion,
-    /// undecoded frame, and diagnostic through `emit` as it happens.
     fn execute_pipeline(
         &mut self,
         batches: &[Batch<Probe>],
@@ -77,9 +65,6 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
     ) -> Result<Stats, BoundaryError>;
 }
 
-/// Runs a scan's batches on a client. The request's UDP profiles bind their
-/// ports in an operation-local registry; the executor builds it once, on its
-/// first batch, and keeps one view of the client that uses it.
 pub(crate) struct ClientExecutor<'c, P, K> {
     client: &'c Client<P, K>,
     bindings: Vec<(u16, packetcraftr_core::layer::Id)>,
@@ -104,8 +89,6 @@ impl<'c, P: Providers, K: Clock> ClientExecutor<'c, P, K> {
         }
     }
 
-    /// The exchange executor over the client view with the configured
-    /// registry, building that view on first use.
     fn exchange(&mut self) -> Result<ExchangeExecutor<'_, P, K>, BoundaryError> {
         let client = match &mut self.configured {
             Some(client) => client,

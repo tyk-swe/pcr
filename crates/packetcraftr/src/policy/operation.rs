@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Operation declarations and the policy/resolver boundary used by live workflows.
-//! Client preparation and injected workflow authorization apply the same
-//! [`Policy`]. Discovery is authorized before it runs; final
-//! materialized bytes are authorized again at the transmission boundary.
 
 use std::net::IpAddr;
 
@@ -15,9 +12,6 @@ use packetcraftr_netio::link::Mode as LinkMode;
 
 use super::{Error, Policy, authorize_permissive_live};
 
-/// The packet-count and conservative wire-byte ceilings a live operation
-/// declares. Policy authorizes them before any side effect; the operation then
-/// charges its running budget against them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WireLimits {
     packets: u64,
@@ -25,11 +19,6 @@ pub struct WireLimits {
 }
 
 impl WireLimits {
-    /// Prospective packets that reach the wire and the conservative total of
-    /// their wire bytes. [`DnsOperation::limits`] uses the same policy fields
-    /// for a documented aggregate of raw UDP packets plus bounded TCP socket
-    /// connections/messages and application bytes; it does not claim that
-    /// kernel-managed TCP has an exact packet count.
     #[must_use]
     pub const fn new(packets: u64, wire_bytes: u64) -> Self {
         Self {
@@ -38,14 +27,6 @@ impl WireLimits {
         }
     }
 
-    /// Checks the declaration. Every count is legal as a declaration: zero
-    /// declares no traffic, and policy compares any other value with its own
-    /// per-operation ceilings when it authorizes the operation, so this always
-    /// succeeds. It exists so every limits type validates the same way.
-    ///
-    /// # Errors
-    ///
-    /// None today.
     pub const fn validate(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -61,12 +42,6 @@ impl WireLimits {
     }
 }
 
-/// The socket connection, framed message, and application byte ceilings a
-/// live operation declares. Kernel-managed TCP packets cannot be counted as
-/// exact [`WireLimits`]. The workflow enforces its own deadline.
-///
-/// [`SocketLimits::none`] declares no socket use; a connect-only operation
-/// declares connections without messages or application bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SocketLimits {
     connections: u64,
@@ -89,15 +64,6 @@ impl SocketLimits {
         Self::new(0, 0, 0)
     }
 
-    /// Checks the declaration. Every count is legal as a declaration: zero
-    /// declares none of that unit, and policy compares the aggregate with its
-    /// own per-operation ceilings when it authorizes the operation, so this
-    /// always succeeds. It exists so every limits type validates the same
-    /// way.
-    ///
-    /// # Errors
-    ///
-    /// None today.
     pub const fn validate(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -133,7 +99,6 @@ impl packetcraftr_core::error::Classified for LimitOverflow {
     }
 }
 
-/// Complete authorization shape for DNS that may use raw UDP and kernel TCP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DnsOperation {
     udp: WireLimits,
@@ -141,7 +106,6 @@ pub struct DnsOperation {
     limits: WireLimits,
 }
 
-/// Authorized numeric endpoints and finite limits on kernel socket operations.
 #[derive(Clone, Copy, Debug)]
 pub struct SocketOperation<'a> {
     endpoints: &'a [std::net::SocketAddr],
@@ -211,18 +175,12 @@ impl DnsOperation {
     }
 }
 
-/// Declares whether transmitted bytes need the permissive-live opt-in and
-/// whether the caller supplied it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissiveLive {
-    /// Every packet builds strictly; no opt-in is involved.
     NotRequired,
-    /// At least one packet requires the per-operation opt-in.
     Required { allowed: bool },
 }
 
-/// Fuzz authorization: all candidate packets, the route destination, and the
-/// permissive-live opt-in.
 #[derive(Clone, Copy, Debug)]
 pub struct DeclaredPackets<'a> {
     limits: WireLimits,
@@ -232,8 +190,6 @@ pub struct DeclaredPackets<'a> {
 }
 
 impl<'a> DeclaredPackets<'a> {
-    /// `destination` is a route destination supplied outside the packets, or
-    /// `None` to route from the packets alone.
     #[must_use]
     pub const fn new(
         limits: WireLimits,
@@ -254,14 +210,11 @@ impl<'a> DeclaredPackets<'a> {
         self.limits
     }
 
-    /// Packets whose declared destinations must be authorized before a route,
-    /// capture, neighbor, or transmission provider can observe them.
     #[must_use]
     pub const fn packets(&self) -> &'a [&'a Packet] {
         self.packets
     }
 
-    /// A route destination chosen outside the packets themselves.
     #[must_use]
     pub const fn destination(&self) -> Option<IpAddr> {
         self.destination
@@ -273,8 +226,6 @@ impl<'a> DeclaredPackets<'a> {
     }
 }
 
-/// A replay operation: one exact captured frame with the link mode it would
-/// be transmitted in.
 #[derive(Clone, Copy, Debug)]
 pub struct ReplayFrame<'a> {
     limits: WireLimits,
@@ -308,45 +259,25 @@ impl<'a> ReplayFrame<'a> {
     }
 }
 
-/// What a workflow declares about the operation it wants to run.
-///
 /// There is deliberately no `Default` and no permissive fallback:
 ///
 /// ```compile_fail,E0599
 /// let _ = packetcraftr::policy::Operation::default();
 /// ```
 ///
-/// Limit fields cannot be left out or filled from a default either:
-///
 /// ```compile_fail
 /// let _ = packetcraftr::policy::WireLimits { packets: 1, ..Default::default() };
 /// ```
-///
-/// A declared-packet request must state its destination and permissive-live
-/// position even when both are "none":
 ///
 /// ```compile_fail,E0061
 /// use packetcraftr::policy::{DeclaredPackets, WireLimits};
 /// let packets: Vec<packetcraftr_core::packet::Packet> = Vec::new();
 /// let _ = DeclaredPackets::new(WireLimits::new(1, 1), &packets);
 /// ```
-///
-/// Each variant is a complete request shape: every field a shape needs is a
-/// constructor argument, no field has a default, and an authorizer matches
-/// the shapes exhaustively. Adding a requirement to a shape, or a new shape,
-/// therefore fails to compile at every construction site and every
-/// authorizer until each says what it does with it.
 #[derive(Clone, Copy, Debug)]
 pub enum Operation<'a> {
-    /// Ordinary socket operations; the endpoint list is authorized before connection.
     Socket(SocketOperation<'a>),
-    /// Only the wire limits of a packet workflow whose destinations are
-    /// authorized separately: scan and traceroute targets as the client
-    /// resolves them, and send packets as they are prepared.
     Wire(WireLimits),
-    /// DNS raw-UDP and socket limits, using [`SocketLimits::none`] without TCP
-    /// continuation. Unlike [`Operation::Wire`], destination authorization
-    /// follows limits approval and server resolution.
     Dns(DnsOperation),
     Declared(DeclaredPackets<'a>),
     Replay(ReplayFrame<'a>),
@@ -364,7 +295,6 @@ impl Operation<'_> {
         }
     }
 
-    /// Stable name of the shape, for authorizers that reject one explicitly.
     #[must_use]
     pub const fn shape(&self) -> &'static str {
         match self {
@@ -377,8 +307,6 @@ impl Operation<'_> {
     }
 }
 
-/// Classified internal error for an operation shape the authorizer cannot
-/// approve.
 #[must_use]
 pub(crate) fn unsupported_operation(
     authorizer: &'static str,
@@ -390,16 +318,11 @@ pub(crate) fn unsupported_operation(
     })
 }
 
-/// Operation authorization inside a workflow engine. Target resolution is the
-/// separate [`ResolveTarget`](crate::target::ResolveTarget) seam, which only
-/// workflows that take a declared target require.
 pub(crate) trait Authorizer {
-    /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
 }
 
 impl Policy {
-    /// Authorizes the complete declared operation before live side effects.
     /// Exact materialized bytes are checked separately after route discovery.
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {
         self.validate()?;

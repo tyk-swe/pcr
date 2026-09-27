@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for TCP and UDP stream following.
-
 mod common;
 
 use common::{CLIENT, SERVER, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame};

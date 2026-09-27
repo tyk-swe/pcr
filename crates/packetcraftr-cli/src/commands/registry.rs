@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The single command declaration: names, formats, preset support, and dispatch.
-
 use clap::Subcommand;
 use serde::Serialize;
 
@@ -16,12 +14,6 @@ use crate::output::contract::{Format, FormatSubset};
 use crate::resources::Settings;
 
 /// Declares every command once, in `--help` order.
-///
-/// A variant with a published name is an output-contract command: it gets a
-/// [`Command`] variant serialized under that name, which is also its
-/// command-line name, and dispatch publishes it through the contract. A
-/// variant without one (`documentation`) writes files instead of contract
-/// output, so it has no kind.
 macro_rules! commands {
     (@offline $arguments:ty) => { false };
     (@offline $arguments:ty, $name:literal) => { <$arguments as Spec>::OFFLINE };
@@ -31,8 +23,6 @@ macro_rules! commands {
     (@start $launch:ident, $arguments:ident, $variant:ident, $name:literal) => {
         $launch.publish(Command::$variant, $arguments)
     };
-    // A command without a published name writes files, not capture analysis,
-    // so no preset applies to it.
     (@presets $arguments:ident, $preset:ident) => {{
         let _ = ($arguments, $preset);
         std::collections::BTreeMap::new()
@@ -40,8 +30,7 @@ macro_rules! commands {
     (@presets $arguments:ident, $preset:ident, $name:literal) => {
         Settings::preset_defaults($preset, |settings| $arguments.resources(settings))
     };
-    // Expands to `$item`; naming `$name` makes the item repeat once per
-    // published command only.
+    // Naming `$name` makes the item repeat once per published command only.
     (@published $name:literal, $item:expr) => { $item };
     (
         $(
@@ -60,15 +49,12 @@ macro_rules! commands {
         }
 
         impl CommandLine {
-            /// Whether `--resource-preset` applies to this command.
             pub(crate) const fn offline(&self) -> bool {
                 match self {
                     $( Self::$variant(_) => commands!(@offline $arguments $(, $name)?), )*
                 }
             }
 
-            /// The `--resource-preset` defaults the command's typed arguments
-            /// declare, by argument id.
             pub(crate) fn preset_defaults(
                 &self,
                 preset: crate::resources::Preset,
@@ -82,7 +68,6 @@ macro_rules! commands {
                 }
             }
 
-            /// Runs the selected command under the global invocation options.
             pub(super) fn start(self, launch: Launch<'_>) -> std::process::ExitCode {
                 match self {
                     $(
@@ -94,28 +79,23 @@ macro_rules! commands {
             }
         }
 
-        /// CLI command identifier frozen into the output schema: every command
-        /// that publishes through the output contract. The output contract
-        /// publishes it as `output::contract::Command`.
+        /// CLI command identifier frozen into the output schema.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
         pub enum Command {
             $( $( #[serde(rename = $name)] $variant, )? )*
         }
 
         impl Command {
-            /// Complete command vocabulary, in `--help` order.
             pub const ALL: &'static [Self] = &[
                 $( $( commands!(@published $name, Self::$variant), )? )*
             ];
 
-            /// The serialized name, byte-identical to the command-line name.
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $( $( Self::$variant => $name, )? )*
                 }
             }
 
-            /// Formats deliberately supported by this command contract.
             pub const fn formats(self) -> &'static [Format] {
                 match self {
                     $(
@@ -231,11 +211,8 @@ mod tests {
     use crate::cli::Cli;
     use crate::command_options::Budget as _;
 
-    /// A command line, and the check of its command's bound declarations.
     type Case = (&'static [&'static str], fn(&[&str]) -> Vec<String>);
 
-    /// The `--max-*` bounds `arguments` accept but do not declare as resource
-    /// settings.
     fn undeclared_bounds<T: Spec + FromArgMatches>(argv: &[&str]) -> Vec<String> {
         let mut definition = Cli::command();
         let matches = definition
@@ -265,9 +242,6 @@ mod tests {
             .collect()
     }
 
-    /// Resource diagnostics come from each command's typed declarations, so a
-    /// new `--max-*` bound that its command forgets to declare would silently
-    /// vanish from the report.
     #[test]
     fn every_command_declares_each_of_its_bounds() {
         const CAPTURE: &str = "capture.pcap";
@@ -392,8 +366,6 @@ mod tests {
         assert_eq!(covered, published);
     }
 
-    /// The budget a command ends up with is the one the policy enforces, so
-    /// this walks the real clap parse rather than reading the trait back.
     fn budgets_for(arguments: &[&str]) -> (u64, u64) {
         let cli = <Cli as clap::Parser>::try_parse_from(arguments)
             .expect("command must parse with defaults");

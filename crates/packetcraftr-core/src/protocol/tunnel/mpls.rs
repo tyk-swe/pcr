@@ -24,28 +24,15 @@ const NAME: &str = BuiltinProtocol::Mpls.as_str();
 const MPLS_LEN: usize = 4;
 const LABEL_MAX: u32 = 0x000f_ffff;
 
-/// Discriminator for a continuing label stack entry (bottom-of-stack clear).
 pub(crate) const MPLS_NEXT_LABEL: u64 = 0;
-/// Discriminator for an opaque bottom-of-stack payload; also the rebuild slot
-/// for a Raw child, since a pseudowire payload has no protocol field at all.
 pub(crate) const MPLS_BOTTOM_RAW: u64 = 1;
-/// The bottom-of-stack payload has no protocol field, so the decoder sniffs
-/// the leading version nibble and offers it in a synthetic discriminator space
-/// that cannot collide with the label-stack slots above.
 pub(crate) const MPLS_BOTTOM_VERSION_BASE: u64 = 0x100;
 
 /// One MPLS label stack entry (RFC 3032).
-///
-/// A cleared `bottom_of_stack` chains another `mpls` entry; a set one carries
-/// the payload, whose IP version is sniffed from its first nibble because the
-/// label stack has no protocol field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mpls {
-    /// 20-bit MPLS label.
     pub label: u32,
-    /// 3-bit traffic class, historically the EXP bits.
     pub traffic_class: u8,
-    /// The S bit: this entry is the bottom of the label stack.
     pub bottom_of_stack: bool,
     pub ttl: u8,
 }
@@ -93,11 +80,6 @@ impl LayerCodec for MplsCodec {
         }
 
         let mut diagnostics = Vec::new();
-        // The S bit is the only thing that tells a dissector whether the next
-        // bytes are another label entry or the payload, so it must agree with
-        // what actually follows: another entry clears it, and anything else —
-        // including nothing at all — ends the stack. A malformed child is a
-        // dissected truncated stack, which must always rebuild.
         let expected_bottom = match context.child {
             Some(child) if child.is::<Mpls>() => Some(false),
             Some(child) if child.is::<Malformed>() => None,
@@ -149,9 +131,6 @@ impl LayerCodec for MplsCodec {
         let payload = input.get(MPLS_LEN..).unwrap_or_default();
         let payload_len = payload.len();
         let next = if !layer.bottom_of_stack {
-            // Advertised even with no bytes left, so a stack truncated before
-            // its bottom entry surfaces as a missing required child rather
-            // than dissecting as complete.
             vec![Discriminator(MPLS_NEXT_LABEL)]
         } else if let Some(&first) = payload.first() {
             vec![

@@ -32,9 +32,7 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
     };
     let (whole_seconds, nanoseconds) = match ticks_per_second {
         Some(exact_ticks_per_second) => {
-            // `checked_pow`/`checked_shl` return `Some` only for a power that
-            // fits in u128, which is never zero, so every division below is
-            // defined.
+            // A power that fits in u128 is never zero, so every division below is defined.
             let wide_ticks = u128::from(ticks);
             let whole_seconds = wide_ticks / exact_ticks_per_second;
             let remainder = wide_ticks % exact_ticks_per_second;
@@ -47,14 +45,12 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
                     field: "sub-nanosecond timestamp",
                 });
             }
-            // scaled is a sub-second remainder scaled by one billion, so the quotient is below one
-            // billion and fits u32
+            // scaled is a sub-second remainder times one billion, so the quotient fits u32
             let nanoseconds = (scaled / exact_ticks_per_second) as u32;
             (whole_seconds, nanoseconds)
         }
         None => {
-            // Any denominator too large for u128 is also much larger than a
-            // u64 timestamp. Only zero ticks are exactly representable.
+            // A denominator beyond u128 dwarfs any u64 timestamp, so only zero ticks are exact.
             if ticks != 0 {
                 return Err(Error::MetadataNotRepresentable {
                     format: Format::PcapNg,
@@ -78,8 +74,7 @@ pub(in crate::capture_file) fn timestamp_to_ticks(
     resolution: TimestampResolution,
     offset_seconds: i64,
 ) -> Result<u64, Error> {
-    // the negated value comes from a `u64` second count and `subsec_nanos` is below one billion, so
-    // neither the negation nor the subtractions can overflow
+    // seconds come from a `u64` and `subsec_nanos` is below one billion, so nothing can overflow
     let (unix_seconds, nanoseconds) = match timestamp.duration_since(UNIX_EPOCH) {
         Ok(elapsed) => (i128::from(elapsed.as_secs()), elapsed.subsec_nanos()),
         Err(error) => {
@@ -105,7 +100,6 @@ pub(in crate::capture_file) fn timestamp_to_ticks(
             format: Format::PcapNg,
         });
     }
-    // Zero ticks are representable at every resolution.
     if relative_seconds == 0 && nanoseconds == 0 {
         return Ok(0);
     }

@@ -14,19 +14,12 @@ use crate::clock::Clock;
 use crate::providers::Providers;
 use crate::route::{Options, Plan, plan as plan_route};
 
-/// Whether `deadline` has arrived.
-///
-/// The boundary itself is expired: no time remains once nothing is left, as
-/// [`packetcraftr_netio::deadline::remaining`] reports. Correlation
-/// eligibility is a separate test on the capture timestamp and still accepts
-/// a frame received at the window's end.
+/// The boundary itself is expired: no time remains once nothing is left.
 #[must_use]
 pub(crate) fn expired(deadline: &Deadline) -> bool {
     !matches!(deadline.remaining(), Ok(remaining) if !remaining.is_zero())
 }
 
-/// Refuses to continue preparing once `deadline` has arrived. Preparation
-/// callers retain the error vocabulary of their operation.
 pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Error> {
     if expired(deadline) {
         return Err(LiveIoError::DeadlineExceeded {
@@ -39,15 +32,6 @@ pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Err
 
 impl<P: Providers, K: Clock> Client<P, K> {
     /// Passive dry planning: route, source, and interface lookup only.
-    ///
-    /// The declared destinations are authorized first; an interface selector
-    /// is resolved through the interface provider only after that, and the
-    /// route lookup receives `deadline`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the policy denial, the interface or route lookup failure, or
-    /// the planning refusal.
     pub fn plan(
         &self,
         packet: &Packet,
@@ -65,10 +49,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
         )
     }
 
-    /// Authorizes, resolves the interface selector, plans through `routes`
-    /// under `deadline`, and authorizes the plan. `before_lookup` runs after
-    /// the declared destinations are authorized and before any provider is
-    /// asked.
     pub(crate) fn authorize_and_plan<R: packetcraftr_netio::route::Provider>(
         &self,
         packet: &Packet,
@@ -96,9 +76,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
         Ok(plan)
     }
 
-    /// `options` with its interface selector resolved through the interface
-    /// provider. A refused operation never gets here, so it never
-    /// enumerates interfaces.
     fn resolve_interface<'o>(
         &self,
         options: &'o Options,

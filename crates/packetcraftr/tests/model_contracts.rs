@@ -315,8 +315,6 @@ fn exchange_requests_validate_all_aggregate_bounds() {
         packetcraftr::send::Options::default(),
     );
     defaults.validate().expect("default exchange request");
-    // The single capture field is exactly what arms the provider, so the
-    // aggregate ceilings and the snapshot length cannot drift from each other.
     let collection = defaults.collection.clone();
     assert_eq!(collection.capture, net::capture::Limits::default());
     collection
@@ -509,10 +507,6 @@ fn public_errors_retain_stable_policy_and_target_classification() {
     }
 }
 
-/// A workflow failure publishes the causes of whatever it wraps, so a chain
-/// that starts in another crate still reaches the render boundary intact: a
-/// transparent variant delegates to the error it restates, and a variant with
-/// a retained source walks it.
 #[test]
 fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     let udp = packetcraftr_core::layer::Id::from("udp");
@@ -569,8 +563,6 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
         "{exchange}"
     );
 
-    // A hostname lookup keeps the system refusal instead of pasting it into
-    // the message, so the message and the cause each say it once.
     let resolver = TargetError::Resolver {
         hostname: "example.test".to_owned(),
         source: Box::new(io::Error::other("name or service not known")),

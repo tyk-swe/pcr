@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The route pieces live preparation assembles: the requested route options,
-//! the authorized expansion, and the resolved destination.
-
 use std::net::IpAddr;
 
 use crate::command_options::RouteSelectionArgs;
@@ -12,9 +9,6 @@ use packetcraftr_core as core;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::BuiltinProtocol;
 
-/// The requested route: link mode, source preference, and the interface
-/// selector the client resolves after it admits each operation. A malformed
-/// `--interface` fails here, before any provider is consulted.
 pub(super) fn options(
     route: &RouteSelectionArgs,
 ) -> Result<packetcraftr::route::Options, CliError> {
@@ -65,9 +59,6 @@ pub(super) fn authorize_expanded_destinations(
     Ok(first)
 }
 
-/// Resolves an explicit `destination` under `policy` for a packet whose
-/// declared destinations the caller has already authorized, choosing the
-/// address family the packet's IP layer requires.
 pub(super) fn destination(
     destination: Option<String>,
     packet: &Packet,

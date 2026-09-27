@@ -27,10 +27,6 @@ const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDes
     "fuzz response",
 );
 
-/// Turns each validated live execution into its case's evidence: the exact
-/// frames retained under the campaign-wide evidence budget and the
-/// response-or-timeout outcome, recording on the case the packet actually
-/// sent.
 pub(super) struct Recorder {
     dissector: Dissector,
     decode_limits: packet_fuzz::Limits,
@@ -90,8 +86,6 @@ impl Recorder {
         Ok(evidence)
     }
 
-    /// Retains exact frames while the campaign-wide evidence budget allows,
-    /// noting once that later frames were omitted.
     fn retain(
         &mut self,
         frames: impl IntoIterator<Item = Frame>,
@@ -105,8 +99,6 @@ impl Recorder {
         Ok(())
     }
 
-    /// Campaign-level diagnostics reach the caller on the case they were
-    /// raised during; the campaign never republishes them.
     pub(super) fn publish_diagnostics(
         &mut self,
         case: &mut packet_fuzz::Case,

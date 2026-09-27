@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The pool's cleanup path for native work whose owner stopped waiting before
-//! it finished, such as a capture worker that missed shutdown. The reaper
-//! admits nothing: work is admitted by the pool, and a transferred cleanup
-//! task carries the permit the work already holds.
-
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
@@ -34,14 +29,9 @@ pub(crate) struct ReaperClient {
 
 struct ReaperService {
     client: ReaperClient,
-    // The service lives for the process lifetime; retaining the handles keeps
-    // the threads owned rather than detached.
     _workers: Vec<JoinHandle<()>>,
 }
 
-/// The reaper's thread could not start. Cloneable so [`shared_reaper`] can
-/// hand the startup failure out of its `OnceLock` repeatedly; `source` is the
-/// original `std::io::Error` itself, so `raw_os_error()` stays reachable.
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("start shared native worker reaper failed")]
 pub(crate) struct ReaperStartError {
@@ -51,10 +41,7 @@ pub(crate) struct ReaperStartError {
 
 pub(crate) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
-/// Blocks until `task` finishes, calling `on_poll` before every wait so a
-/// cleanup task can keep nudging a blocked worker. The task signals its end,
-/// but a nudge (a native capture interrupt) can arrive before the worker
-/// blocks and be missed, so it is repeated every `poll_interval`.
+/// A nudge can arrive before the worker blocks, so it is repeated every `poll_interval`.
 pub(crate) fn wait_until_finished(
     task: Task<()>,
     poll_interval: Duration,
@@ -71,9 +58,7 @@ pub(crate) fn wait_until_finished(
 }
 
 impl ReaperClient {
-    /// Transfers `task` without blocking. If admission fails, retains the
-    /// entire closure and its resources, leaking a bounded reservation to keep
-    /// native state alive for workers that may still access it.
+    /// If admission fails, leaks the task so native state outlives workers that may still use it.
     pub(crate) fn transfer(&self, task: ReapTask) {
         if let Err(TrySendError::Full(task) | TrySendError::Disconnected(task)) =
             self.tasks.try_send(task)
@@ -104,9 +89,7 @@ fn start_reaper(
     capacity: usize,
     mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
-    // The pool capacity bounds the native work that may concurrently hold a
-    // slot. The channel and cleanup threads have the same capacity, so every
-    // admitted worker can be transferred and reaped independently.
+    // The channel and threads match pool capacity, so every admitted worker can be reaped.
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let retained_tasks = Arc::new(AtomicUsize::new(0));
@@ -149,8 +132,7 @@ fn run_reaper(receiver: SharedReceiver) {
         let Ok(task) = task else {
             return;
         };
-        // A defective cleanup task must not kill the shared receiver and strand
-        // all later ownership transfers.
+        // A defective cleanup task must not kill the shared receiver.
         let _ = catch_unwind(AssertUnwindSafe(task));
     }
 }

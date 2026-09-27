@@ -307,8 +307,6 @@ fn suffix_overlapping_gap_fill_preserves_response_provenance() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
     let response = b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc";
-    // The tail arrives before the head, then a gap fill re-covers it: only
-    // the shared suffix is retransmitted, not a prefix of the fill.
     capture.server_beyond(&mut stream, 4, &response[4..]);
     let fill = capture.server_spec(&stream, Tcp::ACK);
     capture.push(fill, response);
@@ -402,8 +400,6 @@ fn service_ports_normalize_and_bound_distinct_values() {
             "{error:?}"
         );
     }
-    // Unsorted duplicates collapse before the distinct-port bound, port 65535
-    // is valid, and more than 256 inputs may still normalize within the limit.
     for ports in [
         vec![443, 80, 443, 65535],
         (1..=256u16).collect(),

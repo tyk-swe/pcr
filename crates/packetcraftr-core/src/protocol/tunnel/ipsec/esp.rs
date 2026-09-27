@@ -25,14 +25,9 @@ const NAME: &str = BuiltinProtocol::Esp.as_str();
 const ESP_LEN: usize = 8;
 
 /// IPsec ESP header (RFC 4303), IP protocol 50.
-///
-/// Everything after the sequence number is ciphertext — including the
-/// trailer and ICV — so the payload is deliberately opaque.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Esp {
-    /// Security parameters index.
     pub spi: u32,
-    /// Anti-replay sequence number.
     pub sequence: u32,
 }
 
@@ -73,8 +68,6 @@ impl LayerCodec for EspCodec {
         let layer = typed_layer::<Esp>(NAME, layer)?;
         ensure_encode_budget(NAME, ESP_LEN, context)?;
         let mut diagnostics = Vec::new();
-        // The ciphertext always ends in the two-byte Pad Length / Next
-        // Header trailer, so a shorter payload cannot be a complete packet.
         if payload_without_padding(NAME, payload, context)?.len() < 2 {
             strict_or_diagnostic(
                 NAME,
@@ -95,9 +88,6 @@ impl LayerCodec for EspCodec {
                 &mut diagnostics,
             )?;
         }
-        // The payload is ciphertext: a typed child would serialize plaintext
-        // protocol structure that dissection deliberately never recovers, so
-        // the layer stack could not round-trip.
         if let Some(child) = context.child
             && !child_is_opaque(child)
         {
@@ -148,7 +138,6 @@ impl LayerCodec for EspCodec {
             }),
             consumed: ESP_LEN,
             payload_len,
-            // Ciphertext: always the opaque child.
             next: vec![Discriminator(0)],
             diagnostics,
             stop: payload_len == 0,

@@ -1,31 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Which assembled sessions a consumer keeps.
-
 use std::str::FromStr;
 
 use super::{Session, Status};
 
-/// Selects finished sessions by SNI, server port, and status.
-///
-/// Every test here runs on an assembled session rather than on a frame. A
-/// frame filter would drop the ServerHello and turn each session into
-/// [`Status::ClientOnly`]; only conversation selection
-/// ([`Options::stream`](crate::analysis::Options::stream)) is safe to push
-/// down to the frames. An empty selector keeps every session.
+/// Runs on assembled sessions: a frame filter would drop the ServerHello.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Selector {
-    /// Keeps sessions whose client offered a matching server name.
     pub sni: Option<SniPattern>,
-    /// Keeps sessions whose server listens on this port.
     pub server_port: Option<u16>,
-    /// Keeps sessions with any of these statuses; empty keeps every status.
     pub statuses: Vec<Status>,
 }
 
 impl Selector {
-    /// Whether `session` passes every test this selector sets.
     #[must_use]
     pub fn matches(&self, session: &Session) -> bool {
         if let Some(port) = self.server_port
@@ -47,12 +35,7 @@ impl Selector {
     }
 }
 
-/// A server-name pattern: a literal compared case-insensitively, optionally
-/// loosened at either end by `*`.
-///
-/// `*` at the start, the end, or both is the whole vocabulary; it is not a
-/// glob dialect.
-///
+/// A server-name literal compared case-insensitively, optionally loosened at either end by `*`.
 /// ```
 /// use packetcraftr_core::analysis::tls::SniPattern;
 ///
@@ -69,7 +52,6 @@ pub struct SniPattern {
 }
 
 impl SniPattern {
-    /// Whether `name` matches, ignoring case.
     #[must_use]
     pub fn matches(&self, name: &str) -> bool {
         let name = name.to_lowercase();

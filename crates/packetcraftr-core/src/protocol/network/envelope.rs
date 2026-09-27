@@ -15,14 +15,9 @@ use crate::protocol::common::{invalid, network_from_addresses, rejected};
 use super::{Ipv4, Ipv6, ip_protocol};
 
 pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
-    // AH participates in the IPv6 extension chain (RFC 8200), so the
-    // pseudo-header scan for the final destination walks through it.
     BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
 }
 
-/// Extension headers whose wire encoding carries its own length, so a chain
-/// walk can step over them: Hop-by-Hop (0), Routing (43), AH (51), and
-/// Destination Options (60).
 pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
     matches!(
         next_header,
@@ -33,10 +28,6 @@ pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
     )
 }
 
-/// Wire length of one walkable extension header, from the protocol number
-/// that selected it and its Hdr Ext Len byte. Hop-by-Hop, Routing, and
-/// Destination Options count 8-byte units excluding the first; AH counts
-/// 4-byte words minus two and can never be shorter than its 12 fixed bytes.
 pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) -> Option<usize> {
     match next_header {
         ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
@@ -52,8 +43,6 @@ pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) 
     }
 }
 
-/// `name` is the calling codec's protocol, so a missing or mismatched
-/// envelope is reported against a protocol the catalog actually has.
 pub(crate) fn resolve_envelope(
     name: &'static str,
     context: &LayerEncodeContext<'_>,
@@ -87,8 +76,7 @@ pub(crate) fn resolve_envelope(
             let inherit_source = inherit_context && ipv6.source.is_unspecified();
             let inherit_destination = inherit_context && ipv6.destination.is_unspecified();
             // Only routing headers inside the nearest IPv6 envelope can
-            // replace its pseudo-header destination. An SRH belonging to an
-            // outer tunnel must not affect an encapsulated transport.
+            // replace its pseudo-header destination.
             let segment_routing_destination = (index.saturating_add(1)..context.index)
                 .filter_map(|candidate_index| context.packet.layer(candidate_index))
                 .take_while(|candidate| is_ipv6_extension_layer(*candidate))

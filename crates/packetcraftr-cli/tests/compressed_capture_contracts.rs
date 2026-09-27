@@ -73,8 +73,6 @@ fn invalid_compression_output_is_rejected_before_live_or_input_work() {
     }
 }
 
-/// Generated capture files are spooled before any stdout byte, so a spool
-/// failure must not leave even an empty compressed container behind.
 #[test]
 fn failed_capture_spool_emits_no_compressed_bytes() {
     let directory = tempfile::tempdir().unwrap();
@@ -155,9 +153,6 @@ fn failed_read_finalizes_zstd_and_keeps_completed_frames() {
     }
 }
 
-/// A read or replay that cannot write its input in the requested capture
-/// format fails before stdout is wrapped, so no empty compressed container is
-/// written. Replay fails before any interface lookup or transmission.
 #[test]
 fn rejected_capture_format_conversion_emits_no_compressed_bytes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures");

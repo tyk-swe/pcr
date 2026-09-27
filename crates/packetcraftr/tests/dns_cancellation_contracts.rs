@@ -14,8 +14,6 @@ use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::error::{BoundaryError, Classified};
 
-/// Answers every hostname after cancelling the client's signal, counting
-/// each resolution.
 #[derive(Clone)]
 struct CancellingResolver {
     signal: Cancellation,

@@ -86,8 +86,7 @@ pub(super) fn run(
                 .ok_or_else(|| CliError::new(Kind::Internal, "built byte count overflowed"))?;
             if let (Some(writer), Some(capture)) = (writer.as_mut(), capture.as_ref()) {
                 capture.validate_wire(&built)?;
-                // One template expansion repeats the same builder diagnostic per
-                // packet; collapse by code so the stderr summary stays bounded.
+                // Collapse by code so the stderr summary stays bounded.
                 for diagnostic in built.diagnostics {
                     core::diagnostic::push_once(&mut diagnostics, diagnostic);
                 }
@@ -112,9 +111,7 @@ pub(super) fn run(
         }
         Ok::<(), CliError>(())
     })();
-    // Finish initialized compression even when a later packet fails, keeping
-    // every frame already written readable. Preserve the original failure if
-    // finalization also fails; finish flushes the underlying destination.
+    // Finish initialized compression even when a later packet fails.
     let finished = writer
         .map(|writer| writer.into_inner().finish().map_err(CliError::classified))
         .transpose();
@@ -128,8 +125,7 @@ pub(super) fn run(
     if capture.is_some() {
         render_diagnostics_stderr(&diagnostics)?;
     }
-    // Startup handles cancellation after JSON publication without appending
-    // a second aggregate document to stdout.
+    // Startup handles cancellation after JSON publication without a second document.
     if format != BuildFormat::Json {
         crate::cancellation::check()?;
     }

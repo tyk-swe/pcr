@@ -1,20 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! CLI machine output: hex, timestamps, reports, and versioned envelopes. The
-//! stream encoder owns ordering/termination; each NDJSON envelope names its
-//! `event`.
-//!
-//! The CLI owns every published field (ADR 0003). An output type embeds a
-//! library type only when that type is itself a versioned contract: the
-//! `packetcraftr.packet` document and its field values. Everything else is a
-//! CLI-owned type with the same JSON shape, built with `From`/`TryFrom`, so a
-//! serde change in a library cannot silently change a frozen output family.
+//! The CLI owns every published field (ADR 0003).
 
-/// Declares a CLI-owned unit enum that mirrors a library enum variant for
-/// variant. Each published name is spelled here, so the serialized value, the
-/// text rendering (`as_str`/`Display`), and the published vocabulary cannot
-/// drift apart, and a library rename cannot reach the output.
 macro_rules! published_enum {
     (
         $(#[$meta:meta])*
@@ -29,7 +17,6 @@ macro_rules! published_enum {
         }
 
         impl $name {
-            /// The published name, for text output that must agree with JSON.
             #[must_use]
             pub const fn as_str(self) -> &'static str {
                 match self {

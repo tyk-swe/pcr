@@ -69,7 +69,6 @@ fn expansion_and_encoded_source_limits_fail_without_exposing_excess_bytes() {
         .unwrap();
         assert!(input.read_to_end(&mut Vec::new()).is_err());
     }
-    // Empty members cannot evade the encoded-byte budget.
     let mut encoded = compressed(Format::Gzip, b"");
     encoded.extend(compressed(Format::Gzip, b""));
     let mut input = Input::new(

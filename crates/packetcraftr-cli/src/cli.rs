@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Root argument definitions, preset-aware parsing, and pre-parse error context.
-
 mod context;
 mod parsing;
 
@@ -41,8 +39,6 @@ Examples:
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";
 
-/// The root help trailer, with the exit-code table rendered from the same
-/// mapping the process exits with.
 fn root_after_help() -> String {
     let mut help = format!(
         "{ROOT_HELP_FORMATS}\n\nExit codes:\n  0   Success.\n  1   verdict: a completed verify-forwarding comparison returned fail or inconclusive.\n"
@@ -65,12 +61,8 @@ fn root_after_help() -> String {
     help
 }
 
-/// The `--version` body: package version plus enabled native features.
-///
-/// Built from `cfg!` so no new dependency is needed. The release workflow's
-/// `scripts/build-manifest.py --verify` compares the complete two-line
-/// `--version` text against `BUILD-METADATA.json`, so this format is part of
-/// release packaging.
+/// `scripts/build-manifest.py --verify` compares this text against
+/// `BUILD-METADATA.json`, so this format is part of release packaging.
 fn long_version() -> &'static str {
     static LONG_VERSION: OnceLock<String> = OnceLock::new();
     LONG_VERSION.get_or_init(|| {
@@ -208,10 +200,6 @@ impl ColorChoice {
 mod tests {
     use super::*;
 
-    /// The whole command tree is rebuilt on every invocation, and several
-    /// subcommands adjust arguments defined in other modules by id, so a
-    /// renamed field turns *every* invocation into a clap panic. This asserts
-    /// those ids, plus `requires`/`conflicts_with` targets, at unit-test speed.
     #[test]
     fn the_command_tree_is_valid() {
         <Cli as clap::CommandFactory>::command().debug_assert();

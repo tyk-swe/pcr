@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes deterministic wire fixtures by hand.
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};

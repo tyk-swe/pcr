@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The DNS wire codec: bounded decoding, strict encoding, and the layer codec
-//! that frames DNS over UDP and TCP.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -32,7 +29,6 @@ pub(super) const HEADER_LEN: usize = 12;
 impl TryFrom<Bytes> for Dns {
     type Error = Error;
 
-    /// Parses a complete DNS message under the default bounded decoder limits.
     fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
         Self::from_wire_with_limits(wire, DecodeLimits::default())
     }
@@ -62,9 +58,7 @@ impl TryFrom<&[u8]> for Dns {
 }
 
 impl Dns {
-    /// Decodes every declared section while retaining the complete original
-    /// wire. Malformed or truncated data returns a typed failure, never an
-    /// invented record. OPT records remain in their original section.
+    /// Malformed or truncated data returns a typed failure, never an invented record.
     pub fn from_wire_with_limits(
         wire: impl Into<Bytes>,
         limits: DecodeLimits,
@@ -72,7 +66,6 @@ impl Dns {
         decode::decode(wire.into(), limits)
     }
 
-    /// Encodes a complete message with strict validation and the DNS wire ceiling.
     pub fn to_wire(&self) -> Result<Bytes, Error> {
         encode::message(self, crate::codec::Mode::Strict, 65_535)
             .map(|encoded| Bytes::from(encoded.0))
@@ -102,8 +95,6 @@ impl Dns {
     }
 }
 
-/// Reports a wire failure through the layer codec contract: truncation keeps
-/// the byte count it needs, anything else is an invalid DNS layer.
 fn layer_error(error: Error, available: usize) -> crate::codec::Error {
     match error {
         Error::Encode(error) => error,

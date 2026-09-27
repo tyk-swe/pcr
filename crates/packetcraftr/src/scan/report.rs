@@ -29,7 +29,6 @@ pub enum Classification {
 }
 
 impl Classification {
-    /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -92,9 +91,6 @@ pub struct Endpoint {
     pub probes: Vec<ProbeEvidence>,
 }
 
-/// Every event one scan published, joined with its terminal [`Report`]:
-/// each probed endpoint with its winning classification and probes in
-/// sequence order.
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     pub planned_duration: Duration,
@@ -107,24 +103,9 @@ pub struct Aggregate {
     pub rtt: Rtt,
 }
 
-/// Operation-level accounting for one bounded repeated-probe run.
-///
-/// `sent` counts probes whose transmission the provider confirmed (for the
-/// socket path, connect calls the kernel admitted). `received` counts probes
-/// that produced a definitive verdict inside their round's timeout: a
-/// checksum-valid, protocol-consistent correlated response for packet
-/// probes, or a connected/refused/unreachable connect verdict for TCP
-/// connect. `lost` is `sent - received`. `min`, `avg`, and `max` summarize
-/// one round-trip sample per received probe — the selected response's
-/// latency, or the connect verdict's elapsed time — and are `None` when no
-/// probe was received.
-///
 /// Each probe contributes at most one sample: duplicate responses inside one
 /// round add neither samples nor counts, and a response arriving after its
 /// round's window is unattributed evidence rather than a late `received`.
-/// When the capture backend reports dropped frames, `lost` may count probes
-/// whose replies arrived but were never delivered; the
-/// `capture.evidence_incomplete` diagnostic marks that caveat.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Rtt {
     pub sent: u64,
@@ -182,30 +163,23 @@ pub struct SentProbe {
     pub sent: Arc<crate::evidence::SentPacket>,
 }
 
-/// What a scan publishes while it runs. Each event is answered before later
-/// probes are sent.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// The provider confirmed this probe's transmission.
     Sent(SentProbe),
-    /// A probe's final outcome.
     Probe {
         target: Arc<str>,
         probe: ProbeEvidence,
     },
-    /// A retained frame that could not be decoded.
     Undecoded {
         frame: Frame,
     },
     Diagnostic(Diagnostic),
 }
 
-/// The terminal result of one scan, returned after every probe event was
-/// published. Diagnostics are not repeated here: each one already reached the
+/// Diagnostics are not repeated here: each one already reached the
 /// caller as [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Report {
-    /// Conservative receive-window and pacing bound, validated before sending.
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
@@ -214,9 +188,6 @@ pub struct Report {
     pub rtt: Rtt,
 }
 
-/// How many probed endpoints settled on each final classification, mirroring
-/// traceroute's [`crate::traceroute::Termination`] rollup for streaming
-/// consumers that never see the per-endpoint outcomes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClassificationCounts {
     pub open: usize,
@@ -241,9 +212,6 @@ impl ClassificationCounts {
     }
 }
 
-/// A sink that keeps every published probe outcome, undecoded frame, and
-/// diagnostic. Pass a clone to [`Client::scan`](crate::Client::scan) and
-/// [`finish`](Self::finish) the one kept with the report the scan returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Collected>);
 
@@ -298,13 +266,6 @@ impl Collected {
 }
 
 impl Collector {
-    /// Joins the collected events with the scan's terminal `report`, ordering
-    /// each endpoint's probes, and the endpoints, by probe sequence.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::IncoherentEvents`] when the collected probe outcomes
-    /// are not the ones the report counts.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Collected {
             mut endpoints,

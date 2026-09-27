@@ -29,8 +29,6 @@ fn empty_capture_is_rejected_before_spool_creation() {
     assert!(!created);
 }
 
-/// An unrepresentable frame keeps the capture error's own classification, as
-/// the streaming writers do, and leaves stdout untouched.
 #[test]
 fn encoding_failure_emits_no_stdout_bytes() {
     let frames = vec![

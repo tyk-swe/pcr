@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded file and redirected-stdin reads with input-specific failures.
-
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -115,8 +113,6 @@ pub(super) fn open_file(path: &Path) -> Result<File, CliError> {
     })
 }
 
-/// A file operation on an input path, retaining the I/O source so the
-/// published error names the file and keeps its cause chain.
 #[derive(Debug, thiserror::Error)]
 #[error("{operation} {} failed: {source}", .path.display())]
 struct FileIo {
@@ -126,7 +122,6 @@ struct FileIo {
     source: io::Error,
 }
 
-/// A failed read of bounded packet or frame input, retaining the I/O source.
 #[derive(Debug, thiserror::Error)]
 #[error("read {label} input failed: {source}")]
 struct InputRead {
@@ -135,10 +130,6 @@ struct InputRead {
     source: io::Error,
 }
 
-/// Reads a complete JSON document file (`--rules-file`, `--udp-profiles`)
-/// under `max_bytes`. These are plain documents, not capture streams, so
-/// open/read failures are ordinary `io.runtime` errors and an oversized
-/// document is a CLI input failure.
 pub(crate) fn read_bounded_json_document(
     path: &Path,
     max_bytes: usize,
@@ -257,8 +248,6 @@ mod tests {
         );
     }
 
-    /// A reader that dies partway through is an I/O failure, not a malformed
-    /// document: exit 5, with the byte count that made it through discarded.
     #[test]
     fn a_reader_that_fails_mid_read_is_reported_as_an_io_failure() {
         struct BrokenReader {

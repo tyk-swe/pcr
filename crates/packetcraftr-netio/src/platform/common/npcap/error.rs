@@ -15,8 +15,6 @@ use crate::{
 };
 use packetcraftr_core::error::Source;
 
-/// Classifies a rejected activation by its status; the status and Npcap's
-/// diagnostic stay the failure's source.
 pub(in crate::platform) fn map_activation_error(
     interface: &InterfaceId,
     status: c_int,
@@ -58,8 +56,6 @@ pub(in crate::platform) fn map_activation_error(
     }
 }
 
-/// Classifies a failed `pcap_create` by its diagnostic, the only thing it
-/// reports; the diagnostic stays the failure's source.
 pub(in crate::platform) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> Error {
     let privilege = is_permission_denied(&diagnostic);
     let missing = is_missing_device(&diagnostic);
@@ -106,7 +102,6 @@ pub(in crate::platform) fn interface_conversion_error(
 pub(in crate::platform) fn error_buffer_message(
     buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE],
 ) -> String {
-    // Bound decoding to `PCAP_ERRBUF_SIZE` if the runtime omits NUL termination.
     let bytes: Vec<u8> = buffer
         .iter()
         .copied()

@@ -233,7 +233,6 @@ fn decode_rdata(
         end,
         limits,
     };
-    // Resource-record interpretation is class-dependent (notably CH A).
     // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
     match (type_code, class) {
         (1, 1) => {

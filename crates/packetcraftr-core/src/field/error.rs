@@ -4,7 +4,6 @@
 use crate::error::{Classification, Classified, Kind};
 use crate::layer::Id;
 
-/// Why a reflective field read, edit, or path was refused.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -22,7 +21,6 @@ pub enum Error {
     ReadOnly { protocol: Id, field: String },
     #[error("required field {field} is absent from layer {protocol} after defaults")]
     MissingRequired { protocol: Id, field: String },
-    /// The text is not a bounded reflective [`Path`](super::Path).
     #[error("invalid reflective field path {path:?}")]
     InvalidPath { path: String },
 }

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! libpcap Layer 2 frame transmission.
-
 use pcap::{Capture, Error as PcapError};
 
 use crate::{

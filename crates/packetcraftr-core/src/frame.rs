@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Runtime-neutral captured frame bytes and metadata.
-
 use std::time::SystemTime;
 
 use bytes::Bytes;
@@ -13,8 +11,7 @@ use crate::error::{Classification, Classified, Kind};
 
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 
-/// Open numeric libpcap link-layer type. The known numbers and their root
-/// protocols are defined by [`capture_file`](crate::capture_file).
+/// Open numeric libpcap link-layer type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LinkType(pub u32);
@@ -25,12 +22,9 @@ impl std::fmt::Display for LinkType {
     }
 }
 
-/// Captured and on-wire lengths, named to prevent accidental transposition.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Lengths {
-    /// Bytes retained in the capture record.
     pub captured: u32,
-    /// Bytes the frame occupied on the wire before truncation.
     pub original: u32,
 }
 
@@ -74,17 +68,14 @@ impl Classified for Error {
     }
 }
 
-/// Complete bytes and capture metadata, independent of successful dissection.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
-    /// Capture time, or [`None`] when the source record carries no timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<SystemTime>,
     captured_length: u32,
     original_length: u32,
     pub link_type: LinkType,
-    /// Capture-wide interface index, normalized across PCAPNG sections, when
-    /// the source declared one.
+    /// Capture-wide interface index, normalized across PCAPNG sections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,7 +101,6 @@ impl Frame {
         Self::try_with_optional_timestamp(Some(timestamp), link_type, lengths, bytes)
     }
 
-    /// Constructs a frame whose source record does not provide a timestamp.
     pub fn without_timestamp(link_type: LinkType, bytes: impl Into<Bytes>) -> Result<Self, Error> {
         Self::with_inferred_lengths(None, link_type, bytes)
     }
@@ -135,7 +125,6 @@ impl Frame {
         )
     }
 
-    /// Constructs a frame with explicit lengths and optional capture time.
     pub fn try_with_optional_timestamp(
         timestamp: Option<SystemTime>,
         link_type: LinkType,
@@ -179,8 +168,6 @@ impl Frame {
     }
 }
 
-/// Inclusive, optionally open capture-time bounds at full [`SystemTime`]
-/// precision. Records without timestamps never match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeBounds {
     start: Option<SystemTime>,
@@ -188,7 +175,6 @@ pub struct TimeBounds {
 }
 
 impl TimeBounds {
-    /// Bounds over `[start, end]`; either side may be `None` for an open end.
     /// Reversed bounds are rejected rather than matching nothing.
     pub fn new(start: Option<SystemTime>, end: Option<SystemTime>) -> Result<Self, Error> {
         if let (Some(start), Some(end)) = (start, end)
@@ -199,18 +185,14 @@ impl TimeBounds {
         Ok(Self { start, end })
     }
 
-    /// The inclusive lower bound, if any.
     pub fn start(&self) -> Option<SystemTime> {
         self.start
     }
 
-    /// The inclusive upper bound, if any.
     pub fn end(&self) -> Option<SystemTime> {
         self.end
     }
 
-    /// Whether `timestamp` lies within the bounds; `None` never does.
-    /// The check is a pure comparison, so capture timestamps may regress.
     pub fn contains(&self, timestamp: Option<SystemTime>) -> bool {
         timestamp.is_some_and(|timestamp| {
             self.start.is_none_or(|start| timestamp >= start)

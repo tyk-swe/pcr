@@ -1,19 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The provider bundle a [`Client`](crate::Client) runs every workflow over.
-
 use std::sync::Arc;
 
 use packetcraftr_netio as net;
 
 use crate::target;
 
-/// Every capability a client reaches the network and resolver through.
-///
 /// A workflow uses only the providers it needs, and only after its request is
-/// admitted. [`ProviderSet`] is the plain composition of six providers;
-/// [`SystemProviders`] is the native provider of each.
+/// admitted.
 pub trait Providers: Send + Sync + 'static {
     type Route: net::route::Provider + 'static;
     type Interface: net::interface::Provider + 'static;
@@ -22,21 +17,14 @@ pub trait Providers: Send + Sync + 'static {
     type Tcp: net::tcp::Provider<Stream: 'static> + 'static;
     type Resolver: target::Resolver + 'static;
 
-    /// Passive route lookups.
     fn route(&self) -> &Self::Route;
-    /// Interface enumeration, which resolves an interface selector.
     fn interface(&self) -> &Self::Interface;
-    /// Capture sessions, armed before any exchange transmits.
     fn capture(&self) -> &Self::Capture;
-    /// Transmission of exact prepared bytes.
     fn transmit(&self) -> &Self::Transmit;
-    /// Kernel TCP connections.
     fn tcp(&self) -> &Self::Tcp;
-    /// Hostname resolution for declared targets.
     fn resolver(&self) -> &Self::Resolver;
 }
 
-/// Six independently owned providers composed into one bundle.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProviderSet<R, N, C, T, P, H> {
     pub route: R,
@@ -88,9 +76,6 @@ where
     }
 }
 
-/// The native provider of every capability for this build's platform. A
-/// capability this build lacks fails with a classified capability error when
-/// it is used.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProviders;
 
@@ -122,8 +107,6 @@ impl Providers for SystemProviders {
     }
 }
 
-/// The client's TCP provider behind the shared handle a pending connect keeps
-/// until its worker returns.
 pub(crate) struct TcpOf<P>(pub(crate) Arc<P>);
 
 impl<P: Providers> net::tcp::Provider for TcpOf<P> {

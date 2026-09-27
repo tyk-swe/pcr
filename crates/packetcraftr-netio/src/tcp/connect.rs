@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ordinary TCP connects on the native worker pool, under their sub-limit.
-
 use crate::{
     tcp::{ConnectOutcome, Connection, Error, MAX_PENDING_CONNECTIONS, Provider},
     workers::{self, Class, RetentionMarker, Task},
@@ -74,9 +72,7 @@ impl<S> Drop for Pending<S> {
         if self.progress == Progress::Running {
             self.retention.mark_retained();
         }
-        // A running worker keeps its permit through provider cleanup. An
-        // unclaimed successful connection holds the same permit until the
-        // task's outcome, and with it the socket, is dropped.
+        // A running worker keeps its permit through provider cleanup.
     }
 }
 
@@ -103,16 +99,12 @@ where
     let lease = permit.clone();
     let cancel = Arc::new(Mutex::new(CancelState::default()));
     let cancelled = Arc::clone(&cancel);
-    // The provider and any failed stream are dropped when this job ends,
-    // before the pool releases the permit.
     let task = permit
         .spawn(move || {
             let admitted = {
                 let mut state = cancelled
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                // A connection stopped before its provider ran reports why
-                // it never started: cancelled, or out of time.
                 let admitted = if state.cancelled {
                     Err(Error::Cancelled(Cancelled))
                 } else {

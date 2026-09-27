@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Keeps `schemas/packetcraftr.packet.v2.schema.json` and the published
-//! `examples/documents/packet-*` files in step with the document loader.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -81,7 +78,6 @@ fn every_published_packet_example_loads_and_builds() {
             .unwrap_or_else(|error| panic!("{} must convert: {error}", path.display()));
         assert!(!packet.is_empty(), "{} must declare layers", path.display());
 
-        // A document produced from the packet must describe the same layers.
         let reconverted = Packet::from_packet(&packet);
         assert_eq!(
             reconverted.layers.len(),

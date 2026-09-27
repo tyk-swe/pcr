@@ -1,16 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Test helpers shared by the crate's unit tests and, through the
-//! `test-support` feature, its integration tests. Not a supported API.
-
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::output::{contract::Command, stream::StreamEncoder};
 use serde_json::Value;
 
-/// A writer the test can still read after handing it to an encoder.
 #[derive(Clone, Default)]
 pub struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
 
@@ -38,7 +34,6 @@ impl Write for SharedBuffer {
     }
 }
 
-/// An NDJSON encoder writing into a buffer the caller can read back.
 pub fn stream(command: Command) -> (StreamEncoder, SharedBuffer) {
     let buffer = SharedBuffer::default();
     (StreamEncoder::new(command, buffer.clone()), buffer)
@@ -88,7 +83,6 @@ pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     })
 }
 
-/// Arbitrary data for stream state and I/O failure tests.
 #[derive(serde::Serialize)]
 #[serde(transparent)]
 pub struct TestRecord<T>(pub T);

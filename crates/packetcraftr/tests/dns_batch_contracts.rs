@@ -16,8 +16,6 @@ use packetcraftr_netio::tcp;
 
 use common::{Step, Steps};
 
-/// A TCP provider whose every connection accepts the query and then times
-/// out waiting for the response prefix, recording [`Step::Connect`].
 #[derive(Clone, Default)]
 struct SilentTcp(Steps);
 
@@ -79,9 +77,6 @@ type Providers = ProviderSet<
     common::ScriptedResolver,
 >;
 
-/// A client over `policy` whose DNS-over-TCP queries all time out after the
-/// query is written, and which never transmits UDP. The steps record every
-/// TCP connection and every resolution.
 fn client(policy: Policy) -> (Client<Providers>, Steps) {
     let base = common::providers(common::FixedRoutes, common::NeverTransmit);
     let steps = Steps::default();

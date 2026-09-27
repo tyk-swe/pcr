@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Built-in child, capture link-type, and TLS port bindings.
-
 use crate::{
     frame::LinkType,
     protocol::BuiltinProtocol,
@@ -52,15 +50,8 @@ pub(super) fn register(
     super::filter_fields::register_filter_fields(builder)
 }
 
-/// TCP ports whose payload the default registry dissects as TLS.
-///
-/// HTTPS, SMTPS, LDAPS, DNS-over-TLS, IMAPS, POP3S, and the conventional
-/// alternate HTTPS port. Anything else on these ports still dissects as `raw`:
-/// the codec gates on the payload, not on the port alone.
 pub const TLS_TCP_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
 
-/// Binds the TLS codec under every well-known TCP port and gives it the raw
-/// tail binding its unconsumed remainder needs.
 fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     bind_tls_ports(builder, TLS_TCP_PORTS)?;
     bind_all(
@@ -69,11 +60,8 @@ fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::reg
     )
 }
 
-/// Binds extra TCP ports to the TLS codec, for callers remapping a service.
-///
 /// Port 0 is refused as a conflict: TCP's discriminator 0 is the raw
-/// fallback, and a higher-priority TLS binding there would claim every
-/// payload on an unbound port.
+/// fallback.
 pub(crate) fn bind_tls_ports(
     builder: &mut crate::registry::Builder,
     ports: &[u16],

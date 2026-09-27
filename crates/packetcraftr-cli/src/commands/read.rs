@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Read CLI command logic.
-
 pub(super) mod arguments;
 mod projection;
 mod rendering;
@@ -35,11 +33,8 @@ use packetcraftr_core::filter::FrameDecoder;
 use super::increment_counter;
 use rendering::render_record;
 
-/// The decoding one `read` invocation needs, built only when `--filter` or
-/// `--dissect` asks for it.
 struct Decoding {
     frames: FrameDecoder,
-    /// Whether the decoded stack is published, not merely used to filter.
     publish_layers: bool,
 }
 
@@ -49,8 +44,6 @@ struct StreamState {
 }
 
 impl StreamState {
-    /// Charges frames against the same two aggregate ceilings the rewrite copy
-    /// and the analysis loop charge against.
     fn new(limits: OfflineCaptureLimitsArgs) -> Result<Self, CliError> {
         let budget = capture::Budget::new(Limits {
             max_frames: limits.max_frames,
@@ -203,14 +196,11 @@ fn prepare_decoding(
     }))
 }
 
-/// Whether epoch bounds keep `frame`; absent bounds keep everything, and a
-/// frame without a timestamp is never kept while bounds are set.
 fn kept_by_time(bounds: Option<core::frame::TimeBounds>, frame: &core::frame::Frame) -> bool {
     bounds.is_none_or(|bounds| bounds.contains(frame.timestamp))
 }
 
-/// Checked before stdout is wrapped, so a rejected conversion writes no
-/// compressed container.
+/// Checked before stdout is wrapped, so a rejected conversion writes no compressed container.
 fn validate_rewrite_format(
     input: capture::Format,
     output: capture::Format,
@@ -353,8 +343,6 @@ fn normalize_capture(
     writer.flush().map_err(CliError::classified)
 }
 
-/// Charges one frame against the stream budget and answers with its source
-/// number.
 fn account_frame(state: &mut StreamState, frame: &core::frame::Frame) -> Result<u64, CliError> {
     crate::cancellation::check()?;
     state

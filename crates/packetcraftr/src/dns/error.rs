@@ -63,8 +63,6 @@ pub enum Error {
     },
     #[error("DNS executor returned invalid evidence on attempt {attempt}: {fault}")]
     InvalidEvidence { attempt: u32, fault: EvidenceFault },
-    /// The TCP executor refused a query this workflow built and validated
-    /// itself, which only a broken executor can do.
     #[error(
         "DNS executor returned invalid evidence on attempt {attempt}: TCP executor rejected the validated local request"
     )]
@@ -158,11 +156,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain. The boundary-sourced
-    /// variants list the boundary's message and its captured `causes`
-    /// snapshot instead, which its own source chain does not hold.
-    ///
-    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.as_causes(),
@@ -172,34 +165,20 @@ impl Classified for Error {
     }
 }
 
-/// What made an executor's DNS evidence untrustworthy: the evidence does not
-/// match the query this workflow authorized and sent.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EvidenceFault {
-    /// The exchange evidence failed the checks every workflow applies.
     Exchange(crate::evidence::Error),
-    /// The sent packet has no outer IPv4 or IPv6 header.
     SentWithoutNetwork,
-    /// The sent packet has no complete UDP header.
     SentWithoutUdp,
-    /// The sent packet changed the server, the UDP ports, or the query.
     SentQueryChanged,
-    /// The exchange statistics do not account for exactly one query.
     SentCount,
-    /// A response answers a request other than the single query.
     ResponseOutsideQuery,
-    /// The framed TCP query length overflowed.
     TcpQueryLengthOverflow,
-    /// The shared attempt deadline went backwards after accounting.
     AttemptDeadlineRegressed,
-    /// The TCP executor reported writing more than the framed query.
     TcpBytesUnauthorized,
-    /// The TCP receipt disagrees with the endpoint, byte count, or deadline.
     TcpReceipt,
-    /// A successful TCP query carried no validated response.
     TcpResponseMissing,
-    /// Reauthorizing the TCP destination selected another server.
     TcpServerChanged { server: IpAddr },
 }
 

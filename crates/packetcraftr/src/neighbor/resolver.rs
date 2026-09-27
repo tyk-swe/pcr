@@ -26,8 +26,6 @@ use super::options::Options;
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
 
-/// The interface-only route a discovery frame leaves on. The frame is
-/// already complete, so no route lookup field is filled in.
 fn discovery_decision(request: &Request) -> Decision {
     Decision {
         interface: request.interface.clone(),
@@ -50,17 +48,10 @@ struct ExchangeOutcome {
     evidence_truncated: bool,
 }
 
-/// The seam [`crate::route::materialize`] resolves through, so in-crate tests
-/// can script resolution without capture or transmission.
 pub(crate) trait Resolver {
-    /// Resolves `request` within the calling operation's `deadline`: no
-    /// attempt starts after it and every wait is clipped to it, on top of the
-    /// resolver's own per-attempt budget.
     fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error>;
 }
 
-/// Client-owned resolution state: validated options and the cache that every
-/// operation of one client (and each operation-local view of it) shares.
 #[derive(Clone, Debug)]
 pub(crate) struct State {
     options: Options,
@@ -68,7 +59,6 @@ pub(crate) struct State {
 }
 
 impl State {
-    /// Validates `options` and starts with an empty cache.
     pub(crate) fn try_new(options: Options) -> Result<Self, Error> {
         options.validate()?;
         Ok(Self {
@@ -77,8 +67,6 @@ impl State {
         })
     }
 
-    /// Resolves over the client's providers: capture is armed on `capture`
-    /// before each request is sent through `transmit`.
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
         Active {
             transmit,
@@ -94,7 +82,6 @@ impl Default for State {
     }
 }
 
-/// Active ARP/NDP resolution over one client's transmit and capture providers.
 pub(crate) struct Active<'a, T, C> {
     transmit: &'a T,
     capture: &'a C,
@@ -216,8 +203,6 @@ where
     ) -> Result<ExchangeOutcome, Error> {
         let cancellation = deadline.cancellation().cloned();
         let Some(ready_timeout) = self.remaining_attempt_budget(deadline) else {
-            // The caller's deadline passed before discovery could start; the
-            // outcome is an honest zero-attempt miss, not an attempt.
             return Ok(ExchangeOutcome {
                 mac_address: None,
                 attempts: 0,
@@ -294,9 +279,6 @@ where
         }
     }
 
-    /// The budget the next attempt may spend: the configured per-attempt
-    /// timeout, clipped to whatever the operation deadline still leaves.
-    /// `None` once that deadline has passed, so no further attempt starts.
     fn remaining_attempt_budget(&self, deadline: &Deadline) -> Option<Duration> {
         deadline
             .remaining()

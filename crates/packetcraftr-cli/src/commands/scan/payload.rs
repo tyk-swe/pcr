@@ -23,8 +23,7 @@ pub(super) fn read(
         ));
     }
     if let Some(hex) = hex {
-        // Bound both source text and decoded digits before parse_hex allocates
-        // its compact representation. Allow customary separators and a prefix.
+        // Bound both source text and decoded digits before parse_hex allocates.
         let digits = hex
             .strip_prefix("0x")
             .or_else(|| hex.strip_prefix("0X"))

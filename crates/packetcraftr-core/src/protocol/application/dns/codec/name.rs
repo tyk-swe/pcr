@@ -1,40 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS name decompression behind [`decode_name`](super::decode_name).
-//! Returns exact label bytes and the resume offset; callers own presentation
-//! and errors.
-
 use bytes::Bytes;
 
 use crate::protocol::application::dns::{Error, MAX_LABEL_LEN, MAX_NAME_LEN};
 
-/// A decompressed DNS name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Decompressed {
-    /// The label octets in wire order, exactly as they appear in the message.
-    /// A root name has no labels. Escaping and case folding are the caller's,
-    /// because DNS presentation syntax and DNS equality disagree about which
-    /// octets are significant.
     pub(super) labels: Vec<Bytes>,
-    /// The offset just past the name's own encoding, which is where the reader
-    /// continues. For a compressed name this is two bytes past the *first*
-    /// pointer, not past the bytes the pointer reached.
+    /// For a compressed name, `resume` is two bytes past the *first* pointer.
     pub(super) resume: usize,
 }
 
-/// Expands the possibly-compressed DNS name that starts at `offset` in
-/// `message`, following at most `max_pointers` compression pointers.
-///
-/// Every offset this walks is bounds-checked against `message`, every pointer
-/// must address a strictly earlier offset than the one it appears at, no offset
-/// is expanded twice, and the expanded name is capped at [`MAX_NAME_LEN`]
-/// octets — so the input cannot make this loop forever or allocate without
-/// bound.
-///
-/// `max_pointers` is what bounds the hop count, and the loop-detection scan is
-/// quadratic in it, so pass a small constant: the built-in dissector passes 32
-/// and the DNS workflow's validated ceiling is 128.
+/// The loop-detection scan is quadratic in `max_pointers`, so pass a small constant.
 pub(super) fn decompress(
     message: &Bytes,
     offset: usize,
@@ -96,8 +74,6 @@ pub(super) fn decompress(
                     });
                 }
                 let length = usize::from(length);
-                // Unreachable while the `0xc0` mask arm above owns every length
-                // above 63.
                 if length > MAX_LABEL_LEN {
                     return Err(Error::LabelTooLong {
                         offset: length_offset,
@@ -187,7 +163,6 @@ mod tests {
 
     #[test]
     fn an_offset_is_never_expanded_twice() {
-        // Enter at 5, hop to 1, read "a", then hop to 1 again.
         let message = [0, 1, b'a', 0xc0, 0x01, 0xc0, 0x01];
         assert!(matches!(
             decompress(&Bytes::copy_from_slice(&message), 5, 32),
@@ -197,7 +172,6 @@ mod tests {
 
     #[test]
     fn the_pointer_ceiling_bounds_the_hop_count() {
-        // A chain of trampolines at increasing offsets, each pointing back one.
         let mut message = vec![0u8];
         let mut previous = 0usize;
         for _ in 0..33 {
@@ -211,8 +185,6 @@ mod tests {
             Err(Error::PointerLimit { limit: 32 })
         ));
         assert!(decompress(&Bytes::copy_from_slice(&message), previous, 33).is_ok());
-        // Entering one trampoline earlier is exactly 32 hops, which fits, and
-        // resumes two bytes past the pointer it started on.
         let entry = previous - 2;
         assert_eq!(
             decompress(&Bytes::copy_from_slice(&message), entry, 32)

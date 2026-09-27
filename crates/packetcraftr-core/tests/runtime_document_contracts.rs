@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for templates, expressions, and document round trips.
-
 mod common;
 
 use bytes::Bytes;
@@ -152,8 +150,6 @@ fn numeric_ranges_expand_to_validated_unsigned_values() {
         ]
     );
 
-    // A range that exceeds the field width fails axis validation before any
-    // packet is yielded.
     let overflowing = template::Template::new(base).axis(
         0,
         "ttl",
@@ -326,8 +322,6 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         ),
         Err(document::Error::InvalidLimit { .. })
     ));
-    // Each of these must surface as a parse failure of the named format, never
-    // as an accepted document or a limit breach.
     let duplicate = "schema: packetcraftr.packet/v2\nschema: duplicate\nlayers: []\n";
     for (input, format, expected_format, expected_fragment) in [
         (

@@ -8,7 +8,6 @@ use packetcraftr_core::error::BoundaryError;
 use super::Report;
 use packetcraftr_core::budget::Deadline;
 
-/// Why a capture failed.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Cause {
@@ -18,7 +17,6 @@ pub enum Cause {
     Budget(#[from] crate::policy::Error),
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    /// The selector or the sink failed, or the sink did not answer in time.
     #[error("capture consumer failed")]
     Consumer(#[source] BoundaryError),
     #[error("invalid capture operation: {0}")]
@@ -48,14 +46,12 @@ impl Classified for Cause {
     }
 }
 
-/// A failed capture, with the report of everything it did before failing.
 #[derive(Debug, thiserror::Error)]
 #[error("{cause}")]
 pub struct Error {
     #[source]
     pub cause: Box<Cause>,
     pub report: Box<Report>,
-    /// Capture shutdown failures that followed the primary failure.
     pub cleanup: Vec<packetcraftr_netio::Error>,
     pub source_frame: Option<u64>,
 }
@@ -69,8 +65,7 @@ impl Classified for Error {
     }
     fn causes(&self) -> Vec<String> {
         let mut causes = match self.cause.as_ref() {
-            // A boundary error carries a captured causes snapshot that its own
-            // source chain no longer holds.
+            // A boundary error carries a causes snapshot its own source chain no longer holds.
             Cause::Consumer(error) => error.as_causes(),
             Cause::Native(error) => error.causes(),
             _ => packetcraftr_core::error::source_chain(self),
@@ -83,7 +78,6 @@ impl Classified for Error {
     }
 }
 
-/// A failure while the capture is cancelled reports the cancellation.
 pub(super) fn interrupted_or(deadline: &Deadline, cause: Cause) -> Cause {
     match deadline.check_cancelled() {
         Err(cancelled) => Cause::Cancelled(cancelled),

@@ -20,8 +20,6 @@ use packetcraftr_core::template::Template;
 use packetcraftr_netio::link::Mode as LinkMode;
 use packetcraftr_netio::{capture, transmit};
 
-/// A sender that records each submitted wire in order and fails on the
-/// `fail_at`-th (zero-based) transmission when set.
 #[derive(Clone, Default)]
 struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -57,8 +55,6 @@ impl capture::Provider for RecordingSender {
     }
 }
 
-/// A clock that starts at the real monotonic time and advances only by the
-/// delays it records, without waiting.
 #[derive(Clone)]
 struct RecordingClock {
     now: Arc<Mutex<Instant>>,
@@ -90,10 +86,8 @@ impl Clock for RecordingClock {
 
 type Fakes = common::FakeProviders<common::FixedRoutes, RecordingSender>;
 
-/// The (pass, index) of each frame an [`observer`] saw published.
 type Observed = Arc<Mutex<Vec<(u32, u64)>>>;
 
-/// Collects the (pass, index) of each published frame.
 fn observer() -> (Observed, impl packetcraftr::Sink<send::Event, Ack = ()>) {
     let observed = Arc::new(Mutex::new(Vec::new()));
     let sink = {
@@ -174,7 +168,6 @@ fn set_send_repeats_the_expansion_in_order_under_one_budget() {
         .expect("set send succeeds");
     let report = collector.finish(report).expect("coherent events");
 
-    // Two expanded packets times three passes, in expansion order per pass.
     assert_eq!(
         report
             .sent
@@ -194,7 +187,6 @@ fn set_send_repeats_the_expansion_in_order_under_one_budget() {
             .map(|frame| frame.packet.bytes_sent() as u64)
             .sum::<u64>()
     );
-    // The expanded ttl alternates in wire order within every pass.
     let wires = recorded.lock().expect("sent lock");
     assert_eq!(wires.len(), 6);
     let ttls: Vec<u8> = wires.iter().map(|wire| wire[8]).collect();
@@ -213,12 +205,10 @@ fn pacing_places_a_fixed_delay_between_transmission_starts() {
         .send(request(template, 4, Some(2)), sink)
         .expect("set send succeeds");
 
-    // Four sends, three 500 ms intervals, none before the first frame.
     assert_eq!(
         *delays.lock().expect("delays lock"),
         [Duration::from_millis(500); 3]
     );
-    // The schedule runs on the injected clock, which never waited.
     assert_eq!(report.stats.elapsed, Duration::from_millis(1_500));
     assert!(started.elapsed() < Duration::from_millis(1_500));
 }
@@ -312,7 +302,6 @@ fn expansion_times_repetition_is_one_bounded_budget() {
 fn scheduled_pacing_beyond_the_operation_ceiling_is_refused() {
     let template = Template::new(packet(64));
     let client = client(RecordingSender::default());
-    // One packet per second for more than an hour of scheduled delay.
     let error = client
         .send(
             request(template, 4_000, Some(1)),
@@ -333,7 +322,6 @@ fn cancellation_between_frames_stops_the_set() {
     let client = client(sender).with_cancellation(signal.clone());
     let template = Template::new(packet(64));
 
-    // Cancel after the first confirmed frame.
     let signal = signal.clone();
     let mut first = true;
     let error = client

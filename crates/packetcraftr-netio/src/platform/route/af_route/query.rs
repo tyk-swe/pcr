@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! macOS routing socket query and passive route lookup.
-
 #![allow(unsafe_code)]
 
 use std::mem::{MaybeUninit, offset_of, size_of};
@@ -29,11 +27,8 @@ use crate::{
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 
-/// Unrelated routing-socket messages a query skips before giving up.
 const MAX_UNMATCHED_MESSAGES: usize = 64;
 
-/// Runs on the worker pool; reads are sliced by the deadline so a cancelled
-/// caller's work stops promptly.
 pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -98,8 +93,6 @@ pub(in crate::platform) fn route(
     )
 }
 
-/// `getifaddrs(3)` answers from the kernel without waiting, so the caller's
-/// deadline has already been checked by the time this runs.
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
     _deadline: &Deadline,
@@ -134,12 +127,10 @@ fn query_route(
     read_route_response(&socket, destination, caller, deadline, &request)
 }
 
-/// The caller's deadline expired during `operation`.
 fn route_timeout(operation: &'static str) -> route::Error {
     route::Error::DeadlineExceeded { operation }
 }
 
-/// Whether a socket call ended because its timeout elapsed.
 fn timed_out(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -170,8 +161,7 @@ fn build_route_request(
     let message_type = u8::try_from(libc::RTM_GET).map_err(|_| route::Error::InvalidResponse {
         message: "macOS RTM_GET does not fit its routing-socket field".to_owned(),
     })?;
-    // SAFETY: all-zero is a valid baseline for this C message structure; all
-    // discriminating and length fields are assigned immediately below.
+    // SAFETY: all-zero is a valid baseline for this C message structure.
     let mut header: libc::rt_msghdr = unsafe { std::mem::zeroed() };
     header.rtm_msglen = wire_message_length;
     header.rtm_version = version;
@@ -234,9 +224,7 @@ fn send_route_request(
     Ok(socket)
 }
 
-/// Darwin fails the RTM_GET write itself when the lookup finds no route
-/// ("writing to routing socket: not in table"), so the no-route errnos an
-/// echoed `rtm_errno` would carry mean the same thing here.
+/// Darwin fails the RTM_GET write itself when the lookup finds no route.
 fn route_write_error(destination: IpAddr, error: std::io::Error) -> route::Error {
     if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENETUNREACH)) {
         return route::Error::RouteNotFound { destination };
@@ -258,7 +246,6 @@ fn read_route_response(
     while unmatched < MAX_UNMATCHED_MESSAGES {
         let remaining = remaining_before(deadline)
             .ok_or_else(|| route_timeout("reading the RTM_GET response"))?;
-        // Reads wait in slices so a cancelled caller is noticed promptly.
         socket
             .set_read_timeout(Some(remaining.min(POLL_INTERVAL)))
             .map_err(|error| os_error("set routing-socket timeout", error))?;
@@ -275,11 +262,9 @@ fn read_route_response(
             unmatched += 1;
             continue;
         }
-        // SAFETY: `recv` initialized the returned prefix; the slice is limited
-        // to exactly that prefix before parsing.
+        // SAFETY: `recv` initialized the returned prefix, which bounds the slice.
         let bytes = unsafe { std::slice::from_raw_parts(response.as_ptr().cast::<u8>(), length) };
-        // SAFETY: the checked prefix contains a complete header; unaligned
-        // reads are used because a byte buffer has no C-struct alignment.
+        // SAFETY: the checked prefix contains a complete header; unaligned reads are used.
         let response_header =
             unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::rt_msghdr>()) };
         if response_header.rtm_version != request.version
@@ -325,10 +310,6 @@ fn read_route_response(
     })
 }
 
-/// Encodes a destination as the Darwin routing-socket `sockaddr`.
-///
-/// Each field is written at the offset `libc` declares for this target's own
-/// structure, and every byte the C structure does not name stays zero.
 fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, route::Error> {
     match address {
         IpAddr::V4(address) => {

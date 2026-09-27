@@ -132,7 +132,6 @@ fn validate_records(validator: &jsonschema::Validator, records: &[Value]) {
     }
 }
 
-/// A converted event with the diagnostics its conversion carried.
 fn validate_published<T: output::stream::StreamRecord>(
     command: output::contract::Command,
     published: output::envelope::Published<T>,
@@ -363,7 +362,6 @@ fn production_typed_event_variants_are_schema_valid() {
         capture_decoded,
         Vec::new(),
     );
-    // A --field capture row streams through the shared projection contract.
     let capture_row = output::projection::Row {
         source_frame: output::frame::SourceFrame::try_from(1).unwrap(),
         values: vec![Some(core::field::FieldValue::Unsigned(46))],
@@ -556,8 +554,6 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     );
 }
 
-/// A minimal session record: the shape a `gap` session takes when the capture
-/// started after the ClientHello, so the optional halves are exercised too.
 fn tls_session_event() -> output::tls::Event {
     let endpoint = |last: u8, port: u16| output::analysis::Endpoint {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
@@ -696,7 +692,6 @@ fn validate_dns_event_variants() {
         let event = output::envelope::Published::<output::dns::Event>::try_from(event).unwrap();
         validate_published(output::contract::Command::Dns, event);
     }
-    // The batch terminal record lists each question's deterministic status.
     // `complete` is reserved for the terminal record, so it emits through the
     // terminal path rather than `emit_data`.
     let (sink, bytes) = stream(output::contract::Command::Dns);

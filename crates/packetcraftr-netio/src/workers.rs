@@ -1,22 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one worker pool for native calls that can block past a caller's
-//! deadline: capture reads, route netlink, routing-socket and IP Helper
-//! queries, and ordinary TCP connects. Sends stay on the caller's thread.
-//!
-//! Admission and execution share one path. A [`Permit`] reserves one of the
-//! pool's slots, and work runs on a pooled thread while it holds a clone of
-//! that permit. The slot returns only when the work has finished and every
-//! resource holding another clone (a connected socket, a capture session) is
-//! gone, so a permit belongs to the resources being cleaned up, never to the
-//! caller's waiting deadline. An owner that stops waiting marks the permit
-//! retained, which the published snapshot reports until cleanup ends.
-//!
-//! Pooled threads are reused, and there are never more of them than the
-//! pool admits. A thread keeps the execution context of the thread that
-//! spawned it (on Linux, its network namespace), and sockets open in that
-//! context, so work only runs on a thread spawned in its caller's context.
+//! The one worker pool for native calls that can block past a caller's deadline.
 
 #[cfg(native_layer2)]
 pub(crate) mod reaper;
@@ -39,28 +24,21 @@ use crate::{
     resources::NativeSnapshot,
 };
 
-/// Slots in the process-wide pool.
 pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
 
 static SHARED: OnceLock<Arc<Pool>> = OnceLock::new();
 
-/// The process-wide pool. Creating it starts no thread.
 pub(crate) fn shared() -> &'static Arc<Pool> {
     SHARED.get_or_init(|| Arc::new(Pool::new(CAPACITY, crate::tcp::MAX_PENDING_CONNECTIONS)))
 }
 
-/// What an admission is for. TCP connects are also counted against their
-/// own published sub-limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Class {
-    /// Capture and route work, which exists only in native profiles.
     #[cfg_attr(not(native_route), allow(dead_code))]
     Native,
     TcpConnect,
 }
 
-/// The pool refused an admission because it, or the admission's sub-limit,
-/// is full. Capabilities report it under their own error codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("native worker admission reached its limit of {capacity}")]
 pub(crate) struct Exhausted {
@@ -89,8 +67,6 @@ struct State {
     next_worker: u64,
 }
 
-/// One pooled thread. `context` is `None` when the spawning thread's context
-/// could not be identified; such a thread runs one job and exits.
 struct Worker {
     id: u64,
     context: Option<ExecutionContext>,
@@ -98,8 +74,7 @@ struct Worker {
     thread: JoinHandle<()>,
 }
 
-/// Runs the work and hands back how to publish its outcome, which happens
-/// only after the pool has settled the job's admission.
+/// Runs the work and hands back how to publish its outcome once admission is settled.
 type Run = Box<dyn FnOnce() -> Box<dyn FnOnce() + Send> + Send>;
 
 struct Job {
@@ -150,7 +125,6 @@ impl Pool {
         }
     }
 
-    /// Reserves one slot for `class`, or refuses without waiting.
     pub(crate) fn admit(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
         let mut state = lock(&self.state);
         let limit = match class {
@@ -181,9 +155,7 @@ impl Pool {
         ))))
     }
 
-    /// Hands `job` to an idle thread spawned in the caller's context, or
-    /// spawns one from this thread. A failed spawn returns the job so its
-    /// permit is dropped outside the pool lock.
+    /// A failed spawn returns the job so its permit is dropped outside the pool lock.
     fn dispatch(self: &Arc<Self>, job: Job) -> Result<(), (Job, std::io::Error)> {
         let context = execution_context();
         let mut state = lock(&self.state);
@@ -200,7 +172,6 @@ impl Pool {
                     state.busy.insert(worker.id, worker);
                     return Ok(());
                 }
-                // The idle thread is gone; spawn a replacement.
                 Err(mpsc::SendError(returned)) => job = returned,
             }
         }
@@ -226,9 +197,7 @@ impl Pool {
             },
         );
         debug_assert!(started.is_ok(), "a new pooled thread accepts its first job");
-        // Each busy thread runs the one job of an active permit, so busy
-        // threads never outnumber the pool; a thread beyond it is idle, in
-        // another context, and is retired.
+        // Busy threads never outnumber the pool, so a thread beyond it is idle and is retired.
         let retired = (state.idle.len() + state.busy.len() > self.capacity)
             .then(|| state.idle.pop())
             .flatten();
@@ -240,10 +209,7 @@ impl Pool {
         Ok(())
     }
 
-    /// Settles a finished job: releases its admission if it held the last
-    /// clone of the permit, and returns the thread to the idle list in the
-    /// same step, so a released slot always has a thread to run on. Returns
-    /// whether the thread keeps serving.
+    /// Releases admission and idles the thread in one step, so a released slot has a thread.
     fn finish(&self, id: u64, permit: Permit) -> bool {
         let mut state = lock(&self.state);
         if let Some(grant) = Arc::into_inner(permit.0) {
@@ -256,8 +222,7 @@ impl Pool {
             state.idle.push(worker);
             true
         } else {
-            // A thread that cannot be matched to a caller exits after its
-            // one job; dropping its record detaches it at exit.
+            // A thread that cannot be matched to a caller exits after its one job.
             false
         }
     }
@@ -284,22 +249,17 @@ const RUNNING: u8 = 0;
 const RETAINED: u8 = 1;
 const RELEASED: u8 = 2;
 
-/// One admitted slot. Clones share it; the slot returns when the last clone
-/// is dropped.
+/// One admitted slot; the slot returns when the last clone is dropped.
 #[derive(Clone)]
 pub(crate) struct Permit(Arc<Grant>);
 
-/// The slot's retention state, and whether its one job has been spawned.
 struct Grant(RetentionMarker, AtomicBool);
 
-/// Marks a permit's slot as held by cleanup the owner no longer waits for.
-/// It does not hold the slot, and a late mark after release has no effect.
 #[derive(Clone)]
 pub(crate) struct RetentionMarker {
     pool: Arc<Pool>,
     class: Class,
-    // Transitions happen while holding the pool state lock; the atomic lets
-    // a clone observe the phase without it.
+    // Transitions happen while holding the pool state lock.
     phase: Arc<AtomicU8>,
 }
 
@@ -343,11 +303,6 @@ impl Permit {
         self.0.0.clone()
     }
 
-    /// Runs `work` on a pooled thread in the caller's context. The thread
-    /// holds a clone of this permit until `work` and everything it captured
-    /// are dropped; a panic in `work` is contained and reported by the task.
-    ///
-    /// A permit runs at most one job, which is what bounds the threads.
     pub(crate) fn spawn<T: Send + 'static>(
         &self,
         work: impl FnOnce() -> T + Send + 'static,
@@ -399,19 +354,15 @@ impl<T> Done<T> {
     }
 }
 
-/// The owner's handle on pooled work. Dropping it abandons the outcome, not
-/// the work: the work still finishes and releases its permit on its thread.
+/// Dropping it abandons the outcome, not the work.
 pub(crate) struct Task<T> {
     done: Arc<Done<T>>,
     retention: RetentionMarker,
 }
 
-/// How a bounded wait for a task ended.
 #[cfg_attr(not(native_route), allow(dead_code))]
 pub(crate) enum Waited<T> {
     Finished(thread::Result<T>),
-    /// The caller's deadline or cancellation ended the wait first, so the
-    /// still-running task is handed back to its owner rather than abandoned.
     Pending(Task<T>),
 }
 
@@ -420,7 +371,6 @@ impl<T> Task<T> {
         self.retention.clone()
     }
 
-    /// The outcome, once, if the work has finished; otherwise `None`.
     pub(crate) fn try_take(&mut self) -> Option<thread::Result<T>> {
         let mut slot = lock(&self.done.slot);
         match std::mem::replace(&mut *slot, Slot::Taken) {
@@ -433,7 +383,6 @@ impl<T> Task<T> {
         }
     }
 
-    /// Waits for completion or interruption without consuming the outcome.
     pub(crate) fn wait_ready(&self, deadline: &Deadline) {
         loop {
             let slot = lock(&self.done.slot);
@@ -443,8 +392,7 @@ impl<T> Task<T> {
             let Ok(remaining) = crate::deadline::remaining(deadline) else {
                 return;
             };
-            // The condvar signals completion; the caller's cancellation
-            // has no waker, so the wait is sliced to notice it.
+            // The caller's cancellation has no waker, so the wait is sliced to notice it.
             let _ = self
                 .done
                 .finished
@@ -453,9 +401,6 @@ impl<T> Task<T> {
         }
     }
 
-    /// Waits for the outcome until `deadline` ends, following the
-    /// [deadline convention](crate::deadline): finished work is reported even
-    /// when the deadline is spent.
     #[cfg_attr(not(native_route), allow(dead_code))]
     pub(crate) fn wait(mut self, deadline: &Deadline) -> Waited<T> {
         self.wait_ready(deadline);

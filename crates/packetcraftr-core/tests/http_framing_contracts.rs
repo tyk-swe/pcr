@@ -62,8 +62,6 @@ fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
             .0
             .body(None)
     }
-    // Commas and semicolons inside a quoted parameter separate nothing, so
-    // "chunked" there cannot select chunked framing.
     for wire in [
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a,chunked;b\"\r\nConnection: close\r\n\r\n".as_slice(),
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a;b\"\r\n\r\n".as_slice(),
@@ -72,8 +70,6 @@ fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
     ] {
         assert_eq!(body_of(wire), Ok(Body::Close), "{wire:?}");
     }
-    // Whitespace before a parameter is part of the grammar; the actual final
-    // coding still decides framing.
     for wire in [
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom ;p=token, chunked\r\n\r\n".as_slice(),
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a\\\\\", chunked\r\n\r\n".as_slice(),
@@ -82,7 +78,6 @@ fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
     ] {
         assert_eq!(body_of(wire), Ok(Body::Chunked), "{wire:?}");
     }
-    // Malformed lists and unterminated quoted strings fail deterministically.
     for wire in [
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"unterminated\r\n\r\n".as_slice(),
         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p\r\n\r\n".as_slice(),
@@ -94,7 +89,6 @@ fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
     ] {
         assert!(body_of(wire).is_err(), "{wire:?}");
     }
-    // A non-chunked final coding on a request remains an error.
     assert!(
         body_of(b"POST / HTTP/1.1\r\nTransfer-Encoding: custom;p=\"a,chunked\"\r\n\r\n").is_err()
     );
@@ -136,8 +130,6 @@ fn chunk_size_tolerates_whitespace_only_before_extensions() {
         );
         assert_eq!(decoder.body_bytes(), 3);
     }
-    // Whitespace inside the digits, before them, or ahead of a bare CRLF
-    // remains invalid.
     for wire in [
         b"3 4;x=y\r\nabcd\r\n0\r\n\r\n".as_slice(),
         b" 3;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),

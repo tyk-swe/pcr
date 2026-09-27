@@ -15,8 +15,6 @@ use crate::rendering::{
     render_diagnostics_text, render_dns_record, render_undecoded, write_stdout_line,
 };
 
-/// Renders each batch question in input order: a status line first, then the
-/// completed question's ordinary detail block.
 pub(super) fn render_batch_text(
     published: output::envelope::Published<output::dns::BatchResult>,
 ) -> Result<(), CliError> {
@@ -52,8 +50,6 @@ pub(super) fn render_batch_text(
     render_diagnostics_text(&diagnostics)
 }
 
-/// `stats` is absent for a batch question, whose counters only the batch
-/// total reports.
 pub(super) fn render_text(
     published: output::envelope::Published<output::dns::Report>,
 ) -> Result<(), CliError> {
@@ -150,8 +146,6 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
-/// A decoded record in the shared DNS record line; its data is the record's
-/// JSON form without the type tag the line already names.
 fn render_record(
     section: output::dns::Section,
     record: &output::dns::Record,
@@ -172,8 +166,7 @@ fn render_record(
     )
 }
 
-/// Record data that already survived decoding cannot fail to serialize, so a
-/// failure here is an internal fault rather than anything the caller sent.
+/// Record data that already survived decoding cannot fail to serialize.
 fn serialization_failure(error: serde_json::Error) -> CliError {
     CliError::new(
         Kind::Internal,
@@ -222,8 +215,6 @@ pub(super) fn emit_event(
     Ok(stream.emit_published(published)?)
 }
 
-/// A batch question's event publishes as the lone query's event does; the
-/// record itself names the question it belongs to.
 pub(super) fn emit_batch_event(
     event: packetcraftr::dns::batch::Event,
     stream: &StreamEncoder,

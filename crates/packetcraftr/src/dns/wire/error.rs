@@ -5,8 +5,6 @@ use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// Why DNS wire text or bytes are refused: a query that cannot be
-/// constructed, or a response that does not answer the query.
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
@@ -14,8 +12,6 @@ pub enum Error {
     Encode(#[from] packetcraftr_core::codec::Error),
     #[error(transparent)]
     Decode(#[from] packetcraftr_core::protocol::application::dns::Error),
-    /// Query type text is not an alias, 1–5 decimal digits, or `TYPE`
-    /// followed by 1–5 digits.
     #[error("expected a DNS type alias, 1–5 decimal digits, or TYPE followed by 1–5 digits")]
     QueryTypeSyntax,
     #[error("DNS query type must be within 0..=65535")]
@@ -70,9 +66,6 @@ impl Error {
     }
 }
 
-/// A query this workflow cannot construct is `packet.dns_query`; a response
-/// that breaks a wire rule is `packet.dns`. Codec and core DNS failures keep
-/// their own classification.
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

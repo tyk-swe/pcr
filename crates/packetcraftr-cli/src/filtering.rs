@@ -14,24 +14,18 @@ use packetcraftr_core::registry::Registry;
 
 use super::errors::CliError;
 
-/// Filter capabilities a command declares before input is read.
-///
-/// Unsupported stream fields fail rather than silently matching no frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Capabilities {
     pub(crate) stream_index: bool,
 }
 
 impl Capabilities {
-    /// A command that dissects frames one at a time and tracks no session.
     pub(crate) const fn frames_only() -> Self {
         Self {
             stream_index: false,
         }
     }
 
-    /// A command that runs the analysis pipeline and assigns conversation
-    /// indices, so `tcp.stream` and `udp.stream` resolve.
     pub(crate) const fn stream_capable() -> Self {
         Self { stream_index: true }
     }
@@ -66,8 +60,6 @@ pub(crate) fn compile(
     Ok(filter)
 }
 
-/// A frame selector over `source`, compiled for a command that judges frames
-/// one at a time.
 pub(crate) fn frame_selector(
     source: &str,
     registry: &Arc<Registry>,
@@ -77,7 +69,6 @@ pub(crate) fn frame_selector(
     FrameSelector::new(Arc::clone(registry), filter, max_frame_bytes).map_err(CliError::classified)
 }
 
-/// [`frame_selector`] for an optional `--filter`.
 pub(crate) fn optional_frame_selector(
     source: Option<&str>,
     registry: &Arc<Registry>,
@@ -88,8 +79,6 @@ pub(crate) fn optional_frame_selector(
         .transpose()
 }
 
-/// A frame decoder applying an optional `--filter`, so every frame-at-a-time
-/// command dissects, budgets, and classifies identically.
 pub(crate) fn frame_decoder(
     registry: &Arc<Registry>,
     source: Option<&str>,
@@ -101,8 +90,6 @@ pub(crate) fn frame_decoder(
     FrameDecoder::new(Arc::clone(registry), filter, max_frame_bytes).map_err(CliError::classified)
 }
 
-/// A frame-at-a-time decode or filter failure, at the one-based source frame
-/// it stopped on.
 pub(crate) fn frame_error(
     source_frame: u64,
     error: impl core::error::Classified + std::fmt::Display,
@@ -110,8 +97,6 @@ pub(crate) fn frame_error(
     CliError::classified(error).with_context(Some(Coordinate::SourceFrame(source_frame)))
 }
 
-/// Evaluates a compiled filter against a dissection the caller already owns,
-/// so commands that decode a frame for output do not decode it again to filter.
 pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
     filter.matches(context).map_err(CliError::classified)
 }

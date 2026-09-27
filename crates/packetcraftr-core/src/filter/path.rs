@@ -7,10 +7,6 @@ use super::error::Error;
 use super::eval;
 use crate::registry::{FilterFieldBinding, Registry};
 
-/// Per-frame values that no protocol layer carries.
-///
-/// These names are reserved: they are resolved before the registry is
-/// consulted, so a protocol can never redefine what `frame.len` means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FrameField {
     Number,
@@ -21,11 +17,7 @@ pub(super) enum FrameField {
     LinkType,
 }
 
-/// Which transport's conversation index a stream path reads.
-///
-/// The slots are separate so `udp.stream` can never observe a TCP index: in
-/// an encapsulated stack one frame legitimately belongs to both a UDP and a
-/// TCP conversation, and each path must read its own.
+/// The slots are separate so `udp.stream` can never observe a TCP index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StreamTransport {
     Tcp,
@@ -39,23 +31,14 @@ pub(super) enum FieldSource {
         path: crate::field::Path,
         occurrence: Option<usize>,
     },
-    /// Reflective fields of one protocol's layers, addressed exactly as the
-    /// registry binds them. Canonical `<protocol>.<field>` paths resolve to a
-    /// `Direct` binding, so every layer path reads through one description.
     Layer {
         binding: FilterFieldBinding,
         occurrence: Option<usize>,
     },
     Frame(FrameField),
-    /// The conversation index assigned by a session-aware caller.
     Stream(StreamTransport),
 }
 
-/// What a path knows in advance about one field it may read.
-///
-/// `derived` matters because a derived wire value reflects as the text `auto`
-/// until the packet is built, which is the only way text can appear on a
-/// numeric field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FieldSpec {
     pub(super) kind: FieldKind,
@@ -63,7 +46,6 @@ pub(super) struct FieldSpec {
 }
 
 impl FieldSpec {
-    /// A synthetic value the caller supplies rather than a header field.
     fn synthetic(kind: FieldKind) -> Self {
         Self {
             kind,
@@ -83,21 +65,11 @@ pub(super) struct ByteSlice {
 pub(super) struct FieldRef {
     pub(super) source: FieldSource,
     pub(super) slice: Option<ByteSlice>,
-    /// What every field this path may read declares, for compile-time literal
-    /// checking. Empty when nothing is knowable in advance.
     pub(super) specs: Vec<FieldSpec>,
-    /// The path exactly as typed, byte slice included, retained for
-    /// diagnostics and projection column names.
     pub(super) path: String,
 }
 
 impl FieldRef {
-    /// Whether this path names a single flag rather than a whole field.
-    ///
-    /// A bit selection and a boolean field both carry their meaning in the
-    /// value, not in whether a value exists, so their bare form reads the flag
-    /// itself. Every other path keeps presence semantics: `ipv4.options` asks
-    /// whether the packet carries options at all.
     pub(super) fn is_flag(&self) -> bool {
         if let FieldSource::Layer {
             binding: FilterFieldBinding::Bits { .. },
@@ -112,7 +84,6 @@ impl FieldRef {
 
 #[derive(Clone, Debug)]
 pub(super) enum Resolved {
-    /// A protocol name with no field, testing whether such a layer is present.
     Layer {
         protocol: crate::layer::Id,
         occurrence: Option<usize>,
@@ -120,16 +91,11 @@ pub(super) enum Resolved {
     Field(FieldRef),
 }
 
-/// Splits a trailing `#N` occurrence selector off a path's first segment.
-///
-/// The selector binds to the protocol, so `ipv4#2.source` selects the second
-/// IPv4 layer and `tcp#1.flags.syn` the first TCP layer. Occurrences are
-/// 1-based and counted outermost first, matching layer order in the packet.
+/// Occurrences are 1-based and counted outermost first, matching layer order in the packet.
 fn split_occurrence(path: &str, offset: usize) -> Result<(String, Option<usize>), Error> {
     let Some(marker) = path.find('#') else {
         return Ok((path.to_owned(), None));
     };
-    // Only the first segment may carry a selector; a later `#` is a typo.
     let first_dot = path.find('.').unwrap_or(path.len());
     if marker > first_dot {
         return Err(Error::Syntax {
@@ -199,11 +165,6 @@ fn specs_for(
     Ok(specs)
 }
 
-/// Resolves a typed path against the registry.
-///
-/// Resolution order is fixed so a spelling always means one thing: reserved
-/// synthetic names, then registered filter spellings, then canonical
-/// `<protocol-or-alias>.<field>` paths, then a bare protocol name.
 pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<Resolved, Error> {
     let (stripped, occurrence) = split_occurrence(path, offset)?;
     let unknown = || Error::UnknownField {
@@ -331,10 +292,6 @@ fn resolve_synthetic(
     })))
 }
 
-/// Parses a `[start:end]` suffix and attaches it to an already-resolved field.
-///
-/// Slicing reads a field as raw bytes, so the result is compared as bytes
-/// regardless of the field's declared kind.
 pub(super) fn attach_slice(
     field: &mut FieldRef,
     contents: &str,
@@ -388,7 +345,6 @@ pub(super) fn attach_slice(
     if matches!(field.source, FieldSource::Frame(_) | FieldSource::Stream(_)) {
         return Err(unsliceable());
     }
-    // Reject known non-byte fields; defer unknown decode-only schemas.
     if !field.specs.is_empty()
         && !field
             .specs
@@ -399,7 +355,6 @@ pub(super) fn attach_slice(
     }
     field.slice = Some(slice);
     field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
-    // A sliced column must not share its whole field's name.
     field.path = format!("{}[{contents}]", field.path);
     Ok(())
 }

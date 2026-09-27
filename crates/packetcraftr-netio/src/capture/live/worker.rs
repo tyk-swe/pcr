@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The pooled capture reader: it drains one native source into the bounded
-//! queue until stopped, and hands a reader that missed shutdown to the
-//! reaper.
-
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{

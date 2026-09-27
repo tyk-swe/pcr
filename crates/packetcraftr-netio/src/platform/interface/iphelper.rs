@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Windows interface enumeration backed by IP Helper `GetAdaptersAddresses`,
-//! whose adapter snapshot the route backend also reads. It emits no neighbor
-//! traffic.
-
 #![allow(unsafe_code)]
 
 pub(in crate::platform) mod adapter;
@@ -24,9 +20,6 @@ use crate::{interface, platform::common::on_worker, route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 
-/// One `GetAdaptersAddresses` snapshot. The call is synchronous and takes no
-/// timeout, so it runs on the worker pool and the caller waits only until its
-/// deadline.
 pub(in crate::platform) fn interfaces(
     deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, interface::Error> {
@@ -47,8 +40,7 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
             | GAA_FLAG_SKIP_DNS_SERVER.0,
     );
     let mut required = 0_u32;
-    // SAFETY: this documented sizing call has null output storage and a valid
-    // size pointer. No linked-list pointer is dereferenced.
+    // SAFETY: this documented sizing call has null output storage and a valid size pointer.
     let sizing =
         unsafe { GetAdaptersAddresses(u32::from(AF_UNSPEC.0), FLAGS, None, None, &mut required) };
     if sizing != ERROR_BUFFER_OVERFLOW.0 && sizing != NO_ERROR.0 {
@@ -66,8 +58,7 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
             .ok_or_else(|| route::Error::InvalidResponse {
                 message: "Windows reported an invalid adapter buffer size".to_owned(),
             })?;
-        // A usize vector supplies alignment at least as strict as every IP
-        // Helper structure while keeping the backing allocation initialized.
+        // A usize vector supplies alignment at least as strict as every IP Helper structure.
         let mut storage = vec![0_usize; word_count];
         let head = storage.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
         let mut supplied = required;
@@ -111,7 +102,6 @@ pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, ro
     Err(route::Error::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
-        // Every read ended with the buffer-overflow status.
         source: Some(Source::new(std::io::Error::from_raw_os_error(
             ERROR_BUFFER_OVERFLOW.0.cast_signed(),
         ))),

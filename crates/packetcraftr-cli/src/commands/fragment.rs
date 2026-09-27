@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `fragment`: builds one IPv4 or IPv6 recipe and splits it into bounded
-//! fragments at an explicit MTU.
-
 pub(super) mod arguments;
 mod rendering;
 

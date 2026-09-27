@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Byte-level packet layouts and the default ceilings on a packet's shape.
-
 use serde::Serialize;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
@@ -23,7 +21,6 @@ impl ByteRange {
         self.end.saturating_sub(self.start)
     }
 
-    /// The range moved `amount` bytes later, unless that overflows.
     pub(crate) fn shifted(self, amount: usize) -> Option<Self> {
         Some(Self {
             start: self.start.checked_add(amount)?,
@@ -57,8 +54,6 @@ pub struct LayerLayout {
 }
 
 impl LayerLayout {
-    /// Moves the layer and every field `amount` bytes later, leaving the
-    /// layout untouched when any range would overflow.
     pub(crate) fn checked_shift(&mut self, amount: usize) -> bool {
         let Some(range) = self.range.shifted(amount) else {
             return false;
@@ -88,11 +83,7 @@ pub struct PacketLayout {
 }
 
 impl PacketLayout {
-    /// Builds a layout whose layers are stored in packet order.
-    ///
-    /// Every producer appends one layout per layer it pushes, so
-    /// `layers[position].index == position`. [`Self::layer`] relies on that
-    /// to resolve an index by position instead of scanning.
+    /// Every producer appends one layout per layer it pushes, so `layers[position].index == position`.
     #[must_use]
     pub fn new(layers: Vec<LayerLayout>) -> Self {
         debug_assert!(
@@ -105,9 +96,6 @@ impl PacketLayout {
         Self { layers }
     }
 
-    /// The layout of the layer at `index`, or [`None`] when the layout does
-    /// not describe that layer. A stored index that disagrees with its
-    /// position resolves to nothing rather than to a neighbouring layer.
     pub fn layer(&self, index: usize) -> Option<&LayerLayout> {
         self.layers
             .get(index)
@@ -165,8 +153,6 @@ mod tests {
         assert_eq!(layout.layer(0), Some(&expected));
         assert_eq!(layout.layer(1), None);
 
-        // A layer stored away from its own semantic index resolves to
-        // nothing instead of to whatever occupies that position.
         let inconsistent = PacketLayout {
             layers: vec![layer()],
         };

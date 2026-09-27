@@ -10,30 +10,21 @@ impl From<u64> for Discriminator {
     }
 }
 
-/// Additional display-filter aliases and packed-field selectors. Canonical
-/// `<protocol>.<field>` paths resolve directly through
-/// [`crate::registry::Registry::schema`] and need no binding.
+/// Additional display-filter aliases and packed-field selectors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FilterFieldBinding {
-    /// An alternate spelling of one reflective field.
     Direct {
         protocol: crate::layer::Id,
         field: &'static str,
     },
     /// One sub-value of a packed unsigned field, such as a single TCP flag.
-    ///
-    /// The field value is masked and then shifted right, so a single flag bit
-    /// compares against `0` and `1` rather than its raw positional weight.
     Bits {
         protocol: crate::layer::Id,
         field: &'static str,
         mask: u64,
         shift: u32,
     },
-    /// Several reflective fields addressed by one path, such as a port that
-    /// may appear as either endpoint. A comparison holds when **any** listed
-    /// field satisfies it.
     Either {
         protocol: crate::layer::Id,
         fields: &'static [&'static str],
@@ -41,7 +32,6 @@ pub enum FilterFieldBinding {
 }
 
 impl FilterFieldBinding {
-    /// The protocol whose layers this path reads.
     pub fn protocol(&self) -> &crate::layer::Id {
         match self {
             Self::Direct { protocol, .. }
@@ -50,7 +40,6 @@ impl FilterFieldBinding {
         }
     }
 
-    /// Every reflective field name this path may read.
     pub fn fields(&self) -> &[&'static str] {
         match self {
             Self::Direct { field, .. } | Self::Bits { field, .. } => std::slice::from_ref(field),

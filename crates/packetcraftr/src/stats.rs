@@ -5,8 +5,6 @@ use std::time::Duration;
 
 use packetcraftr_netio::capture;
 
-/// A counter in [`Stats`] would exceed its range; the counters were left
-/// untouched.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("statistic accounting overflowed")]
 pub struct StatsOverflow;

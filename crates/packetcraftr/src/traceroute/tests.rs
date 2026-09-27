@@ -43,8 +43,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
-/// Runs the engine as the client does under the request's duration limit,
-/// collecting every event into the aggregate.
 fn run<A, E, C>(
     request: &Request,
     authorizer: &mut A,
@@ -74,8 +72,6 @@ where
     collector.finish(report)
 }
 
-/// Runs the engine as the client does, publishing each event to `sink` on a
-/// worker admitted by `runtime`.
 fn run_with_events<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
@@ -750,8 +746,6 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 }
 
-/// An authorized resolution without an address of the requested family fails
-/// in the traceroute's own vocabulary.
 #[test]
 fn a_family_miss_is_reported_as_a_traceroute_error() {
     use packetcraftr_core::error::Classified as _;

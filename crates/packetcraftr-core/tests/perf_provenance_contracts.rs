@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for physical-source attribution while provenance work is
-//! deduplicated: HTTP deliveries merge once per open message, source-set
-//! unions stay faithful, and provenance retirement still follows real
-//! datagram removals, including outcomes that only moved counters.
-
 mod common;
 
 use common::{
@@ -128,8 +123,6 @@ fn long_header_across_many_deliveries_and_a_split_crlf() {
     let (mut capture, mut stream) = setup();
     let long_value = "x".repeat(400);
     let head = format!("GET / HTTP/1.1\r\nX-Long: {long_value}\r\n\r\n");
-    // Split inside the CRLFCRLF terminator: "\r" ends one delivery, the
-    // remaining "\n\r\n" arrives in the next.
     let boundary = head.len() - 3;
     capture.client(&mut stream, &head.as_bytes()[..boundary]);
     capture.client(&mut stream, &head.as_bytes()[boundary..]);
@@ -176,8 +169,6 @@ fn malformed_and_gap_messages_keep_their_contributing_sources() {
 
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, b"GET /g HTTP/1.1\r\nHost: exam");
-    // Client bytes resume past a 32-byte hole: the reassembler reports a gap
-    // on the request's own direction and retires the open message as a gap.
     let mut spec = capture.client_spec(&stream, Tcp::ACK);
     spec.sequence = spec.sequence.wrapping_add(32);
     capture.push(spec, b"past-the-hole");
@@ -269,7 +260,6 @@ fn pending_datagrams_survive_unrelated_frames_and_expire_with_sources() {
             &payload,
         ));
     }
-    // Unrelated, unfragmented datagrams must not disturb pending sources.
     for second in 1..=10 {
         frames.push(udp_frame(
             &registry,
@@ -281,7 +271,6 @@ fn pending_datagrams_survive_unrelated_frames_and_expire_with_sources() {
             &payload,
         ));
     }
-    // The next physical frame sweeps every pending datagram at once.
     frames.push(udp_frame(
         &registry,
         epoch + Duration::from_secs(40),
@@ -380,8 +369,6 @@ fn retirements_omitted_from_the_outcome_cap_still_release_sources() {
     )
     .expect("bounded run succeeds");
 
-    // The sweep retired three datagrams but named only one; the provenance
-    // tracker is bounded the same way and must still release every entry.
     assert_eq!(
         summary.ip_reassembly.counters.ipv4.idle_expired_datagrams,
         3
@@ -397,7 +384,6 @@ fn retirements_omitted_from_the_outcome_cap_still_release_sources() {
 #[test]
 #[ignore = "timing fixture; not a CI assertion"]
 fn measure_repeated_provenance_work() {
-    // One header delivered whole versus fragmented across many deliveries.
     let header = {
         let mut head = b"GET / HTTP/1.1\r\n".to_vec();
         for index in 0..16 {
@@ -437,8 +423,6 @@ fn measure_repeated_provenance_work() {
         "every segment contributes"
     );
 
-    // Many pending datagrams, then a stream of unrelated physical frames
-    // that expire nothing.
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH;
     let payload = [9_u8; 8];

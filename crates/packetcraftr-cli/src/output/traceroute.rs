@@ -14,7 +14,6 @@ use super::probe::{ProbeStatus, Transport};
 use packetcraftr::traceroute as library;
 
 published_enum! {
-    /// What kind of node answered a traceroute probe.
     pub enum ResponseKind from library::ResponseKind {
         Intermediate => "intermediate",
         DestinationReached => "destination_reached",
@@ -23,7 +22,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// Why a traceroute stopped.
     pub enum Completion from library::Termination {
         DestinationReached => "destination_reached",
         Unreachable => "unreachable",
@@ -81,7 +79,6 @@ pub struct Report {
     pub completion: Completion,
 }
 
-/// A traceroute, with its diagnostics and totals.
 impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
@@ -160,7 +157,6 @@ pub enum Event {
     },
 }
 
-/// One traceroute event, with any diagnostic it carried for the envelope.
 impl TryFrom<library::Event> for Published<Event> {
     type Error = Error;
 
@@ -187,7 +183,6 @@ impl TryFrom<library::Event> for Published<Event> {
     }
 }
 
-/// The terminal record, with the run's totals.
 impl From<library::Report> for Published<Event> {
     fn from(summary: library::Report) -> Self {
         Self::new(

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Windows route lookup backed by IP Helper. `GetBestRoute2` supplies
-//! route/source selection over the interface backend's
-//! `GetAdaptersAddresses` snapshot. Neither API emits neighbor traffic.
-
 mod query;
 
 use std::net::IpAddr;
@@ -15,9 +11,6 @@ use crate::{
     interface::Id as InterfaceId,
     route::{self, Decision},
 };
-
-// IP Helper calls are synchronous and take no timeout, so every one runs on
-// the worker pool and the caller waits only until its deadline.
 
 pub(in crate::platform) fn route(
     destination: IpAddr,

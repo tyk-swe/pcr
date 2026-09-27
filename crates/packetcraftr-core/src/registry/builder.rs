@@ -28,8 +28,6 @@ impl Builder {
     }
 
     /// Registers a codec with its canonical name and caller-owned aliases.
-    /// Codecs do not advertise aliases; built-ins use
-    /// [`crate::protocol::BuiltinProtocol::aliases`].
     pub fn register_codec<C>(&mut self, codec: C, aliases: &[&str]) -> Result<&mut Self, Error>
     where
         C: LayerCodec + 'static,
@@ -61,14 +59,6 @@ impl Builder {
         Ok(self)
     }
 
-    /// Records that frames of a link protocol may carry trailing padding after
-    /// the payload its network layer declares, as Ethernet does to reach its
-    /// minimum frame size.
-    ///
-    /// Decoding a link scope rooted at `protocol` preserves bytes past the
-    /// network layer's declared length as link [`Padding`](crate::layer::Padding),
-    /// and building accepts link padding inside it. Call it when registering
-    /// the protocol's codec; [`Self::build`] rejects an unregistered protocol.
     pub fn allow_trailing_padding(&mut self, protocol: impl Into<crate::layer::Id>) -> &mut Self {
         self.trailing_padding.insert(protocol.into());
         self
@@ -135,8 +125,6 @@ impl Builder {
     }
 
     /// Registers an additional case-insensitive, registry-unique filter path.
-    /// Canonical `<protocol>.<field>` paths already resolve without
-    /// registration.
     pub fn bind_filter_field(
         &mut self,
         path: &'static str,

@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Operation-local protocol bindings make each explicit profile's wire intent
-//! agree with strict building. The original client and registry remain intact:
-//! the executor runs on a view of the client with the configured registry.
 use crate::scan::Request;
 use packetcraftr_core::{
     error::BoundaryError,
@@ -11,8 +8,6 @@ use packetcraftr_core::{
 };
 use std::sync::Arc;
 
-/// Each scanned UDP port with a profile, and the protocol that profile
-/// decodes the port as, in port order.
 pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
     request
         .udp_profiles
@@ -27,8 +22,6 @@ pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
         .collect()
 }
 
-/// `base` with `bindings` applied, or `base` itself when it already decodes
-/// every bound port that way.
 pub(super) fn configured(
     base: &Arc<Registry>,
     bindings: &[(u16, Id)],

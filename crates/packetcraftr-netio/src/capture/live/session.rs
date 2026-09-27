@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Owned capture-session lifecycle and worker join semantics.
-
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
@@ -37,9 +35,7 @@ pub(crate) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
-    /// Pooled worker, its permit, and interrupt handle share one lifetime.
-    /// The permit is the activation's admission; the interrupt outlives the
-    /// worker, and the session's clone of the permit outlives the interrupt.
+    /// The interrupt outlives the worker, and the permit outlives the interrupt.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
     shutdown_timeout: Duration,
@@ -54,14 +50,10 @@ struct RunningCapture {
 
 enum Shutdown {
     NotAttempted,
-    /// Shutdown ran but its finite deadline expired, so the worker is still
-    /// owned and an explicit retry is still allowed.
     Incomplete,
     Finished(Result<(), Error>),
 }
 
-/// The owner's half of an activated source, handed over before the first
-/// read: what a [`NativeCaptureSession`] needs besides the pooled job.
 pub(crate) struct Started {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
@@ -69,9 +61,6 @@ pub(crate) struct Started {
     interrupt: Arc<dyn CaptureInterrupt>,
 }
 
-/// The reading half: it drains the source on the pooled thread that
-/// activated it. The source closes on that thread when the reader finishes
-/// or is dropped unread.
 pub(crate) struct Reader {
     source: Box<dyn super::NativeCaptureSource>,
     shared: Arc<CaptureQueue>,
@@ -81,8 +70,6 @@ pub(crate) struct Reader {
 }
 
 impl Reader {
-    /// Reads until stopped; a failure or panic becomes the queue's terminal
-    /// error.
     pub(crate) fn run(mut self) {
         let terminal_shared = Arc::clone(&self.shared);
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -107,7 +94,6 @@ impl Reader {
 }
 
 impl NativeCaptureSession {
-    /// Splits activated `parts` into the owner's half and the reader.
     pub(crate) fn prepare(parts: NativeCaptureParts, limits: Limits) -> (Started, Reader) {
         let NativeCaptureParts {
             source,
@@ -134,8 +120,6 @@ impl NativeCaptureSession {
         )
     }
 
-    /// Attaches the owner to the pooled job `worker`, which activated the
-    /// source under `permit` and now reads it.
     pub(crate) fn attach(
         started: Started,
         worker: Task<()>,
@@ -228,7 +212,6 @@ impl Session for NativeCaptureSession {
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Ok(None);
             };
-            // Wait in slices: the queue signals records, not cancellation.
             let (next_state, _) = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
@@ -271,9 +254,6 @@ impl NativeCaptureSession {
                 match worker.wait(&Deadline::new(timeout)) {
                     Waited::Pending(worker) => {
                         permit.retention_marker().mark_retained();
-                        // The deadline expired with the worker still running,
-                        // so this session keeps the complete bundle and an
-                        // explicit retry stays possible.
                         self.running = Some(RunningCapture {
                             worker,
                             interrupt,
@@ -283,11 +263,8 @@ impl NativeCaptureSession {
                             operation: "shutting down native capture",
                         });
                     }
-                    // The worker is finished, so the native interrupt and the
-                    // cleanup permit are released here and only here.
                     Waited::Finished(join_result) => {
-                        // A user-supplied interrupt may own resources with a
-                        // destructor. Release it before returning admission.
+                        // Release a user-supplied interrupt before returning admission.
                         drop(interrupt);
                         drop(permit);
                         join_result
@@ -330,10 +307,7 @@ impl Drop for NativeCaptureSession {
             permit,
         }) = self.running.take()
         {
-            // Explicit shutdown has already used its finite deadline. A
-            // running worker is transferred, together with its interrupt and
-            // its cleanup permit, to an owner that can wait without blocking
-            // this Drop path.
+            // Explicit shutdown has already used its finite deadline.
             transfer_capture_worker(
                 worker,
                 Arc::clone(&self.stop),
@@ -459,8 +433,6 @@ mod tests {
         }
     }
 
-    /// Admits one slot from `pool`, runs the reader on it, and attaches the
-    /// session, as activation does.
     fn spawn_on(
         parts: NativeCaptureParts,
         pool: &Arc<Pool>,
@@ -479,7 +451,6 @@ mod tests {
         session
     }
 
-    /// A session on the process-wide pool and reaper.
     fn spawn(parts: NativeCaptureParts, shutdown_timeout: Duration) -> NativeCaptureSession {
         spawn_on(
             parts,
@@ -599,8 +570,7 @@ mod tests {
                 interrupt: interrupt_for_parts,
                 metadata: capture_metadata("fake-panic", 2),
             },
-            // The panic hook may symbolize a backtrace (RUST_BACKTRACE=1)
-            // before the worker finishes, so the deadline only bounds a hang.
+            // The panic hook may symbolize a backtrace, so the deadline only bounds a hang.
             Duration::from_secs(10),
         );
         started_receiver
@@ -740,9 +710,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
         canceller.join().unwrap();
 
-        // Shutdown sets the stop flag before it interrupts the source, so a
-        // worker released after the interrupt sees a requested stop rather
-        // than an unexpected close.
+        // Shutdown sets the stop flag before it interrupts the source.
         let releaser = {
             let interrupt = Arc::clone(&interrupt);
             thread::spawn(move || {

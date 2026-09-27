@@ -28,22 +28,14 @@ impl EvidenceDiagnosticDescriptor {
     }
 }
 
-/// Where a workflow publishes what [`EvidenceState`] keeps, as the
-/// workflow's own events, and how it checks its deadline between frames.
 pub(crate) trait EvidenceSink {
     type Error;
 
-    /// Publishes one retained undecodable frame.
     fn undecoded(&mut self, frame: Frame) -> Result<(), Self::Error>;
-    /// Publishes one diagnostic.
     fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Self::Error>;
-    /// Checks the operation deadline around each undecodable frame.
     fn check(&mut self) -> Result<(), Self::Error>;
 }
 
-/// Operation-wide evidence accounting shared by live workflows: the exact
-/// frame budget, how many undecodable frames were kept, and the diagnostics
-/// raised while keeping them, each published once.
 pub(crate) struct EvidenceState {
     limits: EvidenceLimits,
     descriptor: EvidenceDiagnosticDescriptor,
@@ -63,14 +55,10 @@ impl EvidenceState {
         }
     }
 
-    /// Keeps a copy of `frame` when the budget allows it, otherwise records a
-    /// truncation diagnostic once.
     pub(crate) fn retain_response(&mut self, frame: &Frame) -> Option<Frame> {
         self.reserve(frame).then(|| frame.clone())
     }
 
-    /// Publishes every retained undecodable frame and every new diagnostic in
-    /// arrival order, stopping at the undecoded limit with its diagnostic.
     pub(crate) fn retain_undecoded<S: EvidenceSink>(
         &mut self,
         frames: Vec<Frame>,
@@ -101,7 +89,6 @@ impl EvidenceState {
         Ok(())
     }
 
-    /// Records each diagnostic once and publishes the ones not yet published.
     pub(crate) fn record_diagnostics<S: EvidenceSink>(
         &mut self,
         diagnostics: impl IntoIterator<Item = Diagnostic>,
@@ -113,7 +100,6 @@ impl EvidenceState {
         self.publish_diagnostics(|diagnostic| sink.diagnostic(diagnostic))
     }
 
-    /// Publishes every diagnostic recorded since the last publication.
     pub(crate) fn publish_diagnostics<E>(
         &mut self,
         publish: impl FnMut(Diagnostic) -> Result<(), E>,
@@ -121,7 +107,6 @@ impl EvidenceState {
         self.diagnostics.publish_new(publish)
     }
 
-    /// Charges `frame` to the budget, or records why it was omitted.
     fn reserve(&mut self, frame: &Frame) -> bool {
         let EvidenceLimits {
             max_frames,

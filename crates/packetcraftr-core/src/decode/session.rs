@@ -127,9 +127,7 @@ impl<'registry> DecodeSession<'registry> {
         cursor: &DecodeCursor,
         allow_link_padding: bool,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        // cursor byte ranges are derived from the original buffer's own length and validated by
-        // validate_layer before the traversal advances; slicing the shared handle lets
-        // byte-retaining codecs keep their input with a refcount bump instead of a memcpy
+        // validate_layer checks cursor ranges; slicing shares the buffer instead of copying
         let input = self.original.slice(cursor.bytes.clone());
         codec.decode(
             input,
@@ -424,10 +422,7 @@ impl<'registry> DecodeSession<'registry> {
         let trailing = std::mem::take(&mut self.trailing);
         for trailing in trailing {
             self.ensure_layer_capacity()?;
-            // Keep explicit coverage ownership so a strict byte-for-byte
-            // rebuild preserves the declared protocol length. The builder
-            // marks padding outside a network root as requiring live
-            // malformed-traffic opt-in.
+            // Keep explicit coverage so a strict rebuild preserves the declared protocol length.
             append_padding(
                 &mut self.packet,
                 &mut self.layouts,

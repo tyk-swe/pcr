@@ -24,14 +24,8 @@ const NAME: &str = BuiltinProtocol::L2tpv3.as_str();
 const L2TPV3_LEN: usize = 4;
 
 /// L2TPv3 session header over IP (RFC 3931), IP protocol 115.
-///
-/// The wire carries only the 32-bit session identifier; the negotiated
-/// cookie that may follow has no on-wire length, so everything after the
-/// header is deliberately opaque. Session zero addresses the control
-/// connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct L2tpv3 {
-    /// 32-bit session identifier; zero is the control connection.
     pub session_id: u32,
 }
 
@@ -66,9 +60,6 @@ impl LayerCodec for L2tpv3Codec {
         let layer = typed_layer::<L2tpv3>(NAME, layer)?;
         ensure_encode_budget(NAME, L2TPV3_LEN, context)?;
         let mut diagnostics = Vec::new();
-        // The negotiated cookie sits between this header and the tunneled
-        // frame with no on-wire length, so a typed child would serialize
-        // structure that dissection deliberately never recovers.
         if let Some(child) = context.child
             && !child_is_opaque(child)
         {
@@ -108,7 +99,6 @@ impl LayerCodec for L2tpv3Codec {
             }),
             consumed: L2TPV3_LEN,
             payload_len,
-            // Cookie and tunneled frame, or control AVPs: always opaque.
             next: vec![Discriminator(0)],
             diagnostics: Vec::new(),
             stop: payload_len == 0,

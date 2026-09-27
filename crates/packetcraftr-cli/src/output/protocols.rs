@@ -10,7 +10,6 @@ use packetcraftr_core::registry::{FilterFieldBinding, Registry};
 
 use super::contract::Error;
 
-/// The reflective kind of a protocol field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum FieldKind {
     #[serde(rename = "bool")]
@@ -36,7 +35,6 @@ pub enum FieldKind {
 }
 
 impl FieldKind {
-    /// The published name, for text output that must agree with JSON.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -122,7 +120,6 @@ pub struct Field {
     pub description: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Self>,
-    /// JSON Pointer to a previously described child array within this top-level field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children_reference: Option<String>,
 }
@@ -172,18 +169,12 @@ impl Field {
     }
 }
 
-/// One registered edge that reaches a protocol during dissection.
-///
-/// `discriminator` is the parent's selector value: a TCP or UDP port, an
-/// EtherType, an IP protocol number. Zero is the parent's fallback binding,
-/// used when nothing more specific matches.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Binding {
     pub parent: String,
     pub discriminator: u64,
 }
 
-/// How a registered filter spelling reads its reflective fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterKind {
@@ -192,12 +183,10 @@ pub enum FilterKind {
     Bits,
 }
 
-/// One registered display-filter spelling, separate from dissection bindings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FilterField {
     pub path: String,
     pub kind: FilterKind,
-    /// Canonical protocol-qualified fields read by this spelling.
     pub fields: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mask: Option<u64>,
@@ -207,7 +196,6 @@ pub struct FilterField {
 }
 
 impl FilterField {
-    /// Every describable stored spelling that reads `protocol`, in path order.
     pub fn for_protocol(registry: &Registry, protocol: &str) -> Vec<Self> {
         registry
             .filter_fields()
@@ -216,8 +204,6 @@ impl FilterField {
             .collect()
     }
 
-    /// Describes a registry binding known to the output contract.
-    /// Future binding kinds may omit this optional discovery metadata.
     pub fn from_binding(path: &str, binding: &FilterFieldBinding) -> Option<Self> {
         let fields: Vec<_> = binding
             .fields()
@@ -264,7 +250,6 @@ impl FilterField {
     }
 }
 
-/// Detailed capability and reflection data for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Detail {
     pub protocol: String,
@@ -279,8 +264,6 @@ pub struct Detail {
     pub filter_fields: Vec<FilterField>,
 }
 
-/// A built-in protocol described from the registry: its capabilities,
-/// reflective fields, the parents that reach it, and its filter spellings.
 impl TryFrom<(&Registry, BuiltinProtocol)> for Detail {
     type Error = Error;
 

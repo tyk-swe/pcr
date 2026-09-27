@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IPv6 base header model and codec, with the extension headers it chains.
-
 mod fragment;
 mod options;
 mod srh;
@@ -163,10 +161,7 @@ impl LayerCodec for Ipv6Codec {
         let payload_length_field = u16::from_be_bytes([header[4], header[5]]);
         let payload_length = usize::from(payload_length_field);
         // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
-        // Payload option. With any other next header, the declared IPv6
-        // payload is empty and any remaining capture bytes are outside it;
-        // the dissector will classify them as link padding or a malformed
-        // trailer according to the enclosing link context.
+        // Payload option.
         if payload_length == 0 && input.len() > IPV6_LEN && header[6] == 0 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol(NAME),

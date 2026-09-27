@@ -46,8 +46,6 @@ impl Limits {
         }
     }
 
-    /// Rejects any bound above the ceiling this crate enforces, and any pair
-    /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[("max_probes", self.max_probes, MAX_PROBES)],
@@ -74,8 +72,6 @@ impl Limits {
     }
 }
 
-/// One trace: the target, how it is probed hop by hop, and the route and
-/// collection bounds every hop's exchange runs under.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub target: Target,
@@ -84,8 +80,6 @@ pub struct Request {
     /// UDP base destination port or fixed TCP destination port. ICMP requires
     /// this to be absent.
     pub destination_port: Option<u16>,
-    /// Optional non-zero UDP/TCP source port. `None` selects the ephemeral
-    /// base the workflow already probes from.
     pub source_port: Option<u16>,
     pub first_hop: u8,
     pub max_hops: u8,
@@ -93,10 +87,8 @@ pub struct Request {
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
-    /// How each probe's route is planned.
     pub route: crate::route::Options,
-    /// How each hop exchange's capture is armed and what it retains. It must
-    /// retain at least one response per probe of a hop.
+    /// It must retain at least one response per probe of a hop.
     pub collection: crate::exchange::Collection,
 }
 

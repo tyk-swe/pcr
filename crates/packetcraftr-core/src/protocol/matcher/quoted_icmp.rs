@@ -16,40 +16,23 @@ use crate::{
 use super::{IcmpMessage, sctp::sctp_initiate_tag};
 use crate::protocol::network::ip_protocol;
 
-/// What an ICMPv4 or ICMPv6 error message that quotes a request reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IcmpErrorKind {
-    /// Port unreachable for a UDP request (ICMPv4 3/3, ICMPv6 1/4).
     PortUnreachable,
-    /// Communication administratively prohibited (ICMPv4 3/9, 3/10, 3/13;
-    /// ICMPv6 1/1, 1/5, 1/6).
     AdministrativelyProhibited,
-    /// Any other destination-unreachable code, including port unreachable for
-    /// a transport other than UDP.
     DestinationUnreachable,
-    /// Time exceeded (ICMPv4 11, ICMPv6 3).
     TimeExceeded,
 }
 
-/// The transport a request carries, which the quoted copy inside an ICMP
-/// error must match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuotedTransport {
     Tcp,
     Udp,
     Sctp,
-    /// ICMPv4 or ICMPv6, matched by echo identifier and sequence.
     Icmp,
 }
 
 /// Classifies `response` as an ICMP error about `request`.
-///
-/// Returns `None` unless the request's first transport is
-/// `expected_transport`, the response's outer IP layer directly carries an
-/// ICMP error of the same IP version addressed to the request's source, and
-/// the quoted datagram is the request's own outer network header and
-/// transport key. A live exchange uses this before its own classification, so
-/// the evidence keeps the time the response arrived.
 pub fn quoted_icmp_error(
     request: &Packet,
     response: &Packet,
@@ -355,8 +338,6 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
                 protocol = next;
                 header_len
             }
-            // Only atomic and first fragments can quote a transport key at the
-            // start of this payload.
             ip_protocol::FRAGMENT => {
                 let fragment = header.first_chunk::<8>()?;
                 let offset_and_flags = u16::from_be_bytes([fragment[2], fragment[3]]);

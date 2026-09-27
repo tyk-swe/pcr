@@ -1,16 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Common capture-analysis rendering and IP reassembly event publication.
-
 use packetcraftr_core::analysis;
 
 use super::StreamEncoder;
 use crate::errors::CliError;
 
-/// Sink for IP reassembly lifecycle events, which only the NDJSON stream
-/// carries. The other formats fold the same information into their terminal
-/// `ip_reassembly` report, so a non-NDJSON `format` drops every event.
 pub(crate) fn ip_event_sink<F>(
     format: F,
     stream: &StreamEncoder,

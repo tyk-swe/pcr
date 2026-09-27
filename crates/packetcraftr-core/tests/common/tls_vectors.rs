@@ -1,40 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Fingerprint vectors for the TLS parser.
-//!
-//! Provenance rules for this file, in order of preference:
-//!
-//! 1. A published fingerprint over a published capture. None is present yet:
-//!    neither the Salesforce JA3 README nor the FoxIO JA4 repository ships a
-//!    full ClientHello as hex beside its fingerprint, so a real vector has to
-//!    come from a capture added to the repository later. Until then this file
-//!    holds nothing that claims to be one.
-//! 2. A published *fingerprint string* reproduced by a hello built here. The
-//!    two ClientHello vectors below are of this kind: the bytes are synthetic
-//!    (documentation host names, RFC 5737-adjacent test domains, no captured
-//!    traffic), and the expectation is a string this project did not invent.
-//! 3. Format-conformance expectations, where the expected value is derived in
-//!    the test from the specification's own string form. Those live in the
-//!    unit tests beside `fingerprint.rs`, not here.
-//!
 //! No expectation in this file was produced by running this implementation.
 
-/// One ClientHello or ServerHello vector.
 pub(crate) struct HelloVector {
-    /// What the vector is for, used in assertion messages.
     pub(crate) name: &'static str,
-    /// Where the expectation comes from.
     pub(crate) source: &'static str,
-    /// A complete TLS record carrying the handshake message, as hex.
     pub(crate) record_hex: &'static str,
-    /// The full JA3 (or JA3S) string the vector must produce.
     pub(crate) expected_ja3_raw: Option<&'static str>,
-    /// The JA4_a component (the ten characters before the first underscore).
     pub(crate) expected_ja4_a: Option<&'static str>,
 }
 
-/// ClientHello vectors.
 pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
     HelloVector {
         name: "Salesforce JA3 README example string",
@@ -71,7 +47,6 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
     },
 ];
 
-/// ServerHello vectors for JA3S.
 pub(crate) const SERVER_HELLO_VECTORS: &[HelloVector] = &[HelloVector {
     name: "TLS 1.3 ServerHello field order",
     source: "https://github.com/salesforce/ja3#ja3s",
@@ -85,7 +60,6 @@ pub(crate) const SERVER_HELLO_VECTORS: &[HelloVector] = &[HelloVector {
     expected_ja4_a: None,
 }];
 
-/// Decodes a lowercase hex vector.
 pub(crate) fn decode_hex(text: &str) -> Vec<u8> {
     assert!(
         text.len().is_multiple_of(2),

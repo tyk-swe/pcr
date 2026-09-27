@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Direction and payload deduplication across TCP reassembly generations. A
-//! retransmitted closing segment can start a new generation; collectors retain
-//! delivery edges to avoid emitting its bytes twice.
-
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
@@ -12,7 +8,6 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::serial::{serial_ge, serial_gt};
 
 /// Sender relative to the first captured frame, whose sender is the client.
-/// This identifies the initiator only when the capture includes the handshake.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum PeerDirection {
     #[serde(rename = "client")]
@@ -21,11 +16,8 @@ pub enum PeerDirection {
     ServerToClient,
 }
 
-/// Tracks delivery edges per direction to deduplicate retransmitted TCP segments.
 #[derive(Debug, Default)]
 pub(crate) struct Deduplicator {
-    /// Sequence after the last delivered byte in each direction, retained
-    /// across clean closes to deduplicate retransmissions.
     client_generation: u64,
     server_generation: u64,
     client_delivered: Option<u32>,
@@ -35,9 +27,6 @@ pub(crate) struct Deduplicator {
     /// tuple reuse, which must not inherit them.
     client_syn_base: Option<u32>,
     server_syn_base: Option<u32>,
-    /// Whether each direction closed cleanly. A SYN after a close is a new
-    /// connection even when it lands on the recorded base, so the delivery
-    /// edges must not survive it.
     client_closed: bool,
     server_closed: bool,
 }
@@ -112,8 +101,6 @@ impl Deduplicator {
         }
     }
 
-    /// Drops previously delivered bytes and advances the direction's delivery
-    /// edge.
     pub(crate) fn deduplicate(
         &mut self,
         direction: PeerDirection,
@@ -129,10 +116,8 @@ impl Deduplicator {
             Some(edge) => {
                 let overlap = edge.wrapping_sub(sequence);
                 if !serial_gt(edge, sequence) {
-                    // Starts at or past the edge: nothing already delivered.
                     bytes.clone()
                 } else if !serial_gt(end, edge) {
-                    // Ends at or before the edge: wholly re-delivered.
                     return None;
                 } else {
                     let start = usize::try_from(overlap).unwrap_or(bytes.len());
@@ -141,8 +126,6 @@ impl Deduplicator {
             }
             None => bytes.clone(),
         };
-        // The edge only advances; serial arithmetic keeps it meaningful
-        // across the 32-bit wrap.
         *delivered = Some(match *delivered {
             Some(edge) if !serial_ge(end, edge) => edge,
             _ => end,

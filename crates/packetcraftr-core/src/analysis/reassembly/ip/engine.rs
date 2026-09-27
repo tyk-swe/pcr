@@ -27,14 +27,10 @@ use validation::{
     validate_reconstruction_consistency,
 };
 
-/// Reconstruction is only ever asked for after completion is established.
 const INCOMPLETE_RECONSTRUCTION: Error = Error::Inconsistent {
     reason: "reconstruction requested before the datagram completed",
 };
 
-/// Validated memory admission for one fragment arrival. Every fallible
-/// replacement allocation is bounded by this plan. Allocation and completion
-/// peak checks still run before the retained state can change.
 struct Charges {
     unique_bytes: usize,
     duplicate_fragments: usize,
@@ -107,9 +103,6 @@ impl Reassembler {
                 limit: self.limits.max_bytes_per_datagram,
             })?;
         let reconstruction_bytes = reconstruction_retained_bytes(existing, incoming)?;
-        // Only the bytes this fragment newly copies are charged as an
-        // allocation; a shared header or prefix is already counted, while a
-        // replaced provisional IPv6 prefix stays retained beside its copy.
         let reconstruction_allocation = reconstruction_copied_bytes(existing, incoming);
         let last_update = existing.map_or(now, |state| state.last_update.max(now));
         let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
@@ -144,9 +137,7 @@ impl Reassembler {
                     .is_some_and(|total| total <= self.limits.max_aggregate_bytes)
             })
             .ok_or_else(|| self.aggregate_limit())?;
-        // The retained state is not removed until every fallible replacement
-        // allocation succeeds, so admission must cover old and new storage at
-        // the same time rather than only the eventual steady state.
+        // Old and new storage coexist until every replacement allocation succeeds.
         let replacement_allocation = self.replacement_allocation_charge(
             merge,
             incoming.payload.len(),
@@ -181,8 +172,6 @@ impl Reassembler {
         })
     }
 
-    /// A reassembler bounded by `limits`, after [`Limits::validate`]
-    /// accepts them.
     pub fn new(
         limits: Limits,
         overlap_policy: OverlapPolicy,
@@ -197,14 +186,10 @@ impl Reassembler {
         })
     }
 
-    /// Admits one physical fragment and returns its classification, attaching
-    /// a raw derived datagram when this arrival fills the last gap.
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<PushOutcome, Error> {
         self.push_with_external_charge(fragment, now, 0)
     }
 
-    /// [`Self::push`], additionally charging memory held by the caller while
-    /// it feeds a derived fragment cascade back into this reassembler.
     pub(crate) fn push_with_external_charge(
         &mut self,
         fragment: Fragment,
@@ -299,8 +284,6 @@ impl Reassembler {
             known_final_length: final_length,
         };
         let previous_deadline = existing.and_then(|state| state.deadline);
-        // The datagram is complete when the update leaves exactly one range
-        // spanning offset zero to the known final length.
         let completes = final_length.is_some_and(|length| {
             merge.result_range_count == 1 && merge.union_start == 0 && merge.union_end == length
         });
@@ -311,9 +294,7 @@ impl Reassembler {
                 .checked_add(datagram_charge)
                 .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
                 .ok_or_else(|| self.aggregate_limit())?;
-            // The completed payload is read from the retained range and the
-            // update without storing it, so no retained state changes before
-            // the datagram is removed.
+            // Read without storing, so no retained state changes before the datagram is removed.
             let retained = ranges.first().map(|range| range.bytes.as_slice());
             let payload: [&[u8]; 2] = match &update {
                 RangeUpdate::Unchanged => [retained.ok_or(INCOMPLETE_RECONSTRUCTION)?, &[]],
@@ -350,8 +331,6 @@ impl Reassembler {
                     requested: prospective_charge,
                 })?;
         }
-        // Applying the update reserves before it writes, so a failure here
-        // leaves the retained ranges exactly as they were.
         let mut fresh_ranges = Vec::new();
         let mut slot = self.datagrams.get_mut(&key);
         let ranges = match slot.as_deref_mut() {
@@ -388,8 +367,6 @@ impl Reassembler {
         Ok(PushOutcome::Accepted(fragment_outcome))
     }
 
-    /// Retires datagrams whose idle deadline is at or before `now`, retaining
-    /// at most the configured number of per-datagram outcomes.
     pub fn expire(&mut self, now: Instant) -> RetiredDatagrams {
         let mut retired = RetiredDatagrams::default();
         let retain_limit = self.limits.max_retained_outcomes;
@@ -408,8 +385,6 @@ impl Reassembler {
         retired
     }
 
-    /// Retires every remaining datagram at end of capture, retaining a bounded
-    /// stable-key prefix of per-datagram outcomes.
     pub fn flush(&mut self) -> RetiredDatagrams {
         let retain_limit = self.limits.max_retained_outcomes.min(self.datagrams.len());
         let mut smallest = BinaryHeap::with_capacity(retain_limit);

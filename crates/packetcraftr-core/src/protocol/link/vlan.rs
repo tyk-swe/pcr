@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IEEE 802.1Q and 802.1ad VLAN tag models and codecs.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;

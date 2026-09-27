@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Names the native capabilities this build can back, so the crate tests one
-//! predicate per capability instead of repeating feature-by-target tables.
-
 use std::env;
 
 fn main() {
@@ -28,8 +25,7 @@ fn main() {
         ("native_send", native_layer2 || native_layer3),
         ("pcap_backend", pcap_backend),
         ("npcap_backend", npcap_backend),
-        // The isolated native suite enters Linux network namespaces through
-        // procfs; the launcher proves isolation at runtime.
+        // The isolated native suite enters Linux network namespaces through procfs.
         ("packetcraftr_test_netns", os == "linux"),
     ];
     for (name, enabled) in capabilities {

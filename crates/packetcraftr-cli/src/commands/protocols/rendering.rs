@@ -1,13 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `protocols`' text output.
-
 use crate::errors::CliError;
 use crate::output;
 use crate::rendering::write_stdout_line;
 
-/// One text row per protocol.
 pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
     format!(
         "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",

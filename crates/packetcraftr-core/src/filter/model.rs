@@ -7,11 +7,6 @@ use super::parser::{self, Options, Requirements};
 use super::plan::Plan;
 use crate::registry::Registry;
 
-/// A compiled display filter.
-///
-/// Compilation resolves every field path against the registry, so a filter
-/// that names an unknown protocol or field fails once, up front, instead of
-/// quietly matching no packets. Evaluation diagnoses unavailable frame facts.
 #[derive(Clone, Debug)]
 pub struct Filter {
     plan: Plan,
@@ -27,7 +22,6 @@ impl Filter {
         })
     }
 
-    /// Compiles a single field equality for declarations that accept one literal.
     pub(crate) fn compile_equality(
         field: &str,
         value: &str,
@@ -50,8 +44,6 @@ impl Filter {
         Ok(filter)
     }
 
-    /// Required caller context, including TCP/UDP conversation indices.
-    /// [`matches`](Self::matches) also checks timestamp availability per frame.
     pub fn requirements(&self) -> Requirements {
         self.requirements
     }

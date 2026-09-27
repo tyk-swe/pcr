@@ -9,10 +9,6 @@ use super::lexer::CompareOperator;
 use super::literal::Literal;
 use crate::field::FieldValue;
 
-/// Whether a single field value satisfies `value <operator> literal`.
-///
-/// Values whose type cannot be compared with the literal simply do not match;
-/// the compile-time compatibility check is what reports genuine mistakes.
 pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &Literal) -> bool {
     if let Some(contained) = containment(value, literal) {
         // Prefix literals describe a set, so only membership is meaningful.
@@ -22,7 +18,6 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
             _ => false,
         };
     }
-    // Lists match when any element matches.
     if let FieldValue::List(values) = value {
         return values
             .iter()
@@ -41,7 +36,6 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
     }
 }
 
-/// Tests prefix membership, or reports [`None`] when the literal is not a prefix.
 fn containment(value: &FieldValue, literal: &Literal) -> Option<bool> {
     match (value, literal) {
         (FieldValue::Ipv4(address), Literal::Ipv4Net(network, prefix)) => {
@@ -90,7 +84,6 @@ fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
         (FieldValue::Bytes(left), Literal::Text(right)) => {
             Some(left.as_ref().cmp(right.as_bytes()))
         }
-        // A one-byte field may compare to a plain number.
         (FieldValue::Bytes(left), Literal::Unsigned(right)) => match left.as_ref() {
             [only] => Some(u64::from(*only).cmp(right)),
             _ => None,
@@ -103,23 +96,13 @@ fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
     }
 }
 
-/// A `contains` needle with its substring searcher already built.
-///
-/// Compiling the [`Finder`] once, alongside the literal at filter-compile
-/// time, makes the per-frame scan a linear-time `memmem` search instead of
-/// a naive sliding-window compare per candidate value.
 #[derive(Clone, Debug)]
 pub(super) struct Needle {
-    // The searcher's precomputed table is large, so it lives boxed rather
-    // than inflating every `Predicate` variant.
+    // The searcher's precomputed table is large, so it lives boxed.
     finder: Box<Finder<'static>>,
 }
 
 impl Needle {
-    /// Builds the searcher over the literal's bytes, or returns the literal
-    /// unchanged when it is not a byte sequence. `check_searchable` rejects
-    /// such needles first, so a returned literal stays reportable rather than
-    /// silently unreachable.
     pub(super) fn new(literal: Literal) -> Result<Self, Literal> {
         let bytes: &[u8] = match &literal {
             Literal::Bytes(bytes) => bytes.as_ref(),
@@ -132,9 +115,7 @@ impl Needle {
         })
     }
 
-    /// Whether `haystack` contains the needle.
     fn find(&self, haystack: &[u8]) -> bool {
-        // An empty needle is contained by every haystack.
         self.finder.needle().is_empty() || self.finder.find(haystack).is_some()
     }
 }

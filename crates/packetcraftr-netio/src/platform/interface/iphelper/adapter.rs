@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded parsing of initialized `GetAdaptersAddresses` response buffers.
-
 #![allow(unsafe_code)]
 
 use std::{
@@ -130,14 +128,11 @@ pub(in crate::platform) fn parse_adapters(
                     .to_owned(),
             });
         }
-        // SAFETY: IP Helper constructed this node in the still-live backing
-        // allocation, and `bounds` established a complete aligned node.
+        // SAFETY: `bounds` established a complete aligned node in the still-live allocation.
         let adapter = unsafe { &*current };
-        // SAFETY: these are the active documented fields of the generated C
-        // unions in IP_ADAPTER_ADDRESSES_LH.
+        // SAFETY: these are the active documented fields of the generated C unions.
         let ipv4_index = unsafe { adapter.Anonymous1.Anonymous.IfIndex };
-        // SAFETY: Flags is the active documented field of the second generated
-        // C union in IP_ADAPTER_ADDRESSES_LH.
+        // SAFETY: Flags is the active documented field of the second generated C union.
         let flags = unsafe { adapter.Anonymous2.Flags };
         let index = if ipv4_index != 0 {
             ipv4_index
@@ -216,8 +211,7 @@ fn parse_unicast_addresses(
                         .to_owned(),
             });
         }
-        // SAFETY: each node belongs to the live adapter buffer and the pointer
-        // was checked to cover a complete aligned structure.
+        // SAFETY: the pointer was checked to cover a complete aligned structure in the live buffer.
         let unicast = unsafe { &*current };
         if let Some(address) = socket_address_ip(&unicast.Address, bounds)? {
             let maximum_prefix = if address.is_ipv4() { 32 } else { 128 };
@@ -264,8 +258,7 @@ fn wide_string(
         .saturating_sub(pointer as usize)
         .checked_div(size_of::<u16>())
         .unwrap_or(0);
-    // SAFETY: the checked pointer is aligned and `available` ends at the
-    // response buffer boundary. We search only this initialized range.
+    // SAFETY: the checked pointer is aligned and `available` ends at the response buffer boundary.
     let units = unsafe { std::slice::from_raw_parts(pointer, available) };
     let length =
         units
@@ -299,8 +292,7 @@ fn socket_address_ip(
             message: "Windows socket address extended outside its response buffer".to_owned(),
         });
     }
-    // SAFETY: the checked byte range contains the family field; use an
-    // unaligned read before the family-specific alignment checks below.
+    // SAFETY: the checked byte range contains the family field; use an unaligned read.
     let family = unsafe { std::ptr::read_unaligned(address.lpSockaddr.cast::<ADDRESS_FAMILY>()) };
     match family {
         AF_INET if length >= size_of::<SOCKADDR_IN>() => {
@@ -309,8 +301,7 @@ fn socket_address_ip(
                     message: "Windows returned a misaligned IPv4 socket address".to_owned(),
                 });
             }
-            // SAFETY: family, length, bounds, and alignment establish a
-            // complete SOCKADDR_IN.
+            // SAFETY: family, length, bounds, and alignment establish a complete SOCKADDR_IN.
             let value = unsafe { &*address.lpSockaddr.cast::<SOCKADDR_IN>() };
             // SAFETY: S_addr is the active IN_ADDR representation.
             let bytes = unsafe { value.sin_addr.S_un.S_addr.to_ne_bytes() };
@@ -322,8 +313,7 @@ fn socket_address_ip(
                     message: "Windows returned a misaligned IPv6 socket address".to_owned(),
                 });
             }
-            // SAFETY: family, length, bounds, and alignment establish a
-            // complete SOCKADDR_IN6.
+            // SAFETY: family, length, bounds, and alignment establish a complete SOCKADDR_IN6.
             let value = unsafe { &*address.lpSockaddr.cast::<SOCKADDR_IN6>() };
             // SAFETY: Byte is the active byte representation of IN6_ADDR.
             let bytes = unsafe { value.sin6_addr.u.Byte };
@@ -356,9 +346,7 @@ mod tests {
             parse_adapters(misaligned, bounds),
             Err(route::Error::InvalidResponse { .. })
         ));
-        // SAFETY: `pointer` names the live initialized Box above. No reference
-        // from the completed parser calls escapes; writing through this same
-        // raw pointer preserves the provenance used by the synthetic cycle.
+        // SAFETY: `pointer` names the live initialized Box above, and no parser reference escapes.
         unsafe {
             (*pointer).Next = pointer;
         }
@@ -381,7 +369,6 @@ mod tests {
             .is_err()
         );
         units[1] = 0;
-        // Reborrow after mutation; the view refers to this initialized array.
         let pointer = units.as_mut_ptr();
         let bounds = BufferBounds::new(pointer.cast(), size_of_val(&units)).unwrap();
         assert_eq!(

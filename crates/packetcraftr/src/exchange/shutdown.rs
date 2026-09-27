@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Panic-safe capture shutdown ownership.
-
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
@@ -33,8 +31,7 @@ impl<C: Session> CaptureGuard<C> {
             CaptureShutdownState::NotAttempted => {}
         }
 
-        // Mark completion before entering provider code so a panic cannot make
-        // Drop invoke an unknown backend state a second time.
+        // Mark completion before provider code so a panic cannot make Drop shut down twice.
         self.shutdown_state = CaptureShutdownState::Succeeded;
         let result = match catch_unwind(AssertUnwindSafe(|| self.inner.shutdown())) {
             Ok(result) => result,

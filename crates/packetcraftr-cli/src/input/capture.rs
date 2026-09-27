@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded capture sources, fingerprints, and seekable snapshots.
-
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
@@ -15,8 +13,6 @@ use super::fingerprint::{self, Fingerprint};
 use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 
-/// Opens a capture reader under its per-item bounds; the aggregate frame and
-/// byte ceilings are charged per frame while streaming, not while opening.
 fn capture_source(path: &Path) -> Result<Box<dyn Read>, CliError> {
     crate::cancellation::check()?;
     if path == Path::new("-") {
@@ -35,8 +31,6 @@ pub(crate) fn open_capture(
     capture_reader(capture_source(path)?, bounds)
 }
 
-/// The fingerprint covers the same read stream as the comparison, including
-/// compression/container bytes. Publish it only after a successful EOF.
 pub(crate) fn open_capture_hashed(
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
@@ -52,8 +46,6 @@ pub(crate) fn open_capture_file(
     capture_reader(open_file(path)?, bounds)
 }
 
-/// Validate and preserve a bounded source in an anonymous seekable snapshot.
-/// Callers can analyze and copy identical records, including redirected stdin.
 pub(crate) fn snapshot_capture<R: Read>(
     input: &mut Reader<R>,
     bounds: CaptureReaderBoundsArgs,

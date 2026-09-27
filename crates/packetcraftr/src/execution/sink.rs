@@ -1,33 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one event-sink contract and its publication on a runtime worker.
-
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 
 use crate::runtime::{self, Runtime, Worker};
 
-/// Receives the events one workflow run publishes while it runs.
-///
-/// Each event is handed to the sink on a worker thread admitted by the
-/// caller's [`Runtime`], and the workflow waits, no longer than its deadline,
-/// for the sink's answer before it continues. The run itself returns the
-/// terminal report. A failed publication stops the run and is reported as the
-/// workflow's output failure.
-///
 /// Any `FnMut(E) -> Result<A, BoundaryError>` closure that is `Send + 'static`
 /// is a sink.
 pub trait Sink<E>: Send + 'static {
-    /// What the sink answers for each event; `()` when the workflow needs no
-    /// answer.
     type Ack: Send + 'static;
 
-    /// Handles one event.
-    ///
-    /// # Errors
-    ///
-    /// Returns the boundary failure that stops the workflow.
     fn publish(&mut self, event: E) -> Result<Self::Ack, BoundaryError>;
 }
 
@@ -43,10 +26,6 @@ where
     }
 }
 
-/// Runs `sink` on a worker admitted by `runtime` and returns the publisher a
-/// workflow calls for each event, which adapts both publication failures into
-/// the workflow's own error type. Every workflow that publishes events goes
-/// through this adapter.
 pub(crate) fn publisher<E, S, X>(
     runtime: &Runtime,
     mut sink: S,

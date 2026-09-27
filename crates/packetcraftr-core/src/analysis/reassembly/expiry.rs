@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::analysis::Constraint;
 
-/// An idle expiry the monotonic clock cannot add to the present, which could
-/// never be scheduled, with the value to report.
+/// An idle expiry the monotonic clock cannot add to the present, with the value to report.
 pub(super) fn violation(expiry: Duration) -> Option<(u64, Constraint)> {
     Instant::now().checked_add(expiry).is_none().then(|| {
         (
@@ -17,7 +16,6 @@ pub(super) fn violation(expiry: Duration) -> Option<(u64, Constraint)> {
     })
 }
 
-/// Deadlines paired one-for-one with retained reassembly states.
 #[derive(Debug)]
 pub(super) struct ExpiryIndex<K> {
     entries: BTreeMap<Instant, BTreeSet<K>>,
@@ -51,17 +49,12 @@ impl<K: Ord> ExpiryIndex<K> {
         }
     }
 
-    /// Removes deadlines through `now` and returns their keys in index order
-    /// (deadline, then key). Eviction order is the caller's to choose: the
-    /// TCP engine re-sorts them by key alone.
     pub(super) fn take_expired(&mut self, now: Instant) -> Vec<K> {
         let mut keys = Vec::new();
         self.drain_expired(now, |key| keys.push(key));
         keys
     }
 
-    /// Removes deadlines through `now`, visiting each key in deadline and
-    /// then stable-key order without first collecting an unbounded key list.
     pub(super) fn drain_expired<F>(&mut self, now: Instant, mut visit: F)
     where
         F: FnMut(K),

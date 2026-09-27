@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The live-I/O failure capture and transmission share.
-
 use std::time::Duration;
 
 use thiserror::Error as ThisError;
@@ -14,14 +12,7 @@ use super::transmit::SendEvidenceFault;
 use super::unsupported::Unsupported;
 use packetcraftr_core::error::{Classification, Classified, Kind, Source, source_chain};
 
-/// The live-I/O failures capture and transmission share, including the
-/// interface-discovery failure a capture reports when its interface lookup
-/// enumerates. Route, interface, and TCP have their own error types.
-///
-/// A native failure keeps the platform's own error as its `source`, a shared
-/// [`Source`] handle so capture sessions can return a terminal failure
-/// repeatedly. An absent source means one of PacketcraftR's own checks failed
-/// (an invariant, a limit, or a provider's answer) rather than a platform call.
+/// An absent source means one of PacketcraftR's own checks failed rather than a platform call.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
@@ -117,8 +108,7 @@ pub enum Error {
         field: &'static str,
         message: String,
     },
-    /// `message` is boxed so this variant stays no larger than the other
-    /// two-`String` variants the `Error` enum is sized for.
+    /// `message` is boxed so this variant stays no larger than the others.
     #[error("capture setting {setting} is not supported on {interface}: {message}")]
     UnsupportedCaptureSetting {
         setting: &'static str,
@@ -145,8 +135,6 @@ pub enum Error {
     InvalidCaptureStatistics { message: String },
     #[error("invalid capture group: {reason}")]
     InvalidCaptureGroup { reason: &'static str },
-    /// One source of a capture group failed; `source` is that session's own
-    /// failure and decides the classification.
     #[error("capture source {index} ({}) failed during {phase}", .interface.name)]
     CaptureSource {
         index: usize,
@@ -159,8 +147,6 @@ pub enum Error {
     CaptureSourceContract { index: usize, reason: &'static str },
     #[error("capture group is not armed, not ready, or has been shut down")]
     CaptureGroupState,
-    /// Stopping a capture group failed for more than one source: `first` in
-    /// source order, then every `remaining` failure.
     #[error("capture group cleanup failed for {} sources", .remaining.len() + 1)]
     CaptureCleanup {
         #[source]
@@ -279,8 +265,6 @@ impl Classified for Error {
         }
     }
 
-    /// A multi-source cleanup failure lists every remaining failure after the
-    /// first one's source chain.
     fn causes(&self) -> Vec<String> {
         let mut causes = source_chain(self);
         if let Self::CaptureCleanup { remaining, .. } = self {
@@ -294,8 +278,6 @@ impl Classified for Error {
 }
 
 impl Error {
-    /// The failure a provider reports when its caller's deadline stopped it
-    /// while `operation` was in progress.
     pub(crate) fn interrupted(
         interrupted: packetcraftr_core::budget::Interrupted,
         operation: &'static str,
@@ -307,7 +289,6 @@ impl Error {
     }
 }
 
-/// The classification every provider-invariant violation shares.
 pub(crate) fn live_io_invariant() -> Classification {
     classified(
         "internal.live_io_invariant",

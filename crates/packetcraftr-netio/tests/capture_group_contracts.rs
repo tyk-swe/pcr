@@ -18,7 +18,6 @@ use std::{
     },
     time::{Duration, Instant, UNIX_EPOCH},
 };
-/// A deadline no fixture here comes close to spending.
 fn live() -> Deadline {
     Deadline::new(Duration::from_secs(5))
 }
@@ -77,9 +76,6 @@ struct Provider {
     requests: Mutex<Vec<capture::Request>>,
     shutdowns: Vec<Arc<AtomicUsize>>,
     fail_arm: Option<usize>,
-    /// When set, the fixture reports an all-default realization even when the
-    /// request asked for native settings — the behavior of a provider that
-    /// silently drops them.
     ignores_native: bool,
 }
 impl Provider {
@@ -94,8 +90,6 @@ impl Provider {
         }
     }
 }
-/// The honest fixture answer: each request is echoed as requested and applied
-/// while the unqueryable effective value stays unknown.
 fn realized(native: &capture::NativeSettings) -> capture::RealizedSettings {
     fn realized<T: Copy>(value: Option<T>) -> capture::Realized<T> {
         capture::Realized {
@@ -138,8 +132,6 @@ impl capture::Provider for Provider {
         })
     }
 }
-/// Arms a group over `provider`, returning it with the arming outcome so a
-/// failed group's snapshot and shutdown stay observable.
 fn arm(
     provider: &Provider,
     request: &GroupRequest,
@@ -283,7 +275,6 @@ fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
     assert_eq!(error.classification().code, "io.capture");
     assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
     assert_eq!(provider.shutdowns[1].load(Ordering::SeqCst), 0);
-    // The admitted source stays reportable after the arming failure.
     let sources = group.snapshot();
     assert_eq!(sources.len(), 1);
     assert!(sources[0].shutdown_confirmed && sources[0].statistics_valid);
@@ -320,7 +311,6 @@ fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
     ));
     assert_eq!(error.classification().code, "io.capture_readiness");
     assert!(!group.snapshot()[0].shutdown_confirmed);
-    // Shutdown reports both cleanup failures, every time it is asked.
     for _ in 0..2 {
         let cleanup = group.shutdown().unwrap_err();
         let net::Error::CaptureCleanup { first, remaining } = &cleanup else {
@@ -419,7 +409,6 @@ fn invalid_native_settings_are_rejected_before_arming() {
     invalid.native.buffer_size = Some(0);
     assert!(Group::<Session>::new(&invalid).is_err());
     let mut invalid = request(1);
-    // Smaller than one configured snapshot cannot hold a frame.
     invalid.native.buffer_size = Some(16);
     assert!(Group::<Session>::new(&invalid).is_err());
 }
@@ -452,7 +441,6 @@ fn group_waits_classify_like_single_session_waits() {
     let frozen = Instant::now();
     let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
 
-    // A spent readiness deadline is a readiness failure, as for one session.
     let provider = Provider::new(vec![Script::default()]);
     let (mut group, armed) = arm(&provider, &request(1), &live());
     armed.unwrap();
@@ -464,8 +452,6 @@ fn group_waits_classify_like_single_session_waits() {
     drop(group);
     assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
 
-    // A remainder above the ceiling is refused with the timeout code, as for
-    // one session, instead of being reported as an invalid group.
     let provider = Provider::new(vec![Script::default()]);
     let (mut group, armed) = arm(&provider, &request(1), &live());
     armed.unwrap();
@@ -518,8 +504,6 @@ fn single_sessions_and_groups_share_the_filter_limit() {
         native: Default::default(),
     };
     single(&at_limit).validate().unwrap();
-    // The system provider refuses before it touches an interface, in every
-    // build profile.
     let error = match capture::SystemProvider.arm_capture(&single(&over_limit), &live()) {
         Err(error) => error,
         Ok(_) => panic!("an oversized filter must not arm"),

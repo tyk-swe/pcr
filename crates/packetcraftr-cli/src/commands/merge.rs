@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `merge`: merges time-ordered captures into one scoped PCAPNG file.
-
 pub(super) mod arguments;
 mod rendering;
 

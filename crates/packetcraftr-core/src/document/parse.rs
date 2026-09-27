@@ -14,8 +14,6 @@ use budget::Budget;
 use seed::PacketSeed;
 
 impl Packet {
-    /// Parses one bounded JSON or YAML document with [`DocumentLimits::DEFAULT`]
-    /// except for the input byte ceiling.
     pub fn parse(input: &str, format: Format, max_bytes: usize) -> Result<Self, Error> {
         Self::parse_with_limits(
             input,
@@ -27,13 +25,6 @@ impl Packet {
         )
     }
 
-    /// Parses one packet document while enforcing every [`DocumentLimits`]
-    /// field during streaming deserialization.
-    ///
-    /// The input byte ceiling is checked first. Tag-independent staging uses
-    /// its own finite, input-derived charge; semantic limits are applied when
-    /// the tag is resolved. Both key orders use the same staging and charging
-    /// path, and both formats classify semantic limit failures alike.
     pub fn parse_with_limits(
         input: &str,
         format: Format,
@@ -82,10 +73,7 @@ impl Packet {
     }
 }
 
-/// The parser budgets one YAML document is read under.
-///
-/// They are an outer envelope derived from the input ceiling: every semantic
-/// limit trips first, so the classified error is the same one JSON reports.
+/// An outer envelope: every semantic limit trips first, so errors classify as JSON's do.
 fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
     let envelope = limits.max_input_bytes.max(1);
     noyalib::ParserConfig::new()
@@ -103,9 +91,7 @@ fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
         .strict_booleans(true)
 }
 
-/// The streaming deserializer reports exhaustion as a scanner error rather
-/// than exposing its StreamEnd event. Match only the scanner's exact message;
-/// another error mentioning those words must remain a parse failure.
+/// The deserializer reports exhaustion as a scanner error; match only its exact message.
 fn yaml_stream_ended(error: &noyalib::Error) -> bool {
     match error {
         noyalib::Error::Parse(message) | noyalib::Error::ParseWithLocation { message, .. } => {
@@ -119,9 +105,7 @@ fn document_container_depth(max_nesting: usize) -> usize {
     DOCUMENT_BASE_CONTAINER_DEPTH.saturating_add(max_nesting.saturating_mul(2))
 }
 
-/// Bounds raw JSON container depth before deserialization: the recursion
-/// limit is disabled so the field-value seeds can own nesting, and the probe
-/// that detects an over-long layer list may skip arbitrary content.
+/// Bounds raw JSON depth up front, since the recursion limit is disabled so seeds own nesting.
 fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), Error> {
     let maximum = document_container_depth(max_nesting);
     let bytes = input.as_bytes();

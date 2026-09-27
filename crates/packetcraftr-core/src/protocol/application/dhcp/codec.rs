@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Wire helpers and layer-codec steps that the DHCPv4 and DHCPv6 codecs share.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -16,7 +14,6 @@ use crate::{
     protocol::common::{invalid, rejected, typed_layer},
 };
 
-/// A complete DHCP message that fills its UDP payload and retains its wire.
 pub(super) trait Message: Layer + Default + Sized + 'static {
     const NAME: &'static str;
 
@@ -38,7 +35,6 @@ pub(super) fn encode<M: Message>(
     let layer = typed_layer::<M>(M::NAME, layer)?;
     let wire = layer
         .encode_wire(Limits {
-            // The packet may have room for more than one DHCP message can use.
             max_message_bytes: context.remaining_packet_bytes.min(MAX_MESSAGE_BYTES),
             ..Default::default()
         })
@@ -47,7 +43,6 @@ pub(super) fn encode<M: Message>(
     Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
 }
 
-/// Keeps a payload that cannot be this message as raw bytes.
 pub(super) fn raw(input: Bytes) -> DecodedLayer {
     let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
     raw.fields = Raw::layout(input.len());
@@ -94,8 +89,6 @@ pub(super) struct Budget {
     options: usize,
 }
 impl Budget {
-    /// A budget for one message of `length` bytes, after
-    /// [`Limits::validate`] accepts `limits`.
     pub(super) fn new(limits: Limits, length: usize) -> Result<Self, Error> {
         limits.validate()?;
         if length > limits.max_message_bytes {

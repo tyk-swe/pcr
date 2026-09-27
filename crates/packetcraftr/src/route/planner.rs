@@ -19,7 +19,6 @@ use super::intent::{
 use super::model::{Options, Plan, is_ipv4_broadcast};
 
 /// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
-/// The route lookup receives the caller's `deadline`.
 pub fn plan<P: Provider>(
     packet: &Packet,
     destination: Option<IpAddr>,
@@ -64,8 +63,6 @@ pub fn plan<P: Provider>(
     })
 }
 
-/// Packet-derived route inputs that are safe to pass to a route provider.
-///
 /// Constructing this value performs every validation that must precede
 /// provider I/O, so an invalid packet never reaches the operating system.
 struct PacketIntent {
@@ -197,8 +194,6 @@ fn reject_offline_link_header(packet: &Packet) -> Result<(), Error> {
     Ok(())
 }
 
-/// The interface identity the caller requested, which must already be
-/// resolved.
 fn requested_interface(options: &Options) -> Result<Option<&InterfaceId>, Error> {
     options
         .interface
@@ -422,8 +417,6 @@ mod tests {
         }
     }
 
-    /// Records how the planner reached the provider so tests can assert that
-    /// rejected input never causes a lookup.
     #[derive(Clone)]
     struct Routes {
         decision: Result<Decision, RouteFailure>,

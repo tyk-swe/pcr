@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The finite packet count and pacing schedule, checked before admission.
-
 use super::request::invalid;
 use super::{Error, Request};
 use packetcraftr_netio::deadline::MAX_WAIT;

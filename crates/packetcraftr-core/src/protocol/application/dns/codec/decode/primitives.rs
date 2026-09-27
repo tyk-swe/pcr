@@ -3,10 +3,6 @@
 
 use crate::protocol::application::dns::Error;
 
-/// Reads the big-endian `u16` at `offset`.
-///
-/// Fails with [`Error::TruncatedField`] naming `field` when the message
-/// ends before the value does.
 pub(super) fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
     let bytes: [u8; 2] = message
         .get(offset..offset.saturating_add(2))
@@ -19,10 +15,6 @@ pub(super) fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Re
     Ok(u16::from_be_bytes(bytes))
 }
 
-/// Reads the big-endian `u32` at `offset`.
-///
-/// Fails with [`Error::TruncatedField`] naming `field` when the message
-/// ends before the value does.
 pub(super) fn read_u32(message: &[u8], offset: usize, field: &'static str) -> Result<u32, Error> {
     let bytes: [u8; 4] = message
         .get(offset..offset.saturating_add(4))

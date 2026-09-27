@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Linux route-netlink query construction and reply translation.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use futures_util::TryStreamExt;
@@ -120,10 +118,7 @@ fn netlink_errno(error: &rtnetlink::Error) -> Option<i32> {
     }
 }
 
-/// The kernel refuses an IPv4 lookup whose preferred source no interface owns
-/// with ENETUNREACH (EINVAL for a source that can never be local), which would
-/// otherwise read as a missing route. Returns that source when a local-address
-/// query confirms nothing owns it.
+/// The kernel refuses an IPv4 lookup whose preferred source no interface owns with ENETUNREACH.
 async fn unowned_preferred_source(
     handle: &Handle,
     preferred_source: Option<IpAddr>,
@@ -137,9 +132,6 @@ async fn unowned_preferred_source(
     (!local.contains(&source)).then_some(source)
 }
 
-/// Reports a failed lookup the way the other targets do: an unowned preferred
-/// source as `SourceUnavailable` and a vanished hinted interface as
-/// `InterfaceNotFound`, before the generic errno translation.
 fn refine_route_lookup_error(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -164,8 +156,6 @@ fn refine_route_lookup_error(
     route_lookup_error(destination, error)
 }
 
-/// Reports the kernel's "no route" errnos as `RouteNotFound`, so an
-/// unreachable destination classifies as `io.route_not_found` on every target.
 fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> route::Error {
     const NO_ROUTE: [i32; 4] = [
         libc::ENETUNREACH,
@@ -179,9 +169,6 @@ fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> route::Er
     os_error("RTM_GETROUTE", error)
 }
 
-/// `finish_route` consults `local_addresses` only for a local route whose
-/// source is absent from the output interface — and only after the family's
-/// mismatch check — so every other decision skips collecting all local addresses.
 fn needs_local_addresses(
     selection_reason: SelectionReason,
     destination: IpAddr,
@@ -202,8 +189,6 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
     match kind {
         RouteType::Local => Some(SelectionReason::Local),
         RouteType::Broadcast => Some(SelectionReason::Broadcast),
-        // The kernel answers a multicast destination with RTN_MULTICAST and
-        // the output interface the group is sent on.
         RouteType::Unicast | RouteType::Anycast | RouteType::Multicast => Some({
             if has_next_hop {
                 SelectionReason::Gateway
@@ -215,8 +200,6 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
     }
 }
 
-// u32::BITS and u128::BITS are 32 and 128, so each host-route prefix length fits the 8-bit field
-// rtnetlink expects
 fn route_request(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -331,14 +314,12 @@ mod tests {
             Some(off_interface),
             &interface
         ));
-        // On-interface sources resolve as `assigned_to_output` first.
         assert!(!needs_local_addresses(
             SelectionReason::Local,
             destination,
             Some(on_interface),
             &interface
         ));
-        // A fallback-resolved source is always on the output interface.
         assert!(!needs_local_addresses(
             SelectionReason::Local,
             destination,
@@ -351,7 +332,6 @@ mod tests {
             Some(off_interface),
             &interface
         ));
-        // A family mismatch fails before `local_addresses` is consulted.
         assert!(!needs_local_addresses(
             SelectionReason::Local,
             IpAddr::V6(Ipv6Addr::LOCALHOST),

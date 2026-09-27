@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Staged preparation keeps authorization ahead of neighbor discovery and the
-//! final check ahead of transmission, in both of its orders.
-
 mod common;
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -39,8 +36,6 @@ fn client(policy: Policy) -> (RecordingClient, Steps) {
     (client, steps)
 }
 
-/// A client over recording I/O, the steps it records, and a handle on that
-/// I/O for counting capture sessions.
 fn recording_client(policy: Policy) -> (RecordingClient, Steps, RecordingTransmit) {
     let steps = Steps::default();
     let io = RecordingTransmit::new(steps.clone());
@@ -52,8 +47,6 @@ fn recording_client(policy: Policy) -> (RecordingClient, Steps, RecordingTransmi
     (client, steps, io)
 }
 
-/// A client whose route, interface, transmit, and capture providers all
-/// record into one [`Steps`], so every provider call is ordered.
 fn fully_recorded_client(
     policy: Policy,
 ) -> (
@@ -69,7 +62,6 @@ fn fully_recorded_client(
     (Client::new(builtin::registry(), policy, providers), steps)
 }
 
-/// Sends `packet` once, collecting nothing.
 fn send_once<P: packetcraftr::Providers>(
     client: &Client<P>,
     packet: Packet,
@@ -90,8 +82,6 @@ fn first_packet(destinations: &[Ipv4Addr]) -> Packet {
         .unwrap()
 }
 
-/// One UDP datagram per destination, framed at Layer 2 so each needs its
-/// neighbor's MAC address.
 fn template(destinations: &[Ipv4Addr]) -> Template {
     let mut packet = Packet::new();
     packet
@@ -137,7 +127,6 @@ fn is_transmit(step: &Step) -> bool {
     matches!(step, Step::Transmit(_))
 }
 
-/// The exact wire size of one datagram from [`template`].
 fn frame_len() -> u64 {
     let (client, _) = client(Policy::default());
     let report = send_once(&client, first_packet(&[FIRST]), layer2_send())
@@ -145,8 +134,6 @@ fn frame_len() -> u64 {
     report.stats.bytes
 }
 
-/// Policies under which the first two datagrams pass and the third is denied
-/// by a later check: its destination, then the cumulative byte budget.
 fn late_denials() -> [(Policy, &'static str); 2] {
     [
         (
@@ -256,8 +243,6 @@ fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
         targets: vec!["2.bytes".parse().expect("raw payload target")],
         ..packet_fuzz::Request::default()
     };
-    // No source address and no link header: preparation fills in the route's
-    // source, synthesizes Ethernet, and rebuilds with the resolved neighbor.
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -313,16 +298,12 @@ fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
     }
 }
 
-/// Sends selecting the fixture interface by name, so a request that reaches
-/// the providers enumerates interfaces before it looks up a route.
 fn by_name() -> send::Options {
     let mut options = layer2_send();
     options.plan.interface = Some(route::Interface::Name("fixture0".to_owned()));
     options
 }
 
-/// Policies that refuse the two-datagram operation at admission: its packet
-/// count, then its first destination.
 fn admission_denials() -> [(Policy, &'static str); 2] {
     [
         (

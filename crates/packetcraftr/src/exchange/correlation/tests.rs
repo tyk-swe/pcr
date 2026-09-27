@@ -125,8 +125,6 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
                 dissector: &dissector,
                 prepared: &[],
                 sent: &[],
-                // A closed window, independent of how its boundary instant
-                // itself is treated.
                 window: &closed_window(),
                 collection: &collection,
             },

@@ -10,16 +10,12 @@ use packetcraftr_core::budget::Deadline;
 use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation, WireLimits};
 
-/// The admitted address set a resolution produced: the declared target
-/// string plus the family-filtered, deduplicated addresses.
 #[derive(Debug)]
 pub(crate) struct SelectedTargets {
     pub(crate) declared: String,
     pub(crate) addresses: Vec<IpAddr>,
 }
 
-/// Resolves, authorizes, filters, and de-duplicates a target while checking
-/// the same absolute deadline on both sides of every policy boundary.
 pub(crate) fn resolve_selected<A, G>(
     authorizer: &mut A,
     target: &Target,
@@ -52,8 +48,6 @@ where
     })
 }
 
-/// Authorizes the complete operation before live side effects, checking the
-/// absolute deadline before and after authorization.
 pub(crate) fn approve_operation<A, G>(
     authorizer: &mut A,
     operation: Operation<'_>,
@@ -70,8 +64,6 @@ where
     approval.map_err(|source| gates.authorization(source))
 }
 
-/// The elapsed-time check on each side of a policy boundary, reported for the
-/// operation as a whole.
 fn check_deadline<G: Errors>(deadline: &Deadline, gates: &G) -> Result<(), G::Error> {
     deadline
         .check()

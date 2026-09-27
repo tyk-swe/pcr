@@ -1,15 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deadline-bounded activation of a native capture source, on the one pool
-//! slot the source then holds until its reader is cleaned up.
-//!
-//! Activation and reading are one pooled job: the job activates the source,
-//! hands the owner's half of the session back to the caller, and continues as
-//! the reader on the same thread under the same permit. A caller that stops
-//! waiting leaves the job to the reaper, which keeps the slot until the late
-//! handle has closed.
-
 use std::sync::{
     Arc,
     mpsc::{self, RecvTimeoutError},
@@ -56,8 +47,7 @@ fn open_with(
     // Native activation spends wall time even when the caller's clock is frozen.
     let deadline = crate::deadline::detach(caller)
         .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
-    // Both fallible cleanup-service steps happen before any native call, so a
-    // failure cannot leave an unmanaged native handle.
+    // Both fallible cleanup-service steps happen before any native call.
     let reaper = reaper().map_err(|error| Error::Capture {
         message: "native capture cleanup is unavailable".to_owned(),
         source: Some(Source::new(error)),
@@ -70,8 +60,6 @@ fn open_with(
         source: Some(Source::new(error)),
     })?;
     // A rendezvous: the reader starts only once an owner holds its stop flag.
-    // If the caller has left, the send fails and the source closes on this
-    // admitted thread without a read.
     let (handoff, claim) = mpsc::sync_channel::<Result<Started, Error>>(0);
     let worker_deadline = deadline.clone();
     let task = permit
@@ -80,8 +68,7 @@ fn open_with(
                 crate::deadline::remaining(&worker_deadline)
                     .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
                 let parts = activate();
-                // A late handle closes here, unread. A late native error must
-                // not mask interruption.
+                // A late native error must not mask interruption.
                 crate::deadline::remaining(&worker_deadline)
                     .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
                 parts
@@ -116,8 +103,6 @@ fn open_with(
     };
     match outcome {
         Err(interrupted) => {
-            // Refusing the handoff keeps the reader from starting; the slot
-            // stays held until the job, and any late handle, is gone.
             drop(claim);
             permit.retention_marker().mark_retained();
             reaper.transfer(Box::new(move || {
@@ -129,7 +114,6 @@ fn open_with(
         Ok(Some(Ok(started))) => {
             let retention = permit.retention_marker();
             let session = NativeCaptureSession::attach(started, task, permit, reaper.clone());
-            // Interruption wins over a result that arrived at the same moment.
             if let Err(interrupted) = crate::deadline::remaining(&deadline) {
                 retention.mark_retained();
                 reaper.transfer(Box::new(move || drop(session)));
@@ -137,10 +121,7 @@ fn open_with(
             }
             Ok(Box::new(session))
         }
-        // The job is over without a session to hand back: activation failed,
-        // or it ended without a handoff, meaning the worker panicked.
-        // Interruption still wins over a failure that arrived at the same
-        // moment, so the deadline is rechecked before reporting it.
+        // Interruption still wins over a failure that arrived at the same moment.
         Ok(failed) => {
             if let Err(interrupted) = crate::deadline::remaining(&deadline) {
                 return Err(Error::interrupted(interrupted, OPERATION));
@@ -276,7 +257,6 @@ mod tests {
         }
     }
 
-    /// Releases a [`BlockingSource`] when the session interrupts it.
     struct ReleasingInterrupt(Sender<()>);
 
     impl CaptureInterrupt for ReleasingInterrupt {
@@ -342,18 +322,12 @@ mod tests {
         );
     }
 
-    /// A worker failure delivered just as the deadline ends must not mask
-    /// the interruption: the caller's clock expires only once the delivered
-    /// outcome is being classified, so the deadline wins.
     #[test]
     fn an_activation_error_arriving_with_expiry_reports_the_deadline() {
         let base = Instant::now();
         let caller = thread::current().id();
         let checks = AtomicUsize::new(0);
-        // Expiry begins at the caller's fifth clock read: construction,
-        // detach, and the wait's first poll (two reads) still see time
-        // remaining. The worker consults the same clock from its own
-        // thread, where time never runs out, so it reports the native error.
+        // Expiry begins at the caller's fifth clock read.
         let clock = move || {
             if thread::current().id() == caller && checks.fetch_add(1, Ordering::SeqCst) >= 4 {
                 base + Duration::from_secs(120)

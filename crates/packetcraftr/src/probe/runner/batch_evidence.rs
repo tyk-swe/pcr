@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Batch-evidence processing shared by every probe workflow: the permit check,
-//! diagnostic recording and publishing order, response selection, retention of
-//! winning and undecodable frames, and the per-probe emit order. Workflows
-//! supply only a [`Classifier`].
-
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::time::{Duration, SystemTime};
@@ -27,24 +22,15 @@ use crate::execution::validation::{
 };
 use crate::probe::{Workflow, enforce_deadline};
 
-/// The reason both probe workflows report for a probe without a winner.
 pub(crate) const NO_RESPONSE_REASON: &str =
     "no checksum-valid, protocol-consistent response before the deadline";
 
-/// The workflow-owned half of batch-evidence processing: how one response is
-/// read against a sent probe and ranked, what a probe's evidence looks like,
-/// and which events carry it.
 pub(crate) trait Classifier {
-    /// The planned probe a batch carries.
     type Probe: Sequenced;
-    /// One correlated response as this workflow reads it.
     type Observation;
-    /// The workflow's progressive event.
     type Event;
 
-    /// Whether `sent` still carries `probe`'s destination and identity.
     fn sent_matches(&self, probe: &Self::Probe, sent: &Packet) -> bool;
-    /// Reads one response against a sent probe; `None` leaves it uncorrelated.
     fn classify(
         &self,
         probe: &Self::Probe,
@@ -55,29 +41,21 @@ pub(crate) trait Classifier {
     fn rank(&self, observation: &Self::Observation) -> u8;
     /// Breaks rank ties: the lower responder wins.
     fn responder(&self, observation: &Self::Observation) -> IpAddr;
-    /// Builds the probe's final evidence event.
     fn evidence(
         &mut self,
         probe: &Self::Probe,
         sent: &SentPacket,
         outcome: Outcome<Self::Observation>,
     ) -> Self::Event;
-    /// Wraps one retained undecodable frame. `probes` is the batch the frame
-    /// arrived with. Only a pipelined workflow retains frames outside any
-    /// batch and passes an empty slice; a serial-only workflow may rely on it.
     fn undecoded(&self, probes: &[Self::Probe], frame: Frame) -> Self::Event;
     fn diagnostic(&self, diagnostic: Diagnostic) -> Self::Event;
-    /// Whether this probe event ends the operation once its batch finishes.
     fn ends_operation(&self, _event: &Self::Event) -> bool {
         false
     }
 }
 
-/// How one sent probe ended.
 pub(crate) enum Outcome<O> {
-    /// No classified response arrived within the probe's timeout.
     Timeout,
-    /// The winning response under the shared candidate ordering.
     Reply(Reply<O>),
 }
 
@@ -85,13 +63,9 @@ pub(crate) struct Reply<O> {
     pub(crate) observation: O,
     pub(crate) received_at: Option<SystemTime>,
     pub(crate) latency: Duration,
-    /// A copy of the exact response frame, or `None` once the operation's
-    /// evidence budget is spent.
     pub(crate) frame: Option<Frame>,
 }
 
-/// Operation-wide batch-evidence processing for one workflow, naming every
-/// failure through the workflow's error adapter `G`.
 pub(crate) struct BatchEvidence<K, F, G> {
     errors: G,
     limits: EvidenceLimits,
@@ -132,8 +106,6 @@ where
     F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
     G: Errors<Step = u64>,
 {
-    /// Checks one batch's executor evidence against its probes, its (clipped)
-    /// timeout, and the evidence limits before anything is charged.
     pub(crate) fn validate(
         &self,
         batch: &Batch<K::Probe>,
@@ -149,16 +121,10 @@ where
         )
     }
 
-    /// Publishes a workflow event that is not batch evidence, such as a
-    /// pipelined send confirmation.
     pub(crate) fn emit(&mut self, event: K::Event, deadline: &Deadline) -> Result<(), G::Error> {
         (self.emit)(event, deadline)
     }
 
-    /// Consumes one validated batch: rejects evidence for another permit,
-    /// publishes the executor's diagnostics, then for each probe selects the
-    /// winning response, retains it, publishes the diagnostics that raised,
-    /// and emits the probe's event; finally retains undecodable frames.
     /// [`ControlFlow::Break`] means a probe event ended the operation.
     pub(crate) fn process(
         &mut self,
@@ -225,8 +191,6 @@ where
         Ok(flow)
     }
 
-    /// Emits undecodable frames and the diagnostics their retention raises in
-    /// arrival order, stopping at the undecoded limit with its diagnostic.
     pub(crate) fn retain_undecoded(
         &mut self,
         probes: &[K::Probe],
@@ -252,7 +216,6 @@ where
         )
     }
 
-    /// Records each diagnostic once and publishes every one not yet published.
     pub(crate) fn record_diagnostics(
         &mut self,
         diagnostics: Vec<Diagnostic>,
@@ -282,8 +245,6 @@ where
     }
 }
 
-/// Publishes what the evidence state keeps as the classifier's events.
-/// `probes` is the batch undecodable frames arrived with.
 struct Events<'e, K: Classifier, F, G> {
     errors: &'e G,
     classifier: &'e K,
@@ -363,8 +324,6 @@ where
     Ok(())
 }
 
-/// Validates one batch's executor evidence under the workflow's limits and
-/// reports any inconsistency at the sequence of the probe it concerns.
 pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
     errors: &G,
     probes: &[P],

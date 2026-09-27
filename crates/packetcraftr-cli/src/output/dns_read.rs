@@ -17,7 +17,6 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 published_enum! {
-    /// The transport a DNS message was framed from.
     pub enum Transport from dns::Transport {
         Udp => "udp",
         Tcp => "tcp",
@@ -25,7 +24,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// Where a framed DNS message, or a stream issue, ended up.
     pub enum Status from dns::Status {
         Complete => "complete",
         Malformed => "malformed",
@@ -38,7 +36,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// How a query/response transaction settled.
     pub enum TransactionStatus from dns::TransactionStatus {
         Matched => "matched",
         Unanswered => "unanswered",
@@ -47,8 +44,6 @@ published_enum! {
     }
 }
 
-/// The interval between a query's last captured byte and its response's
-/// first; negative intervals stay visible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Latency {
     pub nanoseconds: u128,
@@ -156,7 +151,6 @@ impl StreamRecord for Transaction {
         "dns_transaction"
     }
 }
-/// A stream-level condition attributed to one direction of a flow.
 #[derive(Debug, Serialize)]
 pub struct Issue {
     pub number: u64,
@@ -179,7 +173,6 @@ impl StreamRecord for Issue {
         "dns_stream_issue"
     }
 }
-/// Cumulative counts over every record the collector processed.
 #[derive(Debug, Serialize)]
 pub struct Summary {
     pub messages: u64,
@@ -213,7 +206,6 @@ pub struct Complete {
     pub source_outcomes_omitted: u64,
     pub ip_reassembly: super::reassembly::Report,
 }
-/// The run's counters, the collector's summary, and the scopes it exposed.
 impl TryFrom<(&library::Summary, dns::Summary, Vec<Definition>)> for Complete {
     type Error = Error;
     fn try_from(
@@ -241,8 +233,6 @@ pub struct Report {
     #[serde(flatten)]
     pub complete: Complete,
 }
-/// The messages, transactions, and issues retained for the document, and the
-/// terminal counters.
 impl From<(Vec<Message>, Vec<Transaction>, Vec<Issue>, Complete)> for Report {
     fn from(
         (messages, transactions, issues, complete): (

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! A scripted TCP capture builder for TLS session assembly contracts.
-
 use super::tls_frames::{
     ClientHelloSpec, ServerHelloSpec, client_hello, handshake_record, server_hello, split,
 };
@@ -19,14 +17,12 @@ use packetcraftr_core::registry::Registry;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-/// A capture under construction: one clock, any number of conversations.
 pub(crate) struct Capture {
     pub(crate) registry: Arc<Registry>,
     pub(crate) tick: u64,
     pub(crate) frames: Vec<Frame>,
 }
 
-/// One TCP conversation's sequence bookkeeping.
 #[derive(Clone, Copy)]
 pub(crate) struct Stream {
     pub(crate) port: u16,
@@ -86,7 +82,6 @@ impl Capture {
         }
     }
 
-    /// Three-way handshake, so both directions have an established base.
     pub(crate) fn open(&mut self, stream: &mut Stream) {
         let mut syn = self.client_spec(stream, Tcp::SYN);
         syn.acknowledgment = 0;
@@ -99,7 +94,6 @@ impl Capture {
         self.push(ack, b"");
     }
 
-    /// A second connection opening on the same four-tuple.
     pub(crate) fn reopen(&mut self, stream: &mut Stream, base: u32) {
         stream.client_sequence = base.wrapping_add(1);
         stream.server_sequence = base.wrapping_add(9_000);
@@ -120,7 +114,6 @@ impl Capture {
             .wrapping_add(u32::try_from(payload.len()).expect("segment fits"));
     }
 
-    /// Re-sends the last `length` client bytes without advancing the stream.
     pub(crate) fn client_retransmit(&mut self, stream: &Stream, payload: &[u8]) {
         let mut spec = self.client_spec(stream, Tcp::ACK);
         spec.sequence = stream
@@ -129,7 +122,6 @@ impl Capture {
         self.push(spec, payload);
     }
 
-    /// Sends server bytes at an offset ahead of the stream, leaving a hole.
     pub(crate) fn server_beyond(&mut self, stream: &mut Stream, hole: u32, payload: &[u8]) {
         let mut spec = self.server_spec(stream, Tcp::ACK);
         spec.sequence = stream.server_sequence.wrapping_add(hole);
@@ -164,7 +156,6 @@ impl Capture {
     }
 }
 
-/// Runs a capture through the pipeline into a TLS collector.
 pub(crate) fn assemble(capture: &Capture, limits: TlsLimits) -> (Vec<Session>, TlsSummary) {
     let mut reader = reader(&capture.frames);
     let mut collector = Collector::new(limits).expect("valid TLS limits");

@@ -10,10 +10,9 @@ use crate::frame::{Frame, LinkType};
 
 use super::classic::{write_pcap_frame, write_pcap_header};
 use super::error::Error;
-use super::model::{
-    Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, Endianness, Format, Interface, Limits,
-    PcapNgOptions, PcapOptions, TimestampPrecision, TimestampResolution,
-};
+use super::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
+use super::header::Interface;
+use super::limits::{Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, Limits};
 use super::pcapng::{
     interface_description_base_length, select_interface, validate_new_interface,
     write_enhanced_packet, write_interface_description, write_section_header,
@@ -22,6 +21,7 @@ use super::wire::{
     PCAP_RECORD_HEADER_LEN, PCAPNG_OPTION_END, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
     align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_size,
 };
+use super::{PcapNgOptions, PcapOptions};
 
 pub(super) enum WriterState {
     Pcap {

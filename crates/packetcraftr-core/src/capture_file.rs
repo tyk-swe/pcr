@@ -16,27 +16,30 @@
 mod classic;
 pub mod compression;
 mod error;
+mod format;
+mod header;
+mod limits;
 mod link_type;
 mod map;
 mod merge;
-pub use map::{MapReport, map_frames};
-mod model;
 mod pcapng;
 mod reader;
+mod record;
 mod rewrite;
 mod wire;
 mod writer;
 
 pub use error::Error;
-pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
-pub use model::{
-    Budget, CaptureHeader, CaptureRecord, DEFAULT_MAX_INTERFACES_PER_SECTION,
-    DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME, DEFAULT_MAX_METADATA_BYTES_PER_FRAME,
-    DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES, DEFAULT_MAX_TOTAL_INTERFACES, Endianness,
-    Format, Interface, Limits, MetadataBlockKind, PacketBlockKind, PcapHeader, PcapNgOption,
-    PcapNgOptions, PcapOptions, ReaderLimits, RecordKind, RewriteReport, Section, SelectionReport,
-    TimestampResolution,
+pub use format::{Endianness, Format, PcapNgOptions, PcapOptions, TimestampResolution};
+pub use header::{CaptureHeader, Interface, PcapHeader, PcapNgOption, Section};
+pub use limits::{
+    Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME,
+    DEFAULT_MAX_METADATA_BYTES_PER_FRAME, DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES,
+    DEFAULT_MAX_TOTAL_INTERFACES, Limits, ReaderLimits,
 };
+pub use map::{MapReport, map_frames};
+pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
 pub use reader::Reader;
-pub use rewrite::{rewrite, select};
+pub use record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind};
+pub use rewrite::{RewriteReport, SelectionReport, rewrite, select};
 pub use writer::Writer;

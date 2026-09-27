@@ -6,10 +6,10 @@ use std::io::Read;
 use super::section::{SectionHeader, read_pcapng_block_header, read_section_header_with_length};
 use crate::capture_file::{
     error::Error,
-    model::{
-        CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, ReaderLimits, RecordKind,
-        Section,
-    },
+    format::{Endianness, Format},
+    header::{Interface, Section},
+    limits::ReaderLimits,
+    record::{CaptureRecord, MetadataBlockKind, RecordKind},
     wire::PCAPNG_SECTION_HEADER,
 };
 

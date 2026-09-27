@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::capture_file::error::Error;
-use crate::capture_file::model::{Format, TimestampResolution};
+use crate::capture_file::format::{Format, TimestampResolution};
 
 pub(in crate::capture_file) fn validate_timestamp_resolution(
     resolution: TimestampResolution,

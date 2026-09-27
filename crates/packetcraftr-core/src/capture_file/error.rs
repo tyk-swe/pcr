@@ -5,7 +5,7 @@ use std::io;
 
 use thiserror::Error;
 
-use super::model::Format;
+use super::format::Format;
 use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 #[derive(Debug, Error)]

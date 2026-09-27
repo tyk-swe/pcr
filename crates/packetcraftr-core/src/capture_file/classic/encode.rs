@@ -6,7 +6,7 @@ use std::io::Write;
 use crate::frame::{Frame, LinkType};
 
 use crate::capture_file::error::Error;
-use crate::capture_file::model::{Endianness, TimestampPrecision};
+use crate::capture_file::format::{Endianness, TimestampPrecision};
 use crate::capture_file::wire::{PCAP_RECORD_HEADER_LEN, write_u16, write_u32};
 
 pub(in crate::capture_file) fn write_pcap_header<W: Write>(

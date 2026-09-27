@@ -7,7 +7,8 @@ use crate::frame::{Direction, Frame, LinkType};
 
 use crate::capture_file::{
     error::Error,
-    model::{Endianness, Interface, TimestampResolution},
+    format::{Endianness, TimestampResolution},
+    header::Interface,
     wire::{
         PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
         PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS, PCAPNG_OPTION_IF_TSOFFSET,

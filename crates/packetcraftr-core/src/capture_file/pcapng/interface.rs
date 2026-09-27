@@ -6,7 +6,8 @@ use crate::frame::LinkType;
 use super::options::visit_options;
 use crate::capture_file::{
     error::Error,
-    model::{Endianness, Format, Interface, TimestampResolution},
+    format::{Endianness, Format, TimestampResolution},
+    header::Interface,
     wire::{
         DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
         decode_i64, decode_u16, decode_u32,

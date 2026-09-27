@@ -3,10 +3,32 @@
 
 use std::io::{Read, Write};
 
-use super::{
-    Budget, Error, Limits, MetadataBlockKind, Reader, RecordKind, RewriteReport, SelectionReport,
-};
+use serde::{Deserialize, Serialize};
+
+use super::{Budget, Error, Format, Limits, MetadataBlockKind, Reader, RecordKind};
 use crate::{error::BoundaryError, frame::Frame};
+
+/// Input and output accounting for a bounded capture selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectionReport {
+    pub format: Format,
+    pub frames_read: u64,
+    pub frames_selected: u64,
+    pub captured_bytes_read: u64,
+    pub captured_bytes_selected: u64,
+    pub interfaces: usize,
+    /// Copied metadata records, excluding the initial capture header.
+    pub metadata_records: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewriteReport {
+    pub format: Format,
+    pub frames: u64,
+    pub captured_bytes: u64,
+    pub interfaces: usize,
+    pub metadata_records: u64,
+}
 
 /// Rewrites a capture without changing its format or dropping source records.
 /// Every validated source record, including section lengths, is copied verbatim.

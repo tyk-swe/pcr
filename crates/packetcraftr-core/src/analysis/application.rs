@@ -67,6 +67,9 @@ pub enum Error {
     Sources { number: u64 },
     #[error("application event output failed")]
     Output(#[source] crate::error::BoundaryError),
+    /// The collector refused a configuration change it no longer accepts.
+    #[error("HTTP collector configuration refused: {0}")]
+    Configuration(&'static str),
 }
 impl Classified for Error {
     fn classification(&self) -> Classification {
@@ -83,6 +86,11 @@ impl Classified for Error {
                 "internal.application_sources",
                 Kind::Internal,
                 Some("enable sourced analysis and preserve contributing transport frames"),
+            ),
+            Self::Configuration(..) => Classification::new(
+                "cli.http_configuration",
+                Kind::Usage,
+                Some("enable transactions and select a body before the first observed frame"),
             ),
         }
     }

@@ -39,7 +39,9 @@ fuzz_target!(|data: &[u8]| {
         [80, 8080],
         65536,
     )
-    .unwrap();
+    .unwrap()
+    .with_transactions()
+    .expect("pre-observe transaction configuration");
     let Ok(summary) = analysis::run(&mut reader, builtin::registry(), &options, |record| {
         let _ = collector
             .observe(&record)

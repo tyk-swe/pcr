@@ -28,7 +28,9 @@ fn messages(frames: &[Frame]) -> Option<Vec<(http::Status, Vec<u8>, u64)>> {
         [80],
         65536,
     )
-    .unwrap();
+    .unwrap()
+    .with_transactions()
+    .expect("pre-observe transaction configuration");
     let mut output = Vec::new();
     let mut retain = |events: Vec<http::Event>| {
         for event in events {

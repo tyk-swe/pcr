@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "split",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.capture_split",
+    "kind": "cli",
+    "message": "invalid capture split option frames_per_file=0: must be non-zero",
+    "causes": [],
+    "remediation": "use split options within their documented ranges"
+  },
+  "diagnostics": []
+}

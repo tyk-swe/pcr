@@ -45,6 +45,10 @@ automatic clamp: incompatible explicit limits still fail validation.
 | Forwarding entries per detail category | 64 | 256 |
 | Forwarding shared detail charge | 1 MiB | 4 MiB |
 | Forwarding comparison scratch charge | 16 MiB | 128 MiB |
+| Split parts | 64 | 256 |
+| Split retained metadata records | 1,024 | 4,096 |
+| Split retained metadata bytes | 2 MiB | 16 MiB |
+| Split decoded output / encoded file bytes, each | 32 MiB | 512 MiB |
 
 Only options present on a selected command are changed. Options not named in
 the preset retain their documented defaults, including other TLS retention
@@ -60,6 +64,10 @@ record/interface/metadata limits; use `compression::Input` for cumulative
 encoded/decoded byte ceilings.
 Physical forwarding disables unused reconstruction and indexes; it never
 pushes a filter ahead of input accounting.
+`split` charges `--max-split-output-bytes` in two domains: cumulative decoded
+part bytes the container writer emits, and cumulative encoded file lengths the
+closed saved files measure, including compression framing and trailers. Each
+count is bounded by the same ceiling; the encoded count is not an RSS ceiling.
 
 See [analysis resource accounting](analysis-resources.md) for the remaining
 state, allocation, and process-memory distinctions.

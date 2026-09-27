@@ -23,8 +23,8 @@ use packetcraftr_cli::output::{
     follow as follow_output, fuzz as fuzz_output, interfaces as interfaces_output,
     network as network_output, plan as plan_output, protocols as protocols_output,
     reassembly as reassembly_output, replay as replay_output, routes as routes_output,
-    scan as scan_output, send as send_output, stats as stats_output, tls as tls_output,
-    traceroute as traceroute_output,
+    scan as scan_output, send as send_output, split as split_output, stats as stats_output,
+    tls as tls_output, traceroute as traceroute_output,
 };
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamTransport;
@@ -77,6 +77,7 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::DnsRead, "offline DNS", dns_read_case),
     (Command::Http, "offline HTTP", http_case),
     (Command::Export, "physical dependencies", export_case),
+    (Command::Split, "bounded parts", split_case),
     (Command::Rewrite, "rewritten headers", rewrite_case),
     (Command::Capture, "capture completion", capture_case),
     (Command::Read, "projected rows", projection_case),
@@ -1922,6 +1923,60 @@ fn export_case() -> Value {
             "selected.pcap".to_owned(),
             capture,
             plan,
+        ))
+        .unwrap(),
+        Vec::new(),
+    )
+}
+
+fn split_case() -> Value {
+    use packetcraftr_core::capture_file::{Format, split};
+    let report = split::Report {
+        format: Format::PcapNg,
+        frames_per_file: 3,
+        frames_read: 8,
+        captured_bytes_read: 659,
+        metadata_records: 2,
+        metadata_bytes: 60,
+        decoded_bytes_written: 1_100,
+        parts: vec![
+            split::Part {
+                index: 1,
+                first_frame: Some(1),
+                last_frame: Some(3),
+                frames: 3,
+                captured_bytes: 120,
+                decoded_bytes: 276,
+            },
+            // An empty source's single part carries no frame range.
+            split::Part {
+                index: 2,
+                first_frame: None,
+                last_frame: None,
+                frames: 0,
+                captured_bytes: 0,
+                decoded_bytes: 96,
+            },
+        ],
+    };
+    envelope(
+        Command::Split,
+        split_output::Report::try_from((
+            "capture-parts".to_owned(),
+            "none",
+            report,
+            vec![
+                split_output::File {
+                    index: 1,
+                    name: "part-000001.pcapng".to_owned(),
+                    encoded_bytes: 276,
+                },
+                split_output::File {
+                    index: 2,
+                    name: "part-000002.pcapng".to_owned(),
+                    encoded_bytes: 96,
+                },
+            ],
         ))
         .unwrap(),
         Vec::new(),

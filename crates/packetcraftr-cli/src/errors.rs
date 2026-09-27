@@ -105,7 +105,7 @@ impl CliError {
         self
     }
 
-    pub(crate) fn with_secondary(mut self, phase: &'static str, secondary: Self) -> Self {
+    pub(crate) fn with_secondary(mut self, phase: &str, secondary: Self) -> Self {
         let primary = self.message.clone();
         self.message = format!("{primary}; {phase} also failed: {}", secondary.message);
         if self.causes.is_empty() {

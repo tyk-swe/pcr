@@ -42,6 +42,7 @@ fn expected_kinds(command: Command) -> &'static [&'static str] {
         Command::Rewrite
         | Command::Export
         | Command::Merge
+        | Command::Split
         | Command::Exchange
         | Command::VerifyForwarding => &["success", "complete", "error"],
         Command::Protocols

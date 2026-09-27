@@ -64,6 +64,7 @@ mod rewrite;
 mod routes;
 mod scan;
 mod send;
+mod split;
 mod stats;
 mod tls;
 mod traceroute;
@@ -298,6 +299,9 @@ commands! {
     /// Export streams and reassembled IP datagrams with their physical dependencies.
     #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
     Export(export::arguments::Args) = "export",
+    /// Split a capture into faithful bounded same-format parts.
+    #[command(after_long_help = split::arguments::AFTER_LONG_HELP)]
+    Split(split::arguments::Args) = "split",
     /// Rewrite capture headers with checked lengths and transport checksums.
     #[command(after_long_help = rewrite::arguments::AFTER_LONG_HELP)]
     Rewrite(rewrite::arguments::Args) = "rewrite",
@@ -505,6 +509,17 @@ mod tests {
             (
                 &["export", "--write", "e.pcapng", CAPTURE],
                 undeclared_bounds::<export::arguments::Args>,
+            ),
+            (
+                &[
+                    "split",
+                    CAPTURE,
+                    "--frames-per-file",
+                    "2",
+                    "--write-dir",
+                    "parts",
+                ],
+                undeclared_bounds::<split::arguments::Args>,
             ),
             (
                 &["rewrite", "--write", "r.pcapng", CAPTURE],

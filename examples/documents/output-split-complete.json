@@ -1,7 +1,9 @@
 {
   "schema": "packetcraftr.output/v7",
   "command": "split",
-  "mode": "aggregate",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "complete",
   "status": "success",
   "result": {
     "format": "pcapng",

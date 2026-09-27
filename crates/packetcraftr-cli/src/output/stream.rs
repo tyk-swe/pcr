@@ -85,7 +85,6 @@ impl EncoderOutput {
 /// deliberately not `Clone`: the completion an artifact commit decides to
 /// publish cannot be duplicated, and dropping a prepared record is a no-op.
 // Artifact-committing commands (body export, capture split) consume this seam.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PreparedComplete {
     output: Arc<Mutex<EncoderOutput>>,
     sequence: u64,
@@ -237,7 +236,6 @@ impl StreamEncoder {
     /// Preparation emits nothing, advances no sequence, and leaves the stream
     /// open; a discarded preparation therefore keeps ordinary error
     /// publication at the same sequence available.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn prepare_complete<T: Serialize>(
         &self,
         result: T,
@@ -272,7 +270,6 @@ impl StreamEncoder {
     /// A token prepared by another encoder, at a sequence the stream has
     /// moved past, or after the stream left the open state fails with
     /// [`EncodeError::PreparedOutput`].
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn publish_prepared_complete(
         &self,
         prepared: PreparedComplete,

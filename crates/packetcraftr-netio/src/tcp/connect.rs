@@ -62,6 +62,11 @@ impl<S> Pending<S> {
             }
         }
     }
+
+    pub(super) fn wait(&mut self, deadline: &Deadline) -> Result<Option<ConnectOutcome<S>>, Error> {
+        self.task.wait_ready(deadline);
+        self.poll()
+    }
 }
 impl<S> Drop for Pending<S> {
     fn drop(&mut self) {

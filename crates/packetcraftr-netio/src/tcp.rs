@@ -174,6 +174,13 @@ impl<S> PendingConnect<S> {
     pub fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, Error> {
         self.inner.poll()
     }
+
+    /// Waits for completion, waking as soon as the worker publishes its outcome.
+    /// Returns `None` if `deadline` expires or is cancelled while work is pending;
+    /// completed work is returned even if the waiting deadline has ended.
+    pub fn wait(&mut self, deadline: &Deadline) -> Result<Option<ConnectOutcome<S>>, Error> {
+        self.inner.wait(deadline)
+    }
 }
 /// Starts `provider.connect` on the native worker pool, admitted under
 /// [`MAX_PENDING_CONNECTIONS`]. The worker receives what the caller's

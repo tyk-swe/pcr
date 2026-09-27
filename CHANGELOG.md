@@ -1256,8 +1256,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 - DNS TCP connects, including UDP fallback, use the admitted native worker
   pool and carry the client's cancellation signal. A stalled connect no
   longer holds the workflow after cancellation or its finite wait expires.
-- TCP connect scans use the client's clock for each attempt's timeout and
-  elapsed evidence. Native route and interface worker waits use wall time
+- DNS TCP waits wake on connection completion, so short attempt windows
+  are available for query I/O instead of being consumed by polling sleeps.
+- TCP connect scans preserve completed connections' verdicts and latency
+  when an earlier event sink is slow. Pending attempts still expire on the
+  client's clock. Native route and interface worker waits use wall time
   even when the caller supplies a frozen clock.
 - Capture activation and timestamp discovery recheck the deadline after
   interface discovery. Unsupported capture paths honor cancellation and

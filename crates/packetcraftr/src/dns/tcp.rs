@@ -343,27 +343,26 @@ where
         Deadline::new(connect_timeout).with_cancellation(request.cancellation.cloned());
     let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
-    let mut stream =
-        loop {
-            let wall_remaining = packetcraftr_netio::deadline::remaining(&connect_deadline)
-                .map_err(|interrupted| match interrupted {
-                    Interrupted::Cancelled(cancelled) => Error::Cancelled(cancelled),
-                    _ => Error::Timeout {
-                        phase: Phase::Connect,
-                        transferred: 0,
-                    },
-                })?;
-            let remaining = remaining(deadline, now(), Phase::Connect, 0)?.min(wall_remaining);
-            if let Some(outcome) = pending
-                .poll()
-                .map_err(|source| map_connect_error(request.endpoint, source))?
-            {
-                break outcome
-                    .result
-                    .map_err(|source| map_connect_error(request.endpoint, source))?;
-            }
-            std::thread::sleep(remaining.min(packetcraftr_netio::deadline::POLL_INTERVAL));
-        };
+    let outcome = pending
+        .wait(&connect_deadline)
+        .map_err(|source| map_connect_error(request.endpoint, source))?;
+    packetcraftr_netio::deadline::remaining(&connect_deadline).map_err(|interrupted| {
+        match interrupted {
+            Interrupted::Cancelled(cancelled) => Error::Cancelled(cancelled),
+            _ => Error::Timeout {
+                phase: Phase::Connect,
+                transferred: 0,
+            },
+        }
+    })?;
+    remaining(deadline, now(), Phase::Connect, 0)?;
+    let mut stream = outcome
+        .ok_or(Error::Timeout {
+            phase: Phase::Connect,
+            transferred: 0,
+        })?
+        .result
+        .map_err(|source| map_connect_error(request.endpoint, source))?;
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "peer socket inspection failed".to_owned(),

@@ -433,28 +433,35 @@ impl<T> Task<T> {
         }
     }
 
+    /// Waits for completion or interruption without consuming the outcome.
+    pub(crate) fn wait_ready(&self, deadline: &Deadline) {
+        loop {
+            let slot = lock(&self.done.slot);
+            if !matches!(*slot, Slot::Running) {
+                return;
+            }
+            let Ok(remaining) = crate::deadline::remaining(deadline) else {
+                return;
+            };
+            // The condvar signals completion; the caller's cancellation
+            // has no waker, so the wait is sliced to notice it.
+            let _ = self
+                .done
+                .finished
+                .wait_timeout(slot, remaining.min(crate::deadline::POLL_INTERVAL))
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
     /// Waits for the outcome until `deadline` ends, following the
     /// [deadline convention](crate::deadline): finished work is reported even
     /// when the deadline is spent.
     #[cfg_attr(not(native_workers), allow(dead_code))]
     pub(crate) fn wait(mut self, deadline: &Deadline) -> Waited<T> {
-        loop {
-            if let Some(outcome) = self.try_take() {
-                return Waited::Finished(outcome);
-            }
-            let Ok(remaining) = crate::deadline::remaining(deadline) else {
-                return Waited::Pending(self);
-            };
-            let slot = lock(&self.done.slot);
-            if matches!(*slot, Slot::Running) {
-                // The condvar signals completion; the caller's cancellation
-                // has no waker, so the wait is sliced to notice it.
-                let _ = self
-                    .done
-                    .finished
-                    .wait_timeout(slot, remaining.min(crate::deadline::POLL_INTERVAL))
-                    .unwrap_or_else(PoisonError::into_inner);
-            }
+        self.wait_ready(deadline);
+        match self.try_take() {
+            Some(outcome) => Waited::Finished(outcome),
+            None => Waited::Pending(self),
         }
     }
 }

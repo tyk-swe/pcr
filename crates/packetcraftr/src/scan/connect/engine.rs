@@ -262,7 +262,7 @@ fn settle_active<S: tcp::Stream>(
         .map_err(|source| execution(active[index].sequence, source))?;
     if let Some(result) = result {
         let entry = active.remove(index);
-        return Ok(Some(finish_probe(entry, result, now)?));
+        return Ok(Some(finish_probe(entry, result)?));
     }
     if now.saturating_duration_since(active[index].started) < active[index].timeout {
         return Ok(None);
@@ -403,9 +403,10 @@ where
 fn finish_probe<S: tcp::Stream>(
     entry: Active<S>,
     result: tcp::ConnectOutcome<S>,
-    now: Instant,
 ) -> Result<ProbeEvidence, Error> {
-    let elapsed = now.saturating_duration_since(entry.started);
+    // Settled attempts keep the worker's completion time; publishing earlier
+    // events can delay observation without extending the socket's latency.
+    let elapsed = result.elapsed;
     let mut probe = ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Bounded reference consumer for the v6 forwarding contract.
+"""Bounded reference consumer for the v6 and v7 forwarding contracts.
 
-This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. Additive fields are accepted; unknown semantic enums are rejected.
-An error envelope is an execution failure, not a forwarding verdict.
+Both schema families carry the same verify-forwarding report shape, so this
+implementation selects the family from the envelope itself: the first record
+of an NDJSON stream (or the one aggregate document) fixes it, and a later
+switch between families is rejected. This validates the protocol and
+forwarding invariants it uses, not the complete JSON Schema. Additive fields
+are accepted; unknown semantic enums are rejected. An error envelope is an
+execution failure, not a forwarding verdict.
 """
 from __future__ import annotations
 
@@ -14,7 +18,9 @@ import json
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v6"
+SCHEMA_V6 = "packetcraftr.output/v6"
+SCHEMA_V7 = "packetcraftr.output/v7"
+SCHEMAS = frozenset({SCHEMA_V6, SCHEMA_V7})
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
 MAX_RULE_DECLARATIONS = 256
@@ -54,7 +60,8 @@ def decode(data: bytes) -> dict[str, Any]:
     except (UnicodeError, ValueError, RecursionError) as error:
         raise ContractError(f"invalid JSON: {error}") from error
     require(isinstance(value, dict), "an envelope must be an object")
-    require(value.get("schema") == SCHEMA, "unsupported schema; explicit migration required")
+    require(value.get("schema") in SCHEMAS,
+            "unsupported schema; explicit migration required")
     require(value.get("command") == "verify-forwarding", "unexpected command")
     return value
 
@@ -231,6 +238,7 @@ def consume(source: BinaryIO, output_format: str, exit_code: int) -> dict[str, A
             require(terminal.get("mode") == "aggregate", "expected aggregate envelope")
         elif output_format == "ndjson":
             terminal = None
+            family = None
             sequence = 0
             total = 0
             while True:
@@ -242,6 +250,9 @@ def consume(source: BinaryIO, output_format: str, exit_code: int) -> dict[str, A
                 require(line.endswith(b"\n"), "truncated NDJSON record")
                 require(terminal is None, "record after terminal event")
                 record = decode(line)
+                if family is None:
+                    family = record["schema"]
+                require(record.get("schema") == family, "schema family changed mid-stream")
                 require(record.get("mode") == "stream", "expected stream envelope")
                 require(type(record.get("sequence")) is int and record["sequence"] == sequence,
                         "non-contiguous stream sequence")

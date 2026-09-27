@@ -36,9 +36,17 @@ All notable changes to PacketcraftR are documented here. The format follows
   its capture-stream remediation; an oversized rules document reports
   `cli.error` instead of `policy.transform_limit`.
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
-  `packetcraftr.output/v6`. Schemas and published examples migrate together.
+  `packetcraftr.output/v7`. Schemas and published examples migrate together.
   DNS questions use one typed list and section counts use `WireValue<u16>`.
   See `docs/migration-unreleased.md`.
+- The v7 output family adds a `split` command result, HTTP `transactions`
+  with a nullable `transaction_summary` and `body_export`, the
+  `http_transaction` NDJSON event with signed header-timing intervals, and a
+  nullable expert `gate`. Until the feature tickets land, runs publish
+  `transactions: []`, `transaction_summary: null`, `body_export: null`, and
+  `gate: null`. The forwarding consumer accepts v6 and v7 with identical
+  semantics, selected by the first stream record, and release archives keep
+  the v6 schema and frozen v6 fixture alongside v7 for archival evidence.
 - Rust APIs now use standard conversion and collection traits. Wire
   constructors become `TryFrom` (`Dns`, `Dhcpv4`, and `Dhcpv6` from
   `Bytes`/`Vec<u8>`/`&[u8]`; `Http` and `Tls` from `&[u8]`; `Tls` also from

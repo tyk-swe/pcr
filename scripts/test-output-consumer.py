@@ -14,6 +14,8 @@ spec = importlib.util.spec_from_file_location("forwarding_consumer", ROOT / "exa
 consumer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(consumer)
 FIXTURE = json.loads((ROOT / "examples/consumers/fixtures/v6-forwarding.json").read_text())
+FIXTURE_V7 = json.loads((ROOT / "examples/consumers/fixtures/v7-forwarding.json").read_text())
+FAMILIES = (("v6", FIXTURE), ("v7", FIXTURE_V7))
 
 
 def encoded(value):
@@ -49,7 +51,57 @@ class ConsumerTests(unittest.TestCase):
         return consumer.consume(io.BytesIO(json.dumps(aggregate).encode()), "json", code)
 
     def test_valid_frozen_consumer_fixture(self):
-        self.assertEqual(self.consume()["verdict"], "pass")
+        for family, fixture in FAMILIES:
+            with self.subTest(family=family):
+                self.assertEqual(self.consume(fixture)["verdict"], "pass")
+
+    def test_both_families_dispatch_identically(self):
+        for family, fixture in FAMILIES:
+            with self.subTest(family=family):
+                self.assertEqual(self.consume(fixture)["verdict"], "pass")
+                self.assertEqual(self.consume_json(fixture)["verdict"], "pass")
+
+    def test_first_stream_record_selects_the_family(self):
+        event = copy.deepcopy(FIXTURE_V7)
+        event["event"] = "event"
+        for family, fixture in FAMILIES:
+            event["schema"] = fixture["schema"]
+            event["sequence"] = 0
+            terminal = copy.deepcopy(fixture)
+            terminal["sequence"] = 1
+            stream = encoded(event) + encoded(terminal)
+            with self.subTest(family=family):
+                result = consumer.consume(io.BytesIO(stream), "ndjson", 0)
+                self.assertEqual(result["verdict"], "pass")
+
+    def test_a_schema_family_switch_mid_stream_is_rejected(self):
+        event = copy.deepcopy(FIXTURE)
+        event["event"] = "event"
+        for first, second in ((FIXTURE, FIXTURE_V7), (FIXTURE_V7, FIXTURE)):
+            event["schema"] = first["schema"]
+            event["sequence"] = 0
+            terminal = copy.deepcopy(second)
+            terminal["sequence"] = 1
+            stream = encoded(event) + encoded(terminal)
+            with self.subTest(first=first["schema"], second=second["schema"]):
+                with self.assertRaisesRegex(consumer.ContractError, "schema family"):
+                    consumer.consume(io.BytesIO(stream), "ndjson", 0)
+
+    def test_v7_mutation_suite(self):
+        mutations = {
+            "prior schema": lambda v: v.update(schema="packetcraftr.output/v5"),
+            "sequence gap": lambda v: v.update(sequence=2),
+            "unknown event": lambda v: v.update(event="finished"),
+            "unknown status": lambda v: v.update(status="okay"),
+            "counter bound": lambda v: v["result"]["summary"].update(checks_satisfied=2**64),
+            "verdict contradiction": lambda v: v["result"]["matches"][0]["checks"][0]["actual"].update(value=63),
+            "rule budget": lambda v: v["result"]["rules"].update(preserve=["x"] * consumer.MAX_RULE_DECLARATIONS),
+        }
+        for name, mutate in mutations.items():
+            invalid = copy.deepcopy(FIXTURE_V7)
+            mutate(invalid)
+            with self.subTest(mutation=name), self.assertRaises(consumer.ContractError):
+                self.consume(invalid)
 
     def test_additive_fields_are_accepted(self):
         value = copy.deepcopy(FIXTURE)
@@ -241,14 +293,16 @@ class ConsumerTests(unittest.TestCase):
             self.consume(code=1)
 
     def test_execution_error_is_not_a_domain_verdict(self):
-        value = {"schema": consumer.SCHEMA, "command": "verify-forwarding", "mode": "stream",
-                 "sequence": 0, "event": "error", "status": "error",
-                 "error": {"code": "policy.duration_limit"}}
-        result = self.consume(value, code=1)
-        self.assertEqual(result["execution"], "error")
-        self.assertIsNone(result["verdict"])
-        with self.assertRaises(consumer.ContractError):
-            self.consume(value, code=0)
+        for schema in sorted(consumer.SCHEMAS):
+            value = {"schema": schema, "command": "verify-forwarding", "mode": "stream",
+                     "sequence": 0, "event": "error", "status": "error",
+                     "error": {"code": "policy.duration_limit"}}
+            with self.subTest(schema=schema):
+                result = self.consume(value, code=1)
+                self.assertEqual(result["execution"], "error")
+                self.assertIsNone(result["verdict"])
+                with self.assertRaises(consumer.ContractError):
+                    self.consume(value, code=0)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,11 @@ pub(crate) use machine::{
     emit_json, emit_published,
 };
 
+// Artifact-committing commands consume the prepared-aggregate seam; unit tests
+// reach it here first.
+#[cfg_attr(not(test), allow(unused_imports))]
+pub(crate) use machine::{PreparedAggregate, prepare_aggregate};
+
 pub(crate) use ndjson::{
     OUTPUT_TIMEOUT_MS, StreamEncoder, stdout_stream, write_unattributed_error,
 };

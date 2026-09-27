@@ -78,6 +78,20 @@ impl EncoderOutput {
     }
 }
 
+/// A serialized terminal record frozen at one encoder's open sequence.
+///
+/// Created by [`StreamEncoder::prepare_complete`] and consumed exactly once by
+/// [`StreamEncoder::publish_prepared_complete`]. The token is opaque and
+/// deliberately not `Clone`: the completion an artifact commit decides to
+/// publish cannot be duplicated, and dropping a prepared record is a no-op.
+// Artifact-committing commands (body export, capture split) consume this seam.
+#[cfg_attr(not(test), expect(dead_code))]
+pub(crate) struct PreparedComplete {
+    output: Arc<Mutex<EncoderOutput>>,
+    sequence: u64,
+    line: Vec<u8>,
+}
+
 /// The single owning encoder for one contiguous NDJSON invocation.
 #[derive(Clone)]
 pub struct StreamEncoder {
@@ -213,6 +227,71 @@ impl StreamEncoder {
         published: Published<T>,
     ) -> Result<(), EncodeError> {
         self.write_success("complete", published, true)
+    }
+
+    /// Serializes the terminal record without writing it, capturing the
+    /// encoder identity, current sequence, command, diagnostics, and one
+    /// resource snapshot so an artifact commit can publish the identical
+    /// record through [`Self::publish_prepared_complete`].
+    ///
+    /// Preparation emits nothing, advances no sequence, and leaves the stream
+    /// open; a discarded preparation therefore keeps ordinary error
+    /// publication at the same sequence available.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn prepare_complete<T: Serialize>(
+        &self,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+    ) -> Result<PreparedComplete, EncodeError> {
+        let Published {
+            result,
+            diagnostics,
+            stats: _,
+        } = Published::new(result, diagnostics);
+        let output = self.lock_output()?;
+        output.require_open()?;
+        let sequence = output.sequence;
+        let mut record = Envelope::record(self.command, sequence, "complete", result, diagnostics);
+        if let Some(observe) = &self.resources {
+            record = record.with_resources(observe());
+        }
+        check_publication_budget(self.deadline.as_deref(), "serialization")?;
+        let line = serialize_line(&record, sequence)?;
+        check_publication_budget(self.deadline.as_deref(), "serialization")?;
+        Ok(PreparedComplete {
+            output: Arc::clone(&self.output),
+            sequence,
+            line,
+        })
+    }
+
+    /// Publishes a completion this same encoder prepared, writing its frozen
+    /// bytes through the ordinary deadline, bounded-writer, flush, and
+    /// terminal machinery without serializing or sampling resources again.
+    ///
+    /// A token prepared by another encoder, at a sequence the stream has
+    /// moved past, or after the stream left the open state fails with
+    /// [`EncodeError::PreparedOutput`].
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn publish_prepared_complete(
+        &self,
+        prepared: PreparedComplete,
+    ) -> Result<(), EncodeError> {
+        if !Arc::ptr_eq(&self.output, &prepared.output) {
+            return Err(EncodeError::PreparedOutput);
+        }
+        let mut output = self.lock_output()?;
+        if output.state != EncoderState::Open || output.sequence != prepared.sequence {
+            return Err(EncodeError::PreparedOutput);
+        }
+        write_line(
+            &mut output,
+            prepared.line,
+            prepared.sequence,
+            EncoderState::Complete,
+            self.deadline.as_deref(),
+            None,
+        )
     }
 
     pub fn emit_error(&self, error: Error) -> Result<(), EncodeError> {
@@ -465,6 +544,8 @@ pub enum EncodeError {
     Terminal,
     #[error("NDJSON stream output has already failed")]
     Failed,
+    #[error("a prepared completion does not match this encoder or its current sequence")]
+    PreparedOutput,
     #[error("NDJSON stream state lock was poisoned")]
     Poisoned,
     #[error("NDJSON sequence overflowed")]
@@ -505,6 +586,13 @@ impl Classified for EncodeError {
                 "io.stdout",
                 Kind::Io,
                 Some("inspect the output sink and account for records already written"),
+            ),
+            Self::PreparedOutput => Classification::new(
+                "internal.prepared_output",
+                Kind::Internal,
+                Some(
+                    "prepare the completion from this same encoder while its sequence is unchanged",
+                ),
             ),
             _ => Classification::new(
                 "internal.ndjson_stream",

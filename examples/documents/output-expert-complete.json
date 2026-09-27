@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "expert",
   "mode": "stream",
   "sequence": 0,
@@ -62,7 +62,8 @@
       ],
       "outcomes": [],
       "outcomes_omitted": 0
-    }
+    },
+    "gate": null
   },
   "diagnostics": []
 }

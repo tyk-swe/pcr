@@ -249,6 +249,7 @@ jobs:
               "examples/documents/output-replay-bit-rate-success.json",
               "examples/consumers/forwarding.py",
               "examples/consumers/fixtures/v6-forwarding.json",
+              "examples/consumers/fixtures/v7-forwarding.json",
           )
           for source in map(pathlib.Path, assets):
               destination = staging / source

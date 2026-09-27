@@ -1,0 +1,51 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "split",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "format": "pcapng",
+    "compression": "none",
+    "directory": "capture-parts",
+    "frames_per_file": 3,
+    "frames_read": 7,
+    "captured_bytes_read": 812,
+    "metadata_records": 2,
+    "metadata_bytes": 64,
+    "decoded_bytes_written": 812,
+    "encoded_bytes_written": 1496,
+    "files": [
+      {
+        "index": 1,
+        "file": "part-000001.pcapng",
+        "first_frame": 1,
+        "last_frame": 3,
+        "frames": 3,
+        "captured_bytes": 348,
+        "decoded_bytes": 348,
+        "encoded_bytes": 480
+      },
+      {
+        "index": 2,
+        "file": "part-000002.pcapng",
+        "first_frame": 4,
+        "last_frame": 6,
+        "frames": 3,
+        "captured_bytes": 348,
+        "decoded_bytes": 348,
+        "encoded_bytes": 480
+      },
+      {
+        "index": 3,
+        "file": "part-000003.pcapng",
+        "first_frame": 7,
+        "last_frame": 7,
+        "frames": 1,
+        "captured_bytes": 116,
+        "decoded_bytes": 116,
+        "encoded_bytes": 536
+      }
+    ]
+  },
+  "diagnostics": []
+}

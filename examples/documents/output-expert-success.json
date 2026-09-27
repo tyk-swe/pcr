@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "expert",
   "mode": "aggregate",
   "status": "success",
@@ -86,7 +86,8 @@
       ],
       "outcomes": [],
       "outcomes_omitted": 0
-    }
+    },
+    "gate": null
   },
   "diagnostics": []
 }

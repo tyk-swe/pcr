@@ -303,7 +303,7 @@ proptest! {
         prop_assert_eq!(records.len(), count);
         for (sequence, record) in records.iter().enumerate() {
             prop_assert_eq!(record["sequence"].as_u64(), Some(sequence as u64));
-            prop_assert_eq!(&record["schema"], "packetcraftr.output/v6");
+            prop_assert_eq!(&record["schema"], "packetcraftr.output/v7");
             prop_assert_eq!(&record["command"], command.as_str());
             let terminal = matches!(record["event"].as_str(), Some("complete" | "error"));
             prop_assert_eq!(terminal, sequence + 1 == records.len());
@@ -503,4 +503,271 @@ fn extended_wait_accepts_a_slow_writer_and_cleanup_uses_its_own_ceiling() {
     assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
     release.send(()).unwrap();
     assert!(!stream.is_complete());
+}
+
+fn resource_report_fixture() -> crate::output::resources::Report {
+    crate::output::resources::Report {
+        settings: Vec::new(),
+        workers: Vec::new(),
+        cooperative_deadlines: true,
+        hard_rss_limit: false,
+    }
+}
+
+#[test]
+fn preparing_writes_nothing_and_freezes_sequence_command_diagnostics_and_resources() {
+    let observations = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&observations);
+    let output = SharedBuffer::default();
+    let stream =
+        StreamEncoder::new(Command::Expert, output.clone()).with_resource_diagnostics(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            resource_report_fixture()
+        });
+    stream
+        .emit_data(TestRecord(serde_json::json!({"finding": 1})), Vec::new())
+        .unwrap();
+    let written = output.bytes().len();
+    let sampled = observations.load(Ordering::SeqCst);
+
+    let prepared = stream
+        .prepare_complete(
+            serde_json::json!({"report": "frozen"}),
+            vec![PacketDiagnostic::warning("fixture.note", "prepared")],
+        )
+        .expect("open stream prepares");
+
+    assert_eq!(
+        output.bytes().len(),
+        written,
+        "preparation performs no writes"
+    );
+    assert_eq!(
+        observations.load(Ordering::SeqCst),
+        sampled + 1,
+        "preparation samples resources exactly once"
+    );
+    assert!(stream.is_open());
+    assert!(!stream.is_terminal());
+
+    stream
+        .publish_prepared_complete(prepared)
+        .expect("unchanged stream publishes its prepared record");
+    assert_eq!(
+        observations.load(Ordering::SeqCst),
+        sampled + 1,
+        "publication reuses the frozen snapshot instead of sampling again"
+    );
+    let records = output.records();
+    crate::test_support::assert_contiguous(&records);
+    assert_eq!(records.len(), 2);
+    let record = &records[1];
+    assert_eq!(record["sequence"], 1);
+    assert_eq!(record["command"], "expert");
+    assert_eq!(record["event"], "complete");
+    assert_eq!(record["status"], "success");
+    assert_eq!(record["result"], serde_json::json!({"report": "frozen"}));
+    assert_eq!(record["diagnostics"][0]["code"], "fixture.note");
+    assert_eq!(record["resources"]["cooperative_deadlines"], true);
+    assert!(stream.is_complete());
+}
+
+#[test]
+fn a_published_prepared_record_is_byte_identical_to_complete() {
+    let result = serde_json::json!({"parts": [1, 2, 3]});
+    let diagnostics = vec![PacketDiagnostic::info("fixture.note", "same")];
+
+    let direct_output = SharedBuffer::default();
+    let direct = StreamEncoder::new(Command::Merge, direct_output.clone());
+    direct
+        .complete(result.clone(), diagnostics.clone())
+        .unwrap();
+
+    let prepared_output = SharedBuffer::default();
+    let stream = StreamEncoder::new(Command::Merge, prepared_output.clone());
+    let prepared = stream.prepare_complete(result, diagnostics).unwrap();
+    stream.publish_prepared_complete(prepared).unwrap();
+
+    let bytes = prepared_output.bytes();
+    assert_eq!(bytes.last(), Some(&b'\n'));
+    assert_eq!(bytes, direct_output.bytes());
+}
+
+#[test]
+fn a_prepared_completion_rejects_another_encoder() {
+    let first = StreamEncoder::new(Command::Read, SharedBuffer::default());
+    let second_output = SharedBuffer::default();
+    let second = StreamEncoder::new(Command::Read, second_output.clone());
+    let prepared = first.prepare_complete((), Vec::new()).unwrap();
+
+    let error = second.publish_prepared_complete(prepared).unwrap_err();
+    assert!(matches!(error, EncodeError::PreparedOutput));
+    let classification = error.classification();
+    assert_eq!(classification.code, "internal.prepared_output");
+    assert_eq!(classification.kind, Kind::Internal);
+    assert!(second_output.bytes().is_empty());
+    assert!(second.is_open());
+    // A failed foreign publish neither writes nor terminates either stream.
+    first.complete((), Vec::new()).unwrap();
+    second.emit_error(fixture_error()).unwrap();
+}
+
+#[test]
+fn a_prepared_completion_rejects_a_clone_of_another_encoder_but_accepts_its_own() {
+    let foreign = StreamEncoder::new(Command::Read, SharedBuffer::default());
+    let foreign_clone = foreign.clone();
+    let output = SharedBuffer::default();
+    let stream = StreamEncoder::new(Command::Read, output.clone());
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    assert!(matches!(
+        foreign_clone.publish_prepared_complete(prepared),
+        Err(EncodeError::PreparedOutput)
+    ));
+    // Clones share one encoder identity, so the same stream's clone may publish.
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    stream.clone().publish_prepared_complete(prepared).unwrap();
+    assert!(stream.is_complete());
+}
+
+#[test]
+fn a_prepared_completion_rejects_a_moved_or_terminal_stream() {
+    let output = SharedBuffer::default();
+    let stream = StreamEncoder::new(Command::Read, output.clone());
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    stream.emit_data(TestRecord(()), Vec::new()).unwrap();
+    assert!(matches!(
+        stream.publish_prepared_complete(prepared),
+        Err(EncodeError::PreparedOutput)
+    ));
+    // The stream stays usable: it still completes at the live sequence.
+    stream.complete((), Vec::new()).unwrap();
+    let records = output.records();
+    crate::test_support::assert_contiguous(&records);
+    assert_eq!(records[1]["event"], "complete");
+
+    let stream = StreamEncoder::new(Command::Read, SharedBuffer::default());
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    stream.complete((), Vec::new()).unwrap();
+    assert!(matches!(
+        stream.publish_prepared_complete(prepared),
+        Err(EncodeError::PreparedOutput)
+    ));
+    assert!(matches!(
+        stream.prepare_complete((), Vec::new()),
+        Err(EncodeError::Terminal)
+    ));
+}
+
+#[test]
+fn a_discarded_preparation_keeps_error_publication_at_the_same_sequence() {
+    let output = SharedBuffer::default();
+    let stream = StreamEncoder::new(Command::Read, output.clone());
+    stream.emit_data(TestRecord(()), Vec::new()).unwrap();
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    drop(prepared);
+    stream.emit_error(fixture_error()).unwrap();
+    let records = output.records();
+    crate::test_support::assert_contiguous(&records);
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["event"], "error");
+}
+
+#[test]
+fn prepared_complete_checks_the_deadline_before_and_after_serialization() {
+    let now = Instant::now();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let expired =
+        StreamEncoder::new(Command::Read, SharedBuffer::default()).with_deadline(Arc::new(
+            Deadline::with_time_source(Duration::from_secs(1), move || {
+                // Construction samples the clock once and lock acquisition checks
+                // once; the pre-serialization check then sees a spent budget.
+                if counted.fetch_add(1, Ordering::SeqCst) < 2 {
+                    now
+                } else {
+                    now + Duration::from_secs(2)
+                }
+            }),
+        ));
+    let Err(error) = expired.prepare_complete((), Vec::new()) else {
+        panic!("an expired deadline must reject preparation");
+    };
+    assert!(matches!(
+        error,
+        EncodeError::Deadline {
+            phase: "serialization",
+            ..
+        }
+    ));
+    assert!(expired.is_open());
+
+    let spent = Arc::new(AtomicBool::new(false));
+    let observed = spent.clone();
+    let now = Instant::now();
+    let deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+        if observed.load(Ordering::Acquire) {
+            now + Duration::from_secs(2)
+        } else {
+            now
+        }
+    });
+    let output = SharedBuffer::default();
+    let owner = StreamEncoder::new(Command::Read, output.clone());
+    let stream = owner.clone().with_deadline(Arc::new(deadline));
+    let Err(error) = stream.prepare_complete(SpendDuringSerialization(spent), Vec::new()) else {
+        panic!("serialization spending the budget must reject preparation");
+    };
+    assert!(matches!(
+        error,
+        EncodeError::Deadline {
+            phase: "serialization",
+            ..
+        }
+    ));
+    assert!(output.bytes().is_empty());
+    assert!(stream.is_open());
+    // A failed preparation leaves error publication at the same sequence, here
+    // through a handle without the spent deadline.
+    owner.emit_error(fixture_error()).unwrap();
+    assert_eq!(output.records()[0]["event"], "error");
+}
+
+#[test]
+fn a_prepared_record_over_the_record_ceiling_fails_without_writing() {
+    let oversized = "x".repeat(MAX_RECORD_BYTES);
+    let output = SharedBuffer::default();
+    let stream = StreamEncoder::new(Command::Read, output.clone());
+    let Err(error) = stream.prepare_complete(serde_json::json!({"blob": oversized}), Vec::new())
+    else {
+        panic!("an oversized record must reject preparation");
+    };
+    assert!(matches!(
+        error,
+        EncodeError::RecordLimit { sequence: 0, .. }
+    ));
+    assert!(output.bytes().is_empty());
+    assert!(stream.is_open());
+    stream.complete((), Vec::new()).unwrap();
+}
+
+#[test]
+fn prepared_publish_uses_the_ordinary_terminal_write_and_flush_rules() {
+    let stream = StreamEncoder::new(
+        Command::Read,
+        FailAfter {
+            remaining: 0,
+            fail_flush: false,
+        },
+    );
+    let prepared = stream.prepare_complete((), Vec::new()).unwrap();
+    assert!(matches!(
+        stream.publish_prepared_complete(prepared),
+        Err(EncodeError::Write { sequence: 0, .. })
+    ));
+    assert!(!stream.is_open());
+    assert!(!stream.is_terminal());
+    assert!(matches!(
+        stream.complete((), Vec::new()),
+        Err(EncodeError::Failed)
+    ));
 }

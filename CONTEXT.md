@@ -42,6 +42,37 @@ output. Kinds are neutral (usage, packet, capability, I/O, policy, internal);
 the CLI decides how each kind is published.
 _Avoid_: CLI kind (for usage failures raised by libraries)
 
+### Offline investigation
+
+**Capture part**:
+A capture containing one contiguous range of the source's physical frames,
+with the source metadata needed to interpret those frames. Its frames retain
+their captured bytes and capture scope.
+_Avoid_: fragment (an IP concept), reconstructed capture
+
+**HTTP transaction**:
+An observed association between HTTP request and response headers, including
+informational responses or the absence of a captured counterpart. Header
+association alone says nothing about body completeness.
+_Avoid_: exchange (the policy-gated live operation), successful request
+
+**Header availability**:
+The capture observation at which an HTTP header boundary becomes available
+to analysis. The interval between two such observations is a capture-observed
+interval, not a measurement of server processing time.
+_Avoid_: RTT, server latency, first-byte wire time
+
+**HTTP body artifact**:
+The bytes of one completed HTTP message body after removing HTTP chunk
+framing, with content encodings and remaining transfer codings preserved.
+_Avoid_: decoded file, reconstructed download
+
+**Analysis gate**:
+A declared predicate over the findings and frame coverage of a completed
+offline analysis. A passing gate establishes that predicate for the selected
+evidence, not the health or completeness of the observed network.
+_Avoid_: network health verdict, error (for a completed failing gate)
+
 ### Resources
 
 **Limit**:

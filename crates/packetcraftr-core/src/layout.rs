@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Byte-level packet layouts and the default ceilings on a packet's shape.
+//! Byte-level packet layouts.
 
 use serde::Serialize;
-
-pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
-pub const DEFAULT_MAX_LAYERS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ByteRange {

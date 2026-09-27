@@ -127,7 +127,7 @@ fn matches(decoded: &decode::DecodedPacket, source: &str) -> bool {
     Filter::compile(
         source,
         &registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .unwrap_or_else(|error| panic!("{source} must compile: {error}"))
     .matches(&FilterContext {

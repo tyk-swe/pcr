@@ -11,7 +11,7 @@ use crate::layer::{Layer, Padding};
 
 mod limits;
 mod link;
-pub use limits::Limits;
+pub use limits::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE, Limits};
 pub use link::{MacAddress, VlanKind, VlanTag};
 
 /// Exactly one ordered, arbitrary wire stack.

@@ -6,8 +6,8 @@
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
-use packetcraftr_core::expression::{self, Options as ExprOptions};
-use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as FilterOptions};
+use packetcraftr_core::expression::{self, Limits as ExprLimits};
+use packetcraftr_core::filter::{Context as FilterContext, Filter, Limits as FilterLimits};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::builtin;
 use std::time::SystemTime;
@@ -25,14 +25,14 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let registry = builtin::registry();
-    let options = FilterOptions {
+    let limits = FilterLimits {
         max_bytes: 4096,
         max_nesting: 16,
         max_terms: 32,
         max_set_members: 32,
     };
 
-    if let Ok(compiled) = Filter::compile(text, &registry, options) {
+    if let Ok(compiled) = Filter::compile(text, &registry, limits) {
         let dissector = Dissector::new(registry.clone());
         let decode_options = DecodeOptions {
             limits: packetcraftr_core::packet::Limits {
@@ -58,10 +58,10 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
-    let expr_options = ExprOptions {
+    let expr_limits = ExprLimits {
         max_bytes: 4096,
         max_layers: 16,
         max_nesting: 16,
     };
-    let _ = expression::parse(text, &registry, expr_options);
+    let _ = expression::parse(text, &registry, expr_limits);
 });

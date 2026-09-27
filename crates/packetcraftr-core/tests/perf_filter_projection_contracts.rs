@@ -22,7 +22,7 @@ use bytes::Bytes;
 use packetcraftr_core::decode::{self, DecodedPacket};
 use packetcraftr_core::field::{self, FieldValue};
 use packetcraftr_core::filter::{
-    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection,
+    Context, DerivedPacket, Error, Filter, Limits, MAX_FILTER_TERMS, Projection,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw, Schema};
@@ -192,7 +192,7 @@ fn context(decoded: &DecodedPacket) -> Context<'_> {
 
 /// Compiles `source`, which must be a valid filter for the fixture registry.
 fn compiled(source: &str) -> Filter {
-    Filter::compile(source, &registry(), Options::default())
+    Filter::compile(source, &registry(), Limits::default())
         .unwrap_or_else(|error| panic!("{source} must compile: {error}"))
 }
 
@@ -411,7 +411,7 @@ fn unreachable_branches_are_still_validated_at_compile_time() {
         "!(ipv4.nosuchfield == 1) && udp",
         "udp && !nosuchproto.field",
     ] {
-        let error = Filter::compile(source, &registry(), Options::default())
+        let error = Filter::compile(source, &registry(), Limits::default())
             .expect_err("dead branches must still validate");
         assert!(
             error.to_string().contains("unknown"),
@@ -622,17 +622,17 @@ fn seeded_deep_expressions_match_per_leaf_semantics() {
 fn parser_limits_long_chains_and_nested_not_hold() {
     // Term and nesting ceilings accept exactly at the limit and reject above.
     let at_terms = vec!["ipv4"; MAX_FILTER_TERMS].join(" && ");
-    assert!(Filter::compile(&at_terms, &registry(), Options::default()).is_ok());
+    assert!(Filter::compile(&at_terms, &registry(), Limits::default()).is_ok());
     let over_terms = vec!["ipv4"; MAX_FILTER_TERMS + 1].join(" && ");
     assert!(matches!(
-        Filter::compile(&over_terms, &registry(), Options::default()),
+        Filter::compile(&over_terms, &registry(), Limits::default()),
         Err(Error::TermLimit { .. })
     ));
     let at_nesting = format!("{}ipv4{}", "(".repeat(64), ")".repeat(64));
-    assert!(Filter::compile(&at_nesting, &registry(), Options::default()).is_ok());
+    assert!(Filter::compile(&at_nesting, &registry(), Limits::default()).is_ok());
     let over_nesting = format!("{}ipv4{}", "(".repeat(65), ")".repeat(65));
     assert!(matches!(
-        Filter::compile(&over_nesting, &registry(), Options::default()),
+        Filter::compile(&over_nesting, &registry(), Limits::default()),
         Err(Error::NestingLimit { .. })
     ));
 
@@ -675,7 +675,7 @@ fn parser_limits_long_chains_and_nested_not_hold() {
         "ipv4 &&& ipv4",
     ] {
         assert!(
-            Filter::compile(malformed, &registry(), Options::default()).is_err(),
+            Filter::compile(malformed, &registry(), Limits::default()).is_err(),
             "{malformed} must not compile"
         );
     }
@@ -1126,7 +1126,7 @@ fn perf_compile_cost() {
     let typical = "ipv4.source in 192.0.2.0/24 && tcp.dstport == 80 || udp.port in {53, 5353}";
     let start = Instant::now();
     for _ in 0..200 {
-        black_box(Filter::compile(&max, &registry, Options::default()).expect("compiles"));
+        black_box(Filter::compile(&max, &registry, Limits::default()).expect("compiles"));
     }
     eprintln!(
         "compile_max_terms: {:?} over 200 compilations",
@@ -1135,9 +1135,9 @@ fn perf_compile_cost() {
     let start = Instant::now();
     for _ in 0..2_000 {
         black_box(
-            Filter::compile(nested.as_str(), &registry, Options::default()).expect("compiles"),
+            Filter::compile(nested.as_str(), &registry, Limits::default()).expect("compiles"),
         );
-        black_box(Filter::compile(typical, &registry, Options::default()).expect("compiles"));
+        black_box(Filter::compile(typical, &registry, Limits::default()).expect("compiles"));
     }
     eprintln!(
         "compile_typical_and_nested: {:?} over 4000 compilations",

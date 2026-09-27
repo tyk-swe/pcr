@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use super::reflection::{dns_layout, dns_schema};
-use super::{DecodeLimits, Dns, Error};
+use super::{Dns, Error, Limits};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
@@ -34,7 +34,7 @@ impl TryFrom<Bytes> for Dns {
 
     /// Parses a complete DNS message under the default bounded decoder limits.
     fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
-        Self::from_wire_with_limits(wire, DecodeLimits::default())
+        Self::from_wire_with_limits(wire, Limits::default())
     }
 }
 
@@ -50,7 +50,7 @@ impl TryFrom<&[u8]> for Dns {
     type Error = Error;
 
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
-        let maximum = DecodeLimits::default().max_message_bytes;
+        let maximum = Limits::default().max_message_bytes;
         if wire.len() > maximum {
             return Err(Error::MessageTooLarge {
                 actual: wire.len(),
@@ -65,10 +65,7 @@ impl Dns {
     /// Decodes every declared section while retaining the complete original
     /// wire. Malformed or truncated data returns a typed failure, never an
     /// invented record. OPT records remain in their original section.
-    pub fn from_wire_with_limits(
-        wire: impl Into<Bytes>,
-        limits: DecodeLimits,
-    ) -> Result<Self, Error> {
+    pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
         decode::decode(wire.into(), limits)
     }
 
@@ -85,12 +82,12 @@ impl Dns {
         }
         Self::from_wire_with_limits(
             self.wire.clone(),
-            DecodeLimits {
+            Limits {
                 max_records: 4096,
                 max_name_pointers: 128,
                 max_txt_strings: 4096,
                 max_txt_bytes: 65_535,
-                ..DecodeLimits::default()
+                ..Limits::default()
             },
         )
         .is_ok_and(|parsed| {

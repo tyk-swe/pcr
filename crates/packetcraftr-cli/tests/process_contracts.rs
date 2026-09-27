@@ -825,7 +825,7 @@ fn dissect_enforces_configurable_decode_budgets() {
 
 #[test]
 fn dissect_uses_the_packet_budget_for_file_and_stdin_reads() {
-    let default_packet_size = packetcraftr_core::layout::DEFAULT_MAX_PACKET_SIZE;
+    let default_packet_size = packetcraftr_core::packet::DEFAULT_MAX_PACKET_SIZE;
     let packet_size = default_packet_size + 1;
     let packet_size_arg = packet_size.to_string();
     let frame = vec![0; packet_size];

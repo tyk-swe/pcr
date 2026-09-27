@@ -59,14 +59,14 @@ impl TemplateArgs {
                 "--max-template-packets must be non-zero",
             ));
         }
-        let options = expression::Options::default();
+        let limits = expression::Limits::default();
         let mut bytes = 0_usize;
         for axis in &self.axes {
             bytes = bytes.saturating_add(axis.len());
-            if bytes > options.max_bytes {
+            if bytes > limits.max_bytes {
                 return Err(CliError::classified(expression::Error::SizeLimit {
                     actual: bytes,
-                    limit: options.max_bytes,
+                    limit: limits.max_bytes,
                 }));
             }
         }
@@ -91,7 +91,7 @@ impl TemplateArgs {
             // a bracketed expression list. Range lengths count arithmetically so
             // oversized spans fail on the ceiling before any value materializes.
             let (source, axis_len) = if values.starts_with('[') {
-                let FieldValue::List(values) = expression::parse_value(values, options.clone())
+                let FieldValue::List(values) = expression::parse_value(values, limits.clone())
                     .map_err(CliError::classified)?
                 else {
                     return Err(syntax());
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn axes_share_the_input_byte_ceiling_before_parsing_any_values() {
-        let half = expression::Options::default().max_bytes / 2;
+        let half = expression::Limits::default().max_bytes / 2;
         let source = format!("0.label=[\"{}\"]", "x".repeat(half));
         let error = TemplateArgs {
             axes: vec![source.clone(), source],

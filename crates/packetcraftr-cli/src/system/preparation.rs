@@ -111,7 +111,7 @@ pub(crate) fn prepare_live<R: LiveRequest>(
     let packet = read_recipe(
         send.route.recipe,
         &registry,
-        core::layout::DEFAULT_MAX_LAYERS,
+        core::packet::DEFAULT_MAX_LAYERS,
     )?;
     request.set_template(axes.into_template(packet));
     let policy = send.policy.into_policy();
@@ -161,7 +161,7 @@ pub(crate) fn prepare_plan(
         route,
     } = arguments;
     let registry = core::protocol::builtin::registry();
-    let packet = read_recipe(recipe, &registry, core::layout::DEFAULT_MAX_LAYERS)?;
+    let packet = read_recipe(recipe, &registry, core::packet::DEFAULT_MAX_LAYERS)?;
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy
@@ -266,7 +266,7 @@ mod tests {
             payload_file: None,
         };
         let registry = core::protocol::builtin::registry();
-        match read_recipe(recipe, &registry, core::layout::DEFAULT_MAX_LAYERS) {
+        match read_recipe(recipe, &registry, core::packet::DEFAULT_MAX_LAYERS) {
             Ok(_) => panic!("recipe must be invalid"),
             Err(error) => error.message,
         }

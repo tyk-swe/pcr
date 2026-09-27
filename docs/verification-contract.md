@@ -103,7 +103,7 @@ rule identity and is rejected. This is misuse prevention, not cryptographic
 attestation of a caller's input.
 
 `verify` now returns `forwarding::Error`. Use `verify_with_limits` for explicit
-`VerifyLimits` and an optional shared `Deadline`. `Declarations` groups value
+`forwarding::Limits` and an optional shared `Deadline`. `Declarations` groups value
 and presence/absence rules. Total declaration count and source bytes are bounded.
 Observation getters expose read-only evidence; hand-built observation literals
 are no longer supported. Adding `plan` and `deadline` to `analysis::Options`

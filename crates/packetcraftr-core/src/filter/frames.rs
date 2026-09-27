@@ -139,12 +139,12 @@ mod tests {
 
     use super::*;
     use crate::error::Classified;
-    use crate::filter::Options;
+    use crate::filter::Limits;
     use crate::frame::LinkType;
     use crate::protocol::builtin;
 
     fn compile(source: &str, registry: &Registry) -> Filter {
-        Filter::compile(source, registry, Options::default()).expect("fixture filter compiles")
+        Filter::compile(source, registry, Limits::default()).expect("fixture filter compiles")
     }
 
     fn ethernet_frame() -> Frame {

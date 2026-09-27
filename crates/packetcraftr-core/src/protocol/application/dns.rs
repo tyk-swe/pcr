@@ -15,13 +15,13 @@ pub(crate) use codec::DnsCodec;
 pub use codec::decode_name;
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
-/// Largest accepted [`DecodeLimits::max_message_bytes`] and
-/// [`DecodeLimits::max_txt_bytes`]: one DNS message.
+/// Largest accepted [`Limits::max_message_bytes`] and
+/// [`Limits::max_txt_bytes`]: one DNS message.
 pub const MAX_MESSAGE_BYTES: usize = 65_535;
-/// Largest accepted [`DecodeLimits::max_records`] and
-/// [`DecodeLimits::max_txt_strings`].
+/// Largest accepted [`Limits::max_records`] and
+/// [`Limits::max_txt_strings`].
 pub const MAX_RECORDS: usize = 4_096;
-/// Largest accepted [`DecodeLimits::max_name_pointers`].
+/// Largest accepted [`Limits::max_name_pointers`].
 pub const MAX_NAME_POINTERS: usize = 128;
 /// The largest label a name may carry, in octets (RFC 1035 §2.3.4).
 pub const MAX_LABEL_LEN: usize = 63;
@@ -30,17 +30,17 @@ pub const MAX_LABEL_LEN: usize = 63;
 pub const MAX_NAME_LEN: usize = 255;
 
 /// Per-message resource bounds. Each is at most its `MAX_*` constant, and a
-/// message may carry at most 64 questions. [`DecodeLimits::validate`] refuses
+/// message may carry at most 64 questions. [`Limits::validate`] refuses
 /// a larger limit rather than lowering it; zero permits none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DecodeLimits {
+pub struct Limits {
     pub max_message_bytes: usize,
     pub max_records: usize,
     pub max_name_pointers: usize,
     pub max_txt_strings: usize,
     pub max_txt_bytes: usize,
 }
-impl DecodeLimits {
+impl Limits {
     /// Rejects a limit above its `MAX_*` constant.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
@@ -69,7 +69,7 @@ impl DecodeLimits {
         Ok(())
     }
 }
-impl Default for DecodeLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_message_bytes: MAX_MESSAGE_BYTES,
@@ -149,7 +149,7 @@ pub enum Error {
     TxtByteLimit { limit: usize },
     #[error("DNS message has {remaining} trailing byte(s) after declared sections")]
     TrailingBytes { remaining: usize },
-    /// A configured [`DecodeLimits`] field above its ceiling.
+    /// A configured [`Limits`] field above its ceiling.
     #[error("DNS limit {field}={value} exceeds the maximum of {maximum}")]
     InvalidLimit {
         field: &'static str,

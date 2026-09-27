@@ -4,22 +4,22 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::frame::{DEFAULT_SIZE_LIMIT, LinkType};
+use crate::frame::{DEFAULT_MAX_SIZE, LinkType};
 
 use super::error::Error;
 
 /// Default maximum number of interface descriptions retained per PCAPNG section.
-pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
+pub const DEFAULT_MAX_INTERFACES_PER_SECTION: usize = 4_096;
 /// Default maximum interface descriptions retained across all PCAPNG sections.
-pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
+pub const DEFAULT_MAX_TOTAL_INTERFACES: usize = 65_536;
 /// Default maximum metadata blocks consumed before one packet is returned.
-pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
+pub const DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME: usize = 4_096;
 /// Default maximum metadata bytes consumed before one packet is returned.
-pub const DEFAULT_METADATA_BYTE_LIMIT: usize = 64 * 1024 * 1024;
+pub const DEFAULT_MAX_METADATA_BYTES_PER_FRAME: usize = 64 * 1024 * 1024;
 /// Default maximum frames accepted by one streaming capture writer or copy.
-pub const DEFAULT_STREAM_FRAMES: u64 = 10_000;
+pub const DEFAULT_MAX_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
-pub const DEFAULT_STREAM_BYTES: u64 = 256 * 1024 * 1024;
+pub const DEFAULT_MAX_STREAM_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Aggregate frame and captured-byte ceilings for a streaming capture operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,8 +31,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_frames: DEFAULT_STREAM_FRAMES,
-            max_bytes: DEFAULT_STREAM_BYTES,
+            max_frames: DEFAULT_MAX_STREAM_FRAMES,
+            max_bytes: DEFAULT_MAX_STREAM_BYTES,
         }
     }
 }
@@ -189,11 +189,11 @@ pub struct ReaderLimits {
 impl Default for ReaderLimits {
     fn default() -> Self {
         Self {
-            max_size: DEFAULT_SIZE_LIMIT,
-            max_interfaces_per_section: DEFAULT_INTERFACE_LIMIT,
-            max_total_interfaces: DEFAULT_TOTAL_INTERFACE_LIMIT,
-            max_metadata_blocks_per_frame: DEFAULT_METADATA_BLOCK_LIMIT,
-            max_metadata_bytes_per_frame: DEFAULT_METADATA_BYTE_LIMIT,
+            max_size: DEFAULT_MAX_SIZE,
+            max_interfaces_per_section: DEFAULT_MAX_INTERFACES_PER_SECTION,
+            max_total_interfaces: DEFAULT_MAX_TOTAL_INTERFACES,
+            max_metadata_blocks_per_frame: DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME,
+            max_metadata_bytes_per_frame: DEFAULT_MAX_METADATA_BYTES_PER_FRAME,
         }
     }
 }
@@ -234,8 +234,8 @@ impl Default for PcapOptions {
         Self {
             endianness: Endianness::Little,
             timestamp_resolution: TimestampResolution::Decimal(9),
-            snap_len: DEFAULT_SIZE_LIMIT,
-            max_size: DEFAULT_SIZE_LIMIT,
+            snap_len: DEFAULT_MAX_SIZE,
+            max_size: DEFAULT_MAX_SIZE,
             stream_limits: Limits::default(),
         }
     }
@@ -272,8 +272,8 @@ impl Default for PcapNgOptions {
     fn default() -> Self {
         Self {
             endianness: Endianness::Little,
-            max_size: DEFAULT_SIZE_LIMIT,
-            max_interfaces: DEFAULT_INTERFACE_LIMIT,
+            max_size: DEFAULT_MAX_SIZE,
+            max_interfaces: DEFAULT_MAX_INTERFACES_PER_SECTION,
             stream_limits: Limits::default(),
         }
     }

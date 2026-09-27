@@ -45,7 +45,7 @@ pub(crate) fn compile(
     let filter = Filter::compile(
         source,
         registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .map_err(CliError::classified)?;
     if filter.requirements().stream_index && !capabilities.stream_index {

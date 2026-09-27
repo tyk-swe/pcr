@@ -10,7 +10,7 @@ use common::registry;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::filter::{Context, Error, Filter, Options};
+use packetcraftr_core::filter::{Context, Error, Filter, Limits};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::link::Ethernet;
@@ -115,7 +115,7 @@ fn context(decoded: &decode::DecodedPacket) -> Context<'_> {
 fn assert_filters(decoded: &decode::DecodedPacket, cases: &[(&str, bool)]) {
     let registry = registry();
     for (source, expected) in cases {
-        let filter = Filter::compile(source, &registry, Options::default())
+        let filter = Filter::compile(source, &registry, Limits::default())
             .unwrap_or_else(|error| panic!("{source} must compile: {error}"));
         let matched = filter
             .matches(&context(decoded))
@@ -127,7 +127,7 @@ fn assert_filters(decoded: &decode::DecodedPacket, cases: &[(&str, bool)]) {
 fn assert_rejected(cases: &[(&str, &str)]) {
     let registry = registry();
     for (source, expected) in cases {
-        let error = match Filter::compile(source, &registry, Options::default()) {
+        let error = match Filter::compile(source, &registry, Limits::default()) {
             Ok(_) => panic!("{source} must not compile"),
             Err(error) => error,
         };
@@ -319,7 +319,7 @@ fn frame_and_stream_facts_are_reserved_and_read_from_the_caller() {
         ],
     );
 
-    let udp_only = Filter::compile("udp.stream == 3", &registry(), Options::default())
+    let udp_only = Filter::compile("udp.stream == 3", &registry(), Limits::default())
         .expect("stream filter compiles");
     let requirements = udp_only.requirements();
     assert!(requirements.stream_index);
@@ -329,7 +329,7 @@ fn frame_and_stream_facts_are_reserved_and_read_from_the_caller() {
     assert!(requirements.udp_stream);
     assert!(!requirements.tcp_stream);
 
-    let filter = Filter::compile("frame.time_epoch >= 0", &registry(), Options::default())
+    let filter = Filter::compile("frame.time_epoch >= 0", &registry(), Limits::default())
         .expect("timestamp filter compiles");
     assert!(filter.requirements().timestamp);
     assert!(!filter.requirements().stream_index);

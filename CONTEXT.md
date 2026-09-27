@@ -46,7 +46,8 @@ _Avoid_: CLI kind (for usage failures raised by libraries)
 
 **Limit**:
 A configured ceiling on one resource, validated when it is set and never
-silently lowered.
+silently lowered. Its default is a `DEFAULT_MAX_*` constant beside the
+limits type it seeds.
 _Avoid_: budget, cap (for the ceiling)
 
 **Budget**:

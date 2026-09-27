@@ -3,7 +3,7 @@
 
 use super::error::Error;
 use super::eval::Context;
-use super::parser::{self, Options, Requirements};
+use super::parser::{self, Limits, Requirements};
 use super::plan::Plan;
 use crate::registry::Registry;
 
@@ -19,8 +19,8 @@ pub struct Filter {
 }
 
 impl Filter {
-    pub fn compile(source: &str, registry: &Registry, options: Options) -> Result<Self, Error> {
-        let compiled = parser::compile(source, registry, &options)?;
+    pub fn compile(source: &str, registry: &Registry, limits: Limits) -> Result<Self, Error> {
+        let compiled = parser::compile(source, registry, &limits)?;
         Ok(Self {
             plan: Plan::compile(compiled.program),
             requirements: compiled.requirements,
@@ -33,7 +33,7 @@ impl Filter {
         value: &str,
         registry: &Registry,
     ) -> Result<Self, Error> {
-        let filter = Self::compile(&format!("{field} == {value}"), registry, Options::default())?;
+        let filter = Self::compile(&format!("{field} == {value}"), registry, Limits::default())?;
         let tokens = super::lexer::tokenize(value)?;
         if !matches!(
             tokens.as_slice(),

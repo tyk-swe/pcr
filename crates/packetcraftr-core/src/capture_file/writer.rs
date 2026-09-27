@@ -11,8 +11,8 @@ use crate::frame::{Frame, LinkType};
 use super::classic::{write_pcap_frame, write_pcap_header};
 use super::error::Error;
 use super::model::{
-    Budget, DEFAULT_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, PcapNgOptions,
-    PcapOptions, TimestampPrecision, TimestampResolution,
+    Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, Endianness, Format, Interface, Limits,
+    PcapNgOptions, PcapOptions, TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
     interface_description_base_length, select_interface, validate_new_interface,
@@ -215,7 +215,7 @@ impl<W: Write> Writer<W> {
                 link_type,
             },
             max_size,
-            DEFAULT_INTERFACE_LIMIT,
+            DEFAULT_MAX_INTERFACES_PER_SECTION,
             budget,
         ))
     }

@@ -432,8 +432,8 @@ mod tests {
                 "7"
             ]),
             (
-                packetcraftr_core::capture_file::DEFAULT_STREAM_FRAMES,
-                packetcraftr_core::capture_file::DEFAULT_STREAM_BYTES
+                packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_FRAMES,
+                packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_BYTES
             ),
         );
         assert_eq!(

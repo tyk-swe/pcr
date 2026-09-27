@@ -68,9 +68,9 @@ pub fn parse(
     let expression = match expression::parse(
         input,
         registry,
-        expression::Options {
+        expression::Limits {
             max_layers,
-            ..expression::Options::default()
+            ..expression::Limits::default()
         },
     ) {
         Ok(packet) => return Ok(packet),

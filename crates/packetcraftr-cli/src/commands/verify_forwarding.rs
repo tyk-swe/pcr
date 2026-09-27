@@ -129,7 +129,7 @@ pub(super) fn run(
         &rules,
         ingress,
         egress,
-        forwarding::VerifyLimits {
+        forwarding::Limits {
             max_details: arguments.max_details,
             max_detail_bytes: arguments.max_detail_bytes,
             max_scratch_bytes: arguments.max_scratch_bytes,

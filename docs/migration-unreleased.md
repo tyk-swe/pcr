@@ -182,7 +182,7 @@ live EDNS policy errors remain workflow-owned.
 `Dns::from_wire` decodes all declared records. Malformed or truncated records
 and trailing bytes now fail decoding; offline dissection retains the original
 payload with malformed-packet diagnostics. `Dns::from_wire_with_limits` returns
-typed `dns::Error` and accepts `DecodeLimits`. The retained `wire()` remains
+typed `dns::Error` and accepts `dns::Limits`. The retained `wire()` remains
 the original message, including compression and unknown bytes.
 
 Default bounds are 65,535 message bytes, 512 records, 32 compression pointers
@@ -658,10 +658,10 @@ canonical path:
 |---|---|
 | `packetcraftr_core::{Packet, PacketError}` | `packetcraftr_core::packet::{Packet, PacketError}` |
 | `build::{Context, Mode}` | `codec::{Context, Mode}` |
-| `build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` | `layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` |
+| `build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` | `packet::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` |
 | `protocol::application::{Dns, Tls}` | `protocol::application::dns::Dns`, `protocol::application::tls::Tls` |
 | `protocol::application::tls::{codec, fingerprint, model, names, parse}` submodule paths | the same items re-exported flat from `protocol::application::tls` |
-| `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
+| `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_MAX_SIZE` |
 | `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_core::error::Source` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
 | `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireLimits}` |
@@ -902,7 +902,7 @@ Constructors that accept limits now validate them and return a `Result`:
 return `analysis::Error::InvalidLimit` (`cli.analysis_limit`), and
 `scope::Interner::with_limits` returns `scope::Error::InvalidLimit`
 (`cli.analysis_limit`). Each of these types, plus `capture_file::Limits`,
-`MergeLimits`, `compression::Limits`, `dhcp::Limits`, `dns::DecodeLimits`, and
+`MergeLimits`, `compression::Limits`, `dhcp::Limits`, `dns::Limits`, and
 `application::Limits`, has a public `validate()`.
 
 Behavior changes:
@@ -914,7 +914,7 @@ Behavior changes:
   `max_frames` or `max_bytes` with `capture_file::Error::InvalidLimit`
   (`cli.capture_limit`) before writing anything.
 - `dhcp::Limits` above `dhcp::{MAX_MESSAGE_BYTES, MAX_OPTIONS, MAX_NESTING}`
-  and `dns::DecodeLimits` above `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS,
+  and `dns::Limits` above `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS,
   MAX_NAME_POINTERS}` fail with `InvalidLimit` (`policy.dhcp_limit` /
   `policy.dns_limit`) instead of being lowered to the ceiling. Pass the
   constant itself to ask for the widest limit.
@@ -980,7 +980,7 @@ constant namespaces `network::ip_protocol` and `tls::extension`.
 | Removed | Use instead |
 |---|---|
 | `packet::link::{MacAddress, VlanKind, VlanTag}` | `packet::{MacAddress, VlanKind, VlanTag}` |
-| `dns::name::decompress(message, offset, max_pointers)` | `dns::decode_name(message, offset, DecodeLimits { max_name_pointers, .. })`, which returns `(Name, resume)`; `Name::labels()` gives the label octets |
+| `dns::name::decompress(message, offset, max_pointers)` | `dns::decode_name(message, offset, Limits { max_name_pointers, .. })`, which returns `(Name, resume)`; `Name::labels()` gives the label octets |
 | `dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN}` | `dns::{MAX_LABEL_LEN, MAX_NAME_LEN}` |
 | `dns::read_u16` | read the two bytes yourself; `dns::Error::TruncatedField` stays public |
 | `layer::raw_layout(len)` | `layer::Raw::layout(len)` |
@@ -1797,3 +1797,29 @@ evidence fault lives under `transmit`. No behavior changes.
 |---|---|
 | `packetcraftr_netio::capture::MAX_TIMEOUT` | `packetcraftr_netio::deadline::MAX_WAIT` |
 | `packetcraftr_netio::SendEvidenceFault` | `packetcraftr_netio::transmit::SendEvidenceFault` |
+
+## Core limit vocabulary
+
+Ceiling-only types in `packetcraftr_core` are `…Limits` types with a
+`validate()` that runs where they are accepted, and public defaults are
+`DEFAULT_MAX_*` constants beside the type they seed. The expression and
+filter ceilings, previously named `Options`, join the convention; `validate()` performs
+the same stable-maximum checks `parse` and `Filter::compile` already ran, in
+the same order and with the same errors. `fuzz::MAX_PACKET_BYTES` is the same
+value as `packet::DEFAULT_MAX_PACKET_SIZE` rather than a second definition.
+
+| Old | New |
+|---|---|
+| `expression::Options` | `expression::Limits` |
+| `filter::Options` | `filter::Limits` |
+| `protocol::application::dns::DecodeLimits` | `protocol::application::dns::Limits` |
+| `analysis::forwarding::VerifyLimits` | `analysis::forwarding::Limits` |
+| `layout::DEFAULT_MAX_PACKET_SIZE` | `packet::DEFAULT_MAX_PACKET_SIZE` |
+| `layout::DEFAULT_MAX_LAYERS` | `packet::DEFAULT_MAX_LAYERS` |
+| `frame::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_MAX_SIZE` |
+| `capture_file::DEFAULT_INTERFACE_LIMIT` | `capture_file::DEFAULT_MAX_INTERFACES_PER_SECTION` |
+| `capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT` | `capture_file::DEFAULT_MAX_TOTAL_INTERFACES` |
+| `capture_file::DEFAULT_METADATA_BLOCK_LIMIT` | `capture_file::DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME` |
+| `capture_file::DEFAULT_METADATA_BYTE_LIMIT` | `capture_file::DEFAULT_MAX_METADATA_BYTES_PER_FRAME` |
+| `capture_file::DEFAULT_STREAM_FRAMES` | `capture_file::DEFAULT_MAX_STREAM_FRAMES` |
+| `capture_file::DEFAULT_STREAM_BYTES` | `capture_file::DEFAULT_MAX_STREAM_BYTES` |

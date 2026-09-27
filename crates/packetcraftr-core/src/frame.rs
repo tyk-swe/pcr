@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
+pub const DEFAULT_MAX_SIZE: usize = 16 * 1024 * 1024;
 
 /// Open numeric libpcap link-layer type. The known numbers and their root
 /// protocols are defined by [`capture_file`](crate::capture_file).

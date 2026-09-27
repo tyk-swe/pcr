@@ -18,7 +18,7 @@ fuzz_target!(|data: &[u8]| {
         max_rejected_records: 8,
         ..MessageLimits::default()
     };
-    let offline_limits = packetcraftr_core::protocol::application::dns::DecodeLimits::from(limits);
+    let offline_limits = packetcraftr_core::protocol::application::dns::Limits::from(limits);
     if let Ok(decoded) = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
         bytes::Bytes::copy_from_slice(data),
         offline_limits,

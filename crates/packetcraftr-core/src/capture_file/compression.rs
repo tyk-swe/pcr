@@ -46,8 +46,8 @@ impl Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_encoded_bytes: super::DEFAULT_STREAM_BYTES,
-            max_decoded_bytes: super::DEFAULT_STREAM_BYTES,
+            max_encoded_bytes: super::DEFAULT_MAX_STREAM_BYTES,
+            max_decoded_bytes: super::DEFAULT_MAX_STREAM_BYTES,
             max_window_log: MAX_WINDOW_LOG,
         }
     }

@@ -27,11 +27,12 @@ pub const MAX_TARGET_FIELDS: usize = 4_096;
 /// Largest retained and wire byte total one campaign may charge (256 MiB).
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_TOTAL_BYTES: usize = MAX_TOTAL_BYTES;
-/// Largest packet one case may build or dissect (16 MiB).
+/// Largest packet one case may build or dissect.
 ///
-/// A case is one packet, so this is the same ceiling the packet layout uses;
-/// a campaign starts at that size and may only lower it.
-pub const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
+/// A case is one packet, so this is the packet default ceiling
+/// ([`crate::packet::DEFAULT_MAX_PACKET_SIZE`]); a campaign starts at that
+/// size and may only lower it.
+pub const MAX_PACKET_BYTES: usize = crate::packet::DEFAULT_MAX_PACKET_SIZE;
 /// Deepest list nesting a reflected fuzz value may carry.
 ///
 /// This must not exceed

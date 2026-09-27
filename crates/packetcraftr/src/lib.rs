@@ -37,7 +37,7 @@
 //! let packet = expression::parse(
 //!     "ipv4(dst=192.0.2.9)/udp(dport=9)/raw(text=ping)",
 //!     &registry,
-//!     expression::Options::default(),
+//!     expression::Limits::default(),
 //! )?;
 //! let client = Client::new(registry, Policy::default(), SystemProviders);
 //! let collector = send::Collector::default();

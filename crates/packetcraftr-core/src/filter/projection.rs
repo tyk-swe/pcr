@@ -53,7 +53,7 @@ impl Projection {
             let compiled = parser::compile(
                 column,
                 registry,
-                &parser::Options {
+                &parser::Limits {
                     max_terms: 1,
                     ..Default::default()
                 },

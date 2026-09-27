@@ -31,7 +31,7 @@
 mod evaluate;
 mod limits;
 
-pub use limits::VerifyLimits;
+pub use limits::Limits;
 
 pub use evaluate::{
     ASSUMPTIONS, AmbiguousGroup, Check, CheckEvaluation, CheckKind, ComparisonKind, Evidence,

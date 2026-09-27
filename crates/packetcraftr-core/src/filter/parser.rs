@@ -15,16 +15,19 @@ pub const MAX_FILTER_NESTING: usize = 64;
 pub const MAX_FILTER_TERMS: usize = 1024;
 pub const MAX_FILTER_SET_MEMBERS: usize = 1024;
 
-/// Bounds applied while compiling a display filter.
+/// Ceilings on one display filter, applied while compiling it.
+///
+/// Every value is honored as given, and each ceiling also has a stable
+/// maximum, which [`validate`](Self::validate) enforces.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Options {
+pub struct Limits {
     pub max_bytes: usize,
     pub max_nesting: usize,
     pub max_terms: usize,
     pub max_set_members: usize,
 }
 
-impl Default for Options {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_FILTER_BYTES,
@@ -32,6 +35,37 @@ impl Default for Options {
             max_terms: MAX_FILTER_TERMS,
             max_set_members: MAX_FILTER_SET_MEMBERS,
         }
+    }
+}
+
+impl Limits {
+    /// Checks the ceilings against their stable maxima.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidNestingLimit`], [`Error::InvalidTermLimit`], or
+    /// [`Error::InvalidSetMemberLimit`] when the matching ceiling exceeds its
+    /// stable maximum.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.max_nesting > MAX_FILTER_NESTING {
+            return Err(Error::InvalidNestingLimit {
+                value: self.max_nesting,
+                maximum: MAX_FILTER_NESTING,
+            });
+        }
+        if self.max_terms > MAX_FILTER_TERMS {
+            return Err(Error::InvalidTermLimit {
+                value: self.max_terms,
+                maximum: MAX_FILTER_TERMS,
+            });
+        }
+        if self.max_set_members > MAX_FILTER_SET_MEMBERS {
+            return Err(Error::InvalidSetMemberLimit {
+                value: self.max_set_members,
+                maximum: MAX_FILTER_SET_MEMBERS,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -108,7 +142,7 @@ pub(super) struct Compiled {
 struct Compiler<'a> {
     tokens: &'a [Spanned],
     registry: &'a Registry,
-    options: &'a Options,
+    limits: &'a Limits,
     program: Vec<Op>,
     operators: Vec<Pending>,
     requirements: Requirements,
@@ -126,50 +160,32 @@ struct Compiler<'a> {
 pub(super) fn compile(
     source: &str,
     registry: &Registry,
-    options: &Options,
+    limits: &Limits,
 ) -> Result<Compiled, Error> {
-    validate_options(source, options)?;
+    validate_limits(source, limits)?;
     let tokens = tokenize(source)?;
-    Compiler::new(&tokens, registry, options).compile(source.len())
+    Compiler::new(&tokens, registry, limits).compile(source.len())
 }
 
-fn validate_options(source: &str, options: &Options) -> Result<(), Error> {
-    if source.len() > options.max_bytes {
+fn validate_limits(source: &str, limits: &Limits) -> Result<(), Error> {
+    if source.len() > limits.max_bytes {
         return Err(Error::SizeLimit {
             actual: source.len(),
-            limit: options.max_bytes,
+            limit: limits.max_bytes,
         });
     }
     if source.trim().is_empty() {
         return Err(Error::Empty);
     }
-    if options.max_nesting > MAX_FILTER_NESTING {
-        return Err(Error::InvalidNestingLimit {
-            value: options.max_nesting,
-            maximum: MAX_FILTER_NESTING,
-        });
-    }
-    if options.max_terms > MAX_FILTER_TERMS {
-        return Err(Error::InvalidTermLimit {
-            value: options.max_terms,
-            maximum: MAX_FILTER_TERMS,
-        });
-    }
-    if options.max_set_members > MAX_FILTER_SET_MEMBERS {
-        return Err(Error::InvalidSetMemberLimit {
-            value: options.max_set_members,
-            maximum: MAX_FILTER_SET_MEMBERS,
-        });
-    }
-    Ok(())
+    limits.validate()
 }
 
 impl<'a> Compiler<'a> {
-    fn new(tokens: &'a [Spanned], registry: &'a Registry, options: &'a Options) -> Self {
+    fn new(tokens: &'a [Spanned], registry: &'a Registry, limits: &'a Limits) -> Self {
         Self {
             tokens,
             registry,
-            options,
+            limits,
             program: Vec::new(),
             operators: Vec::new(),
             requirements: Requirements::default(),
@@ -197,9 +213,9 @@ impl<'a> Compiler<'a> {
         match token {
             Token::LeftParen => {
                 self.depth = self.depth.saturating_add(1);
-                if self.depth > self.options.max_nesting {
+                if self.depth > self.limits.max_nesting {
                     return Err(Error::NestingLimit {
-                        limit: self.options.max_nesting,
+                        limit: self.limits.max_nesting,
                     });
                 }
                 self.operators.push(Pending::LeftParen);
@@ -211,16 +227,16 @@ impl<'a> Compiler<'a> {
             }
             Token::Word(_) => {
                 self.terms = self.terms.saturating_add(1);
-                if self.terms > self.options.max_terms {
+                if self.terms > self.limits.max_terms {
                     return Err(Error::TermLimit {
-                        limit: self.options.max_terms,
+                        limit: self.limits.max_terms,
                     });
                 }
                 let (predicate, next) = parse_predicate(
                     self.tokens,
                     self.index,
                     self.registry,
-                    self.options,
+                    self.limits,
                     &mut self.requirements,
                 )?;
                 self.program.push(Op::Leaf(predicate));
@@ -326,7 +342,7 @@ fn parse_predicate(
     tokens: &[Spanned],
     start: usize,
     registry: &Registry,
-    options: &Options,
+    limits: &Limits,
     requirements: &mut Requirements,
 ) -> Result<(Predicate, usize), Error> {
     let (mut field, mut index) = match parse_subject(tokens, start, registry)? {
@@ -342,7 +358,7 @@ fn parse_predicate(
         index = index.saturating_add(1);
     }
     record_requirements(&field, requirements);
-    parse_field_predicate(tokens, index, field, options)
+    parse_field_predicate(tokens, index, field, limits)
 }
 
 enum Subject {
@@ -444,7 +460,7 @@ fn parse_field_predicate(
     tokens: &[Spanned],
     index: usize,
     field: FieldRef,
-    options: &Options,
+    limits: &Limits,
 ) -> Result<(Predicate, usize), Error> {
     match tokens.get(index) {
         Some(Spanned {
@@ -491,7 +507,7 @@ fn parse_field_predicate(
             tokens,
             index.saturating_add(1),
             field,
-            options,
+            limits,
             *operator_offset,
         ),
         _ => {
@@ -506,7 +522,7 @@ fn parse_membership(
     tokens: &[Spanned],
     start: usize,
     field: FieldRef,
-    options: &Options,
+    limits: &Limits,
     offset: usize,
 ) -> Result<(Predicate, usize), Error> {
     let Some(first) = tokens.get(start) else {
@@ -553,9 +569,9 @@ fn parse_membership(
         let (value, next) = parse_literal(tokens, index, offset)?;
         check_literal(&field, &value, member_offset)?;
         values.push(value);
-        if values.len() > options.max_set_members {
+        if values.len() > limits.max_set_members {
             return Err(Error::SetMemberLimit {
-                limit: options.max_set_members,
+                limit: limits.max_set_members,
             });
         }
         index = next;
@@ -676,7 +692,7 @@ mod tests {
         let compiled = compile(
             "frame.time_epoch >= 0 || tcp.stream == 1 && !udp.stream == 2",
             &registry,
-            &Options::default(),
+            &Limits::default(),
         )
         .expect("valid mixed-requirement filter compiles");
 
@@ -705,9 +721,9 @@ mod tests {
             compile(
                 "ipv4",
                 &registry,
-                &Options {
+                &Limits {
                     max_bytes: 3,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::SizeLimit {
@@ -716,16 +732,16 @@ mod tests {
             })
         ));
         assert!(matches!(
-            compile(" ", &registry, &Options::default()),
+            compile(" ", &registry, &Limits::default()),
             Err(Error::Empty)
         ));
         assert!(matches!(
             compile(
                 "ipv4",
                 &registry,
-                &Options {
+                &Limits {
                     max_nesting: MAX_FILTER_NESTING + 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::InvalidNestingLimit { .. })
@@ -734,9 +750,9 @@ mod tests {
             compile(
                 "ipv4",
                 &registry,
-                &Options {
+                &Limits {
                     max_terms: MAX_FILTER_TERMS + 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::InvalidTermLimit { .. })
@@ -745,9 +761,9 @@ mod tests {
             compile(
                 "ipv4",
                 &registry,
-                &Options {
+                &Limits {
                     max_set_members: MAX_FILTER_SET_MEMBERS + 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::InvalidSetMemberLimit { .. })
@@ -756,9 +772,9 @@ mod tests {
             compile(
                 "((ipv4))",
                 &registry,
-                &Options {
+                &Limits {
                     max_nesting: 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::NestingLimit { limit: 1 })
@@ -767,9 +783,9 @@ mod tests {
             compile(
                 "ipv4 && tcp",
                 &registry,
-                &Options {
+                &Limits {
                     max_terms: 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::TermLimit { limit: 1 })
@@ -778,9 +794,9 @@ mod tests {
             compile(
                 "tcp.port in {1, 2}",
                 &registry,
-                &Options {
+                &Limits {
                     max_set_members: 1,
-                    ..Options::default()
+                    ..Limits::default()
                 }
             ),
             Err(Error::SetMemberLimit { limit: 1 })
@@ -806,7 +822,7 @@ mod tests {
         ];
 
         for (source, expected) in cases {
-            let error = match compile(source, &registry, &Options::default()) {
+            let error = match compile(source, &registry, &Limits::default()) {
                 Ok(_) => panic!("{source} unexpectedly compiled"),
                 Err(error) => error,
             };
@@ -818,23 +834,23 @@ mod tests {
     fn incompatible_prefix_and_contains_operations_fail_during_compilation() {
         let registry = crate::protocol::builtin::registry();
         assert!(matches!(
-            compile("ipv4.source > 192.0.2.0/24", &registry, &Options::default()),
+            compile("ipv4.source > 192.0.2.0/24", &registry, &Limits::default()),
             Err(Error::OrderedPrefixComparison { .. })
         ));
         assert!(matches!(
-            compile("ipv4.source == 7", &registry, &Options::default()),
+            compile("ipv4.source == 7", &registry, &Limits::default()),
             Err(Error::IncompatibleLiteral { .. })
         ));
         assert!(matches!(
             compile(
                 "tcp.source_port contains \"x\"",
                 &registry,
-                &Options::default()
+                &Limits::default()
             ),
             Err(Error::IncompatibleLiteral { .. })
         ));
         assert!(matches!(
-            compile("raw.bytes contains 1", &registry, &Options::default()),
+            compile("raw.bytes contains 1", &registry, &Limits::default()),
             Err(Error::IncompatibleLiteral { .. })
         ));
     }

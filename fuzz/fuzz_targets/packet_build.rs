@@ -9,7 +9,7 @@ use packetcraftr_core::build::{Builder, Options as BuildOptions};
 use packetcraftr_core::codec::{Context, Mode};
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
-use packetcraftr_core::expression::{self, Options as ExprOptions};
+use packetcraftr_core::expression::{self, Limits as ExprLimits};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -29,12 +29,12 @@ fuzz_target!(|data: &[u8]| {
     };
     let registry = builtin::registry();
 
-    let expr_options = ExprOptions {
+    let expr_limits = ExprLimits {
         max_bytes: 64 * 1024,
         max_layers: MAX_LAYERS,
         max_nesting: 16,
     };
-    if let Ok(packet) = expression::parse(text, &registry, expr_options) {
+    if let Ok(packet) = expression::parse(text, &registry, expr_limits) {
         build_both_modes(&registry, &packet);
     }
 

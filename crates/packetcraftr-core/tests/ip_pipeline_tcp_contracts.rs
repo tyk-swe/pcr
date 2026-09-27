@@ -127,7 +127,7 @@ fn fragmented_tcp_completion_feeds_tcp_follow_and_expert() {
     let filter = Filter::compile(
         "ip.frag_offset == 3 && tcp.stream == 0",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("combined physical and derived TCP filter compiles");
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);
@@ -298,7 +298,7 @@ fn filtered_frames_do_not_advance_tcp_expiry_time() {
     let filter = Filter::compile(
         "tcp",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("TCP filter compiles");
     let frames = [

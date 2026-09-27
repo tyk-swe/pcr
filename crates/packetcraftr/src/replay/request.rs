@@ -5,10 +5,10 @@ use std::io::{Read, Seek};
 use std::time::Duration;
 
 use packetcraftr_core::capture_file::{
-    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
+    DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES, Error as CaptureError, Reader,
 };
 use packetcraftr_core::filter::FrameSelector;
-use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
+use packetcraftr_core::frame::{DEFAULT_MAX_SIZE, Frame};
 use packetcraftr_netio::{deadline::MAX_WAIT, link::Mode as LinkMode};
 use serde::{Deserialize, Serialize};
 
@@ -70,9 +70,9 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_source_frames: DEFAULT_STREAM_FRAMES,
-            max_transmitted_bytes: DEFAULT_STREAM_BYTES,
-            max_frame_bytes: DEFAULT_SIZE_LIMIT,
+            max_source_frames: DEFAULT_MAX_STREAM_FRAMES,
+            max_transmitted_bytes: DEFAULT_MAX_STREAM_BYTES,
+            max_frame_bytes: DEFAULT_MAX_SIZE,
             max_duration: MAX_WAIT,
         }
     }

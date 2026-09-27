@@ -183,14 +183,14 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
         "ipv4=192.0.2.1,ipv6=2001:db8::1,mac=00-11-22-33-44-55,",
         "token=ignored,wire=auto)"
     );
-    let error = expression::parse(expression, registry, expression::Options::default())
+    let error = expression::parse(expression, registry, expression::Limits::default())
         .expect_err("incompatible custom byte fields should be rejected by the codec");
     assert!(matches!(error, expression::Error::Layer { layer: 0, .. }));
 
     let packet = expression::parse(
         "probe(value=42,enabled=true,label=hello,ipv4=192.0.2.1,ipv6=2001:db8::1,mac=00:11:22:33:44:55,wire=auto)",
         registry,
-        expression::Options::default(),
+        expression::Limits::default(),
     )
     .expect("valid expression");
     let probe = packet.get::<Probe>().expect("probe layer");
@@ -215,7 +215,7 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
     }
     for source in ["", "probe(", "/probe", "probe(value=1,value=2)", "unknown"] {
         assert!(
-            expression::parse(source, registry, expression::Options::default()).is_err(),
+            expression::parse(source, registry, expression::Limits::default()).is_err(),
             "{source}"
         );
     }
@@ -223,9 +223,9 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
         expression::parse(
             "probe",
             registry,
-            expression::Options {
+            expression::Limits {
                 max_bytes: 4,
-                ..expression::Options::default()
+                ..expression::Limits::default()
             },
         ),
         Err(expression::Error::SizeLimit { .. })
@@ -234,9 +234,9 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
         expression::parse(
             "probe/probe",
             registry,
-            expression::Options {
+            expression::Limits {
                 max_layers: 1,
-                ..expression::Options::default()
+                ..expression::Limits::default()
             },
         ),
         Err(expression::Error::LayerLimit { limit: 1 })
@@ -245,9 +245,9 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
         expression::parse(
             "probe",
             registry,
-            expression::Options {
+            expression::Limits {
                 max_nesting: 65,
-                ..expression::Options::default()
+                ..expression::Limits::default()
             },
         ),
         Err(expression::Error::InvalidNestingLimit { .. })

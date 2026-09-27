@@ -17,7 +17,7 @@ use super::evaluate::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Viola
 /// details, and zero `max_scratch_bytes` refuses any comparison that needs
 /// scratch space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VerifyLimits {
+pub struct Limits {
     pub max_details: usize,
     /// Conservative JSON-sized charge over all retained detail categories.
     pub max_detail_bytes: usize,
@@ -25,7 +25,7 @@ pub struct VerifyLimits {
     pub max_scratch_bytes: usize,
 }
 
-impl Default for VerifyLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_details: 256,
@@ -35,7 +35,7 @@ impl Default for VerifyLimits {
     }
 }
 
-impl VerifyLimits {
+impl Limits {
     /// Checks the ceilings. Every value is honored as given, so this always
     /// succeeds; it exists so every limits type validates the same way.
     ///
@@ -203,13 +203,13 @@ mod tests {
 
     #[test]
     fn every_ceiling_is_a_valid_verify_limit() {
-        let zero = VerifyLimits {
+        let zero = Limits {
             max_details: 0,
             max_detail_bytes: 0,
             max_scratch_bytes: 0,
         };
         assert!(zero.validate().is_ok());
-        assert!(VerifyLimits::default().validate().is_ok());
+        assert!(Limits::default().validate().is_ok());
     }
 
     #[test]

@@ -10,10 +10,10 @@ use packetcraftr_core as core;
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct PacketBudgetArgs {
     /// Maximum protocol layers accepted in one packet.
-    #[arg(long, value_name = "N", default_value_t = core::layout::DEFAULT_MAX_LAYERS)]
+    #[arg(long, value_name = "N", default_value_t = core::packet::DEFAULT_MAX_LAYERS)]
     pub(crate) max_layers: usize,
     /// Maximum packet bytes accepted, encoded or decoded.
-    #[arg(long, value_name = "BYTES", default_value_t = core::layout::DEFAULT_MAX_PACKET_SIZE)]
+    #[arg(long, value_name = "BYTES", default_value_t = core::packet::DEFAULT_MAX_PACKET_SIZE)]
     pub(crate) max_packet_size: usize,
 }
 

@@ -62,7 +62,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
             stream_limits: capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,

@@ -19,7 +19,7 @@ use crate::{
     error::BoundaryError,
     field::WireValue,
     protocol::{
-        application::dns::{self, DecodeLimits, Dns},
+        application::dns::{self, Dns},
         transport::Udp,
     },
 };
@@ -446,7 +446,7 @@ impl Collector {
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {
-            match Dns::from_wire_with_limits(message.wire.clone(), DecodeLimits::default()) {
+            match Dns::from_wire_with_limits(message.wire.clone(), dns::Limits::default()) {
                 Ok(dns) => {
                     self.summary.complete_messages += 1;
                     message.dns = Some(dns);

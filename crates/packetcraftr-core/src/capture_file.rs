@@ -30,11 +30,12 @@ mod writer;
 pub use error::Error;
 pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
 pub use model::{
-    Budget, CaptureHeader, CaptureRecord, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
-    DEFAULT_METADATA_BYTE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,
-    DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, MetadataBlockKind,
-    PacketBlockKind, PcapHeader, PcapNgOption, PcapNgOptions, PcapOptions, ReaderLimits,
-    RecordKind, RewriteReport, Section, SelectionReport, TimestampResolution,
+    Budget, CaptureHeader, CaptureRecord, DEFAULT_MAX_INTERFACES_PER_SECTION,
+    DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME, DEFAULT_MAX_METADATA_BYTES_PER_FRAME,
+    DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES, DEFAULT_MAX_TOTAL_INTERFACES, Endianness,
+    Format, Interface, Limits, MetadataBlockKind, PacketBlockKind, PcapHeader, PcapNgOption,
+    PcapNgOptions, PcapOptions, ReaderLimits, RecordKind, RewriteReport, Section, SelectionReport,
+    TimestampResolution,
 };
 pub use reader::Reader;
 pub use rewrite::{rewrite, select};

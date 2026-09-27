@@ -9,7 +9,7 @@ use packetcraftr_core::{
     layer::{Layer, Malformed, Raw},
     packet::Packet,
     protocol::{
-        application::dns::{self, DecodeLimits, Dns, Error as DecodeError, Name, RecordValue},
+        application::dns::{self, Dns, Error as DecodeError, Limits, Name, RecordValue},
         builtin,
         network::Ipv4,
         transport::Udp,
@@ -44,7 +44,7 @@ fn dns_codec_failures_keep_the_dns_error_as_their_source() {
         let mut wire = question();
         wire.truncate(12);
         wire.extend_from_slice(suffix);
-        let direct = Dns::from_wire_with_limits(wire.clone(), DecodeLimits::default()).unwrap_err();
+        let direct = Dns::from_wire_with_limits(wire.clone(), Limits::default()).unwrap_err();
         assert!(expected(&direct), "{direct:?}");
 
         let fields = BTreeMap::from([("wire".to_owned(), FieldValue::Bytes(Bytes::from(wire)))]);
@@ -67,7 +67,7 @@ fn truncated_names_report_the_bytes_they_need() {
     wire.truncate(12);
     wire.extend_from_slice(b"\x03a");
     assert!(matches!(
-        Dns::from_wire_with_limits(wire, DecodeLimits::default()),
+        Dns::from_wire_with_limits(wire, Limits::default()),
         Err(DecodeError::TruncatedLabel {
             offset: 13,
             end: 16
@@ -254,7 +254,7 @@ fn malformed_and_truncated_records_remain_exact_malformed_capture_bytes() {
         truncated,
         truncated_tc,
     ] {
-        assert!(Dns::from_wire_with_limits(wire.clone(), DecodeLimits::default()).is_err());
+        assert!(Dns::from_wire_with_limits(wire.clone(), Limits::default()).is_err());
         let frame = captured(&wire);
         let decoded = decode::Dissector::new(builtin::registry())
             .decode(frame.clone(), Default::default())
@@ -276,17 +276,17 @@ fn malformed_and_truncated_records_remain_exact_malformed_capture_bytes() {
 fn every_message_record_name_and_txt_bound_is_enforced() {
     type Expected = fn(&DecodeError) -> bool;
     let wire = response();
-    let defaults = DecodeLimits::default();
-    let cases: [(DecodeLimits, Expected); 5] = [
+    let defaults = Limits::default();
+    let cases: [(Limits, Expected); 5] = [
         (
-            DecodeLimits {
+            Limits {
                 max_message_bytes: wire.len() - 1,
                 ..defaults
             },
             |e| matches!(e, DecodeError::MessageTooLarge { .. }),
         ),
         (
-            DecodeLimits {
+            Limits {
                 max_records: 11,
                 ..defaults
             },
@@ -301,21 +301,21 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
             },
         ),
         (
-            DecodeLimits {
+            Limits {
                 max_name_pointers: 0,
                 ..defaults
             },
             |e| matches!(e, DecodeError::PointerLimit { limit: 0 }),
         ),
         (
-            DecodeLimits {
+            Limits {
                 max_txt_strings: 1,
                 ..defaults
             },
             |e| matches!(e, DecodeError::TxtStringLimit { limit: 1 }),
         ),
         (
-            DecodeLimits {
+            Limits {
                 max_txt_bytes: 2,
                 ..defaults
             },
@@ -326,7 +326,7 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
         let error = Dns::from_wire_with_limits(wire.clone(), limits).unwrap_err();
         assert!(expected(&error), "{error:?}");
     }
-    let exact = DecodeLimits {
+    let exact = Limits {
         max_message_bytes: wire.len(),
         max_records: 12,
         max_name_pointers: 1,
@@ -362,35 +362,35 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
     for (field, limits) in [
         (
             "max_message_bytes",
-            DecodeLimits {
+            Limits {
                 max_message_bytes: dns::MAX_MESSAGE_BYTES + 1,
                 ..defaults
             },
         ),
         (
             "max_records",
-            DecodeLimits {
+            Limits {
                 max_records: dns::MAX_RECORDS + 1,
                 ..defaults
             },
         ),
         (
             "max_name_pointers",
-            DecodeLimits {
+            Limits {
                 max_name_pointers: dns::MAX_NAME_POINTERS + 1,
                 ..defaults
             },
         ),
         (
             "max_txt_strings",
-            DecodeLimits {
+            Limits {
                 max_txt_strings: dns::MAX_RECORDS + 1,
                 ..defaults
             },
         ),
         (
             "max_txt_bytes",
-            DecodeLimits {
+            Limits {
                 max_txt_bytes: dns::MAX_MESSAGE_BYTES + 1,
                 ..defaults
             },

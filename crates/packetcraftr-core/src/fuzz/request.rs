@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::layout::DEFAULT_MAX_PACKET_SIZE;
+use crate::packet::DEFAULT_MAX_PACKET_SIZE;
 
 use super::error::{Constraint, Error};
 use super::{

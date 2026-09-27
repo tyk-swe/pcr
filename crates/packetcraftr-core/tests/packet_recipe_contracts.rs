@@ -9,7 +9,7 @@ use packetcraftr_core::{
     document::{Format, payload, recipe},
     error::{Classified, Kind},
     field::FieldValue,
-    layout::DEFAULT_MAX_LAYERS,
+    packet::DEFAULT_MAX_LAYERS,
     packet::Packet,
     protocol::builtin,
 };

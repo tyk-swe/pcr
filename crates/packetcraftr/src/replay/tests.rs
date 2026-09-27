@@ -1073,7 +1073,7 @@ mod client {
 
     use super::*;
     use crate::policy::Policy;
-    use packetcraftr_core::filter::{Filter, FrameSelector, Options as FilterOptions};
+    use packetcraftr_core::filter::{Filter, FrameSelector, Limits as FilterLimits};
 
     use crate::replay::{
         Collector,
@@ -1217,7 +1217,7 @@ mod client {
                 condition: Condition::Filter(
                     FrameSelector::new(
                         Arc::clone(&registry),
-                        Filter::compile(filter, &registry, FilterOptions::default())
+                        Filter::compile(filter, &registry, FilterLimits::default())
                             .expect("fixture filter compiles"),
                         1_500,
                     )

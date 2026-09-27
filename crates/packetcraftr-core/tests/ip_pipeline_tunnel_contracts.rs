@@ -333,7 +333,7 @@ fn derived_inner_fragments_reenter_reassembly_and_dispatch_udp() {
     let filter = Filter::compile(
         "udp.stream == 0",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("UDP stream filter compiles");
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);
@@ -436,7 +436,7 @@ fn cascading_completions_preserve_intermediate_layers_and_streams() {
     let filter = Filter::compile(
         "udp.stream == 0 && tcp.stream == 0 && vxlan && tcp",
         registry.as_ref(),
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("cascade filter compiles");
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::{DecodeLimits, Dns, Error, Name, Question};
+use super::super::{Dns, Error, Limits, Name, Question};
 use bytes::Bytes;
 use primitives::read_u16;
 mod primitives;
@@ -24,7 +24,7 @@ pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Resul
 ///
 /// Every offset is bounds-checked, every compression pointer must address a
 /// strictly earlier offset, no offset is expanded twice, at most
-/// [`DecodeLimits::max_name_pointers`] pointers are followed, and the name is
+/// [`Limits::max_name_pointers`] pointers are followed, and the name is
 /// capped at [`MAX_NAME_LEN`](super::super::MAX_NAME_LEN) wire octets, so the
 /// input cannot make decoding loop or allocate without bound. The limits are
 /// validated first.
@@ -33,25 +33,21 @@ pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Resul
 ///
 /// ```
 /// use bytes::Bytes;
-/// use packetcraftr_core::protocol::application::dns::{DecodeLimits, Error, decode_name};
+/// use packetcraftr_core::protocol::application::dns::{Limits, Error, decode_name};
 ///
 /// // "a" then a pointer back to the root label at offset 0.
 /// let message = Bytes::from_static(&[0x00, 0x01, b'a', 0xc0, 0x00]);
-/// let (name, resume) = decode_name(&message, 1, DecodeLimits::default()).expect("bounded name");
+/// let (name, resume) = decode_name(&message, 1, Limits::default()).expect("bounded name");
 /// assert_eq!(name.labels(), [Bytes::from_static(b"a")]);
 /// assert_eq!(resume, 5);
 ///
 /// // A pointer that does not move backward cannot terminate.
 /// assert!(matches!(
-///     decode_name(&Bytes::from_static(&[0xc0, 0x00]), 0, DecodeLimits::default()),
+///     decode_name(&Bytes::from_static(&[0xc0, 0x00]), 0, Limits::default()),
 ///     Err(Error::SelfPointer { offset: 0 }),
 /// ));
 /// ```
-pub fn decode_name(
-    message: &Bytes,
-    offset: usize,
-    limits: DecodeLimits,
-) -> Result<(Name, usize), Error> {
+pub fn decode_name(message: &Bytes, offset: usize, limits: Limits) -> Result<(Name, usize), Error> {
     limits.validate()?;
     let expanded = super::name::decompress(message, offset, limits.max_name_pointers)?;
     Ok((
@@ -62,7 +58,7 @@ pub fn decode_name(
     ))
 }
 
-pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, Error> {
+pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
     limits.validate()?;
     let message = wire.as_ref();
     let maximum = limits.max_message_bytes;

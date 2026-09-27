@@ -11,9 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use super::limits::{DetailBudget, DetailCharge, ScratchBudget};
-use super::{
-    Error, ExpectationOutcome, Incomplete, Observation, Rules, Side, ValueState, VerifyLimits,
-};
+use super::{Error, ExpectationOutcome, Incomplete, Limits, Observation, Rules, Side, ValueState};
 use crate::budget::{Cancellation, Deadline};
 use crate::field::FieldValue;
 use crate::frame::LinkType;
@@ -374,9 +372,9 @@ pub fn verify(
         rules,
         ingress,
         egress,
-        VerifyLimits {
+        Limits {
             max_details,
-            ..VerifyLimits::default()
+            ..Limits::default()
         },
         cancellation,
         None,
@@ -390,7 +388,7 @@ pub fn verify_with_limits(
     rules: &Rules,
     ingress: SideInput,
     egress: SideInput,
-    limits: VerifyLimits,
+    limits: Limits,
     cancellation: Option<&Cancellation>,
     deadline: Option<&Deadline>,
 ) -> Result<Report, Error> {

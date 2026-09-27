@@ -6,11 +6,11 @@ use std::time::Duration;
 use crate::analysis::reassembly::ip::{self, Limits as IpReassemblyLimits, OverlapPolicy};
 use crate::analysis::reassembly::tcp::{self, Limits as TcpReassemblyLimits};
 use crate::capture_file::{
-    Budget as CaptureBudget, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError,
-    Limits as CaptureLimits,
+    Budget as CaptureBudget, DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES,
+    Error as CaptureError, Limits as CaptureLimits,
 };
 use crate::filter::Filter;
-use crate::frame::DEFAULT_SIZE_LIMIT;
+use crate::frame::DEFAULT_MAX_SIZE;
 
 use crate::analysis::{Constraint, Error};
 
@@ -73,9 +73,9 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_provenance_bytes: 16 * 1024 * 1024,
-            max_frames: DEFAULT_STREAM_FRAMES,
-            max_bytes: DEFAULT_STREAM_BYTES,
-            max_frame_bytes: DEFAULT_SIZE_LIMIT,
+            max_frames: DEFAULT_MAX_STREAM_FRAMES,
+            max_bytes: DEFAULT_MAX_STREAM_BYTES,
+            max_frame_bytes: DEFAULT_MAX_SIZE,
             max_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
             max_scope_bytes: 16 * 1024 * 1024,
             tcp: TcpReassemblyLimits {

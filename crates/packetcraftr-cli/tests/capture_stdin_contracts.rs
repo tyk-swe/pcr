@@ -289,7 +289,7 @@ fn capture_help_describes_interface_limit_scopes() {
             help.contains("selected output interfaces"),
             "{command}: {help}"
         );
-        let total = packetcraftr_core::capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT.to_string();
+        let total = packetcraftr_core::capture_file::DEFAULT_MAX_TOTAL_INTERFACES.to_string();
         assert!(
             help.replace(',', "")
                 .contains(&format!("capture-wide input ceiling of {total}")),

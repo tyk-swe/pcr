@@ -73,6 +73,6 @@ pub use eval::{Context, DerivedPacket};
 pub use frames::{FrameDecoder, FrameSelector};
 pub use model::Filter;
 pub use parser::{
-    DEFAULT_MAX_FILTER_BYTES, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
-    Options, Requirements,
+    DEFAULT_MAX_FILTER_BYTES, Limits, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
+    Requirements,
 };

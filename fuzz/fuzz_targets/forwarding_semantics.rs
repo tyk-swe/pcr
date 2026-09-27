@@ -6,7 +6,7 @@ mod composed_support;
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::{
-    analysis::forwarding::{self, Side, Verdict, VerifyLimits},
+    analysis::forwarding::{self, Limits, Side, Verdict},
     protocol::builtin,
 };
 
@@ -33,10 +33,10 @@ fuzz_target!(|data: &[u8]| {
                 &rules,
                 before,
                 after,
-                VerifyLimits {
+                Limits {
                     max_details,
                     max_detail_bytes,
-                    ..VerifyLimits::default()
+                    ..Limits::default()
                 },
                 None,
                 None,

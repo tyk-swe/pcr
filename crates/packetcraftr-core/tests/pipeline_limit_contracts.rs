@@ -608,7 +608,7 @@ fn time_bounds_compose_with_the_display_filter() {
     let filter = packetcraftr_core::filter::Filter::compile(
         "udp",
         &registry,
-        packetcraftr_core::filter::Options::default(),
+        packetcraftr_core::filter::Limits::default(),
     )
     .expect("display filter compiles");
     let bounds =

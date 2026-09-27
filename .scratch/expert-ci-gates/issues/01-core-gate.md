@@ -1,6 +1,6 @@
 # GATE-01: Evaluate expert findings against explicit CI criteria
 
-Status: ready-for-agent
+Status: resolved (e10438c4; all listed tests green)
 Blocked by: BASE-01
 Size: small
 Spec: [gate domain, truth table, API, EG02–EG05](../spec.md)
@@ -20,11 +20,11 @@ Spec: [gate domain, truth table, API, EG02–EG05](../spec.md)
 
 ## Acceptance and validation
 
-- [ ] EG02–EG05 hold, including inclusive threshold/equality behavior.
-- [ ] All report fields equal configured options/observed counts.
-- [ ] No finding lists or code maps grow gate memory.
-- [ ] Existing expert collector/selector/summary behavior is unchanged.
-- [ ] Public errors are typed, classified, and preserve relevant sources.
+- [x] EG02–EG05 hold, including inclusive threshold/equality behavior.
+- [x] All report fields equal configured options/observed counts.
+- [x] No finding lists or code maps grow gate memory.
+- [x] Existing expert collector/selector/summary behavior is unchanged.
+- [x] Public errors are typed, classified, and preserve relevant sources.
 
 ```sh
 cargo test --locked -p packetcraftr-core --test expert_gate_contracts --test pipeline_expert_contracts --test expert_transition_contracts

@@ -256,7 +256,7 @@ fn address_scope(address: IpAddr) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::Ipv6Addr;
 
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::MacAddress;
@@ -265,42 +265,24 @@ mod tests {
     use crate::{
         interface::{self, Id as InterfaceId},
         link::Capability,
+        test_support::{assigned, interface_info, v4},
     };
-
-    fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
-        IpAddr::V4(Ipv4Addr::new(a, b, c, d))
-    }
 
     fn interface() -> interface::Info {
         interface::Info {
-            id: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
             description: Some("fixture interface".to_owned()),
             mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
             addresses: vec![
-                interface::Address {
-                    address: v4(10, 0, 0, 2),
-                    prefix_length: 8,
-                },
-                interface::Address {
-                    address: v4(10, 2, 3, 4),
-                    prefix_length: 24,
-                },
-                interface::Address {
-                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                    prefix_length: 128,
-                },
+                assigned(v4(10, 0, 0, 2), 8),
+                assigned(v4(10, 2, 3, 4), 24),
+                assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
             ],
             flags: interface::Flags {
                 up: true,
                 multicast: true,
                 ..interface::Flags::default()
             },
-            mtu: Some(1_500),
-            capability: Capability::Layer2AndLayer3,
-            link_type: LinkType::ETHERNET,
+            ..interface_info("fixture0", 7)
         }
     }
 

@@ -110,36 +110,18 @@ fn constrain_by_preferred_source<T: InterfaceCandidate>(
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    use packetcraftr_core::frame::LinkType;
+    use std::net::Ipv6Addr;
 
     use super::*;
-    use crate::link::Capability;
-    use packetcraftr_core::packet::MacAddress;
+    use crate::test_support::{assigned, interface_info, v4};
 
     fn interface() -> interface::Info {
         interface::Info {
-            id: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: Some("fixture interface".to_owned()),
-            mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
             addresses: vec![
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-                    prefix_length: 8,
-                },
-                interface::Address {
-                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                    prefix_length: 128,
-                },
+                assigned(v4(10, 0, 0, 2), 8),
+                assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
             ],
-            flags: interface::Flags::default(),
-            mtu: Some(1_500),
-            capability: Capability::Layer2AndLayer3,
-            link_type: LinkType::ETHERNET,
+            ..interface_info("fixture0", 7)
         }
     }
 

@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::{budget::Deadline, error::Classified as _};
+use packetcraftr_core::{
+    budget::{Cancellation, Deadline},
+    error::Classified as _,
+};
 use packetcraftr_netio::{
     resources::{self, native_snapshot, tcp_connect_snapshot},
     tcp::{self, Provider, Stream},
@@ -203,4 +206,35 @@ fn a_spent_or_cancelled_caller_starts_no_connection() {
         Err(tcp::Error::Cancelled(_))
     ));
     assert!(started.try_recv().is_err(), "no provider call was made");
+}
+
+#[test]
+fn tcp_workers_observe_parent_cancellation_after_dispatch() {
+    struct CancelParent(Cancellation);
+
+    impl Provider for CancelParent {
+        type Stream = tcp::SystemStream;
+
+        fn connect(&self, _: SocketAddr, deadline: &Deadline) -> Result<Self::Stream, tcp::Error> {
+            self.0.cancel();
+            deadline.check_cancelled()?;
+            Err(io::Error::from(io::ErrorKind::ConnectionRefused).into())
+        }
+    }
+
+    let signal = Cancellation::default();
+    let parent = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal.clone()));
+    let child = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));
+    let mut pending = tcp::start_connect(
+        Arc::new(CancelParent(signal)),
+        "127.0.0.1:9".parse().unwrap(),
+        &child,
+    )
+    .unwrap();
+    let outcome = pending
+        .wait(&Deadline::new(Duration::from_secs(1)))
+        .unwrap()
+        .expect("the provider completes immediately");
+    assert!(outcome.attempted);
+    assert!(matches!(outcome.result, Err(tcp::Error::Cancelled(_))));
 }

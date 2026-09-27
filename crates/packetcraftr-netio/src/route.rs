@@ -117,12 +117,10 @@ mod tests {
     use packetcraftr_core::error::Kind;
 
     use super::*;
+    use crate::test_support::interface_id;
 
     fn interface() -> InterfaceId {
-        InterfaceId {
-            name: "fixture0".to_owned(),
-            index: 7,
-        }
+        interface_id("fixture0", 7)
     }
 
     #[cfg(not(native_route))]

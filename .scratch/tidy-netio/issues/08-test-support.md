@@ -4,7 +4,12 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No fixture builder is defined twice in the crate.
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] No fixture builder is defined twice in the crate.
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- `tests/common/mod.rs` holds only the route `decision` fixture; the TCP test that duplicated a fake provider moved next to the pending-connect fixtures instead of growing a second shared one.
+- The always-compiled `interface::validation` tests use the shared `assigned`/`v4` builders, which keeps `test_support` free of dead code in the portable profile.

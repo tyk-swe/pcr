@@ -94,15 +94,14 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use packetcraftr_core::{budget::Cancellation, error::Classified, frame::LinkType};
+    use packetcraftr_core::{budget::Cancellation, error::Classified};
 
     use super::*;
     use crate::{
-        capture::{
-            Metadata,
-            live::{CaptureInterrupt, NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats},
+        capture::live::{
+            CaptureInterrupt, NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats,
         },
-        interface,
+        test_support::capture_metadata,
         workers::reaper::test_support::client_with_receiver,
     };
 
@@ -214,15 +213,7 @@ mod tests {
                             close: closed,
                         }),
                         interrupt: Arc::new(NoInterrupt),
-                        metadata: Metadata {
-                            interface: interface::Id {
-                                name: "fixture0".to_owned(),
-                                index: 7,
-                            },
-                            link_type: LinkType::ETHERNET,
-                            snap_length: 64,
-                            native: Default::default(),
-                        },
+                        metadata: capture_metadata("fixture0", 7),
                     })
                 },
                 || Ok(worker_reaper),

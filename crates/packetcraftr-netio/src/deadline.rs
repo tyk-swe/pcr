@@ -126,15 +126,4 @@ mod tests {
         signal.cancel();
         assert!(matches!(remaining(&live), Err(Interrupted::Cancelled(_))));
     }
-
-    #[test]
-    fn a_detached_deadline_keeps_the_remainder_and_the_signal() {
-        let signal = Cancellation::default();
-        let deadline =
-            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        let detached = detach(&deadline).unwrap();
-        assert!(detached.limit() <= Duration::from_secs(60));
-        signal.cancel();
-        assert!(detached.check_cancelled().is_err());
-    }
 }

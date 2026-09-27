@@ -125,26 +125,15 @@ fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
 mod tests {
     use std::error::Error as _;
 
-    use packetcraftr_core::{error::Classified, frame::LinkType};
+    use packetcraftr_core::error::Classified;
 
     use super::*;
     use crate::route;
+    use crate::test_support::interface_info;
 
     #[test]
     fn discovery_retains_actual_snapshot_validation_failures() {
-        let valid = Info {
-            id: Id {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: None,
-            mac_address: None,
-            addresses: Vec::new(),
-            flags: Flags::default(),
-            mtu: None,
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
-        };
+        let valid = interface_info("fixture0", 7);
         assert_eq!(
             validate_snapshot(vec![valid.clone()]).unwrap(),
             std::slice::from_ref(&valid)

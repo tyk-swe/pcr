@@ -15,6 +15,8 @@ pub(crate) use time::{monotonic_packet_time, system_time};
 
 mod queue;
 mod session;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod time;
 mod worker;
 

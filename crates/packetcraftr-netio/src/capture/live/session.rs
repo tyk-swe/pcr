@@ -342,41 +342,18 @@ mod tests {
     use std::time::SystemTime;
 
     use bytes::Bytes;
-    use packetcraftr_core::frame::LinkType;
 
     use super::*;
     use crate::capture::live::{
         NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats, NativeCapturedPacket,
+        test_support::{BlockingSource, FakeInterrupt},
     };
     use crate::error::test_support::assert_same_failure;
     use crate::{
-        capture::{Limits, Metadata},
-        interface::Id as InterfaceId,
+        capture::Limits,
+        test_support::capture_metadata,
         workers::reaper::test_support::{client_with_receiver, retained_tasks, start_with},
     };
-
-    fn metadata(name: &str, index: u32) -> Metadata {
-        Metadata {
-            interface: InterfaceId {
-                name: name.to_owned(),
-                index,
-            },
-            link_type: LinkType::ETHERNET,
-            snap_length: 64,
-            native: Default::default(),
-        }
-    }
-
-    #[derive(Default)]
-    struct FakeInterrupt {
-        calls: AtomicUsize,
-    }
-
-    impl CaptureInterrupt for FakeInterrupt {
-        fn interrupt(&self) {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-        }
-    }
 
     struct LifetimeInterrupt {
         dropped: Sender<()>,
@@ -407,32 +384,6 @@ mod tests {
     impl NativeCaptureSource for CountingSource {
         fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(NativeCaptureEvent::Closed)
-        }
-
-        fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
-            Ok(NativeCaptureStats::default())
-        }
-    }
-
-    struct BlockingSource {
-        started: Option<Sender<()>>,
-        release: Receiver<()>,
-        finished: Option<Sender<()>>,
-    }
-
-    impl NativeCaptureSource for BlockingSource {
-        fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
-            if let Some(started) = self.started.take() {
-                let _ = started.send(());
-            }
-            self.release.recv().map_err(|_| Error::Capture {
-                message: "fake capture release channel closed".to_owned(),
-                source: None,
-            })?;
-            if let Some(finished) = self.finished.take() {
-                let _ = finished.send(());
-            }
             Ok(NativeCaptureEvent::Closed)
         }
 
@@ -499,7 +450,7 @@ mod tests {
                     finished: Some(finished_sender),
                 }),
                 interrupt,
-                metadata: metadata("scripted-capture", 9),
+                metadata: capture_metadata("scripted-capture", 9),
             },
             Limits::default(),
         )
@@ -536,7 +487,7 @@ mod tests {
                     finished,
                 }),
                 interrupt: interrupt_for_parts,
-                metadata: metadata("fake-capture", 1),
+                metadata: capture_metadata("fake-capture", 1),
             },
             Limits::default(),
             shutdown_timeout,
@@ -597,7 +548,7 @@ mod tests {
                     started: Some(started_sender),
                 }),
                 interrupt: interrupt_for_parts,
-                metadata: metadata("fake-panic", 2),
+                metadata: capture_metadata("fake-panic", 2),
             },
             Limits::default(),
             // The panic hook may symbolize a backtrace (RUST_BACKTRACE=1)
@@ -821,7 +772,7 @@ mod tests {
                     entered,
                     release: std::sync::Mutex::new(released),
                 }),
-                metadata: metadata("destructor", 1),
+                metadata: capture_metadata("destructor", 1),
             },
             Limits::default(),
             Duration::from_secs(1),
@@ -859,7 +810,7 @@ mod tests {
                 interrupt: Arc::new(LifetimeInterrupt {
                     dropped: interrupt_dropped,
                 }),
-                metadata: metadata("unstarted-capture", 11),
+                metadata: capture_metadata("unstarted-capture", 11),
             },
             Limits::default(),
             Duration::ZERO,
@@ -886,7 +837,7 @@ mod tests {
                     finished: None,
                 }),
                 interrupt: Arc::new(FakeInterrupt::default()),
-                metadata: metadata("saturated-reaper", 12),
+                metadata: capture_metadata("saturated-reaper", 12),
             },
             Limits::default(),
             Duration::ZERO,
@@ -915,7 +866,7 @@ mod tests {
                     finished: Some(finished_sender),
                 }),
                 interrupt: Arc::new(PanickingInterrupt),
-                metadata: metadata("panicking-interrupt", 14),
+                metadata: capture_metadata("panicking-interrupt", 14),
             },
             Limits::default(),
             Duration::ZERO,
@@ -949,7 +900,7 @@ mod tests {
                 interrupt: Arc::new(LifetimeInterrupt {
                     dropped: interrupt_dropped,
                 }),
-                metadata: metadata("lifetime-capture", 13),
+                metadata: capture_metadata("lifetime-capture", 13),
             },
             Limits::default(),
             Duration::ZERO,

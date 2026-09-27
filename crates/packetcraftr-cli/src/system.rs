@@ -3,7 +3,8 @@
 
 //! The CLI's one composition root: the only place that names system
 //! providers, prepares live operations, and builds the client a command runs
-//! on. Dispatch and rendering remain elsewhere.
+//! on. It also constructs the bounded output runtime and registers runtimes
+//! with diagnostics. Dispatch and rendering remain elsewhere.
 
 mod client;
 mod exchange;
@@ -14,9 +15,7 @@ mod preparation;
 mod route;
 
 pub(crate) use client::{Client, Runtime, client, runtime};
-pub(crate) use interface::{
-    InterfaceSelector, interface_route, interfaces, resolve, timestamp_types,
-};
+pub(crate) use interface::{interface_route, interfaces, resolve, timestamp_types};
 pub(crate) use preparation::{
     Prepared, Workflow, placeholder, prepare_live, prepare_plan, prepare_workflow,
 };

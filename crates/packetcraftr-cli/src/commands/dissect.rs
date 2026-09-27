@@ -52,9 +52,9 @@ pub(super) fn run(
             DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv
         )
     {
-        return Err(super::projection::missing_fields_error());
+        return Err(crate::rendering::missing_fields_error());
     }
-    let projector = super::projection::Projector::prepare(
+    let projector = crate::rendering::Projector::prepare(
         &arguments.fields,
         arguments.max_projection_bytes,
         &registry,

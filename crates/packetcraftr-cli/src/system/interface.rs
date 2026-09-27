@@ -1,64 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-use std::num::NonZeroU32;
-
 use packetcraftr_core::error::Kind;
 use packetcraftr_netio as net;
 use packetcraftr_netio::capture::Provider as _;
 use packetcraftr_netio::route::Provider as _;
 
+use crate::command_options::InterfaceSelector;
 use crate::errors::CliError;
-
-/// A validated `--interface` value. Decimal selectors are always indexes:
-/// zero and values outside the public `u32` index domain never fall back to
-/// interface-name lookup.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum InterfaceSelector {
-    Name(String),
-    Index(NonZeroU32),
-}
-
-impl InterfaceSelector {
-    /// Validates a selector without consulting a platform provider.
-    pub(crate) fn parse(selector: &str) -> Result<Self, CliError> {
-        if selector.is_empty() {
-            return Err(CliError::new(Kind::Usage, "--interface cannot be empty"));
-        }
-        if !selector.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Ok(Self::Name(selector.to_owned()));
-        }
-        let index = selector.parse::<u32>().map_err(|_| {
-            CliError::new(
-                Kind::Usage,
-                format!("--interface index must be within 1..={}", u32::MAX),
-            )
-        })?;
-        NonZeroU32::new(index)
-            .map(Self::Index)
-            .ok_or_else(|| CliError::new(Kind::Usage, "--interface index must be non-zero"))
-    }
-}
-
-/// The library selector the client resolves after admission.
-impl From<InterfaceSelector> for packetcraftr::route::Interface {
-    fn from(selector: InterfaceSelector) -> Self {
-        match selector {
-            InterfaceSelector::Name(name) => Self::Name(name),
-            InterfaceSelector::Index(index) => Self::Index(index),
-        }
-    }
-}
-
-impl fmt::Display for InterfaceSelector {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Name(name) => formatter.write_str(name),
-            Self::Index(index) => write!(formatter, "{index}"),
-        }
-    }
-}
 
 /// The system's interfaces, keeping only the ones `selector` names.
 pub(crate) fn interfaces(
@@ -125,45 +74,9 @@ fn select_interfaces<I: net::interface::Provider>(
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
-
     use packetcraftr_netio as net;
 
     use super::{InterfaceSelector, select_interfaces};
-
-    #[test]
-    fn interface_selectors_distinguish_names_and_numeric_indexes() {
-        assert_eq!(
-            InterfaceSelector::parse("ethernet0").unwrap(),
-            InterfaceSelector::Name("ethernet0".to_owned())
-        );
-        assert_eq!(
-            InterfaceSelector::parse("7").unwrap(),
-            InterfaceSelector::Index(NonZeroU32::new(7).unwrap())
-        );
-
-        for (selector, expected) in [
-            ("", "--interface cannot be empty"),
-            ("0", "--interface index must be non-zero"),
-            (
-                "4294967296",
-                "--interface index must be within 1..=4294967295",
-            ),
-        ] {
-            let error = InterfaceSelector::parse(selector)
-                .expect_err("invalid selectors must fail before provider access");
-            assert_eq!(error.exit_code(), 2, "selector={selector:?}");
-            assert_eq!(error.message, expected, "selector={selector:?}");
-        }
-    }
-
-    #[test]
-    fn selectors_display_verbatim() {
-        let by_index = InterfaceSelector::parse("7").unwrap();
-        let by_name = InterfaceSelector::parse("eth0").unwrap();
-        assert_eq!(by_index.to_string(), "7");
-        assert_eq!(by_name.to_string(), "eth0");
-    }
 
     struct FixtureProvider;
 

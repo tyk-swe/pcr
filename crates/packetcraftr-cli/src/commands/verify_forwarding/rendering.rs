@@ -7,8 +7,8 @@ use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
 
 use super::arguments::Args;
-use crate::commands::offline_analysis::omitted_diagnostic;
 use crate::errors::CliError;
+use crate::rendering::omitted_diagnostic;
 use crate::rendering::{StreamEncoder, emit_json, write_stdout_line};
 
 pub(super) fn render(

@@ -38,7 +38,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
 
 fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
     let result = output::protocols::ListResult::from(BuiltinProtocol::ALL);
-    super::render_aggregate_rows(
+    crate::rendering::render_aggregate_rows(
         output::contract::Command::Protocols,
         format,
         &result,

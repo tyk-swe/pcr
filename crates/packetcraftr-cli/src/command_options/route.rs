@@ -6,9 +6,7 @@ use std::net::IpAddr;
 use clap::{Args, ValueEnum};
 use packetcraftr_netio as net;
 
-use super::recipe::RecipeArgs;
-use super::{Selector, interface_selector};
-use crate::system::InterfaceSelector;
+use super::{InterfaceSelector, RecipeArgs, Selector, interface_selector};
 
 /// Route-selection constraints shared by live commands.
 #[derive(Debug, Args)]

@@ -45,8 +45,11 @@ pub(crate) use duration::{
     RunTime, TimeoutArgs, Window,
 };
 
-mod stream;
-pub(crate) use stream::{Selector, interface_selector, stream_selector};
+mod selectors;
+pub(crate) use selectors::{InterfaceSelector, Selector, interface_selector, stream_selector};
+
+mod target;
+pub(crate) use target::parse_target;
 
 mod timestamp;
 pub(crate) use timestamp::parse_timestamp;

@@ -69,7 +69,7 @@ pub(super) fn run(
     let outcome = session
         .run(
             &mut reader,
-            super::offline_analysis::ip_event_sink(format, stream),
+            crate::rendering::ip_event_sink(format, stream),
             |finding| {
                 if selector.matches(&finding) {
                     state.count(&finding);

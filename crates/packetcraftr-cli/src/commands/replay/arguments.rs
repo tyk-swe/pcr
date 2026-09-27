@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::system::InterfaceSelector;
+use crate::command_options::InterfaceSelector;
 
 use crate::command_options::{
     Budget, CaptureReaderBoundsArgs, CaptureStdout, CompressionArgs, DestinationAllowlistArgs,

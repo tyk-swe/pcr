@@ -14,10 +14,9 @@ use crate::output::{
     rewrite::MAX_REPORTED_CHANGES,
 };
 use crate::{
-    commands::offline_analysis::Retained,
     errors::CliError,
     filtering,
-    rendering::{StreamEncoder, emit_aggregate},
+    rendering::{Retained, StreamEncoder, emit_aggregate},
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -54,7 +53,7 @@ impl super::Spec for Args {
 }
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
-    crate::input::validate_capture_stream_limits(args.limits)?;
+    args.limits.validate()?;
     let checksum_mode = args
         .checksum_mode
         .map(ChecksumMode::from)

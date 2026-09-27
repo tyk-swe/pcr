@@ -4,7 +4,8 @@
 //! Read CLI command logic.
 
 pub(super) mod arguments;
-pub(crate) mod rendering;
+mod projection;
+mod rendering;
 #[cfg(test)]
 mod tests;
 
@@ -27,7 +28,7 @@ use self::arguments::Args;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering;
-use crate::input::{open_capture, validate_capture_stream_limits};
+use crate::input::open_capture;
 use crate::rendering::{StreamEncoder, finish_compressed_output};
 use packetcraftr_core::filter::FrameDecoder;
 
@@ -89,10 +90,10 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let compression = arguments.compression.for_output(format.as_format())?;
     if !arguments.fields.is_empty() {
-        return super::projection::read(arguments, format.as_format(), stream);
+        return projection::run(arguments, format.as_format(), stream);
     }
     if matches!(format, ReadFormat::Json | ReadFormat::Csv | ReadFormat::Tsv) {
-        return Err(super::projection::missing_fields_error());
+        return Err(crate::rendering::missing_fields_error());
     }
     let Args {
         fields: _,
@@ -106,7 +107,7 @@ pub(super) fn run(
         dissect,
         decode,
     } = arguments;
-    validate_capture_stream_limits(limits)?;
+    limits.validate()?;
     let bounds = epoch.resolve()?;
     validate_dissect_format(dissect, format)?;
     if normalize && format != ReadFormat::PcapNg {

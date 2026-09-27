@@ -25,16 +25,15 @@ use packetcraftr_core::capture_file::{Format, Limits, Reader, Writer, compressio
 use packetcraftr_core::error::{BoundaryError, Kind};
 
 use self::arguments::Args;
-use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering;
-use crate::input::{open_capture_file, validate_capture_stream_limits};
+use crate::input::open_capture_file;
 use crate::output::{self, contract::ExchangeFormat, stream::EncodeError};
 use crate::rendering::{
     HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
     finish_compressed_output, stream_capture_error, write_stdout_line_with_interrupt,
 };
-use crate::system::InterfaceSelector;
 use conversion::timing;
 
 /// One validated replay: the client it runs on and its request over a
@@ -112,7 +111,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         max_bytes: policy.max_bytes_per_operation,
         reader: arguments.reader,
     };
-    validate_capture_stream_limits(capture_limits)?;
+    capture_limits.validate()?;
     let timing = timing(arguments)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let max_frame_bytes = arguments.reader.max_frame_bytes;

@@ -1,35 +1,29 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Versioned defaults, resolved by clap before typed command construction.
-//! Explicit command-line values always win; a preset is not an RSS guarantee.
+//! Preset-aware parsing, retaining the finalized definition for diagnostics.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use clap::{ArgMatches, CommandFactory, FromArgMatches, ValueEnum};
+use clap::{ArgMatches, CommandFactory, FromArgMatches};
 
-use crate::cli::Cli;
+use super::Cli;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum Preset {
-    CiV1,
-    WorkstationV1,
-}
-
-impl Preset {
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::CiV1 => "ci-v1",
-            Self::WorkstationV1 => "workstation-v1",
-        }
-    }
+/// The typed invocation and the parser metadata that produced it.
+pub(crate) struct Parsed {
+    pub(crate) cli: Cli,
+    pub(crate) matches: ArgMatches,
+    pub(crate) definition: clap::Command,
 }
 
 /// The command-line definition with `defaults`, the preset values the
 /// selected command's typed arguments declare, as the named subcommand's
 /// defaults.
-fn definition(subcommand: &str, defaults: &BTreeMap<&'static str, &'static str>) -> clap::Command {
+fn preset_definition(
+    subcommand: &str,
+    defaults: &BTreeMap<&'static str, &'static str>,
+) -> clap::Command {
     Cli::command().mut_subcommand(subcommand, |command| {
         command.mut_args(|arg| match defaults.get(arg.get_id().as_str()) {
             Some(value) => arg.default_value(*value),
@@ -38,11 +32,16 @@ fn definition(subcommand: &str, defaults: &BTreeMap<&'static str, &'static str>)
     })
 }
 
-pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<(Cli, ArgMatches), clap::Error> {
-    let matches = Cli::command().try_get_matches_from(arguments.clone())?;
+pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<Parsed, clap::Error> {
+    let mut definition = Cli::command();
+    let matches = definition.try_get_matches_from_mut(&arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;
     let Some(preset) = cli.resource_preset else {
-        return Ok((cli, matches));
+        return Ok(Parsed {
+            cli,
+            matches,
+            definition,
+        });
     };
     let subcommand = match matches.subcommand_name() {
         Some(subcommand) if cli.command.offline() => subcommand,
@@ -54,14 +53,20 @@ pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<(Cli, ArgMatches), 
         }
     };
     let defaults = cli.command.preset_defaults(preset);
-    let matches = definition(subcommand, &defaults).try_get_matches_from(arguments)?;
+    let mut definition = preset_definition(subcommand, &defaults);
+    let matches = definition.try_get_matches_from_mut(arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;
-    Ok((cli, matches))
+    Ok(Parsed {
+        cli,
+        matches,
+        definition,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resources::Preset;
 
     #[test]
     fn both_presets_build_valid_command_trees() {
@@ -92,7 +97,7 @@ mod tests {
                 .expect("offline command parses");
                 let defaults = cli.command.preset_defaults(preset);
                 assert!(!defaults.is_empty(), "{arguments:?}");
-                definition(arguments[0], &defaults).debug_assert();
+                preset_definition(arguments[0], &defaults).debug_assert();
             }
         }
     }
@@ -125,8 +130,9 @@ mod tests {
                 "ci-v1",
             ],
         ] {
-            let (_, matches) = parse_from(arguments.into_iter().map(OsString::from).collect())
-                .expect("valid preset");
+            let Parsed { matches, .. } =
+                parse_from(arguments.into_iter().map(OsString::from).collect())
+                    .expect("valid preset");
             let (_, selected) = matches.subcommand().expect("comparison");
             assert_eq!(selected.get_one::<usize>("max_flows"), Some(&7));
             assert_eq!(

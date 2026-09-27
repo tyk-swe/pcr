@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Application-event publication and retention under a shared byte budget.
+
 use crate::output::{contract::ToolFormat, stream::StreamRecord};
 use crate::{
     errors::CliError,
@@ -8,14 +10,14 @@ use crate::{
 };
 use packetcraftr_core::error::Kind;
 
-pub(super) struct EventOutput<'a> {
+pub(crate) struct EventOutput<'a> {
     format: ToolFormat,
     stream: &'a StreamEncoder,
     remaining: usize,
 }
 
 impl<'a> EventOutput<'a> {
-    pub(super) fn new(format: ToolFormat, stream: &'a StreamEncoder, maximum: usize) -> Self {
+    pub(crate) fn new(format: ToolFormat, stream: &'a StreamEncoder, maximum: usize) -> Self {
         Self {
             format,
             stream,
@@ -23,7 +25,7 @@ impl<'a> EventOutput<'a> {
         }
     }
 
-    pub(super) fn emit<T: StreamRecord>(
+    pub(crate) fn emit<T: StreamRecord>(
         &mut self,
         value: T,
         retained: &mut Vec<T>,

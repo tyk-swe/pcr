@@ -21,7 +21,6 @@ mod filtering;
 mod input;
 mod invocation;
 pub mod output;
-mod presets;
 mod rendering;
 mod resources;
 mod staged_output;

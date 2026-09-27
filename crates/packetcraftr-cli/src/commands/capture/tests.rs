@@ -372,7 +372,7 @@ fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
 fn projection_streams_bounded_fields_records() {
     let (provider, request, stopped) = single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
     let (publisher, buffer) = stream(Command::Capture);
-    let projector = crate::commands::projection::Projector::prepare(
+    let projector = crate::rendering::Projector::prepare(
         &["frame.len".to_owned(), "ipv4.destination".to_owned()],
         4096,
         &registry(),
@@ -425,7 +425,7 @@ fn projection_exhaustion_stops_capture_and_retains_evidence() {
     let (provider, request, stopped) =
         single_session(LinkType::ETHERNET, vec![ipv4_udp_frame(), ipv4_udp_frame()]);
     let (publisher, buffer) = stream(Command::Capture);
-    let projector = crate::commands::projection::Projector::prepare(
+    let projector = crate::rendering::Projector::prepare(
         &["frame.len".to_owned(), "ipv4.destination".to_owned()],
         16,
         &registry(),

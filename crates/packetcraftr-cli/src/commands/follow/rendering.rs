@@ -9,8 +9,8 @@ use packetcraftr_core::analysis;
 
 use crate::output;
 
-use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
+use crate::rendering::{Retained, omitted_diagnostic};
 use crate::rendering::{
     StreamEncoder, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
@@ -81,9 +81,9 @@ pub(super) fn render_text(
     summary: &Summary,
     written: &[super::write::Written],
 ) -> Result<(), CliError> {
-    crate::commands::offline_analysis::render_clock(&summary.clock)?;
+    crate::rendering::render_clock(&summary.clock)?;
     if let Some(scope) = &summary.scope {
-        crate::commands::offline_analysis::render_scope(scope)?;
+        crate::rendering::render_scope(scope)?;
     }
     let transport = selector.transport.as_str();
     match &summary.client_flow {

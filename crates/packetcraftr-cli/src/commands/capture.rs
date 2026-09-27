@@ -147,7 +147,7 @@ pub(super) fn run(
     let projector = if args.fields.is_empty() {
         None
     } else {
-        super::projection::Projector::prepare(
+        crate::rendering::Projector::prepare(
             &args.fields,
             args.max_projection_bytes,
             &registry,
@@ -155,6 +155,15 @@ pub(super) fn run(
             format.as_format(),
         )?
     };
+    if projector
+        .as_ref()
+        .is_some_and(|projector| projector.projection.requirements().stream_index)
+    {
+        return Err(CliError::new(
+            Kind::Usage,
+            "capture --field cannot select stream indices; save the capture and use read --field",
+        ));
+    }
     let decoding = Decoding::prepare(
         args.dissect,
         projector.is_some(),
@@ -294,7 +303,7 @@ struct Output<'a> {
     compression: Compression,
     selector: Option<FrameSelector>,
     decoding: Option<Decoding>,
-    projector: Option<super::projection::Projector>,
+    projector: Option<crate::rendering::Projector>,
     files: Option<Files>,
     stream: &'a StreamEncoder,
 }
@@ -303,7 +312,7 @@ struct Output<'a> {
 struct Destinations {
     files: Option<Files>,
     writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
-    projector: Option<super::projection::Projector>,
+    projector: Option<crate::rendering::Projector>,
 }
 
 /// The client is injected so normal capture, rotation, and mixed interfaces
@@ -486,7 +495,7 @@ fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
 /// and every sink error propagates so capture cleanup still runs.
 fn emit_frame(
     decoding: Option<&mut Decoding>,
-    projector: Option<&mut super::projection::Projector>,
+    projector: Option<&mut crate::rendering::Projector>,
     stream: &StreamEncoder,
     format: CaptureFormat,
     writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,

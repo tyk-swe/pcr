@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Output and command attribution for failures before typed parsing succeeds.
+
 use std::ffi::OsString;
 
 use crate::output;
@@ -10,27 +12,22 @@ use crate::cli::{ColorChoice, Format};
 /// The formats that can carry a structured error document. A clap failure is
 /// reported in one of these or, for everything else, as prose on stderr.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum MachineFormat {
+pub(crate) enum MachineFormat {
     Json,
     Ndjson,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct Context {
-    pub(super) format: Option<MachineFormat>,
-    pub(super) color: ColorChoice,
-    pub(super) command: Option<output::contract::Command>,
-}
-
-pub(super) fn from_env() -> Context {
-    let arguments = std::env::args_os().collect::<Vec<_>>();
-    parse(&arguments)
+pub(crate) struct Context {
+    pub(crate) format: Option<MachineFormat>,
+    pub(crate) color: ColorChoice,
+    pub(crate) command: Option<output::contract::Command>,
 }
 
 /// Selects error rendering from global output/color options and the first
 /// root positional. This scan never interprets command-specific options or
 /// decides argument validity; Clap remains the argument parser.
-fn parse(arguments: &[OsString]) -> Context {
+pub(crate) fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
     let mut arguments = arguments.iter().skip(1).peekable();

@@ -48,14 +48,29 @@ capture evidence, not wire timing or processing duration — and cites this
 invocation's one-based message indices; a row can precede the message record
 it cites. Message statuses remain the authority on body completeness.
 
+```sh
+target/debug/packetcraftr --output ndjson http examples/captures/http-stream.pcap \
+  --transactions
+```
+
 `http --body-message INDEX --write FILE` saves one message's body bytes —
 Content-Length, close-delimited, or concatenated chunk-data after chunk
-removal; content and remaining transfer codings stay coded. List messages
-first, then rerun with the same capture, stream, epoch, and decode settings
-plus the pair: the new file appears only when the whole capture inspects
-cleanly and the message completed, an existing destination is never
-overwritten, and `result.body_export` reports the artifact's path, byte
-count, and SHA-256 digest rather than its bytes.
+removal; content and remaining transfer codings stay coded — the file can
+hold gzip bytes, and nothing is decompressed. List messages first, then
+rerun with the same capture, stream, epoch, HTTP-port, and decode settings
+plus the pair so `INDEX` means the same invocation-local message:
+
+```sh
+target/debug/packetcraftr http examples/captures/http-stream.pcap
+target/debug/packetcraftr --output json http examples/captures/http-stream.pcap \
+  --body-message 2 --write message-2-body.bin
+```
+
+The new file appears only when the whole capture inspects cleanly and the
+message completed; an existing destination is never overwritten; a report
+that cannot be written after the file commits leaves the published artifact
+in place. `result.body_export` reports the artifact's path, byte count, and
+SHA-256 digest rather than its bytes.
 
 For an ordinary failure, lower `--max-frames` below the physical capture count.
 Filtered-out input still counts; adding a display filter does not bypass that
@@ -70,9 +85,14 @@ To turn findings into a pass/fail signal for automation, use the expert
 gate:
 
 ```sh
-target/debug/packetcraftr --output json expert capture.pcap \
+target/debug/packetcraftr --output json expert examples/captures/clock-regression.pcap \
   --fail-on warning --allow-findings 0 --minimum-frames 20
 ```
+
+The checked-in `clock-regression.pcap` produces one warning finding, so this
+gate fails with `finding_allowance_exceeded` and exits 1 even though its 3
+matched frames fall below the declared minimum coverage of 20 — an observed
+violation wins over insufficient coverage.
 
 The gate counts every produced finding — including findings
 `--min-severity`, `--code`, or aggregate retention hide from the report —
@@ -99,6 +119,12 @@ their source meaning. Parts are contiguous physical-frame ranges and may cut
 through streams and IP datagrams; use `export` for dependency-complete
 extraction. `--compression` selects gzip or Zstd for the saved files
 independently of the input's compression, and no existing file is overwritten.
+Each part is generated through one staged output handle at a time — at most
+one output file/compressor is open, and a finished part is sealed to a closed
+path before the next part begins — and parts commit in name order only after
+every part is generated and the report is prepared. A commit or interruption
+failure rolls back exactly the names this invocation created; a report that
+cannot be written after parts committed leaves the published parts in place.
 The text and machine reports name each part's source frame range so a source
 frame number is recoverable as `first_frame + part-local frame - 1`.
 

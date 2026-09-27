@@ -48,12 +48,39 @@ fn documentation_generates_completions_and_man_pages_for_every_command() {
     }
     let bash = std::fs::read_to_string(directory.join("completions/packetcraftr.bash"))
         .expect("bash completion");
-    for option in ["--dissect", "--decode-as", "--field"] {
+    for option in [
+        "--dissect",
+        "--decode-as",
+        "--field",
+        // The offline-investigation batch: HTTP evidence, capture parts, and
+        // expert gates must stay completable everywhere a flag can appear.
+        "--transactions",
+        "--body-message",
+        "--frames-per-file",
+        "--write-dir",
+        "--max-split-output-bytes",
+        "--fail-on",
+        "--allow-findings",
+        "--minimum-frames",
+    ] {
         assert!(
             bash.contains(option),
             "bash completion misses finalized option {option}"
         );
     }
+    let fish = std::fs::read_to_string(directory.join("completions/packetcraftr.fish"))
+        .expect("fish completion");
+    for option in ["--transactions", "--frames-per-file", "--fail-on"] {
+        let fish_flag = option.replace("--", "-l ");
+        assert!(
+            fish.contains(&fish_flag),
+            "fish completion misses finalized option {option}"
+        );
+    }
+    assert!(
+        fish.contains("-a \"split\""),
+        "fish completion misses the split command"
+    );
 
     let man = directory.join("man");
     let root = man.join("packetcraftr.1");
@@ -76,6 +103,40 @@ fn documentation_generates_completions_and_man_pages_for_every_command() {
         capture.contains("--dissect") && capture.contains("--decode-as"),
         "capture man page misses finalized options"
     );
+    for (subcommand, options) in [
+        (
+            "http",
+            ["--transactions", "--body-message", "--write"].as_slice(),
+        ),
+        (
+            "split",
+            [
+                "--frames-per-file",
+                "--write-dir",
+                "--compression",
+                "--max-files",
+                "--max-split-metadata-records",
+                "--max-split-metadata-bytes",
+                "--max-split-output-bytes",
+                "--max-duration-ms",
+            ]
+            .as_slice(),
+        ),
+        (
+            "expert",
+            ["--fail-on", "--allow-findings", "--minimum-frames"].as_slice(),
+        ),
+    ] {
+        let page = std::fs::read_to_string(man.join(format!("packetcraftr-{subcommand}.1")))
+            .unwrap_or_else(|error| panic!("{subcommand} man page must read: {error}"))
+            .replace("\\-", "-");
+        for option in options {
+            assert!(
+                page.contains(option),
+                "{subcommand} man page misses finalized option {option}"
+            );
+        }
+    }
 }
 
 #[test]

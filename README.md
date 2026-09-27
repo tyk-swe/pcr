@@ -511,6 +511,10 @@ packetcraftr --output pcapng fragment --packet 'ipv4(src=192.0.2.1,dst=192.0.2.2
 packetcraftr merge left.pcap right.pcapng --write merged.pcapng --compression zstd
 packetcraftr --output pcap read capture.pcap.gz --compression zstd > capture.pcap.zst
 packetcraftr --output csv read capture.pcapng --field frame.number --field ip.src --field udp.source_port
+packetcraftr --output ndjson http capture.pcap --transactions > http.ndjson
+packetcraftr http capture.pcap --body-message 2 --write message-2-body.bin
+packetcraftr split capture.pcapng --frames-per-file 1000 --write-dir parts
+packetcraftr --output json expert capture.pcap --fail-on warning --allow-findings 0 --minimum-frames 20
 ```
 
 Fragmentation is explicit and never sends traffic. MTU excludes the link header.
@@ -610,6 +614,23 @@ after every pass succeeds. Reports list source positions, unmatched selectors,
 known incomplete dependencies, unattributable groups, and omitted source outcomes.
 Missing fragment headers are never used to guess a conversation. Ordinary `read`
 keeps its existing physical-frame selection behavior.
+
+`split CAPTURE --frames-per-file N --write-dir DIR` divides a PCAP or PCAPNG
+capture into contiguous physical-frame parts named `part-000001` and up. Every
+part duplicates the complete source metadata — section headers, interface
+descriptions, and non-packet records, so interface statistics still describe the
+source capture, not the part — and each part rereads independently. Parts are
+faithful frame ranges, not dependency-complete selections: a stream or IP
+datagram may cross a part boundary; use `export` for conversation-complete
+extraction. Parts are staged one at a time — at most one output
+handle/compressor is open and each finished part is sealed to a closed path
+before the next begins — then committed in name order only after every part is
+generated and the report is prepared. A commit or interruption failure rolls
+back exactly the names this invocation created, nothing existing is overwritten,
+and a report-write failure after commits leaves the published parts in place.
+`--compression` selects gzip or Zstd for the saved files independently of the
+input's compression, and the text and machine reports name each part's source
+frame range.
 
 `rewrite CAPTURE --write rewritten.pcapng` edits matched capture headers. Direct
 options include `--source-ip`, `--destination-ip`, TCP/UDP source/destination

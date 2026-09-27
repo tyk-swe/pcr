@@ -508,6 +508,55 @@ fn split_usage_errors_precede_source_io() {
     }
 }
 
+/// SP15/SP17: split's option surface is closed — a display filter, an
+/// interval or byte-sized part mode, and output-format conversion remain
+/// invalid invocations rather than implied alternate semantics — and the run
+/// duration is a parse-time range. Every refusal is an ordinary usage
+/// failure before source I/O, `cli.error` on the machine stream.
+#[test]
+fn split_rejects_foreign_and_out_of_range_flags_without_destinations() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = parts_directory(root.path());
+    let missing = root.path().join("missing-input.pcapng");
+    for flags in [
+        vec!["--filter", "frame.number > 0"],
+        vec!["--interval-ms", "60000"],
+        vec!["--output-format", "pcap"],
+        vec!["--max-duration-ms", "0"],
+        vec!["--max-duration-ms", "3600001"],
+        vec!["--frames-per-file", "not-a-number"],
+        vec!["--frames-per-file", "18446744073709551616"],
+        vec!["--frames-per-file"],
+    ] {
+        let mut arguments = vec![
+            "split".to_owned(),
+            path_text(&missing).to_owned(),
+            "--write-dir".to_owned(),
+            path_text(&directory).to_owned(),
+        ];
+        arguments.extend(flags.iter().map(|flag| (*flag).to_owned()));
+        let references = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+        let output = run(&references);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}: {output:?}");
+    }
+    for flags in [
+        vec!["--filter", "frame.number > 0"],
+        vec!["--max-duration-ms", "0"],
+    ] {
+        let output = run_split("ndjson", &missing, &directory, "1", &flags);
+        assert_eq!(output.status.code(), Some(2), "{flags:?}: {output:?}");
+        let records = parse_ndjson(&output);
+        let terminal = records.last().expect("a terminal record is emitted");
+        assert_eq!(terminal["status"], "error", "{flags:?}");
+        assert_eq!(terminal["error"]["code"], "cli.error", "{flags:?}");
+    }
+    assert_eq!(
+        entries(&directory),
+        Vec::<String>::new(),
+        "a refused invocation never creates a destination"
+    );
+}
+
 #[test]
 fn split_help_lists_every_bounded_option() {
     let output = run_success(&["split", "--help"]);

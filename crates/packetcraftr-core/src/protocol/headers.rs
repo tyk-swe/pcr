@@ -636,11 +636,7 @@ impl Ipv6Header {
                 Some(extension) => extension?,
                 None => break,
             };
-            let fragment_offset = extension.fragment_offset();
             extensions.push(extension);
-            if fragment_offset.is_some_and(|units| units != 0) {
-                break;
-            }
         }
         let (upper_layer, upper_layer_offset) = chain.position();
         Ok(Self {
@@ -756,7 +752,9 @@ impl Ipv6Extension {
 /// Iterator over one IPv6 extension-header chain in `bytes`. Each step
 /// reports the Hop-by-Hop, Routing, Fragment, AH, or Destination Options
 /// header the position stands at; the walk ends at the first other Next
-/// Header value. It yields an error once and then ends.
+/// Header value, and behind a Fragment header with a nonzero offset — the
+/// bytes there continue an earlier fragment, not another header. It yields
+/// an error once and then ends.
 ///
 /// There is no count bound: the slice bounds the chain. [`Ipv6Header`]
 /// walks apply [`MAX_IPV6_EXTENSIONS`] on top.
@@ -765,7 +763,7 @@ pub struct Ipv6ExtensionChain<'a> {
     bytes: &'a [u8],
     protocol: u8,
     offset: usize,
-    failed: bool,
+    done: bool,
 }
 
 impl<'a> Ipv6ExtensionChain<'a> {
@@ -776,7 +774,7 @@ impl<'a> Ipv6ExtensionChain<'a> {
             bytes,
             protocol: next_header,
             offset,
-            failed: false,
+            done: false,
         }
     }
 
@@ -787,7 +785,8 @@ impl<'a> Ipv6ExtensionChain<'a> {
     }
 
     fn at_header(&self) -> bool {
-        self.protocol == ip_protocol::FRAGMENT || is_walkable_ipv6_extension(self.protocol)
+        !self.done
+            && (self.protocol == ip_protocol::FRAGMENT || is_walkable_ipv6_extension(self.protocol))
     }
 }
 
@@ -795,7 +794,7 @@ impl Iterator for Ipv6ExtensionChain<'_> {
     type Item = Result<Ipv6Extension, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.failed || !self.at_header() {
+        if !self.at_header() {
             return None;
         }
         let step = (|| {
@@ -828,10 +827,11 @@ impl Iterator for Ipv6ExtensionChain<'_> {
             Ok(extension) => {
                 self.offset += extension.length;
                 self.protocol = extension.next_header;
+                self.done = extension.fragment_offset().is_some_and(|units| units != 0);
                 Some(Ok(extension))
             }
             Err(error) => {
-                self.failed = true;
+                self.done = true;
                 Some(Err(error))
             }
         }
@@ -1230,6 +1230,22 @@ mod tests {
         assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 0));
         assert_eq!(chain.next(), None);
         assert_eq!(chain.next(), None);
+    }
+
+    #[test]
+    fn ipv6_extension_chain_stops_behind_a_later_fragment() {
+        // A non-initial fragment announces Hop-by-Hop, but the bytes behind
+        // it continue an earlier fragment and must not walk as a header.
+        let mut bytes = vec![0xaa; 8];
+        bytes.extend_from_slice(&[0, 0, 0, 0x09, 0, 0, 0, 0]); // Fragment -> Hop-by-Hop, offset 1
+        bytes.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]); // fragment data
+        let mut chain = Ipv6ExtensionChain::new(&bytes, 8, ip_protocol::FRAGMENT);
+        let fragment = chain.next().unwrap().unwrap();
+        assert_eq!(fragment.range(), 8..16);
+        assert_eq!(fragment.fragment_offset(), Some(1));
+        assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
+        assert_eq!(chain.next(), None);
+        assert_eq!(chain.position(), (ip_protocol::HOP_BY_HOP, 16));
     }
 
     #[test]

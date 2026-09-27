@@ -52,7 +52,7 @@ impl Error {
                 Self::DeadlineExceeded { operation }
             }
             error => Self::Discovery {
-                message: "the native route adapter refused the interface query".to_owned(),
+                message: "the native route backend refused the interface query".to_owned(),
                 source: Source::new(error),
             },
         }

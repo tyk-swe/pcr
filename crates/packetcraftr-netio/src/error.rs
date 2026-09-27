@@ -62,7 +62,7 @@ pub enum Error {
         source: Option<Source>,
     },
     #[error(
-        "packet transmission mode mismatch: expected {expected:?}, materialized route uses {actual:?}"
+        "packet transmission mode mismatch: expected {expected:?}, resolved route uses {actual:?}"
     )]
     TransmissionModeMismatch { expected: Mode, actual: Mode },
     #[error("packet transmission route still has unresolved automatic link mode")]
@@ -182,7 +182,7 @@ impl Classified for Error {
             Self::Privilege { .. } => classified(
                 "capability.privilege",
                 Kind::Capability,
-                "grant the minimum raw-socket or capture permission required by the selected platform adapter",
+                "grant the minimum raw-socket or capture permission required by the selected native backend",
             ),
             Self::InterfaceDiscovery { .. } => crate::interface::discovery_classification(),
             Self::Device { .. } => classified(

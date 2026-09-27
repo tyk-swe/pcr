@@ -19,6 +19,13 @@
 //! A capture read is the one call whose expiry is not a failure: it ends the
 //! wait, so an expired read delivers an already queued record or `Ok(None)`.
 //! See [`capture::Session`](crate::capture::Session).
+//!
+//! Three calls take no deadline by design. A [send](crate::transmit::Provider::send)
+//! stays on the caller's thread and never waits on the network. A session
+//! [shutdown](crate::capture::Session::shutdown) keeps its own bounded
+//! lifecycle so cleanup still runs after cancellation. A connected
+//! [`tcp::Stream`](crate::tcp::Stream) bounds each read and write with the
+//! socket timeouts its caller sets.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

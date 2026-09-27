@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Network provider contracts and native I/O adapters.
+//! Network provider contracts and native backends.
 //!
 //! All platform-specific and potentially unsafe I/O is contained here. Higher
 //! level transmission and diagnostic workflows remain policy-gated in
@@ -11,8 +11,11 @@
 //!
 //! Each capability is a module ([`route`], [`interface`], [`capture`],
 //! [`transmit`], [`tcp`]) holding its provider contract and its system
-//! provider; shared vocabulary is at the root. Public fields name core types
-//! by their core path, such as `packetcraftr_core::packet::MacAddress`.
+//! provider. What the capabilities share is a module too: [`link`] (link
+//! modes and capabilities), [`deadline`] (the deadline convention), and
+//! [`resources`] (worker-pool diagnostics); the root re-exports only the
+//! shared error types. Public fields name core types by their core path,
+//! such as `packetcraftr_core::packet::MacAddress`.
 //!
 //! # Errors
 //!

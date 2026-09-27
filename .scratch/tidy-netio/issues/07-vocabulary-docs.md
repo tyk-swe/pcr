@@ -4,7 +4,11 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No CONTEXT.md "avoid" term remains in netio docs or messages.
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] No CONTEXT.md "avoid" term remains in netio docs or messages.
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- "adapter" stays where it names IP Helper's own adapter snapshot and the NIC that reports an MTU; the messages and docs that meant a backend now say backend.

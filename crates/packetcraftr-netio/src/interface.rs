@@ -58,7 +58,7 @@ pub trait Provider: Send + Sync {
     fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error>;
 }
 
-/// Provider backed by the adapter selected for the current target and feature
+/// Provider backed by the backend selected for the current target and feature
 /// set. Portable profiles return a typed capability error.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
@@ -116,7 +116,7 @@ pub(crate) fn identity_changed(expected: &Id, actual: Option<&str>) -> crate::Er
 /// prefix, or a duplicate interface.
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
     validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
-        message: "the native route adapter returned an invalid interface snapshot".to_owned(),
+        message: "the native route backend returned an invalid interface snapshot".to_owned(),
         source: Source::new(error),
     })
 }

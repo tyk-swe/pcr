@@ -4,7 +4,7 @@
 //! Operating-system native interface snapshot validation.
 //!
 //! Every rejection is a [`route::Error::InvalidResponse`]: the snapshot came
-//! from the operating system, so an inconsistency in it is a native adapter
+//! from the operating system, so an inconsistency in it is a native backend
 //! fault rather than a caller error.
 
 use crate::{interface, route};

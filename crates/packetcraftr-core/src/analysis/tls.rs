@@ -374,7 +374,7 @@ impl Collector {
         key: &CanonicalFlow,
         events: &mut Vec<SessionEvent>,
     ) {
-        let cap = MAX_DIRECTION_BUFFER;
+        let ceiling = MAX_DIRECTION_BUFFER;
         for event in record.tcp_events {
             let TcpEvent::Data {
                 flow: sender,
@@ -403,7 +403,7 @@ impl Collector {
             // A direction that has stopped contributing handshake bytes keeps
             // none of this delivery, so it charges nothing and the frame is
             // not part of the handshake this session reports.
-            let Some(charge) = live.retainable(direction, payload.len(), cap) else {
+            let Some(charge) = live.retainable(direction, payload.len(), ceiling) else {
                 continue;
             };
             live.note_delivery(record.number);
@@ -432,7 +432,7 @@ impl Collector {
                 return;
             };
             let before = live.buffered();
-            let verdict = live.feed(direction, &payload, cap, &mut limit_hits);
+            let verdict = live.feed(direction, &payload, ceiling, &mut limit_hits);
             let after = live.buffered();
             self.buffered_bytes = self
                 .buffered_bytes

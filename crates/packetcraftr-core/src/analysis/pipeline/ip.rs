@@ -104,7 +104,7 @@ pub struct IpReassemblyReport {
 pub(super) struct DerivedDecodeBudget {
     pub(super) charge: usize,
     pub(super) max_layers: usize,
-    /// Whether the layer cap came from the budget rather than from the
+    /// Whether the layer ceiling came from the budget rather than from the
     /// datagram's own structure, so a layer-limit refusal can be reported as
     /// the resource failure it is.
     pub(super) budget_reduced: bool,
@@ -479,7 +479,7 @@ mod tests {
             removed,
             "retirements bounded into omitted counters still prove removal"
         );
-        assert!(events.is_empty(), "no outcomes fit the zero cap");
+        assert!(events.is_empty(), "no outcomes fit the zero ceiling");
         assert_eq!(dispatch.report().outcomes_omitted, 2);
         assert_eq!(dispatch.report().counters.ipv4.idle_expired_datagrams, 2);
     }

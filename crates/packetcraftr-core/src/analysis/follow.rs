@@ -1,6 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Follows one selected conversation through a pipeline run, emitting its
+//! payload as [`Chunk`]s: the reassembler's in-order deliveries per
+//! direction for TCP, one chunk per datagram for UDP. Its [`Summary`] also
+//! counts captured bytes that were buffered but never deliverable.
+
 use bytes::Bytes;
 
 use crate::analysis::adapter::transport_payload;

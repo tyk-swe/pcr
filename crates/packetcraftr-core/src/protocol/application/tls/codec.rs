@@ -56,7 +56,7 @@ pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 /// Records dissected from one segment before the remainder becomes a raw tail.
 ///
 /// A hostile peer can pack thousands of one-byte records into a single
-/// segment; the cap keeps per-frame work linear in the segment length with a
+/// segment; the ceiling keeps per-frame work linear in the segment length with a
 /// small constant.
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 

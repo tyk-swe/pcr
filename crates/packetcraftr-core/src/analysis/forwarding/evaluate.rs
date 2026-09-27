@@ -79,7 +79,7 @@ pub fn verify_with_limits(
     let mut detail_budget = DetailBudget::new(limits.max_detail_bytes);
     let mut scratch_budget = ScratchBudget::new(limits.max_scratch_bytes);
     // Rank, order, permutation, and key-set bookkeeping. Charges are
-    // independent of the observation collection budget, not an RSS cap.
+    // independent of the observation collection budget, not an RSS ceiling.
     scratch_budget.reserve(
         ingress
             .observations

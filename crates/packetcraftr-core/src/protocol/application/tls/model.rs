@@ -24,7 +24,7 @@ pub const MAX_EXTENSIONS: usize = 64;
 pub const MAX_EXTENSION_LEN: usize = 16 * 1024;
 pub const MAX_ALPN: usize = 32;
 /// Largest server name accepted. RFC 6066 lets `HostName` run to 2^16-1
-/// bytes; the 255-byte cap is the DNS name limit (RFC 1035 section 2.3.4).
+/// bytes; the 255-byte ceiling is the DNS name limit (RFC 1035 section 2.3.4).
 pub const MAX_SNI_LEN: usize = 255;
 /// Largest session identifier accepted, per RFC 8446.
 pub const MAX_SESSION_ID_LEN: usize = 32;
@@ -206,7 +206,7 @@ impl ServerHello {
 /// The complete TLS records carried by one TCP segment.
 ///
 /// The layer covers only whole records. A record continuing into the next
-/// segment, a malformed tail, and records past the per-segment record cap all
+/// segment, a malformed tail, and records past the per-segment record ceiling all
 /// stay outside it, as a `raw` child.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tls {

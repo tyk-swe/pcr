@@ -174,12 +174,17 @@ impl Live {
     /// How much of a `length`-byte delivery this direction can still retain,
     /// or `None` when the direction has stopped contributing handshake bytes
     /// and will retain nothing at all.
-    pub(super) fn retainable(&self, direction: Side, length: usize, cap: usize) -> Option<usize> {
+    pub(super) fn retainable(
+        &self,
+        direction: Side,
+        length: usize,
+        ceiling: usize,
+    ) -> Option<usize> {
         let state = self.side(direction);
         if state.done {
             return None;
         }
-        Some(length.min(cap.saturating_sub(state.charged())))
+        Some(length.min(ceiling.saturating_sub(state.charged())))
     }
 
     /// Whether anything of a handshake was assembled, which is what makes the
@@ -243,11 +248,11 @@ impl Live {
         &mut self,
         direction: Side,
         extra: usize,
-        cap: usize,
+        ceiling: usize,
         limit_hits: &mut u64,
         reason: &'static str,
     ) -> Option<Verdict> {
-        if self.side_mut(direction).charged().saturating_add(extra) <= cap {
+        if self.side_mut(direction).charged().saturating_add(extra) <= ceiling {
             return None;
         }
         *limit_hits = limit_hits.saturating_add(1);
@@ -264,7 +269,7 @@ impl Live {
         &mut self,
         direction: Side,
         chunk: &[u8],
-        cap: usize,
+        ceiling: usize,
         limit_hits: &mut u64,
     ) -> Verdict {
         let mut offset = 0;
@@ -282,7 +287,7 @@ impl Live {
                 match parse_record(rest) {
                     Outcome::Complete { consumed, value } => {
                         offset = offset.saturating_add(consumed);
-                        match self.apply_record(direction, value, cap, limit_hits) {
+                        match self.apply_record(direction, value, ceiling, limit_hits) {
                             Verdict::Open => {}
                             verdict => return verdict,
                         }
@@ -291,7 +296,7 @@ impl Live {
                         if let Some(verdict) = self.refuse_past_ceiling(
                             direction,
                             rest.len(),
-                            cap,
+                            ceiling,
                             limit_hits,
                             REASON_RECORD_CEILING,
                         ) {
@@ -310,7 +315,7 @@ impl Live {
             match parse_record(&self.side_mut(direction).partial) {
                 Outcome::Complete { consumed, value } => {
                     self.side_mut(direction).partial.advance(consumed);
-                    match self.apply_record(direction, value, cap, limit_hits) {
+                    match self.apply_record(direction, value, ceiling, limit_hits) {
                         Verdict::Open => {}
                         verdict => return verdict,
                     }
@@ -328,7 +333,7 @@ impl Live {
                     if let Some(verdict) = self.refuse_past_ceiling(
                         direction,
                         taken,
-                        cap,
+                        ceiling,
                         limit_hits,
                         REASON_RECORD_CEILING,
                     ) {
@@ -354,7 +359,7 @@ impl Live {
         &mut self,
         direction: Side,
         record: Record,
-        cap: usize,
+        ceiling: usize,
         limit_hits: &mut u64,
     ) -> Verdict {
         match record.content_type {
@@ -362,7 +367,7 @@ impl Live {
                 if let Some(verdict) = self.refuse_past_ceiling(
                     direction,
                     record.body.len(),
-                    cap,
+                    ceiling,
                     limit_hits,
                     REASON_HANDSHAKE_CEILING,
                 ) {

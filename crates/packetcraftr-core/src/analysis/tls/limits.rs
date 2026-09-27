@@ -24,7 +24,7 @@ const DEFAULT_MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
 ///
 /// This charge excludes parsed hello summaries, buffer allocation capacity,
 /// tracking metadata, and emitted results. Parser and session-count limits bound
-/// retained summaries separately. These limits are not a total-memory or RSS cap.
+/// retained summaries separately. These limits are not a total-memory or RSS ceiling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Conversations tracked at once. Reaching it retires the oldest tracked

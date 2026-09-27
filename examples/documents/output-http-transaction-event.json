@@ -2,7 +2,7 @@
   "schema": "packetcraftr.output/v7",
   "command": "http",
   "mode": "stream",
-  "sequence": 4,
+  "sequence": 2,
   "event": "http_transaction",
   "status": "success",
   "result": {
@@ -20,23 +20,23 @@
     },
     "outcome": "paired",
     "request": 1,
-    "response": 2,
+    "response": 3,
     "response_status": 200,
     "informational": [
-      3
+      2
     ],
     "request_headers_available": {
       "frame": 4,
       "timestamp": {
         "unix_seconds": 5,
-        "nanoseconds": 200000000
+        "nanoseconds": 0
       }
     },
     "response_started": {
-      "frame": 5,
+      "frame": 6,
       "timestamp": {
-        "unix_seconds": 5,
-        "nanoseconds": 0
+        "unix_seconds": 4,
+        "nanoseconds": 800000000
       }
     },
     "response_headers_available": {
@@ -51,7 +51,7 @@
       "negative": true
     },
     "response_header_span": {
-      "nanoseconds": 1000000000,
+      "nanoseconds": 1200000000,
       "negative": false
     }
   },

@@ -1825,15 +1825,68 @@ fn dns_read_case() -> Value {
 
 fn http_case() -> Value {
     use packetcraftr_cli::output::http::{Complete, Report};
+    use packetcraftr_cli::output::{
+        analysis as output_analysis, frame as frame_output, http as http_output,
+    };
+    let summary = packetcraftr_core::analysis::http::Summary {
+        messages: 2,
+        complete_messages: 2,
+        transaction_summary: Some(packetcraftr_core::analysis::http::TransactionSummary {
+            transactions: 1,
+            paired: 1,
+            unanswered: 0,
+            orphan_responses: 0,
+            negative_header_waits: 1,
+            negative_header_spans: 0,
+        }),
+        ..Default::default()
+    };
     let complete = Complete::try_from((
         &packetcraftr_core::analysis::Summary::default(),
-        Default::default(),
+        summary,
         Vec::new(),
     ))
     .expect("an empty run converts");
+    let availability = |frame: u64, unix_seconds: i64| http_output::Availability {
+        frame,
+        timestamp: frame_output::Timestamp {
+            unix_seconds,
+            nanoseconds: 0,
+        },
+    };
+    let transaction = http_output::Transaction {
+        index: 1,
+        stream: 0,
+        generation: 0,
+        flow: output_analysis::ScopedFlowKey {
+            scope: 0,
+            flow: output_analysis::FlowKey {
+                source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                source_port: 40000,
+                destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                destination_port: 80,
+            },
+        },
+        outcome: http_output::TransactionOutcome::Paired,
+        request: Some(1),
+        response: Some(2),
+        response_status: Some(200),
+        informational: vec![3],
+        request_headers_available: Some(availability(4, 5)),
+        response_started: Some(availability(5, 5)),
+        response_headers_available: Some(availability(7, 6)),
+        response_header_wait: Some(http_output::Interval {
+            nanoseconds: 200_000_000,
+            negative: true,
+        }),
+        response_header_span: Some(http_output::Interval {
+            nanoseconds: 1_000_000_000,
+            negative: false,
+        }),
+    };
     envelope(
         Command::Http,
-        Report::from((Vec::new(), Vec::new(), complete)),
+        Report::from((Vec::new(), vec![transaction], Vec::new(), complete)),
         Vec::new(),
     )
 }

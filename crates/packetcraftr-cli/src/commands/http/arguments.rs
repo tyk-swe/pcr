@@ -13,10 +13,13 @@ pub(crate) const AFTER_LONG_HELP: &str = r"HTTP/1 messages are read offline from
 
 --stream keeps one TCP conversation, as tcp:INDEX. Text prints start lines and header fields escaped; JSON and NDJSON keep their exact bytes as hex.
 
+--transactions adds one settled header-association row per request pairing, unanswered request, or orphan response. Each row records the physical capture frames at which header boundaries became available to the parser and the signed intervals between those markers; they are capture observations, not wire-time or processing measurements. Rows cite this invocation's one-based message indices, and a row can precede the message record it cites. Message statuses remain the authority on body completeness.
+
 Examples:
   packetcraftr http capture.pcapng
   packetcraftr http capture.pcapng --http-port 8000 --stream tcp:2
-  packetcraftr --output json http capture.pcapng";
+  packetcraftr --output json http capture.pcapng
+  packetcraftr --output ndjson http capture.pcapng --transactions";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -32,6 +35,12 @@ pub(crate) struct Args {
     /// Maximum counted entity bytes in one message. Bodies are discarded.
     #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_http_body_bytes: u64,
+    /// Emit one settled header-association row per request pairing,
+    /// unanswered request, or orphan response, with capture-observed
+    /// header-availability markers and signed intervals. Rows cite this
+    /// invocation's one-based message indices.
+    #[arg(long)]
+    pub(crate) transactions: bool,
     #[command(flatten)]
     pub(crate) application: ApplicationLimitsArgs,
     #[command(flatten)]

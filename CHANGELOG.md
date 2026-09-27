@@ -770,6 +770,18 @@ All notable changes to PacketcraftR are documented here. The format follows
   other body keeps the counting discard path, and a sink refusal aborts the
   run as `application::Error::Output` with the sink's own classification and
   causes rather than a recoverable message status.
+- `http --transactions` publishes the core header transactions through the v7
+  output contract. JSON aggregates gain the `transactions` rows and a
+  `transaction_summary`; NDJSON emits each settled row as an
+  `http_transaction` event in collector order — a row can precede the
+  `http_message` record it cites — before the single terminal `complete`;
+  text prints one escaped row per transaction plus an enabled-only count
+  line. Rows record capture-observed header-availability markers and signed
+  nanosecond intervals (never wire timing or processing duration) and cite
+  this invocation's one-based message indices; message statuses stay the
+  authority on body completeness. Serialized transaction bytes charge
+  `--max-application-output-bytes` in every format, and disabled mode keeps
+  `transactions` empty with a null `transaction_summary`.
 - Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
   UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
   responses, partial messages, and capture-clock regressions.

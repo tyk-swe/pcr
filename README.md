@@ -575,6 +575,13 @@ explicit outcomes. HTTP/2, HTTP/3, TLS decryption, and object extraction remain
 outside this command. `--http-port` adds a cleartext service to ports 80 and 8080;
 `--stream tcp:INDEX` selects a whole conversation. The per-frame `http` layer and
 `--decode-as tcp.port=PORT:http` expose headers that fit in one captured segment.
+`--transactions` publishes settled request/response header-association rows —
+paired, unanswered, and orphan-response outcomes — recording the physical
+frames and capture timestamps that made each header boundary available to the
+parser. The intervals are capture observations, not wire timing or processing
+duration, and each row cites this invocation's message indices, so a row can
+precede the message record it cites; message statuses remain the authority on
+body completeness.
 
 `export CAPTURE --stream tcp:INDEX --write selected.pcap` copies a whole scoped
 conversation, including the physical fragments used to reconstruct its transport

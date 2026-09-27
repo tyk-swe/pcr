@@ -1,0 +1,39 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "http",
+  "mode": "stream",
+  "sequence": 7,
+  "event": "http_transaction",
+  "status": "success",
+  "result": {
+    "index": 3,
+    "stream": 2,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.1",
+        "source_port": 40002,
+        "destination": "198.51.100.2",
+        "destination_port": 80
+      }
+    },
+    "outcome": "unanswered",
+    "request": 5,
+    "response": null,
+    "response_status": null,
+    "informational": [],
+    "request_headers_available": {
+      "frame": 15,
+      "timestamp": {
+        "unix_seconds": 8,
+        "nanoseconds": 500000000
+      }
+    },
+    "response_started": null,
+    "response_headers_available": null,
+    "response_header_wait": null,
+    "response_header_span": null
+  },
+  "diagnostics": []
+}

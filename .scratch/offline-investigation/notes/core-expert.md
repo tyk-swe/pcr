@@ -241,3 +241,14 @@ CLI (GATE-02):
 - NDJSON: `gate` lives ONLY in the terminal `complete` result; `"finding"` data events untouched (spec: no new data event).
 - NDJSON incomplete-stream error path already maps to `io.stdout` (startup.rs:236-256 `command_failure`) — a gate error mid-run leaves the stream unterminated, so the process reports the classified gate-caused error (per `Error::Sink`/`Collector` delegation), never a fabricated gate result.
 - Help text: `AFTER_LONG_HELP` for expert (commands.rs:263 wiring) should document the truth table + exit statuses per `--help` sweep expectations.
+
+## 12. Invariants to preserve (regression checklist)
+
+- `expert::Collector`/`expert::Summary` byte-for-byte behavior — `Summary::count` semantics (all produced findings), `codes` BTreeMap key set, `clock` copy in finish (expert.rs:118-128).
+- Selector semantics: `--min-severity`/`--code` still gate ONLY report counters/retention/NDJSON `finding` events; `State.selected`/`State.retained` counts must be identical with/without a gate (spec lines 113-116).
+- EOF attribution: `tcp.incomplete_at_end` keeps `number = frames_read` and the `stream` lookup rule; EOF findings still reach report selectors (a filtered-out finding counts toward `findings_observed` but not `selected`).
+- `frames_matched` shared: outer `Report.frames_matched` and `gate.frames_matched` are the same `outcome.run.frames_matched` — never a separately counted value.
+- Failure ordering: pipeline/capture errors still short-circuit before any verdict (no fabricated gate report for partial runs); sink errors keep `Error::Sink{number}` shape; trailing-drain errors keep `Error::Collector`.
+- Exit statuses: 0 pass / 1 fail+inconclusive via `CommandExit` / 2 usage / 3-6 classified / 70 internal / 130 cancelled — no new exit code.
+- Publication order: report writes complete BEFORE the non-zero exit is returned; JSON/NDJSON emit exactly one success payload; NDJSON keeps single terminal `complete` with `gate` inside `result`.
+- Empty input: no gate → legacy success (empty report, exit 0); gate enabled → `inconclusive/insufficient_frames` exit 1 unless a triggering EOF finding forced fail first (EG06).

@@ -42,9 +42,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - The v7 output family adds a `split` command result, HTTP `transactions`
   with a nullable `transaction_summary` and `body_export`, the
   `http_transaction` NDJSON event with signed header-timing intervals, and a
-  nullable expert `gate`. Until the feature tickets land, runs publish
-  `transactions: []`, `transaction_summary: null`, and `body_export: null`;
-  `gate` is live — `expert --fail-on` populates it. The forwarding consumer
+  nullable expert `gate`. `http --transactions` populates the rows and
+  summary, `http --body-message --write` populates `body_export` after the
+  artifact commits, and `expert --fail-on` populates `gate`; without the
+  opt-in each field stays empty or null. The forwarding consumer
   accepts v6 and v7 with identical semantics, selected by the first stream
   record, and release archives keep the v6 schema and frozen v6 fixture
   alongside v7 for archival evidence.

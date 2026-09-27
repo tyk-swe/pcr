@@ -17,11 +17,7 @@ use std::io::{Cursor, Read, Write};
 struct PartBytes(Vec<Vec<u8>>);
 
 impl split::Sink for PartBytes {
-    fn begin(
-        &mut self,
-        _index: u64,
-        _format: capture_file::Format,
-    ) -> Result<(), BoundaryError> {
+    fn begin(&mut self, _index: u64, _format: capture_file::Format) -> Result<(), BoundaryError> {
         self.0.push(Vec::new());
         Ok(())
     }
@@ -132,13 +128,14 @@ fuzz_target!(|data: &[u8]| {
         let report = split::write(&mut source, plan, &mut sink).unwrap();
         for (bytes, part) in sink.0.iter().zip(&report.parts) {
             let mut oracle = composed_support::reader(&frames);
-            let (expected, _) = capture_file::select(&mut oracle, Vec::new(), limits, |number, _| {
-                Ok(
-                    (part.first_frame.unwrap_or(1)..=part.last_frame.unwrap_or(0))
-                        .contains(&number),
-                )
-            })
-            .unwrap();
+            let (expected, _) =
+                capture_file::select(&mut oracle, Vec::new(), limits, |number, _| {
+                    Ok(
+                        (part.first_frame.unwrap_or(1)..=part.last_frame.unwrap_or(0))
+                            .contains(&number),
+                    )
+                })
+                .unwrap();
             assert_eq!(bytes, &expected);
         }
     }

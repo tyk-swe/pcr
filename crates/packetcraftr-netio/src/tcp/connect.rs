@@ -90,7 +90,7 @@ where
     P::Stream: 'static,
 {
     let deadline = crate::deadline::detach(caller).map_err(Error::interrupted)?;
-    if deadline.limit() > crate::capture::MAX_TIMEOUT {
+    if deadline.limit() > crate::deadline::MAX_WAIT {
         return Err(Error::Timeout);
     }
     let started = Instant::now();

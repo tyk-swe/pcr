@@ -19,8 +19,8 @@ pub const WORKER_CAPACITY: usize = 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeSnapshot {
-    /// Whether this feature/platform profile uses the worker pool. Ordinary
-    /// TCP connects use it in every profile.
+    /// Always `true`: ordinary TCP connects use the pool in every feature and
+    /// platform profile. The field stays for the published resource row.
     pub supported: bool,
     /// Maximum concurrent reservations.
     pub capacity: usize,

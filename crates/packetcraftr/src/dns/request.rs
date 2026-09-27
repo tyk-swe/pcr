@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::EvidenceLimits;
 use crate::execution::limits::{check_limits, duration_violation};
@@ -196,7 +197,7 @@ impl Default for Limits {
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
             max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
-            max_duration: MAX_TIMEOUT,
+            max_duration: MAX_WAIT,
         }
     }
 }
@@ -220,10 +221,10 @@ impl Limits {
                 value,
                 reason,
             })?;
-        if duration_violation(self.max_duration, MAX_TIMEOUT) {
+        if duration_violation(self.max_duration, MAX_WAIT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_TIMEOUT,
+                maximum: MAX_WAIT,
             });
         }
         Ok(())
@@ -326,10 +327,10 @@ impl Request {
                 reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_TIMEOUT,
+                maximum: MAX_WAIT,
             });
         }
         if let Some(rate) = self.queries_per_second

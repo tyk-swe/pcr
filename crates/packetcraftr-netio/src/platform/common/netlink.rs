@@ -15,7 +15,6 @@ use std::{
     collections::{BTreeMap, VecDeque},
     fs::File,
     future::Future,
-    os::unix::fs::MetadataExt,
     panic::{AssertUnwindSafe, catch_unwind},
     pin::Pin,
     sync::{
@@ -32,7 +31,10 @@ use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline};
 use rtnetlink::{Handle, new_connection};
 
 use crate::{
-    platform::common::{os_error, refused},
+    platform::{
+        common::{os_error, refused},
+        execution_context::{ExecutionContext, NAMESPACE_PATH},
+    },
     route,
     workers::{self, Class, Task, Waited},
 };
@@ -185,7 +187,8 @@ impl Drop for StopOnExit<'_> {
     }
 }
 
-type NamespaceId = (u64, u64);
+/// A worker's namespace is the execution context the pool matches threads by.
+type NamespaceId = ExecutionContext;
 
 struct Namespace {
     id: NamespaceId,
@@ -194,15 +197,11 @@ struct Namespace {
 
 impl Namespace {
     fn current() -> Result<Self, route::Error> {
-        let file = File::open("/proc/thread-self/ns/net")
+        let file = File::open(NAMESPACE_PATH)
             .map_err(|error| os_error("open caller network namespace", error))?;
-        let metadata = file
-            .metadata()
+        let id = ExecutionContext::of_namespace(&file)
             .map_err(|error| os_error("identify caller network namespace", error))?;
-        Ok(Self {
-            id: (metadata.dev(), metadata.ino()),
-            file,
-        })
+        Ok(Self { id, file })
     }
 }
 
@@ -889,10 +888,7 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
-        assert_ne!(
-            std::fs::metadata("/proc/thread-self/ns/net").unwrap().ino(),
-            parent
-        );
+        assert_ne!(std::fs::metadata(NAMESPACE_PATH).unwrap().ino(), parent);
         let mut namespaces = Vec::new();
         for _ in 0..2 {
             namespaces.push(
@@ -902,9 +898,9 @@ mod tests {
                     // exits without returning to another caller's network context.
                     let changed = unsafe { libc::unshare(libc::CLONE_NEWNET) };
                     assert_eq!(changed, 0, "{}", std::io::Error::last_os_error());
-                    let expected = std::fs::metadata("/proc/thread-self/ns/net").unwrap().ino();
+                    let expected = std::fs::metadata(NAMESPACE_PATH).unwrap().ino();
                     let observed = with_netlink(&caller(), |_| async {
-                        std::fs::metadata("/proc/thread-self/ns/net")
+                        std::fs::metadata(NAMESPACE_PATH)
                             .map(|metadata| metadata.ino())
                             .map_err(|error| os_error("inspect worker namespace", error))
                     })

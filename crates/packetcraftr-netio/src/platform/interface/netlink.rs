@@ -42,9 +42,7 @@ pub(in crate::platform) fn snapshot(
     )
 }
 
-pub(in crate::platform) async fn query_interfaces(
-    handle: &Handle,
-) -> Result<Vec<interface::Info>, route::Error> {
+async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, route::Error> {
     let mut interfaces = query_links(handle, None).await?;
     query_addresses(handle, None, &mut interfaces).await?;
     Ok(interfaces.into_values().collect())

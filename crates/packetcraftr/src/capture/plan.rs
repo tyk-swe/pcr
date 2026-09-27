@@ -7,7 +7,7 @@ use super::error::failure;
 use super::{Cause, Error, Report, StopReason};
 use crate::{Client, Stats, clock::Clock, policy::CaptureBudget, providers::Providers};
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_netio::capture::{self as native, GroupRequest};
+use packetcraftr_netio::capture::GroupRequest;
 use std::time::{Duration, Instant};
 
 impl<P: Providers, K: Clock> Client<P, K> {
@@ -38,7 +38,8 @@ impl<P: Providers, K: Clock> Client<P, K> {
         if let Err(error) = validated {
             return Err(failure(Cause::Native(error), report, None));
         }
-        if window > native::MAX_TIMEOUT || started.checked_add(window).is_none() {
+        if window > packetcraftr_netio::deadline::MAX_WAIT || started.checked_add(window).is_none()
+        {
             return Err(failure(
                 Cause::Invalid("capture window exceeds the supported range"),
                 report,

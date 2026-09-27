@@ -439,8 +439,14 @@ impl<C: Session> Session for Group<C> {
         if let Err(error) = check_cancelled(caller) {
             return Err(self.fail(error));
         }
-        let Some(deadline) = wait_end(caller) else {
-            return Err(self.fail(invalid("readiness timeout must be finite and positive")));
+        let deadline = match super::wait_end(caller) {
+            Ok(Some(deadline)) => deadline,
+            Ok(None) => {
+                return Err(self.fail(Error::CaptureReadiness {
+                    message: "capture readiness deadline expired".to_owned(),
+                }));
+            }
+            Err(error) => return Err(self.fail(error)),
         };
         for index in 0..self.sources.len() {
             if let Err(error) = check_cancelled(caller) {
@@ -488,11 +494,9 @@ impl<C: Session> Session for Group<C> {
         if !self.ready || self.closed {
             return Err(self.fail(Error::CaptureGroupState));
         }
-        let deadline = match caller.remaining() {
-            Ok(remaining) if remaining > super::MAX_TIMEOUT => {
-                return Err(self.fail(invalid("capture wait exceeds its finite range")));
-            }
-            _ => wait_end(caller),
+        let deadline = match super::wait_end(caller) {
+            Ok(deadline) => deadline,
+            Err(error) => return Err(self.fail(error)),
         };
         // Sources are first polled without waiting.
         let immediate = Deadline::new(Duration::ZERO);
@@ -565,16 +569,6 @@ impl<C: Session> Session for Group<C> {
 
 fn check_cancelled(deadline: &Deadline) -> Result<(), Error> {
     deadline.check_cancelled().map_err(Error::from)
-}
-
-/// The instant a group wait ends, or `None` once the caller's deadline is
-/// spent or its remainder exceeds the public maximum.
-fn wait_end(deadline: &Deadline) -> Option<Instant> {
-    let remaining = deadline
-        .remaining()
-        .ok()
-        .filter(|remaining| !remaining.is_zero() && *remaining <= super::MAX_TIMEOUT)?;
-    Instant::now().checked_add(remaining)
 }
 
 impl<C: Session> Drop for Group<C> {

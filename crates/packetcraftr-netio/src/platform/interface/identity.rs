@@ -1,44 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Validates the interface name/index pair at native I/O boundaries to detect
-//! renamed, removed, or recreated interfaces. Capture enumerates once for
-//! addresses and a BPF netmask. Per-frame transmission queries only the
-//! selected name on Linux and macOS; other targets have no cheap name lookup
-//! and enumerate on every check.
+//! The per-send check that the selected interface still has its name and
+//! index. Linux and macOS ask the kernel by name; other targets have no cheap
+//! name lookup and enumerate through the interface capability on every check.
 
 #![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
 
 use crate::{Error, interface::Id as InterfaceId};
 
-/// Confirms the selected interface is still current and returns its snapshot.
-///
-/// Reserved for capture, which reads the returned addresses, and for targets
-/// with no cheap name lookup. Every other native boundary uses
-/// [`verify_interface_identity`].
-#[cfg(any(native_layer2, not(any(target_os = "linux", target_os = "macos"))))]
-pub(in crate::platform) fn validate_current_interface_identity(
-    expected: &InterfaceId,
-    deadline: &packetcraftr_core::budget::Deadline,
-) -> Result<crate::interface::Info, Error> {
-    let mut interfaces =
-        crate::interface::Provider::interfaces(&crate::interface::SystemProvider, deadline)?;
-    if let Some(position) = interfaces
-        .iter()
-        .position(|interface| interface.id == *expected)
-    {
-        return Ok(interfaces.swap_remove(position));
-    }
-    let actual = interfaces
-        .iter()
-        .find(|interface| interface.id.index == expected.index)
-        .map(|interface| interface.id.name.clone());
-    Err(identity_changed(expected, actual.as_deref()))
-}
-
-/// Checks the current name/index pair. Linux and macOS avoid a full native
-/// enumeration on each send; other targets fall back to the enumeration in
-/// `validate_current_interface_identity`, which is not built on every profile.
+/// Confirms the interface a send was routed to is still current.
 pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
@@ -47,7 +18,7 @@ pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> 
         if current_index(&expected.name) == Some(expected.index) {
             return Ok(());
         }
-        Err(identity_changed(
+        Err(crate::interface::identity_changed(
             expected,
             current_name(expected.index).as_deref(),
         ))
@@ -57,22 +28,7 @@ pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> 
         // A send has no deadline to give, and this target's enumeration is a
         // synchronous snapshot that takes none.
         let unbounded = packetcraftr_core::budget::Deadline::new(std::time::Duration::MAX);
-        validate_current_interface_identity(expected, &unbounded).map(|_| ())
-    }
-}
-
-fn identity_changed(expected: &InterfaceId, actual: Option<&str>) -> Error {
-    let actual = actual.map_or_else(
-        || "no current interface".to_owned(),
-        |name| format!("{name} (index {})", expected.index),
-    );
-    Error::Device {
-        interface: expected.name.clone(),
-        message: format!(
-            "interface identity changed before native I/O: expected {} (index {}), found {actual}",
-            expected.name, expected.index
-        ),
-        source: None,
+        crate::interface::current(expected, &unbounded).map(|_| ())
     }
 }
 

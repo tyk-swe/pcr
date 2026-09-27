@@ -5,14 +5,40 @@
 //! Layer 3 packet, and the native [`SystemProvider`] dispatches each to the
 //! backend compiled in for its layer. Callers own policy authorization.
 
+#[cfg(native_layer3)]
+pub(crate) mod raw_ip;
+
 use bytes::Bytes;
 use std::net::IpAddr;
 use std::time::{Instant, SystemTime};
 
+use packetcraftr_core::error::{Classification, Classified};
+
 use super::Error;
-use super::error::SendEvidenceFault;
+use super::error::live_io_invariant;
 use super::link::Mode;
 use super::route::Decision;
+
+/// Which exact-transmission invariant a provider's wire evidence violated.
+///
+/// Each variant is one unrelated failure: they are never interchangeable and
+/// never distinguished by inspecting a message.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SendEvidenceFault {
+    #[error("provider-accepted bytes differ from the exact submitted frame")]
+    AcceptedBytesDiffer,
+    #[error("provider timing has inconsistent monotonic endpoints")]
+    InconsistentTiming,
+    #[error("provider-accepted bytes cannot form a capture record")]
+    UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
+}
+
+impl Classified for SendEvidenceFault {
+    fn classification(&self) -> Classification {
+        live_io_invariant()
+    }
+}
 
 /// The route facts a transmission backend checks before sending: the
 /// selected interface decision, the resolved link mode, and the destination

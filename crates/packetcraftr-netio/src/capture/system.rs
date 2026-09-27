@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! The native capture path behind [`SystemProvider`](super::SystemProvider):
-//! every request check, the interface identity check, and the BPF netmask
+//! every request check, the current-interface lookup, and the BPF netmask
 //! happen here before the selected backend opens its source.
 
 use packetcraftr_core::budget::Deadline;
@@ -21,7 +21,7 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
     }
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
-    let interface = crate::platform::current_interface(&request.interface, deadline)?;
+    let interface = crate::interface::current(&request.interface, deadline)?;
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
     let request = request.clone();
@@ -58,7 +58,7 @@ pub(super) fn timestamp_types(
 ) -> Result<Vec<TimestampType>, Error> {
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
-    let interface = crate::platform::current_interface(interface, deadline)?;
+    let interface = crate::interface::current(interface, deadline)?;
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
     crate::platform::timestamp_types(&interface.id)
@@ -94,45 +94,25 @@ fn netmask(interface: &crate::interface::Info) -> Option<u32> {
 
 #[cfg(all(test, native_layer2))]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    use packetcraftr_core::frame::LinkType;
+    use std::net::{IpAddr, Ipv6Addr};
 
     use super::*;
-    use crate::{interface, link::Capability};
+    use crate::{
+        interface,
+        test_support::{assigned, interface_info, v4},
+    };
 
     #[test]
     fn capture_netmask_uses_the_first_ipv4_assignment() {
         let interface = interface::Info {
-            id: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: None,
-            mac_address: None,
-            addresses: vec![
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-                    prefix_length: 8,
-                },
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
-                    prefix_length: 24,
-                },
-            ],
-            flags: interface::Flags::default(),
-            mtu: None,
-            capability: Capability::Layer2AndLayer3,
-            link_type: LinkType::ETHERNET,
+            addresses: vec![assigned(v4(10, 0, 0, 2), 8), assigned(v4(192, 0, 2, 2), 24)],
+            ..interface_info("fixture0", 7)
         };
 
         assert_eq!(netmask(&interface), Some(0xff00_0000));
 
         let mut ipv6_only = interface;
-        ipv6_only.addresses = vec![interface::Address {
-            address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-            prefix_length: 128,
-        }];
+        ipv6_only.addresses = vec![assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128)];
         assert_eq!(netmask(&ipv6_only), None);
     }
 }

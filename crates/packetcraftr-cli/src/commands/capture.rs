@@ -79,10 +79,10 @@ pub(super) fn run(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let timeout = args.timeout.timeout();
-    if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
+    if timeout > net::deadline::MAX_WAIT || Instant::now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
             timeout,
-            maximum: net::capture::MAX_TIMEOUT,
+            maximum: net::deadline::MAX_WAIT,
         }));
     }
     if args.interface.len() > 256 {

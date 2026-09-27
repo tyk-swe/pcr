@@ -448,6 +448,43 @@ fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_rea
     assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
 }
 #[test]
+fn group_waits_classify_like_single_session_waits() {
+    let frozen = Instant::now();
+    let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
+
+    // A spent readiness deadline is a readiness failure, as for one session.
+    let provider = Provider::new(vec![Script::default()]);
+    let (mut group, armed) = arm(&provider, &request(1), &live());
+    armed.unwrap();
+    let error = group
+        .wait_ready(&fixed(Duration::ZERO))
+        .expect_err("a spent deadline cannot wait for readiness");
+    assert!(matches!(error, net::Error::CaptureReadiness { .. }));
+    assert_eq!(error.classification().code, "io.capture_readiness");
+    drop(group);
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+
+    // A remainder above the ceiling is refused with the timeout code, as for
+    // one session, instead of being reported as an invalid group.
+    let provider = Provider::new(vec![Script::default()]);
+    let (mut group, armed) = arm(&provider, &request(1), &live());
+    armed.unwrap();
+    group.wait_ready(&live()).unwrap();
+    let error = group
+        .next_captured_frame(&fixed(net::deadline::MAX_WAIT + Duration::from_nanos(1)))
+        .expect_err("a wait above the ceiling is refused");
+    assert!(matches!(
+        error,
+        net::Error::InvalidCaptureTimeout {
+            maximum: net::deadline::MAX_WAIT,
+            ..
+        }
+    ));
+    assert_eq!(error.classification().code, "cli.capture_timeout");
+    drop(group);
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+}
+#[test]
 fn an_empty_source_does_not_pretend_the_wait_or_capture_has_ended() {
     let provider = Provider::new(vec![Script::default(), Script::default()]);
     let (mut group, armed) = arm(&provider, &request(2), &live());

@@ -8,6 +8,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `packetcraftr_netio::capture::MAX_TIMEOUT` is `packetcraftr_netio::deadline::MAX_WAIT`,
+  the one-hour ceiling every provider wait and bounded live operation
+  accepts, and `packetcraftr_netio::SendEvidenceFault` is
+  `packetcraftr_netio::transmit::SendEvidenceFault`. See
+  `docs/migration-unreleased.md`.
 - `dns::tcp::query` takes an `Arc<P>` so its admitted connect worker owns the
   provider; `P` and its stream must be `'static`. `dns::tcp::Request` gains
   `cancellation: Option<&Cancellation>`, and its `Error` and `Category` gain
@@ -877,6 +882,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A capture group's waits classify like a single session's: `wait_ready`
+  with a spent deadline reports `io.capture_readiness`, and a wait whose
+  remainder exceeds the one-hour ceiling reports `cli.capture_timeout`,
+  where both previously reported `cli.capture_group`.
 - Text output no longer shows Rust `Debug` formatting. Durations read as
   milliseconds to the microsecond (`12.345ms`, `none` when absent) in the
   `scan`, `traceroute`, `dns`, `replay`, `stats`, `tls`, `expert`, and
@@ -1253,6 +1262,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Arming a native capture source holds one worker-pool slot from activation
+  through reader cleanup. Activation no longer takes a second slot to start
+  the reader, which refused the last source of a `capture::MAX_SOURCES` group
+  while fifteen readers were running.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit

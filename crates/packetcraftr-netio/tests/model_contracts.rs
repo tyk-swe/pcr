@@ -1,48 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv4Addr};
+//! The capture models: queue limits validate their bounds and statistics
+//! distinguish complete evidence from loss.
 
-use bytes::Bytes;
-use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::MacAddress;
-use packetcraftr_netio::interface::Id as InterfaceId;
-use packetcraftr_netio::{
-    Error, capture,
-    link::{Capability, Mode},
-    route::{Decision, Scope, SelectionReason},
-    transmit::{Layer2Frame, Layer3Frame, Outbound, Report, Route},
-};
-
-fn interface() -> InterfaceId {
-    InterfaceId {
-        name: "fixture0".to_owned(),
-        index: 4,
-    }
-}
-
-fn decision(capability: Capability) -> Decision {
-    Decision {
-        interface: interface(),
-        source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
-        selected_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-        preferred_source: None,
-        next_hop: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
-        selection_reason: SelectionReason::Gateway,
-        destination_scope: Scope::Private,
-        mtu: 1_500,
-        capability,
-        link_type: LinkType::ETHERNET,
-    }
-}
-
-fn route(decision: &Decision, mode: Mode) -> Route<'_> {
-    Route {
-        decision,
-        mode,
-        lookup_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
-    }
-}
+use packetcraftr_netio::{Error, capture};
 
 #[test]
 fn capture_limits_validate_each_bound_and_cross_field_constraint() {
@@ -209,79 +171,4 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
         }),
         None
     );
-}
-
-#[test]
-fn typed_transmissions_enforce_mode_and_select_the_resolved_layer() {
-    let bytes = Bytes::from_static(&[1, 2, 3]);
-    let decision = decision(Capability::Layer2AndLayer3);
-    let layer2_route = route(&decision, Mode::Layer2);
-    let layer3_route = route(&decision, Mode::Layer3);
-    let auto_route = route(&decision, Mode::Auto);
-
-    assert!(matches!(
-        Layer2Frame::try_new(&bytes, layer3_route),
-        Err(Error::TransmissionModeMismatch {
-            expected: Mode::Layer2,
-            actual: Mode::Layer3
-        })
-    ));
-    assert!(matches!(
-        Layer3Frame::try_new(&bytes, layer2_route),
-        Err(Error::TransmissionModeMismatch {
-            expected: Mode::Layer3,
-            actual: Mode::Layer2
-        })
-    ));
-    assert!(matches!(
-        Outbound::try_new(&bytes, auto_route),
-        Err(Error::UnresolvedLinkMode)
-    ));
-
-    let layer2 = Outbound::try_new(&bytes, layer2_route).expect("Layer 2 frame");
-    assert!(matches!(layer2, Outbound::Layer2(_)));
-    assert_eq!(layer2.bytes(), &bytes);
-    assert_eq!(layer2.route(), layer2_route);
-
-    let layer3 = Outbound::try_new(&bytes, layer3_route).expect("Layer 3 packet");
-    assert!(matches!(layer3, Outbound::Layer3(_)));
-    assert_eq!(layer3.bytes(), &bytes);
-    assert_eq!(layer3.route(), layer3_route);
-}
-
-#[test]
-fn send_reports_validate_counts_bytes_and_provider_timing() {
-    let expected = Bytes::from_static(&[1, 2, 3]);
-    let submission = packetcraftr_netio::transmit::Submission::start();
-    let started = submission.started();
-    let report = submission.complete(expected.len(), expected.clone());
-
-    assert_eq!(report.bytes_sent(), expected.len());
-    assert_eq!(report.wire_bytes(), &expected);
-    assert!(report.timing().is_consistent());
-    assert!(report.timing().started().monotonic() >= started.monotonic());
-    assert_eq!(report.timing().started().wall_clock(), started.wall_clock());
-    assert!(
-        report.timing().freshness_marker().monotonic() >= report.timing().started().monotonic()
-    );
-    assert!(report.validate_exact(&expected).is_ok());
-
-    assert!(matches!(
-        Report::committed(expected.len() - 1, expected.clone()).validate_exact(&expected),
-        Err(Error::PartialSend {
-            expected: 3,
-            actual: 2
-        })
-    ));
-    assert!(matches!(
-        Report::committed(expected.len(), Bytes::from_static(&[1, 2])).validate_exact(&expected),
-        Err(Error::InvalidSendReport {
-            bytes_sent: 3,
-            wire_bytes: 2
-        })
-    ));
-    assert!(matches!(
-        Report::committed(expected.len(), Bytes::from_static(&[3, 2, 1])).validate_exact(&expected),
-        Err(Error::InvalidSendEvidence { .. })
-    ));
 }

@@ -46,7 +46,7 @@ use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::route::Provider as RouteProvider;
-use packetcraftr_netio::{Error as LiveIoError, capture, interface, transmit};
+use packetcraftr_netio::{Error as LiveIoError, interface, transmit};
 
 use crate::clock::Clock;
 use crate::execution::Admission;
@@ -416,7 +416,7 @@ impl<'c, P: Providers, K: Clock> Stages<'c, P, K> {
             .client
             .neighbors
             .over(providers.transmit(), providers.capture());
-        let route = match self.within(capture::MAX_TIMEOUT, |deadline| {
+        let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
             route::materialize(plan, &neighbors, deadline)
         }) {
             Ok(route) => route,

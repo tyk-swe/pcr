@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_netio::capture::{self, MAX_TIMEOUT};
+use packetcraftr_netio::{capture, deadline::MAX_WAIT};
 
 use crate::clock::Clock;
 use crate::providers::Providers;
@@ -67,7 +67,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
                         index: offset as u64,
                         packet,
                     }),
-                    &self.deadline(MAX_TIMEOUT),
+                    &self.deadline(MAX_WAIT),
                 )?;
             }
         }

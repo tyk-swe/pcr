@@ -491,7 +491,7 @@ instead of sending exactly one packet. `Client::send` is unchanged; new
 and expansion `index`, and `passes_completed` counts finished passes. The
 output/v6 `sendResult` replaces `frame`/`route` with a `frames` list plus
 `passes_completed`. Invalid repeat/rate values classify as `cli.send_limit`;
-the pacing ceiling is `packetcraftr_netio::capture::MAX_TIMEOUT`.
+the pacing ceiling is `packetcraftr_netio::deadline::MAX_WAIT`.
 
 ## DNS question batches and reverse names
 
@@ -1283,13 +1283,13 @@ unchanged.
 | `packetcraftr::scan::connect::Statistics` | `packetcraftr::scan::connect::Stats` |
 
 **One duration ceiling.** Each workflow's duration and timeout ceiling
-restated `packetcraftr_netio::capture::MAX_TIMEOUT` (one hour). The aliases
+restated `packetcraftr_netio::deadline::MAX_WAIT` (one hour). The aliases
 are removed; use that constant.
 
 | Removed | Use instead |
 |---|---|
-| `scan::MAX_DURATION`, `traceroute::MAX_DURATION`, `dns::MAX_DURATION`, `fuzz::MAX_DURATION` | `packetcraftr_netio::capture::MAX_TIMEOUT` |
-| `replay::MAX_REPLAY_DURATION`, `send::MAX_SEND_DURATION`, `exchange::MAX_EXCHANGE_TIMEOUT` | `packetcraftr_netio::capture::MAX_TIMEOUT` |
+| `scan::MAX_DURATION`, `traceroute::MAX_DURATION`, `dns::MAX_DURATION`, `fuzz::MAX_DURATION` | `packetcraftr_netio::deadline::MAX_WAIT` |
+| `replay::MAX_REPLAY_DURATION`, `send::MAX_SEND_DURATION`, `exchange::MAX_EXCHANGE_TIMEOUT` | `packetcraftr_netio::deadline::MAX_WAIT` |
 
 `packetcraftr_core::fuzz::MAX_DURATION`, the offline campaign ceiling, is
 unchanged.
@@ -1786,3 +1786,14 @@ Classification codes are unchanged.
 | `scan::profile::Error("reason")` | `scan::profile::Error::Invalid("reason")`; the enum also carries the document refusals |
 | reading a `packetcraftr.udp-profiles/v1` document | `scan::profile::compile(packetcraftr_core::document::udp_profiles::parse(&bytes)?)?` |
 | `packetcraftr_cli::output::verify_forwarding::Input` tuple `(path, source, selection_filter)` | `Input { path, source, selection_filter }` |
+
+## One live-wait ceiling and transmit's own fault
+
+The one-hour ceiling every bounded live operation and provider wait accepts
+is owned by the deadline convention, not by capture, and the transmit-only
+evidence fault lives under `transmit`. No behavior changes.
+
+| Before | After |
+|---|---|
+| `packetcraftr_netio::capture::MAX_TIMEOUT` | `packetcraftr_netio::deadline::MAX_WAIT` |
+| `packetcraftr_netio::SendEvidenceFault` | `packetcraftr_netio::transmit::SendEvidenceFault` |

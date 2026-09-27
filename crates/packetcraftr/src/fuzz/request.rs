@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::EvidenceLimits;
 use crate::{exchange, route, send};
@@ -74,10 +75,10 @@ impl Request {
                 value,
                 reason,
             })?;
-        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_TIMEOUT,
+                maximum: MAX_WAIT,
             });
         }
         if let Some(rate) = self.cases_per_second

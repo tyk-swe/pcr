@@ -1,15 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native plumbing that more than one capability's backend shares.
+//! Native plumbing shared across the capability → backend tree.
 //!
-//! Each submodule belongs to one backend and holds only what that backend's
-//! capabilities have in common: the route-netlink connection worker, the
-//! Darwin socket-address parsers, the Npcap library, and libpcap's open
-//! handling. `pcap_api` holds the pcap API rules libpcap and Npcap share. The
+//! A submodule holds what one backend's capabilities have in common (the
+//! route-netlink connection worker, the Darwin socket-address parsers, the
+//! Npcap library, libpcap's open handling) or what two backends speaking one
+//! ABI share (`pcap_api`, the pcap API rules for libpcap and Npcap). The
 //! functions below are the route and interface backends' shared failure and
-//! worker-pool handling; interface enumeration reports `route::Error` as the
-//! native source its capability wraps.
+//! worker-pool handling; they make no native call themselves, but only a
+//! target gate says which backends use them, so they stay beside those
+//! backends rather than in a capability module. Interface enumeration
+//! reports `route::Error` as the native source its capability wraps.
 
 #[cfg(all(native_route, target_os = "macos"))]
 pub(in crate::platform) mod af_route;

@@ -8,8 +8,9 @@
 //!
 //! - `route`: route lookup (`netlink` on Linux, `af_route` on macOS,
 //!   `iphelper` on Windows).
-//! - `interface`: interface enumeration with the same three backends, and
-//!   `identity`, the per-send check that an interface kept its name and index.
+//! - `interface`: interface enumeration with the same three backends (the
+//!   macOS one reads `getifaddrs(3)`), and `identity`, the per-send check
+//!   that an interface kept its name and index.
 //! - `capture`: live capture (`libpcap` on Linux and macOS, the runtime-loaded
 //!   `npcap` on Windows).
 //! - `transmit`: Layer 2 injection (`libpcap`, `npcap`) and raw IP
@@ -22,16 +23,18 @@
 //! context the worker pool matches. `dispatch` selects the backend the build
 //! script enabled for this target.
 //!
-//! The `native_*`, `pcap_backend`, `npcap_backend`, and `native_workers`
-//! predicates come from the build script, which combines the enabled
-//! features with the target the crate is compiled for.
+//! The `native_route`, `native_layer2`, `native_layer3`, `native_send`,
+//! `pcap_backend`, `npcap_backend`, and `packetcraftr_test_netns` predicates
+//! come from the build script, which combines the enabled features with the
+//! target the crate is compiled for. Both layer features enable
+//! `native-route`, so `native_send` implies `native_route`.
 
 #[cfg(native_layer2)]
 mod capture;
 mod common;
 mod dispatch;
 mod execution_context;
-#[cfg(any(native_route, native_send))]
+#[cfg(native_route)]
 mod interface;
 #[cfg(native_route)]
 mod route;
@@ -42,7 +45,7 @@ mod transmit;
 pub(crate) use dispatch::unsupported;
 #[cfg(native_send)]
 pub(crate) use dispatch::verify_interface_identity;
-#[cfg(native_layer2)]
-pub(crate) use dispatch::{current_interface, open_capture, timestamp_types};
 pub(crate) use dispatch::{interface_route, interfaces, route, send_layer2, send_layer3};
+#[cfg(native_layer2)]
+pub(crate) use dispatch::{open_capture, timestamp_types};
 pub(crate) use execution_context::{ExecutionContext, current as execution_context};

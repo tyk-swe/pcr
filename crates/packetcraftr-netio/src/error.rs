@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! The live-I/O failure capture and transmission share.
+
 use std::time::Duration;
 
 use thiserror::Error as ThisError;
@@ -8,25 +10,13 @@ use thiserror::Error as ThisError;
 use super::capture::Phase as CapturePhase;
 use super::interface::Id as InterfaceId;
 use super::link::Mode;
+use super::transmit::SendEvidenceFault;
 use super::unsupported::Unsupported;
 use packetcraftr_core::error::{Classification, Classified, Kind, Source, source_chain};
 
-/// Which exact-transmission invariant a provider's wire evidence violated.
-///
-/// Each variant is one unrelated failure: they are never interchangeable and
-/// never distinguished by inspecting a message.
-#[derive(Debug, ThisError, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SendEvidenceFault {
-    #[error("provider-accepted bytes differ from the exact submitted frame")]
-    AcceptedBytesDiffer,
-    #[error("provider timing has inconsistent monotonic endpoints")]
-    InconsistentTiming,
-    #[error("provider-accepted bytes cannot form a capture record")]
-    UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
-}
-
-/// Live interface, transmission, and capture failures.
+/// The live-I/O failures capture and transmission share, including the
+/// interface-discovery failure a capture reports when its interface lookup
+/// enumerates. Route, interface, and TCP have their own error types.
 ///
 /// A native failure keeps the platform's own error as its `source`, a shared
 /// [`Source`] handle so capture sessions can return a terminal failure
@@ -72,7 +62,7 @@ pub enum Error {
         source: Option<Source>,
     },
     #[error(
-        "packet transmission mode mismatch: expected {expected:?}, materialized route uses {actual:?}"
+        "packet transmission mode mismatch: expected {expected:?}, resolved route uses {actual:?}"
     )]
     TransmissionModeMismatch { expected: Mode, actual: Mode },
     #[error("packet transmission route still has unresolved automatic link mode")]
@@ -179,12 +169,6 @@ pub enum Error {
     },
 }
 
-impl Classified for SendEvidenceFault {
-    fn classification(&self) -> Classification {
-        live_io_invariant()
-    }
-}
-
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
@@ -198,13 +182,9 @@ impl Classified for Error {
             Self::Privilege { .. } => classified(
                 "capability.privilege",
                 Kind::Capability,
-                "grant the minimum raw-socket or capture permission required by the selected platform adapter",
+                "grant the minimum raw-socket or capture permission required by the selected native backend",
             ),
-            Self::InterfaceDiscovery { .. } => classified(
-                "io.interface_discovery",
-                Kind::Io,
-                "inspect the operating-system interface state and retry with an available interface",
-            ),
+            Self::InterfaceDiscovery { .. } => crate::interface::discovery_classification(),
             Self::Device { .. } => classified(
                 "io.device",
                 Kind::Io,
@@ -327,7 +307,8 @@ impl Error {
     }
 }
 
-fn live_io_invariant() -> Classification {
+/// The classification every provider-invariant violation shares.
+pub(crate) fn live_io_invariant() -> Classification {
     classified(
         "internal.live_io_invariant",
         Kind::Internal,

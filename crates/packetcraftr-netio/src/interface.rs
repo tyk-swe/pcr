@@ -15,6 +15,7 @@ use packetcraftr_core::packet::MacAddress;
 use super::link::Capability;
 
 pub use error::Error;
+pub(crate) use error::discovery_classification;
 
 /// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
@@ -57,7 +58,7 @@ pub trait Provider: Send + Sync {
     fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error>;
 }
 
-/// Provider backed by the adapter selected for the current target and feature
+/// Provider backed by the backend selected for the current target and feature
 /// set. Portable profiles return a typed capability error.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
@@ -69,11 +70,53 @@ impl Provider for SystemProvider {
     }
 }
 
+/// The current snapshot of the interface `expected` names, or the live I/O
+/// failure for one that was renamed, removed, or recreated since it was
+/// selected. Capture reads the snapshot's addresses; a target with no cheap
+/// name lookup verifies each send this way too.
+///
+/// Linux and macOS sends verify by name lookup instead, so a build with only
+/// Layer 3 there has no caller.
+#[cfg(native_send)]
+#[cfg_attr(not(native_layer2), allow(dead_code))]
+pub(crate) fn current(expected: &Id, deadline: &Deadline) -> Result<Info, crate::Error> {
+    let mut interfaces = SystemProvider.interfaces(deadline)?;
+    if let Some(position) = interfaces
+        .iter()
+        .position(|interface| interface.id == *expected)
+    {
+        return Ok(interfaces.swap_remove(position));
+    }
+    let actual = interfaces
+        .iter()
+        .find(|interface| interface.id.index == expected.index)
+        .map(|interface| interface.id.name.clone());
+    Err(identity_changed(expected, actual.as_deref()))
+}
+
+/// The live I/O failure for an interface whose name/index pair changed
+/// before native I/O; `actual` is the name now holding the expected index.
+#[cfg(native_send)]
+pub(crate) fn identity_changed(expected: &Id, actual: Option<&str>) -> crate::Error {
+    let actual = actual.map_or_else(
+        || "no current interface".to_owned(),
+        |name| format!("{name} (index {})", expected.index),
+    );
+    crate::Error::Device {
+        interface: expected.name.clone(),
+        message: format!(
+            "interface identity changed before native I/O: expected {} (index {}), found {actual}",
+            expected.name, expected.index
+        ),
+        source: None,
+    }
+}
+
 /// Refuses a native snapshot with an incomplete identity, an impossible
 /// prefix, or a duplicate interface.
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
     validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
-        message: "the native route adapter returned an invalid interface snapshot".to_owned(),
+        message: "the native route backend returned an invalid interface snapshot".to_owned(),
         source: Source::new(error),
     })
 }
@@ -82,26 +125,15 @@ fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
 mod tests {
     use std::error::Error as _;
 
-    use packetcraftr_core::{error::Classified, frame::LinkType};
+    use packetcraftr_core::error::Classified;
 
     use super::*;
     use crate::route;
+    use crate::test_support::interface_info;
 
     #[test]
     fn discovery_retains_actual_snapshot_validation_failures() {
-        let valid = Info {
-            id: Id {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: None,
-            mac_address: None,
-            addresses: Vec::new(),
-            flags: Flags::default(),
-            mtu: None,
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
-        };
+        let valid = interface_info("fixture0", 7);
         assert_eq!(
             validate_snapshot(vec![valid.clone()]).unwrap(),
             std::slice::from_ref(&valid)

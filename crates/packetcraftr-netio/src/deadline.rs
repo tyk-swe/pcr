@@ -19,6 +19,13 @@
 //! A capture read is the one call whose expiry is not a failure: it ends the
 //! wait, so an expired read delivers an already queued record or `Ok(None)`.
 //! See [`capture::Session`](crate::capture::Session).
+//!
+//! Three calls take no deadline by design. A [send](crate::transmit::Provider::send)
+//! stays on the caller's thread and never waits on the network. A session
+//! [shutdown](crate::capture::Session::shutdown) keeps its own bounded
+//! lifecycle so cleanup still runs after cancellation. A connected
+//! [`tcp::Stream`](crate::tcp::Stream) bounds each read and write with the
+//! socket timeouts its caller sets.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,10 +37,12 @@ use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 /// spinning.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-/// Longest single wall-clock wait a provider derives from a deadline. A
-/// longer remainder is clipped so its instant stays inside the monotonic
-/// clock's range; callers re-check the deadline after each wait.
-const MAX_WALL_CLOCK_WAIT: Duration = Duration::from_secs(60 * 60);
+/// The longest wait a provider derives from one deadline, and the ceiling
+/// every bounded live operation accepts for its run time or response window:
+/// one hour. A capture or connect refuses a longer remainder; [`expires_at`]
+/// clips one so its instant stays inside the monotonic clock's range, and
+/// callers re-check the deadline after each wait.
+pub const MAX_WAIT: Duration = Duration::from_secs(60 * 60);
 
 /// Wall-clock time remaining, or `None` at or after `deadline`. Treat `None` as
 /// expiry before calling providers that reject a zero timeout.
@@ -71,7 +80,7 @@ pub fn remaining(deadline: &Deadline) -> Result<Duration, Interrupted> {
 ///
 /// Returns the same interruptions as [`remaining`].
 pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
-    let remaining = remaining(deadline)?.min(MAX_WALL_CLOCK_WAIT);
+    let remaining = remaining(deadline)?.min(MAX_WAIT);
     let now = Instant::now();
     Ok(now.checked_add(remaining).unwrap_or(now))
 }
@@ -116,16 +125,5 @@ mod tests {
         assert!(remaining(&live).unwrap() <= Duration::from_secs(60));
         signal.cancel();
         assert!(matches!(remaining(&live), Err(Interrupted::Cancelled(_))));
-    }
-
-    #[test]
-    fn a_detached_deadline_keeps_the_remainder_and_the_signal() {
-        let signal = Cancellation::default();
-        let deadline =
-            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        let detached = detach(&deadline).unwrap();
-        assert!(detached.limit() <= Duration::from_secs(60));
-        signal.cancel();
-        assert!(detached.check_cancelled().is_err());
     }
 }

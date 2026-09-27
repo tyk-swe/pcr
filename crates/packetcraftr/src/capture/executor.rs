@@ -27,7 +27,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
         // then stops without waiting.
         let unbounded;
         let arming = if window.is_zero() {
-            unbounded = self.deadline(native::MAX_TIMEOUT);
+            unbounded = self.deadline(packetcraftr_netio::deadline::MAX_WAIT);
             &unbounded
         } else {
             deadline

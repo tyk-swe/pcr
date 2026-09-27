@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn the_ceiling_is_the_workflow_ceiling() {
         let ceiling = Duration::from_millis(MAX_MILLISECONDS);
-        assert_eq!(ceiling, packetcraftr_netio::capture::MAX_TIMEOUT);
+        assert_eq!(ceiling, packetcraftr_netio::deadline::MAX_WAIT);
         assert_eq!(ceiling, packetcraftr_core::fuzz::MAX_DURATION);
     }
 

@@ -4,7 +4,7 @@
 //! Operating-system native interface snapshot validation.
 //!
 //! Every rejection is a [`route::Error::InvalidResponse`]: the snapshot came
-//! from the operating system, so an inconsistency in it is a native adapter
+//! from the operating system, so an inconsistency in it is a native backend
 //! fault rather than a caller error.
 
 use crate::{interface, route};
@@ -49,29 +49,15 @@ fn invalid_response(message: String) -> route::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    use packetcraftr_core::frame::LinkType;
+    use std::net::{IpAddr, Ipv6Addr};
 
     use super::*;
-    use crate::{
-        interface::{self, Id as InterfaceId},
-        link::Capability,
-    };
+    use crate::test_support::{assigned, interface_info, v4};
 
     fn interface(name: &str, index: u32, addresses: Vec<interface::Address>) -> interface::Info {
         interface::Info {
-            id: InterfaceId {
-                name: name.to_owned(),
-                index,
-            },
-            description: None,
-            mac_address: None,
             addresses,
-            flags: interface::Flags::default(),
-            mtu: Some(1_500),
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
+            ..interface_info(name, index)
         }
     }
 
@@ -81,14 +67,8 @@ mod tests {
             "fixture0",
             7,
             vec![
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                    prefix_length: 32,
-                },
-                interface::Address {
-                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                    prefix_length: 128,
-                },
+                assigned(v4(192, 0, 2, 1), 32),
+                assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
             ],
         )];
 
@@ -103,21 +83,11 @@ mod tests {
         for invalid in [
             interface("", 7, Vec::new()),
             interface("fixture0", 0, Vec::new()),
+            interface("fixture0", 7, vec![assigned(v4(127, 0, 0, 1), 33)]),
             interface(
                 "fixture0",
                 7,
-                vec![interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    prefix_length: 33,
-                }],
-            ),
-            interface(
-                "fixture0",
-                7,
-                vec![interface::Address {
-                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                    prefix_length: 129,
-                }],
+                vec![assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 129)],
             ),
         ] {
             assert!(validate_native_interface(&invalid).is_err(), "{invalid:?}");

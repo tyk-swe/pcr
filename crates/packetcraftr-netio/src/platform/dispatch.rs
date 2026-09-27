@@ -27,7 +27,7 @@ use super::{interface::netlink as interface_backend, route::netlink as route_bac
 #[cfg(all(native_route, target_os = "macos"))]
 use super::{interface::af_route as interface_backend, route::af_route as route_backend};
 
-#[cfg(all(native_route, windows))]
+#[cfg(all(native_route, target_os = "windows"))]
 use super::{interface::iphelper as interface_backend, route::iphelper as route_backend};
 
 #[cfg(pcap_backend)]
@@ -177,13 +177,4 @@ pub(crate) fn send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, E
 #[cfg(native_send)]
 pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     super::interface::identity::verify_interface_identity(expected)
-}
-
-/// Confirms the interface is still current and returns its snapshot.
-#[cfg(native_layer2)]
-pub(crate) fn current_interface(
-    expected: &InterfaceId,
-    deadline: &Deadline,
-) -> Result<interface::Info, Error> {
-    super::interface::identity::validate_current_interface_identity(expected, deadline)
 }

@@ -67,7 +67,7 @@
 //! share.
 //!
 //! Every workflow duration and timeout is at most
-//! [`packetcraftr_netio::capture::MAX_TIMEOUT`], the longest a capture stays
+//! [`packetcraftr_netio::deadline::MAX_WAIT`], the longest a capture stays
 //! armed for one wait, so no workflow has a ceiling of its own.
 
 #![forbid(unsafe_code)]

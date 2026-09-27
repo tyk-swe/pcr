@@ -10,11 +10,27 @@
 //! context, so every thread matches.
 
 /// The identity of a thread's network context.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ExecutionContext {
     /// The device and inode of the thread's network namespace.
     #[cfg(target_os = "linux")]
     namespace: (u64, u64),
+}
+
+/// The procfs entry naming the calling thread's network namespace.
+#[cfg(target_os = "linux")]
+pub(in crate::platform) const NAMESPACE_PATH: &str = "/proc/thread-self/ns/net";
+
+#[cfg(target_os = "linux")]
+impl ExecutionContext {
+    /// The context a network-namespace file identifies.
+    pub(in crate::platform) fn of_namespace(file: &std::fs::File) -> std::io::Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = file.metadata()?;
+        Ok(Self {
+            namespace: (metadata.dev(), metadata.ino()),
+        })
+    }
 }
 
 /// The calling thread's context, or `None` when it cannot be identified;
@@ -22,11 +38,8 @@ pub(crate) struct ExecutionContext {
 pub(crate) fn current() -> Option<ExecutionContext> {
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::MetadataExt;
-        let namespace = std::fs::metadata("/proc/thread-self/ns/net").ok()?;
-        Some(ExecutionContext {
-            namespace: (namespace.dev(), namespace.ino()),
-        })
+        let file = std::fs::File::open(NAMESPACE_PATH).ok()?;
+        ExecutionContext::of_namespace(&file).ok()
     }
     #[cfg(not(target_os = "linux"))]
     {

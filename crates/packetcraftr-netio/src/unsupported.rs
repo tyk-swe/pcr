@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! The one representation of a native capability this build, target, or
+//! device lacks.
+
 use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 use thiserror::Error as ThisError;
 

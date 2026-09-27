@@ -6,11 +6,11 @@ use std::{fmt, io, net::IpAddr, time::Duration};
 use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode, route,
-    tcp,
+    Error, NativeCapability, Unsupported, capture, interface, link::Mode, route, tcp,
+    transmit::SendEvidenceFault,
 };
 
-/// The live-I/O failures a native adapter raises keep the platform refusal as
+/// The live-I/O failures a native backend raises keep the platform refusal as
 /// a source, and the retained failure is published exactly once.
 #[test]
 fn live_io_failures_retain_the_platform_refusal_as_a_source() {
@@ -40,7 +40,7 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
         Kind::Internal,
     );
 
-    // A route adapter refusal survives the interface-discovery boundary.
+    // A route backend refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
         source: Some(Source::new(route::Error::OperatingSystem {
@@ -396,7 +396,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::InvalidCaptureTimeout {
                 timeout: Duration::ZERO,
-                maximum: capture::MAX_TIMEOUT,
+                maximum: packetcraftr_netio::deadline::MAX_WAIT,
             },
             "cli.capture_timeout",
             Kind::Usage,

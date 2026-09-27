@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pinned Npcap SDK 1.16 ABI declarations.
-
-#![allow(unsafe_code)]
+//! Pinned Npcap SDK 1.16 ABI declarations. Naming `unsafe extern "C"`
+//! function-pointer types is not unsafe code; the loader that calls them
+//! opts in.
 
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ushort, c_void};
 

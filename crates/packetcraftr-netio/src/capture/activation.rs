@@ -126,12 +126,6 @@ fn open_with(
             }));
             Err(Error::interrupted(interrupted, OPERATION))
         }
-        // The job ended without a handoff: activation panicked.
-        Ok(None) => Err(Error::Capture {
-            message: "native capture activation worker panicked".to_owned(),
-            source: None,
-        }),
-        Ok(Some(Err(error))) => Err(error),
         Ok(Some(Ok(started))) => {
             let retention = permit.retention_marker();
             let session = NativeCaptureSession::attach(started, task, permit, reaper.clone());
@@ -143,6 +137,23 @@ fn open_with(
             }
             Ok(Box::new(session))
         }
+        // The job is over without a session to hand back: activation failed,
+        // or it ended without a handoff, meaning the worker panicked.
+        // Interruption still wins over a failure that arrived at the same
+        // moment, so the deadline is rechecked before reporting it.
+        Ok(failed) => {
+            if let Err(interrupted) = crate::deadline::remaining(&deadline) {
+                return Err(Error::interrupted(interrupted, OPERATION));
+            }
+            match failed {
+                Some(Err(error)) => Err(error),
+                None => Err(Error::Capture {
+                    message: "native capture activation worker panicked".to_owned(),
+                    source: None,
+                }),
+                Some(Ok(_)) => unreachable!("the session handoff is matched above"),
+            }
+        }
     }
 }
 
@@ -151,8 +162,10 @@ mod tests {
     use std::{
         sync::{
             Arc,
+            atomic::{AtomicUsize, Ordering},
             mpsc::{self, Sender},
         },
+        thread,
         time::{Duration, Instant},
     };
 
@@ -327,6 +340,37 @@ mod tests {
             pool.admit(Class::Native).is_ok(),
             "cleanup returns admission"
         );
+    }
+
+    /// A worker failure delivered just as the deadline ends must not mask
+    /// the interruption: the caller's clock expires only once the delivered
+    /// outcome is being classified, so the deadline wins.
+    #[test]
+    fn an_activation_error_arriving_with_expiry_reports_the_deadline() {
+        let base = Instant::now();
+        let caller = thread::current().id();
+        let checks = AtomicUsize::new(0);
+        // Expiry begins at the caller's fifth clock read: construction,
+        // detach, and the wait's first poll (two reads) still see time
+        // remaining. The worker consults the same clock from its own
+        // thread, where time never runs out, so it reports the native error.
+        let clock = move || {
+            if thread::current().id() == caller && checks.fetch_add(1, Ordering::SeqCst) >= 4 {
+                base + Duration::from_secs(120)
+            } else {
+                base
+            }
+        };
+        let pool = Arc::new(Pool::new(1, 1));
+        let (reaper, _cleanup) = client_with_receiver(1);
+        let result = open_with(
+            Limits::default(),
+            &Deadline::with_time_source(Duration::from_secs(60), clock),
+            || Err(activation_error()),
+            &pool,
+            || Ok(reaper),
+        );
+        assert_eq!(error_code(result), "io.deadline_exceeded");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # BASE-02: Prove and document the complete offline batch
 
-Status: ready-for-agent
+Status: resolved (c1f737c8; all required validation green)
 Blocked by: HTTP-T02, HTTP-B02, SPLIT-02, GATE-02
 Size: small–medium integration and release work
 Spec: [batch contract](../spec.md)
@@ -53,13 +53,13 @@ subsequent relevant change. Report an unavailable check honestly.
 
 ## Acceptance
 
-- [ ] All feature acceptance IDs map to meaningful passing tests.
-- [ ] v6 history is unchanged; real current output/examples/assets agree on v7.
-- [ ] Portable execution succeeds with no provider construction or networking.
-- [ ] Every new bound has correct resource diagnostics and preset precedence.
-- [ ] No source-layout tests, new unsafe code, or accidental core→workflow edge.
-- [ ] Documentation describes the final implementation and exact limitations.
-- [ ] Applicable CODEOWNERS review is requested with the implementation PR.
+- [x] All feature acceptance IDs map to meaningful passing tests.
+- [x] v6 history is unchanged; real current output/examples/assets agree on v7.
+- [x] Portable execution succeeds with no provider construction or networking.
+- [x] Every new bound has correct resource diagnostics and preset precedence.
+- [x] No source-layout tests, new unsafe code, or accidental core→workflow edge.
+- [x] Documentation describes the final implementation and exact limitations.
+- [x] Applicable CODEOWNERS review is requested with the implementation PR.
 
 ## Comments
 

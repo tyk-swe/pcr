@@ -15,14 +15,14 @@ use std::{
 use packetcraftr_core::budget::Deadline;
 
 use crate::deadline::{POLL_INTERVAL, remaining_before};
-use packetcraftr_core::error::Source;
+use packetcraftr_core::frame::LinkType;
 
 use crate::workers::{Permit, Task, Waited};
 
 use crate::{
     Error,
     capture::{Captured, Limits, Metadata, Session, Stats},
-    workers::reaper::{ReaperClient, ReaperStartError, shared_reaper},
+    workers::reaper::ReaperClient,
 };
 
 use super::{
@@ -38,7 +38,7 @@ pub(crate) struct NativeCaptureSession {
     shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
     /// Pooled worker, its permit, and interrupt handle share one lifetime.
-    /// The permit precedes worker creation; the interrupt outlives the
+    /// The permit is the activation's admission; the interrupt outlives the
     /// worker, and the session's clone of the permit outlives the interrupt.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
@@ -60,38 +60,55 @@ enum Shutdown {
     Finished(Result<(), Error>),
 }
 
+/// The owner's half of an activated source, handed over before the first
+/// read: what a [`NativeCaptureSession`] needs besides the pooled job.
+pub(crate) struct Started {
+    metadata: Metadata,
+    shared: Arc<CaptureQueue>,
+    stop: Arc<AtomicBool>,
+    interrupt: Arc<dyn CaptureInterrupt>,
+}
+
+/// The reading half: it drains the source on the pooled thread that
+/// activated it. The source closes on that thread when the reader finishes
+/// or is dropped unread.
+pub(crate) struct Reader {
+    source: Box<dyn super::NativeCaptureSource>,
+    shared: Arc<CaptureQueue>,
+    stop: Arc<AtomicBool>,
+    interface_index: u32,
+    link_type: LinkType,
+}
+
+impl Reader {
+    /// Reads until stopped; a failure or panic becomes the queue's terminal
+    /// error.
+    pub(crate) fn run(mut self) {
+        let terminal_shared = Arc::clone(&self.shared);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            capture_worker(
+                self.source.as_mut(),
+                self.shared,
+                self.stop,
+                self.interface_index,
+                self.link_type,
+            )
+        }))
+        .unwrap_or_else(|_| {
+            Err(Error::Capture {
+                message: "native capture worker panicked".to_owned(),
+                source: None,
+            })
+        });
+        if let Err(error) = result {
+            terminal_shared.set_error(error);
+        }
+    }
+}
+
 impl NativeCaptureSession {
-    pub(crate) fn spawn(parts: NativeCaptureParts, limits: Limits) -> Result<Self, Error> {
-        Self::spawn_with_shutdown_timeout(parts, limits, SHUTDOWN_TIMEOUT)
-    }
-
-    fn spawn_with_shutdown_timeout(
-        parts: NativeCaptureParts,
-        limits: Limits,
-        shutdown_timeout: Duration,
-    ) -> Result<Self, Error> {
-        Self::spawn_with_reaper(parts, limits, shutdown_timeout, shared_reaper())
-    }
-
-    fn spawn_with_reaper(
-        parts: NativeCaptureParts,
-        limits: Limits,
-        shutdown_timeout: Duration,
-        reaper: Result<ReaperClient, ReaperStartError>,
-    ) -> Result<Self, Error> {
-        // Both fallible cleanup-service steps happen before the source worker
-        // is created, so failure cannot leave an unmanaged native worker.
-        let reaper = reaper.map_err(|error| Error::Capture {
-            message: "native capture cleanup is unavailable".to_owned(),
-            source: Some(Source::new(error)),
-        })?;
-        let permit = reaper.reserve().map_err(|error| Error::Capture {
-            message: format!(
-                "native capture cleanup capacity {} is exhausted",
-                error.capacity
-            ),
-            source: Some(Source::new(error)),
-        })?;
+    /// Splits activated `parts` into the owner's half and the reader.
+    pub(crate) fn prepare(parts: NativeCaptureParts, limits: Limits) -> (Started, Reader) {
         let NativeCaptureParts {
             source,
             interrupt,
@@ -99,40 +116,39 @@ impl NativeCaptureSession {
         } = parts;
         let shared = Arc::new(CaptureQueue::new(limits));
         let stop = Arc::new(AtomicBool::new(false));
-        let worker_shared = Arc::clone(&shared);
-        let worker_stop = Arc::clone(&stop);
-        let interface_index = metadata.interface.index;
-        let link_type = metadata.link_type;
-        let mut source = source;
-        // The source closes on the pooled thread, before the pool releases
-        // the worker's clone of the permit.
-        let worker = permit
-            .spawn(move || {
-                let terminal_shared = Arc::clone(&worker_shared);
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    capture_worker(
-                        source.as_mut(),
-                        worker_shared,
-                        worker_stop,
-                        interface_index,
-                        link_type,
-                    )
-                }))
-                .unwrap_or_else(|_| {
-                    Err(Error::Capture {
-                        message: "native capture worker panicked".to_owned(),
-                        source: None,
-                    })
-                });
-                if let Err(error) = result {
-                    terminal_shared.set_error(error);
-                }
-            })
-            .map_err(|error| Error::Capture {
-                message: "could not start the owned capture worker".to_owned(),
-                source: Some(Source::new(error)),
-            })?;
-        Ok(Self {
+        let reader = Reader {
+            source,
+            shared: Arc::clone(&shared),
+            stop: Arc::clone(&stop),
+            interface_index: metadata.interface.index,
+            link_type: metadata.link_type,
+        };
+        (
+            Started {
+                metadata,
+                shared,
+                stop,
+                interrupt,
+            },
+            reader,
+        )
+    }
+
+    /// Attaches the owner to the pooled job `worker`, which activated the
+    /// source under `permit` and now reads it.
+    pub(crate) fn attach(
+        started: Started,
+        worker: Task<()>,
+        permit: Permit,
+        reaper: ReaperClient,
+    ) -> Self {
+        let Started {
+            metadata,
+            shared,
+            stop,
+            interrupt,
+        } = started;
+        Self {
             metadata,
             shared,
             stop,
@@ -142,9 +158,9 @@ impl NativeCaptureSession {
                 permit,
             }),
             reaper,
-            shutdown_timeout,
+            shutdown_timeout: SHUTDOWN_TIMEOUT,
             shutdown: Shutdown::NotAttempted,
-        })
+        }
     }
 }
 
@@ -352,7 +368,13 @@ mod tests {
     use crate::{
         capture::Limits,
         test_support::capture_metadata,
-        workers::reaper::test_support::{client_with_receiver, retained_tasks, start_with},
+        workers::{
+            Class, Pool,
+            reaper::{
+                shared_reaper,
+                test_support::{client_with_receiver, retained_tasks},
+            },
+        },
     };
 
     struct LifetimeInterrupt {
@@ -437,13 +459,43 @@ mod tests {
         }
     }
 
+    /// Admits one slot from `pool`, runs the reader on it, and attaches the
+    /// session, as activation does.
+    fn spawn_on(
+        parts: NativeCaptureParts,
+        pool: &Arc<Pool>,
+        reaper: ReaperClient,
+        shutdown_timeout: Duration,
+    ) -> NativeCaptureSession {
+        let permit = pool
+            .admit(Class::Native)
+            .expect("the test pool admits the reader");
+        let (started, reader) = NativeCaptureSession::prepare(parts, Limits::default());
+        let worker = permit
+            .spawn(move || reader.run())
+            .expect("the reader spawns");
+        let mut session = NativeCaptureSession::attach(started, worker, permit, reaper);
+        session.shutdown_timeout = shutdown_timeout;
+        session
+    }
+
+    /// A session on the process-wide pool and reaper.
+    fn spawn(parts: NativeCaptureParts, shutdown_timeout: Duration) -> NativeCaptureSession {
+        spawn_on(
+            parts,
+            crate::workers::shared(),
+            shared_reaper().expect("the shared reaper starts"),
+            shutdown_timeout,
+        )
+    }
+
     fn scripted_session(
         events: impl IntoIterator<Item = Result<NativeCaptureEvent, Error>>,
         interrupt: Arc<FakeInterrupt>,
     ) -> (NativeCaptureSession, Receiver<()>) {
         let (finished_sender, finished_receiver) = mpsc::channel();
         let interrupt: Arc<dyn CaptureInterrupt> = interrupt;
-        let session = NativeCaptureSession::spawn(
+        let session = spawn(
             NativeCaptureParts {
                 source: Box::new(ScriptedSource {
                     events: events.into_iter().collect(),
@@ -452,9 +504,8 @@ mod tests {
                 interrupt,
                 metadata: capture_metadata("scripted-capture", 9),
             },
-            Limits::default(),
-        )
-        .expect("scripted capture worker should spawn");
+            SHUTDOWN_TIMEOUT,
+        );
         (session, finished_receiver)
     }
 
@@ -479,7 +530,7 @@ mod tests {
     ) -> (NativeCaptureSession, Receiver<()>) {
         let (started_sender, started_receiver) = mpsc::channel();
         let interrupt_for_parts: Arc<dyn CaptureInterrupt> = interrupt;
-        let session = NativeCaptureSession::spawn_with_shutdown_timeout(
+        let session = spawn(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
                     started: Some(started_sender),
@@ -489,10 +540,8 @@ mod tests {
                 interrupt: interrupt_for_parts,
                 metadata: capture_metadata("fake-capture", 1),
             },
-            Limits::default(),
             shutdown_timeout,
-        )
-        .expect("fake capture worker should spawn");
+        );
         (session, started_receiver)
     }
 
@@ -542,7 +591,7 @@ mod tests {
         let interrupt = Arc::new(FakeInterrupt::default());
         let interrupt_for_parts: Arc<dyn CaptureInterrupt> = interrupt.clone();
         let (started_sender, started_receiver) = mpsc::channel();
-        let mut session = NativeCaptureSession::spawn_with_shutdown_timeout(
+        let mut session = spawn(
             NativeCaptureParts {
                 source: Box::new(PanickingSource {
                     started: Some(started_sender),
@@ -550,12 +599,10 @@ mod tests {
                 interrupt: interrupt_for_parts,
                 metadata: capture_metadata("fake-panic", 2),
             },
-            Limits::default(),
             // The panic hook may symbolize a backtrace (RUST_BACKTRACE=1)
             // before the worker finishes, so the deadline only bounds a hang.
             Duration::from_secs(10),
-        )
-        .expect("fake capture worker should spawn");
+        );
         started_receiver
             .recv_timeout(Duration::from_millis(100))
             .expect("fake capture worker should reach the panic point");
@@ -760,10 +807,11 @@ mod tests {
                     .unwrap();
             }
         }
-        let (reaper, _receiver) = client_with_receiver(1, 1);
+        let pool = Arc::new(Pool::new(1, 1));
+        let (reaper, _receiver) = client_with_receiver(1);
         let (entered, waiting) = mpsc::channel();
         let (release, released) = mpsc::channel();
-        let mut session = NativeCaptureSession::spawn_with_reaper(
+        let mut session = spawn_on(
             NativeCaptureParts {
                 source: Box::new(CountingSource {
                     calls: Arc::new(AtomicUsize::new(0)),
@@ -774,62 +822,31 @@ mod tests {
                 }),
                 metadata: capture_metadata("destructor", 1),
             },
-            Limits::default(),
+            &pool,
+            reaper,
             Duration::from_secs(1),
-            Ok(reaper.clone()),
-        )
-        .unwrap();
+        );
         let worker = std::thread::spawn(move || {
             let _ = session.shutdown();
         });
         waiting.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(
-            reaper.reserve().is_err(),
+            pool.admit(Class::Native).is_err(),
             "interrupt destructor still owns admission"
         );
         release.send(()).unwrap();
         worker.join().unwrap();
-        assert!(reaper.reserve().is_ok());
-    }
-
-    #[test]
-    fn reaper_spawn_failure_does_not_start_an_unmanaged_capture_worker() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let reaper_error = match start_with(1, |_| {
-            Err(std::io::Error::other("injected capture reaper failure"))
-        }) {
-            Ok(_) => panic!("injected reaper creation must fail"),
-            Err(error) => error,
-        };
-        let (interrupt_dropped, interrupt_drop_receiver) = mpsc::channel();
-        let result = NativeCaptureSession::spawn_with_reaper(
-            NativeCaptureParts {
-                source: Box::new(CountingSource {
-                    calls: Arc::clone(&calls),
-                }),
-                interrupt: Arc::new(LifetimeInterrupt {
-                    dropped: interrupt_dropped,
-                }),
-                metadata: capture_metadata("unstarted-capture", 11),
-            },
-            Limits::default(),
-            Duration::ZERO,
-            Err(reaper_error),
-        );
-        assert!(matches!(result, Err(Error::Capture { .. })));
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        interrupt_drop_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("unstarted capture parts are released normally");
+        assert!(pool.admit(Class::Native).is_ok());
     }
 
     #[test]
     fn session_drop_is_no_panic_when_reaper_queue_is_saturated() {
-        let (reaper, _receiver) = client_with_receiver(1, 1);
+        let pool = Arc::new(Pool::new(1, 1));
+        let (reaper, _receiver) = client_with_receiver(1);
         reaper.transfer(Box::new(|| {}));
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
-        let session = NativeCaptureSession::spawn_with_reaper(
+        let session = spawn_on(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
                     started: Some(started_sender),
@@ -839,11 +856,10 @@ mod tests {
                 interrupt: Arc::new(FakeInterrupt::default()),
                 metadata: capture_metadata("saturated-reaper", 12),
             },
-            Limits::default(),
+            &pool,
+            reaper.clone(),
             Duration::ZERO,
-            Ok(reaper.clone()),
-        )
-        .expect("capture reserves cleanup before starting");
+        );
         wait_until_blocked(started_receiver);
 
         assert!(catch_unwind(AssertUnwindSafe(|| drop(session))).is_ok());
@@ -858,7 +874,7 @@ mod tests {
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
         let (finished_sender, finished_receiver) = mpsc::channel();
-        let session = NativeCaptureSession::spawn_with_shutdown_timeout(
+        let session = spawn(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
                     started: Some(started_sender),
@@ -868,10 +884,8 @@ mod tests {
                 interrupt: Arc::new(PanickingInterrupt),
                 metadata: capture_metadata("panicking-interrupt", 14),
             },
-            Limits::default(),
             Duration::ZERO,
-        )
-        .expect("capture starts with a defective interrupt fixture");
+        );
         wait_until_blocked(started_receiver);
 
         assert!(catch_unwind(AssertUnwindSafe(|| drop(session))).is_ok());
@@ -885,12 +899,13 @@ mod tests {
 
     #[test]
     fn reaper_keeps_native_interrupt_alive_until_capture_worker_stops() {
-        let (reaper, receiver) = client_with_receiver(1, 1);
+        let pool = Arc::new(Pool::new(1, 1));
+        let (reaper, receiver) = client_with_receiver(1);
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
         let (finished_sender, finished_receiver) = mpsc::channel();
         let (interrupt_dropped, interrupt_drop_receiver) = mpsc::channel();
-        let session = NativeCaptureSession::spawn_with_reaper(
+        let session = spawn_on(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
                     started: Some(started_sender),
@@ -902,11 +917,10 @@ mod tests {
                 }),
                 metadata: capture_metadata("lifetime-capture", 13),
             },
-            Limits::default(),
+            &pool,
+            reaper,
             Duration::ZERO,
-            Ok(reaper),
-        )
-        .expect("capture reserves cleanup before starting");
+        );
         wait_until_blocked(started_receiver);
         drop(session);
 

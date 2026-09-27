@@ -4,8 +4,14 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The regression test fails before and passes after.
-- [ ] All activation, session, workers, reaper, and capture contract tests pass; `native_isolated` compiles.
-- [ ] fmt, clippy, and the workspace tests pass.
+- [x] The regression test fails before and passes after.
+- [x] All activation, session, workers, reaper, and capture contract tests pass; `native_isolated` compiles.
+- [x] fmt, clippy, and the workspace tests pass.
+
+## Comments
+
+- Reproduced on the previous code by holding 15 of the shared pool's 16 slots and arming one source through `capture::activation::open`: it failed with "native capture cleanup capacity 16 is exhausted". The same scenario on the new code arms the source with the pool at 16 active. That check ran once, alone, because it occupies the process-wide pool; the committed regression test uses a private one-slot pool and asserts the reader runs on the activation's slot.
+- Spawning a second job on one permit is refused by the pool (`Permit::spawn` asserts one job per permit, and dispatch bounds busy threads by active permits), so activation and reading are one job: `NativeCaptureSession::prepare` splits the owner half from the reader, a rendezvous channel hands the owner half back, and `attach` builds the session on the activation's permit.
+- `ReaperClient` no longer holds a pool or admits; `client_with_receiver` takes only the queue capacity, and tests that need permits admit from a local `Pool`.

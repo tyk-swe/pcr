@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! The pool's cleanup path for native work whose owner stopped waiting before
-//! it finished, such as a capture worker that missed shutdown.
+//! it finished, such as a capture worker that missed shutdown. The reaper
+//! admits nothing: work is admitted by the pool, and a transferred cleanup
+//! task carries the permit the work already holds.
 
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
@@ -18,7 +20,7 @@ use std::{
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 
-use super::{Class, Exhausted, Permit, Pool, Task, Waited, shared};
+use super::{Task, Waited, shared};
 
 static SHARED_REAPER: OnceLock<Result<ReaperService, ReaperStartError>> = OnceLock::new();
 
@@ -27,7 +29,6 @@ type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
 #[derive(Clone)]
 pub(crate) struct ReaperClient {
     tasks: SyncSender<ReapTask>,
-    pool: Arc<Pool>,
     retained_tasks: Arc<AtomicUsize>,
 }
 
@@ -70,11 +71,6 @@ pub(crate) fn wait_until_finished(
 }
 
 impl ReaperClient {
-    /// Admits native work to the pool this reaper cleans up after.
-    pub(crate) fn reserve(&self) -> Result<Permit, Exhausted> {
-        self.pool.admit(Class::Native)
-    }
-
     /// Transfers `task` without blocking. If admission fails, retains the
     /// entire closure and its resources, leaking a bounded reservation to keep
     /// native state alive for workers that may still access it.
@@ -98,20 +94,19 @@ impl ReaperClient {
 
 pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
     SHARED_REAPER
-        .get_or_init(|| start_reaper(Arc::clone(shared()), spawn_reaper_thread))
+        .get_or_init(|| start_reaper(shared().capacity(), spawn_reaper_thread))
         .as_ref()
         .map(|service| service.client.clone())
         .map_err(Clone::clone)
 }
 
 fn start_reaper(
-    pool: Arc<Pool>,
+    capacity: usize,
     mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
     // The pool capacity bounds the native work that may concurrently hold a
     // slot. The channel and cleanup threads have the same capacity, so every
     // admitted worker can be transferred and reaped independently.
-    let capacity = pool.capacity();
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let retained_tasks = Arc::new(AtomicUsize::new(0));
@@ -133,7 +128,6 @@ fn start_reaper(
     Ok(ReaperService {
         client: ReaperClient {
             tasks,
-            pool,
             retained_tasks,
         },
         _workers: workers,
@@ -167,13 +161,11 @@ pub(crate) mod test_support {
 
     pub(crate) fn client_with_receiver(
         queue_capacity: usize,
-        permit_capacity: usize,
     ) -> (ReaperClient, mpsc::Receiver<ReapTask>) {
         let (tasks, receiver) = mpsc::sync_channel(queue_capacity);
         (
             ReaperClient {
                 tasks,
-                pool: Arc::new(Pool::new(permit_capacity, permit_capacity)),
                 retained_tasks: Arc::new(AtomicUsize::new(0)),
             },
             receiver,
@@ -184,7 +176,7 @@ pub(crate) mod test_support {
         capacity: usize,
         spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
     ) -> Result<ReaperClient, ReaperStartError> {
-        start_reaper(Arc::new(Pool::new(capacity, capacity)), spawn).map(|service| service.client)
+        start_reaper(capacity, spawn).map(|service| service.client)
     }
 
     pub(crate) fn retained_tasks(client: &ReaperClient) -> usize {
@@ -196,6 +188,7 @@ pub(crate) mod test_support {
 mod tests {
     use std::io;
 
+    use super::super::{Class, Pool};
     use super::test_support::*;
     use super::*;
 
@@ -231,7 +224,7 @@ mod tests {
 
     #[test]
     fn queue_saturation_retains_complete_task_without_panicking() {
-        let (client, _receiver) = client_with_receiver(1, 1);
+        let (client, _receiver) = client_with_receiver(1);
         client.transfer(Box::new(|| {}));
         client.transfer(Box::new(|| {}));
         assert_eq!(retained_tasks(&client), 1);
@@ -239,25 +232,17 @@ mod tests {
 
     #[test]
     fn dead_receiver_retains_complete_task_without_panicking() {
-        let (client, receiver) = client_with_receiver(1, 1);
+        let (client, receiver) = client_with_receiver(1);
         drop(receiver);
         client.transfer(Box::new(|| {}));
         assert_eq!(retained_tasks(&client), 1);
     }
 
     #[test]
-    fn reservations_bound_all_cleanup_liabilities() {
-        let (client, _receiver) = client_with_receiver(1, 1);
-        let permit = client.reserve().expect("one reservation");
-        assert_eq!(client.reserve().map(|_| ()), Err(Exhausted { capacity: 1 }));
-        drop(permit);
-        assert!(client.reserve().is_ok());
-    }
-
-    #[test]
     fn stalled_task_does_not_block_later_cleanup() {
+        let pool = Arc::new(Pool::new(2, 2));
         let client = start_with(2, spawn_reaper_thread).expect("start test reaper");
-        let first_permit = client.reserve().expect("first cleanup reservation");
+        let first_permit = pool.admit(Class::Native).expect("first admission");
         let (first_started, first_started_receiver) = mpsc::channel();
         let (release_first, release_first_receiver) = mpsc::channel();
         let (first_finished, first_finished_receiver) = mpsc::channel();
@@ -271,7 +256,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("first cleanup task starts");
 
-        let second_permit = client.reserve().expect("second cleanup reservation");
+        let second_permit = pool.admit(Class::Native).expect("second admission");
         let (second_finished, second_finished_receiver) = mpsc::channel();
         client.transfer(Box::new(move || {
             let _permit = second_permit;

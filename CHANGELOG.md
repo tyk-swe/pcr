@@ -1262,6 +1262,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Arming a native capture source holds one worker-pool slot from activation
+  through reader cleanup. Activation no longer takes a second slot to start
+  the reader, which refused the last source of a `capture::MAX_SOURCES` group
+  while fifteen readers were running.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit

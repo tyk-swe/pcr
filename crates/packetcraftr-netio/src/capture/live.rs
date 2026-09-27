@@ -10,7 +10,7 @@ use bytes::Bytes;
 
 use crate::{Error, capture::Metadata};
 
-pub(crate) use session::NativeCaptureSession;
+pub(crate) use session::{NativeCaptureSession, Started};
 pub(crate) use time::{monotonic_packet_time, system_time};
 
 mod queue;

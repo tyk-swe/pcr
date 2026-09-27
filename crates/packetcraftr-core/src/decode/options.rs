@@ -8,7 +8,6 @@ use crate::diagnostic::Diagnostic;
 use crate::layout::PacketLayout;
 use crate::packet::Packet;
 
-/// How one frame is decoded.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub limits: crate::packet::Limits,

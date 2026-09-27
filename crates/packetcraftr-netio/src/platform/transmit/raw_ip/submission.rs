@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Target socket ownership, interface binding, and native error mapping.
-
 #![cfg_attr(target_os = "windows", allow(unsafe_code))]
 
 #[cfg(target_os = "macos")]
@@ -140,12 +138,10 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
             io::Error::new(io::ErrorKind::InvalidInput, "socket handle exceeds usize"),
         )
     })?;
-    // SAFETY: socket2 owns a live Winsock SOCKET for the duration of this
-    // call, and `index` is the documented four-byte IF_INDEX option value.
+    // SAFETY: socket2 owns a live SOCKET, and `index` is the four-byte IF_INDEX option value.
     let result = unsafe { setsockopt(SOCKET(raw_socket), level, option, Some(&index)) };
     if result == SOCKET_ERROR {
-        // SAFETY: WSAGetLastError has no preconditions and is read
-        // immediately after the failed Winsock call on the same thread.
+        // SAFETY: WSAGetLastError is read immediately after the failed call on the same thread.
         let code = unsafe { WSAGetLastError().0 };
         Err(raw_error(
             "binding the selected Windows interface",

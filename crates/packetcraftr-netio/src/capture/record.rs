@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! What a capture session delivers: each captured record with its identity
-//! and ingress marker, and the loss counters that qualify the whole.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -11,8 +8,6 @@ use packetcraftr_core::frame::Frame as CaptureFrame;
 
 use crate::Error;
 
-/// Capture counters for accepted frames and pre-delivery loss. Native receiver
-/// drops are a subset; overflow events are bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Stats {
     pub received_frames: u64,
@@ -25,7 +20,6 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// Returns the fieldwise sum, or `None` if any counter would overflow.
     pub fn checked_add(self, value: Self) -> Option<Self> {
         Some(Self {
             received_frames: self.received_frames.checked_add(value.received_frames)?,
@@ -39,7 +33,6 @@ impl Stats {
         })
     }
 
-    /// Validates required frame/byte counter relationships.
     pub fn validate(&self) -> Result<(), Error> {
         if self.dropped_frames == 0 && self.dropped_bytes != 0 {
             return Err(Error::InvalidCaptureStatistics {
@@ -54,8 +47,6 @@ impl Stats {
         Ok(())
     }
 
-    /// Returns the typed loss error these counters describe, or `None` when the
-    /// backend reported no drop and no queue overflow.
     pub fn evidence_loss_error(self) -> Option<Error> {
         if self.overflow_events != 0 {
             Some(Error::CaptureQueueOverflow {
@@ -82,23 +73,17 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-/// Opaque identity assigned exactly once when a record enters capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RecordIdentity(u64);
 
 static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
-/// output-only; freshness and latency use `received_at` to avoid reordering.
+/// Wall-clock time is output-only; freshness and latency use `received_at`.
 #[derive(Clone, Debug)]
 pub struct Captured {
     identity: RecordIdentity,
-    /// The session source that delivered this record; `0` for a
-    /// single-interface session. A [`Group`](super::Group) sets its own
-    /// source number.
     pub source: usize,
     pub frame: CaptureFrame,
-    /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
 }
 
@@ -107,12 +92,6 @@ impl Captured {
         Self::with_ingress_time(frame, Some(received_at))
     }
 
-    /// Retains an optional provider-supplied monotonic ingress marker.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the process exhausts the non-reusable capture-record
-    /// identity space.
     pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
         let identity = NEXT_RECORD_ID
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -127,7 +106,6 @@ impl Captured {
         }
     }
 
-    /// Evidence without an ingress marker cannot satisfy freshness correlation.
     pub fn without_ingress_time(frame: CaptureFrame) -> Self {
         Self::with_ingress_time(frame, None)
     }

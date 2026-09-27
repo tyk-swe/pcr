@@ -54,11 +54,6 @@ A nonmatching UDP reply remains evidence while a rolling window waits for a vali
 application reply or its deadline. Profiles do not perform hidden resolution.
 ";
 
-/// One CLI `--ports` token, parsed into the library's own port selection.
-///
-/// Only the token syntax and its clap-facing messages live here; expansion,
-/// de-duplication, and the `max_ports` ceiling belong to
-/// [`packetcraftr::scan::select_ports`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PortSpec(pub(crate) packetcraftr::scan::PortSpec);
 

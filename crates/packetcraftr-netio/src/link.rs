@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Link-layer transmission capabilities and modes.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
@@ -13,9 +11,7 @@ pub enum Capability {
 }
 
 impl Capability {
-    /// Whether an interface with this capability can transmit in `mode`.
-    /// Unresolved [`Mode::Auto`] is never supported: the mode must be decided
-    /// before a capability question is meaningful.
+    /// Unresolved [`Mode::Auto`] is never supported.
     pub const fn supports(self, mode: Mode) -> bool {
         match mode {
             Mode::Layer2 => matches!(self, Self::Layer2 | Self::Layer2AndLayer3),
@@ -24,8 +20,6 @@ impl Capability {
         }
     }
 
-    /// The serialized spelling, so a text renderer and the JSON document never
-    /// name the same capability two ways.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -52,7 +46,6 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// Serialized spelling shared by text and JSON output.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

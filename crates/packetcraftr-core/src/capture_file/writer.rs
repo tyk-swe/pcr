@@ -36,8 +36,6 @@ pub(super) enum WriterState {
     },
 }
 
-// A private, destination-free plan: preview and output use exactly the same
-// validation and sizes. It owns at most one small interface, never the table or payload.
 struct FramePlan {
     encoding: FrameEncoding,
     encoded_size: usize,
@@ -57,9 +55,6 @@ enum FrameEncoding {
     },
 }
 
-/// A `dyn Error`'s rendered chain, retained for re-reporting: `&dyn Error`
-/// cannot be cloned, so the sticky failure keeps each link's message and
-/// shape rather than only the outermost string.
 #[derive(Debug)]
 struct ChainSnapshot {
     message: String,
@@ -89,8 +84,6 @@ impl std::error::Error for ChainSnapshot {
     }
 }
 
-/// The shared retained payload a re-reported `io::Error` carries, so the
-/// same chain backs every later report.
 #[derive(Debug)]
 struct SharedIo(Arc<dyn std::error::Error + Send + Sync>);
 
@@ -110,9 +103,6 @@ impl std::error::Error for SharedIo {
 struct OutputFailure {
     kind: io::ErrorKind,
     raw_os_error: Option<i32>,
-    /// The original payload's retained chain, when the failure carried one.
-    /// OS and simple `io::Error`s reproduce exactly from `kind` and
-    /// `raw_os_error` and need none.
     source: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -129,11 +119,6 @@ impl OutputFailure {
     }
 }
 
-/// A streaming writer that creates a new capture from frames.
-///
-/// It emits generated classic packet records or PCAPNG Enhanced Packet Blocks;
-/// use [`rewrite`](fn@super::rewrite) when source block structure must be
-/// retained.
 pub struct Writer<W> {
     inner: W,
     pub(super) state: WriterState,
@@ -145,13 +130,10 @@ pub struct Writer<W> {
 
 impl<W: Write> Writer<W> {
     /// Creates a writer with default settings and, for PCAPNG, interface zero.
-    /// Use [`pcapng`](Self::pcapng) and [`add_interface`](Self::add_interface)
-    /// to declare all interfaces explicitly.
     pub fn new(inner: W, format: Format, link_type: LinkType) -> Result<Self, Error> {
         match format {
             Format::Pcap => Self::pcap(inner, link_type),
             Format::PcapNg => {
-                // Validate the default interface before writing the section header.
                 if link_type.0 > u16::MAX as u32 {
                     return Err(Error::LinkTypeOutOfRange {
                         link_type: link_type.0,
@@ -164,12 +146,10 @@ impl<W: Write> Writer<W> {
         }
     }
 
-    /// Creates a little-endian, nanosecond-resolution classic PCAP writer.
     pub fn pcap(inner: W, link_type: LinkType) -> Result<Self, Error> {
         Self::pcap_with_options(inner, link_type, PcapOptions::default())
     }
 
-    /// Creates a classic PCAP writer with explicit format options.
     pub fn pcap_with_options(
         mut inner: W,
         link_type: LinkType,
@@ -220,12 +200,10 @@ impl<W: Write> Writer<W> {
         ))
     }
 
-    /// Creates a little-endian PCAPNG writer without an interface block.
     pub fn pcapng(inner: W) -> Result<Self, Error> {
         Self::pcapng_with_options(inner, PcapNgOptions::default())
     }
 
-    /// Creates a PCAPNG writer without an interface block using explicit options.
     pub fn pcapng_with_options(mut inner: W, options: PcapNgOptions) -> Result<Self, Error> {
         let PcapNgOptions {
             endianness,
@@ -290,18 +268,10 @@ impl<W: Write> Writer<W> {
         self.max_size
     }
 
-    /// The aggregate ceilings this writer was opened under. They are fixed
-    /// at construction: a stream's limits cannot be raised part-way through
-    /// the output it already committed.
     pub fn stream_limits(&self) -> Limits {
         self.budget.limits()
     }
 
-    /// Frames committed to the output so far.
-    ///
-    /// A record refused for any reason — an exhausted budget, a metadata
-    /// mismatch, or an output failure — commits neither a frame nor a byte,
-    /// and this pair is how a caller observes that.
     pub fn frames_written(&self) -> u64 {
         self.budget.frames()
     }
@@ -310,8 +280,6 @@ impl<W: Write> Writer<W> {
         self.budget.captured_bytes()
     }
 
-    /// Adds a PCAPNG interface using the writer's configured size limit as
-    /// its snap length and returns its numeric interface ID.
     pub fn add_interface(&mut self, link_type: LinkType) -> Result<u32, Error> {
         self.ensure_output_available()?;
         let snap_len = usize_to_u32_limit(self.max_size)?;
@@ -323,12 +291,10 @@ impl<W: Write> Writer<W> {
         })
     }
 
-    /// Adds one PCAPNG interface while retaining its timestamp metadata.
     pub fn add_interface_description(&mut self, description: Interface) -> Result<u32, Error> {
         self.add_interface_description_with_options(description, &[])
     }
 
-    /// Adds bounded interface options, excluding the timestamp fields owned by `description`.
     pub fn add_interface_description_with_options(
         &mut self,
         description: Interface,
@@ -349,8 +315,6 @@ impl<W: Write> Writer<W> {
             }
             length = length.saturating_add(4 + option.value.len().div_ceil(4) * 4);
         }
-        // Without custom options, `validate_new_interface` checks the base
-        // length along with the rest of the interface metadata.
         if !options.is_empty() && length > self.max_size {
             return Err(Error::SizeLimitExceeded {
                 kind: "interface description",
@@ -390,7 +354,6 @@ impl<W: Write> Writer<W> {
         Ok(())
     }
 
-    /// The PCAPNG interface table, or `WrongWriterFormat` on a classic writer.
     fn pcapng_interfaces(&mut self) -> Result<&mut Vec<Interface>, Error> {
         match &mut self.state {
             WriterState::PcapNg { interfaces, .. } => Ok(interfaces),
@@ -403,14 +366,10 @@ impl<W: Write> Writer<W> {
 
     /// Counts the uncompressed capture bytes a frame would add under the current
     /// interface and resource state, including any automatic interface block.
-    /// This performs the same validation as `write_frame` without changing this
-    /// writer, its counters, or its destination.
     pub fn encoded_frame_size(&self, frame: &Frame) -> Result<usize, Error> {
         Ok(self.prepare_frame(frame)?.encoded_size)
     }
 
-    /// Writes one frame, validating all representability and length invariants
-    /// before emitting any bytes for it.
     pub fn write_frame(&mut self, frame: &Frame) -> Result<(), Error> {
         let plan = self.prepare_frame(frame)?;
         let endianness = self.endianness();
@@ -427,8 +386,7 @@ impl<W: Write> Writer<W> {
                 new_interface,
             } => {
                 if let Some(description) = new_interface {
-                    // The plan already validated this declaration. Commit it after
-                    // its own successful output, even if the following packet fails.
+                    // Commit it after its own output, even if the following packet fails.
                     self.write_interface(description, &[])?;
                 }
                 self.write_output(|inner| {
@@ -540,10 +498,7 @@ impl<W: Write> Writer<W> {
         match operation(&mut self.inner) {
             Err(Error::Io(error)) => {
                 let (kind, raw_os_error) = (error.kind(), error.raw_os_error());
-                // An `io::Error` payload cannot be cloned: the error returned
-                // now keeps it so `get_ref` downcasts and the typed chain stay
-                // intact, while the sticky state retains a shareable snapshot
-                // of the same chain for every later report.
+                // An `io::Error` payload cannot be cloned; the sticky state keeps a chain snapshot.
                 let (source, error) = match error.into_inner() {
                     Some(payload) => {
                         let snapshot: Arc<dyn std::error::Error + Send + Sync> =
@@ -731,7 +686,6 @@ mod tests {
     fn automatic_interface_commits_only_its_successful_block_on_packet_failure() {
         let first = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![7]).unwrap();
         let second = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![8]).unwrap();
-        // Every cut in the second IDB or EPB, after an already committed frame.
         for added in 0..(32 + 36) {
             let mut writer = Writer::pcapng(FailAt {
                 bytes: Vec::new(),
@@ -790,7 +744,6 @@ mod tests {
         let error = writer
             .add_interface_description_with_options(description, &options)
             .unwrap_err();
-        // The 32-byte base block, plus 4 + 8 and 4 + 4 bytes of padded options.
         assert!(
             matches!(
                 error,

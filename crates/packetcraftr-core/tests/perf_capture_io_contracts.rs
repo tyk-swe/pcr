@@ -32,7 +32,6 @@ fn interface(resolution: TimestampResolution, offset: i64) -> Interface {
     }
 }
 
-// Independent wire fixtures, checked against the base encoder before optimization.
 fn words(order: Endianness, values: &[u32]) -> Vec<u8> {
     values
         .iter()
@@ -284,7 +283,6 @@ fn automatic_interfaces_are_included_once_and_previews_do_not_claim_ids() {
         for _ in 0..4 {
             assert_eq!(writer.encoded_frame_size(&packet).unwrap(), bytes.len());
         }
-        // A declaration between preview and write still gets the first ID.
         let mut other = description.clone();
         other.link_type = LinkType::RAW;
         assert_eq!(writer.add_interface_description(other.clone()).unwrap(), 0);
@@ -754,7 +752,6 @@ fn fully_accepting_writer_counts_packet_calls_separately_from_setup() {
                 assert_eq!(writer.get_ref().calls, calls);
                 writer.write_frame(&packet).unwrap();
                 assert_eq!(writer.get_ref().bytes - bytes, size);
-                // Fixed headers and tails are batched; empty payloads make no call.
                 let expected = match format {
                     Format::Pcap => 1 + usize::from(length != 0),
                     Format::PcapNg => 2 + usize::from(length != 0),
@@ -848,8 +845,6 @@ fn short_writes_interruptions_and_byte_offset_failures_preserve_prefixes_and_poi
             let header = reference.get_ref().bytes.len();
             reference.write_frame(&packet).unwrap();
             let complete = reference.into_inner().bytes;
-            // Every byte boundary in the automatic IDB, packet header, payload,
-            // padding, options and footer, independent of write-call grouping.
             for offset in header..complete.len() {
                 let mut writer = open();
                 writer.get_mut().interrupt_at = Some(offset);
@@ -965,7 +960,6 @@ fn measure_capture_preview_and_output() {
                     let mut samples = Vec::new();
                     let mut calls = 0;
                     for _ in 0..5 {
-                        // File creation, frame allocation and interface population precede timing.
                         let measured = if file {
                             measured_capture(
                                 tempfile::tempfile_in(env!("CARGO_MANIFEST_DIR")).unwrap(),

@@ -8,10 +8,6 @@ use packetcraftr_netio as net;
 
 use crate::errors::CliError;
 
-/// The collection bounds every exchange of one command runs under: retention
-/// up to the aggregate capture queue, and decoding up to its snapshot length.
-/// They are validated together with the command's exchange `timeout` and
-/// `max_template_packets`, as one exchange request would be.
 pub(crate) fn collection(
     timeout: Duration,
     max_template_packets: usize,

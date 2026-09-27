@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured IP fragment-reassembly lifecycle and terminal accounting.
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::Serialize;
@@ -15,7 +13,6 @@ use packetcraftr_core::analysis::{
 };
 
 published_enum! {
-    /// The IP version a fragment or datagram belongs to.
     pub enum Family from ip::Family {
         Ipv4 => "ipv4",
         Ipv6 => "ipv6",
@@ -23,7 +20,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// How conflicting fragment bytes were resolved.
     pub enum OverlapPolicy from ip::OverlapPolicy {
         Reject => "reject",
         First => "first",
@@ -32,14 +28,12 @@ published_enum! {
 }
 
 published_enum! {
-    /// Why a partial datagram was retired.
     pub enum IncompleteReason from ip::IncompleteReason {
         IdleExpired => "idle_expired",
         EndOfCapture => "end_of_capture",
     }
 }
 
-/// Exact IPv4 fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ipv4DatagramKey {
     pub scope: u32,
@@ -49,7 +43,6 @@ pub struct Ipv4DatagramKey {
     pub protocol: u8,
 }
 
-/// Exact IPv6 fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ipv6DatagramKey {
     pub scope: u32,
@@ -58,7 +51,6 @@ pub struct Ipv6DatagramKey {
     pub identification: u32,
 }
 
-/// Exact, capture-scoped fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "family")]
 pub enum DatagramKey {
@@ -88,7 +80,6 @@ impl From<ip::DatagramKey> for DatagramKey {
     }
 }
 
-/// Bounded evidence for a datagram that retired with gaps.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IncompleteDatagram {
     pub key: DatagramKey,
@@ -115,7 +106,6 @@ impl From<ip::IncompleteDatagram> for IncompleteDatagram {
     }
 }
 
-/// How one datagram's reassembly ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status")]
 pub enum DatagramOutcome {
@@ -158,7 +148,6 @@ impl From<AnalysisOutcome> for DatagramOutcome {
     }
 }
 
-/// One family's capture-global fragment and datagram counters.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Counters {
     pub physical_fragments: u64,
@@ -196,7 +185,6 @@ impl From<&AnalysisFamilyCounters> for Counters {
     }
 }
 
-/// Family label attached to the domain's counters for tabular output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FamilyCounters {
     pub family: Family,
@@ -204,7 +192,6 @@ pub struct FamilyCounters {
     pub counters: Counters,
 }
 
-/// Capture-global counters and bounded terminal outcomes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub families: Vec<FamilyCounters>,
@@ -237,8 +224,6 @@ impl From<&AnalysisReport> for Report {
     }
 }
 
-/// Progressive lifecycle record emitted before downstream data enabled by the
-/// same completing fragment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {

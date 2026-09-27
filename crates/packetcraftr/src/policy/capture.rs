@@ -3,9 +3,6 @@
 
 use super::model::{Error, Policy};
 
-/// Charges live capture one frame at a time. Stop reading when
-/// [`CaptureBudget::is_exhausted`] reports the frame ceiling;
-/// [`CaptureBudget::account`] rejects frames that exceed either budget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureBudget {
     max_frames: u64,
@@ -15,7 +12,6 @@ pub struct CaptureBudget {
 }
 
 impl CaptureBudget {
-    /// Starts an empty budget from the policy's per-operation limits.
     #[must_use]
     pub const fn new(policy: &Policy) -> Self {
         Self {
@@ -46,16 +42,11 @@ impl CaptureBudget {
         self.bytes
     }
 
-    /// Whether the frame budget leaves room for another frame.
     #[must_use]
     pub const fn is_exhausted(&self) -> bool {
         self.frames >= self.max_frames
     }
 
-    /// Charges one captured frame and its wire bytes. The budget is left
-    /// untouched when either limit would be exceeded, so a rejected frame never
-    /// half-spends it. Counter overflow is charged as a spent budget rather
-    /// than wrapped.
     pub fn account(&mut self, frame_bytes: u64) -> Result<(), Error> {
         let frames = self
             .frames

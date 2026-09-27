@@ -447,8 +447,6 @@ fn dns_wire(id: u16, flags: u16, questions: &[(&str, u16, u16)]) -> Vec<u8> {
 fn dns_response_wire(id: u16, questions: &[(&str, u16, u16)]) -> Vec<u8> {
     let mut wire = dns_wire(id, RESPONSE_FLAGS, questions);
     wire[6..8].copy_from_slice(&1_u16.to_be_bytes());
-    // The answer owner is the first question name when one exists, else the
-    // root name.
     if questions.is_empty() {
         wire.push(0);
     } else {
@@ -518,8 +516,6 @@ fn dns_answers_match_their_query_at_application_confidence() {
         Some(IpAddr::V4(IPV4_SERVER))
     );
 
-    // The typed DNS layer owns the pair: the weaker transport matcher cannot
-    // also accept the response on tuple reversal alone.
     assert!(
         registry
             .matcher("udp")
@@ -600,7 +596,6 @@ fn dns_answers_reject_every_identity_mismatch() {
         "a response-shaped request has no query to answer"
     );
 
-    // The question section compares completely and in order.
     let two_questions = dns_query_packet(0x1234, &[("a.example", 1, 1), ("z.example", 28, 1)]);
     let reordered = dns_reply_packet(0x1234, &[("z.example", 28, 1), ("a.example", 1, 1)]);
     let reechoed = dns_reply_packet(0x1234, &[("a.example", 1, 1), ("z.example", 28, 1)]);
@@ -620,8 +615,6 @@ fn dns_names_fold_ascii_case_and_compression_only() {
         "ASCII letter case is not DNS identity"
     );
 
-    // The second question name points at the first; a literal echo decodes to
-    // the same wire name.
     let mut compressed_wire = dns_wire(0x1234, QUERY_FLAGS, &[("example.com", 1, 1)]);
     compressed_wire[4..6].copy_from_slice(&2_u16.to_be_bytes());
     compressed_wire.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1]);
@@ -653,8 +646,6 @@ fn dns_matching_stays_inside_its_reversed_udp_flow() {
     wrong_peer.get_mut::<Ipv4>().expect("IPv4").source = IPV4_ROUTER;
     assert!(matcher.matches(&request, &wrong_peer).is_none());
 
-    // A tunneled flow cannot let an inner DNS answer bypass an outer or inner
-    // envelope that does not reverse.
     let tunneled =
         |outer: (Ipv4Addr, Ipv4Addr), inner: (Ipv4Addr, Ipv4Addr), source_port: u16, dns: Dns| {
             let mut packet = ipv4_envelope(outer.0, outer.1);
@@ -723,8 +714,6 @@ fn dns_matching_stays_inside_its_reversed_udp_flow() {
 fn transport_tuple_reversed_correlates_udp_while_deeper_layers_stay_opaque() {
     let request = dns_query_packet(0x1234, &[("example.com", 1, 1)]);
 
-    // Tuple correlation answers even where the DNS matcher rejects identity:
-    // dedicated workflows classify the payload themselves.
     let mismatched = dns_reply_packet(0x1235, &[("other.example", 1, 1)]);
     assert_eq!(
         transport_tuple_reversed(&request, &mismatched, BuiltinProtocol::Udp),
@@ -750,8 +739,6 @@ fn transport_tuple_reversed_correlates_udp_while_deeper_layers_stay_opaque() {
     wrong_port.get_mut::<Udp>().expect("UDP").source_port = 5353;
     assert!(transport_tuple_reversed(&request, &wrong_port, BuiltinProtocol::Udp).is_none());
 
-    // TCP stays eligible for transports other than UDP, and a request with no
-    // UDP layer has no tuple to reverse.
     let mut tcp_request = ipv4_envelope(IPV4_CLIENT, IPV4_SERVER);
     tcp_request.push(Tcp {
         source_port: CLIENT_PORT,

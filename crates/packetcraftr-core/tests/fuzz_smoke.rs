@@ -9,14 +9,10 @@ use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
 #[path = "../../../fuzz/fuzz_targets/ip_reassembly_support.rs"]
 mod ip_reassembly_support;
 
-/// The checked-in seed corpus for one fuzz target; a missing corpus is a
-/// harness defect, not an empty smoke test.
 fn corpus(target: &str) -> std::path::PathBuf {
     seed_dir(Path::new("fuzz/corpora").join(target))
 }
 
-/// The published examples that seed a fuzz target instead of a corpus copy,
-/// so the seeds cannot drift from the documents the schemas pin.
 fn published_examples(kind: &str) -> std::path::PathBuf {
     seed_dir(Path::new("examples").join(kind))
 }
@@ -76,8 +72,6 @@ fn smoke_test_json_packet_documents() {
     assert!(checked > 0, "corpus must contain seed inputs");
 }
 
-/// Every checked-in YAML seed parses under the fuzz target's limits, so a
-/// campaign starts from valid documents rather than only from mutations.
 #[test]
 fn yaml_packet_document_seeds_parse_under_the_fuzz_limits() {
     let mut checked = 0_usize;

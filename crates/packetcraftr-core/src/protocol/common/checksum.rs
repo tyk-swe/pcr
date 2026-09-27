@@ -7,13 +7,10 @@ use crate::codec::NetworkEnvelope;
 
 use super::errors::invalid;
 
-/// Returns the 16-bit Internet Checksum (RFC 1071) of one contiguous slice.
 pub fn checksum(bytes: &[u8]) -> u16 {
     checksum_parts(&[bytes])
 }
 
-/// Returns the Internet Checksum of `parts` read as one contiguous byte
-/// stream, so a part may end on an odd boundary.
 pub fn checksum_parts(parts: &[&[u8]]) -> u16 {
     let mut accumulator = ChecksumAccumulator::default();
     for part in parts {
@@ -22,7 +19,6 @@ pub fn checksum_parts(parts: &[&[u8]]) -> u16 {
     accumulator.finish()
 }
 
-/// Accumulates 16-bit Internet Checksum (RFC 1071) over contiguous or chunked byte slices.
 #[derive(Debug, Clone, Default)]
 pub struct ChecksumAccumulator {
     sum: u128,
@@ -30,12 +26,8 @@ pub struct ChecksumAccumulator {
 }
 
 impl ChecksumAccumulator {
-    /// Adds a byte slice to the accumulator.
-    ///
     /// Bytes are folded in 64-bit chunks: RFC 1071 permits summing 16-bit words in wider
-    /// registers because carry propagation matches ones'-complement addition modulo 2^16 - 1,
-    /// and the `u128` sum has room for every chunk a slice can contribute.
-    // the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute
+    /// registers because carry propagation matches ones'-complement addition modulo 2^16 - 1.
     pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
@@ -58,8 +50,6 @@ impl ChecksumAccumulator {
         self.pending_high_byte = remainder.first().copied();
     }
 
-    /// Finalizes and returns the 16-bit Internet Checksum.
-    // the pending byte contributes at most 0xff00, which the u128 accumulator still has room for
     pub fn finish(self) -> u16 {
         let sum = self.sum
             + self
@@ -70,7 +60,6 @@ impl ChecksumAccumulator {
 }
 
 // the loop only exits once sum >> 16 is zero, so sum is at most 0xffff
-// each addend is a masked or shifted half of sum, so every fold step stays below u128::MAX
 fn fold_checksum(mut sum: u128) -> u16 {
     sum = (sum & 0xffff_ffff_ffff_ffff) + (sum >> 64);
     sum = (sum & 0xffff_ffff) + (sum >> 32);
@@ -80,8 +69,6 @@ fn fold_checksum(mut sum: u128) -> u16 {
     !(sum as u16)
 }
 
-/// `name` is the calling codec's protocol, so a pseudo-header failure is
-/// reported against a protocol that is actually in the catalog.
 pub(crate) fn transport_checksum(
     name: &'static str,
     network: NetworkEnvelope,
@@ -91,7 +78,6 @@ pub(crate) fn transport_checksum(
     transport_checksum_parts(name, network, protocol_number, &[segment])
 }
 
-/// Treats `parts` as one contiguous byte stream, including across odd boundaries.
 pub(crate) fn transport_checksum_parts(
     name: &'static str,
     network: NetworkEnvelope,
@@ -139,7 +125,6 @@ pub(crate) fn network_from_addresses(source: IpAddr, destination: IpAddr) -> Net
 mod tests {
     use super::{ChecksumAccumulator, checksum, checksum_parts};
 
-    /// RFC 1071 IPv4 header vector whose checksum field is zeroed.
     const IPV4_HEADER: [u8; 20] = [
         0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0xc0, 0xa8, 0x00,
         0x01, 0xc0, 0xa8, 0x00, 0xc7,

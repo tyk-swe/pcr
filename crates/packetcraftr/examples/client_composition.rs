@@ -1,17 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Composes a `Client` over explicitly local providers — a fixed route
-//! decision and I/O that records submissions and never captures — gated by an
-//! explicit `Policy` carrying a destination allowlist and finite
-//! per-operation budgets. Nothing touches the network.
-//!
-//! Production composition uses `SystemProviders`, each capability's
-//! `SystemProvider` behind the `native-*` features, and the client resolves
-//! neighbors over its own transmit and capture providers; the policy and
-//! budget contract is identical either way.
-//!
-//!     cargo run -p packetcraftr --example client_composition
+//! Composes a `Client` over explicitly local providers. Nothing touches the network.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -31,11 +21,8 @@ use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr_netio::{interface, tcp, transmit};
 
-/// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
 
-/// A route provider that puts every destination on-link over one dual
-/// capability Ethernet interface — the shape a host route lookup returns.
 struct DocumentationRoutes;
 
 impl Provider for DocumentationRoutes {
@@ -66,8 +53,6 @@ impl Provider for DocumentationRoutes {
     }
 }
 
-/// A sender that retains each submitted wire so the example can report what
-/// transmission would have emitted.
 #[derive(Clone, Default)]
 struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -86,8 +71,6 @@ impl transmit::Provider for RecordingSender {
 impl capture::Provider for RecordingSender {
     type Capture = capture::SystemSession;
 
-    /// The client arms capture only to resolve a neighbor; this example's
-    /// Layer 3 sends never need one, so arming would prove the wiring wrong.
     fn arm_capture(
         &self,
         _request: &capture::Request,
@@ -108,9 +91,7 @@ fn packet(destination: Ipv4Addr) -> Result<packetcraftr_core::packet::Packet, ex
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Explicit authorization: only the TEST-NET-1 documentation prefix is
-    // permitted, and one operation may spend at most 8 packets / 16 KiB of
-    // wire — the client enforces both before any provider sees a frame.
+    // Explicit authorization: only the TEST-NET-1 documentation prefix is permitted.
     let policy = Policy {
         allowed_destinations: vec![DestinationConstraint::Network(
             packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,
@@ -124,9 +105,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    // The recording sender transmits and captures; this workflow never
-    // selects an interface by name, connects over TCP, or resolves a
-    // hostname, so those capabilities keep their system providers unused.
     let providers = ProviderSet {
         route: DocumentationRoutes,
         interface: interface::SystemProvider,
@@ -137,8 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = Client::new(builtin::registry(), policy, providers);
 
-    // Layer 3 planning skips neighbor resolution entirely, so the composed
-    // client never arms capture on the recording I/O.
+    // Layer 3 planning skips neighbor resolution, so the client never arms capture.
     let options = send::Options {
         plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,
@@ -148,8 +125,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
-    // The collector keeps every frame the send publishes; its aggregate joins
-    // them with the terminal report.
     let collector = send::Collector::default();
     let report = client.send(
         send::Request::packet(allowed, options.clone()),

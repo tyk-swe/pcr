@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet recipes: text that is either a packet document or a layer
-//! expression.
-
 use std::path::Path;
 
 use super::{DocumentLimits, Format, Packet};
@@ -13,8 +10,6 @@ use crate::expression;
 use crate::registry::Registry;
 
 impl Format {
-    /// The format a file name declares by its extension (`json`, `yaml`, or
-    /// `yml`, in any case), or `None` when it declares none.
     pub fn from_path(path: &Path) -> Option<Self> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "json" => Some(Self::Json),
@@ -23,8 +18,6 @@ impl Format {
         }
     }
 
-    /// The format recipe text announces by how it starts: a JSON object, or
-    /// a YAML `schema:` key or `---` document marker after leading whitespace.
     pub fn sniff(input: &str) -> Option<Self> {
         let trimmed = input.trim_start();
         if trimmed.starts_with('{') {
@@ -37,13 +30,6 @@ impl Format {
     }
 }
 
-/// Reads recipe text as a packet with at most `max_layers` layers.
-///
-/// A `declared` format, or else the one [`Format::sniff`] finds, parses the
-/// text as a packet document of that format. Text that announces no format is
-/// a layer expression; if it is not one either, it is tried as a YAML
-/// document, and when that also fails the expression failure is reported
-/// with the document failure as its cause.
 pub fn parse(
     input: &str,
     declared: Option<Format>,
@@ -87,14 +73,10 @@ pub fn parse(
     }
 }
 
-/// Why recipe text is not a packet.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// The text is a packet document that does not describe a packet.
     Document(document::Error),
-    /// The text is neither a layer expression nor a YAML packet document. It
-    /// reads as the expression failure; the document failure is a cause.
     Unrecognized {
         expression: Box<expression::Error>,
         document: Box<document::Error>,

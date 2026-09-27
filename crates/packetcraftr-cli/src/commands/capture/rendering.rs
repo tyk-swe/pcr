@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `capture`'s terminal summary in every format.
-
 use crate::errors::CliError;
 use crate::output::{
     self,
@@ -68,9 +66,6 @@ pub(super) fn render_complete(
     }
 }
 
-/// `requested/applied/effective` in one parenthesized triplet; `default` marks
-/// an unset request, `-` a setting never applied, and `unknown` a value the
-/// backend cannot confirm.
 fn realized_text<T: std::fmt::Display>(realized: &output::capture::Realized<T>) -> String {
     fn field<T: std::fmt::Display>(value: &Option<T>, none: &str) -> String {
         value

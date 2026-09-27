@@ -22,11 +22,6 @@ use crate::dns::{
 };
 
 /// A DNS question's exact 16-bit wire code, including unassigned codes.
-///
-/// Text accepts the named constants' aliases, decimal codes, or `TYPE<n>`.
-/// Numeric syntax contains one to five ASCII digits in `0..=65535`.
-/// Serialization uses the numeric code; display uses a lowercase known alias
-/// or `TYPE<n>` for other codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct QueryType(u16);
@@ -58,7 +53,6 @@ impl QueryType {
         (Self::ANY, "any"),
     ];
 
-    /// Preserves any 16-bit code without assigning it record semantics.
     pub const fn new(code: u16) -> Self {
         Self(code)
     }
@@ -119,8 +113,6 @@ impl std::str::FromStr for QueryType {
     }
 }
 
-/// DNS message decoding limits, independent of workflow capture and deadline
-/// limits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageLimits {
     pub max_message_bytes: usize,
@@ -145,8 +137,6 @@ impl Default for MessageLimits {
 }
 
 impl MessageLimits {
-    /// Rejects any bound above the ceiling this crate enforces, and any pair
-    /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
@@ -179,8 +169,6 @@ impl MessageLimits {
     }
 }
 
-/// Bounds one DNS workflow operation: the message codec, the exact evidence it
-/// retains, and its duration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
     pub message: MessageLimits,
@@ -211,8 +199,6 @@ impl Limits {
         }
     }
 
-    /// Rejects any bound above the ceiling this crate enforces, and any pair
-    /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         self.message.validate()?;
         self.evidence()
@@ -231,18 +217,15 @@ impl Limits {
     }
 }
 
-/// Opt-in EDNS version 0 query settings. No custom options are emitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdnsRequest {
-    /// Advertised UDP response capacity, within 512..=65535 bytes.
-    /// This does not change capture or message decoding limits.
+    /// Advertised UDP response capacity; it does not change capture or decoding limits.
     pub udp_payload_size: u16,
     /// Request DNSSEC records; this does not perform signature validation.
     pub dnssec_ok: bool,
 }
 
 impl EdnsRequest {
-    /// Validates the advertised UDP response capacity before query construction.
     pub fn validate(&self) -> Result<(), wire::Error> {
         if self.udp_payload_size < 512 {
             return Err(wire::Error::InvalidEdns {
@@ -256,17 +239,13 @@ impl EdnsRequest {
     }
 }
 
-/// How each independently authorized DNS attempt reaches the server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum TransportMode {
-    /// Start with UDP and continue a validated truncated response over TCP.
     #[default]
     UdpThenTcp,
-    /// Use UDP and report validated truncation without a continuation.
     Udp,
-    /// Open a framed TCP query directly; the operating system selects its source port.
     Tcp,
 }
 
@@ -282,33 +261,24 @@ pub struct Request {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub recursion_desired: bool,
-    /// Optional EDNS v0 settings; absent settings preserve the plain DNS query.
     #[serde(default)]
     pub edns: Option<EdnsRequest>,
-    /// Transport selection for every retry. Scoped IPv6 link-local servers
-    /// require UDP because [`Target`] carries no TCP scope identifier.
+    /// Scoped IPv6 link-local servers need UDP: [`Target`] carries no TCP scope identifier.
     #[serde(default)]
     pub transport: TransportMode,
     pub attempts: u32,
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,
     pub limits: Limits,
-    /// Route selection for every UDP exchange. Direct TCP and fallback run on
-    /// a kernel socket, which accepts only the default route options. A live
-    /// setting, not part of the serialized question.
+    /// Direct TCP and fallback run on a kernel socket, which accepts only default route options.
     #[serde(skip)]
     pub route: crate::route::Options,
-    /// The capture and retention bounds every UDP exchange runs under; they
-    /// must fit inside [`Limits`]'s evidence bounds. A live setting, not part
-    /// of the serialized question.
+    /// Must fit inside [`Limits`]'s evidence bounds.
     #[serde(skip)]
     pub collection: crate::exchange::Collection,
 }
 
 impl Request {
-    /// Rejects every request this workflow cannot execute: an out-of-range
-    /// limit, port, attempt count, timeout, or rate, and a query name that is
-    /// not a valid DNS name, or invalid EDNS request settings.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if let Some(edns) = self.edns {
@@ -346,8 +316,6 @@ impl Request {
         Ok(())
     }
 
-    /// The canonical wire form of the declared query name, after
-    /// [`Request::validate`] accepts the request.
     pub fn canonical_name(&self) -> Result<String, Error> {
         self.validate()?;
         canonical_query_name(&self.query_name).map_err(Error::Query)

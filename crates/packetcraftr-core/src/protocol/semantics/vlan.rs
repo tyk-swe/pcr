@@ -44,7 +44,6 @@ pub fn vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
         .collect()
 }
 
-/// Checks the ranges a directly constructed tag can exceed.
 fn checked_tag(layer: &dyn Layer, tag: VlanTag) -> Result<VlanTag, Error> {
     if tag.priority > 7 {
         return Err(Error::field(

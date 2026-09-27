@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet recipes and bounded payload-file injection.
-
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
@@ -69,9 +67,6 @@ fn resolve_recipe(
         .map_err(CliError::classified)
 }
 
-/// Loads a file into an existing, empty bytes-typed recipe field under the
-/// packet input ceiling. Saved documents retain the bytes, independent of the
-/// file.
 fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let (target, path) = spec
         .split_once('=')
@@ -89,8 +84,6 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
 
 const PAYLOAD_FILE_SYNTAX: &str = "--payload-file requires LAYER.FIELD=PATH";
 
-/// A refused `--payload-file`: the option is the outer context, and the
-/// library's refusal stays the typed source with its own text.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 struct PayloadFile {

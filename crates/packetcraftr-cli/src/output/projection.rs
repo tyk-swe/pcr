@@ -9,7 +9,6 @@ use serde::{
     ser::{Error as _, SerializeMap, SerializeSeq},
 };
 
-/// Compact cell serialization: addresses/MACs are text, bytes are lowercase hex.
 pub struct Cell<'a>(pub &'a FieldValue);
 impl Serialize for Cell<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -53,7 +52,6 @@ pub struct Row {
     #[serde(serialize_with = "values")]
     pub values: Vec<Option<FieldValue>>,
 }
-/// A frame's projected cells, at its one-based source position.
 impl TryFrom<(u64, Vec<Option<FieldValue>>)> for Row {
     type Error = Error;
 
@@ -70,7 +68,6 @@ pub struct RowEvent<'a> {
     #[serde(flatten)]
     pub row: &'a Row,
 }
-/// One row under the projection's column names.
 impl<'a> From<(&'a Projection, &'a Row)> for RowEvent<'a> {
     fn from((projection, row): (&'a Projection, &'a Row)) -> Self {
         Self {
@@ -91,8 +88,6 @@ pub struct Complete {
     pub frames_read: u64,
     pub captured_bytes_read: u64,
 }
-/// The projection's columns, the rows written, and the frames and captured
-/// bytes read.
 impl From<(&Projection, u64, u64, u64)> for Complete {
     fn from(
         (projection, rows_written, frames_read, captured_bytes_read): (&Projection, u64, u64, u64),
@@ -111,7 +106,6 @@ pub struct Report {
     pub summary: Complete,
     pub rows: Vec<Row>,
 }
-/// The terminal counters and every retained row.
 impl From<(Complete, Vec<Row>)> for Report {
     fn from((summary, rows): (Complete, Vec<Row>)) -> Self {
         Self { summary, rows }

@@ -30,11 +30,6 @@ pub struct Mutation {
     pub value: FieldValue,
 }
 
-/// Why one fuzz case was rejected, retained in the campaign report.
-///
-/// A failure built by [`CaseFailure::new`] carries a captured `causes`
-/// snapshot; one built by [`CaseFailure::with_source`] keeps the typed source
-/// and derives its causes from the source chain.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[error("{message}")]
 pub struct CaseFailure {
@@ -59,7 +54,6 @@ impl CaseFailure {
         }
     }
 
-    /// A failure whose cause is the typed `source`.
     pub fn with_source(
         message: impl Into<String>,
         classification: Classification,
@@ -102,11 +96,6 @@ pub struct Case {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// What one offline campaign generated, built, retained, and took.
-///
-/// The module has no transmission seam, so a case is the only unit counted
-/// here; the output boundary is what maps these onto the published
-/// packet-operation columns.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stats {
     pub cases_generated: u64,
@@ -125,8 +114,6 @@ pub struct Report {
 }
 
 impl Report {
-    /// Reattaches the collected cases to the campaign metadata that
-    /// [`run_observed`](crate::fuzz::run_observed) reports after publishing them.
     #[must_use]
     pub fn from_summary(summary: Summary, cases: Vec<Case>) -> Self {
         Self {
@@ -139,7 +126,6 @@ impl Report {
     }
 }
 
-/// Final offline campaign metadata after every case event was published.
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub seed: u64,

@@ -84,8 +84,6 @@ fn advertised_protocols_and_capture_roots_are_registered() {
             );
         }
     }
-    // The one advertised non-round-tripping codec is the one that cannot
-    // encode at all, and it says so instead of failing silently.
     let not_round_tripping: Vec<&str> = BuiltinProtocol::ALL
         .iter()
         .filter(|protocol| !protocol.exact_round_trip())

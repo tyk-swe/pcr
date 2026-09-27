@@ -25,13 +25,10 @@ pub(crate) struct ResponseCandidate<'a, O> {
     pub(crate) latency: Duration,
 }
 
-/// What the one candidate ordering compares about a response. Serial batch
-/// selection builds it from each [`ResponseCandidate`]; a pipelined executor
-/// that keeps a best-so-far response builds it from what it retained.
 pub(crate) struct CandidateKey<'a, T> {
     /// Higher wins.
     pub(crate) rank: u8,
-    /// Breaks rank ties; lower wins. Probe workflows use the responder.
+    /// Breaks rank ties; lower wins.
     pub(crate) tie_break: T,
     /// Breaks key ties; shorter wins.
     pub(crate) latency: Duration,
@@ -39,9 +36,6 @@ pub(crate) struct CandidateKey<'a, T> {
     pub(crate) bytes: &'a [u8],
 }
 
-/// The single tie-break rule: rank, then tie-break key (responder), then
-/// latency, then bytes. A complete tie keeps the current candidate, so equal
-/// evidence never depends on arrival order.
 pub(crate) fn candidate_precedes<T: Ord>(
     candidate: &CandidateKey<'_, T>,
     current: &CandidateKey<'_, T>,
@@ -82,7 +76,6 @@ fn update_best_candidate<'a, O, K: Ord>(
     }
 }
 
-/// Stable, linear-time response grouping shared by every bounded probe batch.
 /// Sorting is stable so equal request indices preserve executor evidence order.
 pub(crate) struct ResponseSelector<'a> {
     matched: Peekable<Iter<'a, Response>>,

@@ -29,7 +29,6 @@ use packetcraftr_netio::{
     transmit,
 };
 
-/// A deadline no fixture here comes close to spending.
 fn live() -> Deadline {
     Deadline::new(std::time::Duration::from_secs(5))
 }
@@ -157,8 +156,6 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
     assert!(error.to_string().contains("denies public destination"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
 
-    // The same address is refused before any provider observes it, so a caller
-    // that resolves first and plans second cannot leak it to the network.
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![1_u8]));
     let error = client
@@ -208,8 +205,6 @@ impl Provider for FixedRoutes {
     }
 }
 
-/// A client over `routes` whose transmit and capture providers must never be
-/// reached.
 fn client<R: Provider + 'static>(
     routes: R,
     policy: policy::Policy,
@@ -233,7 +228,6 @@ fn source_client(
     )
 }
 
-/// Sends `packet` once, collecting nothing.
 fn send_once<P: packetcraftr::Providers>(
     client: &Client<P>,
     packet: Packet,
@@ -342,9 +336,6 @@ fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
     );
 }
 
-/// Every workflow is admitted through the client's one admission path, which
-/// validates the policy before any operation: an unusable resolved-address
-/// bound is refused by `send` exactly as the policy itself refuses it.
 #[test]
 fn the_client_refuses_a_malformed_policy_as_the_policy_does() {
     let malformed = policy::Policy {
@@ -398,12 +389,10 @@ fn destination_constraints_narrow_never_widen() {
     let inside = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let outside = IpAddr::V4(Ipv4Addr::new(10, 0, 1, 2));
 
-    // An empty list adds no constraint: private destinations stay authorized.
     policy::Policy::default()
         .authorize_destination(inside)
         .expect("empty allowlist is unconstrained");
 
-    // Exact and CIDR entries permit their members.
     let policy = constrained_policy(&["10.0.0.2", "10.9.0.0/16"]);
     policy
         .authorize_destination(inside)
@@ -412,7 +401,6 @@ fn destination_constraints_narrow_never_widen() {
         .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 9, 9, 9)))
         .expect("CIDR member is authorized");
 
-    // Non-members are denied with the effective constraints in the evidence.
     let error = policy
         .authorize_destination(outside)
         .expect_err("destination outside every constraint is denied");
@@ -422,8 +410,6 @@ fn destination_constraints_narrow_never_widen() {
     );
     assert!(error.to_string().contains("10.0.0.2, 10.9.0.0/16"));
 
-    // Constraints never widen: an allowlisted public address still needs the
-    // public-destination opt-in.
     let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
     let error = constrained_policy(&["8.8.8.8"])
         .authorize_destination(public)
@@ -456,7 +442,6 @@ fn destination_constraints_enforce_family_and_subnet_boundaries() {
         "policy.destination_not_allowed"
     );
 
-    // An IPv6 constraint does not admit IPv4 destinations and vice versa.
     assert!(
         constrained_policy(&["2001:db8::/32"])
             .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)))
@@ -496,9 +481,6 @@ fn every_resolved_address_must_satisfy_the_allowlist() {
 
 #[test]
 fn final_wire_destination_outside_allowlist_is_denied_even_when_target_passed() {
-    // The declared destination 10.0.0.2 is allowed; the bytes that would
-    // actually reach the wire carry 10.9.9.9 and must be denied at the final
-    // wire boundary.
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![
         0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0xfd, 0x65, 0x23, 0x0a, 0x00, 0x00,

@@ -1,9 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Transactional fragment merging: plan overlap/accounting, build a
-//! replacement, then commit. Planning and allocation failures leave retained
-//! bytes unchanged.
+//! Transactional fragment merging: failures leave retained bytes unchanged.
 
 use super::super::RANGE_METADATA_CHARGE;
 use super::{Error, Incoming, Malformed, OverlapPolicy, Resource, RetainedRange};
@@ -19,20 +17,13 @@ pub(super) struct MergePlan {
     pub(super) kind: UpdateKind,
 }
 
-/// How the retained ranges absorb one admitted fragment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UpdateKind {
-    /// Every incoming byte is already retained; nothing is stored.
     Unchanged,
-    /// The fragment starts exactly where one retained range ends and touches
-    /// no other range, so its bytes extend that range in place.
     Append,
-    /// The affected ranges and the fragment are rebuilt into one new range.
     Replace,
 }
 
-/// The prepared range update: `Replace` carries the merged range, allocated
-/// before any retained state changes.
 pub(super) enum RangeUpdate {
     Unchanged,
     Append,
@@ -116,8 +107,7 @@ pub(super) fn plan_merge(
     })
 }
 
-/// Measures one retained range's overlap with the incoming fragment,
-/// reporting `(overlapping, conflicting)` byte counts.
+/// Reports `(overlapping, conflicting)` byte counts.
 fn measure_overlap(
     retained: &RetainedRange,
     retained_end: usize,
@@ -148,8 +138,6 @@ fn measure_overlap(
         .payload
         .get(incoming_start..incoming_stop)
         .ok_or(Malformed::OffsetOverflow)?;
-    // A retransmitted fragment overlaps byte-for-byte, so settle that
-    // case with one slice compare before counting byte by byte.
     let conflicting = if retained_overlap == incoming_overlap {
         0
     } else {
@@ -162,8 +150,6 @@ fn measure_overlap(
     Ok((length, conflicting))
 }
 
-/// Builds the single range covering the fragment and every retained range it
-/// touches. Nothing retained is modified.
 pub(super) fn merge_affected(
     ranges: &[RetainedRange],
     incoming: &Incoming,
@@ -186,8 +172,6 @@ pub(super) fn merge_affected(
         .offset
         .checked_sub(plan.union_start)
         .ok_or(Malformed::OffsetOverflow)?;
-    // Overlapping bytes are resolved by write order: whichever side is
-    // written last wins the contested region.
     let incoming_last = policy == OverlapPolicy::Last;
     if !incoming_last {
         copy_into(&mut merged, incoming_start, &incoming.payload)?;
@@ -212,8 +196,6 @@ pub(super) fn merge_affected(
     })
 }
 
-/// Stores the prepared update in `ranges`. Every reservation precedes every
-/// write, so an error leaves `ranges` untouched.
 pub(super) fn apply_range_update(
     ranges: &mut Vec<RetainedRange>,
     update: RangeUpdate,

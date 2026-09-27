@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! What one DNS operation will do before any side effect: its finite
-//! limits, approved up front, and each attempt's authorized [`Probe`].
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -25,21 +22,14 @@ use super::error::Error;
 use super::request::QueryType;
 use super::{DEFAULT_SERVER_PORT, MAX_PROBE_OVERHEAD, Request, TransportMode};
 
-/// The complete finite cost one DNS operation may incur, approved before any
-/// resolver, route, capture, or socket side effect.
 pub(super) struct OperationLimits {
     pub(super) packet_count: u64,
     pub(super) maximum_wire_bytes: u64,
-    /// The socket cost of direct TCP or a possible continuation, or
-    /// [`SocketLimits::none`] for UDP-only queries. DNS always
-    /// states the shape, so the same overrun is charged and classified the
-    /// same way whether or not fallback is enabled.
+    /// Always stated, so an overrun is charged the same way whether or not fallback is enabled.
     pub(super) tcp: SocketLimits,
-    /// Intentional delay between attempts at the requested rate.
     pub(super) delay: Duration,
 }
 
-/// Sum every question's worst-case UDP and TCP cost before any batch traffic.
 pub(super) fn batch_limits(
     mut operations: impl Iterator<Item = DnsOperation>,
 ) -> Result<DnsOperation, Error> {
@@ -155,10 +145,6 @@ fn worst_case_duration(request: &Request, delay: Duration) -> Result<Duration, E
         })
 }
 
-/// One attempt's authorized query: the selected server, the rotated source
-/// port, and the exact message bytes every transport carries.
-/// [`classify_response`](super::classify_response) judges captured frames
-/// against it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub attempt: u32,
@@ -172,9 +158,7 @@ pub struct Probe {
 }
 
 impl Probe {
-    /// Builds the portable IPv4/IPv6 UDP query this already-authorized attempt
-    /// transmits. Route-dependent fields remain unspecified for the client to
-    /// materialize.
+    /// Route-dependent fields remain unspecified for the client to materialize.
     #[must_use]
     pub fn packet(&self) -> Packet {
         let mut packet = Packet::new();
@@ -212,22 +196,17 @@ impl Probe {
     }
 }
 
-/// Rotates the query source port one step per retry, so a retried query is not
-/// a second chance for an off-path spoofer to guess the same tuple.
+/// A retried query must not give an off-path spoofer a second chance at the same tuple.
 pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
     crate::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
 
-/// Draws a DNS transaction ID from the system random source.
-/// Entropy failures are returned before a query can be sent. Callers needing
-/// reproducible experiments supply a fixed identity in `Request` instead.
+/// Callers needing reproducible experiments supply a fixed identity in `Request` instead.
 pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
     random_u16(getrandom::fill)
 }
 
-/// Draws an ephemeral source port from the system random source.
-/// Retries retain deterministic rotation from this random base; this is not
-/// a claim of independent entropy on each retry.
+/// Retries rotate deterministically from this random base, not with independent entropy.
 pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
     random_u16(getrandom::fill).map(|value| {
         crate::correlation::ephemeral_source_port(

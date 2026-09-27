@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The transmit contract: typed frames select the resolved layer, reports
-//! validate what the backend accepted, and the system provider refuses a
-//! layer whose backend this build doesn't include.
-
 mod common;
 
 use bytes::Bytes;
@@ -98,8 +94,6 @@ fn send_reports_validate_counts_bytes_and_provider_timing() {
     ));
 }
 
-/// Each test runs only in builds without that layer, such as
-/// `--no-default-features --features native-layer3` for Layer 2.
 #[cfg(not(all(native_layer2, native_layer3)))]
 mod missing_layer {
     use packetcraftr_core::error::{Classified, Kind};

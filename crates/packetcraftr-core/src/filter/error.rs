@@ -10,12 +10,8 @@ use crate::error::{Classification, Classified, Kind};
 #[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum Error {
-    /// A frame the filter was to judge could not be dissected; the refusal
-    /// is the decoder's own, so a budget stays a resource limit.
     #[error(transparent)]
     Decode(Arc<crate::decode::Error>),
-    /// The filter reads `tcp.stream` or `udp.stream`, but its caller judges
-    /// frames one at a time and assigns no conversation index.
     #[error(
         "display filter reads a conversation index, which frame-at-a-time selection does not assign"
     )]
@@ -65,7 +61,6 @@ pub enum Error {
         path: String,
         protocol: crate::layer::Id,
     },
-    /// A [`Projection`](super::Projection) column is not one field path.
     #[error("invalid projection field")]
     ProjectionField {
         #[source]

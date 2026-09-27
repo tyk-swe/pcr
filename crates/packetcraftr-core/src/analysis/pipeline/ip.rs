@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture-pipeline accounting around the standalone IP reassembler.
-
 use std::mem::size_of;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -16,9 +14,7 @@ use crate::analysis::reassembly::ip::{
 };
 use crate::decode::DecodedPacket;
 
-/// Counters for one IP family. Sub-counters describe admitted fragments and
-/// are intentionally independent: a completing fragment may also resolve an
-/// overlap.
+/// Sub-counters are intentionally independent: a completing fragment may also resolve an overlap.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct IpFamilyCounters {
     pub physical_fragments: u64,
@@ -51,7 +47,6 @@ impl IpCounters {
     }
 }
 
-/// Bounded terminal evidence for one completed or incomplete datagram.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum IpDatagramOutcome {
@@ -64,13 +59,9 @@ pub enum IpDatagramOutcome {
         duplicate_fragments: usize,
         overlap_bytes: usize,
     },
-    /// The engine's own retirement evidence, carried through unchanged.
     Incomplete(ip::IncompleteDatagram),
 }
 
-/// Progressive IP lifecycle evidence. The pipeline attributes each value to
-/// the physical frame whose arrival revealed it (or the final frame for EOF
-/// outcomes).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IpEvent {
     OverlapResolved {
@@ -80,18 +71,15 @@ pub enum IpEvent {
         fragment_count: usize,
         unique_bytes: usize,
     },
-    /// One datagram reached its terminal completed or incomplete outcome.
     Outcome(IpDatagramOutcome),
 }
 
-/// One event together with its physical capture attribution.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IpEventRecord {
     pub number: u64,
     pub event: IpEvent,
 }
 
-/// Terminal capture-global IP reassembly accounting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IpReassemblyReport {
     pub counters: IpCounters,
@@ -99,20 +87,12 @@ pub struct IpReassemblyReport {
     pub outcomes_omitted: u64,
 }
 
-/// How much of the aggregate IP memory budget one derived decode may spend,
-/// and how many layers that buys.
 pub(super) struct DerivedDecodeBudget {
     pub(super) charge: usize,
     pub(super) max_layers: usize,
-    /// Whether the layer ceiling came from the budget rather than from the
-    /// datagram's own structure, so a layer-limit refusal can be reported as
-    /// the resource failure it is.
     pub(super) budget_reduced: bool,
 }
 
-/// Owns the whole aggregate IP memory ledger: the reassembler's retained
-/// state and the derived-decode charges the pipeline holds while it feeds a
-/// completion cascade back in.
 pub(super) struct IpDispatch {
     reassembler: ip::Reassembler,
     clock: CaptureClock,
@@ -138,9 +118,7 @@ impl IpDispatch {
         })
     }
 
-    /// The monotonic instant this frame's capture timestamp maps to, plus the
-    /// rollback the timestamp showed when it regressed. Every physical frame
-    /// advances IP expiry, matched or not.
+    /// Every physical frame advances IP expiry, matched or not.
     pub(super) fn at(
         &mut self,
         timestamp: SystemTime,
@@ -153,11 +131,7 @@ impl IpDispatch {
         self.clock.report()
     }
 
-    /// Plans one derived decode against whatever the ledger already holds.
-    ///
-    /// Each committed layer consumes at least one input byte; only the final
-    /// stop layer may consume zero. Capping the decoder to the number of
-    /// layers reserved here makes the pre-allocation charge enforceable.
+    /// Capping the decoder to the layers reserved here makes the pre-allocation charge enforceable.
     pub(super) fn plan_derived_decode(
         &self,
         current: usize,
@@ -208,8 +182,6 @@ impl IpDispatch {
         })
     }
 
-    /// Adds one planned derived decode to the caller-held charge, refusing
-    /// the total the reassembler's retained state could not also afford.
     pub(super) fn charge_derived_memory(
         &self,
         current: usize,
@@ -312,10 +284,7 @@ impl IpDispatch {
         Ok((Some(datagram), events))
     }
 
-    /// Idle-expiry sweep. Besides the bounded events, it reports whether the
-    /// reassembler removed any datagram at all — including retirements whose
-    /// outcome records were bounded away into the omitted counters — so the
-    /// caller can skip provenance reconciliation when nothing left.
+    /// The flag reports whether any datagram was removed, even one omitted from the events.
     pub(super) fn expire(&mut self, now: Instant) -> (Vec<IpEvent>, bool) {
         let retired = self.reassembler.expire(now);
         let removed =
@@ -328,8 +297,6 @@ impl IpDispatch {
         self.drain(retired, IncompleteReason::EndOfCapture)
     }
 
-    /// Accounts one batch of retired datagrams: the outcomes the engine could
-    /// still name become events, the rest only move counters.
     fn drain(&mut self, retired: ip::RetiredDatagrams, reason: IncompleteReason) -> Vec<IpEvent> {
         for (count, family) in [
             (retired.omitted_ipv4, Family::Ipv4),

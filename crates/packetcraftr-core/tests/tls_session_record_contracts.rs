@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for malformed records, misplaced hellos, and alert accounting.
-
 mod common;
 
 use common::tls_capture::{Capture, Stream, assemble_default, complete_handshake};
@@ -14,8 +12,6 @@ use packetcraftr_core::analysis::tls::{
     ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, MAX_ALERTS, Status,
 };
 
-/// One record with an arbitrary content type and body, which the fixtures do
-/// not build: they only produce the types the parser admits.
 fn raw_record(content_type: u8, body: &[u8]) -> Vec<u8> {
     let mut out = vec![content_type];
     out.extend_from_slice(&TLS_1_2.to_be_bytes());
@@ -37,8 +33,7 @@ fn a_record_the_parser_rejects_is_malformed_and_says_what_it_read() {
         &mut stream,
         &handshake_record(&client_hello(&ClientHelloSpec::default())),
     );
-    // Content type 24 is outside the range TLS defines, so the record framer
-    // stops rather than guessing what follows it.
+    // Content type 24 is outside the range TLS defines.
     capture.client(&mut stream, &raw_record(24, &[0x00, 0x01]));
     let (sessions, summary) = assemble_default(&capture);
     assert_eq!(sessions.len(), 1);
@@ -56,7 +51,6 @@ fn a_record_the_parser_rejects_is_malformed_and_says_what_it_read() {
 
 #[test]
 fn a_hello_on_the_wrong_side_of_a_settled_conversation_is_malformed() {
-    // Both peers claim to be the client.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -75,7 +69,6 @@ fn a_hello_on_the_wrong_side_of_a_settled_conversation_is_malformed() {
         sessions[0].reason
     );
 
-    // The client's own direction answers itself.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -132,7 +125,6 @@ fn an_alert_record_too_short_to_read_is_ignored_rather_than_recorded() {
         &mut stream,
         &handshake_record(&client_hello(&ClientHelloSpec::default())),
     );
-    // One byte: a level with no description, which says nothing to report.
     capture.server(&mut stream, &raw_record(21, &[ALERT_LEVEL_FATAL]));
     capture.server(
         &mut stream,

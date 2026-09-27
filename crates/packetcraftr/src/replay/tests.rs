@@ -88,8 +88,6 @@ struct RecordingTransmitter {
     transmission_calls: usize,
     partial: bool,
     different_interface: bool,
-    /// Resolves every request to this complete identity, the way the system
-    /// transmitter resolves a name-only or index-only selector.
     resolves_to: Option<InterfaceId>,
 }
 
@@ -141,7 +139,6 @@ impl Executor for RecordingTransmitter {
     }
 }
 
-/// Selects every frame and routes it through [`test_interface`].
 struct AllFrames;
 
 impl Selector for AllFrames {
@@ -154,7 +151,6 @@ impl Selector for AllFrames {
     }
 }
 
-/// Selects every frame and routes it through one interface selector.
 struct Through(Interface);
 
 impl Selector for Through {
@@ -167,7 +163,6 @@ impl Selector for Through {
     }
 }
 
-/// Records the one-based frame numbers it is asked about.
 struct RecordingSelector {
     numbers: Vec<u64>,
     skip: Option<u64>,
@@ -247,7 +242,6 @@ fn replay_options(timing: Timing) -> Options {
     }
 }
 
-/// Replays `source` under `options` through the engine's seams.
 fn replay_source<R: std::io::Read, S: Selector, C: Clock>(
     source: Source<R>,
     options: &Options,
@@ -271,7 +265,6 @@ fn replay_source<R: std::io::Read, S: Selector, C: Clock>(
     )
 }
 
-/// Replays one seekable capture, rewound before every pass.
 fn replay_seekable<S: Selector, C: Clock>(
     reader: Reader<Cursor<Vec<u8>>>,
     options: &Options,
@@ -292,7 +285,6 @@ fn replay_seekable<S: Selector, C: Clock>(
     )
 }
 
-/// Replays one streaming capture.
 fn replay<S: Selector, C: Clock>(
     reader: Reader<Cursor<Vec<u8>>>,
     options: &Options,
@@ -760,9 +752,6 @@ fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
     assert_eq!(transmitter.transmission_calls, 0);
 }
 
-/// Both arms of the replay route-selection mapping retain the route adapter's
-/// own refusal as a source, so the platform diagnostic reaches `causes()`
-/// instead of being dropped when it stops being restated in `message`.
 #[test]
 fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     let destination = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
@@ -775,8 +764,6 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     assert_eq!(unreachable.classification().code, "io.send");
     assert_eq!(unreachable.causes(), ["no route to 203.0.113.9 was found"]);
 
-    // The refusal keeps reaching a consumer through the replay wrapper the
-    // engine publishes it in.
     let published = Error::Transmission {
         source_index: 0,
         source: unreachable,
@@ -789,7 +776,6 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
         ]
     );
 
-    // An operating-system refusal keeps its own nested diagnostic too.
     let refused = map_route_error(RouteError::OperatingSystem {
         operation: "RTM_GETROUTE",
         message: "the operating system refused the request".to_owned(),
@@ -805,8 +791,6 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
         ]
     );
 
-    // The capability arm keeps naming the replay boundary and publishes the
-    // adapter's text once, in `causes`.
     let unsupported = map_route_error(RouteError::Unsupported(
         packetcraftr_netio::Unsupported::new(
             packetcraftr_netio::NativeCapability::Route,
@@ -890,7 +874,6 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
     );
 }
 
-/// Routes the frame at source index `i` through `test{i + 1}`.
 struct MappedInterfaces;
 impl Selector for MappedInterfaces {
     fn select(&mut self, _: u64, _: &Frame) -> Result<bool, Error> {
@@ -998,9 +981,6 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
 
 #[test]
 fn generated_capture_replays_verbatim_through_fake_providers() {
-    // `build --output pcap --link-type raw` emits exactly this: packets built
-    // by the codec builder framed under an explicit link type with
-    // deterministic timestamps.
     let registry = packetcraftr_core::protocol::builtin::registry();
     let builder = packetcraftr_core::build::Builder::new(std::sync::Arc::clone(&registry));
     let mut bytes = Vec::new();
@@ -1056,9 +1036,6 @@ fn generated_capture_replays_verbatim_through_fake_providers() {
     assert_eq!(authorizer.final_wire_calls, 2);
 }
 
-/// `Client::replay` over fake providers: the client's policy admits each
-/// frame, its interface and transmit providers carry it, and its sink
-/// receives the evidence.
 mod client {
     use std::sync::{Arc, Mutex};
 
@@ -1093,8 +1070,6 @@ mod client {
         FakeProviders,
     >;
 
-    /// Two up Ethernet interfaces that own 192.0.2.1, enumerated into the
-    /// same call log as the other fake providers.
     #[derive(Clone)]
     struct Interfaces(Arc<Mutex<Vec<Call>>>);
 
@@ -1127,7 +1102,6 @@ mod client {
         }
     }
 
-    /// The other interface [`Interfaces`] enumerates.
     fn second_interface() -> InterfaceId {
         InterfaceId {
             name: "test1".to_owned(),
@@ -1135,8 +1109,6 @@ mod client {
         }
     }
 
-    /// A client whose policy permits the permissive rebuild every replayed
-    /// frame needs, over fake providers sharing one call log.
     fn client(policy: Policy) -> (Client<Providers>, FakeProviders) {
         let fake = FakeProviders::default();
         let providers = ProviderSet {
@@ -1162,8 +1134,6 @@ mod client {
         }
     }
 
-    /// An ICMP echo from the interface's own addresses to a documentation
-    /// neighbor, identified by `ttl`.
     fn owned_frame(ttl: u8) -> Vec<u8> {
         let mut packet = Packet::new();
         packet
@@ -1208,7 +1178,6 @@ mod client {
         )
     }
 
-    /// Routing by filter rules, each `(filter, interface)`.
     fn filter_routing(rules: &[(&str, Interface)]) -> Routing {
         let registry = packetcraftr_core::protocol::builtin::registry();
         let rules = rules
@@ -1259,7 +1228,6 @@ mod client {
                 .collect::<Vec<_>>(),
             [test_interface(), second_interface()]
         );
-        // Each name or index selector resolves through the interface provider.
         assert_eq!(
             fake.calls(),
             [
@@ -1314,7 +1282,6 @@ mod client {
                 .collect::<Vec<_>>(),
             frames
         );
-        // The validated interface is enumerated once and reused.
         assert_eq!(
             fake.calls(),
             [

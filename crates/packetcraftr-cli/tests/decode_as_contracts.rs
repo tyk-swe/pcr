@@ -88,7 +88,6 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
         );
     }
     assert_eq!(records[2]["result"]["frames_matched"], 2);
-    // Every analysis command accepts the same registry configuration.
     for command in ["stats", "expert", "tls", "follow"] {
         let mut arguments = vec![
             "--output",

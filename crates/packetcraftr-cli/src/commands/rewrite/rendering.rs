@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `rewrite`'s text output.
-
 use crate::errors::CliError;
 use crate::output;
 use crate::rendering::write_summary_line;

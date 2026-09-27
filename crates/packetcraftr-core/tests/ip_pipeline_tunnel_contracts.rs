@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for fragments inside tunnels: derived inner transports and
-//! nested and cascading completions.
-
 mod common;
 
 use common::ip_fragments::{UDP_DATA, build, cascading_vxlan_tcp_frames, reader_with_link_type};

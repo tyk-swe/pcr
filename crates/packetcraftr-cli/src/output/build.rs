@@ -10,9 +10,6 @@ use super::frame::{Layout, Wire};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
-    /// Publishes the `bytes_hex` and `length` keys the contract declares,
-    /// formatting the hexadecimal at serialization rather than retaining a
-    /// second copy of the packet.
     #[serde(flatten)]
     pub frame: Wire,
     pub packet: packetcraftr_core::document::Packet,
@@ -20,7 +17,6 @@ pub struct Report {
     pub requires_live_opt_in: bool,
 }
 
-/// A built packet, with the builder's diagnostics for the envelope.
 impl From<BuiltPacket> for Published<Report> {
     fn from(built: BuiltPacket) -> Self {
         let requires_live_opt_in = packetcraftr::policy::requires_live_opt_in(&built);
@@ -43,7 +39,6 @@ impl From<BuiltPacket> for Published<Report> {
     }
 }
 
-/// One built packet in deterministic, zero-based Cartesian order.
 #[derive(Clone, Debug, Serialize)]
 pub struct PacketEvent {
     pub packet_index: u64,
@@ -51,7 +46,6 @@ pub struct PacketEvent {
     pub packet: Report,
 }
 
-/// The packet at a zero-based index in the expansion.
 impl From<(u64, BuiltPacket)> for Published<PacketEvent> {
     fn from((packet_index, built): (u64, BuiltPacket)) -> Self {
         let Published {
@@ -76,7 +70,6 @@ impl super::stream::StreamRecord for PacketEvent {
     }
 }
 
-/// Totals published only after every packet has been built and emitted.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct Complete {
     pub packets_built: u64,

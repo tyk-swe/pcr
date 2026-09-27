@@ -33,16 +33,12 @@ pub enum Error {
         evidence_truncated: bool,
         capture_statistics: Stats,
     },
-    /// `source` is the core refusal when encoding or building the request
-    /// frame is what failed.
     #[error("neighbor request is invalid: {message}")]
     InvalidRequest {
         message: String,
         #[source]
         source: Option<Source>,
     },
-    /// `source` is the capture-limit refusal when the options' capture
-    /// bounds are what failed.
     #[error("neighbor resolver options are invalid: {message}")]
     InvalidOptions {
         message: String,
@@ -114,8 +110,6 @@ impl Classified for Error {
         }
     }
 
-    /// Walks the retained `#[source]` chain, except for the dual failure, which
-    /// carries two unrelated errors at once and so has no single chain to walk.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::OperationAndCleanup {
@@ -161,8 +155,6 @@ pub(super) fn invalid_request(message: impl Into<String>) -> Error {
     }
 }
 
-/// A request frame that core refused to encode or build, keeping the refusal
-/// as the source.
 pub(super) fn unbuildable_request(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,

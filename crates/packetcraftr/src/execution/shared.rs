@@ -3,13 +3,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// State a collecting sink shares with its caller. The workflow's worker
-/// publishes into one clone while the caller keeps another and takes the
-/// state once the run returns.
 pub(crate) struct Shared<T>(Arc<Mutex<T>>);
 
 impl<T> Shared<T> {
-    /// Runs `update` on the state.
     pub(crate) fn update<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
         update(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }

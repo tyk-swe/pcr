@@ -1,18 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `--max-duration-ms` and `--timeout-ms`, defined once for every command.
-//!
-//! Every command bounds both by the same one-hour ceiling
-//! ([`MAX_MILLISECONDS`]). Out-of-range values fail where the owning command
-//! has always rejected them, with that command's error code. Workflows
-//! (`scan`, `traceroute`, `dns`, `fuzz`, `replay`, `exchange`, `capture`)
-//! validate their own limits. Offline analysis checks the ceiling through
-//! [`MaxDurationArgs::within_ceiling`], and `rewrite` limits the range while
-//! arguments are parsed ([`RunTime::PARSED`]). What each argument bounds, and
-//! a window's default, differ per command: a small marker type supplies them,
-//! as [`Budget`](super::Budget) does for traffic budgets.
-
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
@@ -23,17 +11,13 @@ use clap::Args;
 use crate::errors::CliError;
 use crate::resources::{Settings, declare};
 
-/// The longest run time or response window any command accepts: one hour.
 pub(crate) const MAX_MILLISECONDS: u64 = 3_600_000;
 
-/// What a command's `--max-duration-ms` bounds.
 pub(crate) trait RunTime:
     Clone + Copy + fmt::Debug + Default + Send + Sync + 'static
 {
     const HELP: &'static str;
-    /// Values clap accepts. Only a command that has always rejected its
-    /// range at parse time narrows this. The others leave the check to the
-    /// code that publishes their own limit error.
+    /// Only a command that has always rejected its range at parse time narrows this.
     const PARSED: RangeInclusive<u64> = 0..=u64::MAX;
 }
 
@@ -51,10 +35,7 @@ pub(crate) struct MaxDurationArgs<R: RunTime> {
     run_time: PhantomData<R>,
 }
 
-/// An argument group that bounds a command's run time; the command publishes
-/// its output under that deadline.
 pub(crate) trait Bounded {
-    /// The `--max-duration-ms` deadline.
     fn max_duration(&self) -> Duration;
 }
 
@@ -69,12 +50,6 @@ impl<R: RunTime> MaxDurationArgs<R> {
         Duration::from_millis(self.max_duration_ms)
     }
 
-    /// Checks the one-hour ceiling for a command that owns its limit
-    /// validation, rejecting a longer deadline with the owner's error.
-    ///
-    /// # Errors
-    ///
-    /// `reject(milliseconds)` when the deadline exceeds [`MAX_MILLISECONDS`].
     pub(crate) fn within_ceiling(
         &self,
         reject: impl FnOnce(u64) -> CliError,
@@ -90,8 +65,6 @@ impl<R: RunTime> MaxDurationArgs<R> {
     }
 }
 
-/// Worst-case response windows plus intentional rate delay: scan,
-/// traceroute, and fuzz.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Probing;
 
@@ -100,14 +73,11 @@ impl RunTime for Probing {
         "Maximum worst-case timeout plus intentional rate delay in milliseconds";
 }
 
-/// What a command's `--timeout-ms` waits for, and its default.
 pub(crate) trait Window:
     Clone + Copy + fmt::Debug + Default + Send + Sync + 'static
 {
-    /// The default in decimal milliseconds. It is text because clap's
-    /// `default_value_t` keeps the rendered default in one static that every
-    /// instantiation of a generic group shares, so the first command built
-    /// would lend its default to all of them.
+    /// Text because clap's `default_value_t` keeps the rendered default in one
+    /// static that every instantiation of a generic group shares.
     const DEFAULT_MILLISECONDS: &'static str;
     const HELP: &'static str;
 }
@@ -137,7 +107,6 @@ impl<W: Window> TimeoutArgs<W> {
     }
 }
 
-/// A one-second window per capture-ready probe, attempt, or case.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ProbeWindow;
 
@@ -174,8 +143,6 @@ mod tests {
         timeout: TimeoutArgs<LongWindow>,
     }
 
-    /// Each window keeps its own default even after another window's group
-    /// was built in the same process.
     #[test]
     fn every_window_keeps_its_own_default() {
         let long = LongFixture::try_parse_from(["fixture"]).unwrap();
@@ -188,8 +155,6 @@ mod tests {
         Fixture::try_parse_from(std::iter::once("fixture").chain(arguments.iter().copied()))
     }
 
-    /// The one ceiling is the one every workflow and capture window enforces,
-    /// so parsing never admits a value a workflow would reject as too long.
     #[test]
     fn the_ceiling_is_the_workflow_ceiling() {
         let ceiling = Duration::from_millis(MAX_MILLISECONDS);

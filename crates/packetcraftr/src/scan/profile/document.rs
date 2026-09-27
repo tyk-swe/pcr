@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Compiles the assignments of a `packetcraftr.udp-profiles/v1` document,
-//! read by core, into the per-port profiles a scan request takes.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -11,13 +8,6 @@ use packetcraftr_core::document::udp_profiles::{Assignment, MAX_PROFILE_BYTES, M
 
 use super::{Error, UdpProfile};
 
-/// Compiles a document's assignments, in order, into per-port profiles.
-///
-/// Each assignment names 1..=[`MAX_PROFILE_PORTS`] ports, and the document
-/// maps at most [`MAX_PROFILE_PORTS`] ports in all. Identical profiles are
-/// compiled and charged once and shared between their ports, whose compiled
-/// storage stays within [`MAX_PROFILE_BYTES`]. A port may repeat only with an
-/// identical profile.
 pub fn compile(assignments: Vec<Assignment>) -> Result<BTreeMap<u16, Arc<UdpProfile>>, Error> {
     let mut profiles: BTreeMap<u16, Arc<UdpProfile>> = BTreeMap::new();
     let mut unique: Vec<Arc<UdpProfile>> = Vec::new();

@@ -17,8 +17,6 @@ use crate::capture_file::wire::{
 pub(in crate::capture_file) struct ParsedPacket<'a> {
     pub(in crate::capture_file) frame: Frame,
     pub(in crate::capture_file) interface_id: u32,
-    /// Option bytes following the packet data. A simple packet block has no
-    /// options at all, so this is empty for one.
     pub(in crate::capture_file) options: &'a [u8],
 }
 
@@ -261,10 +259,7 @@ pub(in crate::capture_file) fn parse_packet_direction(
     Ok(direction)
 }
 
-/// Rejects `epb_flags` options a packet rewrite cannot retain: only a defined
-/// inbound/outbound direction is carried onto the frame, so other flag bits and
-/// the undefined direction value 3 are refused. A value that is not four bytes
-/// is reported with `malformed_reason`.
+/// Only a defined inbound/outbound `epb_flags` direction survives a rewrite; the rest is refused.
 pub(in crate::capture_file) fn validate_rewritable_packet_flags(
     options: &[PcapNgOption],
     endianness: Endianness,

@@ -70,8 +70,7 @@ pub(crate) fn validate_raw_child_discriminator(
         .child
         .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
     // A malformed binding also represents a known terminal discriminator
-    // (IPv6 No Next Header). It is valid with no protocol payload, while any
-    // actual bytes must be represented by Malformed rather than Raw.
+    // (IPv6 No Next Header).
     if BuiltinProtocol::from_id(bound) == Some(BuiltinProtocol::Malformed) && absent_payload {
         return Ok(());
     }
@@ -99,12 +98,6 @@ pub(crate) fn validate_raw_child_discriminator(
     Ok(())
 }
 
-/// The dual of [`validate_raw_child_discriminator`]: a typed child must be
-/// selected by its discriminator on dissection. When the discriminator is
-/// unregistered — or registered only to the raw fallback — the emitted bytes
-/// would dissect back as opaque raw bytes, not as the declared layer.
-/// Registered typed selections are left to `validate_raw_child_discriminator`,
-/// which already rejects a mismatch there.
 pub(crate) fn validate_typed_child_discriminator(
     parent: &'static str,
     discriminator: u64,
@@ -177,8 +170,6 @@ pub(crate) fn strict_or_diagnostic(
     Ok(())
 }
 
-/// Like [`strict_or_diagnostic`] for a typed failure: strict mode keeps it as
-/// the codec error's source, and permissive mode publishes its rendered chain.
 pub(crate) fn strict_or_diagnostic_error(
     name: &'static str,
     code: &'static str,
@@ -194,8 +185,6 @@ pub(crate) fn strict_or_diagnostic_error(
     Ok(())
 }
 
-/// Copies option bytes and zero-pads the copy to a four-byte boundary,
-/// emitting the caller's padded-options diagnostic when padding is added.
 pub(crate) fn pad_options_to_four_bytes(
     options: &[u8],
     code: &'static str,

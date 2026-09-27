@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded comparison by declared identity. [`verify`] pairs only 1:1 groups;
-//! one-sided groups are unmatched and non-1:1 groups remain ambiguous. Neither
-//! position nor timestamps disambiguate members. Reordering compares uniquely
-//! matched pairs' ingress/egress ranks; timestamps are evidence only.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::limits::{DetailBudget, DetailCharge, ScratchBudget};
@@ -18,20 +13,12 @@ use super::{Error, ExpectationOutcome, Limits, Observation, Rules, Side, ValueSt
 use crate::budget::{Cancellation, Deadline};
 use crate::field::FieldValue;
 
-/// One capture's contribution to the comparison: the collected observations
-/// plus the physical frame count the run read.
 #[derive(Clone, Debug, Default)]
 pub struct SideInput {
-    /// Physical frames read from this capture, including frames the selection
-    /// excluded.
     pub frames_read: u64,
-    /// Selected observations in capture order.
     pub observations: Vec<Observation>,
 }
 
-/// Compares observations under `rules`. Counters cover all evidence;
-/// `max_details` bounds each report list, with exclusions counted in
-/// [`Report::omitted`].
 pub fn verify(
     rules: &Rules,
     ingress: SideInput,
@@ -52,8 +39,6 @@ pub fn verify(
     )
 }
 
-/// Comparison with independent scratch/detail budgets and an optional
-/// invocation-wide deadline. A detail omission never changes the verdict.
 /// Observations must originate from this exact compiled Rules instance.
 pub fn verify_with_limits(
     rules: &Rules,
@@ -78,8 +63,6 @@ pub fn verify_with_limits(
     let max_details = limits.max_details;
     let mut detail_budget = DetailBudget::new(limits.max_detail_bytes);
     let mut scratch_budget = ScratchBudget::new(limits.max_scratch_bytes);
-    // Rank, order, permutation, and key-set bookkeeping. Charges are
-    // independent of the observation collection budget, not an RSS ceiling.
     scratch_budget.reserve(
         ingress
             .observations
@@ -240,8 +223,6 @@ pub fn verify_with_limits(
                             Ok(kept)
                         };
                     ambiguous.push(AmbiguousGroup {
-                        // Clone known cells rather than parsing serialized keys;
-                        // decoder-defined nested values need no JSON depth round-trip.
                         key: ingress[ingress_members[0]].key().expect("indexed identity"),
                         ingress: members(ingress_members, &ingress)?,
                         egress: members(egress_members, &egress)?,
@@ -285,7 +266,6 @@ pub fn verify_with_limits(
         }
     }
 
-    // Matches publish in ingress order, independent of the detail ceiling.
     matches.sort_by_key(|pair| pair.ingress_order);
 
     let mut unkeyed = Sided::<Vec<UnkeyedObservation>>::default();
@@ -346,7 +326,6 @@ fn census(
     Ok(summary)
 }
 
-/// Canonical identity bytes → observation indices, in capture order.
 fn index(
     observations: &[Observation],
     budget: &mut ScratchBudget,
@@ -364,7 +343,6 @@ fn index(
     Ok(index)
 }
 
-/// Order ranks among keyed observations, aligned with `observations`.
 fn ranks(
     observations: &[Observation],
     check: impl Fn() -> Result<(), Error>,
@@ -385,7 +363,6 @@ fn ranks(
         .collect()
 }
 
-/// Whether every member carries identical projected non-identity evidence.
 fn indistinguishable(
     members: &[usize],
     pool: &[Observation],
@@ -414,8 +391,6 @@ struct ViolationSink<'a> {
 }
 
 impl ViolationSink<'_> {
-    /// Counts an outcome and, on violation, retains its evidence within the
-    /// bound.
     fn record(
         &mut self,
         outcome: Outcome,
@@ -529,7 +504,6 @@ fn evaluate_pair(
     }
 }
 
-/// One egress observation's expectation outcomes, outside a unique pairing.
 fn record_egress_expectations(
     rules: &Rules,
     egress: &Observation,
@@ -597,7 +571,6 @@ fn evaluate_expectation(
     (outcome, stored.actual.clone())
 }
 
-/// Retains `item` while `list` is under `max`, counting the drop otherwise.
 fn push_bounded<T: DetailCharge>(
     list: &mut Vec<T>,
     omitted: &mut u64,

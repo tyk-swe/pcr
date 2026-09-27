@@ -38,8 +38,6 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         .remediation
         .expect("TCP resource failures have remediation");
     assert!(tcp_remediation.contains("trim or pre-filter the capture"));
-    // A TCP budget failure must point at the TCP budgets, not tell the
-    // operator to inspect the flow instead of raising them.
     assert!(tcp_remediation.contains("--max-tcp-*"));
     let bounded_ip = Error::IpReassembly {
         number: 3,
@@ -54,8 +52,6 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         .expect("IP resource failures have remediation");
     assert!(remediation.contains("trim or pre-filter the capture"));
     assert!(remediation.contains("--max-ip-*"));
-    // An engine invariant that broke is neither the operator's capture nor
-    // their budget, so it must not be reported as either.
     let inconsistent = Error::IpReassembly {
         number: 4,
         source: packetcraftr_core::analysis::reassembly::ip::Error::Inconsistent {

@@ -50,8 +50,6 @@ impl super::Spec for Args {
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
     let aggregation = analysis::stats::Table::from(arguments.table);
-    // Stats assigns conversation indices, so stream-aware filters like
-    // `tcp.stream == 7` are supported here.
     let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
@@ -85,9 +83,6 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     }
 }
 
-/// Applies `--top` to the one table this run reports, so text and JSON render
-/// the same rows and the same omission diagnostic. The fragments table is
-/// bounded by `--max-ip-outcomes` instead.
 fn cap_table(
     report: &mut analysis::stats::Report,
     table: Table,

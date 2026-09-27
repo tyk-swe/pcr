@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure bounded parsers for Darwin socket-address records, shared by the
-//! macOS route and interface backends.
-
 use std::{
     mem::{offset_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -32,11 +29,8 @@ pub(in crate::platform) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     }
 }
 
-/// Decodes an interface netmask sockaddr for an address of the interface's
-/// family. XNU trims trailing zero bytes from netmask sockaddrs and records
-/// the shortened length (255.255.255.0 arrives with length 7), so the mask
-/// is zero-extended to the family's address width instead of requiring a
-/// complete sockaddr, and the mask's own family byte is not relied on.
+/// XNU trims trailing zero bytes from netmask sockaddrs and records
+/// the shortened length (255.255.255.0 arrives with length 7).
 pub(in crate::platform) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
     let (offset, width) = match interface_address {
         IpAddr::V4(_) => (offset_of!(libc::sockaddr_in, sin_addr), 4),

@@ -1,16 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Performance-oriented contracts for filter evaluation and projection.
-//!
-//! Short-circuit evaluation is observable only through which reflective
-//! fields a packet is asked for, so a field-read-counting layer proves that a
-//! decisive `&&`/`||` operand skips the other side. A per-leaf oracle —
-//! each predicate compiled alone and combined by the documented boolean
-//! structure — replaces the eager interpreter as the reference for
-//! differential testing. Projection tests pin the cell-byte budget at its
-//! exact boundary and the values that flow through it.
-
 mod common;
 
 use common::decoded::{context, ipv6_tcp, tunnelled};
@@ -33,9 +23,6 @@ use packetcraftr_core::protocol::application::dns::{Dns, Question, Record, Recor
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 
-/// A packet assembled from layers directly, without a wire round trip: the
-/// filter evaluator only reads `packet` and `frame`, so instrumented layers
-/// can stand in for decoded ones.
 fn layered(layers: Vec<Box<dyn Layer>>) -> DecodedPacket {
     let mut packet = Packet::new();
     for layer in layers {
@@ -55,8 +42,6 @@ fn layered(layers: Vec<Box<dyn Layer>>) -> DecodedPacket {
     }
 }
 
-/// A DNS layer carrying nested values: a list of question objects and answer
-/// objects whose `value` member is itself an object with a text list.
 fn dns_layered() -> DecodedPacket {
     let questions = vec![
         Question {
@@ -97,19 +82,15 @@ fn dns_layered() -> DecodedPacket {
     layered(vec![Box::new(dns)])
 }
 
-/// Compiles `source`, which must be a valid filter for the fixture registry.
 fn compiled(source: &str) -> Filter {
     Filter::compile(source, &registry(), Limits::default())
         .unwrap_or_else(|error| panic!("{source} must compile: {error}"))
 }
 
-/// The answer `source` gives against `decoded` as a standalone filter.
 fn leaf_value(source: &str, context: &Context<'_>) -> Result<bool, Error> {
     compiled(source).matches(context)
 }
 
-/// A layer that records every reflective field read, so a test can prove
-/// which predicates evaluation actually ran.
 #[derive(Debug)]
 struct CountedLayer {
     inner: Box<dyn Layer>,
@@ -148,8 +129,6 @@ impl Layer for CountedLayer {
     }
 }
 
-/// Runs `filter` against a packet whose TCP layer counts field reads,
-/// returning the verdict and the ordered list of field names read.
 fn counted_match(source: &str, tcp: Tcp, extra_layers: Vec<Box<dyn Layer>>) -> (bool, Vec<String>) {
     let reads = Arc::new(Mutex::new(Vec::new()));
     let mut layers: Vec<Box<dyn Layer>> = vec![Box::new(CountedLayer::wrapped(tcp, &reads))];
@@ -171,8 +150,6 @@ fn tcp_fixture() -> Tcp {
 
 #[test]
 fn decisive_left_operands_skip_right_side_field_reads() {
-    // A false `&&` left operand: the comparison on the right never asks the
-    // layer for its field.
     let (matched, reads) = counted_match(
         "tcp.srcport == 9 && tcp.window_size == 1024",
         tcp_fixture(),
@@ -181,7 +158,6 @@ fn decisive_left_operands_skip_right_side_field_reads() {
     assert!(!matched);
     assert_eq!(reads, ["source_port"]);
 
-    // A true `||` left operand skips the same way.
     let (matched, reads) = counted_match(
         "tcp.srcport == 1234 || tcp.window_size == 1",
         tcp_fixture(),
@@ -190,7 +166,6 @@ fn decisive_left_operands_skip_right_side_field_reads() {
     assert!(matched);
     assert_eq!(reads, ["source_port"]);
 
-    // A skipped right operand is skipped as a whole subtree.
     let (matched, reads) = counted_match(
         "tcp.srcport == 9 && (tcp.window_size == 1024 || tcp.urgent_pointer == 0)",
         tcp_fixture(),
@@ -207,8 +182,6 @@ fn decisive_left_operands_skip_right_side_field_reads() {
     assert!(matched);
     assert_eq!(reads, ["source_port"]);
 
-    // `!` preserves the skip direction: a false operand inverted is true, so
-    // the right side must run; a true operand inverted short-circuits out.
     let (matched, reads) = counted_match(
         "!tcp.srcport == 9 && tcp.window_size == 1024",
         tcp_fixture(),
@@ -244,15 +217,11 @@ fn undecided_left_operands_still_read_the_right_side() {
     assert!(matched);
     assert_eq!(reads, ["source_port", "window"]);
 
-    // A layer-presence left operand reads no fields at all; it is decided by
-    // protocol id before any `field` call.
     let (matched, reads) =
         counted_match("tcp && tcp.window_size == 1024", tcp_fixture(), Vec::new());
     assert!(matched);
     assert_eq!(reads, ["window"]);
 
-    // A guard on a different layer entirely still gates the counted layer's
-    // fields.
     let reads = Arc::new(Mutex::new(Vec::new()));
     let packet = layered(vec![Box::new(CountedLayer::wrapped(
         Raw::new(b"needle in a haystack".to_vec()),
@@ -278,9 +247,6 @@ fn missing_timestamp_fails_the_whole_filter_before_any_short_circuit() {
     let mut undated = tunnelled();
     undated.frame.timestamp = None;
     for source in [
-        // The timestamp leaf sits behind a decisively false `&&` and a
-        // decisively true `||`; the filter-level requirement is diagnosed
-        // either way.
         "frame.number == 999 && frame.time_epoch == 0",
         "udp.dstport == 9999 || frame.time_epoch == 0",
         "frame.time_epoch == 123",
@@ -294,7 +260,6 @@ fn missing_timestamp_fails_the_whole_filter_before_any_short_circuit() {
             "{source} must report the missing timestamp"
         );
     }
-    // The same filters evaluate normally once the frame carries a timestamp.
     for (source, expected) in [
         ("frame.number == 999 && frame.time_epoch == 0", false),
         ("udp.dstport == 9999 || frame.time_epoch == 0", true),
@@ -327,9 +292,6 @@ fn unreachable_branches_are_still_validated_at_compile_time() {
     }
 }
 
-/// Leaf predicates spanning every value source: layer presence, direct and
-/// either-endpoint fields, flags, comparisons in both directions, membership,
-/// `contains`, byte slices, occurrences, nested paths, and frame/stream facts.
 const LEAVES: &[&str] = &[
     "ipv4",
     "ipv6",
@@ -353,7 +315,6 @@ const LEAVES: &[&str] = &[
     "tcp.stream == 2",
 ];
 
-/// Asserts `source` agrees with `expected` on every fixture packet.
 fn assert_on_all(source: &str, expected: bool, contexts: &[(&str, Context<'_>)]) {
     let filter = compiled(source);
     for (name, context) in contexts {
@@ -376,9 +337,6 @@ fn two_leaf_combinations_match_per_leaf_semantics() {
         ("dns", context(&dns)),
     ];
 
-    // Each leaf's standalone answer on this packet is the oracle; the combined
-    // filter must produce the same boolean whether or not evaluation can stop
-    // early.
     for (name, context) in &contexts {
         let values: Vec<bool> = LEAVES
             .iter()
@@ -416,7 +374,6 @@ fn two_leaf_combinations_match_per_leaf_semantics() {
 fn three_leaf_combinations_match_per_leaf_semantics() {
     let tunnelled = tunnelled();
     let context = context(&tunnelled);
-    // A bounded leaf subset keeps the triple enumeration useful and finite.
     let subset = &LEAVES[..10];
     let values: Vec<bool> = subset
         .iter()
@@ -450,7 +407,6 @@ fn three_leaf_combinations_match_per_leaf_semantics() {
     }
 }
 
-/// A deterministic xorshift, so generated filters are reproducible.
 struct Rng(u64);
 
 impl Rng {
@@ -468,8 +424,6 @@ impl Rng {
     }
 }
 
-/// Generates a fully parenthesized expression and its expected value, so the
-/// generated structure is exactly the parsed structure.
 fn generated(rng: &mut Rng, leaves: &[(&str, bool)], depth: usize) -> (String, bool) {
     let leafish = depth == 0 || rng.below(3) == 0;
     if leafish {
@@ -527,7 +481,6 @@ fn seeded_deep_expressions_match_per_leaf_semantics() {
 
 #[test]
 fn parser_limits_long_chains_and_nested_not_hold() {
-    // Term and nesting ceilings accept exactly at the limit and reject above.
     let at_terms = vec!["ipv4"; MAX_FILTER_TERMS].join(" && ");
     assert!(Filter::compile(&at_terms, &registry(), Limits::default()).is_ok());
     let over_terms = vec!["ipv4"; MAX_FILTER_TERMS + 1].join(" && ");
@@ -543,7 +496,6 @@ fn parser_limits_long_chains_and_nested_not_hold() {
         Err(Error::NestingLimit { .. })
     ));
 
-    // Nested `!` chains: even count preserves the operand, odd inverts it.
     let tunnelled = tunnelled();
     for (count, expected) in [
         (1usize, false),
@@ -560,7 +512,6 @@ fn parser_limits_long_chains_and_nested_not_hold() {
         );
     }
 
-    // A long chain of the same operator stays left-associative and correct.
     let ors = vec!["ipv6"; 500].join(" || ");
     assert_eq!(
         compiled(&ors).matches(&context(&tunnelled)).ok(),
@@ -608,8 +559,6 @@ fn repeated_layers_occurrences_inequality_and_derived_packets_hold() {
         &[("tunnelled", context(&tunnelled))],
     );
 
-    // A derived datagram exposes only the layers its completion added: the
-    // reconstructed base header repeats the physical one and stays hidden.
     let inner = layered(vec![
         Box::new(Ipv4 {
             source: "192.0.2.1".parse().expect("replayed source"),
@@ -667,7 +616,6 @@ fn repeated_layers_occurrences_inequality_and_derived_packets_hold() {
 fn missing_fields_and_flag_semantics_are_unchanged() {
     let ipv6_tcp = ipv6_tcp();
     let cases: &[(&str, bool)] = &[
-        // Bare paths still ask presence; flags still read the bit.
         ("tcp.flags.fin", false),
         ("!tcp.flags.fin", true),
         ("tcp.flags.syn && !tcp.flags.fin", true),
@@ -677,7 +625,6 @@ fn missing_fields_and_flag_semantics_are_unchanged() {
         // `!=` against an absent field has no value to satisfy it.
         ("udp.dstport != 9999", false),
         ("!(udp.dstport)", true),
-        // Slices keep byte semantics.
         ("ethernet.destination[0:3] == 00:00:00", true),
         ("ethernet.destination[1] == 0", true),
     ];
@@ -696,8 +643,6 @@ fn projection_preserves_values_ordering_and_missing_columns() {
     let dns = dns_layered();
     let ipv6_tcp = ipv6_tcp();
 
-    // Repeated occurrences form an ordered list; a single value stays scalar;
-    // a missing column is `None`; an empty container stays present-but-empty.
     let projection = Projection::compile(
         [
             "ipv4.source",
@@ -725,7 +670,6 @@ fn projection_preserves_values_ordering_and_missing_columns() {
                 FieldValue::Unsigned(9_999),
             ])),
             None,
-            // Both ethernet layers contribute, in packet order.
             Some(FieldValue::List(vec![
                 FieldValue::Bytes(Bytes::from_static(&[0x06, 0x07])),
                 FieldValue::Bytes(Bytes::from_static(&[0xaa, 0xbb])),
@@ -733,7 +677,6 @@ fn projection_preserves_values_ordering_and_missing_columns() {
         ]
     );
 
-    // Nested paths select inside reflected containers without extra copies.
     let nested = Projection::compile(
         [
             "dns.questions[0].name",
@@ -757,7 +700,6 @@ fn projection_preserves_values_ordering_and_missing_columns() {
     assert!(matches!(&row[3], Some(FieldValue::List(values)) if values.len() == 2));
     assert_eq!(row[4], Some(FieldValue::Text("a".to_owned())));
 
-    // Missing columns interleave with present ones without disturbing order.
     let mixed = Projection::compile(["udp.dstport", "tcp.dstport", "frame.number"], &registry())
         .expect("mixed projection compiles");
     let row = mixed
@@ -815,8 +757,6 @@ fn retained_projection_cells_release_large_source_allocations() {
 #[test]
 fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     let tunnelled = tunnelled();
-    // `frame.number` = 7 renders as `7`: one byte. `ip.src` renders as two
-    // quoted addresses joined into a list cell.
     let single = Projection::compile(["frame.number"], &registry()).expect("compiles");
     let tunnelled_context = context(&tunnelled);
     assert!(single.values(&tunnelled_context, 1).is_ok());
@@ -871,8 +811,6 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
 
 #[test]
 fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
-    // frame.number can carry u64::MAX; frame.time_epoch on a pre-epoch frame
-    // is a signed value; addresses render in canonical text form.
     let mut extreme = tunnelled();
     extreme.frame.timestamp = Some(UNIX_EPOCH - Duration::from_secs(1));
     let columns = [
@@ -900,7 +838,6 @@ fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
             FieldValue::Ipv4("10.0.0.1".parse().unwrap()),
         ]))
     );
-    // No IPv6 layer on the tunnelled packet: a present-but-missing column.
     assert_eq!(row[3], None);
     assert_eq!(
         row[4],
@@ -911,8 +848,6 @@ fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
     );
     assert_eq!(row[5], Some(FieldValue::Bytes(Bytes::from_static(b"G"))));
 
-    // IPv6 addresses — including `::` elision — measure by the same display
-    // form the cell writer emits.
     let v6 = ipv6_tcp();
     let v6_projection = Projection::compile(["ipv6.source", "ipv6.destination"], &registry())
         .expect("ipv6 projection compiles");
@@ -934,8 +869,6 @@ fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
     ));
 }
 
-/// Number of timed iterations per fixture: enough to drown out timer noise
-/// without making the release-mode measurement slow.
 const MEASURE_ITERS: u32 = 20_000;
 
 fn measure<F>(label: &str, iterations: u32, mut run: F)
@@ -956,10 +889,6 @@ where
     );
 }
 
-/// A packet whose payload scan is expensive enough to make a skipped
-/// `contains` obvious: 64 KiB of payload without the needle. The layers are
-/// assembled directly, since only the evaluator reads them and a UDP payload
-/// this size could never sit on the wire.
 fn measured_packet() -> DecodedPacket {
     layered(vec![
         Box::new(Ipv4::default()),
@@ -974,27 +903,22 @@ fn perf_evaluation_short_circuit_and_full() {
     let decoded = measured_packet();
     let context = context(&decoded);
     for (label, source) in [
-        // A decisively false guard: the 64 KiB needle scan is skipped.
         (
             "guard_false_short_circuits",
             "ipv6 && raw.bytes contains \"zzz\"",
         ),
-        // A decisively true guard: same scan skipped through `||`.
         (
             "guard_true_short_circuits",
             "ipv4 || raw.bytes contains \"zzz\"",
         ),
-        // An undecided guard: the scan still runs every packet.
         (
             "full_scan_when_undecided",
             "ipv4 && raw.bytes contains \"zzz\"",
         ),
-        // Fully evaluated chain of three cheap predicates.
         (
             "fully_evaluated_chain",
             "ipv4 && udp.dstport == 53 && frame.number == 7",
         ),
-        // Common case: a single predicate.
         ("single_predicate", "udp.dstport == 53"),
     ] {
         let filter = compiled(source);
@@ -1009,14 +933,12 @@ fn perf_evaluation_short_circuit_and_full() {
 fn perf_evaluation_max_size_program() {
     let decoded = measured_packet();
     let context = context(&decoded);
-    // The largest legal program: 1024 terms, all evaluated on a match.
     let source = vec!["ipv4"; MAX_FILTER_TERMS].join(" || ");
     assert!(source.len() <= packetcraftr_core::filter::DEFAULT_MAX_FILTER_BYTES);
     let filter = compiled(&source);
     measure("max_terms_all_or", MEASURE_ITERS / 10, || {
         filter.matches(&context).expect("measurement evaluates")
     });
-    // A mixed chain that ends decisively on the last term.
     let mixed = format!("{} && ipv4", vec!["ipv6"; 512].join(" || "));
     let filter = compiled(&mixed);
     measure("mixed_chain_decisive_end", MEASURE_ITERS / 10, || {

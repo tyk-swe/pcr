@@ -1,17 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Separate accounting domains for comparison scratch and retained details.
-//! These are deterministic charges, not allocator or process-RSS guarantees.
-
 use serde::Serialize;
 use std::io::{self, Write};
 
 use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
 
-/// Finite comparison limits. Input observations have their own collection
-/// limits; these ceilings account for the additional index and report work.
-///
 /// Every value is honored as given, so [`validate`](Self::validate) has
 /// nothing to refuse: zero `max_details` or `max_detail_bytes` retains no
 /// details, and zero `max_scratch_bytes` refuses any comparison that needs
@@ -19,9 +13,7 @@ use super::report::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violati
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_details: usize,
-    /// Conservative JSON-sized charge over all retained detail categories.
     pub max_detail_bytes: usize,
-    /// Canonical key bytes plus conservative per-index/array-entry charges.
     pub max_scratch_bytes: usize,
 }
 
@@ -36,18 +28,11 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Checks the ceilings. Every value is honored as given, so this always
-    /// succeeds; it exists so every limits type validates the same way.
-    ///
-    /// # Errors
-    ///
-    /// None today.
     pub const fn validate(&self) -> Result<(), super::Error> {
         Ok(())
     }
 }
 
-/// Counts serialized bytes without building an intermediate JSON allocation.
 pub(super) fn json_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
     struct Counter(usize);
     impl Write for Counter {
@@ -94,8 +79,6 @@ pub(super) trait DetailCharge {
 
 impl DetailCharge for Evidence {
     fn detail_charge(&self) -> usize {
-        // Includes JSON punctuation and the wire timestamp/source-frame form,
-        // including negative epochs. Do not serialize SystemTime here.
         512usize.saturating_add(json_bytes(&self.diagnostics))
     }
 }
@@ -157,7 +140,6 @@ impl ScratchBudget {
         Ok(())
     }
 
-    /// Retains canonical JSON while charging each write before its allocation.
     pub(super) fn json<T: Serialize + ?Sized>(
         &mut self,
         value: &T,

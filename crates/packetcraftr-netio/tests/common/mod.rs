@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Every integration test binary compiles this module separately and uses
-// only the fixtures it needs.
+// Every integration test binary compiles this module separately.
 #![allow(dead_code)]
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -21,7 +20,6 @@ pub(crate) fn interface() -> InterfaceId {
     }
 }
 
-/// A gateway route out of `fixture0` on a private network.
 pub(crate) fn decision(capability: Capability) -> Decision {
     Decision {
         interface: interface(),
@@ -37,7 +35,6 @@ pub(crate) fn decision(capability: Capability) -> Decision {
     }
 }
 
-/// The destination `decision` was looked up for.
 pub(crate) fn lookup_destination() -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))
 }

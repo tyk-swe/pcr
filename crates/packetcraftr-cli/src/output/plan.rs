@@ -5,8 +5,6 @@ use serde::Serialize;
 
 use crate::output::network::Plan;
 
-/// `result.route` holds the whole [`Plan`]; its nested `route` field holds
-/// [`Plan::decision`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     #[serde(rename = "route")]

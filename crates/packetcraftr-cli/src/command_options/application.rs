@@ -56,7 +56,6 @@ impl ApplicationLimitsArgs {
     }
 }
 
-/// The shared `--max-application-output-bytes` range every consumer enforces.
 pub(crate) fn validate_output_bytes(value: usize) -> Result<(), CliError> {
     if value == 0 || value > 256 * 1024 * 1024 {
         return Err(CliError::new(

@@ -27,7 +27,6 @@ use std::{
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
-/// Runs on every read, before the session answers it.
 type Tick = Arc<dyn Fn() + Send + Sync>;
 
 struct Session {
@@ -123,7 +122,6 @@ impl native::Provider for Provider {
     }
 }
 
-/// The fixture capture provider; capture never reaches the others.
 type Fixture = ProviderSet<
     net::route::SystemProvider,
     net::interface::SystemProvider,
@@ -133,8 +131,6 @@ type Fixture = ProviderSet<
     SystemResolver,
 >;
 
-/// A client capturing from `provider` under a budget of `frames` frames and
-/// `bytes` bytes.
 fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
     Client::new(
         packetcraftr_core::protocol::builtin::registry(),
@@ -154,7 +150,6 @@ fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
     )
 }
 
-/// Whether every armed fixture source was shut down exactly once.
 fn all_stopped(client: &Client<Fixture, impl Clock>) -> bool {
     let capture = &client.providers().capture;
     capture
@@ -177,7 +172,6 @@ fn request() -> Request {
     ])
 }
 
-/// A capture of one interface, so each read is one session read.
 fn single() -> Request {
     capture_of(vec![Id {
         index: 7,
@@ -203,7 +197,6 @@ fn capture_of(interfaces: Vec<Id>) -> Request {
     )
 }
 
-/// A sink answering `control` for every frame and continuing past the start.
 fn answering(control: Control) -> impl FnMut(Event) -> Result<Control, BoundaryError> + Send {
     move |event| {
         Ok(if matches!(event, Event::Frame { .. }) {
@@ -361,7 +354,6 @@ fn an_arming_failure_reports_every_admitted_source_after_its_shutdown() {
     assert!(error.cleanup.is_empty());
 }
 
-/// A clock that moves only when told to.
 #[derive(Clone)]
 struct ManualClock(Arc<Mutex<Instant>>);
 
@@ -414,8 +406,6 @@ fn the_window_closes_on_the_client_clock_and_cancellation_stops_every_source() {
     assert_eq!(report.stats.elapsed, Duration::from_millis(1_200));
     assert!(all_stopped(&client));
 
-    // The client's cancellation, signaled during the second read, stops the
-    // capture before that read delivers a frame.
     let signal = Cancellation::default();
     let reads = Arc::new(AtomicUsize::new(0));
     let mut provider = Provider::new(8);

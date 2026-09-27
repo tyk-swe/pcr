@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for fragmented TCP segments feeding TCP reassembly, follow,
-//! expert, and TLS collectors.
-
 mod common;
 
 use common::ip_fragments::{

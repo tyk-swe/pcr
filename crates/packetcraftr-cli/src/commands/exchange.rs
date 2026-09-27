@@ -72,9 +72,6 @@ pub(super) fn run(
     };
     request.collection.decode.limits.max_packet_size = limits.snap_length;
     let Prepared { request, client } = prepare_live(send, template, request)?;
-    // Exchange drives the composed client itself — authorization,
-    // cancellation, and the callback runtime live inside it — so the driver
-    // vends no session state.
     execution::run_workflow(
         &mut (),
         format,

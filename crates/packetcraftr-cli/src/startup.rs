@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Process setup and publication of errors before command dispatch.
-
 use std::process::ExitCode;
 
 use packetcraftr_core::error::Kind;
@@ -27,8 +25,6 @@ pub(crate) fn run() -> ExitCode {
     crate::commands::run(parsed)
 }
 
-/// Renders a command-line parse error through the negotiated output format
-/// and reports the process exit code to use.
 fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
     let code = u8::try_from(error.exit_code()).unwrap_or(exit_code_for(Kind::Internal));
     let raw_message = error.to_string();

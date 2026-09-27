@@ -15,7 +15,6 @@ use packetcraftr_core::{
 use serde::Serialize;
 
 published_enum! {
-    /// Where an HTTP message, or a stream issue, ended up.
     pub enum Status from analysis::Status {
         Complete => "complete",
         Incomplete => "incomplete",
@@ -29,7 +28,6 @@ published_enum! {
     }
 }
 
-/// How a message delimits its body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "length")]
 pub enum Body {
@@ -57,7 +55,6 @@ impl From<http::Body> for Body {
     }
 }
 
-/// The HTTP request line or status line of a message.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StartLine {
@@ -101,7 +98,6 @@ impl From<http::StartLine> for StartLine {
     }
 }
 
-/// One HTTP header field with its text form and raw wire bytes.
 #[derive(Debug, Serialize)]
 pub struct Header {
     pub name: String,
@@ -118,7 +114,6 @@ impl From<http::Header> for Header {
     }
 }
 
-/// One HTTP message on a stream, with head, body progress, and outcome.
 #[derive(Debug, Serialize)]
 pub struct Message {
     pub index: u64,
@@ -173,7 +168,6 @@ impl StreamRecord for Message {
         "http_message"
     }
 }
-/// A stream-level condition that invalidated pending messages.
 #[derive(Debug, Serialize)]
 pub struct Issue {
     pub number: u64,
@@ -196,7 +190,6 @@ impl StreamRecord for Issue {
         "http_stream_issue"
     }
 }
-/// Cumulative counts over every message the collector framed.
 #[derive(Debug, Serialize)]
 pub struct Summary {
     pub messages: u64,
@@ -230,7 +223,6 @@ pub struct Complete {
     pub source_outcomes_omitted: u64,
     pub ip_reassembly: super::reassembly::Report,
 }
-/// The run's counters, the collector's summary, and the scopes it exposed.
 impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Complete {
     type Error = Error;
     fn try_from(
@@ -257,8 +249,6 @@ pub struct Report {
     #[serde(flatten)]
     pub complete: Complete,
 }
-/// The messages and issues retained for the document, and the terminal
-/// counters.
 impl From<(Vec<Message>, Vec<Issue>, Complete)> for Report {
     fn from((messages, issues, complete): (Vec<Message>, Vec<Issue>, Complete)) -> Self {
         Self {

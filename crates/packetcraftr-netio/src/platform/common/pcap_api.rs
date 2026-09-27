@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Rules shared by the libpcap and Npcap backends: portable link-type
-//! canonicalization, snapshot-length validation, timestamp-source value
-//! mapping, and error phrasing.
-
 use std::ffi::c_int;
 use std::fmt;
 
@@ -17,7 +13,6 @@ use crate::{
     interface::Id as InterfaceId,
 };
 
-// PCAP_TSTAMP_* values every pcap-API backend shares.
 pub(in crate::platform) const PCAP_TSTAMP_HOST: c_int = 0;
 pub(in crate::platform) const PCAP_TSTAMP_HOST_LOWPREC: c_int = 1;
 pub(in crate::platform) const PCAP_TSTAMP_HOST_HIPREC: c_int = 2;
@@ -25,9 +20,6 @@ pub(in crate::platform) const PCAP_TSTAMP_ADAPTER: c_int = 3;
 pub(in crate::platform) const PCAP_TSTAMP_PRECISION_MICRO: c_int = 0;
 pub(in crate::platform) const PCAP_TSTAMP_PRECISION_NANO: c_int = 1;
 
-// Setter results that mean "the requested value cannot be applied": the
-// activation-status PCAP_ERROR_* codes plus the warning pcap_set_tstamp_type
-// returns when the device refuses the type and keeps its default.
 pub(in crate::platform) const PCAP_WARNING_TSTAMP_TYPE_NOTSUP: c_int = 3;
 pub(in crate::platform) const PCAP_ERROR_CANTSET_TSTAMP_TYPE: c_int = -10;
 pub(in crate::platform) const PCAP_ERROR_TSTAMP_PRECISION_NOTSUP: c_int = -12;
@@ -82,9 +74,6 @@ pub(in crate::platform) const fn timestamp_precision_value(precision: TimestampP
     }
 }
 
-/// Maps an advertised timestamp-type value to the source enum; `None` for
-/// types the frame-time contract cannot represent, including every
-/// unsynchronized clock domain.
 pub(in crate::platform) const fn timestamp_source_of_value(
     value: c_int,
 ) -> Option<TimestampSource> {
@@ -97,8 +86,6 @@ pub(in crate::platform) const fn timestamp_source_of_value(
     }
 }
 
-/// Maps a confirmed precision value; `None` for anything outside the two
-/// precisions the API defines.
 pub(in crate::platform) const fn timestamp_precision_of_value(
     value: c_int,
 ) -> Option<TimestampPrecision> {
@@ -109,10 +96,6 @@ pub(in crate::platform) const fn timestamp_precision_of_value(
     }
 }
 
-/// What a pcap-API call reported about its own failure: the status it
-/// returned, when the call returns one, and the text it wrote into its error
-/// buffer. libpcap and Npcap report nothing more structured, so this is the
-/// typed source their failures keep.
 #[derive(Debug)]
 pub(in crate::platform) struct Diagnostic {
     status: Option<c_int>,
@@ -127,7 +110,6 @@ impl Diagnostic {
         }
     }
 
-    /// The source handle a live-I/O failure keeps.
     pub(in crate::platform) fn into_source(self) -> Option<Source> {
         Some(Source::new(self))
     }
@@ -144,9 +126,6 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
-/// Maps known unsupported `pcap_set_*` statuses to
-/// [`Error::UnsupportedCaptureSetting`]. Every other nonzero status, including
-/// unexpected warnings, is a backend failure.
 pub(in crate::platform) fn check_setting_status(
     backend: &str,
     interface: &InterfaceId,
@@ -180,9 +159,6 @@ pub(in crate::platform) fn check_setting_status(
     })
 }
 
-/// Returns activated settings and delivered timestamp precision. Confirmed
-/// precision determines read units; buffer size and timestamp type remain
-/// unconfirmed because pcap cannot query them after activation.
 pub(in crate::platform) fn realize_settings(
     backend: &str,
     interface: &InterfaceId,
@@ -211,9 +187,6 @@ pub(in crate::platform) fn realize_settings(
             source: None,
         });
     }
-    // The backend delivers fractions in the confirmed precision when it can
-    // report one; an applied request is authoritative otherwise, and the API
-    // default is microseconds.
     let delivered = confirmed
         .or(settings.timestamp_precision)
         .unwrap_or_default();
@@ -273,21 +246,14 @@ pub(in crate::platform) fn validate_effective_snapshot_length(
     Ok(effective)
 }
 
-// libpcap and Npcap report why opening or injecting failed only as error-buffer
-// text: their open calls return no status at all, and a failed send returns a
-// bare -1. Matching that text is therefore the only way to tell a privilege or
-// missing-device refusal apart, and it is used only on those paths; wherever
-// the API returns a distinguishing status (activation), the status decides.
+// Open and send failures report only error-buffer text, so matching it is the only classifier.
 
-/// Recognizes the missing-interface refusals libpcap and Npcap phrase
-/// differently, so both backends classify them as device failures.
 pub(in crate::platform) fn is_missing_device(message: &str) -> bool {
     const PHRASES: [&str; 3] = ["no such device", "not found", "does not exist"];
     let message = message.to_ascii_lowercase();
     PHRASES.iter().any(|phrase| message.contains(phrase))
 }
 
-/// Recognizes privilege refusals across libpcap and Npcap.
 pub(in crate::platform) fn is_permission_denied(message: &str) -> bool {
     const PHRASES: [&str; 4] = [
         "permission denied",
@@ -361,7 +327,6 @@ mod tests {
                 Some(source)
             );
         }
-        // Unsynchronized and unknown types cannot be selected.
         for value in [4, 5, -1, 99] {
             assert_eq!(timestamp_source_of_value(value), None);
         }
@@ -450,7 +415,6 @@ mod tests {
             realize_settings("fixture", &interface(), &settings, Some(1)).unwrap();
         assert_eq!(realized.buffer_size.requested, Some(4 * 1024 * 1024));
         assert_eq!(realized.buffer_size.applied, Some(4 * 1024 * 1024));
-        // Neither pcap-family backend can query the allocated buffer.
         assert_eq!(realized.buffer_size.effective, None);
         assert_eq!(
             realized.timestamp_source.applied,
@@ -474,7 +438,6 @@ mod tests {
             realize_settings("fixture", &interface(), &settings, Some(0)),
             Err(Error::Capture { .. })
         ));
-        // An unreported or unknown precision cannot confirm anything.
         let (_, delivered) = realize_settings("fixture", &interface(), &settings, None).unwrap();
         assert_eq!(delivered, TimestampPrecision::Nano);
         let (realized, delivered) =

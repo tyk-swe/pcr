@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Synthetic TLS handshake captures for the `tls` command's contracts.
-//!
-//! Nothing here comes from captured traffic: each hello is built field by
-//! field, the endpoints are RFC 5737 documentation addresses, and the host
-//! names are documentation names.
-
 use std::io::Write as _;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -44,11 +38,7 @@ const X25519: u16 = 0x001d;
 pub(crate) struct Handshake {
     pub(crate) client_port: u16,
     pub(crate) server_port: u16,
-    /// The offered server name, or `None` for a conversation that carries
-    /// plain HTTP instead of a handshake.
     pub(crate) sni: Option<&'static str>,
-    /// Whether the server answers. Without an answer the session is
-    /// `client_only`.
     pub(crate) answered: bool,
 }
 
@@ -71,7 +61,6 @@ impl Handshake {
         }
     }
 
-    /// A conversation on a TLS port that never speaks TLS.
     pub(crate) const fn plain(client_port: u16, server_port: u16) -> Self {
         Self {
             client_port,
@@ -82,13 +71,10 @@ impl Handshake {
     }
 }
 
-/// Writes a PCAPNG capture holding one TCP conversation per handshake.
 pub(crate) fn write_capture(handshakes: &[Handshake]) -> tempfile::NamedTempFile {
     write_capture_with_udp_443(handshakes, 0)
 }
 
-/// Writes one complete TLS handshake whose two data-bearing TCP segments are
-/// each split across two IPv4 fragments.
 pub(crate) fn write_fragmented_capture() -> tempfile::NamedTempFile {
     let registry = registry();
     let handshake = Handshake::complete(40_000, 443, "api.example.test");
@@ -141,8 +127,6 @@ pub(crate) fn write_fragmented_capture() -> tempfile::NamedTempFile {
     file
 }
 
-/// Writes the same capture with `udp_443_frames` UDP datagrams on port 443
-/// appended, standing in for the QUIC traffic this command does not read.
 pub(crate) fn write_capture_with_udp_443(
     handshakes: &[Handshake],
     udp_443_frames: u16,
@@ -175,7 +159,6 @@ pub(crate) fn write_capture_with_udp_443(
     file
 }
 
-/// One ClientHello frame, as whole-frame hexadecimal for `dissect --hex`.
 pub(crate) fn client_hello_frame_hex(server_port: u16, sni: &str) -> String {
     let mut packet = Packet::new();
     packet.push(Ipv4 {
@@ -203,7 +186,6 @@ fn registry() -> Arc<Registry> {
     packetcraftr_core::protocol::builtin::registry()
 }
 
-/// A datagram on UDP port 443, which the collector counts but never assembles.
 fn udp_443_frame(registry: &Arc<Registry>, timestamp: SystemTime, index: u16) -> Frame {
     let mut packet = Packet::new();
     packet.push(Ipv4 {
@@ -243,7 +225,6 @@ struct Segment {
     flags: u16,
 }
 
-/// SYN, SYN-ACK, ACK, ClientHello, optional ServerHello, then both FINs.
 fn conversation(handshake: &Handshake) -> Vec<(u64, Segment, Vec<u8>)> {
     let hello = match handshake.sni {
         Some(sni) => record(&client_hello(sni)),

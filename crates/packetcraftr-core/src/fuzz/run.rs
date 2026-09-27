@@ -11,10 +11,7 @@ use super::prepare::{PreparedCases, prepare_with_events};
 use super::report::{Case, Report, Stats, Summary};
 use super::request::Request;
 
-/// A completely prepared and bounded deterministic mutation campaign.
-///
-/// Live callers must prepare the campaign before authorization and reuse
-/// these exact cases; preparation never performs networking or capture I/O.
+/// Live callers must prepare the campaign before authorization and reuse these exact cases.
 #[derive(Clone, Debug)]
 pub struct Campaign {
     cases: Vec<Case>,
@@ -40,7 +37,6 @@ impl Campaign {
         })
     }
 
-    /// What preparation generated and built, and how long it took.
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
@@ -59,11 +55,6 @@ pub fn run(request: &Request, packet: Packet, registry: Arc<Registry>) -> Result
     Ok(Report::from_summary(summary, cases))
 }
 
-/// Generates each deterministic case once and hands it to `emit` as soon as
-/// its offline outcome is final.
-///
-/// `emit` receives the campaign deadline so a publisher can bound how long it
-/// waits for backpressure. Its failure aborts later cases.
 pub fn run_observed<F>(
     request: &Request,
     packet: Packet,

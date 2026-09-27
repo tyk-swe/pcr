@@ -14,7 +14,6 @@ pub struct SegmentRoute {
     pub active_index: Option<usize>,
 }
 
-/// Validates the routing state shared by typed packets and captured SRH bytes.
 pub fn validate_segment_route(
     header_destination: Ipv6Addr,
     segments: Vec<Ipv6Addr>,

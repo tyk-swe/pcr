@@ -14,9 +14,7 @@ use super::{PENDING_SEGMENT_METADATA_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE};
 pub(super) struct TcpFlowState {
     pub(super) base_sequence: u32,
     pub(super) next_offset: u64,
-    // A contiguous tail ending at `next_offset`. It is deliberately bounded
-    // by the same per-flow budget as pending data so retransmission checking
-    // cannot turn a long-lived stream into an unbounded byte log.
+    // Bounded by the per-flow budget so retransmission checks cannot keep an unbounded byte log.
     pub(super) history_start_offset: u64,
     pub(super) emitted_history: History,
     pub(super) pending: BTreeMap<u64, u64>,
@@ -83,8 +81,6 @@ pub(super) fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
 }
 
 pub(super) fn planned_history_allocation(current: usize, required: usize, limit: usize) -> usize {
-    // Logical history is trimmed independently; retain and charge storage
-    // instead of reallocating its shrinking tail on every pending insertion.
     let retained = current;
     if required <= retained {
         return retained;
@@ -92,8 +88,7 @@ pub(super) fn planned_history_allocation(current: usize, required: usize, limit:
     retained.saturating_mul(2).max(required).min(limit)
 }
 
-// each difference is clamped by overlap_start/overlap_end into payload or emitted_history, whose
-// lengths are already usize, so no target can truncate
+// Each difference is clamped into payload or emitted_history, so no usize cast can truncate.
 pub(super) fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, payload: &[u8]) -> bool {
     let Some(payload_end) = offset.checked_add(payload.len() as u64) else {
         return true;
@@ -149,8 +144,7 @@ pub(super) fn prepare_emitted_history(
     Ok(Some(resized))
 }
 
-// history_start_offset lies between output_start and output_end, so each difference is bounded by
-// emitted_history.len() or output.len(), both already usize
+// Each difference is bounded by emitted_history.len() or output.len(), so no cast truncates.
 pub(super) fn append_emitted_history(
     state: &mut TcpFlowState,
     output_start: u64,

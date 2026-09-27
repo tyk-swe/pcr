@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! A reflective probe protocol with a child layer, registered on a private
-//! link type, for exercising the runtime without built-in protocols.
-
 use bytes::Bytes;
 use packetcraftr_core::codec::{
     DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
@@ -286,11 +283,8 @@ pub(crate) fn probe_registry() -> packetcraftr_core::registry::Registry {
     builder.build().expect("valid test registry")
 }
 
-/// The link type the fixture registry binds to the `probe` root.
 pub(crate) const PROBE_LINK_TYPE: LinkType = LinkType(777);
 
-/// Protocol order plus every reflected field, the comparison the document
-/// projection preserves exactly.
 pub(crate) fn structure(packet: &Packet) -> document::Packet {
     document::Packet::from_packet(packet)
 }

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts of the display-filter language: what a path resolves to, what a
-//! comparison means at run time, and which mistakes are compile errors.
-
 mod common;
 
 use common::decoded::{context, ipv6_tcp, tunnelled};
@@ -12,8 +9,6 @@ use common::registry;
 use packetcraftr_core::decode;
 use packetcraftr_core::filter::{Error, Filter, Limits};
 
-/// Compiles each source against the built-in registry and asserts whether it
-/// matches the fixture.
 fn assert_filters(decoded: &decode::DecodedPacket, cases: &[(&str, bool)]) {
     let registry = registry();
     for (source, expected) in cases {
@@ -53,8 +48,6 @@ fn numeric_comparisons_order_values_and_cross_the_signed_boundary() {
             ("udp.srcport <= 12345", true),
             ("udp.dstport > 65535", false),
             ("udp.dstport < 0", false),
-            // A negative literal is representable and simply orders below every
-            // unsigned port rather than failing to compare.
             ("udp.dstport > -1", true),
             ("udp.dstport == -1", false),
             ("vxlan.vni == 74565", true),
@@ -124,8 +117,6 @@ fn slices_past_the_last_byte_select_no_value() {
             ("ethernet.source[6]", false),
             ("ethernet.source[6:8]", false),
             ("ethernet.source[7:]", false),
-            // A bounded end clamps once the start is inside the field, and an
-            // open range from the end selects the empty tail.
             ("ethernet.source[4:9] == 0a:0b", true),
             ("ethernet.source[6:] == \"\"", true),
         ],
@@ -142,8 +133,6 @@ fn contains_searches_byte_text_and_mac_haystacks() {
             ("raw.bytes contains 47:45:54", true),
             ("raw.bytes contains 47:45:55", false),
             ("raw.bytes contains 47:45:54:20:2f:69:6e:64", true),
-            // An empty needle is contained by every haystack the path can read,
-            // and by nothing the path cannot.
             ("raw.bytes contains \"\"", true),
             ("eth.src contains 07:08", true),
             ("eth.src contains 08:07", false),
@@ -160,7 +149,6 @@ fn layer_occurrences_select_one_layer_of_a_tunnelled_stack() {
             ("ipv4#2.source == 10.0.0.1", true),
             ("ipv4#1.source == 10.0.0.1", false),
             ("ipv4#2.source == 192.0.2.1", false),
-            // An unqualified path matches any occurrence.
             ("ipv4.source == 10.0.0.1", true),
             ("ip.src == 192.0.2.1", true),
             ("udp#1.dstport == 4789", true),
@@ -194,7 +182,6 @@ fn flag_paths_read_the_bit_and_bare_field_paths_read_presence() {
             ("!tcp.flags.fin", true),
             ("tcp.flags.syn == 1", true),
             ("tcp.flags.fin == 0", true),
-            // A non-flag bare path asks whether the packet exposes a value.
             ("tcp.options", true),
             ("raw.bytes", true),
             ("udp.dstport", false),
@@ -225,9 +212,6 @@ fn frame_and_stream_facts_are_reserved_and_read_from_the_caller() {
         .expect("stream filter compiles");
     let requirements = udp_only.requirements();
     assert!(requirements.stream_index);
-    // The aggregate says a conversation index is needed; the per-transport
-    // flags say which one, so a caller that indexes one transport at a time
-    // prepares only that half.
     assert!(requirements.udp_stream);
     assert!(!requirements.tcp_stream);
 

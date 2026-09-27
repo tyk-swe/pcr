@@ -52,9 +52,6 @@ impl ResponseMatcher for EchoMatcher {
             {
                 return None;
             }
-            // The echo identifier and sequence (body bytes 0-4) are the
-            // correlation identity; the variable rest of the echo body is not
-            // compared.
             if request.body.get(..4)? != response.body.get(..4)? {
                 return None;
             }

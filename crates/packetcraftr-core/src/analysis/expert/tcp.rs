@@ -27,7 +27,6 @@ pub(super) struct DirectionState {
     pub(super) window_from_syn: bool,
     pub(super) syn_seen: bool,
     pub(super) window_shift: Option<u8>,
-    /// Mirrors the reassembler's capture base for observed-overlap claims.
     pub(super) reassembly_base: Option<u32>,
     /// Set only after the clean-close frame's header analysis.
     pub(super) closed: bool,

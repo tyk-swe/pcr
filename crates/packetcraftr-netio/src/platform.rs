@@ -2,32 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Crate-private FFI and reviewed-unsafe-code boundary.
-//!
-//! Only code that calls a native API lives here, organized as capability →
-//! backend:
-//!
-//! - `route`: route lookup (`netlink` on Linux, `af_route` on macOS,
-//!   `iphelper` on Windows).
-//! - `interface`: interface enumeration with the same three backends (the
-//!   macOS one reads `getifaddrs(3)`), and `identity`, the per-send check
-//!   that an interface kept its name and index.
-//! - `capture`: live capture (`libpcap` on Linux and macOS, the runtime-loaded
-//!   `npcap` on Windows).
-//! - `transmit`: Layer 2 injection (`libpcap`, `npcap`) and raw IP
-//!   transmission (`raw_ip`).
-//!
-//! TCP connect uses only portable sockets, so it has no backend here.
-//! `common` holds the native plumbing more than one capability's backend
-//! shares (the netlink connection worker, Npcap's loader and handles, the
-//! pcap API rules), and `execution_context` names the per-thread network
-//! context the worker pool matches. `dispatch` selects the backend the build
-//! script enabled for this target.
-//!
-//! The `native_route`, `native_layer2`, `native_layer3`, `native_send`,
-//! `pcap_backend`, `npcap_backend`, and `packetcraftr_test_netns` predicates
-//! come from the build script, which combines the enabled features with the
-//! target the crate is compiled for. Both layer features enable
-//! `native-route`, so `native_send` implies `native_route`.
 
 #[cfg(native_layer2)]
 mod capture;

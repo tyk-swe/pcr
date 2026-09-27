@@ -176,7 +176,6 @@ pub(in crate::capture_file) fn validate_pcapng_block_length(
     Ok(())
 }
 
-/// Copies a reader-validated section header with an unknown section length.
 // validated section headers contain at least 28 bytes
 pub(in crate::capture_file) fn write_selected_section(
     output: &mut impl std::io::Write,

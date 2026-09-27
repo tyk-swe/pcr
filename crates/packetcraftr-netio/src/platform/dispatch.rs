@@ -1,13 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native backend selection: one entry point per native operation, backed by
-//! the module the build script selected for this target, or a fail-closed
-//! stub whose message names the actionable cause.
-//!
-//! Validation belongs to the capability that calls these entry points; each
-//! one here forwards to its backend unchanged.
-
 use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
@@ -36,9 +29,6 @@ use super::{capture::libpcap as capture_backend, transmit::libpcap as transmit_b
 #[cfg(npcap_backend)]
 use super::{capture::npcap as capture_backend, transmit::npcap as transmit_backend};
 
-/// The failure for a native `capability` this build has no backend for. The
-/// message names the `operation` and distinguishes a target that has no
-/// native implementation from a build that simply left `feature` off.
 #[cfg(not(all(native_route, native_layer2, native_layer3)))]
 pub(crate) fn unsupported(
     capability: NativeCapability,
@@ -120,8 +110,6 @@ pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, i
     .into())
 }
 
-/// Opens the backend's capture source; the capture capability owns every
-/// check before this call and the session built from its parts.
 #[cfg(native_layer2)]
 pub(crate) fn open_capture(
     interface: &InterfaceId,
@@ -173,7 +161,6 @@ pub(crate) fn send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, E
     .into())
 }
 
-/// Confirms the interface a send was routed to still has that name and index.
 #[cfg(native_send)]
 pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     super::interface::identity::verify_interface_identity(expected)

@@ -43,8 +43,6 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
-/// Runs a serial fixture executor where the engine takes a pipeline-capable
-/// one; every fixture request keeps `max_in_flight` at one.
 struct Serial<'e, E>(&'e mut E);
 
 impl<E: Executor<Batch<Probe>>> Executor<Batch<Probe>> for Serial<'_, E> {
@@ -64,8 +62,6 @@ impl<E: Executor<Batch<Probe>>> Pipelined for Serial<'_, E> {
     }
 }
 
-/// Runs the engine as the client does under the request's duration limit,
-/// collecting every event into the aggregate.
 fn run<A, E, C>(
     request: &Request,
     authorizer: &mut A,
@@ -95,8 +91,6 @@ where
     collector.finish(report)
 }
 
-/// Runs the engine as the client does, publishing each event to `sink` on a
-/// worker admitted by `runtime`.
 fn run_with_events<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
@@ -781,8 +775,6 @@ fn port_selection_is_stable_deduplicated_and_limit_aware() {
     );
 }
 
-/// The bound is enforced while expanding, so a 65535-port range never
-/// materializes before the limit rejects it.
 #[test]
 fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
     let error = select_ports(
@@ -808,8 +800,6 @@ fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
     }
 }
 
-/// A validated request selects the ports it declared, once each; the CLI and
-/// the library agree because there is one expansion.
 #[test]
 fn a_validated_request_selects_its_declared_ports_once_each() {
     let target = Target::Address("192.0.2.1".parse().expect("documentation address"));
@@ -948,8 +938,6 @@ fn icmp_scan_request(target: Target, attempts: u32, timeout: Duration) -> Reques
     }
 }
 
-/// Returns `copies` correlated ICMP echo replies per probe, each carrying the
-/// probe's identity and the scripted latency.
 struct EchoReplyExecutor {
     inner: TimeoutExecutor,
     latency: Duration,
@@ -1040,7 +1028,6 @@ fn scan_mixed_icmp_rounds_count_loss_and_sample_only_received() {
     assert_eq!(report.rtt.max, Some(Duration::from_micros(500)));
 }
 
-/// Answers only even-sequence probes, with a latency that grows per answer.
 struct EveryOtherEchoExecutor {
     inner: TimeoutExecutor,
 }
@@ -1073,8 +1060,6 @@ impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
     }
 }
 
-/// Builds the echo reply matching one sent probe: same identity body, type 0,
-/// and the probed address answered to the fixture source.
 fn echo_reply(body: bytes::Bytes, remote: Ipv4Addr) -> Option<Packet> {
     let mut reply = Packet::new();
     reply
@@ -1139,8 +1124,6 @@ fn scan_duplicate_replies_contribute_a_single_rtt_sample() {
     assert_eq!(report.rtt.avg, Some(Duration::from_micros(500)));
 }
 
-/// Replies inside the round window with a stale identity, the way a reply to
-/// an earlier probe or another operation's probe would arrive.
 struct StaleEchoExecutor {
     inner: TimeoutExecutor,
 }
@@ -1203,8 +1186,6 @@ fn scan_replies_with_a_stale_identity_count_as_lost_not_received() {
     assert_eq!(report.rtt.min, None);
 }
 
-/// An authorized resolution without an address of the requested family fails
-/// in the scan's own vocabulary.
 #[test]
 fn a_family_miss_is_reported_as_a_scan_error() {
     use packetcraftr_core::error::Classified as _;

@@ -23,8 +23,6 @@ pub(super) struct FramedBlock<'a> {
     pub(super) raw: Bytes,
 }
 
-/// Which packet-block layout a block type names, or [`None`] for the
-/// metadata blocks.
 pub(super) const fn packet_block_kind(block_type: u32) -> Option<PacketBlockKind> {
     match block_type {
         PCAPNG_ENHANCED_PACKET_BLOCK => Some(PacketBlockKind::Enhanced),

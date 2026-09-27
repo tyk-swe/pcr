@@ -23,7 +23,6 @@ pub struct Report {
     pub interfaces: Vec<Interface>,
     pub source_metadata_records: u64,
 }
-/// The destination path and what the merge wrote there.
 impl From<(String, MergeReport)> for Report {
     fn from((path, report): (String, MergeReport)) -> Self {
         Self {

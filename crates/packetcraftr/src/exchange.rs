@@ -1,12 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exchange: transmitting packets with capture armed first, then collecting
-//! the frames correlated to them.
-//!
-//! [`Client::exchange`](crate::Client::exchange) publishes each outcome as an
-//! [`Event`] when its classification becomes final and returns the terminal
-//! [`Report`]; a [`Collector`] sink rebuilds the full [`Aggregate`].
+//! Exchange: transmitting packets with capture armed first, then collecting correlated frames.
 
 mod accumulator;
 mod capture;

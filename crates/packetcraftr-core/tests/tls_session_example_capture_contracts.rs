@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contract tying the published example capture to its generator.
-
 mod common;
 
 use common::tls_frames::{
@@ -14,7 +12,6 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use std::time::{Duration, SystemTime};
 
-/// The client of the published example capture.
 const EXAMPLE_CLIENT_PORT: u16 = 54_321;
 
 /// A fixed 2026 wall-clock base, so regenerating the example is byte-stable.
@@ -25,13 +22,6 @@ fn example_capture_path() -> std::path::PathBuf {
         .join("../../examples/captures/tls-handshake.pcapng")
 }
 
-/// The frames of `examples/captures/tls-handshake.pcapng`: one TLS 1.3
-/// handshake on port 443, from SYN to FIN, over RFC 5737 documentation
-/// addresses.
-///
-/// Sequence numbers, timestamps and ports are all written out here rather than
-/// derived, because the file this produces is checked in and a reader of the
-/// capture should be able to find every byte of it in this function.
 fn example_capture_frames() -> Vec<Frame> {
     let registry = registry();
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(EXAMPLE_CAPTURE_EPOCH_SECONDS);

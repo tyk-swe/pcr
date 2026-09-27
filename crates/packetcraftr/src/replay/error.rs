@@ -88,18 +88,14 @@ pub enum Error {
         link_type: u32,
         requested: LinkMode,
     },
-    /// The request's filter, or a filter rule of its routing, could not
-    /// judge the frame.
     #[error("replay frame selection failed at source index {source_index}")]
     Selection {
         source_index: u64,
         #[source]
         source: packetcraftr_core::filter::Error,
     },
-    /// Routing rules that match the frame name different interfaces.
     #[error("replay frame {} matches conflicting output interfaces", source_index.saturating_add(1))]
     ConflictingInterfaces { source_index: u64 },
-    /// No routing rule matches the frame and the routing has no fallback.
     #[error("replay frame {} has no output interface mapping", source_index.saturating_add(1))]
     Unmapped { source_index: u64 },
     #[error("replay policy denied source index {source_index}")]
@@ -124,14 +120,12 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    /// The sink refused a frame event, or publishing it failed.
     #[error("replay output failed at source index {source_index}")]
     Output {
         source_index: u64,
         #[source]
         source: packetcraftr_core::error::BoundaryError,
     },
-    /// A collector saw events that disagree with the report.
     #[error("replay events are incoherent: {message}")]
     IncoherentEvents { message: String },
 }
@@ -249,12 +243,6 @@ impl Classified for Error {
         Self::context(self)
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants list the boundary's message and its
-    /// captured `causes` snapshot instead, which its own source chain no
-    /// longer holds.
-    ///
-    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization { source, .. } | Self::Output { source, .. } => source.as_causes(),

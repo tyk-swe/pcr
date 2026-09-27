@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one pre-discovery preparation every live command runs: each check that
-//! can refuse the operation runs before hostname work, in one order per
-//! command family, policy is validated once, and the client is composed last.
-//! The client resolves the interface selector after it admits each operation.
-
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,18 +13,11 @@ use crate::command_options::{RouteArgs, RouteSelectionArgs, SendArgs, TemplateAr
 use crate::errors::CliError;
 use crate::input::read_recipe;
 
-/// A live command's request, as the shared preparation sees it. A command
-/// builds it before the recipe is read, with a placeholder template the
-/// preparation replaces.
 pub(crate) trait LiveRequest {
-    /// Checks the command's options before the recipe is read.
     fn validate(&self) -> Result<(), CliError>;
-    /// Installs the packet set read from the recipe.
     fn set_template(&mut self, template: core::template::Template);
     fn template(&self) -> &core::template::Template;
-    /// The packet count the count-only operation budget admits.
     fn budget_count(&self) -> Result<u64, CliError>;
-    /// Installs the resolved per-packet send options.
     fn set_send(&mut self, send: packetcraftr::send::Options);
 }
 
@@ -46,7 +34,6 @@ impl LiveRequest for packetcraftr::send::Request {
         &self.template
     }
 
-    /// Counts the complete expansion times repetition.
     fn budget_count(&self) -> Result<u64, CliError> {
         self.packet_count().map_err(CliError::classified)
     }
@@ -69,7 +56,6 @@ impl LiveRequest for packetcraftr::exchange::Request {
         &self.template
     }
 
-    /// Counts one pass over the expansion.
     fn budget_count(&self) -> Result<u64, CliError> {
         let count = self
             .template
@@ -83,21 +69,15 @@ impl LiveRequest for packetcraftr::exchange::Request {
     }
 }
 
-/// The template a command's request carries until the recipe is read.
 pub(crate) fn placeholder() -> core::template::Template {
     core::template::Template::new(core::packet::Packet::new())
 }
 
-/// The command's request, holding the packet set and resolved send options,
-/// and a client bound to the validated policy.
 pub(crate) struct Prepared<R> {
     pub(crate) request: R,
     pub(crate) client: Client,
 }
 
-/// Validates `request`, reads the recipe into its template, validates policy,
-/// authorizes the budget count and every expanded destination, then resolves
-/// the first packet's destination and composes the client.
 pub(crate) fn prepare_live<R: LiveRequest>(
     send: SendArgs,
     template: TemplateArgs,
@@ -140,8 +120,6 @@ pub(crate) fn prepare_live<R: LiveRequest>(
     })
 }
 
-/// One recipe packet with its resolved destination and requested route, and
-/// the client that plans it.
 pub(crate) struct Plan {
     pub(crate) client: Client,
     pub(crate) packet: core::packet::Packet,
@@ -149,8 +127,6 @@ pub(crate) struct Plan {
     pub(crate) route: packetcraftr::route::Options,
 }
 
-/// Reads one recipe, validates `policy`, and authorizes the packet's declared
-/// destinations before hostname work, then composes the client.
 pub(crate) fn prepare_plan(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
@@ -177,19 +153,13 @@ pub(crate) fn prepare_plan(
     })
 }
 
-/// A probe workflow's validated policy, with the route and capture bounds
-/// every exchange of the workflow runs under.
 pub(crate) struct Workflow {
     policy: Arc<packetcraftr::policy::Policy>,
-    /// The route every exchange of the workflow plans on.
     pub(crate) route: packetcraftr::route::Options,
-    /// The capture bounds every exchange of the workflow collects under.
     pub(crate) collection: packetcraftr::exchange::Collection,
 }
 
 impl Workflow {
-    /// Composes the client the workflow runs on, publishing its events on
-    /// `runtime`.
     pub(crate) fn client(&self, runtime: Runtime) -> Client {
         client(
             core::protocol::builtin::registry(),
@@ -202,10 +172,6 @@ impl Workflow {
 /// Validates the policy, the interface selector, and the collection bounds,
 /// in that order. The client resolves the selector only after it admits each
 /// exchange, so a denied target never enumerates interfaces.
-///
-/// `max_template_packets` is how many packets one exchange may hold: one query
-/// for `dns`, one probe for `scan` and each fuzz case, one attempt per hop for
-/// `traceroute`.
 pub(crate) fn prepare_workflow(
     route: &RouteSelectionArgs,
     policy: packetcraftr::policy::Policy,

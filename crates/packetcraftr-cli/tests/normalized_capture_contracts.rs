@@ -360,8 +360,6 @@ fn normalization_rejects_timestamps_not_representable_in_capture_time() {
     }
 }
 
-// The write-failure case sinks stdout into /dev/full; the package build script
-// enables the gate on targets that provide it.
 #[cfg(packetcraftr_test_dev_full)]
 #[test]
 fn normalized_stdout_failure_exits_with_an_io_error() {

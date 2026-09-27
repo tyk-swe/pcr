@@ -44,8 +44,6 @@ impl ResponseMatcher for ReverseFlowMatcher {
         match self.protocol {
             BuiltinProtocol::Tcp => match_tcp(request, &layers),
             BuiltinProtocol::Sctp => match_sctp(request, response, &layers),
-            // UDP has no further state to confirm: reverse tuples are the
-            // whole attribution.
             _ => Some(Match::new(100)),
         }
     }
@@ -133,8 +131,7 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
         if layer.is::<Padding>() {
             break;
         }
-        // The built-in TCP binding decodes its opaque payload as Raw. An
-        // unknown child cannot be assigned a sequence-space length from
+        // An unknown child cannot be assigned a sequence-space length from
         // reflective fields without guessing its encoded representation.
         let raw = layer.downcast_ref::<Raw>()?;
         payload_length = payload_length.checked_add(u32::try_from(raw.bytes.len()).ok()?)?;

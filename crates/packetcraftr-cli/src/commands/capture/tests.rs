@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The capture driver against scripted native sessions.
-
 use super::*;
 use crate::test_support::stream;
 use packetcraftr_core::budget::Deadline;
@@ -122,7 +120,6 @@ fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
         stopped,
     )
 }
-/// A client capturing from `provider` under a budget of `count` frames.
 fn client(provider: Provider, count: u64) -> packetcraftr::Client<impl packetcraftr::Providers> {
     crate::system::fixture::capturing(
         registry(),
@@ -275,7 +272,6 @@ fn single_session(
     )
 }
 
-/// Ethernet/IPv4/UDP with a verified header checksum and four payload bytes.
 fn ipv4_udp_frame() -> Vec<u8> {
     vec![
         0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x08, 0x00, 0x45,
@@ -331,7 +327,6 @@ fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
         .map(|layer| layer["protocol"].as_str().unwrap())
         .collect();
     assert_eq!(layers, ["ethernet", "ipv4", "udp", "raw"]);
-    // Captured bytes and interface metadata survive beside the dissection.
     assert_eq!(
         valid["frame"]["bytes_hex"].as_str().unwrap(),
         "aabbccddeeff112233445566080045000020000100004011f6c8c0000201c0000202d4313039000c0000deadbeef"
@@ -343,7 +338,6 @@ fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
             .unwrap()
             .is_empty()
     );
-    // Truncation surfaces as decode diagnostics, not a dropped frame.
     let truncated = &records[1]["result"];
     assert!(
         !truncated["decoded"]["diagnostics"]
@@ -352,7 +346,6 @@ fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
             .is_empty()
     );
     assert_eq!(truncated["frame"]["captured_length"], 26);
-    // Unknown protocol payloads still dissect to their known layers.
     let unknown = &records[2]["result"];
     let layers: Vec<_> = unknown["decoded"]["packet"]["layers"]
         .as_array()

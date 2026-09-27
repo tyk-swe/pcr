@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded publication of operation events on callback workers. Deadlines
-//! limit publisher waiting; callbacks and their destructors must eventually
-//! return to release capacity.
-
 use std::{
     cell::Cell,
     sync::{
@@ -19,13 +15,9 @@ use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupt
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_netio::deadline::POLL_INTERVAL;
 
-/// Maximum concurrent callback workers admitted by one runtime.
 pub const MAX_WORKER_CAPACITY: usize = 8;
 
 /// The finite worker budget shared by an application's progressive operations.
-/// Cloning shares admission and diagnostic counters. Construction starts no
-/// threads. A worker owns its permit until its callback and captured resources
-/// have been dropped, even if its [`Worker`] handle or runtime ends.
 #[derive(Clone, Debug)]
 pub struct Runtime {
     budget: Arc<WorkerBudget>,
@@ -45,9 +37,6 @@ impl Runtime {
         }
     }
 
-    /// Diagnostic samples; active means admitted workers, including idle ones.
-    /// Counts can change as callbacks complete. Timed-out
-    /// work continues consuming `active` capacity until callback cleanup ends.
     pub fn snapshot(&self) -> RuntimeSnapshot {
         RuntimeSnapshot {
             capacity: self.capacity(),
@@ -172,14 +161,11 @@ impl<F> Callback<F> {
     }
 }
 
-/// Publication failed before the callback acknowledged the event.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
     Deadline(#[from] DeadlineExceeded),
-    /// A callback or runtime failure; a cancelled publication is erased here
-    /// with its own message and classification.
     #[error(transparent)]
     Output(#[from] BoundaryError),
 }
@@ -219,10 +205,6 @@ impl From<Interrupted> for Error {
     }
 }
 
-/// One callback thread admitted by a [`Runtime`], with a single in-flight
-/// event whose callback answers `A`. Dropping the worker closes its channels;
-/// the thread exits after any active callback returns. A timed-out worker never
-/// accepts a second event, and its thread still consumes capacity.
 pub struct Worker<T, A = ()> {
     events: SyncSender<T>,
     outcomes: mpsc::Receiver<Result<A, BoundaryError>>,
@@ -242,9 +224,6 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
         let status = Arc::clone(&worker._permit.0);
         let (events, receiver) = mpsc::sync_channel(1);
         let (outcomes, outcome_receiver) = mpsc::sync_channel(1);
-        // The thread owns every resource it needs. Dropping its join handle
-        // releases the native handle; no polling or retained-handle queue is
-        // needed. Its permit remains owned by Worker until cleanup finishes.
         drop(
             thread::Builder::new()
                 .name("packetcraftr-worker".to_owned())
@@ -345,8 +324,6 @@ mod tests {
     use packetcraftr_core::budget::Cancellation;
     use std::time::{Duration, Instant};
 
-    /// Generous bound on fixture release waits so a broken test fails instead
-    /// of blocking a worker forever; far above the deadlines under test.
     const FIXTURE_WATCHDOG: Duration = Duration::from_secs(30);
 
     fn wait_for_cleanup(runtime: &Runtime) {

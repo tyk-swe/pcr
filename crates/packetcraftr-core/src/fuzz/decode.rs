@@ -63,7 +63,6 @@ pub fn dissect_built(
     }
 }
 
-/// The link type recorded for a built packet, from its outermost layer.
 pub fn packet_link_type(packet: &Packet) -> Option<LinkType> {
     LinkType::for_root_protocol(BuiltinProtocol::of(packet.layer(0)?)?)
 }

@@ -35,8 +35,6 @@ fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, Cli
     prepare_live(send, template, request)
 }
 
-/// A sink that writes each confirmed frame with `write` as the send publishes
-/// it, so partial progress is preserved when a later frame fails.
 fn writing(
     write: impl Fn(&packetcraftr::send::SentFrame) -> Result<(), CliError> + Send + 'static,
 ) -> impl packetcraftr::Sink<packetcraftr::send::Event, Ack = ()> {
@@ -45,7 +43,6 @@ fn writing(
     }
 }
 
-/// Sends the prepared request, keeping every frame for the report.
 fn collect(
     prepared: Prepared<packetcraftr::send::Request>,
 ) -> Result<packetcraftr::send::Aggregate, CliError> {
@@ -80,8 +77,6 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
     let prepared = prepare(arguments)?;
     match format {
         SendFormat::Text => {
-            // Each confirmed frame is reported as it happens, and its builder
-            // diagnostics are kept for the end of the run.
             let diagnostics = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let collected = std::sync::Arc::clone(&diagnostics);
             let report = prepared
@@ -135,7 +130,6 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             .map_err(CliError::classified)
             .map(|_| ()),
         SendFormat::Pcap | SendFormat::PcapNg => {
-            // The aggregate already holds every confirmed frame, in order.
             let report = collect(prepared)?;
             let capture_format = if format == SendFormat::Pcap {
                 capture::Format::Pcap

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded TLS parsing from byte slices, independent of TCP buffering.
-//! [`Outcome::NeedMore`] gives the total input length required; malformed input
-//! returns [`Outcome::Malformed`] without panicking.
-
 use bytes::Bytes;
 
 use super::super::{
@@ -15,30 +11,19 @@ use super::super::{
 mod handshake;
 pub use handshake::parse_handshake;
 
-/// The result of reading one framed item from a byte slice.
 #[derive(Debug)]
 pub enum Outcome<T> {
-    /// A complete item, with the number of input bytes it occupied.
     Complete {
-        /// Bytes consumed from the front of the input.
         consumed: usize,
         value: T,
     },
-    /// The input is a plausible prefix; `minimum` is the total input length
-    /// required before a `Complete` can be produced.
     NeedMore {
         /// Total input length needed, counting the bytes already supplied.
         minimum: usize,
     },
-    /// The input cannot be a valid item, whatever follows it. The error
-    /// describes which rule or limit it broke.
     Malformed(Error),
 }
 
-/// TLS dissection gate: requires a full [`RECORD_HEADER_LEN`], content type
-/// `20..=23`, version `0x0300..=0x0304`, and body length `1..=MAX_RECORD_BODY`.
-/// Accepts the same headers as [`parse_record`], so a passing record cannot
-/// then parse as malformed.
 #[must_use]
 pub fn looks_like_record_start(input: &[u8]) -> bool {
     input
@@ -140,7 +125,6 @@ impl<'a> Reader<'a> {
         Ok(slice)
     }
 
-    /// Takes a fixed-size field, so callers can index the array without bounds checks.
     fn array<const N: usize>(&mut self) -> Result<&'a [u8; N], Error> {
         let bytes = self.take(N)?;
         <&[u8; N]>::try_from(bytes)

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet recipes: format detection, the expression-then-YAML fallback, and
-//! payload targets.
-
 use bytes::Bytes;
 use packetcraftr_core::{
     document::{Format, payload, recipe},
@@ -40,7 +37,6 @@ fn recipes_read_as_documents_or_expressions() {
         names(&recipe(&format!("\n  {IPV4_UDP_JSON}"), None).unwrap()),
         ["ethernet", "ipv4", "udp", "raw"]
     );
-    // A YAML document without a leading marker is still a document.
     let unmarked = RAW_YAML.replacen("schema: packetcraftr.packet/v2\n", "", 1)
         + "schema: packetcraftr.packet/v2\n";
     assert_eq!(names(&recipe(&unmarked, None).unwrap()), ["raw"]);

@@ -14,7 +14,6 @@ use crate::output::frame::{Captured, Timestamp};
 use packetcraftr::dns::{self as library, response_code_name};
 
 published_enum! {
-    /// How one DNS attempt, or the whole query, ended.
     pub enum Outcome from library::Outcome {
         Response => "response",
         Truncated => "truncated",
@@ -26,7 +25,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// The transport a DNS attempt used.
     pub enum Transport from library::Transport {
         Udp => "udp",
         Tcp => "tcp",
@@ -34,7 +32,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// The response section a record came from.
     pub enum Section from library::Section {
         Answer => "answer",
         Authority => "authority",
@@ -43,7 +40,6 @@ published_enum! {
 }
 
 published_enum! {
-    /// Whether a batch question ran to completion.
     pub enum QuestionStatus from library::batch::QuestionStatus {
         Completed => "completed",
         Failed => "failed",
@@ -51,7 +47,6 @@ published_enum! {
     }
 }
 
-/// A response record validation set aside, with why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RejectedRecord {
     pub section: Section,
@@ -73,16 +68,10 @@ impl From<library::RejectedRecord> for RejectedRecord {
     }
 }
 
-/// The response-header block the aggregate result and the terminal record both
-/// publish, present exactly when a response was accepted.
-///
-/// Flattened at both use sites, so the emitted keys sit beside their siblings
-/// and a new header flag is declared once.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ResponseSummary {
     pub response_code: u16,
     pub response_code_name: String,
-    /// Absent when the response carried no OPT record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edns: Option<Edns>,
     pub authoritative: bool,
@@ -132,7 +121,6 @@ pub struct Report {
     pub undecoded: Vec<Undecoded>,
 }
 
-/// The response halves that only the aggregate result publishes.
 #[derive(Default)]
 struct ResponseRecords {
     answers: Vec<Record>,
@@ -150,7 +138,6 @@ impl From<Vec<library::RejectedRecord>> for ResponseRecords {
     }
 }
 
-/// One query, with its diagnostics and totals.
 impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
@@ -204,8 +191,6 @@ impl TryFrom<library::Aggregate> for Published<Report> {
     }
 }
 
-/// Splits a validated response into the flattened header summary, the record
-/// sections only the aggregate publishes, and the rejection tally both do.
 fn split_response(
     response: Option<library::ValidatedResponse>,
 ) -> (Option<ResponseSummary>, ResponseRecords, usize) {
@@ -266,17 +251,13 @@ impl TryFrom<library::UndecodedEvidence> for Undecoded {
     fn try_from(evidence: library::UndecodedEvidence) -> Result<Self, Error> {
         Ok(Self {
             attempt: evidence.attempt,
-            // DNS-over-TCP runs on a kernel socket and never yields captured
-            // frames, so undecoded evidence is UDP by construction. The schema
-            // pins this to the constant "udp".
+            // DNS-over-TCP runs on a kernel socket and never yields captured frames.
             transport: Transport::Udp,
             frame: evidence.frame.try_into()?,
         })
     }
 }
 
-/// Aggregate result of a `dns` batch: the shared server plus each question's
-/// deterministic outcome in input order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct BatchResult {
     pub server: String,
@@ -284,8 +265,6 @@ pub struct BatchResult {
     pub questions: Vec<QuestionResult>,
 }
 
-/// One batch question: uniform identity and status, the classified failure for
-/// `failed`, and the complete per-question result for `completed`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct QuestionResult {
     pub query_name: String,
@@ -310,7 +289,6 @@ pub struct QuestionComplete {
     pub error: Option<String>,
 }
 
-/// A question batch, with each diagnostic code once and the batch totals.
 impl TryFrom<library::batch::Aggregate> for Published<BatchResult> {
     type Error = Error;
 
@@ -334,8 +312,6 @@ impl TryFrom<library::batch::Aggregate> for Published<BatchResult> {
             } = question;
             let result = result
                 .map(|report| {
-                    // Questions in a batch trip the same codes; the aggregate
-                    // envelope carries one entry per code, not per question.
                     for diagnostic in report.diagnostics() {
                         packetcraftr_core::diagnostic::push_once(
                             &mut diagnostics,
@@ -444,8 +420,6 @@ pub enum Event {
         evidence: Undecoded,
     },
     Diagnostic {},
-    /// The terminal record for a multi-question batch: one status entry per
-    /// declared question, in input order.
     BatchComplete {
         server: String,
         server_port: u16,
@@ -468,7 +442,6 @@ pub enum Event {
     },
 }
 
-/// One DNS event, with any diagnostic it carried for the envelope.
 impl TryFrom<library::Event> for Published<Event> {
     type Error = Error;
 
@@ -533,7 +506,6 @@ impl TryFrom<library::Event> for Published<Event> {
     }
 }
 
-/// The terminal record of one query, with its totals.
 impl From<library::Report> for Published<Event> {
     fn from(summary: library::Report) -> Self {
         let rejected_record_count = summary
@@ -566,8 +538,6 @@ impl From<library::Report> for Published<Event> {
     }
 }
 
-/// The terminal record of a batch: every question's status in input order,
-/// with the batch totals.
 impl From<library::batch::Report> for Published<Event> {
     fn from(batch: library::batch::Report) -> Self {
         Self::new(

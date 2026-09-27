@@ -358,7 +358,6 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
         Name::from_labels(std::iter::repeat(Bytes::from_static(b"a"))),
         Err(DecodeError::NameTooLong)
     ));
-    // A limit above its ceiling is refused, never lowered to the ceiling.
     for (field, limits) in [
         (
             "max_message_bytes",

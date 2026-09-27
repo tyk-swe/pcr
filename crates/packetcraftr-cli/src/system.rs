@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The CLI's one composition root: the only place that names system
-//! providers, prepares live operations, and builds the client a command runs
-//! on. It also constructs the bounded output runtime and registers runtimes
-//! with diagnostics. Dispatch and rendering remain elsewhere.
-
 mod client;
 mod exchange;
 #[cfg(test)]

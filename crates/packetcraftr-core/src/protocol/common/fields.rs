@@ -141,13 +141,8 @@ where
     Ok(())
 }
 
-/// The discriminator this parent must (or should) carry for the child it
-/// actually holds.
-///
 /// An explicit `value` that already selects this child is honoured as-is:
-/// several protocols are registered under more than one discriminator —
-/// MPLS's two EtherTypes, PPPoE's two stages, ERSPAN's two GRE protocol
-/// types — and only one of them is the reverse binding's winner.
+/// several protocols are registered under more than one discriminator.
 pub(crate) fn expected_discriminator<T>(
     parent: &str,
     context: &LayerEncodeContext<'_>,
@@ -188,8 +183,6 @@ where
         )
 }
 
-/// A `List` field value over decoded text, for decode-only layers whose
-/// repeated fields are strings.
 pub(crate) fn text_list(values: &[String]) -> FieldValue {
     FieldValue::List(values.iter().cloned().map(FieldValue::Text).collect())
 }
@@ -212,10 +205,6 @@ where
     Ok(Box::new(layer))
 }
 
-/// Applies one document field, which may name a nested path such as
-/// `questions[0].name`, to a layer under construction. The document key is
-/// parsed here, at the document edge; a key that is not a path is an unknown
-/// field.
 pub(crate) fn set_document_field<L>(
     layer: &mut L,
     name: &str,
@@ -233,11 +222,6 @@ where
     layer.set_field_path(&path, value)
 }
 
-/// Rejects a field supplied under two spellings at once.
-///
-/// Both spellings write the same member, so accepting them would silently
-/// drop one of the caller's values. The alias table comes from the schema, so
-/// every layer is covered without a per-codec list.
 fn reject_aliased_duplicates(
     schema: &'static crate::layer::Schema,
     fields: &BTreeMap<String, FieldValue>,

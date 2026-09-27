@@ -25,47 +25,30 @@ const NAME: &str = BuiltinProtocol::Erspan.as_str();
 const ERSPAN_II_LEN: usize = 8;
 const ERSPAN_III_LEN: usize = 12;
 const SUBHEADER_LEN: usize = 8;
-/// The O bit of the Type III flag word: an optional subheader follows.
 const SUBHEADER_FLAG: u16 = 0x0001;
 const TYPE_II_PROTOCOL: u64 = 0x88be;
 const TYPE_III_PROTOCOL: u64 = 0x22eb;
 
 /// ERSPAN mirrored-frame header, Type II (version 1) or Type III (version 2).
-///
-/// Both types end in the mirrored Ethernet frame. The Type III extras are
-/// grouped in [`ErspanType3`], present exactly when `version` is 2.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Erspan {
     /// Header version: 1 is Type II, 2 is Type III.
     pub version: u8,
-    /// VLAN of the mirrored frame.
     pub vlan: u16,
-    /// Class of service of the mirrored frame.
     pub cos: u8,
     /// Type II: trunk encapsulation type. Type III: bad/short frame bits.
     pub encapsulation: u8,
-    /// The mirrored frame was truncated by the session MTU.
     pub truncated: bool,
-    /// 10-bit monitoring-session identifier.
     pub session_id: u16,
-    /// Type II: reserved 12 bits and the 20-bit port index, packed as the
-    /// final word. Type III leaves this zero.
     pub index_word: u32,
-    /// Type III extras; present exactly when `version` is 2.
     pub type3: Option<ErspanType3>,
 }
 
-/// The Type III fields between the session word and the mirrored frame.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ErspanType3 {
     pub timestamp: u32,
-    /// Security group tag.
     pub sgt: u16,
-    /// The final half-word: P bit, frame type, hardware ID, direction,
-    /// timestamp granularity, and the optional-subheader flag.
     pub flags: u16,
-    /// The 8-byte platform-specific subheader; present exactly when the
-    /// flag word's O bit is set.
     pub subheader: Option<Bytes>,
 }
 
@@ -161,8 +144,6 @@ impl LayerCodec for ErspanCodec {
                     return Err(truncated(NAME, ERSPAN_III_LEN, input.len()));
                 };
                 type3_header = Some(header);
-                // The flag word's O bit places an 8-byte subheader before
-                // the mirrored frame.
                 if u16::from_be_bytes([header[10], header[11]]) & SUBHEADER_FLAG != 0 {
                     ERSPAN_III_LEN.saturating_add(SUBHEADER_LEN)
                 } else {
@@ -237,7 +218,6 @@ impl LayerCodec for ErspanCodec {
             layer: Box::new(layer),
             consumed: header_len,
             payload_len,
-            // The mirrored frame is always Ethernet.
             next: vec![Discriminator(0)],
             diagnostics,
             stop: payload_len == 0,
@@ -372,8 +352,6 @@ fn validate_parent(
 fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
     let mut fields = erspan_static_layout();
     if let Some(type3) = &layer.type3 {
-        // The index word does not exist in a Type III header; its slot is
-        // the timestamp, the trailing flag word, and the optional subheader.
         fields.retain(|field| field.name != "index_word");
         for (name, start, end) in [("timestamp", 4, 8), ("sgt", 8, 10), ("flags", 10, 12)] {
             fields.push(crate::layout::FieldLayout {

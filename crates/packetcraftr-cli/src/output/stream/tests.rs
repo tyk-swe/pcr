@@ -152,8 +152,6 @@ fn classified_error_includes_typed_context() {
         error.context,
         Some(crate::output::envelope::ErrorContext::Attempt(7))
     );
-    // The externally tagged coordinate publishes exactly the one key the
-    // output contract declares.
     let value = serde_json::to_value(&error).expect("error serializes");
     assert_eq!(
         value.get("context"),
@@ -292,9 +290,6 @@ proptest! {
         }
         let bytes = buffer.bytes();
         prop_assert_eq!(bytes.last(), Some(&b'\n'));
-        // Physical NDJSON framing: one complete JSON value per line. A
-        // streaming deserializer would also accept concatenated values or a
-        // record spread across lines, so parse line-wise instead.
         let text = std::str::from_utf8(&bytes).unwrap();
         let records: Vec<serde_json::Value> = text
             .lines()
@@ -385,9 +380,6 @@ fn an_operation_deadline_bounds_waiting_for_the_encoder_lock() {
     assert!(owner.is_open());
 }
 
-/// Generous bound on the fixture's release wait so a broken test fails
-/// instead of blocking the writer worker forever; far above the millisecond
-/// production deadline under test.
 const RELEASE_WATCHDOG: Duration = Duration::from_secs(30);
 
 struct Blocked {

@@ -1,14 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Selector arguments: `--interface NAME_OR_INDEX` and
-//! `--stream TRANSPORT:INDEX`.
-//!
-//! Clap parses each value into its type once, while arguments are parsed, but
-//! a malformed value is reported where the command reads the selector: after
-//! the output-format check, and for route selection after policy admission.
-//! That keeps the error a malformed selector publishes, and which error wins
-//! when several inputs are wrong, as they were for the untyped arguments.
+//! A malformed value is reported where the command reads the selector, not while parsing.
 
 use std::convert::Infallible;
 use std::fmt;
@@ -19,9 +12,7 @@ use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 
-/// A validated `--interface` value. Decimal selectors are always indexes:
-/// zero and values outside the public `u32` index domain never fall back to
-/// interface-name lookup.
+/// Decimal selectors are always indexes and never fall back to interface-name lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InterfaceSelector {
     Name(String),
@@ -29,7 +20,6 @@ pub(crate) enum InterfaceSelector {
 }
 
 impl InterfaceSelector {
-    /// Validates a selector without consulting a platform provider.
     pub(crate) fn parse(selector: &str) -> Result<Self, CliError> {
         if selector.is_empty() {
             return Err(CliError::new(Kind::Usage, "--interface cannot be empty"));
@@ -49,7 +39,6 @@ impl InterfaceSelector {
     }
 }
 
-/// The library selector the client resolves after admission.
 impl From<InterfaceSelector> for packetcraftr::route::Interface {
     fn from(selector: InterfaceSelector) -> Self {
         match selector {
@@ -68,7 +57,6 @@ impl fmt::Display for InterfaceSelector {
     }
 }
 
-/// A parsed selector argument and the text it was parsed from.
 #[derive(Clone, Debug)]
 pub(crate) struct Selector<T> {
     text: String,
@@ -76,16 +64,10 @@ pub(crate) struct Selector<T> {
 }
 
 impl<T: Clone> Selector<T> {
-    /// The value as written on the command line.
     pub(crate) fn text(&self) -> &str {
         &self.text
     }
 
-    /// The selected value.
-    ///
-    /// # Errors
-    ///
-    /// A usage error naming the argument when the value was malformed.
     pub(crate) fn get(&self) -> Result<T, CliError> {
         self.parsed
             .clone()
@@ -93,7 +75,6 @@ impl<T: Clone> Selector<T> {
     }
 }
 
-/// The `--interface` value parser.
 pub(crate) fn interface_selector(text: &str) -> Result<Selector<InterfaceSelector>, Infallible> {
     Ok(Selector {
         text: text.to_owned(),
@@ -101,11 +82,7 @@ pub(crate) fn interface_selector(text: &str) -> Result<Selector<InterfaceSelecto
     })
 }
 
-/// The `--stream` value parser: `tcp:INDEX` or `udp:INDEX`.
-///
-/// Both transports parse, so each command states its own restriction:
-/// `follow` follows either, while a TCP-only command rejects a `udp:`
-/// selector with a message that says why.
+/// Both transports parse, so each command states its own restriction.
 pub(crate) fn stream_selector(text: &str) -> Result<Selector<StreamRef>, Infallible> {
     Ok(Selector {
         text: text.to_owned(),

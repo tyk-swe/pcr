@@ -1,54 +1,26 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Clipping live boundary waits to an operation [`Deadline`], and the
-//! deadlines workflows hand to providers.
-//!
-//! Providers take a core [`Deadline`] by reference (see
-//! [`packetcraftr_netio::deadline`]). Workflows that track their operation
-//! deadline as an [`Instant`] build that argument from the instant and the
-//! operation's cancellation signal.
-
 use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded};
 
-/// The allowance a passive route or interface lookup gets when its operation
-/// has no deadline of its own.
+/// Allowance for a passive route or interface lookup whose operation has no deadline.
 pub const PASSIVE_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The provider deadline for work bounded by the wall-clock `deadline`,
-/// carrying the operation's `cancellation`.
 pub(crate) fn until(deadline: Instant, cancellation: Option<Cancellation>) -> Deadline {
     Deadline::new(deadline.saturating_duration_since(Instant::now()))
         .with_cancellation(cancellation)
 }
 
-/// A spent deadline: a capture read given it takes only what is already
-/// queued, while still honoring `cancellation`.
+/// A spent deadline: a capture read given it takes only what is already queued.
 pub(crate) fn immediate(cancellation: Option<Cancellation>) -> Deadline {
     Deadline::new(Duration::ZERO).with_cancellation(cancellation)
 }
 
-/// Boundary waits bounded by what remains of an operation [`Deadline`].
 pub trait DeadlineExt {
-    /// Clips a child boundary's `requested` timeout to the wall-clock budget
-    /// still available, so the child can never outlive the operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] after the operation budget is spent or
-    /// when nothing remains for the child to spend.
     fn bounded_timeout(&self, requested: Duration) -> Result<Duration, DeadlineExceeded>;
 
-    /// Starts a real-time boundary wait capped by the remaining operation
-    /// budget, carrying the same cancellation signal. Deterministic parent
-    /// accounting allocates the allowance; the actual wait uses wall time.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] under the same conditions as
-    /// [`bounded_timeout`](Self::bounded_timeout).
     fn for_wait(&self, requested: Duration) -> Result<Deadline, DeadlineExceeded>;
 }
 
@@ -70,9 +42,6 @@ impl DeadlineExt for Deadline {
     }
 }
 
-/// Implements the two conversions a workflow error with a `DurationLimit`
-/// variant needs to accept [`Interrupted`](packetcraftr_core::budget::Interrupted)
-/// through `?`.
 macro_rules! deadline_error_conversions {
     ($error:ty) => {
         impl ::std::convert::From<::packetcraftr_core::budget::DeadlineExceeded> for $error {

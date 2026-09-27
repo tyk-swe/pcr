@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for the offline fuzz engine: determinism, bounded resources, and
-//! progressive output.
-
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 
@@ -120,9 +117,7 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
         fuzz_protocol_registry(),
     )
     .unwrap_err();
-    // The base packet's own reflected values exhaust the 64-byte campaign
-    // budget, so the first value that no longer fits is refused by name
-    // instead of being reported as one byte over the limit.
+    // The base packet's own reflected values exhaust the 64-byte campaign budget.
     assert!(
         matches!(error, Error::ValueTooLarge { limit: 64 }),
         "{error:?}"

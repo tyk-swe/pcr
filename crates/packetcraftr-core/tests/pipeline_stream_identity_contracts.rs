@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for frame indices and stream identity across interfaces and
-//! tunnels.
-
 mod common;
 
 use common::{CLIENT, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};

@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Frame-boundary rotation. Slots retain owned file handles so explicit ring
-//! reuse never opens or truncates an unrelated pre-existing pathname.
+//! Slots retain owned file handles so explicit ring reuse never opens or
+//! truncates an unrelated pre-existing pathname.
 
 use crate::command_options::Compression;
 use crate::output::capture::{File as FileReport, Files as FilesReport, Retention};
@@ -283,8 +283,6 @@ impl Files {
         report.last_source_frame = Some(source_frame);
         let capture_bytes = report.capture_bytes;
         self.budget = budget;
-        // Stop exactly at a full final slot when possible; otherwise a later
-        // boundary reports its one matched but unpublished frame explicitly.
         if self.options.retention == Retention::Stop
             && self.slots.len() == self.options.max_files
             && self
@@ -619,8 +617,6 @@ mod tests {
         assert_eq!(read_file(&report.files[0])[0].bytes(), frame(3).bytes());
         assert_eq!(read_file(&report.files[1])[0].bytes(), frame(4).bytes());
     }
-    /// Elapsed time comes from the capture engine's monotonic clock, so a
-    /// regression is a broken invariant rather than a usage error.
     #[test]
     fn elapsed_time_regression_is_an_internal_failure() {
         let directory = tempfile::tempdir().unwrap();

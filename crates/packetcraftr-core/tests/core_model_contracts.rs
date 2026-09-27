@@ -180,10 +180,6 @@ fn erased_classified_error_retains_source_classification_and_causes() {
     );
 }
 
-/// `causes` is derived once by walking `Error::source()`, so an implementor
-/// never hand-writes the walk, and a wrapper that only restates the failure it
-/// carries — `#[error(transparent)]` and `BoundaryError::from_error` both
-/// produce exactly that — contributes nothing of its own.
 #[test]
 fn source_chain_walks_every_link_and_drops_restated_wrappers() {
     #[derive(Debug, thiserror::Error)]
@@ -204,13 +200,9 @@ fn source_chain_walks_every_link_and_drops_restated_wrappers() {
 
     assert_eq!(source_chain(&Root), Vec::<String>::new());
     assert_eq!(source_chain(&Middle(Root)), ["root cause"]);
-    // A wrapper that only restates its source publishes nothing of its own,
-    // so the chain below it is what a caller sees.
     assert_eq!(source_chain(&Restating(Root)), Vec::<String>::new());
     assert_eq!(source_chain(&Outer(Restating(Root))), ["root cause"]);
 
-    // An erased classified error restates the error it retains, so the erasure
-    // adds no duplicate entry to a caller that walks the chain through it.
     let boundary = BoundaryError::from_error(ClassifiedFailure);
     assert_eq!(boundary.to_string(), "classified failure");
     assert_eq!(source_chain(&boundary), Vec::<String>::new());

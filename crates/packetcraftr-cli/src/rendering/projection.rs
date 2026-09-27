@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded selected-field output shared by read, dissect, and capture.
-
 use crate::output::{
     self,
     contract::{Command, Format},
@@ -207,8 +205,6 @@ fn quoted(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
     writer.write_all(b"\"")
 }
 
-/// The one rejection for a command output format that requires `--field`
-/// selections; each command applies it to the formats it declared projected.
 pub(crate) fn missing_fields_error() -> CliError {
     CliError::new(
         core::error::Kind::Usage,

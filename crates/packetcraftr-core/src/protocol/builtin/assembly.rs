@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Assembly of the deterministic default registry from the built-in codecs,
-//! matchers, and bindings.
-
 use std::sync::{Arc, OnceLock};
 
 use crate::protocol::{
@@ -79,17 +76,6 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
     builtin_protocol_catalog!(register_protocols)
 }
 
-/// The default immutable registry, built once and shared by every caller.
-///
-/// The built-in catalog is a static property of compiled-in code, so this
-/// cannot fail at runtime; use [`registry_with`] when a caller-supplied
-/// closure may conflict with the defaults.
-///
-/// # Panics
-///
-/// Panics if the built-in catalog registers a duplicate protocol, alias, link
-/// type, matcher, or filter path — a defect in this crate, not in caller
-/// input.
 pub fn registry() -> Arc<crate::registry::Registry> {
     static REGISTRY: OnceLock<Arc<crate::registry::Registry>> = OnceLock::new();
     Arc::clone(REGISTRY.get_or_init(|| {
@@ -99,14 +85,6 @@ pub fn registry() -> Arc<crate::registry::Registry> {
 
 /// Build the default registry, then let the caller add bindings before it is
 /// frozen.
-///
-/// The default registry is immutable once built, so a command that remaps a
-/// service onto a non-standard port — `--tls-port 4433` — needs the extra
-/// binding before [`crate::registry::Builder::build`]. `extra` sees a builder
-/// already carrying every built-in codec and binding, so it can bind, but not
-/// unbind, and a conflicting binding is reported as
-/// [`crate::registry::Error`].
-///
 /// ```
 /// use packetcraftr_core::protocol::builtin;
 ///
@@ -134,14 +112,6 @@ where
 }
 
 /// Build the default registry with extra TCP ports dissected as TLS.
-///
-/// The built-in ports stay bound; `ports` adds to them. Re-binding a port that
-/// is already TLS is accepted, so a caller need not filter the default list.
-/// A port already bound to another protocol (DNS on 53, HTTP on 80 and 8080)
-/// fails with [`crate::registry::Error::BindingConflict`], as does port 0:
-/// TCP's discriminator 0 is the raw fallback every unbound port reaches, not a
-/// service port.
-///
 /// ```
 /// use packetcraftr_core::protocol::builtin;
 ///

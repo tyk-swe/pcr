@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Interface validation, route materialization, and exact replay transmission
-//! over the client's providers.
-
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::error::{Classified, Kind};
@@ -23,13 +20,9 @@ use crate::route::{Interface, Materialized as MaterializedRoute};
 
 use super::evidence::{Transmission, network_envelope};
 
-/// Carries out one approved frame: the engine authorizes the route returned
-/// by [`plan_frame`](Executor::plan_frame) and passes that same route to
-/// [`transmit`](Executor::transmit).
 pub(crate) trait Executor {
     /// Resolve and validate the concrete interface, then passively select and
-    /// materialize the final route, before any intentional delay. Interface
-    /// and route lookups receive the replay's `deadline`.
+    /// materialize the final route, before any intentional delay.
     fn plan_frame(
         &mut self,
         interface: &Interface,
@@ -38,7 +31,6 @@ pub(crate) trait Executor {
         deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError>;
 
-    /// Transmit the exact frame through the route that was authorized.
     fn transmit(
         &mut self,
         route: &MaterializedRoute,
@@ -46,8 +38,6 @@ pub(crate) trait Executor {
     ) -> Result<Transmission, LiveIoError>;
 }
 
-/// Maps route failures to live-I/O errors, retaining the provider's error as
-/// the source.
 pub(super) fn map_route_error<E: Classified + Send + Sync + 'static>(source: E) -> LiveIoError {
     let classification = source.classification();
     let source = packetcraftr_core::error::Source::new(source);
@@ -67,9 +57,6 @@ pub(super) fn map_route_error<E: Classified + Send + Sync + 'static>(source: E) 
     }
 }
 
-/// The client's interface, route, and transmit providers. Caches only the
-/// validated interface; each transmission uses the plan returned by the
-/// engine.
 pub(super) struct ProviderExecutor<'c, P> {
     providers: &'c P,
     validated_interface: Option<InterfaceInfo>,
@@ -152,7 +139,6 @@ impl<'c, P: Providers> ProviderExecutor<'c, P> {
     }
 }
 
-/// The name a routed interface was requested by; an index names none.
 fn requested_name(requested: &Interface) -> String {
     match requested {
         Interface::Id(id) => id.name.clone(),
@@ -195,8 +181,6 @@ fn materialized_route<Q: RouteProvider>(
                 neighbor_source: None,
                 neighbor_target: None,
                 destination_mac: None,
-                // Layer 2 replay sends the captured bytes unchanged, so
-                // there is no materialized packet source MAC.
                 source_mac: None,
                 neighbor_vlan_tags: Vec::new(),
                 synthesized_ethernet: false,
@@ -360,7 +344,6 @@ mod tests {
         }
     }
 
-    /// Providers that outlive every executor a test builds over them.
     fn providers() -> &'static FakeProviders {
         Box::leak(Box::default())
     }
@@ -555,8 +538,6 @@ mod tests {
         assert!(route.plan.packet_source.is_none());
     }
 
-    /// A Layer 3 route can only be built from a network envelope the caller
-    /// already validated, and an unresolved link mode never produces one.
     #[test]
     fn route_materialization_requires_a_resolved_mode_and_a_validated_envelope() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
@@ -583,8 +564,6 @@ mod tests {
             ),
             Err(LiveIoError::UnresolvedLinkMode)
         ));
-        // The envelope reaches the route only through `plan_frame`, which
-        // rejects bytes that are not a raw network datagram before it is built.
         let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(

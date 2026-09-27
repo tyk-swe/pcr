@@ -76,8 +76,6 @@ fn a_complete_tie_keeps_the_first_response() {
     assert_eq!(best.map(|candidate| candidate.observation), Some(1));
 }
 
-/// Records what [`EvidenceState`] publishes and fails the `fail_on`th
-/// deadline check.
 struct RecordingSink {
     emitted: Vec<String>,
     checks: usize,

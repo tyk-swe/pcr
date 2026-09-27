@@ -26,8 +26,6 @@ pub(super) enum ReaderState {
 }
 
 /// Streaming capture reader; construction consumes only the container header.
-/// [`next_record`](Self::next_record) preserves source structure, while
-/// [`next_frame`](Self::next_frame) skips metadata records.
 pub struct Reader<R> {
     inner: R,
     state: ReaderState,
@@ -144,17 +142,13 @@ impl<R: Read> Reader<R> {
         })
     }
 
-    /// Checks a cooperative stop signal before and after each source record,
-    /// including metadata and EOF. An in-progress `Read` must return first.
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: Cancellation) -> Self {
         self.cancellation = Some(cancellation);
         self
     }
 
-    /// Shares the invocation ceiling across records, metadata, EOF, and rewind.
-    /// Construction reads a header, so callers also gate before and after
-    /// constructing a reader. Blocking `Read` calls remain cooperative.
+    /// Construction reads a header, so callers also gate before and after constructing a reader.
     #[must_use]
     pub fn with_deadline(mut self, deadline: std::sync::Arc<crate::budget::Deadline>) -> Self {
         self.deadline = Some(deadline);
@@ -186,10 +180,6 @@ impl<R: Read> Reader<R> {
         self.header.format()
     }
 
-    /// Returns the current byte order.
-    ///
-    /// For PCAPNG this starts with the first section and changes after a later
-    /// section header is consumed.
     pub fn endianness(&self) -> Endianness {
         match self.state {
             ReaderState::Pcap { endianness, .. } => endianness,
@@ -197,11 +187,6 @@ impl<R: Read> Reader<R> {
         }
     }
 
-    /// Interface metadata parsed so far.
-    ///
-    /// Classic PCAP exposes its single global interface immediately. PCAPNG
-    /// descriptions are appended while [`next_frame`](Self::next_frame)
-    /// advances the stream, before any frame that references them is returned.
     pub fn interfaces(&self) -> &[Interface] {
         &self.interfaces
     }
@@ -210,7 +195,6 @@ impl<R: Read> Reader<R> {
         &self.header
     }
 
-    /// Reads the next source record, including metadata and validated bytes.
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
         if self.finished {
             return Ok(None);
@@ -258,7 +242,6 @@ impl<R: Read> Reader<R> {
         Ok(record)
     }
 
-    /// Reads the next frame, consuming but not returning metadata records.
     pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
         while let Some(record) = self.next_record()? {
             if let Some(frame) = record.frame {
@@ -294,8 +277,6 @@ impl<R: Read> Iterator for Reader<R> {
 }
 
 impl<R: Read + Seek> Reader<R> {
-    /// Reopens a seekable capture from its first header, resetting all section
-    /// and interface state while retaining limits and cancellation.
     pub fn rewind(&mut self) -> Result<(), Error> {
         self.check_interrupted()?;
         self.finished = true;

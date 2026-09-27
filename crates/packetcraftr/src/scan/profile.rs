@@ -1,10 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Explicit UDP fixture payloads and bounded application response checks,
-//! compiled from the profiles a `packetcraftr.udp-profiles/v1` document
-//! ([`udp_profiles`], read by core)
-//! assigns to ports. Confirmation means the configured checks matched, not
+//! Confirmation means the configured checks matched, not
 //! authenticated identity.
 use bytes::Bytes;
 use packetcraftr_core::document::udp_profiles::{self, Config, Payload, ResponseCheck};
@@ -39,28 +36,19 @@ pub struct UdpProfile {
     payload: Compiled,
     charge: usize,
 }
-/// Why a UDP profile, or a document's assignment of profiles to ports, is
-/// refused.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// One profile breaks a bound; the reason names which.
     #[error("invalid UDP profile: {0}")]
     Invalid(&'static str),
-    /// The document itself could not be read.
     #[error(transparent)]
     Document(#[from] udp_profiles::Error),
     #[error("each UDP profile needs 1..=4096 port entries")]
     PortCount { count: usize },
-    /// The distinct compiled profiles exceed
-    /// [`MAX_PROFILE_BYTES`](udp_profiles::MAX_PROFILE_BYTES).
     #[error("compiled UDP profiles exceed 1 MiB")]
     Storage,
-    /// Two different profiles claim the same port.
     #[error("conflicting UDP profiles for port {port}")]
     ConflictingPort { port: u16 },
-    /// The assignments map more than
-    /// [`MAX_PROFILE_PORTS`](udp_profiles::MAX_PROFILE_PORTS) ports.
     #[error("UDP profiles exceed 4096 mapped ports")]
     MappedPorts,
 }

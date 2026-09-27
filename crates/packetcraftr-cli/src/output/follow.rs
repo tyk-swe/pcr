@@ -9,7 +9,6 @@ use super::analysis::{Clock, Endpoint, Scope, StreamTransport};
 use super::contract::Error;
 use super::hex::compact_hex;
 
-/// Which peer of a conversation sent a run of payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum PeerDirection {
     #[serde(rename = "client")]
@@ -27,12 +26,10 @@ impl From<follow::PeerDirection> for PeerDirection {
     }
 }
 
-/// One run of conversation payload, in delivery order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Chunk {
     pub direction: PeerDirection,
     pub direction_generation: u64,
-    /// Frame whose arrival delivered these bytes.
     pub frame: u64,
     pub bytes_hex: String,
 }
@@ -48,7 +45,6 @@ impl From<follow::Chunk> for Chunk {
     }
 }
 
-/// One direction payload file `follow --write` published.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct WrittenFile {
     pub direction: PeerDirection,
@@ -56,7 +52,6 @@ pub struct WrittenFile {
     pub bytes: u64,
 }
 
-/// A published direction file: its direction, path, and byte count.
 impl From<(follow::PeerDirection, String, u64)> for WrittenFile {
     fn from((direction, path, bytes): (follow::PeerDirection, String, u64)) -> Self {
         Self {
@@ -73,7 +68,6 @@ pub struct Report {
     pub transport: StreamTransport,
     pub stream: u64,
     pub scope: Option<Scope>,
-    /// Absent when the capture holds no frame of the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<Endpoint>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,18 +75,13 @@ pub struct Report {
     pub frames: u64,
     pub client_bytes: u64,
     pub server_bytes: u64,
-    /// TCP bytes captured but stranded behind missing segments.
     pub undelivered_bytes: u64,
     pub chunks: Vec<Chunk>,
-    /// Files `--write` published, in deterministic publish order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub written: Vec<WrittenFile>,
     pub ip_reassembly: super::reassembly::Report,
 }
 
-/// One followed conversation: its selector, summary, the chunks retained for
-/// the document, the capture's IP reassembly, and the files `--write`
-/// published.
 impl
     TryFrom<(
         library::StreamRef,

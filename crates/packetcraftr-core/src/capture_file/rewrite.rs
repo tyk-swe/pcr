@@ -30,7 +30,6 @@ pub struct RewriteReport {
     pub metadata_records: u64,
 }
 
-/// Rewrites a capture without changing its format or dropping source records.
 /// Every validated source record, including section lengths, is copied verbatim.
 pub fn rewrite<R: Read, W: Write>(
     reader: &mut Reader<R>,
@@ -51,16 +50,7 @@ pub fn rewrite<R: Read, W: Write>(
     ))
 }
 
-/// Copies selected packet records and all metadata in the source format.
-///
-/// The predicate receives the original one-based frame number. Every input
-/// packet consumes the limits, even when rejected. Selected packets and metadata
-/// are copied verbatim except PCAPNG section lengths, which become unknown.
-/// Retained interface statistics describe the source capture, not the selection.
-/// No related packets or fragments are automatically included.
-///
-/// An empty selection succeeds. Errors may leave a partial capture in `output`;
-/// input validation continues through EOF and the output is flushed on success.
+/// The predicate receives the original one-based frame number.
 pub fn select<R: Read, W: Write, F>(
     reader: &mut Reader<R>,
     output: W,
@@ -107,7 +97,6 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
             if !predicate(report.frames_read, frame)? {
                 continue;
             }
-            // Selected totals cannot exceed the already checked input totals.
             report.frames_selected = report.frames_selected.saturating_add(1);
             report.captured_bytes_selected = report
                 .captured_bytes_selected

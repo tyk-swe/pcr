@@ -11,8 +11,7 @@ use packetcraftr_core::protocol::application::dns::{
 
 fuzz_target!(|data: &[u8]| {
     // The first two bytes select entry offset and pointer budget; the remainder
-    // is the DNS message. Also feed it to the dissector to exercise the
-    // question loop.
+    // is the DNS message.
     let split = data.len().min(2);
     let (control, message) = data.split_at(split);
     let message = Bytes::copy_from_slice(message);
@@ -25,14 +24,12 @@ fuzz_target!(|data: &[u8]| {
 
     let expanded = decode_name(&message, start, limits(max_pointers));
 
-    // Decompression is a pure function of its three inputs.
     assert_eq!(
         expanded,
         decode_name(&message, start, limits(max_pointers)),
         "decompression must be deterministic"
     );
 
-    // Raising the pointer ceiling can only admit more names, never fewer.
     if expanded.is_ok() && max_pointers < MAX_NAME_POINTERS {
         assert!(
             decode_name(&message, start, limits(max_pointers + 1)).is_ok(),

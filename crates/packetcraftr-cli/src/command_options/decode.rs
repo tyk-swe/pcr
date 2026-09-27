@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Explicit, compatible port bindings for offline decoding.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -89,7 +87,6 @@ impl DecodeArgs {
         builtin::registry_with(|builder| {
             for ((parent, port), child) in bindings {
                 // The builder rejects changing an existing child's priority.
-                // Identical default mappings already have the desired result.
                 if default.child_for(parent, Discriminator(u64::from(port))) != Some(child) {
                     builder.bind(parent, u64::from(port), child, i32::MAX)?;
                 }

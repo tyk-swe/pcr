@@ -16,32 +16,10 @@ use super::evidence::{evidence_loss, finish_stats, replace_sources};
 use super::executor::Armed;
 use super::{Cause, Control, Error, Event, Report, Request, StopReason};
 
-/// The longest single read, so cancellation, the budget, and the window are
-/// checked at least this often while no frame arrives.
 const READ_SLICE: Duration = Duration::from_millis(50);
 
 impl<P: Providers, K: Clock> Client<P, K> {
-    /// Captures from every interface the request names, as one capture group
-    /// under one frame and byte budget from the client's policy.
-    ///
-    /// Every source is armed and ready before [`Event::Started`] is
-    /// published. Each delivered frame is then charged to the budget, offered
-    /// to the request's selector, and, when kept, published as an
-    /// [`Event::Frame`] whose `interface` is its source index. Events reach
-    /// `sink` on a worker admitted by the client's runtime, and the capture
-    /// waits for each [`Control`] before it reads the next frame. The capture
-    /// stops when the window closes on the client's clock, the frame budget
-    /// is spent, or the sink asks it to, and the client's cancellation stops
-    /// it with a failure. Every exit shuts every armed source down before
-    /// the report is returned.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the provider, budget, selector, or sink
-    /// failure, the cancellation, or evidence lost under
-    /// [`OverflowPolicy::Fail`](packetcraftr_netio::capture::OverflowPolicy::Fail). The error keeps
-    /// the report of everything done before it, after every source was shut
-    /// down.
+    /// Captures from every interface the request names, as one capture group.
     pub fn capture<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event>,
@@ -64,7 +42,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
             Ok(publisher) => publisher,
             Err(cause) => return Err(failure(cause, report, None)),
         };
-        // Each event gets the longest wait a capture has.
         let mut publish = |event: Event| -> Result<Control, Cause> {
             publisher(
                 event,
@@ -98,7 +75,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
                 report.stop = StopReason::FrameBudget;
                 break;
             }
-            // Reads wait on the capture in real time, never past the window.
             let Ok(slice) = deadline.for_wait(READ_SLICE) else {
                 report.stop = StopReason::Window;
                 break;
@@ -167,8 +143,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
                 }
             }
         }
-        // A group failure already shut every source down; this reports that
-        // cleanup, or performs it after any other exit.
         let mut cleanup = Vec::new();
         if let Err(error) = group.shutdown() {
             if primary.is_none() {

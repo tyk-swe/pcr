@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Internet Control Message Protocol models.
-
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
@@ -68,9 +66,6 @@ impl Default for Icmpv6 {
     }
 }
 
-/// Reads `width` big-endian bytes at `start` inside `body` as an unsigned
-/// view. Views are structural lenses over the verbatim `body` member, so a
-/// message too short to cover a window simply reports the field absent.
 fn body_unsigned(body: &Bytes, start: usize, width: usize) -> Option<FieldValue> {
     let bytes = body.get(start..start.checked_add(width)?)?;
     let mut value = 0_u64;
@@ -80,15 +75,10 @@ fn body_unsigned(body: &Bytes, start: usize, width: usize) -> Option<FieldValue>
     Some(FieldValue::Unsigned(value))
 }
 
-/// The bytes after the leading four-byte type-specific field: the quoted
-/// datagram for error messages and the payload for echo-style messages.
-/// Present, but empty, when the complete type-specific field has no payload.
 fn body_rest(body: &Bytes) -> Option<FieldValue> {
     (body.len() >= 4).then(|| FieldValue::Bytes(body.slice(4..)))
 }
 
-/// Writes `bytes` at `start` inside `body`, zero-extending a shorter body so
-/// typed views edit in place and untouched bytes stay verbatim.
 fn patch_body(body: &mut Bytes, start: usize, bytes: &[u8]) {
     let end = start.saturating_add(bytes.len());
     let mut edited = Vec::with_capacity(body.len().max(end));
@@ -98,8 +88,6 @@ fn patch_body(body: &mut Bytes, start: usize, bytes: &[u8]) {
     *body = Bytes::from(edited);
 }
 
-/// Replaces the bytes `rest` covers, keeping the leading type-specific field
-/// intact and zero-filling it when the body does not yet carry one.
 fn patch_body_rest(body: &mut Bytes, rest: &[u8]) {
     let mut edited = Vec::with_capacity(4usize.saturating_add(rest.len()));
     edited.extend_from_slice(body.get(..4).unwrap_or(body));
@@ -121,7 +109,6 @@ fn body_unsigned_value(
 
 macro_rules! icmp_body_view_setters {
     ($schema:ident) => {
-        /// Edits the `identifier` view: the echo identifier at body bytes 0-2.
         fn set_identifier(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             let value = body_unsigned_value($schema(), name, value)?;
             let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
@@ -129,7 +116,6 @@ macro_rules! icmp_body_view_setters {
             Ok(())
         }
 
-        /// Edits the `sequence` view: the echo sequence at body bytes 2-4.
         fn set_sequence(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             let value = body_unsigned_value($schema(), name, value)?;
             let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
@@ -137,7 +123,6 @@ macro_rules! icmp_body_view_setters {
             Ok(())
         }
 
-        /// Edits the `rest` view: bytes after the type-specific field.
         fn set_rest(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             match value {
                 FieldValue::Bytes(value) => {
@@ -150,8 +135,7 @@ macro_rules! icmp_body_view_setters {
     };
 }
 
-/// Appends a fixed body-view byte range when the decoded body covers the
-/// window; `body` starts at message offset four.
+/// `body` starts at message offset four.
 fn view_layout(
     fields: &mut Vec<FieldLayout>,
     body_len: usize,
@@ -163,8 +147,6 @@ fn view_layout(
     }
 }
 
-/// Appends the trailing `rest` view that covers whatever follows the four-byte
-/// type-specific field, then orders the layout by message offset.
 fn finish_layout(mut fields: Vec<FieldLayout>, body_len: usize) -> Vec<FieldLayout> {
     if body_len >= 4 {
         fields.push(FieldLayout {
@@ -245,8 +227,6 @@ reflective_layer! {
     layout fn icmpv4_base_layout(body_len: usize);
 }
 
-/// The field layout an ICMPv4 message reports: verbatim `body` plus the typed
-/// view windows the body covers.
 fn icmpv4_layout(body_len: usize) -> Vec<FieldLayout> {
     let mut fields = icmpv4_base_layout(body_len);
     view_layout(&mut fields, body_len, "pointer", ByteRange::new(4, 5));
@@ -260,7 +240,6 @@ fn icmpv4_layout(body_len: usize) -> Vec<FieldLayout> {
 impl Icmpv4 {
     icmp_body_view_setters!(icmpv4_schema);
 
-    /// Edits the `gateway` view: the redirect gateway at body bytes 0-4.
     fn set_gateway(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let address = match value {
             FieldValue::Ipv4(address) => address,
@@ -273,7 +252,6 @@ impl Icmpv4 {
         Ok(())
     }
 
-    /// Edits the `mtu` view: the 16-bit next-hop MTU at body bytes 2-4.
     fn set_mtu(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv4_schema(), name, value)?;
         let value = u16::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
@@ -281,7 +259,6 @@ impl Icmpv4 {
         Ok(())
     }
 
-    /// Edits the `pointer` view: the parameter-problem octet at body byte 0.
     fn set_pointer(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv4_schema(), name, value)?;
         let value = u8::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
@@ -351,8 +328,6 @@ reflective_layer! {
     layout fn icmpv6_base_layout(body_len: usize);
 }
 
-/// The field layout an ICMPv6 message reports: verbatim `body` plus the typed
-/// view windows the body covers.
 fn icmpv6_layout(body_len: usize) -> Vec<FieldLayout> {
     let mut fields = icmpv6_base_layout(body_len);
     view_layout(&mut fields, body_len, "identifier", ByteRange::new(4, 6));
@@ -365,8 +340,6 @@ fn icmpv6_layout(body_len: usize) -> Vec<FieldLayout> {
 impl Icmpv6 {
     icmp_body_view_setters!(icmpv6_schema);
 
-    /// Edits a 32-bit view over the whole type-specific field at body bytes
-    /// 0-4: the packet-too-big `mtu` and the parameter-problem `pointer`.
     fn set_body_word(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv6_schema(), name, value)?;
         let value = u32::try_from(value).map_err(|_| out_of_range(icmpv6_schema(), name))?;
@@ -408,7 +381,6 @@ impl LayerCodec for Icmpv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        // prefix begins with the four-byte ICMP header pushed above
         {
             prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         }
@@ -499,7 +471,6 @@ impl LayerCodec for Icmpv6Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        // prefix begins with the four-byte ICMP header pushed above
         {
             prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         }

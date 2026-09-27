@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Classic pcap fixtures shared by the capture contracts.
-
 use std::time::SystemTime;
 
 use packetcraftr_core::capture_file::{PcapOptions, Writer};

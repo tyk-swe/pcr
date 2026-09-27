@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture-reading selected-field workflow, with analysis only when required.
-
 use packetcraftr_core as core;
 
 use super::arguments::Args;
@@ -77,8 +75,6 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         frames = summary.frames_read;
         bytes = summary.bytes_read;
     } else {
-        // The stream-capable filter takes the analysis branch above, so the
-        // frame-at-a-time seam applies here.
         let decoder =
             core::filter::FrameDecoder::new(registry, filter, args.limits.reader.max_frame_bytes)
                 .map_err(CliError::classified)?;

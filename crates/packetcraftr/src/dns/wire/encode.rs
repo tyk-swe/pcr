@@ -6,9 +6,6 @@ use bytes::Bytes;
 use super::name::canonical_query_name;
 use crate::dns::CLASS_IN;
 
-/// Constructs one standard IN-class DNS query without resolver or I/O side
-/// effects. Absent EDNS settings preserve the plain query bytes; settings
-/// append one option-free EDNS v0 OPT record after validation.
 pub fn encode_query(
     query_name: &str,
     query_type: crate::dns::QueryType,

@@ -155,7 +155,6 @@ impl LayerCodec for FragmentCodec {
             next: if fragment_offset == 0 && offset_flags & 1 == 0 {
                 vec![Discriminator(u64::from(header[0]))]
             } else {
-                // Non-atomic fragments retain opaque Raw payloads.
                 vec![Discriminator(255)]
             },
             fields: fragment_layout(),

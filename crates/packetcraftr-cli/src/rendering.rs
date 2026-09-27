@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Machine, capture-file, and human-terminal rendering, including bounded
-//! field projection, application-event output, and retained aggregate results.
-//! Commands own input preparation and command-specific output restrictions.
-
 mod aggregate;
 mod analysis;
 mod application;

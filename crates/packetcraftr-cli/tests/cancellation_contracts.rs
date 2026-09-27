@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// These contracts observe child processes through procfs and deliver INT/TERM
-// through a `kill` utility; the package build script enables the gate on
-// targets that provide both facilities.
 #![cfg(packetcraftr_test_procfs)]
 
 use std::io::{Cursor, Write};
@@ -19,9 +16,6 @@ use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 
 mod common;
 
-// Every process assertion has finite cleanup, including failures before stdin
-// is released. Output files normally keep a generating child from blocking on
-// stdout; a piped stdout remains undrained until finish to test backpressure.
 struct Running {
     child: Child,
     stdout: tempfile::NamedTempFile,
@@ -151,14 +145,13 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
             true,
         );
         // Observe the blocked write itself so the signal always lands after
-        // publication starts, regardless of process or analysis startup time.
+        // publication starts.
         process.wait_until(|p| {
             std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
                 .unwrap()
                 .contains("pipe_write")
         });
         process.signal(signal);
-        // The handler consumes the signal while stdout remains blocked.
         std::thread::sleep(Duration::from_millis(100));
         let output = process.finish();
         assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
@@ -198,8 +191,6 @@ fn build_retains_signal_termination_while_recipe_stdin_is_open() {
 #[test]
 fn cancellation_during_build_json_publication_keeps_one_complete_document() {
     common::require_procfs();
-    // The rendered payload exceeds the pipe capacity, keeping publication
-    // blocked until the signal has been handled and finish drains stdout.
     let payload_len = 64 * 1024;
     let recipe = format!("raw(text={})", "x".repeat(payload_len));
     for signal in ["INT", "TERM"] {
@@ -269,8 +260,6 @@ fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
                         .any(|bytes| bytes == b"before")
                 });
                 process.signal(if eof { "TERM" } else { "INT" });
-                // Allow the handler thread to consume the delivered signal
-                // before releasing the blocked input read.
                 std::thread::sleep(Duration::from_millis(100));
                 if !eof {
                     let _ = stdin.write_all(&later);
@@ -332,8 +321,6 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
                     if records.last().unwrap()["event"] == "error" {
                         assert_eq!(records.last().unwrap()["error"]["code"], "io.cancelled");
                     } else {
-                        // Cancellation can interrupt acknowledgment of an active
-                        // write. The encoder then fails closed without a terminal.
                         assert!(records.iter().all(|record| record["event"] == "case"));
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         assert!(

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for handshake shapes: retries, alerts, buffering after the
-//! hellos, orientation, encrypted hellos, and non-TLS traffic.
-
 mod common;
 
 use common::tls_capture::{Capture, Stream, assemble_default, complete_handshake};
@@ -29,7 +26,6 @@ fn a_hello_retry_request_yields_retry_then_completes_with_the_first_hellos_finge
         ..ServerHelloSpec::default()
     }));
 
-    // Interrupted after the retry: the client never came back.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -42,8 +38,6 @@ fn a_hello_retry_request_yields_retry_then_completes_with_the_first_hellos_finge
     assert!(sessions[0].hello_retry);
     assert!(sessions[0].server.is_none());
 
-    // The full exchange, with the TLS 1.3 compatibility change_cipher_spec
-    // between the retry and the second hello.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -63,7 +57,6 @@ fn a_hello_retry_request_yields_retry_then_completes_with_the_first_hellos_finge
     assert_eq!(retried[0].status, Status::Complete);
     assert!(retried[0].hello_retry);
 
-    // The fingerprints are the first hello's, not the retried offer's.
     let mut plain = Capture::new();
     let mut stream = Stream::new(40_000);
     plain.open(&mut stream);
@@ -98,7 +91,6 @@ fn a_fatal_alert_before_the_server_hello_ends_the_session_as_alert() {
     assert_eq!(sessions[0].alerts[0].description, ALERT_HANDSHAKE_FAILURE);
     assert_eq!(summary.by_status.get(&Status::Alert), Some(&1));
 
-    // A warning alert is recorded but does not end the handshake.
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -156,7 +148,6 @@ fn a_tls12_certificate_chain_is_not_buffered() {
         alpn: Some("http/1.1".to_owned()),
         ..ServerHelloSpec::default()
     }));
-    // A certificate chain far larger than one direction may buffer.
     answer.extend_from_slice(&handshake_records(&certificate(120_000), 16_000));
     for segment in split(&answer, 12) {
         capture.server(&mut stream, &segment);
@@ -194,8 +185,6 @@ fn a_stream_that_is_not_tls_never_becomes_a_session() {
 fn a_capture_starting_with_a_server_frame_reorients_on_the_client_hello() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
-    // The capture starts mid-connection, and the first frame it holds for the
-    // conversation is the server's, so the roles are elected the wrong way.
     capture.server(&mut stream, b"");
     capture.client(
         &mut stream,

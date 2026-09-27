@@ -10,9 +10,6 @@ use super::*;
 
 use packetcraftr_core::budget::Deadline;
 
-/// Field-by-field equality for an error that retains a system source and
-/// so cannot derive `PartialEq`. `Debug` renders every field, the source
-/// included, so this compares strictly more than a derived `==` did.
 #[track_caller]
 fn assert_same_error(actual: &Error, expected: &Error) {
     assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
@@ -98,12 +95,9 @@ impl ScriptedStream {
     }
 }
 
-/// How much of the caller's deadline a scripted read spends before it
-/// delivers bytes.
 #[derive(Clone, Copy, Debug)]
 enum Pacing {
     Prompt,
-    /// Advance virtual time past the timeout installed for this read.
     PastDeadline,
 }
 
@@ -204,7 +198,6 @@ fn connector(input: Vec<u8>) -> ScriptedConnector {
     }
 }
 
-/// Budget measured entirely by the scripted monotonic clock.
 const SCRIPTED_TIMEOUT: Duration = Duration::from_millis(50);
 
 fn request(query: &[u8]) -> Request<'_> {

@@ -14,10 +14,8 @@ use crate::frame::DEFAULT_MAX_SIZE;
 use crate::analysis::{Constraint, Error};
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
-/// A TCP conversation occupies one reassembly flow per direction.
 pub(super) const DIRECTIONS_PER_CONVERSATION: usize = 2;
 
-/// The offline analysis name of a TCP reassembly limit.
 const fn tcp_field(field: tcp::Field) -> &'static str {
     match field {
         tcp::Field::MaxFlows => "max_tcp_flows",
@@ -28,7 +26,6 @@ const fn tcp_field(field: tcp::Field) -> &'static str {
     }
 }
 
-/// The offline analysis name of an IP reassembly limit.
 const fn ip_field(field: ip::Field) -> &'static str {
     match field {
         ip::Field::MaxDatagrams => "max_ip_datagrams",
@@ -40,30 +37,18 @@ const fn ip_field(field: ip::Field) -> &'static str {
     }
 }
 
-/// Complete per-run resource limits, including both reassembly engines. Frame
-/// and byte limits count all input, including filtered frames; duration bounds
-/// processing time.
+/// Frame and byte limits count all input, including filtered frames.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Physical source-set allocations, including references retained by collectors.
     pub max_provenance_bytes: usize,
-    /// Physical input frames. This also bounds persistent capture-scope
-    /// metadata: one frame can introduce at most three exact scope identities.
     pub max_frames: u64,
     pub max_bytes: u64,
     pub max_frame_bytes: usize,
-    /// Capture-global cumulative distinct conversations per transport. Expiry
-    /// releases payload state, not these indices. A TCP conversation additionally
-    /// occupies one reassembly flow per direction, so the default
-    /// [`tcp.max_flows`](TcpReassemblyLimits::max_flows) is twice this default.
+    /// Cumulative distinct conversations per transport; expiry does not release them.
     pub max_flows: usize,
-    /// Conservative retained scope/path metadata charge, separate from payload state.
     pub max_scope_bytes: usize,
-    /// The TCP reassembler's limits. Its aggregate byte ceiling is the largest
-    /// single memory ceiling an analysis run has.
     pub tcp: TcpReassemblyLimits,
-    /// The IP fragment reassembler's limits. Its aggregate byte ceiling also
-    /// covers derived cascade buffers.
+    /// Its aggregate byte ceiling also covers derived cascade buffers.
     pub ip: IpReassemblyLimits,
     pub max_duration: Duration,
 }
@@ -88,10 +73,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Rejects a zero limit, a per-frame byte limit above `max_bytes`, and
-    /// any reassembly limit its engine refuses. Reassembly fields are named
-    /// as the offline analysis options spell them, such as
-    /// `max_tcp_bytes_per_flow`.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
@@ -185,8 +166,6 @@ impl Limits {
         Ok(())
     }
 
-    /// The input frame and byte budget. Its limits are this struct's
-    /// `max_frames` and `max_bytes`, so a refusal names those fields.
     pub(super) fn capture_budget(&self) -> Result<CaptureBudget, Error> {
         CaptureBudget::new(CaptureLimits {
             max_frames: self.max_frames,

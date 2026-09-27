@@ -23,8 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The state every pipelined fixture starts from: answers are held back
-/// until two probes are in flight, so windows overlap.
 fn overlapping() -> State {
     State {
         hold_replies_until: 2,
@@ -234,8 +232,6 @@ fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
     assert_eq!(winner(2), 1);
 }
 
-/// A clock that starts at real time and advances a fixed step each time it
-/// is read, and by the whole delay when asked to sleep.
 #[derive(Clone)]
 struct SteppingClock(Arc<Mutex<Instant>>);
 
@@ -246,7 +242,6 @@ impl SteppingClock {
         Self(Arc::new(Mutex::new(Instant::now())))
     }
 
-    /// The current time, without advancing it.
     fn peek(&self) -> Instant {
         *self.0.lock().unwrap()
     }

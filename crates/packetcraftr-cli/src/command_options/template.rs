@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded packet-set arguments shared by build and exchange.
-
 use clap::Args;
 use packetcraftr_core::{
     error::Kind,
@@ -34,7 +32,6 @@ struct Axis {
     values: Vec<FieldValue>,
 }
 
-/// An axis operand whose size is known before its values are materialized.
 enum AxisSource {
     List(Vec<FieldValue>),
     Range(NumericRange),
@@ -49,8 +46,6 @@ impl TemplateArgs {
         crate::resources::declare!(settings, self, [max_template_packets: Count @ Operation]);
     }
 
-    /// Check syntax, aggregate input size, and the complete expansion ceiling
-    /// before a caller reads its recipe or performs route preparation.
     pub(crate) fn parse(self) -> Result<ParsedTemplate, CliError> {
         let maximum = self.max_template_packets;
         if maximum == 0 {
@@ -87,9 +82,8 @@ impl TemplateArgs {
             if field.is_empty() {
                 return Err(syntax());
             }
-            // A bare START..END[:STEP] operand is a range; anything else must be
-            // a bracketed expression list. Range lengths count arithmetically so
-            // oversized spans fail on the ceiling before any value materializes.
+            // Range lengths count arithmetically so oversized spans fail on the
+            // ceiling before any value materializes.
             let (source, axis_len) = if values.starts_with('[') {
                 let FieldValue::List(values) = expression::parse_value(values, limits.clone())
                     .map_err(CliError::classified)?
@@ -108,8 +102,6 @@ impl TemplateArgs {
                 })?;
                 (AxisSource::Range(range), axis_len)
             };
-            // This boundary check precedes route preparation; the library
-            // independently checks expansion for callers that bypass the CLI.
             count = count.checked_mul(axis_len).ok_or_else(|| {
                 CliError::classified(packetcraftr_core::template::Error::ExpansionOverflow)
             })?;
@@ -135,9 +127,6 @@ impl TemplateArgs {
     }
 }
 
-/// Parses a `START..END[:STEP]` axis operand. Endpoints and the step are
-/// unsigned decimal or `0x`-prefixed integers; the range is inclusive,
-/// ascending, and produces `FieldValue::Unsigned` values.
 fn parse_range(text: &str) -> Result<NumericRange, CliError> {
     let syntax = || {
         CliError::new(

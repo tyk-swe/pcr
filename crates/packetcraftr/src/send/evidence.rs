@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Confirmed transmissions and their consistency with the terminal report.
-
 use super::{Error, Report};
 use crate::evidence::SentPacket;
 
-/// One confirmed transmission inside a send.
 #[derive(Clone, Debug)]
 pub struct SentFrame {
     /// One-based pass over the packet set.
@@ -16,11 +13,8 @@ pub struct SentFrame {
     pub packet: SentPacket,
 }
 
-/// What a send publishes while it runs. Each event is answered before the
-/// next frame is transmitted.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// The provider confirmed this frame.
     Sent(SentFrame),
 }
 

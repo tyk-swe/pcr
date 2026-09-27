@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Compact packet expressions.
-
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
@@ -128,10 +126,7 @@ pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet,
         });
     }
     limits.validate()?;
-    // Enforce the layer ceiling while scanning instead of first collecting
-    // every slash-delimited slice. Otherwise a delimiter-heavy expression
-    // can amplify a small byte budget into a much larger temporary vector
-    // even when the caller allows only a handful of layers.
+    // Bound layers while scanning so delimiters cannot amplify a small byte budget.
     let segments = split_top_level_bounded(input, '/', Some(limits.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
     for (layer_index, segment) in segments.into_iter().enumerate() {
@@ -159,9 +154,7 @@ pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet,
     Ok(packet)
 }
 
-/// Parses one reflective value using the packet expression grammar, including
-/// nested lists. Byte and nesting limits apply before parsing; `max_layers`
-/// has no effect because this input contains no layer stack.
+/// `max_layers` has no effect because this input contains no layer stack.
 pub fn parse_value(input: &str, limits: Limits) -> Result<FieldValue, Error> {
     if input.len() > limits.max_bytes {
         return Err(Error::SizeLimit {
@@ -466,11 +459,6 @@ fn split_top_level_bounded(
     Ok(result)
 }
 
-/// Walks input while tracking quotes, escapes, and bracket nesting.
-///
-/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth for the
-/// assignment scanner; the splitter keeps the depths separate so a mismatched
-/// bracket reports the offending character.
 struct TopLevelScanner<'a> {
     chars: std::str::CharIndices<'a>,
     quoted: bool,
@@ -567,9 +555,7 @@ impl<'a> TopLevelScanner<'a> {
 }
 
 enum ScanFailure {
-    /// A closing bracket appeared without a matching opener.
     Unbalanced { offset: usize, character: char },
-    /// A quote or bracket was still open at the end of the input.
     Unterminated,
 }
 

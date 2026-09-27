@@ -5,7 +5,6 @@ use super::{contract::Error, frame::Timestamp};
 use packetcraftr_core::analysis::provenance::SourceFrame;
 use serde::Serialize;
 
-/// One capture frame a reconstructed record drew bytes from.
 #[derive(Debug, Serialize)]
 pub struct Source {
     pub number: u64,

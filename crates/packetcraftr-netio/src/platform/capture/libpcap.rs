@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! libpcap-backed capture session creation and frame stream.
-
 #![allow(unsafe_code)]
 
 mod bpf;
@@ -38,9 +36,7 @@ use crate::{
 use packetcraftr_core::error::Source;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
-// The locked pcap crate calls pcap_set_* through private raw bindings that
-// discard the status code, so the settings this file must accept or reject
-// are invoked on the real libpcap symbols directly.
+// The pcap crate's pcap_set_* bindings discard the status, so these call libpcap directly.
 #[link(name = "pcap")]
 unsafe extern "C" {
     fn pcap_snapshot(handle: *mut c_void) -> c_int;
@@ -99,8 +95,7 @@ pub(in crate::platform) fn open_capture(
                 ),
             )
         })?;
-    // SAFETY: capture is activated and remains live and immutably borrowed for
-    // this query; pcap_snapshot only reads its configured snapshot length.
+    // SAFETY: capture is activated and borrowed; pcap_snapshot only reads its snapshot length.
     let reported_snap_length = unsafe { pcap_snapshot(capture.as_ptr().cast()) };
     let snap_length = validate_effective_snapshot_length(
         "libpcap",
@@ -108,8 +103,7 @@ pub(in crate::platform) fn open_capture(
         limits.snap_length,
         reported_snap_length,
     )?;
-    // SAFETY: capture is activated and remains live for this query;
-    // pcap_get_tstamp_precision only reads the negotiated precision.
+    // SAFETY: capture is activated and live; pcap_get_tstamp_precision only reads the precision.
     let reported_precision = unsafe { pcap_get_tstamp_precision(capture.as_ptr().cast()) };
     let (native, timestamp_precision) = realize_settings(
         "libpcap",
@@ -134,9 +128,6 @@ pub(in crate::platform) fn open_capture(
     })
 }
 
-/// Applies every requested setting on the inactive handle. Any rejection is
-/// returned before activation, so no applied setting is ever silently absent
-/// from the session.
 fn apply_native_settings(
     interface: &InterfaceId,
     handle: *mut c_void,
@@ -193,9 +184,6 @@ fn apply_native_settings(
     Ok(())
 }
 
-/// The timestamp types libpcap advertises for this interface, read from a
-/// created-but-not-activated handle; no worker or activated device is left
-/// behind on failure.
 pub(in crate::platform) fn timestamp_types(
     interface: &InterfaceId,
 ) -> Result<Vec<TimestampType>, Error> {
@@ -215,8 +203,7 @@ pub(in crate::platform) fn timestamp_types(
             source: Diagnostic::new(Some(count), inactive_error_message(handle)).into_source(),
         });
     }
-    // A zero count means only the default timestamp type is supported;
-    // libpcap returns no allocation, so the null list must not become a slice.
+    // libpcap returns no allocation for a zero count, so the null list must not become a slice.
     if count == 0 {
         return Ok(Vec::new());
     }
@@ -240,8 +227,7 @@ pub(in crate::platform) fn timestamp_types(
     Ok(values
         .into_iter()
         .map(|value| {
-            // SAFETY: both functions return a static NUL-terminated string or
-            // NULL; any text is copied before the next call.
+            // SAFETY: both functions return a static NUL-terminated string or NULL, copied at once.
             let name = unsafe { tstamp_type_string(pcap_tstamp_type_val_to_name(value)) };
             // SAFETY: same contract as the name lookup.
             let description =
@@ -256,13 +242,11 @@ pub(in crate::platform) fn timestamp_types(
         .collect())
 }
 
-/// Copies a static libpcap string, returning `None` for a NULL or empty one.
 unsafe fn tstamp_type_string(raw: *const c_char) -> Option<String> {
     if raw.is_null() {
         return None;
     }
-    // SAFETY: `raw` is NULL-checked above and points to a NUL-terminated
-    // string libpcap owns statically; the copy happens inside this call.
+    // SAFETY: `raw` is non-NULL and points to a static NUL-terminated libpcap string.
     let value = unsafe { CStr::from_ptr(raw) }
         .to_string_lossy()
         .into_owned();
@@ -285,7 +269,6 @@ fn inactive_error_message(handle: *mut c_void) -> String {
 struct PcapCaptureSource {
     capture: Capture<Active>,
     snap_length: usize,
-    /// The fraction unit the backend delivers in `ts.tv_usec`; never assumed.
     timestamp_precision: TimestampPrecision,
 }
 

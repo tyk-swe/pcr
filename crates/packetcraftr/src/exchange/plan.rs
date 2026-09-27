@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Admission and preparation of the complete exchange before capture starts.
-
 use super::{Collection, Error, Request, Window};
 use crate::preparation::{Admitted, PreparedPacket};
 use crate::route::CachedProvider;
@@ -42,8 +40,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
         let routes = CachedProvider::new(self.providers.route());
         let mut admitted: Vec<Admitted> = Vec::with_capacity(expanded_packets.len());
         loop {
-            // Expansion allocates, so the operation's stop conditions are
-            // checked before each packet is pulled.
+            // Expansion allocates, so stop conditions are checked before each packet is pulled.
             admission.check()?;
             let Some(expanded_packet) = expanded_packets.next() else {
                 break;
@@ -58,8 +55,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
             admitted.push(admitted_packet);
         }
         let total_bytes = admission.wire_bytes();
-        // Neighbor discovery is delayed until every packet has passed packet,
-        // route, permissive-build, and aggregate byte-policy checks.
+        // Neighbor discovery waits until every packet has passed every policy check.
         let discovery = admission.discover();
         let packets = admitted
             .into_iter()
@@ -78,8 +74,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     }
 }
 
-/// Every packet of one exchange, admitted and materialized, with the window
-/// and collection bounds its capture runs under.
 pub(crate) struct Prepared {
     pub(crate) cancellation: Option<packetcraftr_core::budget::Cancellation>,
     pub(crate) window: Window,

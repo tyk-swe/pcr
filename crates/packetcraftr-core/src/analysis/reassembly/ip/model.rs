@@ -18,7 +18,6 @@ pub enum Family {
     Ipv6,
 }
 
-/// Exact IPv4 fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Ipv4DatagramKey {
     pub scope: ScopeId,
@@ -28,7 +27,6 @@ pub struct Ipv4DatagramKey {
     pub protocol: u8,
 }
 
-/// Exact IPv6 fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Ipv6DatagramKey {
     pub scope: ScopeId,
@@ -37,7 +35,6 @@ pub struct Ipv6DatagramKey {
     pub identification: u32,
 }
 
-/// Exact, capture-scoped fragment association key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "family", rename_all = "snake_case")]
 pub enum DatagramKey {
@@ -55,40 +52,29 @@ impl DatagramKey {
     }
 }
 
-/// One decoded non-atomic IPv4 fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ipv4Fragment {
     pub key: Ipv4DatagramKey,
     /// Offset in eight-byte units, exactly as encoded on the wire.
     pub fragment_offset: u16,
     pub more_fragments: bool,
-    /// Exact IPv4 header bytes for this physical fragment.
     pub header: Bytes,
-    /// Exact fragment payload, excluding the IPv4 header and link padding.
     pub payload: Bytes,
 }
 
-/// One decoded non-atomic IPv6 fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ipv6Fragment {
     pub key: Ipv6DatagramKey,
     /// Offset in eight-byte units, exactly as encoded on the wire.
     pub fragment_offset: u16,
     pub more_fragments: bool,
-    /// Next Header carried by the Fragment header.
     pub next_header: u8,
-    /// Exact IPv6 base header and extension headers preceding the Fragment
-    /// header. The Fragment header itself is excluded.
     pub unfragmentable_prefix: Bytes,
-    /// Byte in `unfragmentable_prefix` whose Next Header value points at the
-    /// removed Fragment header. This is byte 6 for a bare IPv6 header and byte
-    /// 0 of the immediately preceding extension header otherwise.
+    /// Byte in `unfragmentable_prefix` whose Next Header pointed at the removed Fragment header.
     pub predecessor_next_header_offset: usize,
-    /// Exact fragmentable payload, excluding the Fragment header.
     pub payload: Bytes,
 }
 
-/// One decoded non-atomic fragment offered to the reassembler.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fragment {
     Ipv4(Ipv4Fragment),
@@ -105,20 +91,15 @@ impl Fragment {
     }
 }
 
-/// Deterministic policy for conflicting fragment bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlapPolicy {
-    /// Reject a fragment carrying any byte that differs from retained data.
     #[default]
     Reject,
-    /// Preserve the byte received first.
     First,
-    /// Replace it with the byte received last.
     Last,
 }
 
-/// Classification of the physical fragment just admitted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum FragmentDisposition {
@@ -135,7 +116,6 @@ pub enum FragmentDisposition {
     },
 }
 
-/// Per-fragment evidence returned after a successful admission.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FragmentOutcome {
     pub key: DatagramKey,
@@ -145,11 +125,9 @@ pub struct FragmentOutcome {
     pub known_final_length: Option<usize>,
 }
 
-/// A complete raw IPv4 or IPv6 datagram derived from physical fragments.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletedDatagram {
     pub key: DatagramKey,
-    /// Raw network-layer bytes, beginning with the IPv4 or IPv6 base header.
     pub bytes: Bytes,
     pub fragment_count: usize,
     pub unique_bytes: usize,
@@ -158,7 +136,6 @@ pub struct CompletedDatagram {
     pub overlap_bytes: usize,
 }
 
-/// Result of admitting one physical fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PushOutcome {
     Accepted(FragmentOutcome),
@@ -168,7 +145,6 @@ pub enum PushOutcome {
     },
 }
 
-/// Why a partial datagram was retired.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IncompleteReason {
@@ -176,7 +152,6 @@ pub enum IncompleteReason {
     EndOfCapture,
 }
 
-/// Bounded evidence for a datagram that retired with gaps.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IncompleteDatagram {
     pub key: DatagramKey,
@@ -196,7 +171,6 @@ impl IncompleteDatagram {
     }
 }
 
-/// Bounded incomplete outcomes from one expiry or end-of-capture sweep.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RetiredDatagrams {
     pub outcomes: Vec<IncompleteDatagram>,
@@ -222,7 +196,6 @@ pub enum Resource {
     IdleExpiryRange { expiry: Duration },
 }
 
-/// Malformed or mutually inconsistent fragment input.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Malformed {
@@ -263,8 +236,7 @@ pub enum Error {
     Resource(#[from] Resource),
     #[error(transparent)]
     Malformed(#[from] Malformed),
-    /// Contradictory retained state: mismatched family or missing completion
-    /// evidence. Classified as an internal defect, not malformed capture input.
+    /// Contradictory retained state; an internal defect, not malformed capture input.
     #[error("IP reassembly state is inconsistent: {reason}")]
     Inconsistent { reason: &'static str },
 }

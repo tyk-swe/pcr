@@ -1,10 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS-over-TCP framing over an explicitly selected TCP provider.
-//!
-//! Callers authorize destinations and validate DNS responses. Each query
-//! reads one declared response frame, then drops the connection.
+//! Bounded DNS-over-TCP framing; callers authorize destinations and validate responses.
 
 use packetcraftr_netio::tcp::{self, Provider, Stream};
 use std::fmt;
@@ -19,32 +16,24 @@ use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 use thiserror::Error as ThisError;
 
-/// Bytes in the DNS-over-TCP message-length prefix.
 pub const LENGTH_PREFIX_BYTES: usize = 2;
 
-/// One bounded DNS-over-TCP query request.
 #[derive(Clone, Copy, Debug)]
 pub struct Request<'a> {
-    /// Already-authorized numeric DNS server endpoint.
     pub endpoint: SocketAddr,
     /// Exact DNS message, without the TCP length prefix.
     pub query: &'a [u8],
-    /// Time remaining in the workflow attempt.
     pub timeout: Duration,
-    /// The operation's cancellation signal, carried into the admitted connect.
     pub cancellation: Option<&'a Cancellation>,
     /// Maximum accepted DNS message bytes, excluding the prefix.
     pub max_message_bytes: usize,
 }
 
-/// The socket phase in which a bounded operation failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Phase {
     Connect,
-    /// Writing the prefixed DNS query.
     Write,
-    /// Reading the two-byte response prefix.
     ReadPrefix,
     ReadMessage,
 }
@@ -60,24 +49,14 @@ impl fmt::Display for Phase {
     }
 }
 
-/// The retry-relevant class of a DNS-over-TCP failure.
-///
-/// Every [`Error`] variant belongs to exactly one category, and the category
-/// decides both the stable classification and how a workflow may react.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Category {
-    /// The operation was cancelled before its connection completed.
     Cancelled,
-    /// The caller submitted a request that is not a runnable bounded query.
     Request,
-    /// This build or route cannot execute DNS over TCP at all.
     Unsupported,
-    /// The bounded attempt deadline expired during a socket phase.
     Timeout,
-    /// A socket operation failed before an orderly response.
     Network,
-    /// The peer's DNS-over-TCP framing was incomplete or oversized.
     Framing,
 }
 
@@ -92,21 +71,14 @@ pub enum Error {
     InvalidTimeout { value: Duration },
     #[error("DNS-over-TCP query must not be empty")]
     EmptyQuery,
-    /// The local query cannot be represented by the two-byte wire prefix.
     #[error("DNS-over-TCP query is {actual} bytes; maximum is {maximum}")]
     QueryTooLarge { actual: usize, maximum: usize },
-    /// The response bound is not representable by DNS-over-TCP framing.
     #[error("DNS-over-TCP message limit {value} is invalid; expected 1..={maximum}")]
     InvalidMessageLimit { value: usize, maximum: usize },
     #[error("DNS-over-TCP deadline overflowed for timeout {value:?}")]
     DeadlineOverflow { value: Duration },
     #[error("DNS-over-TCP deadline expired during {phase} after {transferred} phase byte(s)")]
     Timeout { phase: Phase, transferred: usize },
-    /// The TCP connection could not be established.
-    ///
-    /// `message` names the socket step; the system failure that step reported,
-    /// when there was one, stays in `source` instead of being formatted into
-    /// the message.
     #[error("DNS-over-TCP connection to {endpoint} failed: {message}")]
     Connect {
         endpoint: SocketAddr,
@@ -123,10 +95,6 @@ pub enum Error {
         #[source]
         source: Source,
     },
-    /// The prefixed query could not be written completely.
-    ///
-    /// A socket refusal keeps its system failure in `source`; the module's own
-    /// accounting invariants have no source and say so in `message` alone.
     #[error("DNS-over-TCP query write stopped after {written} of {expected} bytes: {message}")]
     Write {
         written: usize,
@@ -135,10 +103,6 @@ pub enum Error {
         #[source]
         source: Option<Source>,
     },
-    /// A response read failed before an orderly end of stream.
-    ///
-    /// A socket refusal keeps its system failure in `source`; the module's own
-    /// accounting invariants have no source and say so in `message` alone.
     #[error("DNS-over-TCP {phase} failed: {message}")]
     Read {
         phase: Phase,
@@ -160,11 +124,7 @@ pub enum Error {
 }
 
 impl Error {
-    /// The retry-relevant class of this failure.
-    ///
-    /// This is the single classifier: an exhaustive match, so a new variant is
-    /// a compile error here instead of being silently reported as a caller
-    /// request fault.
+    /// An exhaustive match, so a new variant is a compile error rather than a silent request fault.
     #[must_use]
     pub const fn category(&self) -> Category {
         match self {
@@ -187,7 +147,6 @@ impl Error {
         }
     }
 
-    /// Exact framed-query bytes written before this failure.
     #[must_use]
     pub const fn query_bytes_written(&self, framed_query_bytes: usize) -> usize {
         match self {
@@ -269,34 +228,20 @@ impl Classified for Error {
     }
 }
 
-/// Receipt for one complete, exactly framed DNS-over-TCP response.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Response {
-    /// Remote endpoint confirmed by the connected socket.
     pub peer_address: SocketAddr,
-    /// Local socket selected by the operating system.
     pub local_address: SocketAddr,
-    /// Wall-clock marker recorded after the complete query was written.
     pub sent_at: SystemTime,
-    /// Wall-clock marker recorded after the declared body arrived.
     pub received_at: SystemTime,
-    /// Monotonic duration for connect, write, and read together.
     pub elapsed: Duration,
-    /// Monotonic duration from query-write completion through response receipt.
     pub latency: Duration,
-    /// Exact number of prefix and query bytes written.
     pub bytes_written: usize,
-    /// One exact DNS-over-TCP frame, including its two-byte prefix. Its length
-    /// is the exact number of prefix and response bytes read.
+    /// One exact DNS-over-TCP frame, including its two-byte prefix.
     pub frame: Bytes,
 }
 
-/// Runs one bounded DNS-over-TCP query through the selected provider.
-/// The shared provider moves into an admitted native connect worker; a
-/// cancelled or expired wait returns while a stalled call retains its slot
-/// until cleanup finishes.
-/// Writes one framed query and reads the first framed response. Subsequent
-/// messages on the stream are outside this response.
+/// A cancelled or expired wait returns while a stalled connect keeps its worker slot until cleanup.
 pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Error>
 where
     P: Provider<Stream: 'static> + 'static,
@@ -482,9 +427,6 @@ fn remaining(
         .ok_or(Error::Timeout { phase, transferred })
 }
 
-/// A connect that timed out, at the socket or before it could start, is the
-/// connect phase's timeout; any other failure keeps its socket error, or the
-/// provider's own failure, as its source.
 fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
     use packetcraftr_netio::tcp::Error as TcpError;
 

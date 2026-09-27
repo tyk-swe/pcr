@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Opaque byte layers: `Raw` payloads, trailing `Padding`, and `Malformed`
-//! bytes. They are part of the layer model, so every codec and engine can use
-//! them without depending on a protocol.
-
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -31,10 +27,6 @@ impl Raw {
         }
     }
 
-    /// The field layout of a `Raw` layer holding `length` bytes: one `bytes`
-    /// field spanning all of them. A codec that decodes or encodes opaque
-    /// bytes as `Raw` attaches this to its [`DecodedLayer`] or
-    /// [`EncodedLayer`].
     pub fn layout(length: usize) -> Vec<crate::layout::FieldLayout> {
         raw_layout(length)
     }
@@ -56,7 +48,6 @@ reflective_layer! {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Padding {
     pub bytes: Bytes,
-    /// First layer index whose declared coverage excludes these bytes.
     /// `None` denotes link padding excluded from every dependent payload.
     pub outside_layer: Option<usize>,
 }
@@ -64,9 +55,6 @@ pub struct Padding {
 impl Padding {
     pub(crate) const ID: Id = Id::new("padding");
 
-    /// Whether the layer at `layer_index` excludes these bytes from its
-    /// payload: link padding is excluded everywhere, and coverage-bounded
-    /// padding from the layer that declared the boundary onward.
     pub fn excluded_from(&self, layer_index: usize) -> bool {
         self.outside_layer
             .is_none_or(|outside_layer| layer_index >= outside_layer)
@@ -202,7 +190,6 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
     Ok(Bytes::from(bytes))
 }
 
-// each arm bounds value to its own ASCII range, so the subtraction and the plus ten stay inside u8
 fn hex_nibble(value: u8) -> Option<u8> {
     match value {
         b'0'..=b'9' => Some(value - b'0'),

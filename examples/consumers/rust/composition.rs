@@ -3,10 +3,6 @@
 
 //! Composes local route and recording-I/O providers with an explicit
 //! destination policy and finite budgets. No network traffic is sent.
-//!
-//! Production composes `SystemProviders` under the same policy
-//! contract; the client resolves neighbors over its own transmit and capture
-//! providers. Run with scripts/check-external-consumer.py.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -26,10 +22,8 @@ use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr_netio::{interface, tcp, transmit};
 
-/// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
 
-/// On-link route provider with one dual-capability Ethernet interface.
 struct DocumentationRoutes;
 
 impl Provider for DocumentationRoutes {
@@ -60,7 +54,6 @@ impl Provider for DocumentationRoutes {
     }
 }
 
-/// Retains submitted bytes for inspection without transmitting them.
 #[derive(Clone, Default)]
 struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -102,8 +95,6 @@ fn packet(destination: Ipv4Addr) -> Result<packetcraftr_core::packet::Packet, ex
 
 #[test]
 fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
-    // Allow only TEST-NET-1, with an 8-packet / 16 KiB per-operation budget
-    // enforced before provider calls.
     let policy = Policy {
         allowed_destinations: vec![DestinationConstraint::Network(
             packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,
@@ -117,9 +108,6 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    // The recording sender transmits and captures; this workflow never
-    // selects an interface by name, connects over TCP, or resolves a
-    // hostname, so those capabilities keep their system providers unused.
     let providers = ProviderSet {
         route: DocumentationRoutes,
         interface: interface::SystemProvider,
@@ -130,8 +118,6 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = Client::new(builtin::registry(), policy, providers);
 
-    // Layer 3 planning skips neighbor resolution entirely, so the composed
-    // client never arms capture on the recording I/O.
     let options = send::Options {
         plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,
@@ -141,8 +127,6 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
-    // The collector keeps every frame the send publishes; its aggregate joins
-    // them with the terminal report.
     let collector = send::Collector::default();
     let report = client.send(
         send::Request::packet(allowed, options.clone()),

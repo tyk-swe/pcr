@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for the aggregate reassembly budget and expiry ordering.
-
 mod common;
 
 use common::ip_fragments::{

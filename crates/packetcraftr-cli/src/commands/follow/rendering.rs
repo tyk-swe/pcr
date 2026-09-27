@@ -23,8 +23,7 @@ pub(super) struct State {
 }
 
 impl State {
-    /// `max_chunks` bounds only the aggregate JSON document, which holds every
-    /// chunk at once.
+    /// `max_chunks` bounds only the aggregate JSON document.
     pub(super) const fn new(max_chunks: usize) -> Self {
         Self {
             retained: Retained::new(max_chunks),
@@ -67,8 +66,6 @@ pub(super) fn render_record(
     }
 }
 
-/// Reports each file `--write` published on formats whose stdout carries the
-/// payload itself.
 pub(super) fn render_written(written: &[super::write::Written]) -> Result<(), CliError> {
     for file in written {
         emit_stderr_message(&format!("wrote {} byte(s) to {}", file.bytes, file.path))?;

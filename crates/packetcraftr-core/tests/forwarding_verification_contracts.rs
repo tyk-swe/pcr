@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `analysis::forwarding` contracts: explicit identity, bounded evidence,
-//! and verdict semantics that never confuse missing proof with proof of loss.
-
 mod common;
 
 use std::error::Error as _;
@@ -56,8 +53,6 @@ fn frame(
     )
 }
 
-/// A frame whose capture record retains fewer bytes than the wire length:
-/// the last two payload bytes are absent, which breaks decode outright.
 fn truncated_frame(timestamp: u64, payload: &[u8]) -> Frame {
     let full = frame(
         timestamp,
@@ -80,9 +75,6 @@ fn truncated_frame(timestamp: u64, payload: &[u8]) -> Frame {
     .expect("truncated fixture is valid")
 }
 
-/// A capture record that declares more wire bytes than it retains while
-/// keeping internally consistent packet bytes: fields still resolve, but the
-/// record admits truncation, so the evidence is incomplete.
 fn short_record(timestamp: u64, payload: &[u8]) -> Frame {
     let full = frame(
         timestamp,
@@ -286,15 +278,11 @@ fn a_wrong_transformed_field_is_a_concrete_failure() {
         Some(FieldValue::Ipv4(Ipv4Addr::new(10, 9, 9, 9)))
     );
     assert!(violation.ingress.is_some());
-    // A pairing whose only problem is a wrong field still pairs: the identity
-    // is what matched, the check is what failed.
     assert_eq!(report.matches[0].checks[0].outcome, Outcome::Violated);
 }
 
 #[test]
 fn preservation_violations_name_expected_and_actual() {
-    // A forwarder decrementing TTL is classic; the pair still matches by
-    // identity but the preservation rule demonstrably fails.
     let mut bytes = frame(1, common::CLIENT, common::SERVER, (40_000, 9_000), b"one")
         .bytes()
         .to_vec();
@@ -325,7 +313,6 @@ fn preservation_violations_name_expected_and_actual() {
     assert_eq!(violation.actual, Some(FieldValue::Unsigned(63)));
 }
 
-/// RFC 791 header checksum for the modified fixture.
 fn ipv4_checksum(header: &[u8]) -> u16 {
     let mut sum = 0_u32;
     for pair in header.as_chunks::<2>().0 {
@@ -400,7 +387,6 @@ fn repeated_identities_are_never_paired() {
     assert_eq!(group.egress_total, 1);
     assert!(group.ingress_indistinguishable);
 
-    // Identical packets on both sides are equally unresolvable.
     let report = compare(
         &rules,
         &[repeated.clone(), repeated.clone()],
@@ -414,8 +400,6 @@ fn repeated_identities_are_never_paired() {
 #[test]
 fn distinguishable_repetition_reports_multiplicity() {
     let shared = frame(1, common::CLIENT, common::SERVER, (40_000, 9_000), b"same");
-    // Two egress copies of one keyed identity: ambiguity is preserved and
-    // neither copy is claimed as the match.
     let rules = rules(&["raw.bytes"], &[], &[]);
     let report = compare(
         &rules,
@@ -438,7 +422,6 @@ fn reordered_unique_identities_still_match() {
     assert_eq!(report.verdict, Verdict::Pass);
     assert_eq!(report.summary.unique_matches, 3);
     assert_eq!(report.summary.reordered_pairs, 1);
-    // Matches publish in ingress order with per-capture evidence.
     assert_eq!(
         report
             .matches
@@ -451,8 +434,7 @@ fn reordered_unique_identities_still_match() {
         report.matches.iter().filter(|pair| pair.reordered).count(),
         1
     );
-    // Frame numbers are capture-local: the same number on each side is a
-    // different observation.
+    // Frame numbers are capture-local.
     assert_eq!(report.matches[0].ingress.frame, 1);
     assert_eq!(report.matches[0].egress.frame, 2);
 }
@@ -466,7 +448,6 @@ fn unsynchronized_timestamps_are_evidence_never_latency() {
         (40_000, 9_000),
         b"one",
     )];
-    // A completely unrelated capture clock still matches by identity.
     let egress = vec![frame(
         1_700_000_000,
         common::CLIENT,
@@ -557,7 +538,6 @@ fn a_selection_filter_applies_per_capture() {
 fn unkeyable_observations_are_listed_not_dropped() {
     let ingress = vec![
         frame(1, common::CLIENT, common::SERVER, (40_000, 9_000), b"one"),
-        // No UDP layer: the declared identity cannot resolve.
         common::tcp_frame(
             &common::registry(),
             UNIX_EPOCH + Duration::from_secs(2),
@@ -591,8 +571,6 @@ fn truncated_evidence_is_explicit_and_unkeyable() {
         (53_000, 9_000),
         b"payload-data-here",
     )];
-    // Two missing payload bytes break decode outright: the observation is
-    // unkeyable and incomplete, never silently dropped or guessed.
     let egress = vec![truncated_frame(1, b"payload-data-here")];
     let rules = rules(&["raw.bytes"], &["raw.bytes"], &[]);
     let report = compare(&rules, &ingress, &egress);
@@ -613,9 +591,6 @@ fn truncated_evidence_is_explicit_and_unkeyable() {
 
 #[test]
 fn a_short_record_still_flags_incomplete_evidence() {
-    // The keyed bytes decode consistently, but the capture record itself
-    // admits it lost wire bytes. The header is readable, but capture-level
-    // incompleteness still prevents an overall pass.
     let full = frame(1, common::CLIENT, common::SERVER, (53_000, 9_000), b"one");
     let short = short_record(1, b"one");
     let rules = rules(&["ipv4.source"], &["ipv4.ttl"], &[]);
@@ -714,7 +689,6 @@ fn report_detail_is_bounded_and_counts_omissions() {
     assert_eq!(report.verdict, Verdict::Inconclusive);
     assert_eq!(report.summary.ingress_only, 4);
     assert_eq!(report.summary.unique_matches, 4);
-    // The document lists two entries per category; the counters stay exact.
     assert_eq!(report.matches.len(), 2);
     assert_eq!(report.unmatched.ingress.len(), 2);
     assert_eq!(report.omitted.matches, 2);
@@ -874,8 +848,6 @@ fn all_observation_projections_share_one_budget() {
             if budget < required {
                 assert_eq!(report.verdict, Verdict::Inconclusive);
                 assert_eq!(report.sides.egress.incomplete, 1);
-                // Earlier readable fields remain evaluated when the final
-                // field exhausts the shared observation budget.
                 assert_eq!(
                     report.summary.checks_evaluated,
                     if required == 3 { 0 } else { 1 }
@@ -931,7 +903,6 @@ fn expectations_accept_only_one_literal() {
             "accepted {value}"
         );
     }
-    // Operator text inside a quoted literal remains literal data.
     rules(&["raw.bytes"], &[], &[r#"raw.bytes="63 or udp""#]);
 }
 
@@ -1118,7 +1089,6 @@ fn incomplete_repeated_fields_are_unevaluable_even_when_the_projection_is_scalar
     assert_eq!(complete.summary.checks_satisfied, 2);
 
     for captured in [18, 20] {
-        // At the second tag boundary and inside it.
         for truncated in [false, true] {
             let partial = frame_prefix(&full, captured, truncated);
             let state = if truncated {

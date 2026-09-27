@@ -46,7 +46,6 @@ const TAGGED_SOLICITATION: [u8; 90] = [
     0xab, 0xcd, 0x01, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
-/// A captured ARP reply from 192.0.2.2 on the stacked VLAN link, padded.
 const CAPTURED_STACKED_ARP_REPLY: [u8; 68] = [
     0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x88, 0xa8, 0xb0, 0x64,
     0x81, 0x00, 0x20, 0xc8, 0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02, 0x02, 0x00,
@@ -120,8 +119,6 @@ fn build(packet: Packet) -> Vec<u8> {
         .to_vec()
 }
 
-/// The Ethernet header and VLAN tags of a reply from `sender` to the
-/// requesting interface.
 fn reply_link(request: &NeighborRequest, sender: MacAddress) -> Packet {
     let mut packet = Packet::new();
     packet.push(Ethernet {
@@ -153,7 +150,6 @@ fn arp_response(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {
     build(packet)
 }
 
-/// The solicited advertisement `request` expects from `sender`.
 fn advertisement(request: &NeighborRequest, sender: MacAddress) -> ndp::NeighborAdvertisement {
     let IpAddr::V6(target) = request.target else {
         panic!("NDP fixture must use IPv6")
@@ -168,7 +164,6 @@ fn advertisement(request: &NeighborRequest, sender: MacAddress) -> ndp::Neighbor
     }
 }
 
-/// The IPv6 header of an advertisement from the target to the requester.
 fn advertisement_ipv6(request: &NeighborRequest) -> Ipv6 {
     let (IpAddr::V6(interface_source), IpAddr::V6(target)) =
         (request.interface_source, request.target)
@@ -183,8 +178,6 @@ fn advertisement_ipv6(request: &NeighborRequest) -> Ipv6 {
     }
 }
 
-/// An advertisement frame from `sender` with `ipv6`, `extensions`, and
-/// `message`, its ICMPv6 checksum computed by the builder.
 fn advertisement_frame(
     request: &NeighborRequest,
     sender: MacAddress,
@@ -256,8 +249,6 @@ fn pad_n() -> Bytes {
     Bytes::from_static(&[1, 4, 0, 0, 0, 0])
 }
 
-/// The expected advertisement's ICMPv6 bytes, checksummed for its IPv6
-/// addresses, for frames that carry it as opaque payload.
 fn advertisement_message(request: &NeighborRequest) -> Vec<u8> {
     let mut packet = Packet::new();
     packet.push(advertisement_ipv6(request));
@@ -273,7 +264,6 @@ fn advertisement_message(request: &NeighborRequest) -> Vec<u8> {
     built.bytes[start..].to_vec()
 }
 
-/// A reply whose IPv6 payload after `extension` is the opaque `payload`.
 fn opaque_payload_frame(
     request: &NeighborRequest,
     next_header: u8,
@@ -433,8 +423,6 @@ fn request_builder_rejects_family_and_mtu_mismatches() {
     ));
 }
 
-/// A frame core refuses to build keeps that refusal as its source, published
-/// once, as a cause, rather than repeated in the message.
 #[test]
 fn request_builder_keeps_the_core_build_refusal_as_its_source() {
     use packetcraftr_core::error::Classified;
@@ -797,7 +785,6 @@ fn neighbor_advertisement_accepts_extensions_and_rejects_fragments() {
         match_neighbor_response(&request, &capture(unfragmented)),
         Some(SENDER)
     );
-    // RFC 6980: fragmented NDP is discarded, including an atomic fragment.
     for fragment in [
         Fragment::default(),
         Fragment {

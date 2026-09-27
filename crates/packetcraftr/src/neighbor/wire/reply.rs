@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! ARP replies and neighbor advertisements read through the dissector.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::neighbor::Request as NeighborRequest;
@@ -91,9 +89,6 @@ fn same_vlan_link(captured: &[VlanTag], requested: &[VlanTag]) -> bool {
         })
 }
 
-/// The sender of an Ethernet/IPv4 ARP reply from `target` to this request.
-/// The codec only types Ethernet/IPv4 ARP, so other address families never
-/// reach this check.
 fn arp_reply(
     layer: &dyn Layer,
     request: &NeighborRequest,
@@ -108,11 +103,7 @@ fn arp_reply(
         .then_some(MacAddress(arp.sender_hardware))
 }
 
-/// The target link-layer address of a solicited advertisement for `target`
-/// sent to `interface_source` (RFC 4861 section 7.1.2).
-///
-/// Extension headers before the message are accepted when the codecs type
-/// them. A fragment header refuses the reply: RFC 6980 requires receivers to
+/// A fragment header refuses the reply: RFC 6980 requires receivers to
 /// discard fragmented Neighbor Discovery messages.
 fn advertisement(
     decoded: &DecodedPacket,

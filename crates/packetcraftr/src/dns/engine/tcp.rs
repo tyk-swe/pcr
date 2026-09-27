@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS-over-TCP attempt authorization, execution, evidence validation, and
-//! accounting. The parent engine owns retries, fallback, transport selection,
-//! and event ordering.
-
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -44,8 +40,7 @@ where
         if !self.authorize_tcp_destination(probe, attempt_deadline)? {
             return Ok(expired_before_connection(probe));
         }
-        // The attempt window is DNS's own; what it has left is the timeout
-        // this step requests from the execution context.
+        // What the DNS attempt window has left is the timeout this step requests.
         if attempt_deadline.start_accounting(Duration::ZERO).is_err() {
             return Ok(expired_before_connection(probe));
         }
@@ -137,9 +132,7 @@ where
                 attempt: probe.attempt,
                 source: error,
             }),
-            // `Request` — and any class added later — fails closed here: a
-            // request this workflow built itself cannot be rejected by the
-            // executor, so it is never a retryable per-attempt outcome.
+            // `Request` and later classes fail closed: a self-built query is never retryable.
             _ => Err(Error::TcpRequestRejected {
                 attempt: probe.attempt,
                 source: error,
@@ -184,9 +177,6 @@ fn expired_before_connection(probe: &Probe) -> ClassifiedAttempt {
     tcp_timeout_evidence(probe, "the DNS attempt deadline expired before connection")
 }
 
-/// One DNS-over-TCP execution as the execution context sees it. Socket and
-/// framing failures are the executor's typed data, not a boundary failure, so
-/// they are carried here with the traffic they may already have produced.
 struct TcpAttempt {
     result: Result<TcpEvidence, TcpError>,
     permit: ExecutionPermit,
@@ -209,7 +199,6 @@ impl TcpAttempt {
                 evidence.response.elapsed,
                 evidence.response.bytes_written,
             ),
-            // A failure carries no evidence to bind to another permit.
             Err(error) => (
                 query.permit,
                 boundary_elapsed,

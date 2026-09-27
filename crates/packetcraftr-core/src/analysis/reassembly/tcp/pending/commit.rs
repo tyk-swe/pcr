@@ -105,8 +105,6 @@ fn commit_flow_push(
         history_replacement,
         ..
     } = plan;
-    // The delivered prefix is contiguous; pending overlaps may sit anywhere
-    // after it, so the event reports each repeated span rather than a count.
     let mut ranges = Vec::with_capacity(merge.overlapping_ranges.len() + 1);
     if retransmitted != 0 {
         ranges.push(payload_sequence..payload_sequence.wrapping_add(retransmitted as u32));
@@ -155,8 +153,7 @@ fn commit_flow_push(
     events
 }
 
-// next_offset counts every delivered byte and can pass 2^32 on a long stream; the `as u32`
-// deliberately keeps it modulo 2^32, which is what wire sequence arithmetic needs
+// The `as u32` deliberately keeps next_offset modulo 2^32 for wire sequence arithmetic.
 fn emit_data(
     state: &mut TcpFlowState,
     flow: &ScopedFlowKey,

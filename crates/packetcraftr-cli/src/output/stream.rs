@@ -19,15 +19,10 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 use super::contract::Command;
 use super::envelope::{Envelope, Error, Published, Stats};
 
-/// A data record declares its discriminator independently of its serialized
-/// payload. The encoder supplies `complete` and `error` terminal records.
 pub trait StreamRecord: Serialize {
     fn event_name(&self) -> &'static str;
 }
 
-/// Writes the single NDJSON error record a failure before command selection can
-/// publish. Such a failure has no stream to join, so this record is the whole
-/// document — which is why it, alone, may carry a null `command`.
 pub fn write_unattributed_error(
     mut writer: impl Write,
     command: Option<Command>,
@@ -51,15 +46,12 @@ enum EncoderState {
     Failed,
 }
 
-/// The whole encoder state, held under one mutex so a record is written, the
-/// sequence advanced, and the state settled as one indivisible step.
 struct EncoderOutput {
     state: EncoderState,
     sequence: u64,
     writer: EncoderWriter,
 }
 
-/// Bounded output retains its worker permit until the underlying write returns.
 enum EncoderWriter {
     Direct(Box<dyn Write + Send>),
     Bounded {
@@ -78,7 +70,6 @@ impl EncoderOutput {
     }
 }
 
-/// The single owning encoder for one contiguous NDJSON invocation.
 #[derive(Clone)]
 pub struct StreamEncoder {
     deadline: Option<Arc<Deadline>>,
@@ -89,18 +80,12 @@ pub struct StreamEncoder {
 }
 
 impl StreamEncoder {
-    /// Applies an operation deadline to this publisher and its clones. Retain
-    /// the original handle to report a terminal error after the deadline.
-    /// Lock waiting and bounded writer waiting consume the remaining budget;
-    /// synchronous serialization is checked on return and cannot be preempted.
     #[must_use]
     pub fn with_deadline(mut self, deadline: Arc<Deadline>) -> Self {
         self.deadline = Some(deadline);
         self
     }
 
-    /// Samples resource metadata on the first and terminal records. The
-    /// observer must return promptly; like serialization it is cooperative.
     #[must_use]
     pub fn with_resource_diagnostics(
         mut self,
@@ -110,8 +95,6 @@ impl StreamEncoder {
         self
     }
 
-    /// Selects a separate finite wait for terminal error cleanup. The default
-    /// remains the timeout supplied to `new_bounded`.
     #[must_use]
     pub fn with_terminal_error_timeout(mut self, timeout: Duration) -> Self {
         self.terminal_error_timeout = Some(timeout);
@@ -132,12 +115,6 @@ impl StreamEncoder {
         }
     }
 
-    /// Opens a stream whose individual writes and flushes wait at most `timeout`.
-    ///
-    /// The writer occupies one callback worker in `runtime`, independently of
-    /// any workflow event callback. On timeout the stream fails closed; the
-    /// write may finish later and retains its worker permit until it returns.
-    /// Serialization remains synchronous, as it is for [`Self::new`].
     pub fn new_bounded(
         command: Command,
         mut writer: impl Write + Send + 'static,
@@ -178,7 +155,6 @@ impl StreamEncoder {
         self.emit_published(Published::new(result, diagnostics))
     }
 
-    /// Writes one data record carrying a converted event and its metadata.
     pub fn emit_published<T: StreamRecord>(
         &self,
         published: Published<T>,
@@ -207,7 +183,6 @@ impl StreamEncoder {
         self.complete_published(Published::new(result, diagnostics).with_stats(stats))
     }
 
-    /// Writes the terminal record carrying a converted result and its metadata.
     pub fn complete_published<T: Serialize>(
         &self,
         published: Published<T>,
@@ -235,13 +210,11 @@ impl StreamEncoder {
         )
     }
 
-    /// Returns false while a record is being written or the state is poisoned.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.state() == Some(EncoderState::Open)
     }
 
-    /// Returns true only after a terminal write and flush have finished.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
@@ -250,7 +223,6 @@ impl StreamEncoder {
         )
     }
 
-    /// A completion acknowledgment is distinct from an emitted terminal error.
     pub fn is_complete(&self) -> bool {
         self.state() == Some(EncoderState::Complete)
     }
@@ -325,7 +297,6 @@ impl StreamEncoder {
         Ok(output)
     }
 
-    /// A busy or poisoned stream cannot safely accept a cleanup record.
     fn state(&self) -> Option<EncoderState> {
         self.output.try_lock().ok().map(|output| output.state)
     }
@@ -382,8 +353,7 @@ fn check_publication_budget(
     Ok(())
 }
 
-/// Maximum encoded NDJSON record bytes, including its newline. This bounds
-/// serialization storage independently of frame limits and string/hex expansion.
+/// Maximum encoded NDJSON record bytes, including its newline.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
 fn serialize_line(record: &impl Serialize, sequence: u64) -> Result<Vec<u8>, EncodeError> {

@@ -156,7 +156,6 @@ impl PolicyArgs {
     }
 }
 
-/// One window per live case.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CaseWindow;
 

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Network-layer protocol models.
-//!
-//! [`ndp`] types the Neighbor Discovery messages an [`Icmpv6`] body carries.
-
 mod envelope;
 mod icmp;
 mod igmp;
@@ -13,7 +9,6 @@ mod ipv6;
 pub mod ndp;
 mod raw_ip;
 
-/// IANA IP protocol numbers that codecs and analyzers refer to by name.
 pub mod ip_protocol {
     pub const HOP_BY_HOP: u8 = 0;
     pub const TCP: u8 = 6;

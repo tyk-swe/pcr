@@ -10,24 +10,17 @@ use packetcraftr_netio::interface::{self, Id as InterfaceId};
 
 use super::Error;
 
-/// The interface a route must leave through.
-///
 /// A name or index selector is resolved through the client's interface
 /// provider only after the operation is admitted, so a refused operation
 /// never enumerates interfaces.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Interface {
-    /// An identity an interface provider already confirmed.
     Id(InterfaceId),
-    /// The interface with this name.
     Name(String),
-    /// The interface with this index.
     Index(NonZeroU32),
 }
 
 impl Interface {
-    /// Whether `id` is the interface this selector names: an index selector
-    /// ignores the name, and a name selector ignores the index.
     #[must_use]
     pub fn matches(&self, id: &InterfaceId) -> bool {
         match self {
@@ -37,7 +30,6 @@ impl Interface {
         }
     }
 
-    /// The confirmed identity, or `None` for a selector not yet resolved.
     pub(crate) fn id(&self) -> Option<&InterfaceId> {
         match self {
             Self::Id(id) => Some(id),
@@ -61,17 +53,10 @@ impl fmt::Display for Interface {
     }
 }
 
-/// The last selector a client resolved and the identity it resolved to.
-///
-/// Every operation of one client (and each operation-local view of it)
-/// shares it, so a workflow that prepares many packets enumerates interfaces
-/// once. A failed lookup is not remembered.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResolvedInterface(Arc<Mutex<Option<(Interface, InterfaceId)>>>);
 
 impl ResolvedInterface {
-    /// Resolves `selector` through `provider` under `deadline`, unless it is
-    /// already an identity or was the last selector resolved.
     pub(crate) fn resolve<N: interface::Provider + ?Sized>(
         &self,
         selector: &Interface,

@@ -1,15 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Route lookup backends: route netlink on Linux, routing sockets on macOS,
-//! and IP Helper on Windows. Each asks the same backend's interface
-//! enumeration for the interface a route leaves through.
-//!
-//! The helpers below are shared by exactly the backends named on each one.
-//! They stay beside those backends because only a target gate says which
-//! ones use them; platform-neutral normalization lives in
-//! `crate::route::normalize`.
-
 #[cfg(target_os = "macos")]
 pub(in crate::platform) mod af_route;
 #[cfg(target_os = "windows")]
@@ -25,8 +16,6 @@ use crate::{
     route,
 };
 
-/// Finds the enumerated interface with the requested name and index,
-/// reporting a mismatch when only one of them still matches.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn find_interface(
     interfaces: &[interface::Info],
@@ -54,7 +43,6 @@ fn find_interface(
     })
 }
 
-/// An interface a native route query may be pinned to.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 trait InterfaceCandidate: Clone {
     fn interface(&self) -> &interface::Info;
@@ -67,9 +55,6 @@ impl InterfaceCandidate for interface::Info {
     }
 }
 
-/// Pins the query to the interface owning `preferred_source`, refusing a
-/// `requested` interface that does not own it. Without a preferred source the
-/// request passes through unchanged.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn constrain_by_preferred_source<T: InterfaceCandidate>(
     available: &[T],

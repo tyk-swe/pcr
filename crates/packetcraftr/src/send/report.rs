@@ -7,15 +7,12 @@ use packetcraftr_core::error::BoundaryError;
 
 use super::{Error, Event, SentFrame};
 
-/// The terminal result of one send.
 #[derive(Clone, Debug)]
 pub struct Report {
     pub passes_completed: u32,
     pub stats: Stats,
 }
 
-/// Every confirmed transmission of one send, in send order, with its
-/// terminal report.
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     pub sent: Vec<SentFrame>,
@@ -23,9 +20,6 @@ pub struct Aggregate {
     pub stats: Stats,
 }
 
-/// A sink that keeps every published frame. Pass a clone to
-/// [`Client::send`](crate::Client::send) and [`finish`](Self::finish) the one
-/// kept with the report the send returns.
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Vec<SentFrame>>);
 
@@ -41,12 +35,6 @@ impl Sink<Event> for Collector {
 }
 
 impl Collector {
-    /// Joins the collected frames with the send's terminal `report`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::IncoherentEvents`] when the collected frames are not
-    /// the ones the report counts.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let sent = self.0.take();
         super::evidence::validate(&sent, &report)?;

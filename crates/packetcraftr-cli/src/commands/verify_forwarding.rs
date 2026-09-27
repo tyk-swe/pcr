@@ -21,9 +21,6 @@ use crate::input::open_capture_hashed;
 use crate::output::verify_forwarding::CaptureSource;
 use crate::rendering::StreamEncoder;
 
-/// The process status when the comparison completed and published its report
-/// but the verdict was not `pass`. `fail` and `inconclusive` share this code;
-/// the report's `verdict` field distinguishes them.
 const VERDICT_NOT_PASS: u8 = 1;
 
 impl super::Spec for Args {
@@ -43,8 +40,6 @@ impl super::Spec for Args {
             max_detail_bytes: Bytes @ ResultRetention preset(1048576, 4194304),
             max_scratch_bytes: Bytes @ Comparison preset(16777216, 134217728),
         ]);
-        // Indexing runs only when the compiled rules or filters need the stream
-        // index, which `run` reports once they compile.
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages {
@@ -82,8 +77,6 @@ pub(super) fn run(
         ));
     }
     let prepared = offline_analysis::prepare(arguments.limits, None, &arguments.decode)?;
-    // Rules and selection filters compile before either capture is opened,
-    // so a malformed declaration never reads input.
     let rules = forwarding::Rules::compile_declarations(
         forwarding::Declarations {
             identity: &arguments.identity,
@@ -157,7 +150,6 @@ pub(super) fn run(
     Ok(exit)
 }
 
-/// Compiles one side's selection filter; absent selects every frame.
 fn compile_selection(
     source: Option<&str>,
     prepared: &AnalysisSetup,
@@ -169,8 +161,6 @@ fn compile_selection(
         .transpose()
 }
 
-/// Reads one capture through the shared bounded pipeline and collects the
-/// observations its own selection keeps.
 fn collect(
     prepared: &AnalysisSetup,
     path: &Path,

@@ -41,9 +41,6 @@ impl fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// Derives a mutable registry configuration, retaining existing codecs,
-    /// aliases, roots, matchers, padding properties and filter fields. `build`
-    /// revalidates bindings.
     pub fn to_builder(&self) -> Builder {
         Builder {
             codecs: self.codecs.clone(),
@@ -70,7 +67,6 @@ impl Registry {
         self.codecs.get(&self.protocol_named(name)?)
     }
 
-    /// Resolves a canonical name or alias to its protocol, ignoring case.
     pub fn protocol_named(&self, name: &str) -> Option<crate::layer::Id> {
         self.aliases.get(&name.trim().to_ascii_lowercase()).copied()
     }
@@ -79,7 +75,6 @@ impl Registry {
         self.roots.get(&link_type).copied()
     }
 
-    /// The winning child that `discriminator` selects under `parent`.
     pub fn child_for(
         &self,
         parent: &str,
@@ -92,7 +87,6 @@ impl Registry {
             .map(|binding| binding.child)
     }
 
-    /// The discriminator under which `parent` selects `child`.
     pub fn discriminator_for(&self, parent: &str, child: &str) -> Option<Discriminator> {
         self.reverse_bindings
             .get(parent)?
@@ -101,9 +95,6 @@ impl Registry {
             .map(|binding| binding.discriminator)
     }
 
-    /// Winning `(parent, discriminator)` bindings selecting `child`, sorted by
-    /// parent then discriminator. Reverse lookup for [`Self::child_for`];
-    /// excludes bindings outranked by another child.
     pub fn parent_bindings(&self, child: &str) -> Vec<(crate::layer::Id, Discriminator)> {
         let mut bindings: Vec<_> = self
             .reverse_bindings
@@ -126,9 +117,6 @@ impl Registry {
         self.matchers.get(protocol)
     }
 
-    /// Whether frames of a link protocol may carry trailing padding after the
-    /// payload their network layer declares. See
-    /// [`Builder::allow_trailing_padding`].
     pub fn allows_trailing_padding(&self, protocol: &str) -> bool {
         self.trailing_padding.contains(protocol)
     }
@@ -137,19 +125,11 @@ impl Registry {
         self.codecs.keys()
     }
 
-    /// The reflective schema of a registered protocol.
-    ///
-    /// Schemas are captured once, when the registry is built, through each
-    /// codec's schema-publication hook. Decode-only codecs may publish a
-    /// schema even when they cannot construct a layer.
     pub fn schema(&self, protocol: &str) -> Option<&'static crate::layer::Schema> {
         self.schemas.get(protocol).copied()
     }
 
     /// Stored display-filter spellings in ascending path order.
-    ///
-    /// Canonical schema paths and protocol aliases resolve without a stored
-    /// binding and are described by [`Self::schema`] instead.
     pub fn filter_fields(&self) -> impl ExactSizeIterator<Item = (&str, &FilterFieldBinding)> {
         self.filter_fields
             .iter()

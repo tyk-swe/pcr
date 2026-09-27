@@ -10,7 +10,6 @@ use crate::layout::PacketLayout;
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
 
-/// How one packet is built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub mode: Mode,
@@ -26,19 +25,16 @@ impl Default for Options {
     }
 }
 
-/// Exact encoded bytes plus the resolved packet, byte layout, and diagnostics.
 #[derive(Clone, Debug)]
 pub struct BuiltPacket {
     pub bytes: Bytes,
     pub packet: Packet,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,
-    /// The codec mode the packet was built with.
     pub mode: Mode,
 }
 
 impl BuiltPacket {
-    /// Whether any layer of the built packet is a [`Malformed`] layer.
     #[must_use]
     pub fn contains_malformed(&self) -> bool {
         self.packet
@@ -46,8 +42,6 @@ impl BuiltPacket {
             .any(<dyn crate::layer::Layer>::is::<Malformed>)
     }
 
-    /// Whether the packet carries padding trailing an IPv4, IPv6, UDP, or
-    /// PPPoE payload, bytes a network stack may treat as part of the datagram.
     #[must_use]
     pub fn contains_network_trailer(&self) -> bool {
         self.packet.iter().any(|layer| {

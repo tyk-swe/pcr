@@ -12,9 +12,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::builtin;
 use std::time::SystemTime;
 
-// Input: `<filter text> NUL <ethernet frame bytes>`. Without NUL, treat all
-// input as filter text and use an empty frame, preserving text-only corpus
-// coverage.
+// Input: `<filter text> NUL <ethernet frame bytes>`.
 fuzz_target!(|data: &[u8]| {
     let (text, frame_bytes) = match data.iter().position(|byte| *byte == 0) {
         Some(split) => (&data[..split], &data[split + 1..]),

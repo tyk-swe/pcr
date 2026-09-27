@@ -1,12 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Wire correlation and probe identity shared by every workflow that reads
-//! captured responses against the packets it sent: DNS, scan, and traceroute.
-//!
-//! [`observe`] correlates one decoded response with a request without
-//! assigning a workflow status; the identity helpers make probes
-//! distinguishable on the wire so that correlation can succeed.
+//! Wire correlation and probe identity shared by DNS, scan, and traceroute.
 
 use std::net::IpAddr;
 
@@ -20,12 +15,10 @@ use packetcraftr_core::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The wire protocol a probe is sent over, as a request names it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
     Tcp,
-    /// The traceroute default.
     #[default]
     Udp,
     Icmp,
@@ -48,31 +41,20 @@ impl std::fmt::Display for Transport {
     }
 }
 
-/// Maps an operation-local sequence to an IPv4 identification that native
-/// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
+/// An IPv4 identification native raw-socket adapters can preserve exactly; zero is excluded.
 pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }
 
-/// ICMP echo payload identifying one probe: `P`, the workflow's `tag`, and the
-/// sequence deliberately reduced to 16 bits across the last two bytes.
-/// Sent-probe matching rebuilds the payload, so the reduction is symmetric.
+/// Sent-probe matching rebuilds the payload, so the 16-bit sequence reduction is symmetric.
 pub(crate) fn icmp_identity(tag: u8, sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, tag, (sequence >> 8) as u8, sequence as u8])
 }
 
-/// First port of the IANA dynamic range, the base every workflow rotates
-/// ephemeral source ports through.
 pub(crate) const EPHEMERAL_SOURCE_PORT_BASE: u16 = 49_152;
 
-/// Rotates an ephemeral source port `offset` steps from `base`, staying inside
-/// whichever range `base` already belongs to: the dynamic range at or above
-/// [`EPHEMERAL_SOURCE_PORT_BASE`], or ports `1..EPHEMERAL_SOURCE_PORT_BASE`
-/// when the caller pinned a lower port.
-// both ranges start inside u16 and `rotated` is a remainder modulo the range width, so `range_start
-// + rotated` stays at or below u16::MAX; `offset` is likewise reduced modulo that width before the
-// narrowing
+// `rotated` is reduced modulo the range width, so `range_start + rotated` fits in u16.
 pub(crate) fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
     let (range_start, width) = if base >= EPHEMERAL_SOURCE_PORT_BASE {
         (
@@ -151,8 +133,6 @@ pub(crate) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]
     }) && layers.next().is_none()
 }
 
-/// Correlates one decoded response with a request without assigning an
-/// operation-specific status. Corrupt and unrelated traffic returns `None`.
 pub(crate) fn observe(
     registry: &Registry,
     transport: Transport,
@@ -171,9 +151,7 @@ pub(crate) fn observe(
     {
         return Some(observation);
     }
-    // UDP probes leave DNS identity to the workflow, but still require the
-    // entire tunnel stack to reverse. Other deepest protocols retain their
-    // registry matcher, including TCP sequence and ICMP echo identity checks.
+    // UDP probes leave DNS identity to the workflow but must reverse the entire tunnel stack.
     let udp_responder = (transport == Transport::Udp)
         .then(|| transport_tuple_reversed(request, &response.packet, BuiltinProtocol::Udp))
         .flatten();
@@ -312,9 +290,6 @@ mod tests {
         }
     }
 
-    /// A base below the dynamic range rotates within
-    /// `1..EPHEMERAL_SOURCE_PORT_BASE`, so a pinned low port never escapes into
-    /// the dynamic range.
     #[test]
     fn a_low_base_rotates_below_the_dynamic_range() {
         let width = u32::from(EPHEMERAL_SOURCE_PORT_BASE) - 1;

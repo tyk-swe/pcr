@@ -1,12 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Synthetic TLS handshake bytes for session-assembly contracts.
-//!
-//! Nothing here comes from captured traffic: every hello is built field by
-//! field so a test can say exactly which byte it is exercising. Host names
-//! are documentation names and the endpoints are RFC 5737 addresses.
-
 use packetcraftr_core::protocol::application::tls::extension::{
     ALPN, ENCRYPTED_CLIENT_HELLO, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS,
     SUPPORTED_VERSIONS,
@@ -17,26 +11,16 @@ use packetcraftr_core::protocol::application::tls::{
     HELLO_RETRY_REQUEST_RANDOM,
 };
 
-/// TLS 1.2 on the wire.
 pub(crate) const TLS_1_2: u16 = 0x0303;
-/// TLS 1.3 on the wire.
 pub(crate) const TLS_1_3: u16 = 0x0304;
-/// `TLS_AES_128_GCM_SHA256`.
 pub(crate) const TLS_AES_128_GCM_SHA256: u16 = 0x1301;
-/// `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`.
 pub(crate) const TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: u16 = 0xc02f;
-/// The `x25519` named group.
 pub(crate) const X25519: u16 = 0x001d;
-/// `close_notify`.
 pub(crate) const ALERT_CLOSE_NOTIFY: u8 = 0;
-/// `handshake_failure`.
 pub(crate) const ALERT_HANDSHAKE_FAILURE: u8 = 40;
-/// The `certificate` handshake type.
 const HANDSHAKE_CERTIFICATE: u8 = 11;
-/// The `padding` extension (RFC 7685), used here only to grow a hello.
 const EXTENSION_PADDING: u16 = 0x0015;
 
-/// What a synthetic ClientHello offers.
 #[derive(Clone, Debug)]
 pub(crate) struct ClientHelloSpec {
     pub(crate) random: [u8; 32],
@@ -45,7 +29,6 @@ pub(crate) struct ClientHelloSpec {
     pub(crate) supported_groups: Vec<u16>,
     pub(crate) key_share_groups: Vec<u16>,
     pub(crate) encrypted_client_hello: bool,
-    /// Bytes of padding extension, to make a hello span more segments.
     pub(crate) padding: usize,
 }
 
@@ -63,7 +46,6 @@ impl Default for ClientHelloSpec {
     }
 }
 
-/// What a synthetic ServerHello selects.
 #[derive(Clone, Debug)]
 pub(crate) struct ServerHelloSpec {
     pub(crate) legacy_version: u16,
@@ -115,7 +97,6 @@ fn extension(kind: u16, body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// One handshake message: its type, 24-bit length, and body.
 fn handshake(kind: u8, body: &[u8]) -> Vec<u8> {
     let length = u32::try_from(body.len()).expect("handshake body fits");
     let bytes = length.to_be_bytes();
@@ -124,7 +105,6 @@ fn handshake(kind: u8, body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// One TLS record with the given content type over `body`.
 fn record(content_type: u8, body: &[u8]) -> Vec<u8> {
     let mut out = vec![content_type];
     out.extend_from_slice(&TLS_1_2.to_be_bytes());
@@ -132,11 +112,6 @@ fn record(content_type: u8, body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Builds a ClientHello handshake message.
-///
-/// The legacy version, session ID, offered ciphers, offered versions, and
-/// signature algorithms are the same in every hello a test builds, so they are
-/// fixed here rather than spelled out on the spec.
 pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
     let cipher_suites = [
         TLS_AES_128_GCM_SHA256,
@@ -200,7 +175,6 @@ pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
     handshake(HANDSHAKE_CLIENT_HELLO, &body)
 }
 
-/// Builds a ServerHello handshake message.
 pub(crate) fn server_hello(spec: &ServerHelloSpec) -> Vec<u8> {
     let mut body = spec.legacy_version.to_be_bytes().to_vec();
     if spec.hello_retry_request {
@@ -238,19 +212,15 @@ fn vector24(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A TLS 1.2 certificate chain message carrying one `length`-byte
-/// certificate, which is how a real chain dwarfs a ServerHello.
 pub(crate) fn certificate(length: usize) -> Vec<u8> {
     let entry = vector24(&vec![0x5a; length]);
     handshake(HANDSHAKE_CERTIFICATE, &vector24(&entry))
 }
 
-/// Wraps one handshake message in a single record.
 pub(crate) fn handshake_record(message: &[u8]) -> Vec<u8> {
     record(CONTENT_TYPE_HANDSHAKE, message)
 }
 
-/// Splits one handshake message across records of at most `body` bytes each.
 pub(crate) fn handshake_records(message: &[u8], body: usize) -> Vec<u8> {
     message
         .chunks(body.max(1))
@@ -258,31 +228,24 @@ pub(crate) fn handshake_records(message: &[u8], body: usize) -> Vec<u8> {
         .collect()
 }
 
-/// The middlebox-compatibility `change_cipher_spec` record.
 pub(crate) fn change_cipher_spec() -> Vec<u8> {
     record(CONTENT_TYPE_CHANGE_CIPHER_SPEC, &[1])
 }
 
-/// One alert record, in the clear.
 pub(crate) fn alert(level: u8, description: u8) -> Vec<u8> {
     record(CONTENT_TYPE_ALERT, &[level, description])
 }
 
-/// One encrypted application-data record of `length` bytes.
 pub(crate) fn application_data(length: usize) -> Vec<u8> {
     record(CONTENT_TYPE_APPLICATION_DATA, &vec![0xab; length])
 }
 
-/// A handshake message that never completes, in `records` records of
-/// `body` bytes each: the declared length is the largest a handshake message
-/// may have, so the bytes accumulate until a ceiling stops them.
 pub(crate) fn unfinished_handshake(records: usize, body: usize) -> Vec<u8> {
     let mut stream = vec![HANDSHAKE_CLIENT_HELLO, 0x02, 0x00, 0x00];
     stream.resize(records * body, 0x77);
     handshake_records(&stream, body)
 }
 
-/// Splits a byte stream into `parts` contiguous segments.
 pub(crate) fn split(bytes: &[u8], parts: usize) -> Vec<Vec<u8>> {
     let parts = parts.max(1);
     let size = bytes.len().div_ceil(parts);

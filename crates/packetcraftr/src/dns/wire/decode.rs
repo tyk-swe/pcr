@@ -15,8 +15,7 @@ use crate::dns::{
     Edns, MessageLimits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
 };
 
-/// Decodes the length prefix of a single DNS-over-TCP frame, then applies the
-/// same transaction, question, bounds, and relevance validation as UDP.
+/// Applies the same transaction, question, bounds, and relevance validation as UDP.
 pub fn decode_tcp_frame(
     frame: &[u8],
     query_name: &str,
@@ -54,8 +53,6 @@ pub fn decode_tcp_frame(
     Ok(response)
 }
 
-/// Decodes a DNS response, accepting relevant records and retaining a bounded
-/// audit of other declared records.
 pub fn decode_response(
     message: &[u8],
     query_name: &str,
@@ -73,8 +70,7 @@ pub fn decode_response(
     )?;
     validate_message_bounds(message, limits)?;
     let header = decode_header(message, transaction_id)?;
-    // One owned handle serves both the question check and the full decode below;
-    // label and record retention inside it is refcounted rather than copied.
+    // One owned handle serves both decodes; retention inside it is refcounted, not copied.
     let wire = bytes::Bytes::copy_from_slice(message);
     decode_question(&wire, &query_name, &expected_name, query_type, limits)?;
 
@@ -147,8 +143,6 @@ fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Er
         }))
 }
 
-/// Reads the big-endian `u16` at `offset`, naming `field` when the message
-/// ends first.
 fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
     message
         .get(offset..offset.saturating_add(2))
@@ -237,8 +231,7 @@ fn decode_question(
 }
 
 fn truncated_response(flags: u16) -> ValidatedResponse {
-    // A UDP truncation may end at any byte after the complete question.
-    // Do not decode or present possibly partial records as accepted facts.
+    // Truncation may end at any byte; never present possibly partial records as accepted.
     ValidatedResponse {
         metadata: ResponseMetadata {
             response_code: flags & RCODE_MASK,

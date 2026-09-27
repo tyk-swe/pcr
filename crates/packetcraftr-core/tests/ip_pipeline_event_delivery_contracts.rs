@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for IP event delivery: end-of-capture events, sink deadlines,
-//! and retention caps.
-
 mod common;
 
 use common::ip_fragments::{ipv4_fragments, ipv4_protocol_fragment_frame, reader_with_link_type};

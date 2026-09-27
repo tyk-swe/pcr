@@ -1,44 +1,32 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Per-source capture evidence, event publication, and final accounting.
-
 use super::{Cause, Report};
 use packetcraftr_core::{diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::capture::{self as native, Limits, Metadata};
 use std::time::Duration;
 
-/// One admitted capture source and what the capture did with its frames.
 #[derive(Clone, Debug)]
 pub struct Source {
     /// The capture-local source number frames carry as their interface.
     pub index: usize,
-    /// The interface identity, link type, snapshot length, and realized
-    /// native settings the provider reported.
     pub metadata: Metadata,
-    /// The queue limits the source was armed with.
     pub limits: Limits,
     pub metadata_valid: bool,
     pub ready: bool,
     pub shutdown_confirmed: bool,
     pub statistics_valid: bool,
-    /// The provider's own counters for this source.
     pub statistics: native::Stats,
-    /// Frames and bytes the provider delivered from this source.
     pub delivered_frames: u64,
     pub delivered_bytes: u64,
-    /// Delivered frames the budget admitted.
     pub admitted_frames: u64,
-    /// Admitted frames the selector kept.
     pub matched_frames: u64,
-    /// Matched frames the sink published.
     pub emitted_frames: u64,
     /// Frames delivered after the window closed, which were not published.
     pub late_frames: u64,
 }
 
 impl Source {
-    /// The source as the capture group reported it, before any frame.
     pub(super) fn armed(source: &native::Source) -> Self {
         Self {
             index: source.index,
@@ -58,8 +46,6 @@ impl Source {
         }
     }
 
-    /// Takes the capture group's latest view of this source, keeping the
-    /// capture's own counts.
     pub(super) fn update(&mut self, source: &native::Source) {
         self.metadata.clone_from(&source.metadata);
         self.limits = source.limits;
@@ -73,21 +59,14 @@ impl Source {
     }
 }
 
-/// What a capture publishes while it runs. Each event is answered with a
-/// [`Control`](super::Control) before the next frame is read.
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// Every admitted source's metadata, before the first frame. A zero
-    /// window reports activated metadata but does not claim readiness.
+    /// A zero window reports activated metadata but does not claim readiness.
     Started { sources: Vec<Source> },
-    /// One selected frame.
     Frame {
         /// The frame's one-based position among every delivered frame.
         source_frame: u64,
-        /// The index of the source that delivered it, which is also the
-        /// frame's `interface`.
         source: usize,
-        /// Time since the capture started, on the client's clock.
         elapsed: Duration,
         frame: Frame,
     },
@@ -103,8 +82,6 @@ pub(super) fn replace_sources(report: &mut Report, sources: &[native::Source]) {
     }
 }
 
-/// Fills the run's statistics from the budget and every source. Returns
-/// whether every requested source reported complete statistics.
 pub(super) fn finish_stats(report: &mut Report, elapsed: Duration) -> bool {
     report.stats.packets_attempted = report.budget.frames();
     report.stats.bytes = report.budget.bytes();
@@ -130,9 +107,6 @@ pub(super) fn finish_stats(report: &mut Report, elapsed: Duration) -> bool {
     complete
 }
 
-/// Fails on the first source that lost evidence under
-/// [`OverflowPolicy::Fail`](native::OverflowPolicy::Fail), and warns about
-/// every other source that lost evidence.
 pub(super) fn evidence_loss(report: &mut Report) -> Option<Cause> {
     for source in &report.sources {
         if let Some(error) = source.statistics.evidence_loss_error() {

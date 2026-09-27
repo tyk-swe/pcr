@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
 
 use std::io::Write;

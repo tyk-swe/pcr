@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Atomic publication of command output files: stage beside the destination,
-//! sync, then rename without clobbering. Shared by every `--write` path.
-
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core::error::{Classification, Kind};
@@ -16,7 +13,6 @@ const CLASSIFICATION: Classification = Classification::new(
     Some("choose a destination that does not exist inside a writable directory"),
 );
 
-/// A temporary output file staged beside the path it publishes to.
 #[derive(Debug)]
 pub(crate) struct StagedFile {
     file: tempfile::NamedTempFile,
@@ -25,8 +21,7 @@ pub(crate) struct StagedFile {
 
 impl StagedFile {
     /// Refuses a destination that already exists — including a dangling
-    /// symlink — before any input is read, then stages a temporary file in
-    /// the destination's directory so publication is a same-filesystem rename.
+    /// symlink — before any input is read.
     pub(crate) fn stage(destination: &Path) -> Result<Self, CliError> {
         crate::cancellation::check()?;
         match std::fs::symlink_metadata(destination) {
@@ -75,7 +70,6 @@ impl StagedFile {
         crate::cancellation::check()
     }
 
-    /// Publishes the staged file at its destination without clobbering.
     pub(crate) fn persist(self) -> Result<(), CliError> {
         // This is the commit boundary. Expiry after a successful rename must
         // not claim that the already-published artifact was rolled back.
@@ -157,7 +151,6 @@ mod tests {
         assert_eq!(error.exit_code(), 5);
         assert!(!error.causes.is_empty());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");
-        // The un-published staged file cleans itself up.
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 

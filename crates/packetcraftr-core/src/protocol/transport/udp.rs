@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! UDP datagram model and codec.
-
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
@@ -217,9 +215,6 @@ impl LayerCodec for UdpCodec {
             }),
             consumed: UDP_LEN,
             payload_len,
-            // Both endpoints are offered before the raw fallback. Destination
-            // normally wins; a plausible DNS response gives source port 53
-            // precedence so a tunnel-service-numbered client port stays DNS.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
@@ -273,8 +268,6 @@ fn validate_child_selection(
     if selected == *child.protocol_id() {
         return Ok(diagnostics);
     }
-    // An endpoint may already use a port bound to the child while the other
-    // endpoint's bound port takes precedence.
     let child_port = [layer.source_port, layer.destination_port]
         .into_iter()
         .find(|port| {

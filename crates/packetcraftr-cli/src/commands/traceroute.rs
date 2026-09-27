@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Traceroute CLI command logic.
-
 use crate::output::contract::ToolFormat;
 
 use packetcraftr_core::error::Kind;

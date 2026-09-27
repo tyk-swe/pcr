@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! What a replay observed: the captured frame's own envelope, and the exact
-//! bytes a provider confirmed it sent.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
@@ -37,14 +34,12 @@ impl FrameEvidence {
     }
 }
 
-/// Exact provider report plus the concrete interface selected for a send.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transmission {
     pub interface: InterfaceId,
     pub report: IoSendReport,
 }
 
-/// The source and destination of a raw IP frame, read from its own header.
 pub(super) fn network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoError> {
     let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
     let bytes = frame.bytes().as_ref();
@@ -107,7 +102,6 @@ pub(super) fn network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoE
     }
 }
 
-/// Requires the provider to confirm exactly the frame's bytes.
 pub(super) fn validate_transmission(
     source_index: u64,
     frame: &Frame,

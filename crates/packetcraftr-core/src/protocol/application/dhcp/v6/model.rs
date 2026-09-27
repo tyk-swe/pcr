@@ -143,7 +143,6 @@ pub enum Value6 {
         code: u16,
         message: Bytes,
     },
-    /// DNS servers or the historical Server Unicast option.
     Addresses(Vec<Ipv6Addr>),
     Flag,
     Raw(Bytes),

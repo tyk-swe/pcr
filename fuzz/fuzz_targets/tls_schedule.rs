@@ -38,9 +38,6 @@ fuzz_target!(|data: &[u8]| {
     for _ in 0..2 {
         writer.add_interface(LinkType::IPV4).unwrap();
     }
-    // Valid captured SYN/hello/close records are reordered, repeated, split
-    // across scopes, and spread over discontinuous capture time. Most inputs
-    // reach collector transitions immediately instead of failing a file header.
     for action in data.chunks_exact(4).take(64) {
         let source = &frames[usize::from(action[0]) % frames.len()];
         let mut bytes = source.bytes().to_vec();

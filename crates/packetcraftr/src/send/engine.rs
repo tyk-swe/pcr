@@ -14,18 +14,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Sends every packet the request's template expands to, `repeat` passes
     /// in expansion order, under one packet and byte budget shared by the
     /// whole operation.
-    ///
-    /// The count-only budget is authorized before any provider is consulted,
-    /// and each packet then passes staged preparation just before it is
-    /// transmitted. Each confirmed frame is published to `sink` on a worker
-    /// admitted by the client's runtime, and the send waits for the sink's
-    /// answer before it transmits the next frame, so evidence published
-    /// before a failure is preserved. Pacing delays run on the client's clock.
-    ///
-    /// # Errors
-    ///
-    /// Returns the invalid request, the preparation or provider failure, the
-    /// sink's failure, or the clock's failure.
     pub fn send<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -59,8 +47,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
                 completed += 1;
                 bytes =
                     bytes.saturating_add(u64::try_from(packet.bytes_sent()).unwrap_or(u64::MAX));
-                // Each event gets the longest wait a workflow has, carrying
-                // the client's cancellation.
                 publish(
                     Event::Sent(SentFrame {
                         pass,

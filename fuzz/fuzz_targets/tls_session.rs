@@ -10,8 +10,6 @@ use packetcraftr_core::capture_file::{Reader, ReaderLimits};
 use packetcraftr_core::protocol::builtin;
 use std::io::Cursor;
 
-// Exercises TLS collection through TCP reassembly and the analysis pipeline.
-// Record and handshake parsers have separate fuzz targets.
 fuzz_target!(|data: &[u8]| {
     let mut reader_options = ReaderLimits::default();
     reader_options.max_size = 64 * 1024;

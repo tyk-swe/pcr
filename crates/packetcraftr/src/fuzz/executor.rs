@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The live fuzz executor boundary: one permit-bound case in, one bounded
-//! evidence receipt out, served by a capture-ready exchange on the client.
-
 use std::time::Duration;
 
 use packetcraftr_core::diagnostic::Diagnostic;
@@ -21,7 +18,6 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
 
-/// One built case, bound to the permit and clipped timeout it may run under.
 #[derive(Clone, Debug)]
 pub(crate) struct CaseStep {
     pub(crate) permit: ExecutionPermit,
@@ -33,7 +29,6 @@ impl crate::execution::Step for CaseStep {
     type Evidence = CaseEvidence;
 }
 
-/// What the executor reports for one case, before the engine validates it.
 #[derive(Clone, Debug)]
 pub(crate) struct CaseEvidence {
     pub(crate) permit: ExecutionPermit,

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Declarative reflection support for strongly typed packet layers.
-
 use bytes::Bytes;
 
 use super::Schema;
@@ -10,31 +8,6 @@ use crate::field::{self, FieldValue, WireValue, parse_mac};
 
 /// Declares a layer's reflective schema, its [`Layer`](crate::layer::Layer)
 /// implementation, and a function returning its static field layout.
-///
-/// Built-in and custom protocols use the same declaration. Encoding and
-/// decoding stay handwritten in the protocol's
-/// [`LayerCodec`](crate::codec::LayerCodec).
-///
-/// The declaration names the schema function and the layer's protocol
-/// [`Id`](crate::layer::Id) and display name, then lists the fields in their
-/// public schema order. Each field gives its
-/// [`FieldKind`](crate::field::FieldKind) variant, whether it is derived by
-/// the encoder or required when building, a description, optional nested
-/// `children` schemas, and how it reflects:
-///
-/// - `reflect: member` reads and writes a struct member through
-///   [`ReflectiveField`];
-/// - `reflect_bounded: member, MAX` does the same but refuses unsigned values
-///   above a wire-width maximum;
-/// - `get |layer| expr, set |layer, value, name| expr` supplies handwritten
-///   accessors, which usually call [`reflect_get`]
-///   and [`reflect_set`].
-///
-/// A field may also give its byte range relative to the layer start with
-/// `layout: (start, end)`; the declared layout function returns those ranges
-/// in wire order. Aliases follow the field name as `"name" | "alias"`.
-///
-/// # Examples
 ///
 /// ```
 /// use packetcraftr_core::field::FieldValue;
@@ -171,9 +144,7 @@ macro_rules! reflective_layer {
                     $crate::reflective_layer!(@layout $field $(, $start, $end)?)
                 ),*
             ].into_iter().flatten().collect();
-            // Schema order is a public reflection contract, while layout
-            // order follows wire position. Stable sorting preserves the
-            // declaration order of fields sharing the same bytes.
+            // Stable sorting preserves the declaration order of fields sharing the same bytes.
             fields.sort_by_key(|field| field.range.start);
             fields
         }
@@ -225,17 +196,10 @@ macro_rules! reflective_layer {
 
 pub(crate) use reflective_layer;
 
-/// Why a reflective setter refused a value, before the field name and
-/// protocol that [`reflect_set`] attaches are known.
-///
-/// A refusal is not an error on its own: [`reflect_set`] turns it into a
-/// [`field::Error`] once the field is known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Refusal {
-    /// The value is not of the named kind.
     WrongType(&'static str),
-    /// The value has the right kind but does not fit the member.
     OutOfRange,
 }
 
@@ -248,28 +212,15 @@ impl std::fmt::Display for Refusal {
     }
 }
 
-/// A layer member that converts to and from a reflected [`FieldValue`].
-///
-/// Implemented for the unsigned integers, `i8`, `bool`, `String`, [`Bytes`],
-/// IPv4 and IPv6 addresses, six-byte MAC and eight-byte arrays, and
-/// [`WireValue`] over the unsigned integers. A custom member type implements
-/// it to be declared with `reflect:` in
-/// [`reflective_layer!`](crate::reflective_layer).
 pub trait ReflectiveField: Sized {
-    /// The member as a reflected value.
     fn reflective_value(&self) -> FieldValue;
-    /// Replaces the member with `value`, or says why it cannot hold it.
     fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal>;
 }
 
-/// Reads a reflective member; the getter counterpart of [`reflect_set`] for
-/// handwritten accessors.
 pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
     value.reflective_value()
 }
 
-/// Writes a reflective member, turning a [`Refusal`] into a [`field::Error`]
-/// that names `field` in `schema`'s protocol.
 pub fn reflect_set<T: ReflectiveField>(
     target: &mut T,
     schema: &'static Schema,
@@ -291,8 +242,6 @@ pub fn reflect_set<T: ReflectiveField>(
         })
 }
 
-/// Like [`reflect_set`], but additionally rejects unsigned values above a
-/// wire-width maximum before delegating to the field's own conversion.
 pub fn reflect_set_bounded<T: ReflectiveField>(
     target: &mut T,
     schema: &'static Schema,

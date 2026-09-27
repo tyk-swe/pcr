@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Route planning publishes stable classifications, keeps the causes it
-//! wraps, and rejects invalid packets before the route provider is asked.
-
 use std::convert::Infallible;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
@@ -20,7 +17,6 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::{Capability, Mode};
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 
-/// A deadline no fixture here comes close to spending.
 fn live() -> Deadline {
     Deadline::new(std::time::Duration::from_secs(5))
 }
@@ -88,8 +84,6 @@ fn ipv6(value: &str) -> IpAddr {
     value.parse().expect("fixture IPv6 address")
 }
 
-/// One table row: the published code and kind, a remediation, and a
-/// non-empty message.
 fn assert_row(
     error: &(impl Classified + fmt::Display),
     expected_code: &'static str,
@@ -312,9 +306,6 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
     }
 }
 
-/// The two lookup variants retain the provider failure they wrap instead of
-/// flattening it into a string, so the chain survives to the render boundary
-/// and the message and the cause each say it once.
 #[test]
 fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     let error = RouteError::RouteLookup {
@@ -327,7 +318,6 @@ fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     assert_eq!(error.causes(), ["provider refused"]);
     assert!(std::error::Error::source(&error).is_some());
 
-    // A transparent variant delegates rather than repeating its own message.
     let neighbor = RouteError::Neighbor(Box::new(NeighborError::InvalidRequest {
         message: "fixture".to_owned(),
         source: None,
@@ -336,8 +326,6 @@ fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     assert_eq!(neighbor.to_string(), "neighbor request is invalid: fixture");
 }
 
-/// Packet interpretation failures retain their typed cause through the public planner,
-/// before an injected provider can perform any I/O.
 #[test]
 fn route_planning_retains_semantic_failures_before_provider_io() {
     use packetcraftr_core::{
@@ -432,9 +420,6 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
     assert_eq!(error.classification().code, "packet.plan");
 }
 
-/// A backend that stalls until its caller's deadline passes, as a hung native
-/// query does, and then reports the deadline the way every system backend
-/// does.
 struct StalledBackend;
 
 impl Provider for StalledBackend {

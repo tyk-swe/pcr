@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Charges bounded items before allocation and records the first [`Limit`]
-//! breach for classified error reporting.
-
 use std::cell::Cell;
 
 use serde::de;
@@ -17,8 +14,7 @@ pub(super) const IPV4_PAYLOAD_BYTES: usize = 4;
 pub(super) const IPV6_PAYLOAD_BYTES: usize = 16;
 pub(super) const MAC_PAYLOAD_BYTES: usize = 6;
 
-/// Shared parse budget. Cheap interior mutability is enough: serde drives
-/// one document on one thread.
+/// Cheap interior mutability is enough: serde drives one document on one thread.
 pub(super) struct Budget<'l> {
     pub(super) limits: &'l DocumentLimits,
     nodes: Cell<usize>,
@@ -47,10 +43,7 @@ impl<'l> Budget<'l> {
         }
     }
 
-    /// A finite outer staging envelope, separate from semantic budgets. A
-    /// source byte cannot introduce more than one staged value; the factor
-    /// two covers geometric container growth and conversion overlap. This
-    /// is a conservative storage charge, not an allocator/RSS guarantee.
+    /// The factor two covers geometric container growth and conversion overlap.
     pub(super) fn charge_temporary<E: de::Error>(&self, amount: usize) -> Result<(), E> {
         let maximum = self
             .limits
@@ -66,7 +59,6 @@ impl<'l> Budget<'l> {
         Ok(())
     }
 
-    /// The first limit this budget rejected, if any.
     pub(super) fn breach(&self) -> Option<Limit> {
         self.breach.get()
     }
@@ -100,8 +92,6 @@ impl<'l> Budget<'l> {
         self.charge(&self.nodes, 1, Limit::TotalNodes)
     }
 
-    /// Which list budget is already full before another item is read, so the
-    /// caller can probe for the item without allocating it.
     pub(super) fn list_budget_full(&self, in_list: usize) -> Option<Limit> {
         if in_list >= self.limits.max_list_items {
             Some(Limit::ListItems)
@@ -112,8 +102,6 @@ impl<'l> Budget<'l> {
         }
     }
 
-    /// Charges one aggregate list item ahead of reading it; a read that finds
-    /// the end of the list hands the charge back.
     pub(super) fn charge_list_item<E: de::Error>(&self) -> Result<(), E> {
         self.charge(&self.list_items, 1, Limit::TotalListItems)
     }
@@ -129,7 +117,6 @@ impl<'l> Budget<'l> {
         Ok(())
     }
 
-    /// Entering a list at `depth` enclosing lists.
     pub(super) fn enter_list<E: de::Error>(&self, depth: usize) -> Result<(), E> {
         if depth >= self.limits.max_nesting {
             return Err(self.exceeded(Limit::Nesting));
@@ -137,14 +124,11 @@ impl<'l> Budget<'l> {
         Ok(())
     }
 
-    /// Reserves capacity for a sequence without trusting its size hint beyond
-    /// the remaining budget.
     pub(super) fn bounded_capacity(&self, hint: Option<usize>, limit: Limit) -> usize {
         hint.unwrap_or(0).min(self.limits.maximum(limit))
     }
 }
 
-/// Nested staging releases its charge on success and every error path.
 pub(super) struct TemporaryScope<'b, 'l> {
     budget: &'b Budget<'l>,
     previous: usize,

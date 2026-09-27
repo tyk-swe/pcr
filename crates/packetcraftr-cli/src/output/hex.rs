@@ -1,13 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Lowercase hexadecimal rendering shared by machine payloads and text output.
-
 use std::fmt;
 
 use serde::{Serialize, Serializer};
 
-/// Bytes rendered as contiguous lowercase hex digits.
 #[derive(Clone, Copy, Debug)]
 pub struct CompactHex<'a>(pub &'a [u8]);
 

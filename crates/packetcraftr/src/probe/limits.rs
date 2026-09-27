@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The probe count and duration checks every scan and traceroute plan must
-//! pass.
-
 use std::time::Duration;
 
 use packetcraftr_core::budget::DeadlineExceeded;

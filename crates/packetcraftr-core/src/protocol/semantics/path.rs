@@ -12,7 +12,6 @@ use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::network::{Fragment, Ipv4, Ipv6, SegmentRoutingHeader};
 
-// Field names that route errors report.
 const SEGMENTS: &str = "segments";
 const SEGMENTS_LEFT: &str = "segments_left";
 const LAST_ENTRY: &str = "last_entry";
@@ -25,11 +24,9 @@ pub struct IpPath {
     pub final_destination: IpAddr,
     /// Route destinations still visited on the live path, including the active hop.
     pub visited_destinations: Vec<IpAddr>,
-    /// Every route-bearing address declared by source routing or an SRH.
     pub declared_route_destinations: Vec<IpAddr>,
 }
 
-/// A built-in IP header, recognized by its layer type.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum IpHeader<'a> {
     V4(&'a Ipv4),
@@ -55,7 +52,6 @@ pub fn outer_scope_len(packet: &Packet) -> usize {
         .map_or(packet.len(), |boundary| boundary.saturating_add(1))
 }
 
-/// Layers of the directly transmitted packet, through its encapsulation boundary.
 pub fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
     packet.iter().take(outer_scope_len(packet))
 }
@@ -91,8 +87,6 @@ pub fn enclosing_ip_path(
     ip_path_at(packet, index, upper_layer_index, header).map(Some)
 }
 
-/// Interprets the IP header at `network_index`, reading its IPv6 extension
-/// chain up to `upper_bound`.
 pub(super) fn ip_path_at(
     packet: &Packet,
     network_index: usize,
@@ -236,8 +230,6 @@ fn typed_segment_route(
     )
 }
 
-/// Resolves a derived one-byte field: `Auto` takes `automatic`, and raw
-/// bytes must be exactly one byte.
 fn wire_u8(
     layer: &dyn Layer,
     field: &'static str,

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Scan reports: packet probes, plus socket-only TCP connect scans in
-//! [`connect`].
-
 pub mod connect;
 
 use std::net::IpAddr;
@@ -22,7 +19,6 @@ use packetcraftr::probe::Transport as ProbeTransport;
 use packetcraftr::scan as library;
 
 published_enum! {
-    /// What a probe's response, or its absence, says about an endpoint.
     pub enum Classification from library::Classification {
         Open => "open",
         Closed => "closed",
@@ -33,7 +29,6 @@ published_enum! {
     }
 }
 
-/// Endpoints per final classification.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClassificationCounts {
     pub open: usize,
@@ -57,7 +52,6 @@ impl From<library::ClassificationCounts> for ClassificationCounts {
     }
 }
 
-/// Round-trip accounting across a run's probes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Rtt {
     pub sent: u64,
@@ -85,7 +79,6 @@ impl From<library::Rtt> for Rtt {
 }
 
 published_enum! {
-    /// How far a UDP profile's expected response was verified.
     pub enum ApplicationStatus from library::profile::Status {
         NotObserved => "not_observed",
         Unchecked => "unchecked",
@@ -94,7 +87,6 @@ published_enum! {
     }
 }
 
-/// What a UDP profile established about the application behind a port.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ApplicationEvidence {
     pub profile: String,
@@ -112,9 +104,6 @@ impl From<library::profile::Evidence> for ApplicationEvidence {
     }
 }
 
-/// The wire protocol one probe was sent over. [`Transport::Icmp`] splits by
-/// address family here because the output contract names the two ICMP protocols
-/// separately; this enum is the only declaration of that vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
@@ -135,7 +124,6 @@ impl From<(ProbeTransport, IpAddr)> for Protocol {
     }
 }
 
-/// One canonical scan probe record used by aggregate and stream output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
@@ -160,7 +148,6 @@ pub struct Probe {
     pub application: Option<ApplicationEvidence>,
 }
 
-/// Final per-endpoint rollup: the winning classification and every probe.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
@@ -181,7 +168,6 @@ pub struct Report {
     pub rtt: Rtt,
 }
 
-/// A scan, with its diagnostics and totals.
 impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
@@ -236,7 +222,6 @@ impl TryFrom<library::Endpoint> for Endpoint {
     }
 }
 
-/// A transmitted probe packet with its destination and timing evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Sent {
     pub sequence: u64,
@@ -295,7 +280,6 @@ pub enum Event {
     },
 }
 
-/// One scan event, with any diagnostic it carried for the envelope.
 impl TryFrom<library::Event> for Published<Event> {
     type Error = Error;
 
@@ -327,7 +311,6 @@ impl TryFrom<library::Event> for Published<Event> {
     }
 }
 
-/// The terminal record, with the run's totals.
 impl From<library::Report> for Published<Event> {
     fn from(summary: library::Report) -> Self {
         Self::new(
@@ -379,14 +362,12 @@ impl crate::output::stream::StreamRecord for Event {
     }
 }
 
-/// A probe still in flight when the pipeline failed, with its best response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Pending {
     pub sent: Sent,
     pub response: Option<Captured>,
 }
 
-/// The probe being prepared when the pipeline failed, before it was sent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FailedProbe {
     pub sequence: u64,
@@ -396,7 +377,6 @@ pub struct FailedProbe {
     pub attempt: u32,
 }
 
-/// Per-interface capture lifecycle and statistics for a pipeline scan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureSource {
     pub interface: InterfaceId,
@@ -406,7 +386,6 @@ pub struct CaptureSource {
     pub statistics: CaptureStats,
 }
 
-/// Pipeline failure report: partial statistics and every incomplete probe.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Failure {
     pub stats: Stats,

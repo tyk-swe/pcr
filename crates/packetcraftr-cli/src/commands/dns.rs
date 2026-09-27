@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS CLI command logic.
-
 pub(super) mod arguments;
 mod rendering;
 
@@ -20,8 +18,7 @@ use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
-/// A DNS exchange puts exactly one query on the wire per attempt, so the probe
-/// only ever needs room for one packet template.
+/// A DNS exchange puts exactly one query on the wire per attempt.
 const MAX_TEMPLATE_PACKETS: usize = 1;
 
 impl super::Spec for Args {
@@ -81,12 +78,8 @@ pub(super) fn run(
         request.route = workflow.route.clone();
         request.collection = workflow.collection.clone();
     }
-    // DNS drives the composed client itself — authorization, cancellation,
-    // and the callback runtime live inside it — so the driver vends no
-    // session state.
     let client = &workflow.client(Runtime::Workflow);
-    // A lone question keeps the single-query contract: its failure propagates
-    // as the command's error rather than reporting as batch evidence.
+    // A lone question keeps the single-query contract.
     if let [request] = requests.as_slice() {
         return execution::run_workflow(
             &mut (),
@@ -164,7 +157,6 @@ fn prepare_requests(
     arguments: &Args,
     queue_limits: net::capture::Limits,
 ) -> Result<Vec<packetcraftr::dns::Request>, CliError> {
-    // NAME questions use --type; --reverse questions are always PTR.
     let mut questions: Vec<(String, packetcraftr::dns::QueryType)> = arguments
         .names
         .iter()
@@ -202,9 +194,7 @@ fn prepare_requests(
     } else {
         packetcraftr::dns::TransportMode::UdpThenTcp
     };
-    // Use independent random ports per question to retain anti-spoofing
-    // entropy, unless `--source-port` pins them or TCP delegates selection to
-    // the stack.
+    // Independent random ports per question retain anti-spoofing entropy.
     let pinned_source_port = arguments.source_port.or(arguments.tcp.then_some(0));
     let limits = packetcraftr::dns::Limits {
         message: packetcraftr::dns::MessageLimits {
@@ -254,8 +244,6 @@ fn prepare_requests(
                 timeout: arguments.timeout.timeout(),
                 queries_per_second: arguments.rate,
                 limits,
-                // The composed route and collection replace these once the
-                // client is prepared.
                 route: packetcraftr::route::Options::default(),
                 collection: packetcraftr::exchange::Collection::default(),
             })

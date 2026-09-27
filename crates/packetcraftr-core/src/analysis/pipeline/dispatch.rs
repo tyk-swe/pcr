@@ -18,10 +18,6 @@ use crate::analysis::reassembly::tcp::{
 };
 use crate::analysis::serial::serial_range_contains;
 
-/// Owns every piece of TCP reassembly state the loop advances.
-///
-/// Only matched frames advance TCP expiry, so the clock lives here rather
-/// than in the loop.
 pub(super) struct ReassemblyDispatch {
     tcp_reassembler: Option<TcpReassembler>,
     half_open_pure_syns: HashSet<ScopedFlowKey>,
@@ -37,7 +33,6 @@ impl ReassemblyDispatch {
         Ok(Self {
             tcp_reassembler,
             half_open_pure_syns: HashSet::new(),
-            // One half-open SYN slot per direction of each conversation.
             max_half_open_pure_syns: limits.max_flows.saturating_mul(DIRECTIONS_PER_CONVERSATION),
             clock: CaptureClock::new(),
         })
@@ -55,8 +50,7 @@ impl ReassemblyDispatch {
             return Ok(tcp_events);
         };
 
-        // Only matched frames advance TCP expiry; regression detail is
-        // reported by the capture-global IP clock instead.
+        // Only matched frames advance TCP expiry.
         let (now, _) = self.clock.at(timestamp, number)?;
         let sweep_due = self.clock.should_sweep(now);
         let pushable = segment.as_ref().is_some_and(|segment| {
@@ -91,9 +85,6 @@ impl ReassemblyDispatch {
     }
 }
 
-/// The acknowledgment a segment carries, when the ACK flag says it carries
-/// one at all. Reassembly does not track acknowledgments itself, so this is
-/// the only header field the dispatch reads beyond the segment.
 fn acknowledgment(tcp_header: Option<&Tcp>) -> Option<u32> {
     tcp_header
         .filter(|tcp| tcp.flags & Tcp::ACK != 0)

@@ -4,7 +4,6 @@
 use crate::output;
 use crate::rendering::optional_display;
 
-/// One text row per route.
 pub(super) fn route_line(route: &output::network::Decision) -> String {
     format!(
         "{} (index {}): source={} mtu={} capability={} link_type={}",

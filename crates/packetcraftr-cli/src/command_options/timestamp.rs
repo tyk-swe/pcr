@@ -1,16 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The one Unix-timestamp syntax every timestamp argument accepts.
-
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 
-/// Parses a non-negative Unix timestamp in decimal seconds, carrying up to
-/// nanosecond fractional precision without rounding.
 pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
     let invalid = || {
         CliError::new(

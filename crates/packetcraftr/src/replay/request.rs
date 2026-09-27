@@ -30,7 +30,6 @@ pub enum Timing {
 }
 
 impl Timing {
-    /// Validates any numeric timing parameter before frames are read.
     pub fn validate(&self) -> Result<(), Error> {
         match *self {
             Self::BitRate(0) => Err(Error::InvalidTiming {
@@ -62,8 +61,6 @@ pub struct Limits {
     pub max_source_frames: u64,
     pub max_transmitted_bytes: u64,
     pub max_frame_bytes: usize,
-    /// Deadline on elapsed time from the replay's start, at most
-    /// [`MAX_WAIT`]. The intentional delays it schedules must also fit.
     pub max_duration: Duration,
 }
 
@@ -79,8 +76,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Applies the policy's transmission ceiling to frames read, including
-    /// skipped frames.
     #[must_use]
     pub fn from_policy(
         policy: &crate::policy::Policy,
@@ -129,9 +124,6 @@ impl Limits {
     }
 }
 
-/// How every selected frame of a replay is scheduled, bounded, and sent.
-/// These settings do not depend on the capture, so a caller can validate them
-/// before it opens one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     pub repeat: u32,
@@ -140,8 +132,6 @@ pub struct Options {
     pub timing: Timing,
     pub limits: Limits,
     /// Second explicit opt-in required in addition to policy approval.
-    /// Replay rebuilds every captured frame permissively, so live replay
-    /// needs it.
     pub allow_permissive_live: bool,
 }
 
@@ -170,19 +160,14 @@ impl Options {
     }
 }
 
-/// Rewinds a seekable capture to its first frame.
 type Rewind<R> = fn(&mut Reader<R>) -> Result<(), CaptureError>;
 
-/// The capture a replay reads. A streaming source is read once, front to
-/// back; only a seekable source can be repeated, because each pass rewinds
-/// it.
 pub struct Source<R> {
     pub(super) reader: Reader<R>,
     pub(super) rewind: Option<Rewind<R>>,
 }
 
 impl<R: Read> Source<R> {
-    /// A capture read once. A request over it must not repeat.
     #[must_use]
     pub fn stream(reader: Reader<R>) -> Self {
         Self {
@@ -193,9 +178,6 @@ impl<R: Read> Source<R> {
 }
 
 impl<R: Read + Seek> Source<R> {
-    /// A stable capture, rewound before every pass. The caller owns its
-    /// immutability between passes; the CLI supplies an anonymous validated
-    /// snapshot.
     #[must_use]
     pub fn seekable(reader: Reader<R>) -> Self {
         Self {
@@ -206,19 +188,13 @@ impl<R: Read + Seek> Source<R> {
 }
 
 impl<R> Source<R> {
-    /// The capture's reader, for its format and interface metadata.
     pub fn reader(&self) -> &Reader<R> {
         &self.reader
     }
 }
 
-/// The engine's selection seam: whether each frame proceeds, and where it
-/// goes. [`Selection`] is the request's; the engine's tests script their own.
 pub(super) trait Selector {
-    /// Decides whether the frame at `source_index` proceeds to authorization
-    /// and transmission.
     fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error>;
-    /// The output interface for a selected frame.
     fn interface(&mut self, source_index: u64, frame: &Frame) -> Result<Interface, Error>;
 }
 
@@ -232,7 +208,6 @@ impl<T: Selector + ?Sized> Selector for &mut T {
     }
 }
 
-/// A request's filter and routing, as the engine consults them.
 pub(super) struct Selection {
     filter: Option<FrameSelector>,
     routing: Routing,
@@ -256,22 +231,14 @@ impl Selector for Selection {
     }
 }
 
-/// One replay: the capture, the frames selected from it, where each goes,
-/// and how they are sent.
 pub struct Request<R> {
     pub source: Source<R>,
-    /// Keeps only the frames it selects. A skipped frame consumes the
-    /// read-side frame budget only: it is never authorized or transmitted,
-    /// and it affects neither policy totals nor timing, while selected frames
-    /// keep their capture spacing.
     pub filter: Option<FrameSelector>,
-    /// Where each selected frame is sent, decided after the filter.
     pub routing: Routing,
     pub options: Options,
 }
 
 impl<R> Request<R> {
-    /// Replays every frame of `source` through `routing` under `options`.
     #[must_use]
     pub fn new(source: Source<R>, routing: Routing, options: Options) -> Self {
         Self {
@@ -282,24 +249,16 @@ impl<R> Request<R> {
         }
     }
 
-    /// Replays only the frames `filter` keeps.
     #[must_use]
     pub fn with_filter(mut self, filter: FrameSelector) -> Self {
         self.filter = Some(filter);
         self
     }
 
-    /// Validates the options, and that only a seekable source repeats,
-    /// without reading the capture.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
         validate(&self.source, &self.options)
     }
 
-    /// The request as the engine runs it.
     pub(super) fn into_parts(self) -> Parts<R, Selection> {
         Parts {
             source: self.source,
@@ -312,15 +271,12 @@ impl<R> Request<R> {
     }
 }
 
-/// What the engine runs: a capture, the seam that selects and routes its
-/// frames, and the options they are sent under.
 pub(super) struct Parts<R, S> {
     pub(super) source: Source<R>,
     pub(super) selector: S,
     pub(super) options: Options,
 }
 
-/// Validates `options`, and that only a seekable `source` repeats.
 pub(super) fn validate<R>(source: &Source<R>, options: &Options) -> Result<(), Error> {
     options.validate()?;
     if options.repeat != 1 && source.rewind.is_none() {

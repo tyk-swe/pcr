@@ -124,7 +124,6 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     ))
 }
 
-/// One aggregate document for a converted result and the metadata it carried.
 pub(crate) fn emit_published<T: Serialize>(
     command: output::contract::Command,
     published: output::envelope::Published<T>,

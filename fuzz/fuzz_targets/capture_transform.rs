@@ -41,7 +41,6 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
-    // A generated valid packet ensures arbitrary bytes still exercise editing.
     let payload = &data[..data.len().min(512)];
     let frame = composed_support::udp(40000, payload);
     let no_op = transform::rewrite(

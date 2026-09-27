@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The capture models: queue limits validate their bounds and statistics
-//! distinguish complete evidence from loss.
-
 use packetcraftr_netio::{Error, capture};
 
 #[test]

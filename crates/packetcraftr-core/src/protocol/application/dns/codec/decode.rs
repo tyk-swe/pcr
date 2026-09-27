@@ -18,19 +18,6 @@ pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Resul
 /// Decodes the possibly-compressed name that starts at `offset` in `message`,
 /// returning it with the offset where the reader continues.
 ///
-/// The labels keep their exact octets. The resume offset is just past the
-/// name's own encoding: for a compressed name, two bytes past the *first*
-/// pointer, not past the bytes the pointer reached.
-///
-/// Every offset is bounds-checked, every compression pointer must address a
-/// strictly earlier offset, no offset is expanded twice, at most
-/// [`Limits::max_name_pointers`] pointers are followed, and the name is
-/// capped at [`MAX_NAME_LEN`](super::super::MAX_NAME_LEN) wire octets, so the
-/// input cannot make decoding loop or allocate without bound. The limits are
-/// validated first.
-///
-/// # Examples
-///
 /// ```
 /// use bytes::Bytes;
 /// use packetcraftr_core::protocol::application::dns::{Limits, Error, decode_name};
@@ -120,8 +107,7 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
             remaining: message.len() - next,
         });
     }
-    // Offline inspection retains OPT records exactly where they occurred. Live
-    // response validation applies section, uniqueness, owner and version rules.
+    // Offline inspection retains OPT records exactly where they occurred.
     Ok(Dns {
         id: read_u16(message, 0, "transaction ID")?,
         response: flags & 0x8000 != 0,

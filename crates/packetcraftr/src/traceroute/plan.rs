@@ -14,8 +14,6 @@ use super::error::Probes;
 use crate::execution::rate_delay;
 use crate::probe::{Batch, ProbeEndpoint, Transport};
 
-/// One planned traceroute probe: the destination, the endpoint it addresses,
-/// and the hop limit and attempt it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
@@ -27,8 +25,6 @@ pub struct Probe {
 }
 
 impl Probe {
-    /// Builds the portable IPv4/IPv6 UDP, TCP, or ICMP probe represented by
-    /// this already-authorized hop plan.
     #[must_use]
     pub fn packet(&self) -> Packet {
         packet::probe_packet(self)
@@ -41,7 +37,6 @@ impl crate::probe::runner::Sequenced for Probe {
     }
 }
 
-/// Plans one batch per hop, each holding that hop's probes.
 pub(super) fn build_batches(
     request: &Request,
     destination: IpAddr,
@@ -84,9 +79,6 @@ pub(super) fn build_batches(
     Ok(batches)
 }
 
-/// Resolves the request's strategy and declared port into the target the probe
-/// at `sequence` addresses. UDP walks one unique destination port per probe, so
-/// the walk is guarded to stay inside `u16`.
 fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndpoint, Error> {
     let declared_port = || {
         request.destination_port.ok_or_else(|| Error::InvalidPort {

@@ -9,13 +9,8 @@ use bytes::Bytes;
 use super::path::FieldSpec;
 use crate::field::FieldKind;
 
-/// How an unbuilt derived wire value reflects through [`crate::field::FieldValue`].
 const AUTO_WIRE_VALUE: &str = "auto";
 
-/// A constant written on the right-hand side of a display-filter comparison.
-///
-/// Literals are recognized by shape rather than by the field they are compared
-/// against, so the same spelling means the same thing everywhere it appears.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Literal {
     Bool(bool),
@@ -65,9 +60,7 @@ impl fmt::Display for Literal {
     }
 }
 
-/// Tries literal forms from most to least specific. Two-digit hex groups form
-/// a byte run (a MAC at six groups) even at eight groups, where they could
-/// also spell an IPv6 address; `2001:db8::1` is not a run, so it is IPv6.
+/// Two-digit hex groups form a byte run even at eight groups, where they could also spell an IPv6 address.
 pub(super) fn parse(word: &str) -> Option<Literal> {
     match word {
         "true" => return Some(Literal::Bool(true)),
@@ -106,10 +99,6 @@ pub(super) fn parse(word: &str) -> Option<Literal> {
     None
 }
 
-/// Recognizes `aa:bb:cc`-style and `aa-bb-cc`-style hex byte runs.
-///
-/// Requires at least two groups so a bare `ff` stays a number, and requires a
-/// consistent separator so `aa:bb-cc` is not silently accepted.
 fn hex_groups(word: &str) -> Option<Vec<u8>> {
     let separator = if word.contains(':') {
         ':'
@@ -152,19 +141,15 @@ pub(super) fn kind_name(kind: FieldKind) -> &'static str {
     }
 }
 
-/// Rejects incompatible field/literal pairings at compile time. Derived fields
-/// also accept `"auto"` text.
 pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
     match spec.kind {
         FieldKind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),
         FieldKind::Unsigned | FieldKind::Signed => match literal {
             Literal::Unsigned(_) | Literal::Signed(_) => true,
-            // Only derived numeric fields accept reflected `auto` text.
             Literal::Text(text) => spec.derived && text == AUTO_WIRE_VALUE,
             _ => false,
         },
         FieldKind::Text => matches!(literal, Literal::Text(_)),
-        // Byte fields also accept a one-byte number.
         FieldKind::Bytes => match literal {
             Literal::Bytes(_) | Literal::Mac(_) | Literal::Text(_) => true,
             Literal::Unsigned(value) => *value <= u64::from(u8::MAX),
@@ -173,22 +158,15 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
         FieldKind::Ipv4 => matches!(literal, Literal::Ipv4(_) | Literal::Ipv4Net(..)),
         FieldKind::Ipv6 => matches!(literal, Literal::Ipv6(_) | Literal::Ipv6Net(..)),
         FieldKind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
-        // Lists compare element-wise.
         FieldKind::List => true,
         FieldKind::Object => false,
     }
 }
 
-/// Whether `contains` can search a field of this kind at all.
-///
-/// Only the kinds evaluated as a byte haystack qualify. Slicing a
-/// field first narrows it to bytes, so `ipv4.source[0:2] contains 0a:00`
-/// still works even though an unsliced address does not.
 pub(super) fn searchable(kind: FieldKind) -> bool {
     matches!(kind, FieldKind::Bytes | FieldKind::Text | FieldKind::Mac)
 }
 
-/// Whether a literal can serve as a `contains` needle.
 pub(super) fn searchable_needle(literal: &Literal) -> bool {
     matches!(
         literal,
@@ -237,8 +215,6 @@ mod tests {
 
     #[test]
     fn eight_byte_runs_stay_bytes_while_other_ipv6_spellings_stay_addresses() {
-        // Eight two-digit groups also spell an uncompressed IPv6 address; the
-        // byte run wins so an 8-byte run reads like every other length.
         assert_eq!(
             parse("47:45:54:20:2f:69:6e:64"),
             Some(Literal::Bytes(Bytes::from_static(b"GET /ind")))

@@ -1,12 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The coherence check every published campaign passes: its case counts
-//! agree with each other and with the cases it published.
-
 use super::report::{Case, CaseOutcome, Report, Stats};
 
-/// Why a campaign's cases disagree with its own summary.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{reason}")]
 pub struct IncoherentReport {
@@ -19,12 +15,6 @@ impl IncoherentReport {
     }
 }
 
-/// A campaign's case counts, established as coherent: built cases never
-/// exceed generated cases, and every case was either built or rejected.
-///
-/// Checking cases against the counts requires one case per generated case,
-/// one non-rejected case per built case, and each case carrying the campaign
-/// seed and its index in publication order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Totals {
     pub generated: u64,
@@ -33,11 +23,6 @@ pub struct Totals {
 }
 
 impl Totals {
-    /// Counts checked against each other.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IncoherentReport`] when more cases were built than generated.
     pub fn new(generated: u64, built: u64) -> Result<Self, IncoherentReport> {
         let rejected = generated.checked_sub(built).ok_or(IncoherentReport::new(
             "built case count exceeds generated case count",
@@ -49,13 +34,6 @@ impl Totals {
         })
     }
 
-    /// Checks the campaign's published cases, in publication order, against
-    /// these counts.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IncoherentReport`] when the cases disagree with the counts,
-    /// the campaign seed, or the publication order.
     pub fn check_cases<'a>(
         self,
         seed: u64,

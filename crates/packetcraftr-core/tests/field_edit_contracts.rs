@@ -78,9 +78,6 @@ fn frame(ipv6: bool, tcp: bool, ethernet: bool, udp_checksum_disabled: bool) -> 
     .unwrap()
 }
 
-/// One DNS answer whose name is a compression pointer into the question, so
-/// edits must preserve compressed names and opaque record bytes. The datagram
-/// is assembled by hand so the compressed bytes are exact.
 fn dns_frame(ethernet: bool) -> Frame {
     let mut message = vec![
         0x12, 0x34, // id
@@ -298,7 +295,6 @@ fn every_editable_field_patches_only_its_layout_range() {
 fn no_op_edit_is_byte_identical_even_with_invalid_checksums() {
     let original = frame(false, true, true, false);
     let mut corrupted = original.bytes().to_vec();
-    // Corrupt the TCP checksum; a no-op edit must not repair it.
     let (start, _) = layer_range(&original, "tcp", "checksum");
     corrupted[start] ^= 0x5a;
     let corrupted = Frame::new(UNIX_EPOCH, original.link_type, corrupted).unwrap();
@@ -326,7 +322,6 @@ fn preserve_mode_leaves_checksum_bytes_exactly() {
         preserved.frame.bytes()[checksum.0..checksum.1],
         original.bytes()[checksum.0..checksum.1]
     );
-    // Only the requested field changed under preserve.
     assert_eq!(
         preserved
             .changes
@@ -475,10 +470,8 @@ fn dns_id_edit_preserves_compressed_names_and_rdata() {
 
 #[test]
 fn assignments_are_atomic_and_overlap_rejected() {
-    // Duplicate canonical paths through different spellings are refused.
     assert!(edits(&["ipv4.ttl=1", "ipv4#1.ttl=2"], ChecksumMode::Repair).is_err());
     assert!(edits(&["ipv4.ttl=1", "ipv4.ttl=2"], ChecksumMode::Repair).is_err());
-    // A failing second assignment aborts before any frame is touched.
     assert!(edits(&["ipv4.ttl=1", "bogus.field=2"], ChecksumMode::Repair).is_err());
     let original = frame(false, true, false, false);
     assert!(apply(&original, &["tcp#7.sequence=1"], ChecksumMode::Repair).is_err());
@@ -514,7 +507,6 @@ fn invalid_fields_values_and_occurrences_are_rejected() {
 #[test]
 fn truncated_fragmented_and_protected_frames_are_rejected() {
     let original = frame(false, false, true, false);
-    // Truncated capture (captured < original).
     let truncated = Frame::try_with_lengths(
         UNIX_EPOCH,
         original.link_type,
@@ -538,7 +530,6 @@ fn truncated_fragmented_and_protected_frames_are_rejected() {
     .unwrap();
     assert!(apply(&fragments[0], &["ipv4.ttl=1"], ChecksumMode::Repair).is_ok());
     assert!(apply(&fragments[0], &["udp.source_port=1"], ChecksumMode::Repair).is_err());
-    // ESP inside the stack marks protected traffic.
     let mut protected = original.bytes().to_vec();
     let ipv4 = layer_range(&original, "ipv4", "ttl");
     protected[ipv4.0 + 1] = 50; // next-header byte -> esp

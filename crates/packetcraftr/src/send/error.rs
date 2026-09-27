@@ -9,25 +9,20 @@ use packetcraftr_core::error::{BoundaryError, Classification, Classified, Coordi
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
-    /// Preparation refused a packet, or a provider failed.
     #[error(transparent)]
     Preparation(#[from] crate::Error),
-    /// The request asked for unbounded or impossible work.
     #[error("invalid send option {field}: {message}")]
     InvalidRequest {
         field: &'static str,
         message: String,
     },
-    /// The sink refused an event, or publishing it failed.
     #[error("send progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
     },
-    /// A collector saw events that disagree with the report.
     #[error("send events are incoherent: {message}")]
     IncoherentEvents { message: String },
-    /// The pacing clock failed while the send could still continue.
     #[error("send pacing clock failed")]
     Clock {
         #[source]
@@ -68,8 +63,6 @@ impl Classified for Error {
         }
     }
 
-    /// Delegates to the wrapped preparation failure, and lists the sink's
-    /// [`BoundaryError`] message with the causes it keeps.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Preparation(error) => error.causes(),

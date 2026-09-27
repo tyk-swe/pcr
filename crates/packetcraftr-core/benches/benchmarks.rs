@@ -166,15 +166,11 @@ layers:
 }
 
 fn bench_capture_processing_and_encoding(c: &mut Criterion) {
-    // Model the CLI's transactional spooled capture path with enough payload
-    // to expose capture-sized growth in peak-RSS: every frame shares the
-    // payload, so measured growth is encoded output (~16 MiB, still practical).
     const LARGE_FRAME_COUNT: u64 = 4_096;
     const LARGE_PAYLOAD_BYTES: usize = 4_096;
     let frame_payload = Bytes::from_static(b"\x45\x00\x00\x28\x00\x01\x00\x00\x40\x06\x00\x00\x0a\x00\x00\x01\x0a\x00\x00\x02\x04\xd2\x00\x50\x00\x00\x03\xe8\x00\x00\x00\x00\x50\x02\x20\x00\x00\x00\x00\x00");
     let frame = Frame::new(SystemTime::now(), LinkType::IPV4, frame_payload).expect("frame");
 
-    // Pre-generate PCAP and PCAPNG buffers with 100 frames
     let mut pcap_writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("pcap writer");
     let mut pcapng_writer = Writer::pcapng(Vec::new()).expect("pcapng writer");
     let _iface = pcapng_writer
@@ -363,8 +359,6 @@ const FRAGMENT_PAYLOAD: usize = 1_480;
 const FRAGMENT_COUNT: usize = 44;
 const DATAGRAM_BYTES: usize = FRAGMENT_PAYLOAD * FRAGMENT_COUNT;
 
-/// A 64 KiB IPv4 datagram split into fragments of one Ethernet MTU each, the
-/// shape produced by a large UDP message such as a DNS or NFS reply.
 fn ipv4_datagram_fragments() -> Vec<Fragment> {
     let mut interner = Interner::new();
     let scope = interner.intern(None, Vec::new()).expect("root scope");
@@ -435,8 +429,6 @@ fn bench_ip_reassembly(c: &mut Criterion) {
     ));
     for (name, fragments) in [("in_order", &in_order), ("reverse_order", &reverse_order)] {
         group.bench_function(name, |b| {
-            // Cloning the fragments and building the reassembler are setup,
-            // not the work being measured.
             b.iter_batched(
                 || {
                     let reassembler =

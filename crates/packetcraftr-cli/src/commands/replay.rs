@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Replay CLI command logic.
-
 pub(super) mod arguments;
 mod conversion;
 mod rendering;
@@ -36,8 +34,6 @@ use crate::rendering::{
 };
 use conversion::timing;
 
-/// One validated replay: the client it runs on and its request over a
-/// validated capture snapshot.
 struct ReplayRun {
     client: crate::system::Client,
     request: Request<std::fs::File>,
@@ -103,9 +99,6 @@ pub(super) fn run(
 
 fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let policy = arguments.policy.clone().into_policy();
-    // Replay's aggregate ceilings come from the traffic policy rather than
-    // from `--max-frames`/`--max-bytes`, but they bound the same capture
-    // stream and are validated against the same cross-field rule.
     let capture_limits = OfflineCaptureLimitsArgs {
         max_frames: policy.max_packets_per_operation,
         max_bytes: policy.max_bytes_per_operation,
@@ -178,7 +171,6 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     })
 }
 
-/// A refused interface rule, in its option's own words.
 impl From<routing::Error> for CliError {
     fn from(error: routing::Error) -> Self {
         let message = match &error {
@@ -201,7 +193,6 @@ impl From<routing::Error> for CliError {
     }
 }
 
-/// The fallback interface as the caller named it, which the report publishes.
 fn requested_interface<R>(request: &Request<R>) -> Option<route::Interface> {
     request.routing.fallback().cloned()
 }
@@ -211,7 +202,6 @@ struct CaptureSettings {
     format: Format,
 }
 
-/// Runs `request` on `client`, publishing each confirmed frame to `sink`.
 fn drive<P, K, R>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
@@ -230,8 +220,7 @@ fn replay_text<P: Providers, K: Clock, R: Read>(
     request: Request<R>,
     filtered: bool,
 ) -> Result<(), CliError> {
-    // The sink runs on a runtime worker, outside this thread's dispatch
-    // scope, so it enters the invocation's deadline itself.
+    // The sink runs on a runtime worker, so it enters the invocation's deadline itself.
     let deadline = crate::invocation::deadline();
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
         let _scope = crate::invocation::enter_deadline(deadline.clone());
@@ -247,8 +236,6 @@ fn replay_aggregate<P: Providers, K: Clock, R: Read>(
     let started = Instant::now();
     let requested_interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
-    // Each frame converts as it is published, so a frame the output cannot
-    // represent stops the replay before the next one is sent.
     let frames = Arc::new(Mutex::new(Vec::new()));
     let collected = Arc::clone(&frames);
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
@@ -292,8 +279,6 @@ fn replay_capture<P: Providers, K: Clock, R: Read>(
     replay_capture_to(client, request, settings, io::stdout())
 }
 
-/// The capture output a replay's sink writes into from its worker, and the
-/// command finalizes once the replay returns.
 struct Shared<T>(Arc<Mutex<Option<T>>>);
 
 impl<T> Shared<T> {
@@ -351,8 +336,6 @@ where
             },
         ));
     }
-    // The command keeps the compressor, so it is finished even when the
-    // capture writer or the replay fails.
     let destination = Shared::new(settings.compression.writer(destination)?);
     let result = (|| {
         let writer = Shared::new(capture_writer(
@@ -391,8 +374,6 @@ where
     finish_compressed_output(result, destination)
 }
 
-/// An output failure the replay reports at the frame it failed on: `message`
-/// names what failed, and the error it carries is the first cause.
 fn output_failure(
     message: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
@@ -409,8 +390,6 @@ fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, Bounda
         .map_err(|source| output_failure("replay frame output failed", source))
 }
 
-/// Writes one frame line. An interrupt observed while writing fails the
-/// replay as an interruption, rather than as an output-sink failure.
 fn text_record_with(
     evidence: FrameEvidence,
     write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
@@ -464,8 +443,6 @@ fn classic_writer<R: Read, W: Write>(
     destination: W,
     limits: packetcraftr::replay::Limits,
 ) -> Result<Writer<W>, CliError> {
-    // replay_capture_to admits only a classic pcap source, which always
-    // exposes its single global interface
     let interface = reader.interfaces()[0].clone();
     let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
         CliError::new(

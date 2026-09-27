@@ -20,9 +20,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Generous bound on the fixture's release wait so a broken test fails the
-/// connection instead of blocking a connect worker forever; far above the
-/// pending deadlines under test.
 const GATE_WATCHDOG: Duration = Duration::from_secs(30);
 
 struct Socket {
@@ -131,8 +128,6 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
     for _ in 1..tcp::MAX_PENDING_CONNECTIONS {
         started.recv_timeout(Duration::from_secs(2)).unwrap();
     }
-    // Connects are a sub-limit of the one native worker pool, which refuses
-    // work past its capacity with a classified error instead of waiting.
     let pool = native_snapshot();
     assert_eq!(pool.capacity, resources::WORKER_CAPACITY);
     assert_eq!(pool.active, tcp::MAX_PENDING_CONNECTIONS);

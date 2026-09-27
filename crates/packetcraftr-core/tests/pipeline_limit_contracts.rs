@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for analysis limits: validation, exact-frame reporting, and
-//! reachability of every reassembly budget.
-
 mod common;
 
 use common::{
@@ -17,7 +14,6 @@ use packetcraftr_core::protocol::transport::Tcp;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-/// The default limits with one edit applied.
 fn with(edit: impl FnOnce(&mut Limits)) -> Limits {
     let mut limits = Limits::default();
     edit(&mut limits);
@@ -26,9 +22,6 @@ fn with(edit: impl FnOnce(&mut Limits)) -> Limits {
 
 #[test]
 fn limits_validate_each_finite_budget_before_input_is_read() {
-    // Every ceiling the two reassembly engines enforce is reachable from
-    // this type, so every one of them is refused at zero before a single
-    // frame is read.
     type ZeroOne = fn(&mut Limits);
     let zeroed: [(&str, ZeroOne); 13] = [
         ("max_frames", |limits| limits.max_frames = 0),
@@ -281,8 +274,6 @@ fn pipeline_reports_aggregate_decode_flow_and_sink_limits_at_the_exact_frame() {
     assert_decode_flow_and_sink_limits(&registry, &frames);
 }
 
-/// A handshake plus two out-of-order payload segments, so the reassembler
-/// retains pending bytes rather than delivering them immediately.
 fn pending_reassembly_frames(registry: &Arc<packetcraftr_core::registry::Registry>) -> Vec<Frame> {
     let epoch = SystemTime::UNIX_EPOCH;
     vec![
@@ -293,8 +284,6 @@ fn pending_reassembly_frames(registry: &Arc<packetcraftr_core::registry::Registr
             server_tcp(500, 101, Tcp::SYN | Tcp::ACK, 4_000),
             b"",
         ),
-        // Each sequence leaves a hole after the handshake, so both segments
-        // are retained instead of delivered.
         tcp_frame(
             registry,
             epoch + Duration::from_secs(2),
@@ -338,8 +327,6 @@ fn analysis_limits_reach_every_tcp_reassembly_budget() {
     let registry = registry();
     let frames = pending_reassembly_frames(&registry);
 
-    // Each byte budget is refused by the engine naming the exact value the
-    // caller set, which is only possible if that value reached it.
     let bounded: [(Limits, tcp::Error); 2] = [
         (
             with(|limits| limits.tcp.max_bytes_per_flow = 4),
@@ -359,9 +346,7 @@ fn analysis_limits_reach_every_tcp_reassembly_budget() {
         );
     }
 
-    // The segment ceiling is recoverable rather than fatal: the flow is
-    // evicted and the segment retried, so reachability shows up as an
-    // eviction the default budget does not produce.
+    // The segment ceiling is recoverable, so reachability shows up as an eviction.
     let evictions = |limits: Limits| {
         run_with_limits(&registry, &frames, limits)
             .expect("a recoverable segment ceiling does not fail the run")
@@ -439,8 +424,6 @@ fn cancellation_stops_before_reading_input_and_is_not_a_timeout() {
 
 #[test]
 fn time_bounds_select_inclusive_endpoints_without_assuming_order() {
-    // The third frame regresses below the second: selection follows the
-    // timestamp value, never capture order.
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH;
     let frames = [
@@ -556,8 +539,6 @@ fn time_bounds_skipped_frames_still_count_against_read_limits() {
     assert_eq!(summary.frames_read, 3);
     assert_eq!(summary.frames_matched, 0);
 
-    // Read budgets charge skipped frames, so the window cannot dodge the
-    // aggregate input ceilings.
     let mut capture = reader(&frames);
     let result = run(
         &mut capture,

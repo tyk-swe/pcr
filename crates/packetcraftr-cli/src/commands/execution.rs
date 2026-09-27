@@ -1,71 +1,34 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! [`run_workflow`], the one driver deciding between the streaming and
-//! collecting engine entry points of a workflow command under the negotiated
-//! output format.
-
 use crate::output;
 use packetcraftr_core as core;
 
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 
-/// The event sink a streaming engine entry point receives. Engines publish
-/// through a runtime-budgeted worker, so the sink is `Send` and `'static`.
+/// Engines publish through a runtime-budgeted worker, so the sink is `Send` and `'static`.
 pub(super) type Emit<E> = Box<dyn FnMut(E) -> Result<(), core::error::BoundaryError> + Send>;
 
-/// The collecting engine entry point: runs the workflow into a report.
 type Collect<'a, S, R> = Box<dyn FnOnce(&mut S) -> Result<R, CliError> + 'a>;
 
-/// The streaming engine entry point: publishes each event through the sink.
 type Publish<'a, S, E, U> = Box<dyn FnOnce(&mut S, Emit<E>) -> Result<U, CliError> + 'a>;
 
-/// The (result, diagnostics, stats) triple a collected report converts into
-/// for the `json` envelope.
-/// The report → wire conversion the driver's `json` arm emits.
 type Convert<'a, R, T> =
     Box<dyn FnOnce(R) -> Result<output::envelope::Published<T>, CliError> + 'a>;
 
-/// The render dispatch for a format that is neither `ndjson` nor `json`.
 type Render<'a, R, F> = Box<dyn FnOnce(R, F) -> Result<(), CliError> + 'a>;
 
-/// The adapters a workflow command hands to [`run_workflow`]: the two engine
-/// entry points plus the conversions between engine types and wire records.
-/// `S` is the command's session — the pieces both entry points drive — or
-/// `()` when the workflow drives a self-contained provider.
 pub(super) struct Hooks<'a, S, E, U, R, F, T> {
-    /// The envelope identity machine output carries.
     pub(super) command: output::contract::Command,
-    /// The collecting entry point: runs the engine into a report for the
-    /// aggregate formats.
     pub(super) run: Collect<'a, S, R>,
-    /// The streaming entry point: publishes each engine event through `emit`
-    /// under `ndjson`.
     pub(super) run_with_events: Publish<'a, S, E, U>,
-    /// Adapts one engine event into its wire record on the stream.
     pub(super) on_event: fn(E, &StreamEncoder) -> Result<(), CliError>,
-    /// Converts the collected report into the published result, with the
-    /// diagnostics and optional stats the driver's `json` arm emits.
     pub(super) into_result: Convert<'a, R, T>,
-    /// Renders the report under a format that is neither `ndjson` streaming
-    /// nor the `json` aggregate: command text and, for `exchange`, the
-    /// capture formats. Commands without extra render formats ignore the
-    /// negotiated format argument.
     pub(super) render_text: Render<'a, R, F>,
-    /// Emits the terminal record ending a streamed run.
     pub(super) complete: fn(U, &StreamEncoder) -> Result<(), CliError>,
 }
 
-/// Drives one workflow under the negotiated `format`.
-///
-/// `ndjson` runs `run_with_events`, adapting every engine event through
-/// `on_event` after checking `cancellation` and the installed invocation
-/// deadline, and ends with `complete`. Every other format runs `run`, then
-/// either emits the `json` envelope from `into_result` or hands the report
-/// to `render_text`. Choosing the entry point before rendering means no
-/// renderer carries an `ndjson` arm, and routing every emission through the
-/// shared check makes interrupt handling identical across the workflows.
 pub(super) fn run_workflow<S, E, U, R, F, T>(
     session: &mut S,
     format: F,
@@ -104,9 +67,6 @@ where
     }
 }
 
-/// The emission guard: the workflow's cancellation token plus the installed
-/// invocation deadline — the same coverage `cancellation::check` gives the
-/// process signal, with the token injectable for tests.
 fn emission_check(cancellation: &core::budget::Cancellation) -> Result<(), CliError> {
     cancellation.check().map_err(CliError::classified)?;
     crate::invocation::check()
@@ -122,7 +82,6 @@ mod tests {
     use super::*;
     use crate::test_support::{TestRecord, assert_contiguous, stream};
 
-    /// A terminal record the scripted `complete` hook publishes.
     #[derive(serde::Serialize)]
     struct Complete(u64);
 
@@ -142,8 +101,6 @@ mod tests {
             .map_err(CliError::from)
     }
 
-    /// Scripted hooks recording the entry points and adapters the driver
-    /// invokes; the wire buffer records what the stream adapters publish.
     fn hooks<'a>(
         log: &'a RefCell<Vec<String>>,
         stream_engine: impl FnOnce(&mut (), Emit<u64>) -> Result<u64, CliError> + 'a,

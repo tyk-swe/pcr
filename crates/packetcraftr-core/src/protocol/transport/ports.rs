@@ -4,7 +4,7 @@
 use crate::registry::Discriminator;
 
 /// Offers each nonzero port once, in preference order, followed by the zero/raw
-/// fallback. A zero port never shadows that fallback.
+/// fallback.
 pub(super) fn child_discriminators(ports: [u16; 2]) -> Vec<Discriminator> {
     let mut next = Vec::with_capacity(3);
     for port in ports {

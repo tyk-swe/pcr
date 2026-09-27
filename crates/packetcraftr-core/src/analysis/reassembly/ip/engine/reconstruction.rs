@@ -1,20 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Retained-header sizing and materialization for admitted fragments, and
-//! exact network-header reconstruction after a complete payload is admitted.
-
 use super::validation::{FAMILY_MISMATCH, Incoming, IncomingReconstruction};
 use super::{Bytes, DatagramState, Ecn, Error, Family, Malformed, Reconstruction, Resource};
 use crate::protocol::headers::Ipv6Header;
 
-/// A complete IPv4 datagram covers offset zero, so the fragment that filled
-/// it recorded the header every reconstruction needs.
 const MISSING_OFFSET_ZERO_HEADER: Error = Error::Inconsistent {
     reason: "complete IPv4 payload has no offset-zero header",
 };
-/// Wire length of the datagram a complete payload of `payload_length` bytes
-/// reconstructs to, including the retained header or prefix.
 pub(super) fn reconstructed_length(
     reconstruction: &Reconstruction,
     payload_length: usize,
@@ -31,8 +24,7 @@ pub(super) fn reconstructed_length(
         .ok_or(Malformed::OffsetOverflow.into())
 }
 
-/// Reconstructs the datagram from its complete payload, given as up to two
-/// consecutive slices so a completing append need not be stored first.
+/// The payload is up to two consecutive slices so a completing append need not be stored first.
 pub(super) fn reconstruct_bytes(
     reconstruction: &Reconstruction,
     payload: [&[u8]; 2],
@@ -79,8 +71,6 @@ pub(super) fn reconstruction_retained_bytes(
             Some(Reconstruction::Ipv6 { .. }) => Err(FAMILY_MISMATCH),
         },
         IncomingReconstruction::Ipv6 { prefix, .. } => match established {
-            // The offset-zero fragment's prefix replaces a provisional one, so
-            // admission must account for the prefix the datagram will retain.
             Some(Reconstruction::Ipv6 {
                 prefix: _,
                 from_offset_zero,
@@ -96,9 +86,6 @@ pub(super) fn reconstruction_retained_bytes(
     }
 }
 
-/// Bytes [`materialize_reconstruction`] newly copies for this fragment while
-/// the datagram's current reconstruction is still retained; a retained header
-/// or prefix is shared, not copied.
 pub(super) fn reconstruction_copied_bytes(
     existing: Option<&DatagramState>,
     incoming: &Incoming,
@@ -159,9 +146,7 @@ pub(super) fn materialize_reconstruction(
                 ..
             }) => {
                 if !from_offset_zero && incoming.offset == 0 {
-                    // RFC 8200 §4.5: only the offset-zero fragment's
-                    // unfragmentable header and Fragment Next Header are
-                    // retained, even when later-offset fragments arrived first.
+                    // RFC 8200 §4.5: the offset-zero fragment's header wins over earlier arrivals.
                     Ok(Reconstruction::Ipv6 {
                         prefix: copy_bytes(prefix)?,
                         predecessor_next_header_offset: *predecessor_next_header_offset,

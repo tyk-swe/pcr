@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared bounds and sourced TCP deliveries for offline application collectors.
-
 use super::{
     FrameRecord,
     provenance::SourceSet,
@@ -17,30 +15,16 @@ use crate::{
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet};
 
-/// Ceilings for one DNS or HTTP application-analysis run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Distinct application messages the collector may count across all
-    /// streams over the whole run: HTTP counts a message when its first byte
-    /// arrives, DNS when it emits a framed message.
     pub max_messages: usize,
     /// Distinct transport streams the collector may track over the whole run;
-    /// a closed stream still counts. HTTP counts TCP conversations; DNS counts
-    /// each UDP flow and TCP stream.
+    /// a closed stream still counts.
     pub max_streams: usize,
-    /// Bytes held at once across all in-flight message parses: partial heads
-    /// and body-decoder buffers for HTTP, TCP length prefixes and partial
-    /// bodies for DNS.
     pub max_buffer_bytes: usize,
     /// Cumulative byte charge for retained and emitted evidence over the
-    /// run: parsed heads and flushed message state for HTTP, emitted wire
-    /// bytes plus pending transaction keys for DNS. Charges include a
-    /// conservative multiplier for decoded-object expansion, so this bounds
-    /// result growth rather than live buffers or serialized output.
+    /// run.
     pub max_retained_bytes: usize,
-    /// TCP sequence spans retained to attribute reassembled deliveries to
-    /// physical source frames. HTTP additionally bounds the distinct source
-    /// frames one message may carry by this limit.
     pub max_source_spans: usize,
 }
 impl Default for Limits {
@@ -87,8 +71,6 @@ impl Classified for Error {
         }
     }
 
-    /// A [`BoundaryError`](crate::error::BoundaryError) carries a captured
-    /// `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Analysis(source) => source.causes(),
@@ -98,8 +80,7 @@ impl Classified for Error {
     }
 }
 impl Limits {
-    /// Rejects a zero limit and one above its fixed ceiling. The DNS and
-    /// HTTP collectors call it before reading input.
+    /// Rejects a zero limit and one above its fixed ceiling.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             ("max_messages", self.max_messages, 100_000),
@@ -125,9 +106,6 @@ impl Limits {
 
 pub(crate) const MAX_SERVICE_PORTS: usize = 256;
 
-/// Sorts and deduplicates service ports; rejects empty lists, zero, and more
-/// than [`MAX_SERVICE_PORTS`] distinct ports. `field` names the limit in
-/// errors.
 pub(crate) fn normalize_ports(
     ports: impl IntoIterator<Item = u16>,
     field: &'static str,

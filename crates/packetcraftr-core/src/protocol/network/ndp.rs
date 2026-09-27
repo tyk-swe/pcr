@@ -2,18 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Neighbor Discovery (RFC 4861) solicitation and advertisement messages.
-//!
-//! The [`Icmpv6`] layer keeps its body verbatim. These models type the body
-//! of a Neighbor Solicitation or Neighbor Advertisement and its options, so
-//! neighbor discovery builds and checks them without hand-written bytes.
-//! They are not registered layers: dissection still reports an NDP message
-//! as an ICMPv6 layer with an opaque body, and these models read or produce
-//! that body.
-//!
-//! Decoding keeps every wire value: reserved bits, option order, and options
-//! of unknown kind. Encoding a decoded message reproduces its body byte for
-//! byte.
-//!
 //! ```
 //! use packetcraftr_core::{
 //!     packet::MacAddress,
@@ -40,29 +28,20 @@ use crate::packet::MacAddress;
 
 use super::Icmpv6;
 
-/// ICMPv6 type of a Neighbor Solicitation.
 pub const NEIGHBOR_SOLICITATION: u8 = 135;
-/// ICMPv6 type of a Neighbor Advertisement.
 pub const NEIGHBOR_ADVERTISEMENT: u8 = 136;
-/// Option kind of a Source Link-Layer Address option.
 pub const SOURCE_LINK_LAYER_ADDRESS: u8 = 1;
-/// Option kind of a Target Link-Layer Address option.
 pub const TARGET_LINK_LAYER_ADDRESS: u8 = 2;
 
-/// Bytes of a solicitation or advertisement body before its options: the
-/// flags or reserved word and the target address.
 const FIXED_LENGTH: usize = 20;
 /// Options are sized in units of eight octets.
 const OPTION_UNIT: usize = 8;
-/// An option's kind and length octets.
 const OPTION_HEADER_LENGTH: usize = 2;
 const ROUTER_FLAG: u32 = 1 << 31;
 const SOLICITED_FLAG: u32 = 1 << 30;
 const OVERRIDE_FLAG: u32 = 1 << 29;
-/// The advertisement bits after its three flags.
 const ADVERTISEMENT_RESERVED: u32 = OVERRIDE_FLAG - 1;
 
-/// A solicitation or advertisement body the codec cannot read or write.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -72,16 +51,12 @@ pub enum Error {
     ZeroLengthOption { offset: usize },
     #[error("NDP option at body byte {offset} runs past the end of the message")]
     OptionOverrun { offset: usize },
-    /// An option's kind, length, and value must fill whole eight-octet units,
-    /// at most 255 of them.
     #[error("NDP option value of {length} bytes does not fill whole 8-octet units")]
     OptionLength { length: usize },
     #[error("NDP advertisement reserved bits {value:#x} do not fit in 29 bits")]
     Reserved { value: u32 },
 }
 
-/// An NDP body the codec refuses is a codec failure: the bytes or field
-/// values break a wire rule.
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         crate::error::Classification::new(
@@ -92,31 +67,22 @@ impl crate::error::Classified for Error {
     }
 }
 
-/// One Neighbor Discovery option, with its value after the kind and length
-/// octets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MessageOption {
-    /// The sender's link-layer address, padded to whole option units.
     SourceLinkLayerAddress(Bytes),
-    /// The advertised target's link-layer address, padded to whole option
-    /// units.
     TargetLinkLayerAddress(Bytes),
-    /// An option of any other kind, kept verbatim.
     Other { kind: u8, value: Bytes },
 }
 
 impl MessageOption {
-    /// A Source Link-Layer Address option carrying an Ethernet address.
     pub fn source_link_layer(address: MacAddress) -> Self {
         Self::SourceLinkLayerAddress(Bytes::copy_from_slice(&address.0))
     }
 
-    /// A Target Link-Layer Address option carrying an Ethernet address.
     pub fn target_link_layer(address: MacAddress) -> Self {
         Self::TargetLinkLayerAddress(Bytes::copy_from_slice(&address.0))
     }
 
-    /// The option kind octet.
     pub fn kind(&self) -> u8 {
         match self {
             Self::SourceLinkLayerAddress(_) => SOURCE_LINK_LAYER_ADDRESS,
@@ -125,7 +91,6 @@ impl MessageOption {
         }
     }
 
-    /// The option value after the kind and length octets.
     pub fn value(&self) -> &Bytes {
         match self {
             Self::SourceLinkLayerAddress(value)
@@ -134,9 +99,6 @@ impl MessageOption {
         }
     }
 
-    /// The Ethernet address a link-layer address option carries: `None` for
-    /// other options and for values that are not exactly six bytes, which is
-    /// the one-unit option RFC 2464 defines for Ethernet.
     pub fn ethernet_address(&self) -> Option<MacAddress> {
         match self {
             Self::SourceLinkLayerAddress(value) | Self::TargetLinkLayerAddress(value) => {
@@ -161,7 +123,6 @@ impl MessageOption {
     }
 }
 
-/// A Neighbor Solicitation body (ICMPv6 type 135).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NeighborSolicitation {
     pub reserved: u32,
@@ -170,7 +131,6 @@ pub struct NeighborSolicitation {
 }
 
 impl NeighborSolicitation {
-    /// Reads a solicitation from an ICMPv6 body.
     pub fn decode(body: &[u8]) -> Result<Self, Error> {
         let (word, target, options) = decode_fixed(body)?;
         Ok(Self {
@@ -180,32 +140,26 @@ impl NeighborSolicitation {
         })
     }
 
-    /// The ICMPv6 body.
     pub fn encode(&self) -> Result<Bytes, Error> {
         encode_fixed(self.reserved, self.target, &self.options)
     }
 
-    /// An ICMPv6 layer of type 135 and code 0 carrying this body, with the
-    /// checksum left for the builder to compute.
     pub fn to_icmpv6(&self) -> Result<Icmpv6, Error> {
         Ok(icmpv6(NEIGHBOR_SOLICITATION, self.encode()?))
     }
 }
 
-/// A Neighbor Advertisement body (ICMPv6 type 136).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NeighborAdvertisement {
     pub router: bool,
     pub solicited: bool,
     pub override_address: bool,
-    /// The 29 bits after the three flags.
     pub reserved: u32,
     pub target: Ipv6Addr,
     pub options: Vec<MessageOption>,
 }
 
 impl NeighborAdvertisement {
-    /// Reads an advertisement from an ICMPv6 body.
     pub fn decode(body: &[u8]) -> Result<Self, Error> {
         let (word, target, options) = decode_fixed(body)?;
         Ok(Self {
@@ -218,7 +172,6 @@ impl NeighborAdvertisement {
         })
     }
 
-    /// The ICMPv6 body.
     pub fn encode(&self) -> Result<Bytes, Error> {
         if self.reserved > ADVERTISEMENT_RESERVED {
             return Err(Error::Reserved {
@@ -233,16 +186,11 @@ impl NeighborAdvertisement {
         encode_fixed(word, self.target, &self.options)
     }
 
-    /// An ICMPv6 layer of type 136 and code 0 carrying this body, with the
-    /// checksum left for the builder to compute.
     pub fn to_icmpv6(&self) -> Result<Icmpv6, Error> {
         Ok(icmpv6(NEIGHBOR_ADVERTISEMENT, self.encode()?))
     }
 }
 
-/// The solicited-node multicast group (RFC 4291 section 2.7.1) a Neighbor
-/// Solicitation for `target` is sent to: `ff02::1:ff00:0/104` plus the low
-/// 24 bits of the target.
 pub fn solicited_node_multicast(target: Ipv6Addr) -> Ipv6Addr {
     const PREFIX: u128 = 0xff02_0000_0000_0000_0000_0001_ff00_0000;
     Ipv6Addr::from(PREFIX | (u128::from(target) & 0x00ff_ffff))

@@ -12,8 +12,7 @@ pub struct TransportKey {
     pub destination_port: u16,
 }
 
-/// Extracts the transport tuple of a built-in TCP, UDP, or SCTP layer. Any
-/// other layer, including a custom one that reflects port fields, has none.
+/// Extracts the transport tuple of a built-in TCP, UDP, or SCTP layer.
 pub fn transport_key(layer: &dyn Layer) -> Option<TransportKey> {
     let (protocol, source_port, destination_port) = if let Some(tcp) = layer.downcast_ref::<Tcp>() {
         (BuiltinProtocol::Tcp, tcp.source_port, tcp.destination_port)

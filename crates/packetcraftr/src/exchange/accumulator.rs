@@ -53,9 +53,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) collection: &'a Collection,
 }
 
-/// The capture provider handed back an ingress record it had already
-/// delivered. Nothing about the operation can be trusted after that, so it is
-/// a failure rather than one more outcome to keep processing.
+/// A re-delivered ingress record means nothing about the operation can be trusted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DuplicateRecord;
 
@@ -144,9 +142,7 @@ impl Accumulator {
         false
     }
 
-    /// Checks the unattributed-frame ceiling, then the aggregate evidence
-    /// budget. Both retention paths share the diagnostic code for `push_once`
-    /// deduplication.
+    /// Both retention paths share the diagnostic code for `push_once` deduplication.
     fn reserve_unattributed(
         &mut self,
         identity: RecordIdentity,
@@ -167,8 +163,7 @@ impl Accumulator {
             return false;
         }
         self.mark_record_retained(identity);
-        // the early return above keeps `retained_unmatched` below `max_unmatched_frames`, so the
-        // increment cannot overflow
+        // The early return above keeps `retained_unmatched` under the ceiling, so no overflow.
         {
             self.retained_unmatched += 1;
         }

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Contracts for the carrier stream a fragmented inner datagram is
-//! attributed to while it is incomplete.
-
 mod common;
 
 use bytes::Bytes;

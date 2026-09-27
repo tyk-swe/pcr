@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! TLS session output. Numeric code points are authoritative; `*_name`
-//! companions are present but null for unknown codes. JA3/JA3S/JA4 use
-//! peer-controlled bytes and indicate possible software identity, not
-//! authentication.
-
 use serde::Serialize;
 
 use packetcraftr_core::analysis::{self as library, tls};
@@ -19,7 +14,6 @@ use super::envelope::is_zero;
 use super::hex::compact_hex;
 
 published_enum! {
-    /// Where a TLS handshake ended up.
     pub enum Status from tls::Status {
         Complete => "complete",
         ClientOnly => "client_only",
@@ -31,14 +25,11 @@ published_enum! {
     }
 }
 
-/// One alert record observed in the clear.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Alert {
     /// `warning` (1) or `fatal` (2).
     pub level: u8,
-    /// The `AlertDescription` code point.
     pub description: u8,
-    /// `null` for an unregistered description.
     pub description_name: Option<&'static str>,
 }
 
@@ -55,18 +46,13 @@ impl From<tls::Alert> for Alert {
 /// What one client offered, in wire order, with GREASE code points kept.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Client {
-    /// The hello's `legacy_version` field, frozen at 0x0303 by TLS 1.3.
     pub legacy_version: u16,
     pub legacy_version_name: Option<&'static str>,
-    /// The offered server name, `null` when absent or rejected as invalid.
     pub sni: Option<String>,
-    /// The raw `host_name` bytes, kept whenever the entry was present so a
-    /// name this parser rejected is still inspectable.
     pub sni_raw_hex: Option<String>,
     /// Whether [`Self::sni`] is the outer, public name of an Encrypted
     /// ClientHello rather than the name the client actually asked for.
     pub sni_is_outer: bool,
-    /// Whether an `encrypted_client_hello` extension was offered.
     pub ech: bool,
     pub alpn: Vec<String>,
     pub supported_versions: Vec<u16>,
@@ -76,9 +62,7 @@ pub struct Client {
     pub signature_algorithms: Vec<u16>,
     /// Lowercase hex MD5 of [`Self::ja3_raw`].
     pub ja3: String,
-    /// The JA3 field string the digest is taken over.
     pub ja3_raw: String,
-    /// The JA4 fingerprint, computed for TLS over TCP.
     pub ja4: String,
 }
 
@@ -106,8 +90,6 @@ impl From<tls::ClientSummary> for Client {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Server {
-    /// `supported_versions` when the server sent it, otherwise the record's
-    /// legacy version.
     pub selected_version: u16,
     pub selected_version_name: Option<&'static str>,
     pub cipher_suite: u16,
@@ -119,7 +101,6 @@ pub struct Server {
     pub key_share_group_name: Option<&'static str>,
     /// Lowercase hex MD5 of [`Self::ja3s_raw`].
     pub ja3s: String,
-    /// The JA3S field string the digest is taken over.
     pub ja3s_raw: String,
 }
 
@@ -139,48 +120,31 @@ impl From<tls::ServerSummary> for Server {
     }
 }
 
-/// One assembled TLS handshake, joining a client's offer to a server's
-/// decision.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Session {
     /// Monotonic 0-based index in first-seen order. Unique for the run, which
     /// [`Session::tcp_stream`] is not: a four-tuple reused after a clean close
     /// carries several sessions on one stream.
     pub session: u64,
-    /// The `tcp.stream` conversation index this handshake rode on.
     pub tcp_stream: u64,
     pub scope: Scope,
     pub client_endpoint: Endpoint,
     pub server_endpoint: Endpoint,
-    /// First capture frame that delivered handshake bytes for this session.
     pub first_frame: u64,
-    /// Last capture frame that delivered handshake bytes for this session.
     pub last_frame: u64,
     /// Milliseconds between the frame completing the ClientHello and the frame
-    /// completing the ServerHello, when both were captured. Negative when the
-    /// ServerHello's frame is timestamped before the ClientHello's, which a
-    /// capture merged from several clocks can produce.
+    /// completing the ServerHello, when both were captured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handshake_rtt_ms: Option<f64>,
-    /// The client's offer, absent only when the capture started after it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<Client>,
-    /// The server's decision, absent until a ServerHello is assembled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<Server>,
-    /// Whether the server asked the client to retry with different
-    /// parameters. The retained fingerprints are always the first hello's.
     pub hello_retry: bool,
-    /// Alert records observed in the clear, in arrival order, at most
-    /// `MAX_ALERTS` of them.
     pub alerts: Vec<Alert>,
-    /// Alert records seen after `alerts` reached its ceiling, counted rather
-    /// than kept. Absent when nothing was dropped.
     #[serde(skip_serializing_if = "is_zero")]
     pub alerts_dropped: u64,
     pub status: Status,
-    /// Why the status is what it is, for the statuses that have a cause:
-    /// `malformed`, `gap`, and `truncated`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -209,8 +173,6 @@ impl TryFrom<tls::Session> for Session {
     }
 }
 
-/// Sessions per terminal status. Every status is reported, so a zero is a
-/// statement rather than a missing key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct StatusCounts {
     pub complete: u64,
@@ -241,33 +203,17 @@ pub struct Summary {
     pub clock: Clock,
     pub frames_read: u64,
     pub frames_matched: u64,
-    /// Sessions assembled, of every status, whether or not a selector kept
-    /// them.
     pub sessions: u64,
-    /// Sessions that passed the command's selectors.
     pub sessions_selected: u64,
     pub by_status: StatusCounts,
-    /// TCP conversations seen, whether or not they carried TLS. Streams with
-    /// no sessions mean the traffic was not TLS on a bound port, or the
-    /// handshake itself was not captured.
     pub tcp_streams: u64,
-    /// Sessions retired by a resource ceiling rather than by the capture.
     pub sessions_evicted: u64,
-    /// Selected sessions left out of `sessions` because the aggregate reached
-    /// its retention ceiling. Non-zero only in the JSON aggregate; text and
-    /// NDJSON write each session as it completes and omit nothing.
     pub sessions_omitted: u64,
-    /// Times one direction's handshake buffer reached its ceiling.
     pub buffer_limit_hits: u64,
-    /// UDP frames seen on port 443, which are most likely QUIC. TLS over QUIC
-    /// is out of scope, so this is how under-reporting stays visible.
     pub udp_443_frames: u64,
     pub ip_reassembly: super::reassembly::Report,
 }
 
-/// The assembler's totals, with the run's frame counts and IP reassembly,
-/// and how many sessions the selectors kept and the retention ceiling
-/// omitted.
 impl From<(tls::Summary, &library::Summary, u64, u64)> for Summary {
     fn from(
         (analysis, run, selected, omitted): (tls::Summary, &library::Summary, u64, u64),
@@ -299,7 +245,6 @@ pub struct Report {
     pub summary: Summary,
 }
 
-/// The sessions retained for the document and the run's summary.
 impl From<(Vec<Session>, Summary)> for Report {
     fn from((sessions, summary): (Vec<Session>, Summary)) -> Self {
         Self { sessions, summary }

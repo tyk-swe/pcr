@@ -15,16 +15,10 @@ use crate::{exchange, route, send};
 use super::MAX_RATE;
 use super::error::Error;
 
-/// One live fuzz campaign: the offline campaign core prepares, and how each
-/// of its built cases is sent, paced, and collected.
 #[derive(Clone, Debug)]
 pub struct Request {
-    /// The deterministic campaign every case comes from. Its limits bound the
-    /// whole live run, including its duration.
     pub campaign: packet_fuzz::Request,
-    /// The template packet every case mutates.
     pub packet: Packet,
-    /// How long each case's exchange collects responses.
     pub timeout: Duration,
     /// Case-start ceiling; `None` is unpaced.
     pub cases_per_second: Option<u32>,
@@ -32,20 +26,13 @@ pub struct Request {
     /// uses each case's own.
     pub destination: Option<IpAddr>,
     pub route: route::Options,
-    /// How each case's capture is armed and what it retains.
     pub collection: exchange::Collection,
-    /// Second explicit opt-in, required in addition to policy approval when
-    /// a case is a permissive packet.
     pub allow_permissive_live: bool,
-    /// Exact frames the whole campaign retains as case evidence.
     pub max_evidence_frames: usize,
-    /// Bytes the whole campaign retains as case evidence.
     pub max_evidence_bytes: usize,
 }
 
 impl Request {
-    /// A live run of `campaign` over `packet`, unpaced, with a one-second
-    /// collection window and the largest evidence retention.
     #[must_use]
     pub fn new(campaign: packet_fuzz::Request, packet: Packet) -> Self {
         Self {
@@ -62,12 +49,6 @@ impl Request {
         }
     }
 
-    /// Rejects every bound this workflow cannot run under: an out-of-range
-    /// evidence retention, timeout, or rate, then an invalid campaign.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
         self.evidence()
             .validate(|field, value, reason| Error::InvalidLimit {
@@ -94,8 +75,6 @@ impl Request {
         Ok(())
     }
 
-    /// How every case is prepared: built as the campaign builds it, towards
-    /// the requested destination and route.
     pub(super) fn send(&self) -> send::Options {
         send::Options {
             destination: self.destination,
@@ -105,7 +84,6 @@ impl Request {
         }
     }
 
-    /// Fuzz bounds undecodable frames by the frame budget alone.
     pub(super) const fn evidence(&self) -> EvidenceLimits {
         EvidenceLimits {
             max_frames: self.max_evidence_frames,

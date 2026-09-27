@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded IPv4/IPv6 reassembly from decoded fragment metadata. Physical frames
-//! remain unchanged; completed raw datagrams can be decoded as separate derived
-//! views.
-
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -24,16 +20,10 @@ mod limits;
 pub(crate) use limits::Field;
 pub use limits::Limits;
 
-// This deliberately coarse reservation covers the hash-table key/state and
-// load-factor slack, transient old+new tables during geometric growth, the
-// duplicated expiry key and both B-tree node levels, and allocator rounding.
-// It is more than eight times the fixed owned-value footprint on supported
-// targets; payload, ranges, and reconstruction bytes are charged separately.
+// Deliberately coarse; payload, ranges, and reconstruction bytes are charged separately.
 const DATAGRAM_METADATA_CHARGE: usize = 4_096;
 const RANGE_METADATA_CHARGE: usize = 64;
 
-/// One gap-free run of retained payload. The bytes are owned so that a
-/// fragment continuing the run is appended in place instead of rebuilding it.
 #[derive(Clone, Debug)]
 struct RetainedRange {
     start: usize,
@@ -57,8 +47,7 @@ enum Reconstruction {
         predecessor_next_header_offset: usize,
         next_header: u8,
         ecn: Ecn,
-        /// Whether `prefix` came from the offset-zero fragment, which RFC 8200
-        /// §4.5 makes the only retained unfragmentable header.
+        /// Whether `prefix` came from the offset-zero fragment (RFC 8200 §4.5).
         from_offset_zero: bool,
     },
 }
@@ -71,8 +60,6 @@ impl Reconstruction {
     }
 }
 
-/// IPv4 TOS / IPv6 Traffic Class congestion marking accumulated across the
-/// admitted fragments of one datagram.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ecn {
     NotEct,
@@ -87,8 +74,7 @@ impl Ecn {
     }
 
     const fn from_ipv6_traffic_class(traffic_class: u8) -> Self {
-        // The low nibble of byte zero and the high nibble of byte one carry the
-        // Traffic Class; ECN is its two least significant bits.
+        // ECN is the Traffic Class's two low bits, here the high nibble of header byte one.
         Self::from_bits((traffic_class & 0x30) >> 4)
     }
 
@@ -114,10 +100,7 @@ impl Ecn {
         self.ipv4_tos_bits() << 4
     }
 
-    /// RFC 3168 §5.3: identical codepoints are preserved, CE combines with any
-    /// ECN-capable marking into CE, and CE alongside Not-ECT cannot be
-    /// reassembled. The RFC leaves the remaining mixtures unspecified; they
-    /// resolve to the lower marking — Not-ECT when present, otherwise ECT(0).
+    /// RFC 3168 §5.3; unspecified mixtures resolve to the lower marking (Not-ECT, else ECT(0)).
     fn merge(self, incoming: Self) -> Result<Self, Malformed> {
         if self == incoming {
             return Ok(self);
@@ -143,11 +126,9 @@ struct DatagramState {
     reconstruction: Reconstruction,
     last_update: Instant,
     deadline: Option<Instant>,
-    /// Admission computes this once; teardown releases exactly that charge.
     memory_charge: usize,
 }
 
-/// Retained payload, allocation charge, and table capacity move together.
 #[derive(Debug, Default)]
 struct Retained {
     payload_bytes: usize,
@@ -157,7 +138,6 @@ struct Retained {
 
 impl Retained {
     fn release(&mut self, state: &DatagramState) {
-        // A state enters the table only after its complete charge is admitted.
         self.payload_bytes = self
             .payload_bytes
             .checked_sub(state.unique_bytes)
@@ -169,7 +149,6 @@ impl Retained {
     }
 }
 
-/// Stateful, bounded IP fragment reassembler.
 #[derive(Debug)]
 pub struct Reassembler {
     limits: Limits,
@@ -236,8 +215,6 @@ mod tests {
         let first = ipv6_fragment(0, b"abcdefgh");
         let mut roomy = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         roomy.push(later.clone(), now).expect("later fragment fits");
-        // The offset-zero prefix is copied while the provisional one is still
-        // retained, beside the one merged range and its 16-byte union.
         let peak = roomy.aggregate_memory_charge() + RANGE_METADATA_CHARGE + 16 + 40;
 
         for (limit, admitted) in [(peak - 1, false), (peak, true)] {

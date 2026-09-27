@@ -78,8 +78,6 @@ fn run_command_with_open_stdin(mut command: Command) -> Output {
     }
 }
 
-// Allocating a pty for the terminal-stdin cases uses the util-linux `script`
-// flags; the package build script enables the gate on targets that ship them.
 #[cfg(packetcraftr_test_util_linux)]
 #[test]
 fn capture_commands_reject_terminal_stdin_before_reading() {
@@ -171,7 +169,6 @@ fn version_is_available_without_network_access() {
         version.contains("native features:"),
         "missing native feature line in:\n{version}"
     );
-    // Layer 2 and Layer 3 providers compile route lookup in, so both report it.
     for (name, enabled) in [
         (
             "native-route",
@@ -368,8 +365,6 @@ fn explicit_files_ignore_an_unrelated_open_stdin_pipe() {
     );
 }
 
-/// The root help publishes the same exit-code table the README documents,
-/// including the cancellation code, which is not a classified failure.
 #[test]
 fn root_help_publishes_every_documented_exit_code() {
     let output = run_success(&["--help"]);
@@ -392,8 +387,6 @@ fn root_help_publishes_every_documented_exit_code() {
     assert_eq!(codes, ["0", "1", "2", "3", "4", "5", "6", "70", "130"]);
 }
 
-/// A help example that dissects inline bytes is copied verbatim by users, so
-/// it has to decode cleanly.
 #[test]
 fn inline_dissect_help_examples_decode_without_diagnostics() {
     for help in [&["--help"][..], &["dissect", "--help"]] {
@@ -468,8 +461,6 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
     assert_eq!(value["error"]["kind"], "cli");
 }
 
-// The write-failure case sinks stdout into /dev/full; the package build script
-// enables the gate on targets that provide it.
 #[cfg(packetcraftr_test_dev_full)]
 #[test]
 fn unwritable_parse_error_record_reports_the_write_failure_once() {
@@ -801,7 +792,6 @@ fn build_enforces_configurable_layer_and_packet_budgets() {
 fn dissect_enforces_configurable_decode_budgets() {
     run_success(&["dissect", "--hex", IPV4_FRAME_HEX]);
 
-    // Two layers (IPv4 plus ICMP echo) breach a one-layer budget.
     let layered = run(&[
         "dissect",
         "--hex",
@@ -897,7 +887,6 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         &["--output", "json", "tls", missing],
         &["--output", "json", "build", "--packet-file", missing],
         &["--output", "json", "dissect", "--file", missing],
-        // Rules files load before the source capture is opened.
         &[
             "--output",
             "json",
@@ -928,7 +917,6 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         assert_eq!(error["code"], "io.runtime", "{arguments:?}");
         let message = error["message"].as_str().unwrap();
         assert!(message.starts_with("open "), "{arguments:?}: {error}");
-        // The operating-system cause is kept as a cause, not only as text.
         let causes = error["causes"].as_array().unwrap();
         assert!(
             matches!(&causes[..], [cause] if message.ends_with(cause.as_str().unwrap())),
@@ -960,7 +948,6 @@ fn existing_output_destination_reports_the_same_io_failure_for_every_writer() {
     std::fs::write(&occupied_path, b"pre-existing").expect("occupied file must write");
     let occupied = occupied_path.to_str().expect("temp path is UTF-8");
 
-    // follow --write stages one file per direction inside a directory.
     let follow_dir_path = directory.path().join("follow-out");
     std::fs::create_dir(&follow_dir_path).expect("follow directory must open");
     let follow_occupied_path = follow_dir_path.join("tcp-0-client.bin");
@@ -1063,7 +1050,6 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    // Keep the read end open without draining it until the child has exited.
     let allowance = Duration::from_millis(200) + Duration::from_secs(2);
     loop {
         match child.try_wait() {
@@ -1075,7 +1061,6 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
                     "{output:?}"
                 );
                 // A blocked pipe write may expose no bytes before process exit.
-                // Neither an empty stream nor a partial record completes the first record.
                 assert!(
                     !output.stdout.contains(&b'\n'),
                     "the first NDJSON record must remain incomplete: {output:?}"
@@ -1186,9 +1171,6 @@ fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
     }
 }
 
-/// Out-of-range durations and windows, and malformed selectors, publish the
-/// code each command published before these arguments were shared and typed.
-/// A malformed `--interface` still loses to a policy denial.
 #[test]
 fn bounded_and_selector_arguments_keep_their_published_codes() {
     const PACKET: &str = "ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)";
@@ -1348,7 +1330,6 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
         );
         assert_eq!(parse_json(&output)["error"]["code"], code, "{arguments:?}");
     }
-    // The messages stay those the untyped arguments published.
     for (command, message) in [
         (
             &["interfaces", "--interface", ""][..],

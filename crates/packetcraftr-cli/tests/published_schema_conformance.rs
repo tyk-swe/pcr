@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Boundary checks of the published JSON schemas against their published
-//! examples: each schema accepts its example and rejects values outside the
-//! contract.
-
 use serde_json::{Value, json};
 
 mod common;
@@ -126,8 +122,6 @@ fn udp_profile_schema_accepts_the_published_profiles_and_bounds_names_as_the_loa
     ))
     .unwrap();
     assert!(validator.is_valid(&sample));
-    // The schema bounds names as the loader does: characters, not bytes, and
-    // no control characters.
     for (name, valid) in [
         ("\u{e9}".repeat(128), true),
         ("tab\tname".to_owned(), false),

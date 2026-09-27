@@ -3,13 +3,6 @@
 
 //! TLS handshake assembly over reassembled TCP streams.
 //!
-//! One record per handshake, joining a client's offer to a server's decision.
-//! The per-frame `tls` layer sees one segment at a time and cannot answer
-//! "which version was negotiated" when a ClientHello spans segments; this
-//! collector consumes the TCP reassembler's in-order deliveries instead, so a
-//! hello split across seven segments produces the same record as an unsplit
-//! one.
-//!
 //! ```text
 //!                            Event::Data (per direction, after dedup)
 //!                                          │
@@ -34,17 +27,7 @@
 //!      capture ends in flight   ─▶ truncated
 //! ```
 //!
-//! Orientation follows the same rule as [`follow`](crate::analysis::follow):
-//! the client is the sender of the conversation's first captured frame. A
-//! capture that starts mid-connection can elect the wrong side, so the first
-//! hello re-orients the session once; a second contradiction is `malformed`.
-//! Deduplication edges stay bound to the captured direction across that swap,
-//! and each session owns one deduplicator, because a four-tuple reused after
-//! a clean close is a new session with its own delivery edges.
-//!
-//! Fingerprints in the assembled record are advisory. Every byte they are
-//! computed from is chosen by the peer, so treat a match as a hint about
-//! software identity, never as authentication.
+//! Fingerprints are advisory: every byte they are computed from is chosen by the peer.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -71,9 +54,7 @@ pub use session::{
 
 use live::{Live, Verdict};
 
-/// The UDP port QUIC uses for HTTPS. Frames on it carry TLS 1.3 handshakes
-/// this collector deliberately does not read, so they are counted instead of
-/// being silently dropped.
+/// QUIC's HTTPS port: its TLS 1.3 handshakes are counted, not read.
 const QUIC_UDP_PORT: u16 = 443;
 
 const REASON_REASSEMBLY_GAP: &str = "TCP reassembly reported missing handshake bytes";
@@ -82,73 +63,44 @@ const REASON_SESSION_LIMIT: &str = "the session table reached its ceiling";
 const REASON_AGGREGATE_LIMIT: &str = "the aggregate handshake buffer reached its ceiling";
 const REASON_TRUNCATED: &str = "the capture ended while the handshake was in flight";
 
-/// One assembled session, delivered as soon as it reaches a terminal status.
-///
-/// Sessions are emitted progressively so a streaming consumer never has to
-/// hold the whole capture's worth of records in memory.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SessionEvent {
-    /// 1-based capture frame whose arrival ended the session. The trailing
-    /// flush attributes its events to the session's own last frame.
+    /// 1-based capture frame whose arrival ended the session.
     pub number: u64,
     pub session: Session,
 }
 
-/// Terminal counters for a completed session assembly pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub clock: crate::analysis::ClockReport,
-    /// Sessions emitted, of every status.
     pub sessions: u64,
-    /// Sessions per status, in [`Status`] order.
     pub by_status: BTreeMap<Status, u64>,
     /// TCP conversations this collector saw, whether or not they carried TLS.
-    /// A capture with streams but no sessions means the traffic was not TLS,
-    /// or the handshake itself was not captured. Each distinct observed index
-    /// counts once, even if filtering hides its first frame or TLS state was
-    /// evicted. A scoped four-tuple reused after a close still counts once.
     pub tcp_streams: u64,
-    /// Sessions retired by a resource ceiling rather than by the capture.
     pub evicted_sessions: u64,
-    /// Times one direction's handshake buffer reached its ceiling.
     pub buffer_limit_hits: u64,
-    /// UDP frames seen on port 443, which are most likely QUIC. TLS over
-    /// QUIC is out of scope, so this is how under-reporting stays visible.
     pub udp_443_frames: u64,
 }
 
 #[derive(Debug)]
 struct Entry {
-    /// Insertion rank, used to retire the oldest conversation first.
     order: u64,
     state: Tracked,
 }
 
 #[derive(Debug)]
-// Generation transition invariants:
-// Live + terminal verdict -> Closed, releasing its recorded bytes and emitting
-// at most one SessionEvent. Closed + SYN -> absent -> fresh Live/deduplicator.
-// Expiry/gap/replacement is folded before current data; a clean close following
-// current data is deferred until that data is folded. EOF retires all remaining
-// Live entries and releases all charges. Never reopen from stale buffered bytes.
+// Closed + SYN -> absent -> fresh Live/deduplicator. Never reopen from stale buffered bytes.
 enum Tracked {
     Live(Box<Live>),
-    /// Terminal: whatever it had to say has been emitted, and new bytes on
-    /// the four-tuple are ignored until a SYN retires the entry.
+    /// Terminal: new bytes on the four-tuple are ignored until a SYN retires the entry.
     Closed,
 }
 
-/// Assembles sessions from TCP reassembly events. Feed matched frames from a
-/// run with [`Options::tcp_events`](crate::analysis::Options::tcp_events), then
-/// call [`Collector::finish`] with the run's trailing events.
 #[derive(Debug)]
 pub struct Collector {
     limits: Limits,
     entries: HashMap<CanonicalFlow, Entry>,
-    /// Insertion rank to conversation, so the oldest is retired in O(log n).
     order: BTreeMap<u64, CanonicalFlow>,
-    /// Distinct visible indices, bounded by the pipeline's capture-global
-    /// indexed-flow ceiling. Retained independently of active session eviction.
     seen_streams: HashSet<u64>,
     next_order: u64,
     next_session: u64,
@@ -157,9 +109,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Creates a collector bound to finite ceilings.
-    ///
-    /// Invalid ceilings fail before the collector consumes a frame.
     pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
         limits.validate()?;
         Ok(Self {
@@ -174,7 +123,6 @@ impl Collector {
         })
     }
 
-    /// Folds one matched frame, returning the sessions it ended.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<SessionEvent> {
         let mut events = Vec::new();
         if let Some(conversation) = record.udp.and_then(|view| view.conversation)
@@ -184,8 +132,7 @@ impl Collector {
         {
             self.summary.udp_443_frames = self.summary.udp_443_frames.saturating_add(1);
         }
-        // Reassembly emits current-generation data before its clean close. Expiry
-        // and replacement events precede that data and must retain their ordering.
+        // Expiry and replacement events precede current data and must retain their ordering.
         let current_flow = record
             .tcp
             .and_then(|view| view.conversation)
@@ -221,15 +168,10 @@ impl Collector {
         self.note_stream(stream);
         let key = CanonicalFlow::from_flow(flow);
         if tcp.header.flags & Tcp::SYN != 0 {
-            // A connection opening on a retired four-tuple is a new session,
-            // with its own index and its own delivery edges.
             self.discard_closed(&key);
         }
 
-        // A conversation is tracked from its first captured frame, payload or
-        // not, because that frame is what elects the client: a capture that
-        // starts mid-connection can see the server first, and the elected
-        // roles are only corrected once a hello says otherwise.
+        // Tracked from its first frame, payload or not, because that frame elects the client.
         match self.entries.get(&key) {
             Some(Entry {
                 state: Tracked::Closed,
@@ -264,9 +206,6 @@ impl Collector {
         events
     }
 
-    /// Folds the trailing flush. Open handshakes become
-    /// [`truncated`](Status::Truncated); undeliverable captured bytes remain a
-    /// [`gap`](Status::Gap), rather than treating EOF eviction as data loss.
     #[must_use]
     pub fn finish(mut self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
         let mut events = Vec::new();
@@ -304,9 +243,7 @@ impl Collector {
         (events, self.summary)
     }
 
-    /// Folds reassembly outcomes before matching the current frame, since
-    /// expiry can concern other flows. Gap outranks close, which outranks
-    /// eviction; a reset produces both close and eviction.
+    /// Gap outranks close, which outranks eviction; a reset produces both close and eviction.
     fn fold_reassembly_events(
         &mut self,
         tcp_events: &[TcpEvent],
@@ -390,7 +327,6 @@ impl Collector {
             let Some(live) = self.live_mut(key) else {
                 return;
             };
-            // A delivery of some other conversation rode this frame's sweep.
             let Some(direction) = live.direction_of(sender) else {
                 continue;
             };
@@ -400,17 +336,12 @@ impl Collector {
             let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
                 continue;
             };
-            // A direction that has stopped contributing handshake bytes keeps
-            // none of this delivery, so it charges nothing and the frame is
-            // not part of the handshake this session reports.
             let Some(charge) = live.retainable(direction, payload.len(), ceiling) else {
                 continue;
             };
             live.note_delivery(record.number);
 
-            // Room is made before any of the delivery is buffered, so the
-            // aggregate ceiling is never exceeded even transiently. Only what
-            // the direction can still retain is charged for.
+            // Room is made before buffering, so the aggregate ceiling is never exceeded.
             while self.buffered_bytes.saturating_add(charge) > self.limits.max_buffered_bytes
                 && self.evict_oldest(Some(key), REASON_AGGREGATE_LIMIT, events)
             {}
@@ -496,9 +427,6 @@ impl Collector {
         self.seen_streams.insert(stream);
     }
 
-    /// Retires the oldest tracked conversation other than `protect`,
-    /// reporting an in-flight handshake as a gap. Returns whether anything
-    /// was retired.
     fn evict_oldest(
         &mut self,
         protect: Option<&CanonicalFlow>,
@@ -528,9 +456,6 @@ impl Collector {
         true
     }
 
-    /// Ends a handshake and reports whether a session was emitted. Retains
-    /// emitted entries as closed to suppress late bytes; drops empty entries
-    /// so a gap before the hello does not prevent later tracking.
     fn retire(
         &mut self,
         key: &CanonicalFlow,
@@ -579,9 +504,6 @@ impl Collector {
         });
     }
 
-    /// Closes a conversation. One that assembled nothing is forgotten
-    /// outright, so a later hello on the same four-tuple is tracked again;
-    /// one that did leaves a closed marker until a new connection opens.
     fn discard(&mut self, key: &CanonicalFlow) {
         if let Some(entry) = self.entries.get_mut(key)
             && let Tracked::Live(live) = std::mem::replace(&mut entry.state, Tracked::Closed)
@@ -593,7 +515,6 @@ impl Collector {
         }
     }
 
-    /// Drops a closed entry so the four-tuple can carry a new session.
     fn discard_closed(&mut self, key: &CanonicalFlow) {
         if matches!(
             self.entries.get(key),
@@ -611,9 +532,7 @@ impl SessionCollector for Collector {
     type Event = SessionEvent;
     type Summary = Summary;
 
-    /// Sessions are assembled from reassembled-TCP events, and UDP
-    /// conversation indexes feed the port-443 QUIC counter — without them
-    /// `udp_443_frames` silently reports zero.
+    /// Without UDP indexes, `udp_443_frames` silently reports zero.
     fn needs(&self) -> CollectorNeeds {
         CollectorNeeds {
             tcp_stream: true,

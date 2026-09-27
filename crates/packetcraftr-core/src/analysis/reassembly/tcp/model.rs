@@ -11,7 +11,6 @@ use thiserror::Error;
 use crate::analysis::scope::ScopeId;
 use crate::error::{Classification, Classified};
 
-/// Directional four-tuple identifying a TCP flow.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FlowKey {
     pub source: IpAddr,
@@ -32,7 +31,6 @@ impl FlowKey {
     }
 }
 
-/// Directional TCP flow qualified by its exact capture scope.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ScopedFlowKey {
     pub scope: ScopeId,
@@ -49,7 +47,6 @@ impl ScopedFlowKey {
     }
 }
 
-/// One TCP segment offered for reassembly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
     pub flow: ScopedFlowKey,
@@ -60,7 +57,6 @@ pub struct Segment {
     pub rst: bool,
 }
 
-/// Events produced by pushing segments or running expiry sweeps.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Data {
@@ -73,10 +69,7 @@ pub enum Event {
         sequence: u32,
         bytes: usize,
         conflicting: bool,
-        /// The arriving segment's wire-sequence spans that repeat data the
-        /// flow already holds, in stream order; their combined length is
-        /// `bytes`. Spans covering pending out-of-order data can sit anywhere
-        /// after `sequence`, so each `end` may wrap at 2^32.
+        /// Wire-sequence spans repeating held data, in stream order; each `end` may wrap at 2^32.
         ranges: Vec<Range<u32>>,
     },
     Gap {
@@ -110,7 +103,6 @@ pub enum Resource {
     AllocationFailed { requested: usize },
 }
 
-/// Mutually inconsistent stream input.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Malformed {
@@ -125,11 +117,6 @@ pub enum Malformed {
     BeyondFinalSequence { final_offset: u64 },
 }
 
-/// Typed TCP reassembly failure category.
-///
-/// The split mirrors [`ip::Error`](crate::analysis::reassembly::ip::Error)
-/// because the operator's answer differs: a resource failure is answered by
-/// raising a finite budget, a malformed one only by inspecting the flow.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {

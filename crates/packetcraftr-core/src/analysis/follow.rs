@@ -16,21 +16,13 @@ use crate::analysis::session::{self, CollectorNeeds};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;
 
-/// Direction lives with the deduplicator every TCP conversation collector
-/// shares; this is its public path.
 pub use crate::analysis::dedup::PeerDirection;
 
 /// One run of conversation payload, in delivery order.
-///
-/// For TCP these are the reassembler's in-order deliveries, so bytes appear
-/// exactly once each and in stream order per direction; for UDP each
-/// datagram's payload is one chunk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
     pub direction: PeerDirection,
     /// Run-local reassembly generation within this direction, starting at zero.
-    /// Reuse/eviction starts a new generation; this is not a claim of a complete
-    /// TCP connection handshake. UDP always uses zero.
     pub direction_generation: u64,
     /// Frame whose arrival delivered these bytes. An out-of-order segment
     /// is delivered by the later frame that filled the hole before it.
@@ -38,26 +30,17 @@ pub struct Chunk {
     pub bytes: Bytes,
 }
 
-/// Terminal accounting for one followed conversation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
     pub clock: crate::analysis::ClockReport,
-    /// The flow of the conversation's first captured frame: its source is
-    /// the client and its destination the server. `None` when the capture
-    /// holds no frame of the selected conversation.
     pub client_flow: Option<FlowKey>,
     pub scope: Option<crate::analysis::scope::Definition>,
-    /// Matched frames belonging to the followed conversation.
     pub frames: u64,
     pub client_bytes: u64,
     pub server_bytes: u64,
-    /// TCP bytes still buffered behind missing segments when their flow was
-    /// evicted or the capture ended — captured but never deliverable.
     pub undelivered_bytes: u64,
 }
 
-/// Extracts one conversation's payload. Filtering upstream limits reassembly
-/// state; flow checks keep extraction correct even with an unfiltered pipeline.
 #[derive(Debug)]
 pub struct Collector {
     selector: StreamRef,
@@ -67,8 +50,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Creates a collector following one conversation, named in the same
-    /// vocabulary the `tcp.stream` and `udp.stream` display filters use.
     pub fn new(selector: StreamRef) -> Self {
         Self {
             selector,
@@ -78,7 +59,6 @@ impl Collector {
         }
     }
 
-    /// Folds one matched frame, returning the payload it delivered.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {
         match self.selector.transport {
             StreamTransport::Tcp => self.observe_tcp(record),
@@ -86,9 +66,6 @@ impl Collector {
         }
     }
 
-    /// Finishes the pass, folding in the run's trailing flush: whatever the
-    /// followed conversation still buffered behind missing segments was
-    /// captured but never deliverable.
     pub fn finish(mut self, summary: &RunSummary) -> Summary {
         self.summary.clock = summary.clock.clone();
         if let Some(client) = self.client_flow.clone() {
@@ -111,8 +88,7 @@ impl Collector {
 
     fn observe_tcp(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {
         // Count evictions before matching this frame: expiry can be triggered
-        // by another flow. Eviction resets delivery edges; clean closes retain
-        // them for deduplication.
+        // by another flow.
         if let Some(client) = self.client_flow.clone() {
             for event in record.tcp_events {
                 match event {
@@ -215,8 +191,6 @@ impl Collector {
         } else {
             PeerDirection::ServerToClient
         };
-        // Every datagram is one chunk, an empty one included: the frame and
-        // direction are part of the conversation's shape.
         let bytes = transport_payload(view.decoded, view.layer);
         self.tally(direction, bytes.len());
         vec![Chunk {
@@ -240,8 +214,6 @@ impl session::Collector for Collector {
     type Event = Chunk;
     type Summary = Summary;
 
-    /// Only TCP chunks need reassembly events; UDP chunks come straight
-    /// from the indexed datagrams.
     fn needs(&self) -> CollectorNeeds {
         match self.selector.transport {
             StreamTransport::Tcp => CollectorNeeds {
@@ -260,8 +232,6 @@ impl session::Collector for Collector {
         Ok(Self::observe(self, record))
     }
 
-    /// Payload arrives only while frames are observed, so `finish` has no
-    /// trailing events to drain.
     fn finish(self, run: &RunSummary) -> Result<(Vec<Chunk>, Summary), BoundaryError> {
         Ok((Vec::new(), Self::finish(self, run)))
     }

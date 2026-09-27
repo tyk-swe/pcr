@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Tunnel and overlay encapsulation layers.
-
 mod erspan;
 mod geneve;
 mod gre;
@@ -29,5 +27,4 @@ pub use pppoe::{Ppp, Pppoe};
 pub use vxlan::Vxlan;
 pub(crate) use vxlan::VxlanCodec;
 
-/// Largest 24-bit virtual network identifier, used by VXLAN and GENEVE.
 const VNI_MAX: u32 = 0x00ff_ffff;

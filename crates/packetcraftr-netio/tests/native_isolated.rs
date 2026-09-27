@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Real Linux native scenarios. The launcher proves isolation before enabling
-//! these ignored tests; every test rechecks it before touching native I/O.
 #![cfg(all(packetcraftr_test_netns, native_layer2))]
 #![forbid(unsafe_code)]
 
@@ -39,7 +37,6 @@ fn isolated() {
     assert!(interfaces.contains(": lo:"));
     assert_eq!(native_snapshot().active, 0);
     // Warm the persistent route service before measuring capture admission.
-    // Its thread and socket remain owned while every capture must be released.
     interface::SystemProvider.interfaces(&live()).unwrap();
     assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 }
@@ -69,7 +66,6 @@ fn request() -> capture::Request {
         native: Default::default(),
     }
 }
-/// A deadline no isolated operation here comes close to spending.
 fn live() -> Deadline {
     Deadline::new(Duration::from_secs(5))
 }
@@ -188,7 +184,6 @@ fn bounded_queue_reports_real_capture_loss() {
     assert!(statistics.overflow_events > 0, "{statistics:?}");
     assert!(statistics.dropped_frames > 0);
     assert!(statistics.evidence_loss_error().is_some());
-    // Shutdown may repeat the unobserved queue failure; it must still clean up.
     let _ = capture.shutdown();
     drop(capture);
     released();
@@ -198,7 +193,6 @@ fn bounded_queue_reports_real_capture_loss() {
 #[ignore = "requires the isolated Linux launcher"]
 fn native_settings_apply_before_activation_and_report_realized_values() {
     isolated();
-    // Timestamp discovery runs on an unactivated handle and admits no capture.
     let interface = Id {
         name: "lo".to_owned(),
         index: 1,
@@ -214,8 +208,6 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
     );
     assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 
-    // Loopback advertises only the host clock, so an adapter-synchronized
-    // request must be rejected typed before any activation.
     let mut unsupported = request();
     unsupported.native.timestamp_source = Some(capture::TimestampSource::Adapter);
     let error = match capture::SystemProvider.arm_capture(&unsupported, &live()) {
@@ -244,7 +236,6 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
     let native = &capture.metadata().native;
     assert_eq!(native.buffer_size.requested, Some(4 * 1024 * 1024));
     assert_eq!(native.buffer_size.applied, Some(4 * 1024 * 1024));
-    // The pcap API has no post-activation buffer-size query.
     assert_eq!(native.buffer_size.effective, None);
     assert_eq!(
         native.timestamp_source.applied,
@@ -261,8 +252,6 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
         .next_captured_frame(&within(Duration::from_secs(2)))
         .unwrap()
         .unwrap();
-    // A nanosecond fraction misread as microseconds either fails the fraction
-    // bound or lands 1000x off; a sane timestamp proves the delivered unit.
     let stamp = frame
         .frame
         .timestamp
@@ -290,8 +279,6 @@ fn native_filter_error_preserves_diagnostic_and_releases_admission() {
         matches!(error, Error::InvalidCaptureFilter { .. }),
         "{error:?}"
     );
-    // libpcap's filter compiler returns its diagnostic through pcap_geterr;
-    // unlike packet reads there is no typed source error to preserve.
     match error {
         Error::InvalidCaptureFilter { message, .. } => assert!(!message.is_empty()),
         _ => unreachable!(),

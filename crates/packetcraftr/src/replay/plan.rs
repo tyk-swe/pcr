@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Each selected frame's place in the replay schedule and budget, decided
-//! before the frame is authorized or sent.
-
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -12,7 +9,6 @@ use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as LinkMode};
 use super::error::Error;
 use super::request::{Options, Timing};
 
-/// The running totals of one replay, which every frame's plan extends.
 #[derive(Default)]
 pub(super) struct Tally {
     pub(super) frames_read: u64,
@@ -27,7 +23,6 @@ pub(super) struct Tally {
 }
 
 impl Tally {
-    /// Commits a transmitted frame's plan to the totals.
     pub(super) fn complete(&mut self, plan: &FramePlan, timestamp: Option<SystemTime>) {
         self.frames_transmitted = plan.next_completed;
         self.bytes_transmitted = plan.next_bytes;
@@ -36,7 +31,6 @@ impl Tally {
         self.has_previous = true;
     }
 
-    /// Records an interface a frame was transmitted on, once.
     pub(super) fn used(&mut self, interface: &InterfaceId) {
         if !self.interfaces_used.contains(interface) {
             self.interfaces_used.push(interface.clone());
@@ -44,7 +38,6 @@ impl Tally {
     }
 }
 
-/// One selected frame's link mode, delay, and the totals it would reach.
 pub(super) struct FramePlan {
     pub(super) mode: LinkMode,
     pub(super) delay: Duration,
@@ -53,8 +46,6 @@ pub(super) struct FramePlan {
     pub(super) next_duration: Duration,
 }
 
-/// Plans `frame` against the totals so far, failing before authorization
-/// when it would cross a byte or duration limit.
 pub(super) fn plan_frame(
     options: &Options,
     tally: &Tally,
@@ -142,9 +133,6 @@ fn scheduled_delay(
 }
 
 impl Timing {
-    /// The delay before the frame captured at `current`, after the frame
-    /// captured at `previous`, once `transmitted_bytes` have been sent on a
-    /// schedule of `scheduled_duration`.
     pub(super) fn delay_between(
         self,
         previous: Option<SystemTime>,
@@ -224,8 +212,6 @@ fn required_times(
     }
 }
 
-/// The link mode a captured link type replays in: Ethernet through Layer 2,
-/// raw IP through Layer 3. An explicit request must agree.
 pub(super) fn link_mode(
     source_index: u64,
     link_type: LinkType,

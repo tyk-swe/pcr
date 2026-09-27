@@ -1,22 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! One bounded analysis pass over a capture: the collector lifecycle the
-//! application commands used to assemble by hand.
-//!
-//! A [`Session`] is prepared with a registry, [`Options`], a [`Collector`],
-//! and the caller's optional conversation selector. Preparing narrows the
-//! run's [`Plan`] to the union of the display filter's
-//! [`Requirements`] and the collector's
-//! [`CollectorNeeds`], so no pipeline stage runs that nothing reads.
-//! [`Session::run`] then drives [`run`](super::run) over the reader —
-//! forwarding IP lifecycle events to one sink and each observed collector
-//! event to another —
-//! captures [`Collector::scopes`] before [`Collector::finish`] consumes the
-//! collector, drains the trailing events through the same event sink, and
-//! reports the empty-selector verdict in its [`Outcome`]. The phases split
-//! as [`Session::observe`] → [`Pass::finish`] for callers whose verdict must
-//! precede the collector's terminal work.
+//! One bounded analysis pass over a capture, driving the collector lifecycle.
 
 use std::io::Read;
 use std::sync::Arc;
@@ -29,28 +14,17 @@ use super::scope::Definition;
 use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary, run_with_ip_events};
 use crate::capture_file::Reader;
 
-/// Pipeline work a [`Collector`] reads from the records it observes.
-///
-/// A session unions these with the display filter's requirements when it
-/// narrows the run's [`Plan`]: declaring a stream index keeps IP
-/// reconstruction on, because canonical stream numbering follows
-/// reconstructed conversations.
+/// A stream index keeps IP reconstruction on: stream numbering follows reconstructed conversations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CollectorNeeds {
-    /// `record.tcp` conversation indexes (`tcp.stream`).
     pub tcp_stream: bool,
-    /// `record.udp` conversation indexes (`udp.stream`).
     pub udp_stream: bool,
-    /// `record.derived_datagrams()` beyond what indexing already implies.
     pub ip_reassembly: bool,
-    /// `record.tcp_events` and `Summary::trailing_tcp_events`.
     pub tcp_events: bool,
-    /// `record.physical_sources`/`tcp_sources`/`udp_sources` provenance.
     pub track_sources: bool,
 }
 
 impl CollectorNeeds {
-    /// The optional stages these needs require.
     fn plan(self) -> Plan {
         Plan {
             ip_reassembly: self.ip_reassembly || self.tcp_stream || self.udp_stream,
@@ -60,65 +34,38 @@ impl CollectorNeeds {
     }
 }
 
-/// The collector contract a [`Session`] drives.
-///
-/// Construction stays with the caller — collector arguments legitimately
-/// differ — while the session owns the lifecycle: `observe` per matched
-/// frame, `scopes` before `finish` consumes the collector, and the trailing
-/// events `finish` returns drained through the run's event sink.
-///
-/// `observe` failures cross the run as [`super::Error::Sink`] attributed to
-/// the frame being folded; `finish` and trailing-drain failures surface as
-/// [`Error::Collector`](super::Error::Collector) after the run has completed.
+/// `observe` failures cross the run as [`super::Error::Sink`]; `finish` and trailing-drain
+/// failures surface as [`Error::Collector`](super::Error::Collector) after the run.
 pub trait Collector {
-    /// One observation emitted while folding a frame or finishing the pass.
     type Event;
-    /// The collector's terminal accounting.
     type Summary;
 
-    /// What this collector reads from each record. Queried once, while the
-    /// session is prepared.
+    /// Queried once, while the session is prepared.
     fn needs(&self) -> CollectorNeeds;
 
-    /// Capture scopes the collector exposes. Collected by the session after
-    /// the run, before [`finish`](Self::finish).
     fn scopes(&self) -> Vec<Definition> {
         Vec::new()
     }
 
-    /// Folds one matched frame, returning the events it produced.
     fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Self::Event>, BoundaryError>;
 
-    /// Closes the pass over the run summary: trailing events drain through
-    /// the same sink, then the terminal summary lands in the [`Outcome`].
     fn finish(self, run: &Summary) -> Result<(Vec<Self::Event>, Self::Summary), BoundaryError>;
 }
 
-/// A driven pass whose frames were observed but whose collector has not
-/// finished.
-///
-/// [`Session::observe`] returns this so a caller can apply the
-/// [`selected_absent`](Self::selected_absent) verdict before
-/// [`finish`](Self::finish) — some commands report an absent selection
-/// before any terminal collector work runs.
+/// Lets a caller apply [`selected_absent`](Self::selected_absent) before [`finish`](Self::finish).
 pub struct Pass<C: Collector> {
-    /// The run's terminal counters and residue.
     pub run: Summary,
     collector: C,
     selector: Option<StreamRef>,
 }
 
 impl<C: Collector> Pass<C> {
-    /// A selector was supplied but no frame matched it: the selected stream
-    /// is not present in this capture.
+    /// A selector was supplied but no frame matched it.
     #[must_use]
     pub fn selected_absent(&self) -> bool {
         self.selector.is_some() && self.run.frames_matched == 0
     }
 
-    /// Captures [`Collector::scopes`], consumes the collector through
-    /// [`Collector::finish`], and drains its trailing events through
-    /// `event_sink` — in that order.
     pub fn finish<F>(self, event_sink: &mut F) -> Result<Outcome<C>, super::Error>
     where
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
@@ -142,38 +89,22 @@ impl<C: Collector> Pass<C> {
     }
 }
 
-/// What a finished [`Session`] produced.
-///
-/// Trailing events have already drained through the sink when this returns;
-/// [`selected_absent`](Self::selected_absent) is the session's verdict on the
-/// selector the caller supplied, which the caller phrases as it needs.
 pub struct Outcome<C: Collector> {
-    /// The run's terminal counters and residue.
     pub run: Summary,
-    /// The collector's terminal summary from [`Collector::finish`].
     pub summary: C::Summary,
-    /// The capture scopes the collector exposed before finishing.
     pub scopes: Vec<Definition>,
     selected_absent: bool,
 }
 
 impl<C: Collector> Outcome<C> {
-    /// A selector was supplied but no frame matched it: the selected stream
-    /// is not present in this capture.
+    /// A selector was supplied but no frame matched it.
     #[must_use]
     pub fn selected_absent(&self) -> bool {
         self.selected_absent
     }
 }
 
-/// A prepared analysis pass: narrowed plan plus the collector lifecycle.
-///
-/// `options.plan` is replaced — the session derives it from the filter's
-/// [`Filter::requirements`] and the collector's [`CollectorNeeds`] — while
-/// `options.tcp_events` and `options.track_sources` are raised to cover the
-/// declared needs. A `selector` becomes `options.stream`: the pass keeps
-/// only that conversation's frames, and the [`Outcome::selected_absent`]
-/// verdict reports whether it had any.
+/// Replaces `options.plan` and raises `tcp_events`/`track_sources` to cover collector needs.
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -182,14 +113,7 @@ pub struct Session<'a, C> {
 }
 
 impl<'a, C: Collector> Session<'a, C> {
-    /// Prepares a run, narrowing `options`' plan to what the compiled filter
-    /// and the collector actually read.
-    ///
-    /// Conversation indexes are capture-global accounting: they are assigned
-    /// before the filter runs and `max_flows` bounds the distinct
-    /// conversations of *each* transport in the capture, not of the selected
-    /// one. Indexing one transport without the other would silently drop
-    /// that bound, so a plan that indexes at all indexes both.
+    /// `max_flows` bounds each transport capture-wide, so a plan that indexes at all indexes both.
     pub fn new(
         registry: Arc<Registry>,
         mut options: Options<'a>,
@@ -217,13 +141,6 @@ impl<'a, C: Collector> Session<'a, C> {
         }
     }
 
-    /// Drives the whole pass over the capture: every matched frame reaches
-    /// `observe`, every produced event reaches `event_sink` in order —
-    /// including the trailing events [`Collector::finish`] returns — and IP
-    /// lifecycle events forward to `ip_sink`.
-    ///
-    /// Composes [`observe`](Self::observe) and [`Pass::finish`]; callers that
-    /// must act on the run before the collector finishes split the phases.
     pub fn run<R, I, F>(
         self,
         reader: &mut Reader<R>,
@@ -240,11 +157,6 @@ impl<'a, C: Collector> Session<'a, C> {
             .finish(&mut event_sink)
     }
 
-    /// Drives the frame loop only: each matched frame folds through
-    /// [`Collector::observe`], produced events drain through `event_sink` in
-    /// order, and IP lifecycle events forward to `ip_sink`. The returned
-    /// [`Pass`] holds the run's terminal summary so the caller can apply its
-    /// verdict before [`Pass::finish`].
     pub fn observe<R, I, F>(
         self,
         reader: &mut Reader<R>,
@@ -296,7 +208,6 @@ mod tests {
 
     type Log = Rc<RefCell<Vec<String>>>;
 
-    /// What the pipeline exposed to one observed frame.
     #[derive(Clone, Copy, Debug, Default)]
     struct View {
         tcp_indexed: bool,
@@ -305,9 +216,6 @@ mod tests {
         tcp_events: usize,
     }
 
-    /// A scripted collector: records the lifecycle and what each record
-    /// exposes, emits its frame's number per observation, and can fail on
-    /// cue.
     struct Probe {
         needs: CollectorNeeds,
         log: Log,
@@ -429,7 +337,6 @@ mod tests {
         build(registry, packet, seconds)
     }
 
-    /// A non-atomic IPv4 fragment: one pending datagram per identification.
     fn fragment_frame(registry: &Arc<Registry>, seconds: u64, identification: u16) -> Frame {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
@@ -462,7 +369,6 @@ mod tests {
         log: Vec<String>,
     }
 
-    /// Runs a probe collector through `Session::run` over `frames`.
     fn drive(
         registry: &Arc<Registry>,
         frames: &[Frame],
@@ -492,7 +398,6 @@ mod tests {
         })
     }
 
-    /// `Driven` is not `Debug`, so `expect_err` is unavailable.
     fn expect_failure(result: Result<Driven, RunError>) -> RunError {
         match result {
             Ok(_) => panic!("the session succeeded"),
@@ -593,7 +498,6 @@ mod tests {
             pass.run.frames_matched, 0,
             "the run summary is available before finish"
         );
-        // A caller that acts on the verdict here never finishes the collector.
         drop(pass);
         assert!(log.borrow().is_empty(), "neither scopes nor finish ran");
     }
@@ -731,8 +635,6 @@ mod tests {
     #[test]
     fn filter_requirements_union_with_collector_needs() {
         let registry = builtin::registry();
-        // Reads only udp.stream, so TCP indexing must stay off even though
-        // both frame kinds are observed. Stream indices are zero-based.
         let filter = compile("udp.stream == 0 || frame.number == 1", &registry);
         let frames = [
             tcp_frame(&registry, 0, Tcp::SYN, 100),
@@ -772,8 +674,7 @@ mod tests {
         );
         let frames = [
             fragment_frame(&registry, 0, 7),
-            // Past the default idle expiry, so this frame's sweep retires the
-            // pending datagram before the record is observed.
+            // Past the default idle expiry, so this frame's sweep retires the datagram first.
             udp_frame(&registry, 40),
         ];
         let mut reader = reader_of(&frames);
@@ -885,8 +786,6 @@ mod tests {
             other => panic!("expected a run sink error at frame 1, got {other:?}"),
         }
 
-        // The same failure on a trailing event crosses as a collector error:
-        // the run itself completed.
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);

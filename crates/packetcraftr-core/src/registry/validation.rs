@@ -12,12 +12,6 @@ use crate::codec::LayerCodec;
 use crate::field::FieldKind;
 
 impl super::builder::Builder {
-    /// Finalizes the registry, resolving every binding it was given.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the builder corrupts a binding table; registration errors return
-    /// [`Error`].
     pub fn build(mut self) -> Result<super::lookup::Registry, Error> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {
@@ -80,7 +74,6 @@ impl super::builder::Builder {
                 });
             }
         }
-        // Collect schemas once; codecs can use a default factory or publish a static schema.
         let mut schemas = BTreeMap::new();
         for (protocol, codec) in &self.codecs {
             if let Some(schema) = codec.published_schema() {
@@ -105,14 +98,6 @@ impl super::builder::Builder {
     }
 }
 
-/// Rejects a filter binding whose path is already a canonical
-/// `<protocol-or-alias>.<field>` spelling.
-///
-/// Canonical paths resolve straight through the cached schemas, so a binding
-/// that reuses one would give the same text two different meanings depending
-/// on which lookup a caller reached for. Only the final `.` is split, so a
-/// nested spelling such as `tcp.flags.syn` is compared as the prefix
-/// `tcp.flags`, which is not an alias and therefore never collides.
 fn reject_canonical_filter_path(
     path: &str,
     aliases: &HashMap<String, crate::layer::Id>,
@@ -140,8 +125,6 @@ fn reject_canonical_filter_path(
     Ok(())
 }
 
-/// Rejects unregistered protocols, absent fields, and unusable bit selections
-/// at registry construction, before they can silently fail to match.
 fn validate_filter_field(
     path: &str,
     binding: &FilterFieldBinding,
@@ -155,7 +138,6 @@ fn validate_filter_field(
         });
     }
     // A decode-only codec has no default layer and therefore no cached schema.
-    // Its field names cannot be checked here; leave them to the compiler.
     let Some(schema) = schemas.get(protocol) else {
         return Ok(());
     };

@@ -21,8 +21,6 @@ struct DiagnosticStreams {
     outermost: Option<usize>,
 }
 
-/// Reports snapshot truncation and timestamp regression from reader and
-/// pipeline evidence, without detecting them again.
 pub(super) fn from_capture_evidence(record: &FrameRecord<'_>) -> Vec<Finding> {
     let mut findings = Vec::new();
     let frame = &record.decoded.frame;
@@ -75,8 +73,6 @@ pub(super) fn from_diagnostics(record: &FrameRecord<'_>) -> Vec<Finding> {
             diagnostic.message.clone(),
         )
     };
-    // The transport walk only pays off when a view actually carries
-    // diagnostics, which most frames do not.
     let mut findings = Vec::new();
     if !record.decoded.diagnostics.is_empty() {
         let physical_streams =

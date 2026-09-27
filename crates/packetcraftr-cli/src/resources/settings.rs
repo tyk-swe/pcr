@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Resource declarations, preset values, and parser-backed setting reports.
-//! Dispatch supplies the parsed definition and the command's declarations.
-
 use std::collections::BTreeMap;
 
 use clap::{ArgMatches, ValueEnum, parser::ValueSource};
@@ -29,13 +26,11 @@ impl Preset {
     }
 }
 
-/// What a setting's value measures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Unit {
     Count,
     Bytes,
     Milliseconds,
-    /// A named policy choice rather than a quantity.
     Policy,
 }
 
@@ -50,7 +45,6 @@ impl Unit {
     }
 }
 
-/// The processing stage a setting bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Stage {
     Output,
@@ -61,8 +55,6 @@ pub(crate) enum Stage {
     ResultRetention,
     IndexedMetadata,
     NativeCapture,
-    /// Capture-file reader bounds. Live commands read captures as part of an
-    /// operation, so there these become [`Stage::Operation`] settings.
     PhysicalInput,
     Operation,
     ActiveState,
@@ -86,14 +78,10 @@ impl Stage {
     }
 }
 
-/// Whether the command runs a setting's stage in this invocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Enabled {
-    /// Known from the arguments alone.
     Fixed(bool),
-    /// Runs only when the comparison needs the capture stream index. The
-    /// command reports that through [`super::stream_index_needed`] once its
-    /// rules and filters compile; until then the stage counts as enabled.
+    /// Runs only when the comparison needs the capture stream index.
     StreamIndex,
 }
 
@@ -103,7 +91,6 @@ impl From<bool> for Enabled {
     }
 }
 
-/// A typed argument value as it is reported; `None` for an unset option.
 pub(crate) trait SettingValue {
     fn setting_value(&self) -> Option<Value>;
 }
@@ -126,15 +113,12 @@ impl<T: SettingValue> SettingValue for Option<T> {
     }
 }
 
-/// A policy choice reported under its command-line spelling.
 pub(crate) fn policy_value<T: ValueEnum>(value: &T) -> Option<Value> {
     value
         .to_possible_value()
         .map(|value| Value::Policy(value.get_name().to_owned()))
 }
 
-/// The defaults each `--resource-preset` gives one setting, as command-line
-/// text for clap to parse and validate like any other default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PresetDefaults {
     pub(crate) ci_v1: &'static str,
@@ -150,8 +134,6 @@ impl PresetDefaults {
     }
 }
 
-/// One typed argument field declared as a resource setting. Build it with
-/// [`declare!`], which names the field and so its command-line argument id.
 pub(crate) struct Field {
     pub(crate) id: &'static str,
     pub(crate) value: Option<Value>,
@@ -163,9 +145,6 @@ pub(crate) struct Field {
 
 /// Declares typed argument fields as resource settings:
 /// `declare!(settings, group, [field: Unit @ Stage, field: Unit @ Stage preset(ci, ws) if enabled])`.
-/// Each field's name is its command-line argument id. `preset(ci, ws)` gives
-/// the field's `ci-v1` and `workstation-v1` defaults, which offline commands
-/// take under `--resource-preset`.
 macro_rules! declare {
     (@enabled) => { $crate::resources::Enabled::Fixed(true) };
     (@enabled $enabled:expr) => { $crate::resources::Enabled::from($enabled) };
@@ -198,8 +177,6 @@ macro_rules! declare {
 }
 pub(crate) use declare;
 
-/// Where declared settings go: the `--resource-diagnostics` report, or the
-/// defaults a `--resource-preset` gives the selected command.
 enum Target<'a> {
     Diagnostics(Diagnostics<'a>),
     Presets {
@@ -208,7 +185,6 @@ enum Target<'a> {
     },
 }
 
-/// The settings one invocation reports, collected from typed arguments.
 struct Diagnostics<'a> {
     root: (&'a clap::Command, &'a ArgMatches),
     selected: Option<(&'a clap::Command, &'a ArgMatches)>,
@@ -218,13 +194,11 @@ struct Diagnostics<'a> {
     declared: BTreeMap<String, (Setting, Enabled)>,
 }
 
-/// Collects the settings a command declares from its typed arguments.
 pub(crate) struct Settings<'a> {
     target: Target<'a>,
 }
 
 impl Settings<'_> {
-    /// The declared `--resource-preset` defaults, by argument id.
     pub(crate) fn preset_defaults(
         preset: Preset,
         declare: impl FnOnce(&mut Settings<'_>),
@@ -242,8 +216,6 @@ impl Settings<'_> {
         }
     }
 
-    /// Declares one argument field. An unset optional argument (its value is
-    /// `None`) is not reported, but its preset still applies.
     pub(crate) fn declare(&mut self, field: Field) {
         match &mut self.target {
             Target::Presets { preset, defaults } => {
@@ -255,8 +227,6 @@ impl Settings<'_> {
         }
     }
 
-    /// Declares the aggregate JSON retention a command derives from its
-    /// physical frame ceiling.
     pub(crate) fn retained_result_items(&mut self, max_frames: u64) {
         if let Target::Diagnostics(report) = &mut self.target {
             report.retained_result_items(max_frames);
@@ -343,7 +313,6 @@ impl Diagnostics<'_> {
         );
     }
 
-    /// Adds the output settings every NDJSON stream runs under.
     fn stream_output(&mut self) {
         let fixed = |name: &str, value, unit: Unit, scope: &str, source: &str| {
             (
@@ -390,12 +359,10 @@ impl Diagnostics<'_> {
     }
 }
 
-/// The root option a report declares, under the name of its `Cli` field.
 struct Root {
     output_timeout_ms: Option<u64>,
 }
 
-/// Collects declared settings with their parser metadata and stage enablement.
 pub(crate) fn collect_settings(
     definition: &clap::Command,
     matches: &ArgMatches,

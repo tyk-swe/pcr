@@ -555,8 +555,6 @@ fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
             1_000,
             b"second-payload",
         );
-        // Simulate a snaplen-truncated record: fewer captured bytes than the
-        // wire length the frame declares.
         let cut = frame.captured_length() - 6;
         Frame::try_with_lengths(
             epoch + Duration::from_secs(11),

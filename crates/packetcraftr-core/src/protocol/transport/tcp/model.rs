@@ -24,8 +24,6 @@ pub struct Tcp {
     pub window: u16,
     pub checksum: WireValue<u16>,
     pub urgent_pointer: u16,
-    /// Parsed options in wire order. Unknown kinds, nonstandard lengths, and
-    /// unparseable tails stay byte-exact as `Raw`/`Trailing` entries.
     pub options: Vec<TcpOption>,
 }
 
@@ -53,39 +51,35 @@ impl Default for Tcp {
     }
 }
 
-/// One SACK block's inclusive sequence edge pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SackBlock {
     pub left_edge: u32,
     pub right_edge: u32,
 }
 
-/// A parsed TCP option, preserving declaration order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TcpOption {
-    /// End of option list (kind 0, a single byte).
     End,
-    /// No-operation padding (kind 1, a single byte).
     Nop,
-    /// Maximum segment size (kind 2, length 4).
     Mss(u16),
-    /// Window scale shift count (kind 3, length 3).
     WindowScale(u8),
-    /// SACK-permitted marker (kind 4, length 2).
     SackPermitted,
-    /// Selective acknowledgment blocks (kind 5, length 2 + 8n).
     Sack(Vec<SackBlock>),
-    /// Timestamps option (kind 8, length 10): TSval and TSecr.
-    Timestamps { value: u32, echo_reply: u32 },
+    Timestamps {
+        value: u32,
+        echo_reply: u32,
+    },
     /// Any other kind, or a standard kind with a nonstandard length;
     /// `data` is the option body after the kind and length bytes.
-    Raw { kind: u8, data: Bytes },
+    Raw {
+        kind: u8,
+        data: Bytes,
+    },
     /// Padding after EOL, or bytes that cannot decode as a TLV; always last.
     Trailing(Bytes),
 }
 
 impl TcpOption {
-    /// Wire kind byte; `Trailing` has none.
     pub fn kind(&self) -> Option<u8> {
         Some(match self {
             Self::End => KIND_END,

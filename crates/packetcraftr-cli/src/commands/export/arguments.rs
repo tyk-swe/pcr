@@ -43,7 +43,6 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineLimitsArgs,
 }
 
-/// The saved export, in its source capture format.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SavedCapture;
 

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS text: one line shape for a question and one for a resource record,
-//! whichever command printed them and whichever model they came from.
-
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
@@ -12,7 +9,6 @@ use packetcraftr_core::{document::Packet, field::FieldValue};
 use super::write_stdout_line;
 use crate::errors::CliError;
 
-/// One question: `  dns question: <name> type=<type> class=<class>`.
 pub(crate) fn render_dns_question(
     name: impl Display,
     query_type: impl Display,
@@ -23,8 +19,6 @@ pub(crate) fn render_dns_question(
     ))
 }
 
-/// One resource record:
-/// `  dns <section>: <owner> type=<type> class=<class> ttl=<ttl> <data>`.
 pub(crate) fn render_dns_record(
     section: impl Display,
     owner: impl Display,
@@ -38,7 +32,6 @@ pub(crate) fn render_dns_record(
     ))
 }
 
-/// The questions and records of every DNS layer in a decoded packet.
 pub(crate) fn render_dns_records(packet: &Packet) -> Result<(), CliError> {
     for layer in &packet.layers {
         if layer.protocol.as_str() == "dns" {
@@ -48,7 +41,6 @@ pub(crate) fn render_dns_records(packet: &Packet) -> Result<(), CliError> {
     Ok(())
 }
 
-/// The questions and records one DNS message's reflected fields carry.
 pub(crate) fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result<(), CliError> {
     if let Some(FieldValue::List(questions)) = fields.get("questions") {
         for question in questions {

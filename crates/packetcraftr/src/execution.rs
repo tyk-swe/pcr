@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The seams every live workflow shares: the executor contract, validation of
-//! the evidence an executor returns, the pacing context that runs each step,
-//! and publication of workflow events on the runtime.
-
 mod admission;
 mod context;
 mod errors;

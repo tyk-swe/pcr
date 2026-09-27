@@ -71,8 +71,6 @@ fn typed_tcp_options_construct_in_order_and_decode_back() {
 
 #[test]
 fn unknown_and_malformed_tcp_options_keep_exact_wire_bytes() {
-    // kind 30 (unknown), a kind 2 with a nonstandard length, then a truncated
-    // tail that cannot be a TLV: all must survive decode/encode unchanged.
     let mut packet = Packet::new();
     packet.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
     packet.push(Tcp {
@@ -104,8 +102,6 @@ fn unknown_and_malformed_tcp_options_keep_exact_wire_bytes() {
     );
     let decoded = dissect(built.bytes.clone());
     let tcp = decoded.packet.get::<Tcp>().unwrap();
-    // The malformed `04 ee` option start swallows everything left, including
-    // the padding byte, into one verbatim trailing span.
     assert!(matches!(
         tcp.options.as_slice(),
         [
@@ -152,13 +148,11 @@ fn tcp_option_fields_filter_project_and_expand() {
             "{expression_text}"
         );
     }
-    // Nested paths project typed option members.
     let tcp = decoded.packet.get::<Tcp>().unwrap();
     assert_eq!(
         tcp.field_path(&"options[0].mss".parse().unwrap()),
         Some(FieldValue::Unsigned(1460))
     );
-    // Template axes reach into typed option members.
     let packet = expression::parse(
         concat!(
             "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
@@ -191,18 +185,13 @@ fn tcp_option_fields_filter_project_and_expand() {
 fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
     let registry = builtin::registry();
     for recipe in [
-        // Raw kinds 0 and 1 carry no length byte; data is malformed there.
         "tcp(options=[{kind=0,data=hex(\"aa\")}])",
         "tcp(options=[{kind=1,data=hex(\"aa\")}])",
-        // Trailing bytes must be the last list member.
         "tcp(options=[{trailing=hex(\"aa\")},{kind=1}])",
-        // Members must match the declared kind.
         "tcp(options=[{kind=2,window_scale=7}])",
         "tcp(options=[{kind=3,mss=1460}])",
         "tcp(options=[{kind=8,tsval=1}])",
-        // Forty-one bytes of options exceed the TCP data-offset limit. The IP
-        // envelope keeps the rejection attributable to the option area rather
-        // than to the transport checksum a bare `tcp()` recipe cannot resolve.
+        // Forty-one bytes of options exceed the TCP data-offset limit.
         "ipv4(source=192.0.2.1,destination=198.51.100.2)/tcp(options=hex(\"020405b401010101010101010101010101010101010101010101010101010101010101010101010101\"))",
         // A SACK list longer than the 31 blocks the length byte can address.
         "tcp(options=[{kind=5,sack=[{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2}]}])",
@@ -215,9 +204,6 @@ fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
         };
         assert!(rejected, "{recipe} must be rejected");
     }
-    // The limit is forty bytes, not thirty-nine: the largest legal option area
-    // still builds, so the rejection above is attributable to the one extra
-    // byte rather than to anything else in the recipe.
     let largest = expression::parse(
         "ipv4(source=192.0.2.1,destination=198.51.100.2)/tcp(options=hex(\"020405b4010101010101010101010101010101010101010101010101010101010101010101010101\"))",
         &registry,
@@ -227,7 +213,6 @@ fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
     Builder::new(registry.clone())
         .build(largest, Default::default(), Default::default())
         .expect("forty option bytes fit the TCP data offset");
-    // Verbatim option bytes still parse into typed entries on construction.
     let packet = expression::parse(
         "tcp(options=hex(\"020405b401030307\"))",
         &registry,
@@ -260,9 +245,6 @@ fn decoded_tcp_options_round_trip_through_documents() {
     );
     assert_eq!(reencode(recreated), built.bytes);
 
-    // A standard kind carrying a nonstandard wire length decodes to `Raw`, and
-    // the field document has to carry it back as `Raw` instead of demanding the
-    // typed member that kind normally declares.
     let malformed = build(concat!(
         "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
         "tcp(destination_port=443,flags=2,options=hex(\"1e04090902050102030400\"))"

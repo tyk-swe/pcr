@@ -5,7 +5,6 @@ use serde::Serialize;
 
 use crate::correlation::Transport;
 
-/// Transport-specific addressing: TCP and UDP require ports; ICMP has none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeEndpoint {
     Tcp { port: u16 },
@@ -23,7 +22,6 @@ impl ProbeEndpoint {
         }
     }
 
-    /// The destination port, absent for the portless ICMP endpoint.
     #[must_use]
     pub const fn port(self) -> Option<u16> {
         match self {
@@ -33,7 +31,6 @@ impl ProbeEndpoint {
     }
 }
 
-/// Whether a probe was answered before its timeout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeStatus {

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure pre-commit fragment normalization and validation. Checks headers,
-//! retained state, final length, wire extent, and ECN without mutating any
-//! datagram.
-
 use super::super::{Ipv4Fragment, Ipv6Fragment};
 use super::{
     Bytes, DatagramKey, DatagramState, Ecn, Error, Fragment, Ipv4Addr, Limits, Malformed,
@@ -16,7 +12,6 @@ use crate::protocol::network::ip_protocol;
 const IPV6_FRAGMENT_HEADER_LENGTH: usize = 8;
 const MAX_WIRE_LENGTH: usize = 65_535;
 
-/// Retained state whose family disagrees with the key it was found under.
 pub(super) const FAMILY_MISMATCH: Error = Error::Inconsistent {
     reason: "retained datagram family disagrees with its key",
 };
@@ -124,8 +119,6 @@ pub(super) fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<I
     Ok(incoming)
 }
 
-/// Validates one IPv4 fragment header and reports its congestion marking so
-/// reassembly can merge it independently of the retained header bytes.
 fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
     let Some(fixed) = fragment.header.first_chunk::<{ Ipv4Header::MIN_LENGTH }>() else {
         return Err(Malformed::InvalidIpv4Header {
@@ -177,9 +170,6 @@ fn validate_ipv4_header(fragment: &Ipv4Fragment) -> Result<Ecn, Error> {
     Ok(Ecn::from_ipv4_tos(fixed[1]))
 }
 
-/// Validates one IPv6 fragment's unfragmentable prefix and reports its
-/// congestion marking so reassembly can merge it independently of the retained
-/// prefix bytes.
 fn validate_ipv6_prefix(fragment: &Ipv6Fragment) -> Result<Ecn, Error> {
     let Some(base) = fragment
         .unfragmentable_prefix
@@ -278,13 +268,8 @@ pub(super) fn validate_reconstruction_consistency(
                 next_header: _,
             },
         ) => {
-            // RFC 8200 §4.5 allows the number and content of the unfragmentable
-            // headers and the Fragment Next Header to differ between fragments.
-            // Only the offset-zero fragment's values are retained, which
-            // Reconstruction::from_offset_zero tracks for materialization.
+            // RFC 8200 §4.5 lets unfragmentable headers differ between fragments.
         }
-        // The datagram key carries the family, so a lookup can never return
-        // state of the other one.
         _ => return Err(FAMILY_MISMATCH),
     }
     Ok(())
@@ -293,11 +278,7 @@ pub(super) fn validate_reconstruction_consistency(
 fn ipv4_headers_match(first: &[u8], second: &[u8]) -> bool {
     first.len() == second.len()
         && first.first() == second.first()
-        // ECN is merged across fragments per RFC 3168, so it may differ even
-        // between offset-zero duplicates; DSCP is preserved and must agree.
-        // Total length, fragment offset/MF, and checksum are normalized during
-        // reconstruction and legitimately differ per fragment. Reserved/DF
-        // are preserved and therefore must agree.
+        // ECN, total length, offset/MF and checksum may differ; DSCP and Reserved/DF must agree.
         && ipv4_dscp(first) == ipv4_dscp(second)
         && first.get(4..6) == second.get(4..6)
         && ipv4_preserved_flags(first) == ipv4_preserved_flags(second)
@@ -385,8 +366,6 @@ pub(super) fn validate_family_wire_extent(
             .map_or(Ipv4Header::MIN_LENGTH, Bytes::len),
         (IncomingReconstruction::Ipv4 { .. }, None) => Ipv4Header::MIN_LENGTH,
         (IncomingReconstruction::Ipv6 { prefix, .. }, existing) => {
-            // An offset-zero fragment replaces a provisional non-zero prefix,
-            // so the wire check must use the prefix the datagram will retain.
             let retained = match existing {
                 Some(DatagramState {
                     reconstruction:

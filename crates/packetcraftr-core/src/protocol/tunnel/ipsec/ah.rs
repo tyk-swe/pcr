@@ -24,17 +24,11 @@ const NAME: &str = BuiltinProtocol::Ah.as_str();
 
 const AH_FIXED_LEN: usize = 12;
 
-/// Whether a protocol behind AH belongs to the other address family. The
-/// shared `ah` registry entry binds children of both families, so the codec
-/// itself keeps ICMPv4 out of IPv6 chains and the IPv6 repertoire out of
-/// IPv4 ones.
 fn ah_family_mismatch(under_ipv6: Option<bool>, child: Option<BuiltinProtocol>) -> bool {
     let Some(child) = child else {
         return false;
     };
     match under_ipv6 {
-        // AH is itself an IPv6 extension header but belongs to both families,
-        // so the IPv6-only repertoire is every other extension plus ICMPv6.
         Some(false) => {
             child == BuiltinProtocol::Icmpv6
                 || (child.is_ipv6_extension() && child != BuiltinProtocol::Ah)
@@ -45,21 +39,14 @@ fn ah_family_mismatch(under_ipv6: Option<bool>, child: Option<BuiltinProtocol>) 
 }
 
 /// IPsec Authentication Header (RFC 4302), IP protocol 51.
-///
-/// Unlike ESP it authenticates rather than encrypts, so the next-header
-/// chain continues through it and the payload dissects normally.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ah {
-    /// Protocol number of the authenticated payload.
     pub next_header: WireValue<u8>,
     /// Header length in 4-byte units minus two; derived from the ICV.
     pub payload_length: WireValue<u8>,
     pub reserved: u16,
-    /// Security parameters index.
     pub spi: u32,
-    /// Anti-replay sequence number.
     pub sequence: u32,
-    /// Integrity check value, a multiple of 4 bytes.
     pub icv: Bytes,
 }
 
@@ -136,9 +123,6 @@ impl LayerCodec for AhCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        // A discriminator whose registered child belongs to the other
-        // address family selects nothing in this one — decode keeps such
-        // payloads opaque — so a raw child is the faithful rebuild there.
         let selects_cross_family = context
             .registry
             .child_for(NAME, Discriminator(u64::from(next_header)))
@@ -217,8 +201,6 @@ impl LayerCodec for AhCodec {
                 .at_field("payload_length"),
             );
         }
-        // A next_header naming the other family's repertoire never selects
-        // that child; the payload stays opaque instead.
         let cross_family = context
             .registry
             .child_for(NAME, Discriminator(u64::from(next_header)))

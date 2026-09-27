@@ -30,10 +30,6 @@ struct ReversedProtocolLayers<'request, 'response> {
     response: &'response dyn Layer,
 }
 
-/// Pairs every occurrence of `protocol` only after the complete directly
-/// matchable stack has reversed. The deepest matcher owns a direct response;
-/// enclosing tunnel transports are evidence it must validate, not independent
-/// reasons to accept an otherwise unrelated inner packet.
 fn reversed_protocol_layers<'request, 'response>(
     protocol: BuiltinProtocol,
     request: &'request Packet,
@@ -79,10 +75,6 @@ fn outer_envelopes_reversed(request: &Packet, response: &Packet) -> bool {
         && request_outer.destination == response_outer.source
 }
 
-/// Whether one matchable pair at the same stack position reverses: identical
-/// protocols, reversed enclosing network endpoints, and reversed transport
-/// keys where the protocol carries them. The response's enclosing envelope is
-/// returned so callers can attribute its responder.
 fn reversed_layer_pair(
     request: &Packet,
     request_layer: (usize, BuiltinProtocol, &dyn Layer),
@@ -111,12 +103,6 @@ fn reversed_layer_pair(
     Some(response_endpoints)
 }
 
-/// Whether the complete transport stack reverses, ignoring DNS application
-/// identity. The deepest transport must be `transport`; enclosing tunnel
-/// transports and every enclosing network envelope must also reverse.
-///
-/// The returned address is the source of the deepest transport's envelope:
-/// the host that answered.
 pub fn transport_tuple_reversed(
     request: &Packet,
     response: &Packet,
@@ -154,9 +140,6 @@ fn matchable_layers(
     })
 }
 
-/// The envelope of the packet transmitted on the wire: the outermost IP path,
-/// ignoring anything behind an encapsulation boundary. A direct reply must
-/// reverse it; reversing only an inner tunnel tuple is not correlation.
 fn outer_network_endpoints(packet: &Packet) -> Option<NetworkEnvelope> {
     let path = semantics::outer_ip_path(packet).ok()??;
     Some(NetworkEnvelope {
@@ -173,7 +156,6 @@ fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option
     })
 }
 
-/// The type, code, and body the built-in ICMPv4 and ICMPv6 layers share.
 struct IcmpMessage<'a> {
     icmp_type: u8,
     code: u8,
@@ -198,7 +180,6 @@ impl<'a> IcmpMessage<'a> {
     }
 }
 
-/// The bytes an opaque built-in layer carries verbatim.
 fn opaque_bytes(layer: &dyn Layer) -> Option<&Bytes> {
     if let Some(raw) = layer.downcast_ref::<Raw>() {
         return Some(&raw.bytes);

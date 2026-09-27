@@ -20,12 +20,7 @@ pub struct MapReport {
     pub interfaces: usize,
     pub source_metadata_records: u64,
 }
-/// Map packet bytes into one PCAPNG section while retaining global interface
-/// identity, times, and interface options. Source section structure, statistics,
-/// packet options and other non-interface metadata are discarded. Declared FCS
-/// and extended packet flags are rejected. `maximum_growth` extends snap lengths
-/// and bounds each mapper result. The mapper may change bytes/lengths, not capture
-/// identity. Output can be partial on failure; publish a temporary file on success.
+/// Output can be partial on failure; publish a temporary file on success.
 pub fn map_frames<R: Read, W: Write, F>(
     reader: &mut Reader<R>,
     output: &mut Writer<W>,

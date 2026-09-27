@@ -19,7 +19,7 @@ batch shares land here:
   `frames_per_file`, read/write totals, and a nonempty bounded `files` list
   of `part-NNNNNN.pcap[ng][.gz|.zst]` parts with per-part frame ranges and
   byte counts.
-- HTTP adds `transactions` (empty until HTTP-T02 populates them), a nullable
+- HTTP adds `transactions` (populated when `--transactions` runs), a nullable
   `transaction_summary`, and a nullable `body_export` record (HTTP-B02)
   identifying the caller-named artifact by path, byte count, SHA-256, and the
   fixed `http_body_after_dechunking` representation; body bytes are never
@@ -31,8 +31,11 @@ batch shares land here:
   `min_severity`, `allow_findings`, `minimum_frames` (positive),
   `frames_matched`, `findings_observed`, and `triggering_findings`.
 
-Current runs publish `transactions: []`, `transaction_summary: null`,
-`body_export: null`, and `gate: null` until the feature tickets fill them.
+Without `--transactions` or `--body-message`/`--write`, runs publish
+`transactions: []`, `transaction_summary: null`, and `body_export: null`;
+`gate` reports the `expert --fail-on` verdict. A successful body export sets
+`body_export` to the artifact metadata after publication, and a stdout
+failure after that commit leaves the published artifact in place.
 The forwarding consumer accepts both families with identical semantics: the
 first NDJSON record selects the family and a later switch is rejected. The
 v6 schema and the frozen `v6-forwarding.json` fixture remain packaged

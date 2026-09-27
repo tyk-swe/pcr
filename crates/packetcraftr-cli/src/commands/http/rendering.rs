@@ -69,6 +69,19 @@ pub(super) fn render_transaction(transaction: &wire::Transaction) -> Result<(), 
     ))
 }
 
+/// The published artifact's one sanitized line — index, byte count, digest,
+/// and destination — printed between the message rows and the summary. Body
+/// bytes themselves never appear in output.
+pub(super) fn render_body_export(complete: &wire::Complete) -> Result<(), CliError> {
+    if let Some(export) = &complete.body_export {
+        write_stdout_line(format_args!(
+            "body message={} bytes={} sha256={} path={}",
+            export.message, export.bytes, export.sha256, export.path,
+        ))?;
+    }
+    Ok(())
+}
+
 pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "{} HTTP/1 messages, {} complete, {} incomplete, {} malformed; {} requests without a captured final response",

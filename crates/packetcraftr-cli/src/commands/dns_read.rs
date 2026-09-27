@@ -10,6 +10,7 @@ mod rendering;
 use packetcraftr_core::analysis::dns::{Collector, Event};
 
 use self::arguments::Args;
+use super::application_output::EventOutput;
 use super::offline_analysis::{Inspection, inspect};
 use crate::errors::CliError;
 use crate::output::{
@@ -50,12 +51,16 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     ports.push(53);
     let collector = Collector::new(args.application.core(), ports).map_err(CliError::classified)?;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
+    let mut output = EventOutput::new(
+        format,
+        stream,
+        args.application.max_application_output_bytes,
+    );
     let outcome = inspect(
         Inspection {
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
             selector: args
                 .stream
                 .as_ref()
@@ -65,6 +70,7 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
         collector,
         format,
         stream,
+        &mut output,
         |output, event| match event {
             Event::Message(value) => output.emit(
                 wire::Message::try_from(*value).map_err(CliError::classified)?,

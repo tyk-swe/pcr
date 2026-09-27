@@ -88,7 +88,9 @@ impl StagedFile {
     }
 }
 
-fn output(action: &'static str, destination: &Path, source: std::io::Error) -> CliError {
+/// The `io.output_file` failure every staged-artifact write, sync, and publish
+/// step shares, retaining the I/O source in the causes chain.
+pub(crate) fn output(action: &'static str, destination: &Path, source: std::io::Error) -> CliError {
     let causes = std::iter::once(source.to_string())
         .chain(packetcraftr_core::error::source_chain(&source))
         .collect();

@@ -148,16 +148,16 @@
         "response_status": 200,
         "informational": [],
         "request_headers_available": {
-          "frame": 2,
+          "frame": 5,
           "timestamp": {
-            "unix_seconds": 2,
+            "unix_seconds": 5,
             "nanoseconds": 0
           }
         },
         "response_started": {
-          "frame": 5,
+          "frame": 6,
           "timestamp": {
-            "unix_seconds": 5,
+            "unix_seconds": 6,
             "nanoseconds": 0
           }
         },
@@ -169,11 +169,11 @@
           }
         },
         "response_header_wait": {
-          "nanoseconds": 3000000000,
+          "nanoseconds": 1000000000,
           "negative": false
         },
         "response_header_span": {
-          "nanoseconds": 1000000000,
+          "nanoseconds": 0,
           "negative": false
         }
       }

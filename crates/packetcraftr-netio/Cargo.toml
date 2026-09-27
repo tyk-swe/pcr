@@ -29,10 +29,12 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
-# `dep:libc` covers the `if_nametoindex`/`if_indextoname` identity check that
-# every Layer 2 and Layer 3 injection performs on Linux and macOS.
-native-layer2 = ["native-route", "dep:libc", "dep:libloading", "dep:pcap"]
-native-layer3 = ["native-route", "dep:libc", "dep:socket2"]
+# Both layer features build on `native-route`, whose `libc` also serves the
+# `if_nametoindex`/`if_indextoname` identity check every Layer 2 and Layer 3
+# injection performs on Linux and macOS, and whose `socket2` opens the raw IP
+# socket.
+native-layer2 = ["native-route", "dep:libloading", "dep:pcap"]
+native-layer3 = ["native-route"]
 
 [dependencies]
 bytes.workspace = true

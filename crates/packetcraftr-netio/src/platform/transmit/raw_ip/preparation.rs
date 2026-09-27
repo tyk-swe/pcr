@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::interface::Id as InterfaceId;
 use crate::{Error, transmit::Layer3Frame};
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use crate::{NativeCapability, Unsupported, link::Mode};
 use packetcraftr_core::protocol::checksum;
 
@@ -80,7 +80,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
         ));
     }
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     validate_windows_restrictions(&bytes, packet_source, interface_source)?;
 
     Ok(PreparedRawIp {
@@ -179,7 +179,7 @@ fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     Ok(Bytes::from(submission))
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn validate_windows_restrictions(
     bytes: &[u8],
     packet_source: IpAddr,
@@ -196,12 +196,12 @@ fn validate_windows_restrictions(
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
     bytes.get(offset..)?.first_chunk::<2>().copied()
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
     let version = bytes
         .first()

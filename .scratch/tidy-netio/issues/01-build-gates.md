@@ -7,7 +7,11 @@
 - `Cargo.toml` features stop repeating `dep:libc`/`dep:socket2` that `native-route` already enables.
 - `platform/common/npcap/abi.rs` keeps `#![allow(unsafe_code)]` only if clippy needs it.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Every `cargo::rustc-cfg` in `build.rs` is used outside `build.rs`.
-- [ ] fmt, the five clippy profiles, and the workspace tests pass.
+- [x] Every `cargo::rustc-cfg` in `build.rs` is used outside `build.rs`.
+- [x] fmt, the five clippy profiles, and the workspace tests pass.
+
+## Comments
+
+- `unsafe extern "C" fn` pointer types compile under `deny(unsafe_code)` (checked with a scratch crate), so `npcap/abi.rs` lost its allow; the Windows CI job is authoritative for the rest of that file.

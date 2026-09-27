@@ -54,7 +54,7 @@ pub(crate) fn shared() -> &'static Arc<Pool> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Class {
     /// Capture and route work, which exists only in native profiles.
-    #[cfg_attr(not(native_workers), allow(dead_code))]
+    #[cfg_attr(not(native_route), allow(dead_code))]
     Native,
     TcpConnect,
 }
@@ -407,7 +407,7 @@ pub(crate) struct Task<T> {
 }
 
 /// How a bounded wait for a task ended.
-#[cfg_attr(not(native_workers), allow(dead_code))]
+#[cfg_attr(not(native_route), allow(dead_code))]
 pub(crate) enum Waited<T> {
     Finished(thread::Result<T>),
     /// The caller's deadline or cancellation ended the wait first, so the
@@ -456,7 +456,7 @@ impl<T> Task<T> {
     /// Waits for the outcome until `deadline` ends, following the
     /// [deadline convention](crate::deadline): finished work is reported even
     /// when the deadline is spent.
-    #[cfg_attr(not(native_workers), allow(dead_code))]
+    #[cfg_attr(not(native_route), allow(dead_code))]
     pub(crate) fn wait(mut self, deadline: &Deadline) -> Waited<T> {
         self.wait_ready(deadline);
         match self.try_take() {

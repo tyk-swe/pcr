@@ -27,7 +27,7 @@ use super::{interface::netlink as interface_backend, route::netlink as route_bac
 #[cfg(all(native_route, target_os = "macos"))]
 use super::{interface::af_route as interface_backend, route::af_route as route_backend};
 
-#[cfg(all(native_route, windows))]
+#[cfg(all(native_route, target_os = "windows"))]
 use super::{interface::iphelper as interface_backend, route::iphelper as route_backend};
 
 #[cfg(pcap_backend)]

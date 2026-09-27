@@ -3,11 +3,11 @@
 
 //! Target socket ownership, interface binding, and native error mapping.
 
-#![cfg_attr(windows, allow(unsafe_code))]
+#![cfg_attr(target_os = "windows", allow(unsafe_code))]
 
 #[cfg(target_os = "macos")]
 use std::num::NonZeroU32;
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use std::os::windows::io::AsRawSocket;
 use std::{
     io,
@@ -15,7 +15,7 @@ use std::{
 };
 
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use windows::Win32::Networking::WinSock::{
     IP_MULTICAST_IF, IP_UNICAST_IF, IPPROTO_IP, IPPROTO_IPV6, IPV6_MULTICAST_IF, IPV6_UNICAST_IF,
     SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
@@ -112,7 +112,7 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
     .map_err(|source| raw_error("binding the selected macOS interface", source))
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
     let (level, option, index) = match packet.destination {
         IpAddr::V4(_) => (

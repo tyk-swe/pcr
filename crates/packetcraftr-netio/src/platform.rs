@@ -22,16 +22,18 @@
 //! context the worker pool matches. `dispatch` selects the backend the build
 //! script enabled for this target.
 //!
-//! The `native_*`, `pcap_backend`, `npcap_backend`, and `native_workers`
-//! predicates come from the build script, which combines the enabled
-//! features with the target the crate is compiled for.
+//! The `native_route`, `native_layer2`, `native_layer3`, `native_send`,
+//! `pcap_backend`, `npcap_backend`, and `packetcraftr_test_netns` predicates
+//! come from the build script, which combines the enabled features with the
+//! target the crate is compiled for. Both layer features enable
+//! `native-route`, so `native_send` implies `native_route`.
 
 #[cfg(native_layer2)]
 mod capture;
 mod common;
 mod dispatch;
 mod execution_context;
-#[cfg(any(native_route, native_send))]
+#[cfg(native_route)]
 mod interface;
 #[cfg(native_route)]
 mod route;

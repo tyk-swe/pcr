@@ -28,8 +28,6 @@ fn main() {
         ("native_send", native_layer2 || native_layer3),
         ("pcap_backend", pcap_backend),
         ("npcap_backend", npcap_backend),
-        // Native route queries and capture reads run on the worker pool.
-        ("native_workers", native_route || native_layer2),
         // The isolated native suite enters Linux network namespaces through
         // procfs; the launcher proves isolation at runtime.
         ("packetcraftr_test_netns", os == "linux"),

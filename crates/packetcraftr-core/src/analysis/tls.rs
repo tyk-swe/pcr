@@ -58,6 +58,7 @@ use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;
 
 mod limits;
+mod live;
 mod selector;
 mod session;
 
@@ -68,7 +69,7 @@ pub use session::{
     Session, Status,
 };
 
-use session::{Live, Verdict};
+use live::{Live, Verdict};
 
 /// The UDP port QUIC uses for HTTPS. Frames on it carry TLS 1.3 handshakes
 /// this collector deliberately does not read, so they are counted instead of

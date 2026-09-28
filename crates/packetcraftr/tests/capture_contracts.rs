@@ -5,7 +5,6 @@ use packetcraftr::{
     capture::{Cause, Control, Event, Request, StopReason},
     clock::Clock,
     policy::Policy,
-    target::SystemResolver,
 };
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::{
@@ -122,14 +121,7 @@ impl native::Provider for Provider {
     }
 }
 
-type Fixture = ProviderSet<
-    net::route::SystemProvider,
-    net::interface::SystemProvider,
-    Provider,
-    net::transmit::SystemProvider,
-    net::tcp::SystemProvider,
-    SystemResolver,
->;
+type Fixture = ProviderSet<(), net::interface::SystemProvider, Provider, (), (), ()>;
 
 fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
     Client::new(
@@ -139,14 +131,7 @@ fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
             max_bytes_per_operation: bytes,
             ..Default::default()
         },
-        ProviderSet {
-            route: Default::default(),
-            interface: Default::default(),
-            capture: provider,
-            transmit: Default::default(),
-            tcp: Default::default(),
-            resolver: SystemResolver,
-        },
+        ProviderSet::capture(net::interface::SystemProvider, provider),
     )
 }
 

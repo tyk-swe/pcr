@@ -20,7 +20,7 @@ use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
-use packetcraftr_netio::{interface, tcp, transmit};
+use packetcraftr_netio::{interface, transmit};
 
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
 
@@ -108,14 +108,12 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    let providers = ProviderSet {
-        route: DocumentationRoutes,
-        interface: interface::SystemProvider,
-        capture: sender.clone(),
-        transmit: sender,
-        tcp: tcp::SystemProvider,
-        resolver: packetcraftr::target::SystemResolver,
-    };
+    let providers = ProviderSet::packet(
+        DocumentationRoutes,
+        interface::SystemProvider,
+        sender.clone(),
+        sender,
+    );
     let client = Client::new(builtin::registry(), policy, providers);
 
     let options = send::Options {

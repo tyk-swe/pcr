@@ -11,7 +11,7 @@ use packetcraftr_netio::Error as LiveIoError;
 use crate::Client;
 use crate::Error;
 use crate::clock::Clock;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::route::{Options, Plan, plan as plan_route};
 
 /// The boundary itself is expired: no time remains once nothing is left.
@@ -30,7 +30,7 @@ pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Err
     Ok(())
 }
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Passive dry planning: route, source, and interface lookup only.
     pub fn plan(
         &self,

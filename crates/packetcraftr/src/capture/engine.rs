@@ -7,7 +7,7 @@ use packetcraftr_netio::capture::Session as _;
 
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
-use crate::providers::Providers;
+use crate::providers::CaptureProviders;
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
@@ -18,7 +18,7 @@ use super::{Cause, Control, Error, Event, Report, Request, StopReason};
 
 const READ_SLICE: Duration = Duration::from_millis(50);
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: CaptureProviders, K: Clock> Client<P, K> {
     /// Captures from every interface the request names, as one capture group.
     pub fn capture<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where

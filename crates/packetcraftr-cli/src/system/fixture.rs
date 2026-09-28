@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{Client, ProviderSet, Providers};
+use packetcraftr::{CaptureProviders, Client, PacketProviders, ProviderSet};
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
@@ -11,18 +11,11 @@ pub(crate) fn capturing<C: net::capture::Provider + 'static>(
     registry: Arc<core::registry::Registry>,
     policy: packetcraftr::policy::Policy,
     capture: C,
-) -> Client<impl Providers> {
+) -> Client<impl CaptureProviders> {
     Client::new(
         registry,
         policy,
-        ProviderSet {
-            route: net::route::SystemProvider,
-            interface: net::interface::SystemProvider,
-            capture,
-            transmit: net::transmit::SystemProvider,
-            tcp: net::tcp::SystemProvider,
-            resolver: packetcraftr::target::SystemResolver,
-        },
+        ProviderSet::capture(net::interface::SystemProvider, capture),
     )
 }
 
@@ -32,7 +25,7 @@ pub(crate) fn transmitting<R, N, T>(
     route: R,
     interface: N,
     transmit: T,
-) -> Client<impl Providers>
+) -> Client<impl PacketProviders>
 where
     R: net::route::Provider + 'static,
     N: net::interface::Provider + 'static,
@@ -41,13 +34,6 @@ where
     Client::new(
         registry,
         policy,
-        ProviderSet {
-            route,
-            interface,
-            capture: net::capture::SystemProvider,
-            transmit,
-            tcp: net::tcp::SystemProvider,
-            resolver: packetcraftr::target::SystemResolver,
-        },
+        ProviderSet::packet(route, interface, net::capture::SystemProvider, transmit),
     )
 }

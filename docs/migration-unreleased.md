@@ -1349,9 +1349,10 @@ why an executor's evidence disagrees with its step, including the new
 The `Client` owns every provider a workflow reaches the network through, and
 workflows run as client methods that take a request and a sink.
 
-**Composition.** `Client<P, K = SystemClock>` holds a `Providers` bundle.
-`ProviderSet { route, interface, capture, transmit, tcp, resolver }` composes
-six providers, and `SystemProviders` selects the native ones. `packetcraftr_netio::PacketIo` is removed: transmit
+**Composition.** `Client<P, K = SystemClock>` holds a provider bundle whose
+required capabilities depend on the workflow. `ProviderSet { route, interface,
+capture, transmit, tcp, resolver }` composes six providers, and
+`SystemProviders` selects the native ones. `packetcraftr_netio::PacketIo` is removed: transmit
 and capture are separate fields.
 
 | Before | After |
@@ -1363,9 +1364,32 @@ and capture are separate fields.
 | `probe::ExchangeExecutor::new(&client, exchange_options)` | internal; run the workflow on the client |
 | `ExchangeExecutor::with_dns_tcp(provider)` | the client's `tcp` provider (see [DNS on the client](#dns-on-the-client)) |
 
-A provider the workflow does not use is never called, so a composition may
-fill it with the system provider. Fakes shared between transmit and capture
-implement `Clone` and fill both fields.
+Each workflow method requires only the capability cluster it drives: `capture`
+needs `CaptureProviders` (the `interface` and `capture` providers); `plan`,
+`send`, `exchange`, `replay`, and `fuzz` need `PacketProviders` (which extends
+`CaptureProviders` with `route` and `transmit`); `scan` and `traceroute` add
+`TargetProviders` (the `resolver` provider); `dns` and `dns_batch` add
+`TcpProviders` (the `tcp` provider); and `scan_connect` needs only
+`TargetProviders + TcpProviders`. `Providers` is a blanket marker trait over
+all four clusters for callers that intentionally compose every workflow.
+
+`ProviderSet` type parameters default to `()`, so a partial bundle composes
+without filler providers:
+
+```rust
+let capture_only = ProviderSet::capture(interface, capture);
+let packet_io = ProviderSet::packet(route, interface, capture, transmit);
+let connect_only = ProviderSet::tcp(tcp, resolver);
+let full = packet_io.with_tcp(tcp).with_resolver(resolver);
+```
+
+Complete six-field `ProviderSet` literals still compile unchanged. A custom
+type that implemented `Providers` directly now implements the capability
+traits instead: `interface`/`capture` move to `CaptureProviders`,
+`route`/`transmit` to `PacketProviders`, `resolver` to `TargetProviders`, and
+`tcp` to `TcpProviders`; `Providers` itself needs no `impl` because the blanket
+implementation covers every type satisfying all four. Fakes shared between
+transmit and capture implement `Clone` and fill both fields.
 
 **Send.** One entry point replaces `send`, `send_set`, `send_set_with_events`,
 and `send_set_driven`:

@@ -10,7 +10,7 @@ use packetcraftr_core::registry::Registry;
 use crate::clock::{Clock, SystemClock};
 use crate::execution::Admission;
 use crate::policy::Policy;
-use crate::providers::Providers;
+use crate::providers::TargetProviders;
 use crate::runtime::Runtime;
 use crate::{Error, neighbor, route};
 
@@ -28,7 +28,7 @@ pub struct Client<P, K = SystemClock> {
     pub(crate) cancellation: Option<Cancellation>,
 }
 
-impl<P: Providers> Client<P> {
+impl<P> Client<P> {
     pub fn new(registry: Arc<Registry>, policy: impl Into<Arc<Policy>>, providers: P) -> Self {
         Self {
             registry,
@@ -43,7 +43,7 @@ impl<P: Providers> Client<P> {
     }
 }
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P, K: Clock> Client<P, K> {
     #[must_use]
     pub fn with_clock<C: Clock>(self, clock: C) -> Client<P, C> {
         Client {
@@ -95,7 +95,10 @@ impl<P: Providers, K: Clock> Client<P, K> {
         &self.providers
     }
 
-    pub(crate) fn admission(&self) -> Admission<'_> {
+    pub(crate) fn admission(&self) -> Admission<'_>
+    where
+        P: TargetProviders,
+    {
         Admission::new(&self.policy, self.providers.resolver())
     }
 

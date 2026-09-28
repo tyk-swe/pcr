@@ -15,7 +15,7 @@ use crate::execution::publisher;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{Batch, check_probe_count, check_probe_duration};
-use crate::providers::Providers;
+use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
 use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 use crate::{Client, Sink};
@@ -32,7 +32,7 @@ use super::{ClassificationCounts, Event, Probe, Report, Request};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 use crate::probe::{ProbeEndpoint, Transport, enforce_deadline};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
     /// send and final outcome, each retained undecoded frame, and each
     /// diagnostic to `sink`.

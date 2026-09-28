@@ -8,7 +8,6 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
-use crate::execution::Admission;
 use crate::policy::{
     Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
     authorize_wire_sources, unsupported_operation,
@@ -29,7 +28,7 @@ pub(crate) trait FinalWire {
 }
 
 pub(super) struct FrameAdmission<'c> {
-    admission: Admission<'c>,
+    policy: &'c crate::policy::Policy,
     registry: Arc<Registry>,
     allow_permissive_live: bool,
     wire_decode: Option<decode::DecodedPacket>,
@@ -38,12 +37,12 @@ pub(super) struct FrameAdmission<'c> {
 impl<'c> FrameAdmission<'c> {
     /// Destination policy is applied through an independent built-in decoder.
     pub(super) fn new(
-        admission: Admission<'c>,
+        policy: &'c crate::policy::Policy,
         registry: Arc<Registry>,
         allow_permissive_live: bool,
     ) -> Self {
         Self {
-            admission,
+            policy,
             registry,
             allow_permissive_live,
             wire_decode: None,
@@ -51,7 +50,7 @@ impl<'c> FrameAdmission<'c> {
     }
 
     fn policy(&self) -> &'c crate::policy::Policy {
-        self.admission.policy()
+        self.policy
     }
 
     fn authorize_frame(&mut self, frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
@@ -218,7 +217,7 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 
 impl Authorizer for FrameAdmission<'_> {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        self.admission
+        self.policy
             .authorize(Operation::Wire(operation.limits()))
             .map_err(BoundaryError::from_error)?;
         match operation {
@@ -294,11 +293,7 @@ mod tests {
         allow_permissive_live: bool,
     ) -> FrameAdmission<'static> {
         let policy = Box::leak(Box::new(policy));
-        FrameAdmission::new(
-            Admission::new(policy, &crate::target::SystemResolver),
-            registry,
-            allow_permissive_live,
-        )
+        FrameAdmission::new(policy, registry, allow_permissive_live)
     }
 
     #[derive(Clone, Copy, Debug)]

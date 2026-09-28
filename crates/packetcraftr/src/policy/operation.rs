@@ -322,6 +322,12 @@ pub(crate) trait Authorizer {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
 }
 
+impl Authorizer for &Policy {
+    fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
+        self.authorize(request).map_err(BoundaryError::from_error)
+    }
+}
+
 impl Policy {
     /// Exact materialized bytes are checked separately after route discovery.
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {

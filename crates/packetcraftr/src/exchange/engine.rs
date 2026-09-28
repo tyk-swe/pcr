@@ -9,10 +9,10 @@ use super::{
     WorkflowStopPredicate,
 };
 use crate::clock::Clock;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Runs one capture-ready exchange and publishes each event when final.
     /// Every packet is admitted before neighbor discovery or capture starts.
     /// A sink may finish after this method returns and holds a runtime worker permit until then.

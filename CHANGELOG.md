@@ -8,6 +8,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `packetcraftr::Providers` is now a blanket marker over the capability
+  interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
+  `TcpProviders`, so each `Client` workflow requires only the provider cluster
+  it uses. `ProviderSet` gains `()`-defaulted type parameters plus the
+  `capture`, `packet`, and `tcp` partial constructors and `with_resolver` /
+  `with_tcp`; complete six-field literals and `SystemProviders` are unchanged.
+  Custom `Providers` implementations move to the four capability traits. See
+  `docs/migration-unreleased.md`.
 - `packetcraftr_netio::capture::MAX_TIMEOUT` is `packetcraftr_netio::deadline::MAX_WAIT`,
   the one-hour ceiling every provider wait and bounded live operation
   accepts, and `packetcraftr_netio::SendEvidenceFault` is

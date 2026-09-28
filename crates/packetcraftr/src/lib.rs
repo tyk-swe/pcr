@@ -60,5 +60,8 @@ mod test_support;
 pub use client::Client;
 pub use error::Error;
 pub use execution::Sink;
-pub use providers::{ProviderSet, Providers, SystemProviders};
+pub use providers::{
+    CaptureProviders, PacketProviders, ProviderSet, Providers, SystemProviders, TargetProviders,
+    TcpProviders,
+};
 pub use stats::{Stats, StatsOverflow};

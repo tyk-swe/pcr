@@ -15,10 +15,6 @@ impl<'c> Admission<'c> {
         Self { policy, resolver }
     }
 
-    pub(crate) fn policy(&self) -> &'c Policy {
-        self.policy
-    }
-
     pub(crate) fn authorize(&self, operation: Operation<'_>) -> Result<(), policy::Error> {
         self.policy.authorize(operation)
     }

@@ -4,13 +4,13 @@
 use packetcraftr_netio::{capture, deadline::MAX_WAIT};
 
 use crate::clock::Clock;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::{Client, Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::{Error, Event, Report, Request, SentFrame};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Sends every packet the request's template expands to, `repeat` passes
     /// in expansion order, under one packet and byte budget shared by the
     /// whole operation.

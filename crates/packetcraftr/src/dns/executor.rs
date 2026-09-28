@@ -13,7 +13,7 @@ use crate::clock::Clock;
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::evidence::ExecutionPermit;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
-use crate::providers::Providers;
+use crate::providers::{PacketProviders, TcpProviders};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Limits;
@@ -86,7 +86,7 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 
-impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let max_responses = exchange.limits.max_evidence_frames;
         if max_responses == 0 {
@@ -172,7 +172,7 @@ impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
 }
 
 /// Kernel TCP cannot honor packet-oriented route overrides, so a query refuses them before I/O.
-impl<P: Providers, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
+impl<P: TcpProviders, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
         validate_tcp_route_options(&self.send.plan)?;
         let response = super::tcp::query(

@@ -4,9 +4,9 @@
 use super::{Collection, Error, Request, Window};
 use crate::preparation::{Admitted, PreparedPacket};
 use crate::route::CachedProvider;
-use crate::{Client, clock::Clock, providers::Providers};
+use crate::{Client, clock::Clock, providers::PacketProviders};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn prepare_exchange(&self, request: Request) -> Result<Prepared, Error> {
         self.check_cancelled()?;
         request.validate()?;

@@ -10,7 +10,7 @@ use crate::clock::Clock;
 use crate::execution::{Context, ExchangeExecutor, Executor, Grant, publisher, rate_delay};
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
 use crate::preparation::exact_bytes;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::{Client, Sink};
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
@@ -20,7 +20,7 @@ use super::executor::{CaseEvidence, CaseStep};
 use super::plan::worst_case_duration;
 use super::{Event, Report, Request, Trial};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub fn fuzz<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -30,9 +30,10 @@ impl<P: Providers, K: Clock> Client<P, K> {
             Error::Output { source }
         })?;
         let mut executor = ExchangeExecutor::new(self, request.send(), request.collection.clone());
+        let mut authorization = self.policy.as_ref();
         run(
             &request,
-            &mut self.admission(),
+            &mut authorization,
             Arc::clone(&self.registry),
             &mut executor,
             &mut self.clock.clone(),

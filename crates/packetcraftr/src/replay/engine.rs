@@ -12,7 +12,7 @@ use packetcraftr_core::frame::Frame;
 use crate::clock::Clock;
 use crate::execution::{self, Paused};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
@@ -25,7 +25,7 @@ use super::plan::{FramePlan, Tally, plan_frame};
 use super::report::{Event, Report};
 use super::request::{Limits, Options, Parts, Request, Selector, Timing, validate};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Replays the request's capture: every selected frame is admitted by the
     /// client's policy, routed through the client's providers, authorized
     /// again against its final route, and transmitted exactly as captured.
@@ -43,7 +43,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
             })
             .map_err(|source| publication_error(0, &deadline, source))?;
         let mut admission = FrameAdmission::new(
-            self.admission(),
+            &self.policy,
             Arc::clone(&self.registry),
             request.options.allow_permissive_live,
         );

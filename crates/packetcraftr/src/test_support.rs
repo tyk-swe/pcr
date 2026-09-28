@@ -79,30 +79,42 @@ fn fixture_interface() -> InterfaceId {
     }
 }
 
-impl crate::Providers for FakeProviders {
-    type Route = Self;
+impl crate::CaptureProviders for FakeProviders {
     type Interface = Self;
     type Capture = Self;
-    type Transmit = Self;
-    type Tcp = Self;
-    type Resolver = Self;
 
-    fn route(&self) -> &Self {
-        self
-    }
     fn interface(&self) -> &Self {
         self
     }
     fn capture(&self) -> &Self {
         self
     }
+}
+
+impl crate::PacketProviders for FakeProviders {
+    type Route = Self;
+    type Transmit = Self;
+
+    fn route(&self) -> &Self {
+        self
+    }
     fn transmit(&self) -> &Self {
         self
     }
-    fn tcp(&self) -> &Self {
+}
+
+impl crate::TargetProviders for FakeProviders {
+    type Resolver = Self;
+
+    fn resolver(&self) -> &Self {
         self
     }
-    fn resolver(&self) -> &Self {
+}
+
+impl crate::TcpProviders for FakeProviders {
+    type Tcp = Self;
+
+    fn tcp(&self) -> &Self {
         self
     }
 }

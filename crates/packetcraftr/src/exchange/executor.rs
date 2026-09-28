@@ -22,12 +22,16 @@ use super::{
 use super::Prepared;
 use crate::planning::ensure_preparation_deadline;
 use crate::preparation::PreparedPacket;
-use crate::{Client, Stats, clock::Clock, providers::Providers};
+use crate::{
+    Client, Stats,
+    clock::Clock,
+    providers::{CaptureProviders, PacketProviders},
+};
 use packetcraftr_netio::capture::{Provider as CaptureProvider, Request as CaptureRequest};
 
-type CaptureSession<P> = <<P as Providers>::Capture as CaptureProvider>::Capture;
+type CaptureSession<P> = <<P as CaptureProviders>::Capture as CaptureProvider>::Capture;
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(super) fn arm_capture(
         &self,
         prepared: Prepared,

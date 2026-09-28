@@ -10,7 +10,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
 use crate::deadline::DeadlineExt as _;
-use crate::providers::{Providers, TcpOf};
+use crate::providers::{TargetProviders, TcpOf, TcpProviders};
 use crate::{
     Client, Sink,
     clock::Clock,
@@ -26,7 +26,7 @@ use super::super::report::RttAccumulator;
 use super::super::{Error, Request};
 use super::{Event, Outcome, ProbeEvidence, Report, Stats};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     /// Scans the request's targets and ports with kernel TCP connects
     /// through the client's TCP provider, keeping at most `max_in_flight`
     /// attempts pending at once.

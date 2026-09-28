@@ -15,7 +15,7 @@ use packetcraftr_netio::{
 };
 
 use crate::policy::decode_wire;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::route::{Interface, Materialized as MaterializedRoute};
 
 use super::evidence::{Transmission, network_envelope};
@@ -62,7 +62,7 @@ pub(super) struct ProviderExecutor<'c, P> {
     validated_interface: Option<InterfaceInfo>,
 }
 
-impl<'c, P: Providers> ProviderExecutor<'c, P> {
+impl<'c, P: PacketProviders> ProviderExecutor<'c, P> {
     pub(super) fn new(providers: &'c P) -> Self {
         Self {
             providers,
@@ -259,7 +259,7 @@ fn interface_owned_packet_source(
     .then_some(source)
 }
 
-impl<P: Providers> Executor for ProviderExecutor<'_, P> {
+impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
     fn plan_frame(
         &mut self,
         interface: &Interface,

@@ -7,7 +7,7 @@ use crate::probe::{Batch, Evidence, Transport};
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 
 use super::Probe;
 use super::evidence::classify_response;
@@ -17,7 +17,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
         if self.collection.max_responses < batch.probes.len() {

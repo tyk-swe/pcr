@@ -62,7 +62,7 @@ pub(crate) struct WorkflowOverrides {
 
 impl<P, K> ExchangeExecutor<'_, P, K>
 where
-    P: crate::Providers,
+    P: crate::PacketProviders,
     K: crate::clock::Clock,
 {
     pub(crate) fn exchange_for_workflow(

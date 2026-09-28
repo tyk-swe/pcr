@@ -11,7 +11,7 @@ use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use packetcraftr::Providers;
+use packetcraftr::PacketProviders;
 use packetcraftr::clock::Clock;
 use packetcraftr::replay::{
     Event, FrameEvidence, Request, Source,
@@ -208,14 +208,14 @@ fn drive<P, K, R>(
     sink: impl packetcraftr::Sink<Event, Ack = ()>,
 ) -> Result<packetcraftr::replay::Report, CliError>
 where
-    P: Providers,
+    P: PacketProviders,
     K: Clock,
     R: Read,
 {
     client.replay(request, sink).map_err(CliError::classified)
 }
 
-fn replay_text<P: Providers, K: Clock, R: Read>(
+fn replay_text<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     filtered: bool,
@@ -229,7 +229,7 @@ fn replay_text<P: Providers, K: Clock, R: Read>(
     rendering::render_summary(&report, filtered)
 }
 
-fn replay_aggregate<P: Providers, K: Clock, R: Read>(
+fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
 ) -> Result<(), CliError> {
@@ -253,7 +253,7 @@ fn replay_aggregate<P: Providers, K: Clock, R: Read>(
     emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
 }
 
-fn replay_stream<P: Providers, K: Clock, R: Read>(
+fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     stream: &StreamEncoder,
@@ -271,7 +271,7 @@ fn replay_stream<P: Providers, K: Clock, R: Read>(
     Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
 }
 
-fn replay_capture<P: Providers, K: Clock, R: Read>(
+fn replay_capture<P: PacketProviders, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
     request: Request<R>,
     settings: CaptureSettings,
@@ -322,7 +322,7 @@ fn replay_capture_to<P, K, R, W>(
     destination: W,
 ) -> Result<(), CliError>
 where
-    P: Providers,
+    P: PacketProviders,
     K: Clock,
     R: Read,
     W: Write + Send + 'static,

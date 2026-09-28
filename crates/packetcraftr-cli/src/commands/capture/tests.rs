@@ -120,7 +120,10 @@ fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
         stopped,
     )
 }
-fn client(provider: Provider, count: u64) -> packetcraftr::Client<impl packetcraftr::Providers> {
+fn client(
+    provider: Provider,
+    count: u64,
+) -> packetcraftr::Client<impl packetcraftr::CaptureProviders> {
     crate::system::fixture::capturing(
         registry(),
         packetcraftr::policy::Policy {

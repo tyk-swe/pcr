@@ -26,11 +26,10 @@ use packetcraftr_netio::route::Provider as RouteProvider;
 use packetcraftr_netio::{Error as LiveIoError, interface, transmit};
 
 use crate::clock::Clock;
-use crate::execution::Admission;
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
-use crate::policy::{Operation, WireLimits};
-use crate::providers::Providers;
+use crate::policy::{Operation, Policy, WireLimits};
+use crate::providers::PacketProviders;
 use crate::route;
 use crate::{Client, Error, evidence::SentPacket, send};
 use materialize::{
@@ -188,8 +187,8 @@ struct Budget {
 }
 
 impl Budget {
-    fn open(admission: &Admission<'_>, packets: u64) -> Result<Self, Error> {
-        admission.authorize(Operation::Wire(WireLimits::new(packets, 0)))?;
+    fn open(policy: &Policy, packets: u64) -> Result<Self, Error> {
+        policy.authorize(Operation::Wire(WireLimits::new(packets, 0)))?;
         Ok(Self {
             packets,
             wire_bytes: 0,
@@ -197,15 +196,15 @@ impl Budget {
     }
 
     /// Arithmetic overflow is itself a byte-limit denial.
-    fn charge(&mut self, admission: &Admission<'_>, wire_len: usize) -> Result<(), Error> {
+    fn charge(&mut self, policy: &Policy, wire_len: usize) -> Result<(), Error> {
         let wire_bytes = u64::try_from(wire_len)
             .ok()
             .and_then(|bytes| self.wire_bytes.checked_add(bytes))
             .ok_or(crate::policy::Error::ByteLimit {
                 actual: u64::MAX,
-                limit: admission.policy().max_bytes_per_operation,
+                limit: policy.max_bytes_per_operation,
             })?;
-        admission.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
+        policy.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
         self.wire_bytes = wire_bytes;
         Ok(())
     }
@@ -213,13 +212,13 @@ impl Budget {
 
 struct Stages<'c, P, K> {
     client: &'c Client<P, K>,
-    admission: Admission<'c>,
+    policy: &'c Policy,
     builder: Builder,
     options: &'c send::Options,
     deadline: Option<&'c Deadline>,
 }
 
-impl<'c, P: Providers, K: Clock> Stages<'c, P, K> {
+impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     fn new(
         client: &'c Client<P, K>,
         options: &'c send::Options,
@@ -227,7 +226,7 @@ impl<'c, P: Providers, K: Clock> Stages<'c, P, K> {
     ) -> Self {
         Self {
             client,
-            admission: client.admission(),
+            policy: client.policy.as_ref(),
             builder: Builder::new(client.registry.clone()),
             options,
             deadline,
@@ -288,7 +287,7 @@ impl<'c, P: Providers, K: Clock> Stages<'c, P, K> {
     }
 
     fn charge(&self, budget: &mut Budget, admitted: Admitted) -> Result<Admitted, Error> {
-        budget.charge(&self.admission, admitted.wire_len())?;
+        budget.charge(self.policy, admitted.wire_len())?;
         Ok(admitted)
     }
 
@@ -358,7 +357,7 @@ pub(crate) struct Admitting<'c, P, K> {
     budget: Budget,
 }
 
-impl<'c, P: Providers, K: Clock> Admitting<'c, P, K> {
+impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
     }
@@ -411,7 +410,7 @@ pub(crate) struct Discovery<'c, P, K> {
     stages: Stages<'c, P, K>,
 }
 
-impl<P: Providers, K: Clock> Discovery<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Discovery<'_, P, K> {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         self.stages.materialize(admitted)
     }
@@ -452,7 +451,7 @@ pub(crate) struct Streaming<'c, P, K> {
     budget: Budget,
 }
 
-impl<P: Providers, K: Clock> Streaming<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Streaming<'_, P, K> {
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.stages.check()
     }
@@ -473,7 +472,7 @@ impl<P: Providers, K: Clock> Streaming<'_, P, K> {
     }
 }
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders, K: Clock> Client<P, K> {
     pub(crate) fn admitting<'c>(
         &'c self,
         options: &'c send::Options,
@@ -501,7 +500,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
     ) -> Result<(Stages<'c, P, K>, Budget), Error> {
         let stages = Stages::new(self, options, deadline);
         stages.check()?;
-        let budget = Budget::open(&stages.admission, packets)?;
+        let budget = Budget::open(stages.policy, packets)?;
         Ok((stages, budget))
     }
 }
@@ -518,7 +517,6 @@ mod tests {
     use packetcraftr_netio::link::Mode;
 
     use super::*;
-    use crate::policy::Policy;
     use crate::test_support::{Call, fake_client};
 
     const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
@@ -590,13 +588,11 @@ mod tests {
     #[test]
     fn cumulative_byte_overflow_is_a_byte_limit_denial() {
         let policy = Policy::default();
-        let providers = crate::test_support::FakeProviders::default();
-        let admission = Admission::new(&policy, &providers);
-        let mut budget = Budget::open(&admission, 1).expect("one packet fits");
+        let mut budget = Budget::open(&policy, 1).expect("one packet fits");
         budget.wire_bytes = u64::MAX - 1;
 
         let error = budget
-            .charge(&admission, 2)
+            .charge(&policy, 2)
             .expect_err("overflowing the cumulative total must be denied");
 
         assert!(

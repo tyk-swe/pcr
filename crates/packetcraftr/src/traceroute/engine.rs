@@ -13,7 +13,7 @@ use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{Batch, check_probe_count, check_probe_duration};
-use crate::providers::Providers;
+use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, admit_operation, wire_limits};
 use crate::{Client, Sink};
@@ -27,7 +27,7 @@ use super::plan::{build_batches, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
 use crate::probe::{Transport, enforce_deadline};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Traces the route to the request's authorized destination one hop at a
     /// time and publishes each probe's final outcome, each retained undecoded
     /// frame, and each diagnostic to `sink`.

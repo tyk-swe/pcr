@@ -15,7 +15,7 @@ use packetcraftr_core::registry::Registry;
 use crate::clock::Clock;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
 use crate::probe::{Batch, Evidence};
-use crate::providers::Providers;
+use crate::providers::PacketProviders;
 use crate::{Client, Stats, evidence::SentPacket};
 use packetcraftr_core::error::BoundaryError;
 
@@ -73,7 +73,7 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     collection: crate::exchange::Collection,
 }
 
-impl<'c, P: Providers, K: Clock> ClientExecutor<'c, P, K> {
+impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     pub(crate) fn new(client: &'c Client<P, K>, request: &Request) -> Self {
         Self {
             client,
@@ -106,7 +106,7 @@ impl<'c, P: Providers, K: Clock> ClientExecutor<'c, P, K> {
     }
 }
 
-impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = batch.probe()?;
         let packet = first.packet();
@@ -143,7 +143,7 @@ impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K>
     }
 }
 
-impl<P: Providers, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
+impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
     fn execute_pipeline(
         &mut self,
         batches: &[Batch<Probe>],

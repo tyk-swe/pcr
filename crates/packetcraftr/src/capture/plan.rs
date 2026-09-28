@@ -3,12 +3,12 @@
 
 use super::error::failure;
 use super::{Cause, Error, Report, StopReason};
-use crate::{Client, Stats, clock::Clock, policy::CaptureBudget, providers::Providers};
+use crate::{Client, Stats, clock::Clock, policy::CaptureBudget, providers::CaptureProviders};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::capture::GroupRequest;
 use std::time::{Duration, Instant};
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: CaptureProviders, K: Clock> Client<P, K> {
     pub(super) fn plan_capture(
         &self,
         request: &GroupRequest,

@@ -3,12 +3,12 @@
 
 use super::error::failure;
 use super::{Cause, Error, Report};
-use crate::{Client, clock::Clock, providers::Providers};
+use crate::{Client, clock::Clock, providers::CaptureProviders};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::capture::{self as native, Group, GroupRequest, Session as _};
 use std::time::Duration;
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: CaptureProviders, K: Clock> Client<P, K> {
     pub(super) fn arm_capture_group(
         &self,
         request: &GroupRequest,

@@ -20,7 +20,7 @@ use crate::execution::evidence::{
 use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation, WireLimits};
-use crate::providers::Providers;
+use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
 use crate::{Client, Sink, Stats, StatsOverflow};
@@ -42,7 +42,7 @@ use super::{
 
 mod tcp;
 
-impl<P: Providers, K: Clock> Client<P, K> {
+impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     /// Runs one bounded DNS query and publishes its events as each becomes final.
     /// The query's worst-case traffic is authorized before any resolution.
     /// A sink may finish after this method returns while it holds a runtime worker permit.

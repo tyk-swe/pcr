@@ -20,7 +20,6 @@ use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{Classified as _, Kind};
 use packetcraftr_netio::tcp::{MAX_PENDING_CONNECTIONS, Provider, Stream};
-use packetcraftr_netio::{capture, interface, route, transmit};
 
 struct Socket;
 
@@ -93,14 +92,7 @@ fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet {
-            route: route::SystemProvider,
-            interface: interface::SystemProvider,
-            capture: capture::SystemProvider,
-            transmit: transmit::SystemProvider,
-            tcp: Silent,
-            resolver: SystemResolver,
-        },
+        ProviderSet::tcp(Silent, SystemResolver),
     );
     let collector = connect::Collector::default();
     let report = client
@@ -137,14 +129,7 @@ fn route_overrides_are_rejected_before_any_tcp_connect() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet {
-            route: route::SystemProvider,
-            interface: interface::SystemProvider,
-            capture: capture::SystemProvider,
-            transmit: transmit::SystemProvider,
-            tcp: CountConnects(Arc::clone(&calls)),
-            resolver: SystemResolver,
-        },
+        ProviderSet::tcp(CountConnects(Arc::clone(&calls)), SystemResolver),
     );
     let request = scan::Request {
         ports: vec![80],

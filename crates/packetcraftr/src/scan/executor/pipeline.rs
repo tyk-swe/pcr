@@ -5,7 +5,7 @@ use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
 use crate::scan::{Classification, Probe, SentProbe, evidence::Observation, profile};
 use crate::{
-    Client, Providers, Stats,
+    Client, Stats,
     clock::Clock,
     evidence::ExecutionPermit,
     evidence::SentPacket,
@@ -15,6 +15,7 @@ use crate::{
     },
     preparation::RebuildError,
     probe::Evidence,
+    providers::PacketProviders,
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -217,11 +218,11 @@ pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryErr
         Vec::new(),
     )
 }
-fn until<P: Providers, K: Clock>(client: &Client<P, K>, end: Instant) -> Deadline {
+fn until<P: PacketProviders, K: Clock>(client: &Client<P, K>, end: Instant) -> Deadline {
     Deadline::new(end.saturating_duration_since(client.now()))
         .with_cancellation(client.cancellation.clone())
 }
-fn check<P: Providers, K: Clock>(
+fn check<P: PacketProviders, K: Clock>(
     client: &Client<P, K>,
     deadline: Instant,
 ) -> Result<(), BoundaryError> {
@@ -237,7 +238,7 @@ fn check<P: Providers, K: Clock>(
     }
     Ok(())
 }
-pub(super) fn run<P: Providers, K: Clock>(
+pub(super) fn run<P: PacketProviders, K: Clock>(
     executor: &ExchangeExecutor<'_, P, K>,
     batches: &[Batch<Probe>],
     options: PipelineOptions,

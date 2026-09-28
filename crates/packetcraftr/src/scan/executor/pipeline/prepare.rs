@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Planned, limit};
 use crate::{
-    Providers,
     clock::Clock,
     execution::ExchangeExecutor,
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
+    providers::PacketProviders,
     scan::executor::PipelineOptions,
 };
 use packetcraftr_core::error::BoundaryError;
@@ -29,7 +29,7 @@ pub(super) struct AdmittedProbe {
 }
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
-pub(super) fn plan<'c, P: Providers, K: Clock>(
+pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
     executor: &'c ExchangeExecutor<'_, P, K>,
     planned: &[Planned<'_>],
     options: PipelineOptions,

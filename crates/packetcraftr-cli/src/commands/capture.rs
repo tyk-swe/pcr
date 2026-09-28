@@ -300,7 +300,7 @@ struct Destinations {
     projector: Option<crate::rendering::Projector>,
 }
 
-fn drive<P: packetcraftr::Providers>(
+fn drive<P: packetcraftr::CaptureProviders>(
     client: &packetcraftr::Client<P>,
     request: workflow::Request,
     rendering: Output<'_>,

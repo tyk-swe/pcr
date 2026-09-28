@@ -1,11 +1,10 @@
 # Analysis resource and evidence contracts
 
-Input selection occurs after capture-global IP reconstruction and conversation
-indexing, and before TCP dispatch and collectors. A stream predicate such as
-`tcp.stream == 7` preserves its TCP input; `tls.sni == "example.test"` drops
-server and segmented-handshake frames. Select completed TLS sessions instead.
-Filtered-out frames still consume physical-input, scope, and index budgets.
-Pre-filter the capture file itself when those costs must be reduced.
+Input selection (`analysis::Options::filter`; its rustdoc says what each kind
+of predicate preserves) occurs after capture-global IP reconstruction and
+conversation indexing, and before TCP dispatch and collectors. Filtered-out
+frames still consume physical-input, scope, and index budgets. Pre-filter the
+capture file itself when those costs must be reduced.
 
 A scoped tuple is a conversation, not a TCP connection epoch. TLS `session` is
 unique per emitted handshake. Follow `direction_generation` separates delivery
@@ -18,26 +17,24 @@ their exact domains.
 IP expiry follows every physical frame; TCP applies the same clock policy to
 selected frames. Thus a filter can hide a clock jump from TCP while it remains
 in the capture-global clock report. Capture time drives expiry in capture order,
-across interfaces. The first
-physical timestamp anchors the clock; subsequent offsets advance a high-water
-mark. A rollback cannot rewind it. A forward outlier can expire state immediately
-and pin expiry until later timestamps catch up. Clock reports include filtered
-input, rollback counts/magnitudes and the largest forward step with its frame.
-A forward step is evidence, not an assertion that a legitimate capture gap is
-malformed. Out-of-range instants fail with a typed timestamp error. I/O buckets
-use their separately reported first-observed matched `origin`; earlier timestamps
-are counted in `underflow_frames` and folded into bucket zero.
+across interfaces. The first physical timestamp anchors the clock; subsequent
+offsets advance a high-water mark. A rollback cannot rewind it. A forward
+outlier can expire state immediately and pin expiry until later timestamps
+catch up. Clock reports include filtered input, rollback counts/magnitudes and
+the largest forward step with its frame. A forward step is evidence, not an
+assertion that a legitimate capture gap is malformed. Out-of-range instants
+fail with a typed timestamp error. I/O buckets use their separately reported
+first-observed matched `origin`; earlier timestamps are counted in
+`underflow_frames` and folded into bucket zero.
 
 ## What the ceilings cover
 
-`--max-interfaces` counts interface descriptions **per input PCAPNG section**,
-including unused interfaces and interfaces whose frames are filtered out. A
-separate, fixed CLI input ceiling limits the capture to 65,536 descriptions
-across all sections. The library exposes that ceiling as
-`ReaderLimits::max_total_interfaces`. With `read --normalize`,
-`--max-interfaces` also bounds the selected interfaces in the single output
-section; filtering can reduce that output count, not either input count.
-Non-normalizing reads and rewrites retain the per-section input semantics.
+`--max-interfaces` counts interface descriptions per input PCAPNG section,
+including unused interfaces and interfaces whose frames are filtered out. The
+capture-wide input ceiling is `ReaderLimits::max_total_interfaces`. Under
+`read --normalize`, filtering can reduce the selected output interface count,
+never either input count. Non-normalizing reads and rewrites keep the
+per-section input semantics.
 
 | Retention | Bound and lifetime |
 | --- | --- |
@@ -61,28 +58,33 @@ coexist. For a frame of B bytes, a hex output field alone needs about 2B string
 bytes before bounded NDJSON serialization begins. Raising JSON retention can
 increase memory even while active TLS state stays fixed.
 
-The payload-byte budget does not count container headers, options or metadata.
-PCAPNG metadata block/byte limits apply while seeking the next frame, not to the
-whole input. Hosts that need a cumulative source-byte or hard I/O-work ceiling
-must enforce it outside the current reader contract. TLS hello completion means
-assembly of the observed client/server hellos, not authentication or validation
-of every negotiation constraint; the first ClientHello remains the fingerprint
-source after a retry.
+The `max_bytes` limit counts payload bytes, not container headers, options or
+metadata. A bare library `capture_file::Reader` bounds each record, interface
+set and metadata block (PCAPNG metadata limits apply while seeking the next
+frame, not to the whole input). The CLI wraps its source in
+`capture_file::compression::Input`, which enforces cumulative encoded and
+decoded bytes including metadata; library hosts that need that ceiling use the
+same wrapper. A hard I/O-work ceiling must be enforced outside the reader.
+Invocation and phase deadlines reach Reader metadata/EOF boundaries but remain
+cooperative around blocking I/O. TLS hello completion means assembly of the
+observed client/server hellos, not authentication or validation of every
+negotiation constraint; the first ClientHello remains the fingerprint source
+after a retry.
 
-No global allocator framework or process-RSS promise is introduced. The encoder
+There is no global allocator framework or process-RSS promise. The encoder
 prepares records atomically, but an OS writer can still fail halfway through
 `write_all` or at flush. It then fails closed and never acknowledges completion.
 Max-duration NDJSON commands also bind an encoder publisher to their remaining
 operation duration. Lock polling is cooperative (1 ms); serialization is checked
 on return, and writer waiting is clipped to the smaller remaining duration and
 per-write timeout. The original encoder owner can attempt a terminal error under
-its separate one-second CLI writer-wait budget. Direct arbitrary `Write` implementations are
-not preemptible. Capture/exchange response windows are not output deadlines.
-A caller's workflow deadline bounds its wait for callbacks; the callback itself,
-serialization and its destructor may finish later. Generic `Read` and providers
-must return before their next cooperative check. Capture polling and cancellable
-pacing check at intervals of at most 25 ms while scheduled, excluding provider
-overshoot and scheduler delays.
+a separate allowance (see `--output-timeout-ms` below). Direct arbitrary `Write`
+implementations are not preemptible. Capture/exchange response windows are not
+output deadlines. A caller's workflow deadline bounds its wait for callbacks; the
+callback itself, serialization and its destructor may finish later. Generic
+`Read` and providers must return before their next cooperative check. Capture
+polling and cancellable pacing check at intervals of at most 25 ms while
+scheduled, excluding provider overshoot and scheduler delays.
 
 ## Example captures
 
@@ -106,18 +108,22 @@ to the current output.
 ## Reproducing measurements
 
 Build the portable CLI with `cargo build --locked --release -p packetcraftr-cli
---no-default-features`, then run `python3 scripts/measure-analysis.py --sizes 128
-1024 8192` for release-profile CLI measurements. It generates unique flows, tiny reverse-ordered TCP segments,
-retransmissions, reverse fragments, VNI scopes and TLS gaps, and measures read,
-follow, TLS, selected/filtered stats, file/pipe input and intentional limit
-failures. `target/analysis-measurements/report.json` records exact commands,
-binary digest, compiler, feature profile, workload size, physical frame count,
-input bytes, exit codes, time and peak RSS. Per-command help files preserve the
-effective defaults. Setup is outside the timed child; process startup and output
-to `/dev/null` are inside. `read` supports NDJSON, not aggregate JSON; TLS and
-stats exercise aggregate output where supported.
+--no-default-features`, then run `python3 scripts/measure-analysis.py` for
+release-profile CLI measurements (`--sizes` sets the workload cardinalities).
+It generates unique flows, tiny reverse-ordered TCP segments, retransmissions,
+reverse fragments, VNI scopes, TLS gaps, and adjacent and reverse TCP growth
+(`tcp-growth`, `tcp-growth-reverse`). It measures read, follow, TLS, HTTP source
+tracking, selected/filtered stats, forwarding with and without retained details,
+file/pipe input and intentional limit failures. `read` supports NDJSON, not
+aggregate JSON; TLS and stats exercise aggregate output where supported.
 
-Use `--heaptrack` for **separate** allocator-profile runs, or run a focused
+`target/analysis-measurements/report.json` records the binary path and SHA-256,
+version, compiler, and, per measurement, the exact command, workload and
+cardinality, physical frame count, input bytes, exit code, time and peak RSS.
+Per-command help files preserve the effective defaults. Setup is outside the
+timed child; process startup and output to `/dev/null` are inside.
+
+Pass `--heaptrack` for **separate** allocator-profile runs, or run a focused
 `heaptrack -o PROFILE target/release/packetcraftr ...` and inspect it with
 `heaptrack_print -f PROFILE.zst`. RSS measurements exclude profiler overhead.
 Allocator “unfreed at exit” includes process-lifetime state and is not proof of
@@ -139,18 +145,16 @@ files with the binary digest when comparing versions.
 | Partial bytes with no terminal record | Output is incomplete; do not infer success from a process or schema-valid prefix. |
 
 The configured CLI flags and typed library errors identify the corresponding
-ceilings; these existing counters/codes remain the canonical evidence rather
-than a second generic loss taxonomy.
+ceilings. These counters and codes are the canonical loss evidence;
+resource metadata adds no second loss taxonomy.
 
 ## Effective settings and resource ownership
 
 Use `--resource-diagnostics` with `--output json` or `--output ndjson` to add a
 `resources` member to the existing envelope. Settings report their resolved
-value, unit, stage, scope, whether the stage is enabled, and source
-(`default`, `override`, `derived`, or `fixed`). They are
-read from the same argument definitions and parsed values that execute the
-command. Domain reports and classified errors remain the canonical usage and
-loss evidence; resource metadata does not introduce a second loss taxonomy.
+value, unit, stage, scope, whether the stage is enabled, and source (`default`,
+`preset:NAME`, `override`, `derived`, or `fixed`). They are read from the same
+argument definitions and parsed values that execute the command.
 The [stats resource example](../examples/documents/output-stats-resources.json)
 and [read resource example](../examples/documents/output-read-resources.json)
 were generated with the Linux full-native profile. A worker's `supported` field
@@ -159,33 +163,39 @@ NDJSON includes settings and worker samples on the first and terminal records,
 without inserting extra events. A failed writer cannot publish a trustworthy
 final snapshot or completion, even if it later finishes writing a partial line.
 
-`--output-timeout-ms N` accepts 1 through 3,600,000 milliseconds for each NDJSON
-write/flush acknowledgment. Its default remains 1,000 ms. The remaining operation
-deadline takes precedence. Terminal-error cleanup uses a separate 1,000 ms
-allowance; it never retries an already failed output stream. One record remains
-in flight at a time. This option does not make synchronous serialization or an
-arbitrary writer preemptible.
+`--output-timeout-ms` (range and default in `--help`) bounds each NDJSON
+write/flush acknowledgment; the remaining operation deadline takes precedence.
+Terminal-error cleanup uses a separate fixed 1,000 ms allowance
+(`terminal_error_timeout_ms` in the diagnostics); it never retries an already
+failed output stream. One record remains in flight at a time. This option does
+not make synchronous serialization or an arbitrary writer preemptible.
 
 Embedders can clone a `runtime::Runtime` and give it to multiple clients with
-`Client::with_runtime`; `Client::runtime` exposes that owner's snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
-and their captured-resource destructors keep their permits until cleanup ends.
-`packetcraftr_netio::resources::native_snapshot()` reports the process-wide
-native worker pool (`resources::WORKER_CAPACITY`, 16 slots shared by capture
-reads, route queries, and TCP connects): active reservations, rejected
-admissions and retained cleanup. `tcp_connect_snapshot()` reports the TCP
-connect sub-limit of the same pool. These counts describe admission
+`Client::with_runtime`; `Client::runtime` returns it and `Runtime::snapshot()`
+reports its retained capacity. `Client::new` creates an isolated runtime.
+Timed-out callbacks and their captured-resource destructors keep their permits
+until cleanup ends. `packetcraftr_netio::resources::native_snapshot()` reports
+the process-wide native worker pool (`resources::WORKER_CAPACITY`, 16 slots
+shared by capture reads, route queries, and TCP connects): active reservations,
+rejected admissions and retained cleanup. `tcp_connect_snapshot()` reports the
+TCP connect sub-limit of the same pool. These counts describe admission
 reservations, not all OS threads, handles, or process memory.
 
-TCP pending ranges now use separately charged 4 KiB payload pages and interval
-descriptors. A direction's sequence window bounds the number of pages; the
-aggregate memory ceiling includes page storage/slack and metadata. Adjacent and
-reverse growth do not copy retained bytes. Delivery flattens an interval once,
-and admission accounts for old storage coexisting with prepared output/history.
-Sparse captures or tight aggregate budgets can therefore reject earlier than
-under payload-only accounting. History keeps and charges its allocation while
-trimming its logical retained tail. These remain conservative charges, not RSS.
-The measurement generator includes `tcp-growth` and `tcp-growth-reverse`; unit
-tests assert deterministic copy/allocation scaling separately from timings.
+## TCP pending ranges
+
+Pending out-of-order ranges use separately charged 4 KiB payload pages and
+interval descriptors. A direction's sequence window bounds the number of pages;
+the aggregate memory ceiling includes page storage/slack and metadata, so sparse
+captures or tight aggregate limits can reject earlier than payload-only
+accounting would. Adjacent and reverse growth do not copy retained bytes:
+incoming pending payload is copied once, and delivery flattens an interval once
+(one output allocation, one copy of the retained interval). N adjacent 100-byte
+segments behind a missing first byte therefore hold
+`ceil((100 × N + 1) / 4096)` pages, and growth is linear in N. Admission
+accounts for old storage coexisting with prepared output/history. History keeps
+and charges its allocation while trimming its logical retained tail. These
+remain conservative charges, not RSS. Unit tests assert the copy and allocation
+counts separately from timings.
 
 ## Hosting untrusted captures with a hard stop
 
@@ -204,55 +214,17 @@ Provision cgroup permissions and verify those limits in the deployment. A
 supervisor should constrain filesystem access, disable networking for offline
 workers, capture exit status, and terminate the worker process/cgroup when the
 outer deadline expires. Memory/CPU/task limits and wall-clock termination solve
-different problems. Budget for serialization, allocator and runtime overhead
+different problems. Allow for serialization, allocator and runtime overhead
 alongside configured state ceilings. Never treat a killed worker's output prefix
 as complete; keep it marked incomplete unless its terminal record was
 acknowledged and the invocation succeeded. In-process providers, generic `Read`,
 serialization and callbacks remain cooperative.
 
-### Deterministic pending-copy regression
-
-One SYN followed by N adjacent 100-byte segments leaves the first expected byte
-missing. Both insertion directions are tested. The former contiguous replacement
-path requested `100 × N × (N + 1) / 2` cumulative buffer bytes; these are a
-source-derived work model, not peak memory or measured elapsed time.
-
-| Segments | Former requested replacement bytes | New page allocations | New copies of previously pending bytes before gap fill |
-| ---: | ---: | ---: | ---: |
-| 128 | 825,600 | 4 | 0 |
-| 1,024 | 52,480,000 | 26 | 0 |
-| 8,192 | 3,355,852,800 | 201 | 0 |
-
-The page counters instrument allocation and copy sites in tests. Incoming
-pending payload is copied exactly once (100 × N bytes); filling the gap performs
-one output allocation and copies the retained interval once. These counters
-exclude decoder work, history copies, serialization and allocator internals.
-The 8,192-segment capture has 8,193 physical frames, 819,200 pending bytes and an
-819,201-byte directional reordering window, within the default limits.
-
 ## Composed invocation and forwarding bounds
 
-The [versioned presets](resource-presets.md) provide optional named defaults;
-explicit flags override them and resource diagnostics show the resolved source.
-They do not define a total RSS budget.
-
-Forwarding skips unrequested stream indexes and retains IP reconstruction when
-an index is required, preserving capture-global numbering. Resource diagnostics
-include requirements from both rules and selection filters. Comparison evidence
-remains physical, and every input consumes frame and byte budgets before selection.
-
-Forwarding collection charges, comparison scratch, shared detail retention,
-and terminal publication limits are separate. Detail omission changes retained
-evidence, not counters or verdict. See [the verification contract](verification-contract.md)
-for defaults, caveats, consumed-input hashes, and check-specific completeness.
-
-The CLI compression wrapper enforces cumulative encoded and decoded bytes,
-including metadata; this is stronger than a bare library Reader's per-record
-and metadata bounds. Invocation and phase deadlines reach Reader metadata/EOF
-boundaries but remain cooperative around blocking I/O.
-
-`measure-analysis.py` now includes HTTP source tracking and forwarding with and
-without retained details on generated flow workloads. It retains time/RSS and
-optional allocation profiles as measurements, not noisy shared-runner gates.
-Semantic fuzz targets and deterministic contract tests guard verdict/detail
-invariance separately from those process measurements.
+[Resource presets](resource-presets.md) own the named defaults, and the
+[verification contract](verification-contract.md) owns forwarding accounting.
+Resource diagnostics for `verify-forwarding` include the requirements from both
+rules and selection filters. Semantic fuzz targets and deterministic contract
+tests guard verdict/detail invariance separately from the process measurements
+above.

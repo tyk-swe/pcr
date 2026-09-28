@@ -4,7 +4,7 @@
 set of finite defaults for offline capture commands. The flag is global and
 works before or after the subcommand. Explicit individual flags always win.
 Unsupported/live commands reject presets rather than changing authorization
-or traffic budgets. Without a preset, existing defaults remain unchanged.
+or traffic limits. Without a preset, the documented defaults apply.
 
 ```sh
 packetcraftr --resource-preset ci-v1 --resource-diagnostics --output json \
@@ -12,18 +12,19 @@ packetcraftr --resource-preset ci-v1 --resource-diagnostics --output json \
   --preserve ipv4.ttl --max-flows 2048
 ```
 
-Resource diagnostics report resolved values, `preset:ci-v1`, `override`, or
-`default` provenance, accounting units, and enabled stages. Help without resolved
-diagnostics documents baseline defaults. A preset is not an RSS guarantee or an
-automatic clamp: incompatible explicit limits still fail validation.
+Resource diagnostics report each setting's resolved value and provenance (for
+example `preset:ci-v1`; see [effective settings](analysis-resources.md#effective-settings-and-resource-ownership)
+for the full list). Help without resolved diagnostics documents baseline
+defaults. A preset is not an RSS guarantee or an automatic clamp: incompatible
+explicit limits still fail validation.
 
-| Budget | ci-v1 | workstation-v1 |
+| Limit | ci-v1 | workstation-v1 |
 | --- | ---: | ---: |
 | Input frames | 10,000 | 1,000,000 |
 | Captured payload bytes | 16 MiB | 256 MiB |
 | Encoded source / decoded container bytes, each | 32 MiB | 512 MiB |
 | Single captured frame | 1 MiB | 16 MiB |
-| Cumulative interfaces | 64 | 1,024 |
+| Interfaces per PCAPNG section | 64 | 1,024 |
 | Invocation time | 30 s | 300 s |
 | Conversations per requested transport | 1,024 | 8,192 |
 | Scope / provenance charge, each | 2 MiB | 16 MiB |
@@ -46,20 +47,14 @@ automatic clamp: incompatible explicit limits still fail validation.
 | Forwarding shared detail charge | 1 MiB | 4 MiB |
 | Forwarding comparison scratch charge | 16 MiB | 128 MiB |
 
-Only options present on a selected command are changed. Options not named in
-the preset retain their documented defaults, including other TLS retention
-ceilings and idle-expiry settings. In particular, the preset is not a sum of
-all allocations or a guarantee that all enabled stages fit one memory budget.
-The values are conservative starting configurations, not benchmark-derived
-capacity recommendations.
+Only options present on a selected command are changed; options not named here
+keep their documented defaults, including other TLS retention ceilings and
+idle-expiry settings. The values are conservative starting configurations, not
+benchmark-derived capacity recommendations, and the limits are not a sum that
+guarantees all enabled stages fit in memory together.
 
-Input limits count filtered-out frames. Encoded/decoded source limits include
-container metadata and are enforced by the CLI compression wrapper. A bare
-library `capture_file::Reader` instead enforces its own
-record/interface/metadata limits; use `compression::Input` for cumulative
-encoded/decoded byte ceilings.
-Physical forwarding disables unused reconstruction and indexes; it never
-pushes a filter ahead of input accounting.
-
-See [analysis resource accounting](analysis-resources.md) for the remaining
-state, allocation, and process-memory distinctions.
+Input limits count filtered-out frames, and encoded/decoded source limits
+include container metadata. See [analysis resource
+accounting](analysis-resources.md#what-the-ceilings-cover) for reader-level
+versus CLI-wrapper enforcement and the remaining state, allocation, and
+process-memory distinctions.

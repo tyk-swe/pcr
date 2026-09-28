@@ -1,10 +1,5 @@
 # Consumer compatibility policy
 
-The pending machine contract is `packetcraftr.output/v6`, which supersedes the
-unreleased v3–v5 drafts. Its forwarding change is semantic: missing values do
-not satisfy ordinary preservation, and check-specific evidence states are
-explicit.
-
 ## Versioning and immutable evidence
 
 A contract family identifies names, units, meanings, enum interpretations,
@@ -12,16 +7,16 @@ ordering, and terminal semantics—not only JSON shape. Incompatible changes
 require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
-release checksum together. v6 uses `urn:packetcraftr:output:v6`; resolve it to
-the bundled local schema, not a moving branch or network fetch. The release
-packager copies every file under `schemas/`, and the verifier requires the v6
-output schema.
+release checksum together. Resolve a schema's `$id` (for example that of the
+[output schema](../schemas/packetcraftr.output.v6.schema.json)) to the bundled
+local file, not a moving branch or network fetch. The release packager copies
+every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
 
 Consumers should tolerate unknown object members, but must not guess meanings
 for unknown verdicts, check kinds, evidence states, or contract families.
 Examples are fixtures, not a replacement for serializing actual Rust payloads;
-the aggregate schema-conformance suite retains that role.
+the `aggregate_schema_conformance` suite does that.
 
 ## Fields, omission, and identifiers
 
@@ -57,16 +52,16 @@ set -e
 python3 examples/consumers/forwarding.py --format ndjson --exit-code "$status" < report.ndjson
 ```
 
-The consumer validates the subset of v6 it interprets, including evidence states,
-counter relationships, omission totals, requested-check coverage, and verdict
-consistency. It does not claim to replace complete JSON Schema validation.
-Its own successful exit means the report was interpreted, not that forwarding
-passed. Read `execution` and `verdict`, or use the regression harness's explicit
-test contract.
+The consumer validates the subset of the output contract it interprets,
+including evidence states, counter relationships, omission totals,
+requested-check coverage, and verdict consistency. It does not claim to replace
+complete JSON Schema validation. Its own successful exit means the report was
+interpreted, not that forwarding passed. Read `execution` and `verdict`, or use
+the regression harness's explicit test contract.
 
-The frozen v6 fixture and its mutations are exercised by
-`scripts/test-output-consumer.py`.
-The Rust CLI tests continue validating real serializers against v6.
+The frozen fixture under `examples/consumers/fixtures/` and its mutations are
+exercised by `scripts/test-output-consumer.py`. The Rust CLI tests validate
+real serializers against the schema.
 
 ## Rust API adoption
 
@@ -74,25 +69,12 @@ The crates remain unpublished (`publish=false`). Public struct fields and enum
 variants are source-compatibility commitments: review additions/removals before
 a stable release rather than assuming JSON compatibility implies Rust compatibility.
 
-For a reproducible local Git dependency, first commit the reviewed source.
-From that checkout, use the exact revision in a separate project:
+For a reproducible local Git dependency, first commit the reviewed source, then
+pin its exact revision (`git rev-parse HEAD`) from a separate project:
 
-```sh
-repository="$(git rev-parse --show-toplevel)"
-revision="$(git rev-parse HEAD)"
-consumer="$(mktemp -d)"
-cat > "$consumer/Cargo.toml" <<EOF
-[package]
-name = "my-packet-consumer"
-version = "0.1.0"
-edition = "2024"
-
+```toml
 [dependencies]
-packetcraftr-core = { git = "file://$repository", rev = "$revision" }
-EOF
-mkdir "$consumer/src"
-printf 'fn main() { let _ = packetcraftr_core::protocol::builtin::registry(); }\n' > "$consumer/src/main.rs"
-cargo build --manifest-path "$consumer/Cargo.toml"
+packetcraftr-core = { git = "file:///path/to/checkout", rev = "FULL_COMMIT_SHA" }
 ```
 
 For shared projects, replace the local URL with the chosen repository URL and

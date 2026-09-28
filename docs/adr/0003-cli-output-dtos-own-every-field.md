@@ -9,5 +9,5 @@ output family.
 
 ## Consequences
 
-Library serde derives are not output commitments. The v6 conformance suite
-proves that the mirrored types keep the published shape.
+Library serde derives are not output commitments. The output-schema
+conformance suite proves that the mirrored types keep the published shape.

@@ -63,16 +63,17 @@ include reconstructed conversations before filtering, preserving capture-global
 stream numbers. Selection and comparison use only physical-frame evidence.
 
 Input frame, payload byte, encoded/decoded source-byte, and interface bounds
-still count rejected input. Physical comparison continues to require usable
-capture timestamps for evidence; missing times are not replaced with an epoch.
+still count rejected input. Physical comparison requires usable capture
+timestamps for evidence; missing times are not replaced with an epoch.
 
 Collection, comparison scratch, retained detail, and publication are distinct
-accounting domains. Defaults are 64 MiB collection evidence per input, 128 MiB
-comparison scratch, 256 entries per detail category, and one shared 4 MiB detail
-charge. The CLI permits at most 8 MiB of detail charges. The terminal record
-remains bounded to 16 MiB; stream preflight reserves envelope headroom. Aggregate
-JSON preflight counts the complete pretty-printed envelope and final newline
-against the same ceiling before writing any success output.
+accounting domains (`--max-evidence-bytes`, `--max-scratch-bytes`,
+`--max-details` and `--max-detail-bytes`; defaults in `--help` and
+`forwarding::Limits`). Detail charges are capped below the record ceiling so
+the terminal summary keeps its own space. The terminal record remains bounded
+to 16 MiB; stream preflight reserves envelope headroom. Aggregate JSON
+preflight counts the complete pretty-printed envelope and final newline against
+the same ceiling before writing any success output.
 
 Reducing detail counts/bytes never changes summary counters or verdict.
 Omissions are explicit. Charges are deterministic conservative accounting,
@@ -102,12 +103,10 @@ collectors and verification. Recompiling identical text creates a different
 rule identity and is rejected. This is misuse prevention, not cryptographic
 attestation of a caller's input.
 
-`verify` now returns `forwarding::Error`. Use `verify_with_limits` for explicit
-`forwarding::Limits` and an optional shared `Deadline`. `Declarations` groups value
-and presence/absence rules. Total declaration count and source bytes are bounded.
-Observation getters expose read-only evidence; hand-built observation literals
-are no longer supported. Adding `plan` and `deadline` to `analysis::Options`
-requires updating exhaustive struct literals.
+`verify_with_limits` takes explicit `forwarding::Limits` and an optional shared
+`Deadline`. `Declarations` groups value and presence/absence rules; total
+declaration count and source bytes are bounded. Observation getters expose
+read-only evidence, and observations cannot be constructed by hand.
 
 ## Reproduction bundle
 

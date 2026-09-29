@@ -386,10 +386,6 @@ impl Accumulator {
                 self.queue_unsolicited(candidate);
                 continue;
             };
-            if self.workflow_response_limit_reached(max_responses) {
-                self.queue_unsolicited(candidate);
-                continue;
-            }
             let request_index = match workflow_attribution(
                 sent,
                 freshness,
@@ -415,6 +411,11 @@ impl Accumulator {
                     continue;
                 }
             };
+            if self.workflow_response_limit_reached(max_responses) {
+                self.refuse_reply(request_index, "exchange.response_limit");
+                self.queue_unsolicited(candidate);
+                continue;
+            }
             // The counters were checked against `max_responses` before acceptance.
             self.record_response(request_index);
             self.retained_unmatched = self

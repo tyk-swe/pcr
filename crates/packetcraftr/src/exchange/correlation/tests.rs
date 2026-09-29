@@ -562,6 +562,43 @@ fn a_refused_frame_the_workflow_accepts_for_one_request_is_that_requests_refused
 }
 
 #[test]
+fn a_workflow_reply_capped_by_the_response_limit_is_not_listed_unanswered() {
+    let exchange = Exchange::new(2, 4, 1);
+    let mut accumulator = Accumulator::new(2);
+    exchange.process(&mut accumulator, [reply(0)]);
+    assert!(matches!(
+        accumulator.drain_events().next(),
+        Some(crate::exchange::Event::Response(_))
+    ));
+    accumulator.retained_unmatched = 1;
+    accumulator.unsolicited = vec![UnsolicitedEvidence {
+        decoded: decoded_evidence(&[1]),
+        freshness: Some(UnsolicitedFreshness {
+            received_at: Instant::now(),
+            eligible_requests: 2,
+        }),
+    }];
+    let mut matcher = |request_index: usize, _: &Packet, _: &DecodedPacket| request_index == 1;
+
+    assert_eq!(
+        accumulator.promote_workflow_unsolicited(exchange.context(), &mut matcher),
+        ProcessOutcome::Continue
+    );
+
+    assert_eq!(accumulator.response_counts, vec![1, 0]);
+    assert_eq!(
+        accumulator.first_refused_reply(2),
+        Some((1, "exchange.response_limit"))
+    );
+    assert!(accumulator.unanswered(2).is_empty());
+    assert_eq!(accumulator.retained_unmatched, 1);
+    assert!(matches!(
+        accumulator.drain_events().next(),
+        Some(crate::exchange::Event::Unsolicited { .. })
+    ));
+}
+
+#[test]
 fn a_refused_frame_the_workflow_does_not_uniquely_accept_is_not_a_refused_reply() {
     let matchers: [fn(usize) -> bool; 2] = [|_| false, |_| true];
     for accepts in matchers {

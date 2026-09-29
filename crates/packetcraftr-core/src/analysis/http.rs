@@ -13,6 +13,9 @@ use super::{
 };
 use crate::error::BoundaryError;
 use crate::protocol::application::http::{self, Body, BodyDecoder, Head, Header};
+mod content;
+pub use content::{ContentDecodeError, decode_content};
+
 use bytes::Bytes;
 use memchr::memchr;
 use serde::Serialize;
@@ -56,6 +59,14 @@ pub struct Issue {
 }
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// Transfer-decoded bytes, emitted only when `with_body_chunks` is enabled.
+    BodyChunk {
+        stream: u64,
+        generation: u64,
+        index: u64,
+        flow: ScopedFlowKey,
+        bytes: Bytes,
+    },
     Message(Box<Message>),
     Issue(Issue),
 }
@@ -110,6 +121,9 @@ type RequestKey = (Connection, ScopedFlowKey);
 pub struct Collector {
     limits: Limits,
     max_body_bytes: u64,
+    body_chunks: bool,
+    exported_body_bytes: u64,
+    max_exported_body_bytes: u64,
     tcp: TcpSources,
     directions: BTreeMap<ScopedFlowKey, Direction>,
     requests: BTreeMap<RequestKey, VecDeque<Pending>>,
@@ -131,6 +145,9 @@ impl Collector {
         Ok(Self {
             limits,
             max_body_bytes,
+            body_chunks: false,
+            exported_body_bytes: 0,
+            max_exported_body_bytes: 256 * 1024 * 1024,
             tcp: TcpSources::new(ports, limits),
             directions: BTreeMap::new(),
             requests: BTreeMap::new(),
@@ -140,6 +157,20 @@ impl Collector {
             retained: 0,
             summary: Summary::default(),
         })
+    }
+    /// Enable streamed dechunked entity chunks before each terminal Message event.
+    #[must_use]
+    pub fn with_body_chunks(mut self) -> Self {
+        self.body_chunks = true;
+        self
+    }
+    /// Stream entities under an operation-wide byte ceiling chosen by the caller.
+    /// Zero permits messages with empty entities only.
+    #[must_use]
+    pub fn with_body_chunk_limit(mut self, maximum: u64) -> Self {
+        self.body_chunks = true;
+        self.max_exported_body_bytes = maximum;
+        self
     }
     pub fn scopes(&self) -> impl Iterator<Item = &Definition> {
         self.tcp.scopes.values()
@@ -419,12 +450,38 @@ impl Collector {
             .expect("head has body state")
             .additional_buffer_bound(input.len());
         self.check_buffer(live.buffered().saturating_add(growth))?;
-        match live
+        let mut export_limit = false;
+        let progress = live
             .body
             .as_mut()
             .expect("head has body state")
-            .consume(input)
-        {
+            .consume_with(input, |bytes| {
+                if self.body_chunks && !bytes.is_empty() {
+                    let Some(next) = self
+                        .exported_body_bytes
+                        .checked_add(bytes.len() as u64)
+                        .filter(|next| *next <= self.max_exported_body_bytes)
+                    else {
+                        export_limit = true;
+                        return;
+                    };
+                    self.exported_body_bytes = next;
+                    output.push(Event::BodyChunk {
+                        stream: direction.stream,
+                        generation: direction.generation,
+                        index: live.index,
+                        flow: flow.clone(),
+                        bytes: Bytes::copy_from_slice(bytes),
+                    });
+                }
+            });
+        if export_limit {
+            return Err(Error::Limit {
+                field: "max_http_exported_bytes",
+                limit: usize::try_from(self.max_exported_body_bytes).unwrap_or(usize::MAX),
+            });
+        }
+        match progress {
             Ok(progress) => {
                 if progress.complete {
                     self.flush(flow, direction, Status::Complete, None, output)?;
@@ -645,7 +702,7 @@ mod tests {
             .iter()
             .filter_map(|event| match event {
                 Event::Message(message) => Some(message.as_ref()),
-                Event::Issue(_) => None,
+                Event::Issue(_) | Event::BodyChunk { .. } => None,
             })
             .collect()
     }

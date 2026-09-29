@@ -95,6 +95,10 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         self.errors
     }
 
+    pub(crate) fn classifier_mut(&mut self) -> &mut K {
+        &mut self.classifier
+    }
+
     pub(crate) fn into_classifier(self) -> K {
         self.classifier
     }

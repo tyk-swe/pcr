@@ -35,6 +35,9 @@ fn request() -> traceroute::Request {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     traceroute::Request {
+        udp_port_mode: Default::default(),
+        cycles: 1,
+        cycle_interval: Duration::from_millis(1000),
         target: Target::Address(IpAddr::V4(DESTINATION)),
         strategy: Transport::Tcp,
         address_family: Family::Any,

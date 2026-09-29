@@ -42,6 +42,9 @@ fn an_attempt_expires_on_the_client_clock_before_the_operation_deadline() {
     let request = scan::Request {
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
@@ -84,6 +87,9 @@ fn a_slow_sink_preserves_completed_connect_verdicts_and_latency() {
     let request = scan::Request {
         targets: Target::Address(Ipv4Addr::LOCALHOST.into()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,

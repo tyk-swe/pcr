@@ -1,0 +1,59 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "rtcp",
+      "fields": {
+        "packets": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "packet_type": {
+                  "type": "unsigned",
+                  "value": 201
+                },
+                "count": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "body": {
+                  "type": "bytes",
+                  "value": [
+                    0,
+                    0,
+                    0,
+                    1
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "packet_type": {
+                  "type": "unsigned",
+                  "value": 210
+                },
+                "count": {
+                  "type": "unsigned",
+                  "value": 0
+                },
+                "body": {
+                  "type": "bytes",
+                  "value": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

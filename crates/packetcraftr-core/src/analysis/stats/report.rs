@@ -64,6 +64,14 @@ pub struct IoBucketStat {
     pub bytes: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SizeBinStat {
+    pub minimum: u32,
+    pub maximum: Option<u32>,
+    pub frames: u64,
+    pub bytes: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub clock: crate::analysis::ClockReport,
@@ -85,6 +93,8 @@ pub struct Report {
     /// Capture-global fragment accounting, independent of the display filter.
     pub ip_reassembly: IpReassemblyReport,
     pub interfaces: Vec<crate::capture_file::Interface>,
+    pub sizes: Vec<SizeBinStat>,
+    pub tcp_timing: Vec<super::TcpTimingStat>,
 }
 
 impl Report {

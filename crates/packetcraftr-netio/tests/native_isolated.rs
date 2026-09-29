@@ -121,6 +121,57 @@ fn readiness_and_repeated_cleanup() {
         drop(capture);
         released();
     }
+    ip(&["link", "add", "capture_dummy0", "type", "dummy"]);
+    ip(&["link", "set", "capture_dummy0", "up"]);
+    let selected = interface::SystemProvider.interfaces(&live()).unwrap();
+    let loopback = selected
+        .iter()
+        .find(|interface| interface.id.name == "lo")
+        .unwrap()
+        .id
+        .clone();
+    let dummy = selected
+        .iter()
+        .find(|interface| interface.id.name == "capture_dummy0")
+        .unwrap()
+        .id
+        .clone();
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let request = capture::GroupRequest {
+        interfaces: vec![loopback.clone(), dummy],
+        limits: request().limits,
+        filter: Some("tcp".to_owned()),
+        filters: vec![(
+            loopback,
+            format!("udp dst port {}", receiver.local_addr().unwrap().port()),
+        )],
+        promiscuous: false,
+        native: Default::default(),
+    };
+    let mut group = capture::Group::new(&request).unwrap();
+    group.arm(&capture::SystemProvider, &live()).unwrap();
+    group.wait_ready(&live()).unwrap();
+    sender
+        .send_to(b"isolated-source-filter", receiver.local_addr().unwrap())
+        .unwrap();
+    let frame = group
+        .next_captured_frame(&within(Duration::from_secs(2)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.source, 0);
+    assert!(
+        frame
+            .frame
+            .bytes()
+            .windows(b"isolated-source-filter".len())
+            .any(|bytes| bytes == b"isolated-source-filter")
+    );
+    assert_eq!(group.source_count(), 2);
+    group.shutdown().unwrap();
+    drop(group);
+    ip(&["link", "del", "capture_dummy0"]);
+    released();
 }
 
 #[test]
@@ -231,9 +282,13 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
         buffer_size: Some(4 * 1024 * 1024),
         timestamp_source: Some(capture::TimestampSource::Host),
         timestamp_precision: Some(capture::TimestampPrecision::Nano),
+        direction: Some(capture::Direction::In),
     };
     let mut capture = ready(&request);
     let native = &capture.metadata().native;
+    assert_eq!(native.direction.requested, Some(capture::Direction::In));
+    assert_eq!(native.direction.applied, Some(capture::Direction::In));
+    assert_eq!(native.direction.effective, Some(capture::Direction::In));
     assert_eq!(native.buffer_size.requested, Some(4 * 1024 * 1024));
     assert_eq!(native.buffer_size.applied, Some(4 * 1024 * 1024));
     assert_eq!(native.buffer_size.effective, None);
@@ -269,6 +324,36 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
 #[ignore = "requires the isolated Linux launcher"]
 fn native_filter_error_preserves_diagnostic_and_releases_admission() {
     isolated();
+    ip(&["link", "add", "preflight_dummy", "type", "dummy"]);
+    ip(&["link", "set", "preflight_dummy", "up"]);
+    let selected = interface::SystemProvider.interfaces(&live()).unwrap();
+    let first = selected
+        .iter()
+        .find(|interface| interface.id.name == "lo")
+        .unwrap()
+        .id
+        .clone();
+    let later = selected
+        .iter()
+        .find(|interface| interface.id.name == "preflight_dummy")
+        .unwrap()
+        .id
+        .clone();
+    let group_request = capture::GroupRequest {
+        interfaces: vec![first, later.clone()],
+        limits: request().limits,
+        filter: Some("udp port 53".to_owned()),
+        filters: vec![(later.clone(), "udp and".to_owned())],
+        promiscuous: false,
+        native: Default::default(),
+    };
+    let mut group = capture::Group::new(&group_request).unwrap();
+    let error = group.arm(&capture::SystemProvider, &live()).unwrap_err();
+    assert!(matches!(error,Error::InvalidCaptureFilter {interface,..} if interface == later.name));
+    assert_eq!(group.sources().count(), 0);
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
+    drop(group);
+    ip(&["link", "del", "preflight_dummy"]);
     let mut request = request();
     request.filter = Some("udp and (".to_owned());
     let error = match capture::SystemProvider.arm_capture(&request, &live()) {

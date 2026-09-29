@@ -20,4 +20,7 @@ pub use catalog::{BuiltinProtocol, UnknownProtocolName};
 pub use common::{ChecksumAccumulator, checksum, checksum_parts};
 pub(crate) use common::{network_from_addresses, transport_checksum};
 
-pub use matcher::{IcmpErrorKind, QuotedTransport, quoted_icmp_error, transport_tuple_reversed};
+pub use matcher::{
+    IcmpErrorKind, QuotedTransport, quoted_icmp_error, quoted_udp_checksum,
+    transport_tuple_reversed,
+};

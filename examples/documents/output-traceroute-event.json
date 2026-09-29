@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 0,
@@ -28,7 +28,8 @@
         "secs": 0,
         "nanos": 4000000
       },
-      "reason": "ICMPv4 time exceeded before reaching the endpoint"
+      "reason": "ICMPv4 time exceeded before reaching the endpoint",
+      "cycle": 1
     }
   },
   "diagnostics": [],

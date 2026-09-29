@@ -112,6 +112,15 @@ impl From<http::Header> for Header {
 }
 
 #[derive(Debug, Serialize)]
+pub struct Entity {
+    pub path: String,
+    pub bytes: u64,
+    pub decoded_path: Option<String>,
+    pub decoded_bytes: Option<u64>,
+    pub content_encoding: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Message {
     pub index: u64,
     pub stream: u64,
@@ -127,6 +136,8 @@ pub struct Message {
     pub trailers: Vec<Header>,
     pub error: Option<String>,
     pub sources: Vec<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity: Option<Entity>,
 }
 impl TryFrom<analysis::Message> for Message {
     type Error = Error;
@@ -138,6 +149,7 @@ impl TryFrom<analysis::Message> for Message {
             )
         });
         Ok(Self {
+            entity: None,
             index: value.index,
             stream: value.stream,
             generation: value.generation,

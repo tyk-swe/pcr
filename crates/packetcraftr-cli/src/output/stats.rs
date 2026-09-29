@@ -20,6 +20,70 @@ pub enum Table {
     Ports,
     Io,
     Fragments,
+    Sizes,
+    TcpTiming,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SizeBin {
+    pub minimum: u32,
+    pub maximum: Option<u32>,
+    pub frames: u64,
+    pub bytes: u64,
+}
+impl From<library::SizeBinStat> for SizeBin {
+    fn from(value: library::SizeBinStat) -> Self {
+        Self {
+            minimum: value.minimum,
+            maximum: value.maximum,
+            frames: value.frames,
+            bytes: value.bytes,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AckRtt {
+    pub count: u64,
+    pub minimum: Option<Duration>,
+    pub mean: Option<Duration>,
+    pub maximum: Option<Duration>,
+    pub excluded_retransmission: u64,
+    pub excluded_clock_regression: u64,
+    pub excluded_missing_ack: u64,
+    pub excluded_limit: u64,
+}
+impl From<library::AckRttStat> for AckRtt {
+    fn from(value: library::AckRttStat) -> Self {
+        Self {
+            count: value.count,
+            minimum: value.minimum,
+            mean: value.mean,
+            maximum: value.maximum,
+            excluded_retransmission: value.excluded_retransmission,
+            excluded_clock_regression: value.excluded_clock_regression,
+            excluded_missing_ack: value.excluded_missing_ack,
+            excluded_limit: value.excluded_limit,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TcpTiming {
+    pub stream: u64,
+    pub handshake_syn_to_syn_ack: Option<Duration>,
+    pub handshake_syn_to_ack: Option<Duration>,
+    pub ack_rtt_a_to_b: AckRtt,
+    pub ack_rtt_b_to_a: AckRtt,
+}
+impl From<library::TcpTimingStat> for TcpTiming {
+    fn from(value: library::TcpTimingStat) -> Self {
+        Self {
+            stream: value.stream,
+            handshake_syn_to_syn_ack: value.handshake_syn_to_syn_ack,
+            handshake_syn_to_ack: value.handshake_syn_to_ack,
+            ack_rtt_a_to_b: value.ack_rtt_a_to_b.into(),
+            ack_rtt_b_to_a: value.ack_rtt_b_to_a.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -173,6 +237,13 @@ pub enum TableData {
     Fragments {
         fragments: super::reassembly::Report,
     },
+    Sizes {
+        sizes: Vec<SizeBin>,
+    },
+    #[serde(rename = "tcp-timing")]
+    TcpTiming {
+        tcp_timing: Vec<TcpTiming>,
+    },
 }
 
 impl TryFrom<(Table, library::Report, u64)> for Report {
@@ -219,6 +290,12 @@ impl TryFrom<(Table, library::Report, u64)> for Report {
                     interval: report.interval,
                     buckets: report.io.into_iter().map(Into::into).collect(),
                 },
+            },
+            Table::Sizes => TableData::Sizes {
+                sizes: report.sizes.into_iter().map(Into::into).collect(),
+            },
+            Table::TcpTiming => TableData::TcpTiming {
+                tcp_timing: report.tcp_timing.into_iter().map(Into::into).collect(),
             },
             Table::Fragments => TableData::Fragments {
                 fragments: (&report.ip_reassembly).into(),

@@ -1,0 +1,30 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "stp",
+      "fields": {
+        "version": {
+          "type": "unsigned",
+          "value": 2
+        },
+        "bpdu_type": {
+          "type": "unsigned",
+          "value": 2
+        },
+        "bridge_id": {
+          "type": "unsigned",
+          "value": 9223374235878031361
+        },
+        "root_id": {
+          "type": "unsigned",
+          "value": 9223374235878031361
+        },
+        "port_id": {
+          "type": "unsigned",
+          "value": 32769
+        }
+      }
+    }
+  ]
+}

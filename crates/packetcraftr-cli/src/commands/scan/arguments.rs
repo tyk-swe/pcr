@@ -111,11 +111,41 @@ impl From<Transport> for packetcraftr::probe::Transport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TcpMode {
+    #[default]
+    Syn,
+    Ack,
+    Fin,
+    Null,
+    Xmas,
+}
+impl From<TcpMode> for packetcraftr::scan::TcpMode {
+    fn from(value: TcpMode) -> Self {
+        match value {
+            TcpMode::Syn => Self::Syn,
+            TcpMode::Ack => Self::Ack,
+            TcpMode::Fin => Self::Fin,
+            TcpMode::Null => Self::Null,
+            TcpMode::Xmas => Self::Xmas,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Use ordinary TCP connections without raw packet privileges.
     #[arg(long = "connect")]
     pub(crate) connect: bool,
+    /// Raw TCP probe flags (syn, ack, fin, null, or xmas).
+    #[arg(long, value_enum, default_value_t = TcpMode::Syn)]
+    pub(crate) tcp_mode: TcpMode,
+    /// Reproducibly shuffle endpoint/attempt scheduling.
+    #[arg(long)]
+    pub(crate) shuffle_seed: Option<u64>,
+    /// Bounded hexadecimal request and banner checks (TCP profiles v1).
+    #[arg(long, requires = "connect")]
+    pub(crate) tcp_profiles: Option<std::path::PathBuf>,
     /// Maximum overlapping probe windows; ordinary TCP is capped at 16.
     #[arg(long, default_value_t = 1)]
     pub(crate) max_in_flight: usize,

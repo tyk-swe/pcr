@@ -33,6 +33,10 @@ pub(super) fn register(
         builder,
         &[
             (BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100),
+            (BuiltinProtocol::Udp, 69, BuiltinProtocol::Tftp, 100),
+            (BuiltinProtocol::Tcp, 1883, BuiltinProtocol::Mqtt, 100),
+            (BuiltinProtocol::Mqtt, 0, BuiltinProtocol::Mqtt, 0),
+            (BuiltinProtocol::Lldp, 0, BuiltinProtocol::Padding, 0),
             (BuiltinProtocol::Udp, 123, BuiltinProtocol::Ntp, 100),
             (BuiltinProtocol::Udp, 67, BuiltinProtocol::Dhcpv4, 100),
             (BuiltinProtocol::Udp, 68, BuiltinProtocol::Dhcpv4, 100),
@@ -123,6 +127,7 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
         BuiltinProtocol::Llc,
         &[
             (0xaaaa, BuiltinProtocol::Snap, 100),
+            (0x4242, BuiltinProtocol::Stp, 100),
             (0, BuiltinProtocol::Raw, -100),
         ],
     )?;
@@ -311,6 +316,7 @@ fn bind_link_children(
             (0x8864, BuiltinProtocol::Pppoe, 100),
             (0x8863, BuiltinProtocol::Pppoe, 90),
             (0x88a8, BuiltinProtocol::Vlan8021ad, 100),
+            (0x88cc, BuiltinProtocol::Lldp, 100),
             (0x86dd, BuiltinProtocol::Ipv6, 100),
             (0, BuiltinProtocol::Raw, -100),
         ],

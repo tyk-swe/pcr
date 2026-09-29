@@ -37,9 +37,10 @@ pub(super) fn render_complete(
             for source in &summary.sources {
                 if let Some(settings) = &source.capture_settings {
                     write_stdout_line(format_args!(
-                        "  source {} ({}): buffer_size {} timestamp_source {} timestamp_precision {}",
+                        "  source {} ({}): direction {} buffer_size {} timestamp_source {} timestamp_precision {}",
                         source.capture_id,
                         source.native_interface.name,
+                        realized_text(&settings.direction),
                         realized_text(&settings.buffer_size),
                         realized_text(&settings.timestamp_source),
                         realized_text(&settings.timestamp_precision),

@@ -40,7 +40,9 @@ use crate::analysis::session::{Collector as SessionCollector, CollectorNeeds};
 use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;
 
+mod certificates;
 mod limits;
+pub use certificates::{Certificate, CertificateCollection, CertificateStatus, MAX_CERTIFICATES};
 mod live;
 mod selector;
 mod session;
@@ -99,6 +101,7 @@ enum Tracked {
 #[derive(Debug)]
 pub struct Collector {
     limits: Limits,
+    collect_certificates: bool,
     entries: HashMap<CanonicalFlow, Entry>,
     order: BTreeMap<u64, CanonicalFlow>,
     seen_streams: HashSet<u64>,
@@ -113,6 +116,7 @@ impl Collector {
         limits.validate()?;
         Ok(Self {
             limits,
+            collect_certificates: false,
             entries: HashMap::new(),
             order: BTreeMap::new(),
             seen_streams: HashSet::new(),
@@ -123,6 +127,12 @@ impl Collector {
         })
     }
 
+    /// Continue plaintext TLS 1.2 server handshakes until the certificate chain.
+    #[must_use]
+    pub fn with_certificates(mut self) -> Self {
+        self.collect_certificates = true;
+        self
+    }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<SessionEvent> {
         let mut events = Vec::new();
         if let Some(conversation) = record.udp.and_then(|view| view.conversation)
@@ -417,7 +427,9 @@ impl Collector {
             key.clone(),
             Entry {
                 order,
-                state: Tracked::Live(Box::new(Live::new(stream, flow, scope))),
+                state: Tracked::Live(Box::new(
+                    Live::new(stream, flow, scope).with_certificates(self.collect_certificates),
+                )),
             },
         );
     }

@@ -190,7 +190,10 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v6`](schemas/packetcraftr.output.v6.schema.json)
+- Practical parity features: [codecs and filters](docs/parity-codecs.md),
+  [offline tools](docs/parity-offline.md), and [live workflows](docs/parity-live.md)
+- Bounded TCP service profiles: [`packetcraftr.tcp-profiles/v1`](schemas/packetcraftr.tcp-profiles.v1.schema.json)
+- Structured command output: [`packetcraftr.output/v7`](schemas/packetcraftr.output.v7.schema.json)
 - Capture rewrite rules: `packetcraftr.rewrite/v1` ([schema](schemas/packetcraftr.rewrite.v1.schema.json))
   and `packetcraftr.rewrite/v2` ([schema](schemas/packetcraftr.rewrite.v2.schema.json))
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)

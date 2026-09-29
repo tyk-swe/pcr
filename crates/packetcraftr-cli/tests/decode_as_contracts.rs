@@ -19,6 +19,31 @@ use packetcraftr_core::{
 };
 use std::time::UNIX_EPOCH;
 
+#[test]
+fn explicit_bindings_support_strict_media_packet_construction() {
+    for (binding, packet) in [
+        (
+            "udp.port=5004:rtp",
+            "ipv4()/udp(destination_port=5004)/rtp(payload_type=96,sequence=7,timestamp=8000,ssrc=1)",
+        ),
+        (
+            "udp.port=5005:rtcp",
+            "ipv4()/udp(destination_port=5005)/rtcp()",
+        ),
+    ] {
+        let report = parse_json(&run_success(&[
+            "--output",
+            "json",
+            "build",
+            "--packet",
+            packet,
+            "--decode-as",
+            binding,
+        ]));
+        assert!(report["result"]["bytes_hex"].as_str().unwrap().len() > 56);
+    }
+}
+
 fn frame(tcp: bool, source: u16, destination: u16, payload: &[u8]) -> Frame {
     let mut packet = Packet::new();
     packet.push(Ipv4 {

@@ -46,6 +46,7 @@ macro_rules! published_enum {
 pub mod analysis;
 pub mod build;
 pub mod capture;
+pub mod capture_transform;
 pub mod contract;
 pub mod diagnostic;
 pub mod dissect;
@@ -82,3 +83,4 @@ pub mod stream;
 pub mod tls;
 pub mod traceroute;
 pub mod verify_forwarding;
+pub mod websocket;

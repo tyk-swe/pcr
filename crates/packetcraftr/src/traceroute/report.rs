@@ -78,6 +78,7 @@ impl std::fmt::Display for Termination {
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
+    pub cycle: u32,
     pub hop_limit: u8,
     pub attempt: u32,
     pub destination: IpAddr,
@@ -91,12 +92,15 @@ pub struct ProbeEvidence {
     pub latency: Option<Duration>,
     pub response: Option<Frame>,
     pub reason: String,
+    pub advertised_mtu: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Hop {
     pub hop_limit: u8,
     pub probes: Vec<ProbeEvidence>,
+    pub responders: std::collections::BTreeMap<IpAddr, u64>,
+    pub rtt: crate::scan::Rtt,
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +179,8 @@ impl Collected {
                     || Hop {
                         hop_limit: probe.hop_limit,
                         probes: Vec::new(),
+                        responders: Default::default(),
+                        rtt: Default::default(),
                     },
                 );
                 hop.probes.push(probe);
@@ -201,6 +207,20 @@ impl Collector {
                     report.stats.packets_attempted
                 ),
             });
+        }
+        let mut hops = hops;
+        for hop in &mut hops {
+            let mut rtt = crate::scan::RttAccumulator::default();
+            for probe in &hop.probes {
+                rtt.note_sent();
+                if let Some(latency) = probe.latency {
+                    rtt.note_received(latency);
+                }
+                if let Some(responder) = probe.responder {
+                    *hop.responders.entry(responder).or_default() += 1;
+                }
+            }
+            hop.rtt = rtt.finish();
         }
         Ok(Aggregate {
             target: report.target,

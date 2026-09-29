@@ -163,6 +163,8 @@ pub struct Session {
     pub alerts: Vec<Alert>,
     #[serde(skip_serializing_if = "is_zero")]
     pub alerts_dropped: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificates: Option<super::CertificateCollection>,
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

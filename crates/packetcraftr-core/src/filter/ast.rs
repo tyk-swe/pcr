@@ -8,6 +8,7 @@ use super::path::FieldRef;
 
 #[derive(Clone, Debug)]
 pub(super) enum Predicate {
+    Advanced(Box<super::advanced::Predicate>),
     LayerPresent {
         protocol: crate::layer::Id,
         occurrence: Option<usize>,

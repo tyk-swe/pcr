@@ -55,6 +55,8 @@ pub(crate) enum Table {
     Ports,
     Io,
     Fragments,
+    Sizes,
+    TcpTiming,
 }
 
 impl From<Table> for output::stats::Table {
@@ -66,6 +68,8 @@ impl From<Table> for output::stats::Table {
             Table::Ports => Self::Ports,
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
+            Table::Sizes => Self::Sizes,
+            Table::TcpTiming => Self::TcpTiming,
         }
     }
 }
@@ -79,6 +83,8 @@ impl From<Table> for packetcraftr_core::analysis::stats::Table {
             Table::Ports => Self::Ports,
             Table::Io => Self::Io,
             Table::Fragments => Self::Fragments,
+            Table::Sizes => Self::Sizes,
+            Table::TcpTiming => Self::TcpTiming,
         }
     }
 }

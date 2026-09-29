@@ -41,6 +41,28 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             |error| Probes.duration_limit(0, error),
             |source| Error::Output { source },
         )?;
+        let configured = if request.udp_port_mode == super::UdpPortMode::Fixed {
+            let mut registry = self.registry.to_builder();
+            if let Some(port) = request.destination_port {
+                registry
+                    .bind("udp", u64::from(port), "raw", i32::MAX)
+                    .map_err(|source| Error::Execution {
+                        sequence: 0,
+                        source: packetcraftr_core::error::BoundaryError::from_error(source),
+                    })?;
+            }
+            Some(
+                self.view_with_registry(Arc::new(registry.build().map_err(|source| {
+                    Error::Execution {
+                        sequence: 0,
+                        source: packetcraftr_core::error::BoundaryError::from_error(source),
+                    }
+                })?)),
+            )
+        } else {
+            None
+        };
+        let client = configured.as_ref().unwrap_or(self);
         let send = crate::send::Options {
             destination: None,
             plan: request.route.clone(),
@@ -50,8 +72,8 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
         run(
             &request,
             &mut self.admission(),
-            &self.registry,
-            &mut ExchangeExecutor::new(self, send, request.collection.clone()),
+            &client.registry,
+            &mut ExchangeExecutor::new(client, send, request.collection.clone()),
             &mut self.clock.clone(),
             &mut self.deadline(request.limits.max_duration),
             publish,
@@ -89,14 +111,35 @@ where
         },
         emit,
     );
-    let stats = run_batches(
-        &mut batches,
-        request.probes_per_second,
-        deadline,
-        clock,
-        executor,
-        &mut evidence,
-    )?;
+    let mut stats = crate::Stats::default();
+    for cycle in 1..=request.cycles {
+        if cycle > 1 {
+            crate::execution::pause(deadline, clock, request.cycle_interval)
+                .map_err(|paused| paused.into_error(&Probes, u64::from(cycle)))?;
+            stats.elapsed = stats.elapsed.saturating_add(request.cycle_interval);
+            evidence.classifier_mut().termination = Termination::Timeout;
+        }
+        let cycle_stats = run_batches(
+            batches.iter_mut().filter(|batch| {
+                batch
+                    .probes
+                    .first()
+                    .is_some_and(|probe| probe.cycle == cycle)
+            }),
+            request.probes_per_second,
+            deadline,
+            clock,
+            executor,
+            &mut evidence,
+        )?;
+        stats
+            .checked_add_assign(&cycle_stats)
+            .map_err(|_| Error::InvalidLimit {
+                field: "statistics",
+                value: u64::MAX,
+                reason: "cumulative traceroute statistics overflowed".to_owned(),
+            })?;
+    }
     let termination = evidence.into_classifier().termination;
 
     Ok(Report {
@@ -176,6 +219,13 @@ fn validate_collection(request: &Request) -> Result<(), Error> {
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
     check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
+    if request.udp_port_mode == super::UdpPortMode::Fixed && total_probes > 65_535 {
+        return Err(Error::InvalidLimit {
+            field: "probes",
+            value: total_probes as u64,
+            reason: "fixed-tuple UDP correlation supports at most 65535 probes".to_owned(),
+        });
+    }
     probe_target(
         request,
         u64::try_from(total_probes.saturating_sub(1)).unwrap_or(u64::MAX),

@@ -36,6 +36,18 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
     if let Some(error) = &message.error {
         write_stdout_line(format_args!("  error: {error}"))?;
     }
+    if let Some(entity) = &message.entity {
+        write_stdout_line(format_args!(
+            "  entity: {} ({} bytes)",
+            entity.path, entity.bytes
+        ))?;
+        if let Some(path) = &entity.decoded_path {
+            write_stdout_line(format_args!(
+                "  decoded: {path} ({} bytes)",
+                entity.decoded_bytes.unwrap_or_default()
+            ))?;
+        }
+    }
     Ok(())
 }
 

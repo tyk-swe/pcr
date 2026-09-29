@@ -17,6 +17,8 @@ use crate::probe::{Batch, ProbeEndpoint, Transport};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
+    pub cycle: u32,
+    pub udp_port_mode: super::UdpPortMode,
     pub address: IpAddr,
     pub target: ProbeEndpoint,
     pub hop_limit: u8,
@@ -44,37 +46,41 @@ pub(super) fn build_batches(
     let mut batches = Vec::with_capacity(request.hop_count());
     let source_port = request.source_port.unwrap_or(super::SOURCE_PORT);
     let mut sequence = 0_u64;
-    for hop_limit in request.first_hop..=request.max_hops {
-        let batch_sequence = sequence;
-        let probe_capacity =
-            usize::try_from(request.probes_per_hop).map_err(|_| Error::InvalidLimit {
-                field: "probes_per_hop",
-                value: u64::from(request.probes_per_hop),
-                reason: "probes per hop exceeds addressable memory".to_owned(),
-            })?;
-        let mut probes = Vec::with_capacity(probe_capacity);
-        for attempt in 1..=request.probes_per_hop {
-            let target = probe_target(request, sequence)?;
-            probes.push(Probe {
-                sequence,
-                address: destination,
-                target,
-                hop_limit,
-                attempt,
-                source_port,
+    for cycle in 1..=request.cycles {
+        for hop_limit in request.first_hop..=request.max_hops {
+            let batch_sequence = sequence;
+            let probe_capacity =
+                usize::try_from(request.probes_per_hop).map_err(|_| Error::InvalidLimit {
+                    field: "probes_per_hop",
+                    value: u64::from(request.probes_per_hop),
+                    reason: "probes per hop exceeds addressable memory".to_owned(),
+                })?;
+            let mut probes = Vec::with_capacity(probe_capacity);
+            for attempt in 1..=request.probes_per_hop {
+                let target = probe_target(request, sequence)?;
+                probes.push(Probe {
+                    sequence,
+                    cycle,
+                    udp_port_mode: request.udp_port_mode,
+                    address: destination,
+                    target,
+                    hop_limit,
+                    attempt,
+                    source_port,
+                });
+                sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
+                    field: "probes",
+                    value: u64::MAX,
+                    reason: "probe sequence overflowed".to_owned(),
+                })?;
+            }
+            batches.push(Batch {
+                probes,
+                timeout: request.timeout,
+                permit: crate::evidence::ExecutionPermit::new(),
+                sequence: batch_sequence,
             });
-            sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
-                field: "probes",
-                value: u64::MAX,
-                reason: "probe sequence overflowed".to_owned(),
-            })?;
         }
-        batches.push(Batch {
-            probes,
-            timeout: request.timeout,
-            permit: crate::evidence::ExecutionPermit::new(),
-            sequence: batch_sequence,
-        });
     }
     Ok(batches)
 }
@@ -91,6 +97,9 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
     match request.strategy {
         Transport::Udp => {
             let base = declared_port()?;
+            if request.udp_port_mode == super::UdpPortMode::Fixed {
+                return Ok(ProbeEndpoint::Udp { port: base });
+            }
             let port = u16::try_from(sequence)
                 .ok()
                 .and_then(|offset| base.checked_add(offset))
@@ -112,7 +121,7 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
 pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> {
     // hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it never exceeds
     // 256
-    let hops = request.hop_count() as u32;
+    let hops = (request.hop_count() as u32).saturating_mul(request.cycles);
     let overflow = || Error::DurationLimit {
         actual: Duration::MAX,
         limit: request.limits.max_duration,
@@ -126,5 +135,14 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
     )?
     .checked_mul(hops.saturating_sub(1))
     .ok_or_else(&overflow)?;
-    exchange.checked_add(delay).ok_or_else(overflow)
+    exchange
+        .checked_add(delay)
+        .and_then(|duration| {
+            duration.checked_add(
+                request
+                    .cycle_interval
+                    .saturating_mul(request.cycles.saturating_sub(1)),
+            )
+        })
+        .ok_or_else(overflow)
 }

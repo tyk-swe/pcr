@@ -1,0 +1,68 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "rtp",
+      "fields": {
+        "payload_type": {
+          "type": "unsigned",
+          "value": 96
+        },
+        "sequence": {
+          "type": "unsigned",
+          "value": 7
+        },
+        "timestamp": {
+          "type": "unsigned",
+          "value": 8000
+        },
+        "ssrc": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "csrcs": {
+          "type": "list",
+          "value": [
+            {
+              "type": "unsigned",
+              "value": 2
+            },
+            {
+              "type": "unsigned",
+              "value": 3
+            }
+          ]
+        },
+        "extension_present": {
+          "type": "bool",
+          "value": true
+        },
+        "extension_profile": {
+          "type": "unsigned",
+          "value": 48862
+        },
+        "extension": {
+          "type": "bytes",
+          "value": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "payload": {
+          "type": "bytes",
+          "value": [
+            102,
+            105,
+            120,
+            116,
+            117,
+            114,
+            101
+          ]
+        }
+      }
+    }
+  ]
+}

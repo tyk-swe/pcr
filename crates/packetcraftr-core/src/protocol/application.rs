@@ -12,3 +12,12 @@ pub(crate) use dns::DnsCodec;
 pub(crate) use http::HttpCodec;
 pub(crate) use ntp::NtpCodec;
 pub(crate) use tls::TlsCodec;
+
+pub mod mqtt;
+pub mod rtcp;
+pub mod rtp;
+pub mod tftp;
+pub(crate) use mqtt::MqttCodec;
+pub(crate) use rtcp::RtcpCodec;
+pub(crate) use rtp::RtpCodec;
+pub(crate) use tftp::TftpCodec;

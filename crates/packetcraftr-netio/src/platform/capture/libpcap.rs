@@ -16,6 +16,7 @@ use bytes::Bytes;
 use pcap::{Active, Capture, Error as PcapError};
 
 use self::bpf::install_capture_filter;
+pub(in crate::platform) use self::bpf::validate_capture_filter;
 use crate::{
     Error, NativeCapability, Unsupported,
     capture::live::{
@@ -39,6 +40,7 @@ const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 // The pcap crate's pcap_set_* bindings discard the status, so these call libpcap directly.
 #[link(name = "pcap")]
 unsafe extern "C" {
+    fn pcap_setdirection(handle: *mut c_void, direction: c_int) -> c_int;
     fn pcap_snapshot(handle: *mut c_void) -> c_int;
     fn pcap_set_buffer_size(handle: *mut c_void, size: c_int) -> c_int;
     fn pcap_set_tstamp_type(handle: *mut c_void, ttype: c_int) -> c_int;
@@ -75,6 +77,23 @@ pub(in crate::platform) fn open_capture(
     let mut capture = inactive
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    if let Some(direction) = native.direction {
+        let value = match direction {
+            crate::capture::Direction::Both => 0,
+            crate::capture::Direction::In => 1,
+            crate::capture::Direction::Out => 2,
+        };
+        // SAFETY: capture owns an activated live handle, and the direction is a valid pcap enum.
+        let status = unsafe { pcap_setdirection(capture.as_ptr().cast(), value) };
+        if status != 0 {
+            return Err(Error::UnsupportedCaptureSetting {
+                setting: "direction",
+                interface: interface.name.clone(),
+                message: format!("libpcap rejected capture direction {}", direction.as_str())
+                    .into(),
+            });
+        }
+    }
     if let Some(filter) = capture_filter {
         install_capture_filter(
             &mut capture,

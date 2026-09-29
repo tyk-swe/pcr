@@ -105,7 +105,7 @@ macro_rules! numeric_setting_values {
     )*};
 }
 
-numeric_setting_values!(u8, u64, usize);
+numeric_setting_values!(u8, u32, u64, usize);
 
 impl<T: SettingValue> SettingValue for Option<T> {
     fn setting_value(&self) -> Option<Value> {

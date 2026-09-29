@@ -21,5 +21,5 @@ pub(crate) use dispatch::unsupported;
 pub(crate) use dispatch::verify_interface_identity;
 pub(crate) use dispatch::{interface_route, interfaces, route, send_layer2, send_layer3};
 #[cfg(native_layer2)]
-pub(crate) use dispatch::{open_capture, timestamp_types};
+pub(crate) use dispatch::{open_capture, timestamp_types, validate_capture_filter};
 pub(crate) use execution_context::{ExecutionContext, current as execution_context};

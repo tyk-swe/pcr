@@ -75,6 +75,11 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     enforce_deadline(&Probes, deadline)?;
+    if !request.tcp_profiles.is_empty() {
+        return Err(Error::InvalidPort {
+            message: "TCP profiles require the connect scanner".to_owned(),
+        });
+    }
     let approved = approve_scan(request, authorizer, deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoints);
     enforce_deadline(&Probes, deadline)?;

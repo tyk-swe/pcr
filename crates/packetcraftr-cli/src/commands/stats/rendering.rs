@@ -113,6 +113,42 @@ pub(super) fn render_text(
             }
         }
         Table::Fragments => render_fragments(&report.ip_reassembly)?,
+        Table::Sizes => {
+            for bin in &report.sizes {
+                write_stdout_line(format_args!(
+                    "{}-{} bytes: {} frames, {} captured bytes",
+                    bin.minimum,
+                    bin.maximum
+                        .map_or_else(|| "+".to_owned(), |maximum| maximum.to_string()),
+                    bin.frames,
+                    bin.bytes
+                ))?;
+            }
+        }
+        Table::TcpTiming => {
+            for row in &report.tcp_timing {
+                write_stdout_line(format_args!(
+                    "TCP stream {}: SYN→SYN-ACK {}, SYN→ACK {}",
+                    row.stream,
+                    optional_display(row.handshake_syn_to_syn_ack.map(duration_text)),
+                    optional_display(row.handshake_syn_to_ack.map(duration_text))
+                ))?;
+                for (direction, rtt) in [("a→b", &row.ack_rtt_a_to_b), ("b→a", &row.ack_rtt_b_to_a)]
+                {
+                    write_stdout_line(format_args!(
+                        "  {direction} ACK RTT: {} samples, min {} mean {} max {}; excluded retransmission={} clock={} missing_ack={} limit={}",
+                        rtt.count,
+                        optional_display(rtt.minimum.map(duration_text)),
+                        optional_display(rtt.mean.map(duration_text)),
+                        optional_display(rtt.maximum.map(duration_text)),
+                        rtt.excluded_retransmission,
+                        rtt.excluded_clock_regression,
+                        rtt.excluded_missing_ack,
+                        rtt.excluded_limit
+                    ))?;
+                }
+            }
+        }
     }
     render_diagnostics_text(diagnostics)
 }

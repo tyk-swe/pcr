@@ -12,6 +12,7 @@ mod limits;
 mod link_type;
 mod map;
 mod merge;
+mod operations;
 mod pcapng;
 mod reader;
 mod record;
@@ -29,6 +30,10 @@ pub use limits::{
 };
 pub use map::{MapReport, map_frames};
 pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
+pub use operations::{
+    DedupLimits, DedupReport, ShiftReport, SplitLimits, SplitReport, SplitSelector, TimeShift,
+    dedup, shift_time, split,
+};
 pub use reader::Reader;
 pub use record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind};
 pub use rewrite::{RewriteReport, SelectionReport, rewrite, select};

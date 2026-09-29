@@ -146,6 +146,7 @@ struct Compiler<'a> {
     expect_operand: bool,
     depth: usize,
     terms: usize,
+    compiled_regex_bytes: usize,
     index: usize,
 }
 
@@ -185,6 +186,7 @@ impl<'a> Compiler<'a> {
             expect_operand: true,
             depth: 0,
             terms: 0,
+            compiled_regex_bytes: 0,
             index: 0,
         }
     }
@@ -232,6 +234,16 @@ impl<'a> Compiler<'a> {
                     self.limits,
                     &mut self.requirements,
                 )?;
+                if let Predicate::Advanced(advanced) = &predicate {
+                    self.compiled_regex_bytes = self
+                        .compiled_regex_bytes
+                        .checked_add(advanced.compiled_storage())
+                        .filter(|bytes| *bytes <= super::advanced::MAX_COMPILED_BYTES)
+                        .ok_or_else(|| Error::Syntax {
+                            offset: *offset,
+                            message: "regexes exceed 1 MiB cumulative compiled storage".to_owned(),
+                        })?;
+                }
                 self.program.push(Op::Leaf(predicate));
                 self.index = next;
                 self.expect_operand = false;
@@ -335,6 +347,9 @@ fn parse_predicate(
     limits: &Limits,
     requirements: &mut Requirements,
 ) -> Result<(Predicate, usize), Error> {
+    if let Some(result) = super::advanced::parse(tokens, start, registry, limits, requirements)? {
+        return Ok(result);
+    }
     let (mut field, mut index) = match parse_subject(tokens, start, registry)? {
         Subject::Field { field, index } => (field, index),
         Subject::Predicate(predicate, index) => return Ok((predicate, index)),
@@ -351,12 +366,16 @@ fn parse_predicate(
     parse_field_predicate(tokens, index, field, limits)
 }
 
-enum Subject {
+pub(super) enum Subject {
     Field { field: FieldRef, index: usize },
     Predicate(Predicate, usize),
 }
 
-fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Result<Subject, Error> {
+pub(super) fn parse_subject(
+    tokens: &[Spanned],
+    start: usize,
+    registry: &Registry,
+) -> Result<Subject, Error> {
     // start is the index of the Word token consume_operand already read
     let Spanned { token, offset } = &tokens[start];
     let offset = *offset;
@@ -435,7 +454,7 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
     Ok(Subject::Field { field, index })
 }
 
-fn record_requirements(field: &FieldRef, requirements: &mut Requirements) {
+pub(super) fn record_requirements(field: &FieldRef, requirements: &mut Requirements) {
     if let FieldSource::Stream(transport) = &field.source {
         requirements.require_stream(*transport);
     }
@@ -570,7 +589,7 @@ fn parse_membership(
     Ok((Predicate::Membership { field, values }, index))
 }
 
-fn parse_literal(
+pub(super) fn parse_literal(
     field: &FieldRef,
     tokens: &[Spanned],
     index: usize,
@@ -605,7 +624,7 @@ fn parse_literal(
     Ok((value, index.saturating_add(1)))
 }
 
-fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), Error> {
+pub(super) fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), Error> {
     if field.specs.is_empty() {
         return Ok(());
     }

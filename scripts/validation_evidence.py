@@ -9,7 +9,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-EVIDENCE_VERSION = 1
+EVIDENCE_VERSION = 2
 TSHARK_VERSION = '4.6.4'
 GIT_TIMEOUT = 30
 
@@ -36,6 +36,18 @@ DECODE_FIELDS = (
     ('dns', 'question_count', 'dns.count.queries', 'integer'),
     ('dns', 'answer_count', 'dns.count.answers', 'integer'),
 )
+
+# Required independent fields for the new codec fixtures. Each generated capture
+# contains exactly one physical frame and must report every listed comparison.
+DECODE_PARITY_FIELDS = {
+    'parity-lldp': ('lldp.time_to_live',),
+    'parity-stp': ('stp.version', 'stp.type', 'stp.root.cost', 'stp.port'),
+    'parity-tftp': ('tftp.opcode', 'tftp.source_file'),
+    'parity-rtp': ('rtp.p_type', 'rtp.seq', 'rtp.timestamp', 'rtp.ssrc'),
+    'parity-rtcp': ('rtcp.pt',),
+    'parity-mqtt': ('mqtt.msgtype', 'mqtt.topic'),
+    'parity-http': ('http.request.method', 'http.request.uri', 'http.request.version'),
+}
 
 # Expected physical-frame counts, independent of capture generation and decoding.
 DECODE_PROFILES = {
@@ -121,6 +133,14 @@ def validate_decoder(report, expected_tshark=TSHARK_VERSION):
             raise ValueError(f"decoder capture {capture['name']}: unexpected physical frame count")
         if type(capture.get('mismatches')) is not int or capture['mismatches'] != 0:
             raise ValueError(f"decoder capture {capture['name']}: missing or nonzero mismatch count")
+    for capture in named_results(report.get('parity_captures'),
+                                 DECODE_PARITY_FIELDS, 'parity decoder captures'):
+        if (not valid_digest(capture.get('sha256')) or capture.get('frames') != 1
+                or type(capture.get('frames')) is not int
+                or type(capture.get('mismatches')) is not int or capture['mismatches'] != 0):
+            raise ValueError(f"parity decoder capture {capture['name']}: incomplete or failed evidence")
+        if capture.get('fields') != list(DECODE_PARITY_FIELDS[capture['name']]):
+            raise ValueError(f"parity decoder capture {capture['name']}: incomplete comparison fields")
     ja3 = report.get('tls_ja3')
     if not isinstance(ja3, dict) or ja3.get('capture') != 'tls-handshake':
         raise ValueError('decoder evidence lacks the named TLS JA3 comparison')

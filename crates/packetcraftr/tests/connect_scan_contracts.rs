@@ -72,6 +72,9 @@ fn request() -> scan::Request {
     scan::Request {
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,

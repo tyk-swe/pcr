@@ -8,6 +8,63 @@ mod process_support;
 
 use capture_support::{ethernet_frame, write_pcapng};
 use common::{parse_json, run, run_success};
+
+#[test]
+fn cidr_maps_preserve_host_bits_and_match_original_fields_before_fixed_overrides() {
+    use packetcraftr_core::{
+        capture_file::Reader,
+        decode::Dissector,
+        frame::LinkType,
+        protocol::{builtin, network::Ipv4, transport::Tcp},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source.pcapng");
+    let target = directory.path().join("mapped.pcapng");
+    let frame = ethernet_frame(Tcp::default(), 5);
+    write_pcapng(&source, LinkType::ETHERNET, &[frame]);
+    run_success(&[
+        "rewrite",
+        source.to_str().unwrap(),
+        "--write",
+        target.to_str().unwrap(),
+        "--source-cidr-map",
+        "192.0.2.0/24=203.0.113.0/24",
+        "--destination-cidr-map",
+        "198.51.100.0/24=192.0.2.0/24",
+        "--filter",
+        "ip.src == 192.0.2.1",
+        "--destination-ip",
+        "192.0.2.99",
+    ]);
+    let frame = Reader::new(std::fs::File::open(target).unwrap())
+        .unwrap()
+        .next_frame()
+        .unwrap()
+        .unwrap();
+    let decoded = Dissector::new(builtin::registry())
+        .decode(frame, Default::default())
+        .unwrap();
+    let ip = decoded.packet.get::<Ipv4>().unwrap();
+    assert_eq!(ip.source.to_string(), "203.0.113.1");
+    assert_eq!(ip.destination.to_string(), "192.0.2.99");
+    let denied = directory.path().join("overlap.pcapng");
+    assert_eq!(
+        run(&[
+            "rewrite",
+            source.to_str().unwrap(),
+            "--write",
+            denied.to_str().unwrap(),
+            "--source-cidr-map",
+            "192.0.2.0/24=203.0.113.0/24",
+            "--source-cidr-map",
+            "192.0.2.128/25=203.0.113.128/25"
+        ])
+        .status
+        .code(),
+        Some(2)
+    );
+    assert!(!denied.exists());
+}
 #[test]
 fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_capture() {
     use packetcraftr_core::{

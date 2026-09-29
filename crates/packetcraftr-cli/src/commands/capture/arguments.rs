@@ -68,6 +68,23 @@ Examples:
     --capture-filter 'udp port 53' \
     --filter 'udp.source_port == 53'";
 
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+pub(crate) enum Direction {
+    #[default]
+    Both,
+    In,
+    Out,
+}
+impl From<Direction> for packetcraftr_netio::capture::Direction {
+    fn from(value: Direction) -> Self {
+        match value {
+            Direction::Both => Self::Both,
+            Direction::In => Self::In,
+            Direction::Out => Self::Out,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     #[command(flatten)]
@@ -117,6 +134,12 @@ pub(crate) struct Args {
     /// Resolver-free core libpcap/Npcap BPF, applied before capture.
     #[arg(long, value_name = "BPF")]
     pub(crate) capture_filter: Option<String>,
+    /// Override the global BPF for a selected source; repeat NAME_OR_INDEX=BPF.
+    #[arg(long, value_name = "NAME_OR_INDEX=BPF")]
+    pub(crate) capture_filter_for: Vec<String>,
+    /// Select both directions, ingress only, or egress only before readiness.
+    #[arg(long, value_enum)]
+    pub(crate) direction: Option<Direction>,
     /// Keep only frames matching PacketcraftR's post-capture display filter.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,

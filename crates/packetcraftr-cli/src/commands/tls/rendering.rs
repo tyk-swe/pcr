@@ -51,7 +51,23 @@ pub(super) fn render_session(
     state.select();
     let session = Session::try_from(session).map_err(CliError::classified)?;
     match format {
-        ToolFormat::Text => write_stdout_line(format_args!("{}", session_line(&session))),
+        ToolFormat::Text => {
+            write_stdout_line(format_args!("{}", session_line(&session)))?;
+            if let Some(chain) = &session.certificates {
+                write_stdout_line(format_args!(
+                    "  certificates: {} ({} entries)",
+                    chain.status,
+                    chain.entries.len()
+                ))?;
+                for (index, certificate) in chain.entries.iter().enumerate() {
+                    write_stdout_line(format_args!(
+                        "  certificate {index}: sha256={} der={}",
+                        certificate.sha256, certificate.der_hex
+                    ))?;
+                }
+            }
+            Ok(())
+        }
         ToolFormat::Json => {
             state.retained.push(|| session);
             Ok(())
@@ -266,6 +282,7 @@ mod tests {
         let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
         let id = scopes.intern(None, Vec::new()).unwrap();
         Session {
+            certificates: None,
             scope: scopes.definition(id).unwrap().try_into().unwrap(),
             session: 0,
             tcp_stream: 3,

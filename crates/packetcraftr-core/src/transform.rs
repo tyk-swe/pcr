@@ -3,11 +3,13 @@
 
 //! Explicit, bounded transformations of complete packet bytes.
 
+mod cidr;
 mod error;
 mod fields;
 mod fragment;
 mod rewrite;
 pub mod rules;
+pub use cidr::{CidrError, CidrMap, CidrRemap, MAX_CIDR_MAPS, rewrite_with_cidr_maps};
 pub use error::{Error, InvalidInput, Limit, Unsupported};
 pub use fields::{
     ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEditOutcome, FieldEdits,

@@ -14,7 +14,7 @@ import json
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v6"
+SCHEMA = "packetcraftr.output/v7"
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
 MAX_RULE_DECLARATIONS = 256

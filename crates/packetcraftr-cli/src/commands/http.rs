@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bodies are counted and discarded, never retained.
+//! Optional entity export streams body bytes into staged files.
 
 pub(super) mod arguments;
+mod export;
 mod rendering;
 
 use packetcraftr_core::analysis::{
@@ -31,7 +32,7 @@ impl super::Spec for Args {
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_http_body_bytes: Bytes @ Operation]);
+        crate::resources::declare!(settings, self, [max_http_body_bytes: Bytes @ Operation, max_http_export_bytes: Bytes @ CaptureStorage]);
         self.application.resources(settings);
         self.limits.resources(
             settings,
@@ -52,8 +53,25 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     args.application.validate_output()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
+    let mut export = args
+        .write
+        .as_deref()
+        .map(|path| {
+            export::Export::new(
+                path,
+                args.decode_content,
+                args.max_http_export_bytes,
+                args.max_http_body_bytes,
+            )
+        })
+        .transpose()?;
     let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
+    let collector = if export.is_some() {
+        collector.with_body_chunk_limit(args.max_http_export_bytes)
+    } else {
+        collector
+    };
     let selector = args
         .stream
         .as_ref()
@@ -78,11 +96,29 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
         format,
         stream,
         |output, event| match event {
-            Event::Message(message) => output.emit(
-                wire::Message::try_from(*message).map_err(CliError::classified)?,
-                &mut messages,
-                rendering::render_message,
-            ),
+            Event::BodyChunk {
+                stream,
+                generation,
+                index,
+                bytes,
+                ..
+            } => {
+                if let Some(export) = &mut export {
+                    export.chunk(stream, generation, index, &bytes)?;
+                }
+                Ok(())
+            }
+            Event::Message(message) => {
+                let entity = export
+                    .as_mut()
+                    .map(|export| export.message(&message))
+                    .transpose()?
+                    .flatten();
+                let mut message =
+                    wire::Message::try_from(*message).map_err(CliError::classified)?;
+                message.entity = entity;
+                output.emit(message, &mut messages, rendering::render_message)
+            }
             Event::Issue(issue) => output.emit(
                 wire::Issue::from(issue),
                 &mut issues,
@@ -90,6 +126,9 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             ),
         },
     )?;
+    if let Some(export) = export {
+        export.finish()?;
+    }
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
     match format {

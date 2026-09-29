@@ -88,6 +88,12 @@ pub enum Error {
         link_type: u32,
         requested: LinkMode,
     },
+    #[error("replay transformation failed at source index {source_index}")]
+    Transform {
+        source_index: u64,
+        #[source]
+        source: packetcraftr_core::transform::Error,
+    },
     #[error("replay frame selection failed at source index {source_index}")]
     Selection {
         source_index: u64,
@@ -143,6 +149,7 @@ impl Error {
             | Self::UnsupportedLinkType { source_index, .. }
             | Self::LinkModeMismatch { source_index, .. }
             | Self::Selection { source_index, .. }
+            | Self::Transform { source_index, .. }
             | Self::ConflictingInterfaces { source_index }
             | Self::Unmapped { source_index }
             | Self::Authorization { source_index, .. }
@@ -208,6 +215,7 @@ impl Classified for Error {
                 )
             }
             Self::Selection { source, .. } => source.classification(),
+            Self::Transform { source, .. } => source.classification(),
             // Routing is part of the request, so a frame it cannot route is
             // the caller's to fix.
             Self::ConflictingInterfaces { .. } | Self::Unmapped { .. } => {

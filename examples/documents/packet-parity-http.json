@@ -1,0 +1,117 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "http",
+      "fields": {
+        "method": {
+          "type": "text",
+          "value": "POST"
+        },
+        "target": {
+          "type": "bytes",
+          "value": [
+            47,
+            102,
+            105,
+            120,
+            116,
+            117,
+            114,
+            101
+          ]
+        },
+        "version": {
+          "type": "text",
+          "value": "HTTP/1.1"
+        },
+        "headers": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "text",
+                  "value": "Host"
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    101,
+                    120,
+                    97,
+                    109,
+                    112,
+                    108,
+                    101,
+                    46,
+                    116,
+                    101,
+                    115,
+                    116
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "text",
+                  "value": "X-Order"
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    102,
+                    105,
+                    114,
+                    115,
+                    116
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "text",
+                  "value": "X-Order"
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    115,
+                    101,
+                    99,
+                    111,
+                    110,
+                    100
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "body": {
+          "type": "bytes",
+          "value": [
+            102,
+            105,
+            120,
+            116,
+            117,
+            114,
+            101
+          ]
+        },
+        "chunked": {
+          "type": "bool",
+          "value": true
+        }
+      }
+    }
+  ]
+}

@@ -61,6 +61,9 @@ pub(super) fn render_text(
                 optional_duration(evidence.latency),
                 evidence.reason,
             ))?;
+            if let Some(mtu) = evidence.advertised_mtu {
+                write_stdout_line(format_args!("    advertised_mtu={mtu}"))?;
+            }
             if let Some(application) = &evidence.application {
                 write_stdout_line(format_args!(
                     "    profile={} validation={}: {}",
@@ -143,6 +146,28 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
             endpoint.port,
             endpoint.classification.as_str()
         ))?;
+        for probe in &endpoint.probes {
+            if let Some(banner) = &probe.banner {
+                write_stdout_line(format_args!(
+                    "  sequence={} profile={} validation={} request_bytes_written={} response_bytes={} banner_preview_hex={}{} error={}",
+                    probe.sequence,
+                    banner.application.profile,
+                    banner.application.status.as_str(),
+                    banner.request_bytes_written,
+                    banner.response_hex.len() / 2,
+                    &banner.response_hex[..banner.response_hex.len().min(128)],
+                    if banner.response_hex.len() > 128 {
+                        "..."
+                    } else {
+                        ""
+                    },
+                    banner
+                        .error
+                        .as_ref()
+                        .map_or("none", |error| error.message.as_str())
+                ))?;
+            }
+        }
     }
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",

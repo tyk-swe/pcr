@@ -122,6 +122,9 @@ fn connect_windows_overlap_with_stable_identity_and_closed_socket_evidence() {
     let request = Request {
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
@@ -183,6 +186,9 @@ fn connect_scan_reports_rtt_statistics_across_verdicts() {
     let request = Request {
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
@@ -251,6 +257,9 @@ fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
     let request = Request {
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,

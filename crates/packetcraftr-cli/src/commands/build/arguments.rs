@@ -28,6 +28,9 @@ pub(crate) struct Args {
     /// Enforce protocol invariants or preserve explicitly permissive values.
     #[arg(long, value_enum, default_value_t = BuildMode::Strict)]
     pub(crate) mode: BuildMode,
+    /// Explicit transport bindings also govern strict packet construction.
+    #[command(flatten)]
+    pub(crate) decode: crate::command_options::DecodeArgs,
     #[command(flatten)]
     pub(crate) capture: CaptureOutputArgs,
     #[command(flatten)]

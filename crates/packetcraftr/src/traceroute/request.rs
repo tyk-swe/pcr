@@ -77,6 +77,9 @@ impl Limits {
 pub struct Request {
     pub target: Target,
     pub strategy: Transport,
+    pub udp_port_mode: super::UdpPortMode,
+    pub cycles: u32,
+    pub cycle_interval: Duration,
     pub address_family: Family,
     /// UDP base destination port or fixed TCP destination port. ICMP requires
     /// this to be absent.
@@ -96,6 +99,26 @@ pub struct Request {
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
+        if self.cycles == 0 || self.cycles > 1024 {
+            return Err(Error::InvalidLimit {
+                field: "cycles",
+                value: u64::from(self.cycles),
+                reason: "must be within 1..=1024".to_owned(),
+            });
+        }
+        if self.cycles > 1
+            && self.cycle_interval.saturating_mul(self.cycles - 1) > self.limits.max_duration
+        {
+            return Err(Error::InvalidDuration {
+                value: self.cycle_interval,
+                maximum: self.limits.max_duration,
+            });
+        }
+        if self.udp_port_mode == super::UdpPortMode::Fixed && self.strategy != Transport::Udp {
+            return Err(Error::InvalidPort {
+                message: "fixed UDP ports require UDP traceroute".to_owned(),
+            });
+        }
         if self.first_hop == 0 {
             return Err(Error::InvalidLimit {
                 field: "first_hop",
@@ -172,6 +195,7 @@ impl Request {
     pub(in crate::traceroute) fn total_probe_count(&self) -> Result<usize, Error> {
         self.hop_count()
             .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
+            .and_then(|count| count.checked_mul(self.cycles as usize))
             .ok_or(Error::InvalidLimit {
                 field: "probes",
                 value: u64::MAX,

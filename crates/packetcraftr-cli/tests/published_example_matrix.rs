@@ -32,7 +32,10 @@ fn published_example_names() -> BTreeSet<String> {
 
 fn expected_kinds(command: Command) -> &'static [&'static str] {
     match command {
-        Command::Rewrite
+        Command::Dedup
+        | Command::Split
+        | Command::ShiftTime
+        | Command::Rewrite
         | Command::Export
         | Command::Merge
         | Command::Exchange
@@ -43,7 +46,8 @@ fn expected_kinds(command: Command) -> &'static [&'static str] {
         | Command::Interfaces
         | Command::Routes
         | Command::Stats => &["success", "error"],
-        Command::Fragment
+        Command::Websocket
+        | Command::Fragment
         | Command::Dissect
         | Command::Read
         | Command::Capture

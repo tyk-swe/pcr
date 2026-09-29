@@ -79,6 +79,9 @@ fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
             Some(i128::from(*left).cmp(&i128::from(*right)))
         }
         (FieldValue::Text(left), Literal::Text(right)) => Some(left.as_str().cmp(right.as_str())),
+        (FieldValue::Text(left), Literal::Bytes(right)) => {
+            Some(left.as_bytes().cmp(right.as_ref()))
+        }
         (FieldValue::Bytes(left), Literal::Bytes(right)) => Some(left.as_ref().cmp(right.as_ref())),
         (FieldValue::Bytes(left), Literal::Mac(right)) => Some(left.as_ref().cmp(right.as_slice())),
         (FieldValue::Bytes(left), Literal::Text(right)) => {

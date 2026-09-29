@@ -135,7 +135,7 @@ fn malformed_and_gap_messages_keep_their_contributing_sources() {
         .iter()
         .filter_map(|event| match event {
             Event::Message(message) => Some(message.as_ref()),
-            Event::Issue(_) => None,
+            Event::Issue(_) | Event::BodyChunk { .. } => None,
         })
         .collect();
     let [message] = messages.as_slice() else {

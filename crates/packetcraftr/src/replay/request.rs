@@ -202,9 +202,25 @@ impl<R> Source<R> {
 pub(super) trait Selector {
     fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error>;
     fn interface(&mut self, source_index: u64, frame: &Frame) -> Result<Interface, Error>;
+    fn transform(
+        &mut self,
+        _source_index: u64,
+        frame: &Frame,
+        _maximum: usize,
+    ) -> Result<Frame, Error> {
+        Ok(frame.clone())
+    }
 }
 
 impl<T: Selector + ?Sized> Selector for &mut T {
+    fn transform(
+        &mut self,
+        source_index: u64,
+        frame: &Frame,
+        maximum: usize,
+    ) -> Result<Frame, Error> {
+        (**self).transform(source_index, frame, maximum)
+    }
     fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error> {
         (**self).select(source_index, frame)
     }
@@ -217,9 +233,28 @@ impl<T: Selector + ?Sized> Selector for &mut T {
 pub(super) struct Selection {
     filter: Option<FrameSelector>,
     routing: Routing,
+    rewrite: packetcraftr_core::transform::HeaderRewrite,
 }
 
 impl Selector for Selection {
+    fn transform(
+        &mut self,
+        source_index: u64,
+        frame: &Frame,
+        maximum: usize,
+    ) -> Result<Frame, Error> {
+        packetcraftr_core::transform::rewrite(
+            frame,
+            &self.rewrite,
+            packetcraftr_core::transform::RewriteLimits {
+                max_output_bytes: maximum,
+            },
+        )
+        .map_err(|source| Error::Transform {
+            source_index,
+            source,
+        })
+    }
     fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error> {
         let Some(filter) = &self.filter else {
             return Ok(true);
@@ -242,6 +277,7 @@ pub struct Request<R> {
     pub filter: Option<FrameSelector>,
     pub routing: Routing,
     pub options: Options,
+    rewrite: packetcraftr_core::transform::HeaderRewrite,
 }
 
 impl<R> Request<R> {
@@ -252,6 +288,7 @@ impl<R> Request<R> {
             filter: None,
             routing,
             options,
+            rewrite: Default::default(),
         }
     }
 
@@ -261,7 +298,17 @@ impl<R> Request<R> {
         self
     }
 
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: packetcraftr_core::transform::HeaderRewrite) -> Self {
+        self.rewrite = rewrite;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), Error> {
+        self.rewrite.validate().map_err(|source| Error::Transform {
+            source_index: 0,
+            source,
+        })?;
         validate(&self.source, &self.options)
     }
 
@@ -271,6 +318,7 @@ impl<R> Request<R> {
             selector: Selection {
                 filter: self.filter,
                 routing: self.routing,
+                rewrite: self.rewrite,
             },
             options: self.options,
         }

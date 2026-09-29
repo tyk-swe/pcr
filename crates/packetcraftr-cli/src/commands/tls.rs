@@ -80,6 +80,11 @@ pub(super) fn run(
         return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
     }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
+    let collector = if arguments.certificates {
+        collector.with_certificates()
+    } else {
+        collector
+    };
 
     let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     let session = analysis::Session::new(

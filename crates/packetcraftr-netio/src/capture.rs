@@ -26,8 +26,8 @@ pub use limits::{
 };
 pub use record::{Captured, RecordIdentity, Stats};
 pub use settings::{
-    MAX_NATIVE_BUFFER_SIZE, MAX_TIMESTAMP_TYPES, NativeSettings, Realized, RealizedSettings,
-    TimestampPrecision, TimestampSource, TimestampType,
+    Direction, MAX_NATIVE_BUFFER_SIZE, MAX_TIMESTAMP_TYPES, NativeSettings, Realized,
+    RealizedSettings, TimestampPrecision, TimestampSource, TimestampType,
 };
 
 pub const MAX_FILTER_BYTES: usize = 64 * 1024;
@@ -157,6 +157,10 @@ pub trait Provider: Send + Sync {
     type Capture: Session;
 
     fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error>;
+    /// Validates all source settings before a group activates its first source.
+    fn validate_capture(&self, request: &Request, _deadline: &Deadline) -> Result<(), Error> {
+        request.validate()
+    }
 
     fn timestamp_types(
         &self,
@@ -183,6 +187,10 @@ impl Provider for SystemProvider {
 
     fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error> {
         system::open(request, deadline)
+    }
+
+    fn validate_capture(&self, request: &Request, deadline: &Deadline) -> Result<(), Error> {
+        system::validate_capture(request, deadline)
     }
 
     fn timestamp_types(

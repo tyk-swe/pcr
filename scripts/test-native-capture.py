@@ -55,7 +55,7 @@ class NativeEvidenceTests(unittest.TestCase):
                     SMOKE.completed_sources(row)
 
     def test_error_terminal_is_not_capture_completion(self):
-        row = {"schema": "packetcraftr.output/v6", "command": "capture",
+        row = {"schema": "packetcraftr.output/v7", "command": "capture",
                "sequence": 0, "event": "error", "status": "error",
                "error": {"code": "fixture.native_error"}}
         parsed = self.terminal(json.dumps(row).encode() + b"\n")

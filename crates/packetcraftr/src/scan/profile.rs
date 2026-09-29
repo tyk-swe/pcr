@@ -19,7 +19,9 @@ use packetcraftr_core::{
 use serde::Serialize;
 
 mod document;
+mod tcp;
 pub use document::compile;
+pub use tcp::{TcpProfile, compile_tcp};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Compiled {
@@ -43,6 +45,8 @@ pub enum Error {
     Invalid(&'static str),
     #[error(transparent)]
     Document(#[from] udp_profiles::Error),
+    #[error(transparent)]
+    TcpDocument(#[from] packetcraftr_core::document::tcp_profiles::Error),
     #[error("each UDP profile needs 1..=4096 port entries")]
     PortCount { count: usize },
     #[error("compiled UDP profiles exceed 1 MiB")]
@@ -58,6 +62,7 @@ impl Classified for Error {
         match self {
             Self::Invalid(_) => Classification::new("cli.udp_profile", Kind::Usage, None),
             Self::Document(source) => source.classification(),
+            Self::TcpDocument(source) => source.classification(),
             Self::PortCount { .. }
             | Self::Storage
             | Self::ConflictingPort { .. }

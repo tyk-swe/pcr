@@ -29,11 +29,26 @@ pub(super) fn render_text(
         optional_display(result.destination_port),
     ))?;
     for hop in &result.hops {
-        write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
+        write_stdout_line(format_args!(
+            "hop={} sent={} received={} lost={} rtt min/avg/max={}/{}/{} responders={}",
+            hop.hop_limit,
+            hop.rtt.sent,
+            hop.rtt.received,
+            hop.rtt.lost,
+            optional_duration(hop.rtt.min),
+            optional_duration(hop.rtt.avg),
+            optional_duration(hop.rtt.max),
+            hop.responders
+                .iter()
+                .map(|(address, count)| format!("{address}:{count}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ))?;
         for probe in &hop.probes {
             write_stdout_line(format_args!(
-                "  sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
+                "  sequence={} cycle={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
                 probe.sequence,
+                probe.cycle,
                 probe.attempt,
                 probe.status.as_str(),
                 probe
@@ -46,6 +61,9 @@ pub(super) fn render_text(
                 optional_display(probe.destination_port),
                 probe.reason,
             ))?;
+            if let Some(mtu) = probe.advertised_mtu {
+                write_stdout_line(format_args!("    advertised_mtu={mtu}"))?;
+            }
             if let Some(frame) = &probe.frame {
                 write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
             }

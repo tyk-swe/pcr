@@ -339,6 +339,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .collect::<Result<Vec<_>, _>>()?;
         let mut plan = prepare::plan(executor, &planned, options, deadline, preparation)?;
         let request = GroupRequest {
+            filters: Vec::new(),
             interfaces: plan.interfaces.clone(),
             limits: executor.collection.capture,
             filter: None,
@@ -827,6 +828,7 @@ mod tests {
                 attempt: 1,
                 udp_payload: bytes::Bytes::new(),
                 udp_profile: None,
+                tcp_mode: Default::default(),
             },
             Duration::from_millis(1),
         )];

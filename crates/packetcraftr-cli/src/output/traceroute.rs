@@ -33,6 +33,7 @@ published_enum! {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
+    pub cycle: u32,
     pub hop_limit: u8,
     pub attempt: u32,
     pub strategy: Transport,
@@ -52,12 +53,16 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Captured>,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advertised_mtu: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Hop {
     pub hop_limit: u8,
     pub probes: Vec<Probe>,
+    pub responders: std::collections::BTreeMap<IpAddr, u64>,
+    pub rtt: super::scan::Rtt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -100,6 +105,8 @@ impl TryFrom<library::Aggregate> for Published<Report> {
             .map(|hop| {
                 Ok(Hop {
                     hop_limit: hop.hop_limit,
+                    responders: hop.responders,
+                    rtt: hop.rtt.into(),
                     probes: hop
                         .probes
                         .into_iter()
@@ -206,6 +213,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
     fn try_from(probe: library::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
             sequence: probe.sequence,
+            cycle: probe.cycle,
             hop_limit: probe.hop_limit,
             attempt: probe.attempt,
             strategy: probe.strategy.into(),
@@ -219,6 +227,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             latency: probe.latency,
             frame: probe.response.map(Captured::try_from).transpose()?,
             reason: probe.reason,
+            advertised_mtu: probe.advertised_mtu,
         })
     }
 }

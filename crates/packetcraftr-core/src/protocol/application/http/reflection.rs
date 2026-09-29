@@ -15,6 +15,9 @@ reflective_layer! {
     pub(super) fn http_schema() => { protocol: crate::layer::Id::new(NAME), name: "HTTP/1" }
     impl Http {
             "wire" => {kind:Bytes,derived:false,required:false,description:"Exact header bytes",get |layer| Some(FieldValue::Bytes(layer.head.wire().clone())),set |_layer,_value,name| read_only(http_schema(),name)},
+            "body" => {kind:Bytes,derived:false,required:false,description:"Constructed body with derived framing",get |layer|Some(FieldValue::Bytes(layer.constructed_body.clone())),set |_layer,_value,name| read_only(http_schema(),name)},
+            "chunked" => {kind:Bool,derived:true,required:false,description:"Chunked transfer framing",get |layer|Some(FieldValue::Bool(layer.head.body(None).ok()==Some(super::Body::Chunked))),set |_layer,_value,name| read_only(http_schema(),name)},
+            "reason" => {kind:Bytes,derived:false,required:false,description:"Response reason phrase",get |layer|match &layer.head.start {StartLine::Response {reason,..}=>Some(FieldValue::Bytes(reason.clone())),_=>None},set |_layer,_value,name|read_only(http_schema(),name)},
             "method" => {kind:Text,derived:false,required:false,description:"Request method",get |layer| layer.head.method().map(|s|FieldValue::Text(s.to_owned())),set |_layer,_value,name| read_only(http_schema(),name)},
             "target" => {kind:Bytes,derived:false,required:false,description:"Exact request target",get |layer| match &layer.head.start {StartLine::Request {target,..}=>Some(FieldValue::Bytes(target.clone())),_=>None},set |_layer,_value,name| read_only(http_schema(),name)},
             "status" => {kind:Unsigned,derived:false,required:false,description:"Response status code",get |layer| layer.head.status().map(|n|FieldValue::Unsigned(u64::from(n))),set |_layer,_value,name| read_only(http_schema(),name)},

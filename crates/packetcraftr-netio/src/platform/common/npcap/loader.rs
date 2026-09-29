@@ -29,8 +29,9 @@ use super::{
     abi::{
         NPCAP_DEPENDENCY, PCAP_CHAR_ENC_UTF_8, PCAP_ERROR_BUFFER_SIZE, PcapActivate, PcapBreakLoop,
         PcapClose, PcapCompile, PcapCreate, PcapDatalink, PcapFreeCode, PcapFreeTstampTypes,
-        PcapGetError, PcapGetInteger, PcapInit, PcapListTstampTypes, PcapNextEx, PcapSendPacket,
-        PcapSetFilter, PcapSetInteger, PcapSnapshot, PcapStats, PcapTstampTypeToStr,
+        PcapGetError, PcapGetInteger, PcapInit, PcapListTstampTypes, PcapNextEx, PcapOpenDead,
+        PcapSendPacket, PcapSetFilter, PcapSetInteger, PcapSnapshot, PcapStats,
+        PcapTstampTypeToStr,
     },
     error::{error_buffer_message, interface_conversion_error},
 };
@@ -41,6 +42,7 @@ pub(in crate::platform) struct NpcapApi {
     // Keeps the DLL loaded while function pointers are used.
     pub(in crate::platform) _library: Library,
     pub(in crate::platform) pcap_create: PcapCreate,
+    pub(in crate::platform) pcap_open_dead: Option<PcapOpenDead>,
     pub(in crate::platform) pcap_set_snaplen: PcapSetInteger,
     pub(in crate::platform) pcap_set_promisc: PcapSetInteger,
     pub(in crate::platform) pcap_set_timeout: PcapSetInteger,
@@ -108,6 +110,7 @@ impl NpcapApi {
             pcap_close: PcapClose,
         });
         load_optional_symbols!(&library, {
+            pcap_open_dead: PcapOpenDead,
             pcap_set_buffer_size: PcapSetInteger,
             pcap_set_tstamp_type: PcapSetInteger,
             pcap_set_tstamp_precision: PcapSetInteger,
@@ -133,6 +136,7 @@ impl NpcapApi {
         Ok(Self {
             _library: library,
             pcap_create,
+            pcap_open_dead,
             pcap_set_snaplen,
             pcap_set_promisc,
             pcap_set_timeout,

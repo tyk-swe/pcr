@@ -48,6 +48,8 @@ published_enum! {
     }
 }
 
+published_enum! { pub enum Direction from native::Direction { Both => "both", In => "in", Out => "out", } }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Realized<T> {
     pub requested: Option<T>,
@@ -67,6 +69,7 @@ impl<T, U: Into<T>> From<native::Realized<U>> for Realized<T> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct RealizedSettings {
+    pub direction: Realized<Direction>,
     pub buffer_size: Realized<usize>,
     pub timestamp_source: Realized<TimestampSource>,
     pub timestamp_precision: Realized<TimestampPrecision>,
@@ -75,6 +78,7 @@ pub struct RealizedSettings {
 impl From<native::RealizedSettings> for RealizedSettings {
     fn from(value: native::RealizedSettings) -> Self {
         Self {
+            direction: value.direction.into(),
             buffer_size: value.buffer_size.into(),
             timestamp_source: value.timestamp_source.into(),
             timestamp_precision: value.timestamp_precision.into(),

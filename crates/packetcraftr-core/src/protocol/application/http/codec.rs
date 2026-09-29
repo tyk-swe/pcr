@@ -39,7 +39,10 @@ impl TryFrom<&[u8]> for Http {
                 "header wire includes body or trailing bytes",
             ));
         }
-        Ok(Self { head })
+        Ok(Self {
+            head,
+            constructed_body: Bytes::new(),
+        })
     }
 }
 impl Head {
@@ -343,15 +346,24 @@ impl LayerCodec for HttpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
-        _payload: &[u8],
+        payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<Http>(NAME, layer)?;
-        ensure_encode_budget(NAME, layer.head.wire().len(), context)?;
-        Ok(
-            EncodedLayer::header(layer.head.wire().to_vec(), Box::new(layer.clone()))
-                .with_fields(http_layout()),
-        )
+        if !layer.constructed_body.is_empty() && !payload.is_empty() {
+            return Err(invalid(
+                NAME,
+                "constructed body cannot also have a payload layer",
+            ));
+        }
+        ensure_encode_budget(
+            NAME,
+            layer.head.wire().len() + layer.constructed_body.len(),
+            context,
+        )?;
+        let mut wire = layer.head.wire().to_vec();
+        wire.extend_from_slice(&layer.constructed_body);
+        Ok(EncodedLayer::header(wire, Box::new(layer.clone())).with_fields(http_layout()))
     }
     fn decode(
         &self,
@@ -362,7 +374,10 @@ impl LayerCodec for HttpCodec {
             return Ok(Raw::decoded(input));
         };
         Ok(DecodedLayer {
-            layer: Box::new(Http { head }),
+            layer: Box::new(Http {
+                head,
+                constructed_body: Bytes::new(),
+            }),
             consumed,
             payload_len: input.len() - consumed,
             next: if consumed < input.len() {
@@ -381,12 +396,30 @@ impl LayerCodec for HttpCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let Some(FieldValue::Bytes(wire)) = fields.get("wire") else {
-            return Err(invalid(
-                NAME,
-                "HTTP/1 dissection requires retained header wire",
-            ));
+            return super::construction::from_fields(fields)
+                .map(|layer| Box::new(layer) as Box<dyn Layer>);
         };
         let mut layer = Http::try_from(wire.as_ref()).map_err(|error| rejected(NAME, error))?;
+        if let Some(FieldValue::Bytes(body)) = fields.get("body") {
+            if !body.is_empty() {
+                let framing = layer
+                    .head
+                    .body(None)
+                    .map_err(|error| rejected(NAME, error))?;
+                let mut decoder =
+                    BodyDecoder::new(framing, super::MAX_CONSTRUCTED_BODY_BYTES as u64);
+                let progress = decoder
+                    .consume(body)
+                    .map_err(|error| rejected(NAME, error))?;
+                if !progress.complete || progress.consumed != body.len() {
+                    return Err(invalid(
+                        NAME,
+                        "retained constructed body has incomplete or conflicting framing",
+                    ));
+                }
+            }
+            layer.constructed_body = body.clone();
+        }
         for (name, value) in fields {
             if layer.field(name).as_ref() != Some(value) {
                 layer.set_field(name, value.clone())?;

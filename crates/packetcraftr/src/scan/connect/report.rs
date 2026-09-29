@@ -53,6 +53,15 @@ pub struct ProbeEvidence {
     pub elapsed: Duration,
     pub local: Option<SocketAddr>,
     pub error: Option<Arc<io::Error>>,
+    pub banner: Option<Banner>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Banner {
+    pub request_bytes_written: usize,
+    pub response: bytes::Bytes,
+    pub application: super::super::profile::Evidence,
+    pub error: Option<Arc<io::Error>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

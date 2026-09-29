@@ -1,0 +1,20 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "split",
+  "mode": "stream",
+  "status": "success",
+  "diagnostics": [],
+  "result": {
+    "path": "split",
+    "format": "pcap",
+    "files": 2,
+    "frames": 2,
+    "captured_bytes": 40,
+    "frames_per_file": [
+      1,
+      1
+    ]
+  },
+  "sequence": 0,
+  "event": "complete"
+}

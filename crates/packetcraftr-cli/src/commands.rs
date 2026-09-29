@@ -17,6 +17,7 @@ pub(crate) use registry::CommandLine;
 
 mod build;
 mod capture;
+mod capture_transform;
 mod dispatch;
 mod dissect;
 mod dns;
@@ -48,6 +49,7 @@ mod test_support;
 mod tls;
 mod traceroute;
 mod verify_forwarding;
+mod websocket;
 
 pub(crate) trait Spec: Sized {
     type Format: FormatSubset;

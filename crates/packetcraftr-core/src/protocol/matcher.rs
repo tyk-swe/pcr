@@ -20,7 +20,7 @@ use crate::{
 
 pub(crate) use dns::DnsMatcher;
 pub(crate) use echo::EchoMatcher;
-pub use quoted_icmp::{IcmpErrorKind, QuotedTransport, quoted_icmp_error};
+pub use quoted_icmp::{IcmpErrorKind, QuotedTransport, quoted_icmp_error, quoted_udp_checksum};
 pub(crate) use reverse_flow::ReverseFlowMatcher;
 
 struct ReversedProtocolLayers<'request, 'response> {

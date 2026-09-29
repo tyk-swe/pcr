@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "shift-time",
+  "mode": "aggregate",
+  "status": "success",
+  "diagnostics": [],
+  "result": {
+    "path": "shift.pcapng",
+    "format": "pcapng",
+    "frames": 2,
+    "captured_bytes": 40,
+    "shifted_packets": 2,
+    "shifted_statistics": 0
+  }
+}

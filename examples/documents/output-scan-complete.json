@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
@@ -15,7 +15,9 @@
       "filtered": 0,
       "unreachable": 0,
       "unknown": 0,
-      "timeout": 1
+      "timeout": 1,
+      "unfiltered": 0,
+      "open_or_filtered": 0
     },
     "planned_duration": {
       "secs": 1,

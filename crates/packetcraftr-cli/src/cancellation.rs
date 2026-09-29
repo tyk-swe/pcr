@@ -46,7 +46,11 @@ fn remove_staged() {
         Err(TryLockError::WouldBlock) => return,
     };
     for path in paths.iter() {
-        let _ = std::fs::remove_file(path);
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(path);
+        } else {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

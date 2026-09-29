@@ -23,7 +23,7 @@ macro_rules! builtin_protocol_catalog {
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Ethernet], codec: EthernetCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Geneve], codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Gre], codec: GreCodec }
-            Http { canonical: "http", aliases: ["http1"], constructible: false, exact_round_trip: true, matcher: none, layer: [application::http::Http], codec: HttpCodec }
+            Http { canonical: "http", aliases: ["http1"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::http::Http], codec: HttpCodec }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: echo_v4, layer: [network::Icmpv4], codec: Icmpv4Codec }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: echo_v6, layer: [network::Icmpv6], codec: Icmpv6Codec }
             Igmp { canonical: "igmp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::Igmp], codec: IgmpCodec }
@@ -39,6 +39,12 @@ macro_rules! builtin_protocol_catalog {
             Llc { canonical: "llc", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Llc], codec: LlcCodec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Malformed], codec: MalformedCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Mpls], codec: MplsCodec }
+            Lldp { canonical: "lldp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Lldp], codec: LldpCodec }
+            Stp { canonical: "stp", aliases: ["rstp"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Stp], codec: StpCodec }
+            Tftp { canonical: "tftp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::tftp::Tftp], codec: TftpCodec }
+            Rtp { canonical: "rtp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::rtp::Rtp], codec: RtpCodec }
+            Rtcp { canonical: "rtcp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::rtcp::Rtcp], codec: RtcpCodec }
+            Mqtt { canonical: "mqtt", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::mqtt::Mqtt], codec: MqttCodec }
             Ntp { canonical: "ntp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ntp::Ntp], codec: NtpCodec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Padding], codec: PaddingCodec }
             Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Ppp], codec: PppCodec }

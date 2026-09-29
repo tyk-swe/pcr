@@ -253,7 +253,7 @@ where
         let limits = self.options.limits;
         let mut source_index = 0u64;
         loop {
-            let Some(read) = read_frame(
+            let Some(mut read) = read_frame(
                 reader,
                 &limits,
                 &session.deadline,
@@ -269,6 +269,9 @@ where
                 continue;
             }
 
+            read.frame =
+                self.selector
+                    .transform(source_index, &read.frame, limits.max_frame_bytes)?;
             let plan = plan_frame(self.options, &session.tally, &read.frame, source_index)?;
             authorize_frame(
                 self.authorizer,

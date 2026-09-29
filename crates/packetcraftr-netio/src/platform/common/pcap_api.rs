@@ -58,6 +58,35 @@ pub(in crate::platform) fn canonical_link_type(datalink: u32) -> LinkType {
     }
 }
 
+/// Native dead-handle layout for a capture source, distinct from its transmit layout.
+pub(in crate::platform) fn filter_datalink(
+    interface: &crate::interface::Info,
+) -> Result<c_int, Error> {
+    if interface.flags.loopback {
+        #[cfg(target_os = "linux")]
+        return Ok(1); // Linux libpcap presents loopback through an Ethernet capture header.
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        return Ok(0); // Native BSD/Npcap loopback captures use DLT_NULL.
+    }
+    let canonical = interface.link_type;
+    let native = match canonical {
+        LinkType::RAW => DLT_RAW,
+        LINKTYPE_ATM_RFC1483 => DLT_ATM_RFC1483,
+        LINKTYPE_SLIP_BSDOS => DLT_SLIP_BSDOS,
+        LINKTYPE_PPP_BSDOS => DLT_PPP_BSDOS,
+        LINKTYPE_ATM_CLIP => DLT_ATM_CLIP,
+        #[cfg(target_os = "macos")]
+        LINKTYPE_PFSYNC => DLT_PFSYNC,
+        #[cfg(target_os = "macos")]
+        LINKTYPE_PKTAP => DLT_PKTAP,
+        LinkType(value) => value,
+    };
+    c_int::try_from(native).map_err(|_| Error::InvalidCaptureFilter {
+        interface: interface.id.name.clone(),
+        message: "capture link type exceeds native BPF range".to_owned(),
+    })
+}
+
 pub(in crate::platform) const fn timestamp_source_value(source: TimestampSource) -> c_int {
     match source {
         TimestampSource::Host => PCAP_TSTAMP_HOST,
@@ -192,6 +221,11 @@ pub(in crate::platform) fn realize_settings(
         .unwrap_or_default();
     Ok((
         RealizedSettings {
+            direction: Realized {
+                requested: settings.direction,
+                applied: settings.direction,
+                effective: settings.direction,
+            },
             buffer_size: Realized {
                 requested: settings.buffer_size,
                 applied: settings.buffer_size,
@@ -410,6 +444,7 @@ mod tests {
             buffer_size: Some(4 * 1024 * 1024),
             timestamp_source: Some(TimestampSource::HostLowPrec),
             timestamp_precision: Some(TimestampPrecision::Nano),
+            direction: None,
         };
         let (realized, delivered) =
             realize_settings("fixture", &interface(), &settings, Some(1)).unwrap();

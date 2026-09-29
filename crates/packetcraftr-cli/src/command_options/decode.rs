@@ -24,7 +24,7 @@ pub(crate) struct DecodeArgs {
     #[arg(long = "tls-port", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) ports: Vec<u16>,
     /// Bind a port to a compatible codec, e.g. udp.port=5353:dns. TCP supports
-    /// dns/http/tls/raw; UDP supports dhcpv4/dhcpv6/dns/ntp/vxlan/geneve/raw.
+    /// dns/http/tls/mqtt/raw; UDP supports dhcpv4/dhcpv6/dns/ntp/vxlan/geneve/tftp/rtp/rtcp/raw.
     /// Explicit bindings override the same built-in selector; conflicting
     /// declarations are rejected.
     #[arg(long = "decode-as", value_name = "TRANSPORT.port=PORT:PROTOCOL")]
@@ -72,10 +72,19 @@ impl DecodeArgs {
                 .ok_or_else(|| error(format!("unknown decode-as protocol {child:?}")))?;
             if !matches!(
                 (parent, child.as_str()),
-                ("tcp", "dns" | "http" | "tls" | "raw")
+                ("tcp", "dns" | "http" | "tls" | "mqtt" | "raw")
                     | (
                         "udp",
-                        "dhcpv4" | "dhcpv6" | "dns" | "ntp" | "vxlan" | "geneve" | "raw"
+                        "dhcpv4"
+                            | "dhcpv6"
+                            | "dns"
+                            | "ntp"
+                            | "vxlan"
+                            | "geneve"
+                            | "tftp"
+                            | "rtp"
+                            | "rtcp"
+                            | "raw"
                     )
             ) {
                 return Err(error(format!(

@@ -33,6 +33,21 @@ impl From<Strategy> for packetcraftr::probe::Transport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub(crate) enum UdpPortMode {
+    #[default]
+    Increment,
+    Fixed,
+}
+impl From<UdpPortMode> for packetcraftr::traceroute::UdpPortMode {
+    fn from(value: UdpPortMode) -> Self {
+        match value {
+            UdpPortMode::Increment => Self::Increment,
+            UdpPortMode::Fixed => Self::Fixed,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Explicit IP address or hostname to trace.
@@ -41,6 +56,15 @@ pub(crate) struct Args {
     /// UDP, ICMP echo, or TCP SYN probes.
     #[arg(long, value_enum, default_value_t = Strategy::Udp)]
     pub(crate) strategy: Strategy,
+    /// Increment UDP destination ports, or preserve the tuple with strict quoted tokens.
+    #[arg(long, value_enum, default_value_t = UdpPortMode::Increment)]
+    pub(crate) udp_port_mode: UdpPortMode,
+    /// Repeat the trace with one cumulative operation budget (1..=1024).
+    #[arg(long, default_value_t = 1)]
+    pub(crate) cycles: u32,
+    /// Monotonic pause between requested cycles.
+    #[arg(long, default_value_t = 1000)]
+    pub(crate) cycle_interval_ms: u64,
     /// Select the first authorized address or only one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,

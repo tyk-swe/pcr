@@ -128,6 +128,9 @@ fn tcp_scan_request(target: Target) -> Request {
         max_in_flight: 1,
         targets: target.into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         address_family: Family::Any,
         ports: vec![80],
         attempts: 1,
@@ -1026,6 +1029,9 @@ fn oversized_cidrs_are_refused_before_hostname_resolution_or_probe_execution() {
 fn icmp_scan_request(target: Target, attempts: u32, timeout: Duration) -> Request {
     Request {
         transport: Transport::Icmp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         ports: Vec::new(),
         attempts,
         timeout,
@@ -1318,4 +1324,102 @@ fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
 
     assert!(matches!(error, Error::IncoherentEvents { .. }), "{error}");
     assert_eq!(error.classification().code, "internal.scan_event_coherence");
+}
+
+#[test]
+fn seeded_schedule_is_stable_complete_and_changes_with_seed() {
+    let addresses = ["192.0.2.1".parse().unwrap(), "2001:db8::1".parse().unwrap()];
+    let endpoints = [80, 443, 8080];
+    let canonical = super::plan::schedule(&addresses, &endpoints, 3, None);
+    let first = super::plan::schedule(&addresses, &endpoints, 3, Some(42));
+    assert_eq!(
+        first,
+        super::plan::schedule(&addresses, &endpoints, 3, Some(42))
+    );
+    assert_ne!(
+        first,
+        super::plan::schedule(&addresses, &endpoints, 3, Some(43))
+    );
+    let mut sorted = first;
+    sorted.sort();
+    let mut expected = canonical;
+    expected.sort();
+    assert_eq!(sorted, expected);
+}
+
+#[test]
+fn tcp_mode_flags_and_silence_classifications_are_distinct() {
+    use super::TcpMode;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    for (mode, flags, silence, reset) in [
+        (
+            TcpMode::Syn,
+            2,
+            Classification::Timeout,
+            Classification::Closed,
+        ),
+        (
+            TcpMode::Ack,
+            16,
+            Classification::Filtered,
+            Classification::Unfiltered,
+        ),
+        (
+            TcpMode::Fin,
+            1,
+            Classification::OpenOrFiltered,
+            Classification::Closed,
+        ),
+        (
+            TcpMode::Null,
+            0,
+            Classification::OpenOrFiltered,
+            Classification::Closed,
+        ),
+        (
+            TcpMode::Xmas,
+            41,
+            Classification::OpenOrFiltered,
+            Classification::Closed,
+        ),
+    ] {
+        assert_eq!(mode.flags(), flags);
+        assert_eq!(mode.silence(), silence);
+        let probe = Probe {
+            sequence: 7,
+            tcp_mode: mode,
+            address: "192.0.2.2".parse().unwrap(),
+            endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
+            attempt: 1,
+            udp_payload: bytes::Bytes::new(),
+            udp_profile: None,
+        };
+        let mut sent = probe.packet();
+        sent.get_mut::<Ipv4>().unwrap().source = "192.0.2.1".parse().unwrap();
+        let request_tcp = sent.get::<Tcp>().unwrap();
+        let mut reply = Packet::new();
+        reply
+            .push(Ipv4 {
+                source: "192.0.2.2".parse().unwrap(),
+                destination: "192.0.2.1".parse().unwrap(),
+                ..Default::default()
+            })
+            .push(Tcp {
+                source_port: 80,
+                destination_port: request_tcp.source_port,
+                flags: Tcp::RST | Tcp::ACK,
+                acknowledgment: request_tcp
+                    .sequence
+                    .wrapping_add(u32::from(flags & Tcp::SYN != 0))
+                    .wrapping_add(u32::from(flags & Tcp::FIN != 0)),
+                ..Default::default()
+            });
+        let decoded = decoded_packet(reply, UNIX_EPOCH, &[], Vec::new());
+        assert_eq!(
+            classify_response(&registry, Transport::Tcp, &sent, &decoded)
+                .unwrap()
+                .classification,
+            reset
+        );
+    }
 }

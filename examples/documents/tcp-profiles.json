@@ -1,0 +1,18 @@
+{
+  "schema": "packetcraftr.tcp-profiles/v1",
+  "profiles": [
+    {
+      "ports": [8080],
+      "profile": {
+        "name": "HTTP status",
+        "request": {"type": "bytes", "data": "48454144202f20485454502f312e300d0a0d0a"},
+        "response": {
+          "type": "bytes",
+          "min_length": 5,
+          "max_length": 4096,
+          "checks": [{"offset": 0, "data": "485454502f"}]
+        }
+      }
+    }
+  ]
+}

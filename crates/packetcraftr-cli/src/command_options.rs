@@ -52,3 +52,6 @@ pub(crate) use timestamp::parse_timestamp;
 
 mod application;
 pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};
+
+mod header_rewrite;
+pub(crate) use header_rewrite::HeaderRewriteArgs;

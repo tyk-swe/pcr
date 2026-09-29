@@ -4,11 +4,13 @@
 use crate::error::{Classification, Classified, Kind};
 
 mod codec;
+mod construction;
 mod model;
 mod reflection;
 
 pub(crate) use codec::HttpCodec;
 pub use codec::{BodyDecoder, Progress, parse_head};
+pub use construction::{Framing, MAX_CONSTRUCTED_BODY_BYTES};
 pub use model::{Body, Head, Header, Http, StartLine};
 
 pub const MAX_HEADER_BYTES: usize = 65_536;

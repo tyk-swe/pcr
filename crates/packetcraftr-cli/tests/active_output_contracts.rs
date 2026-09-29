@@ -27,6 +27,7 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
         port: None,
         classification,
         probes: vec![scan::ProbeEvidence {
+            advertised_mtu: None,
             application: None,
             sequence: 0,
             address,

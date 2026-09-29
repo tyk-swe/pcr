@@ -23,3 +23,17 @@ pub(super) fn load(
     let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
 }
+
+pub(super) fn load_tcp(
+    path: Option<&Path>,
+) -> Result<BTreeMap<u16, Arc<profile::TcpProfile>>, CliError> {
+    let Some(path) = path else {
+        return Ok(BTreeMap::new());
+    };
+    let document = crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?;
+    profile::compile_tcp(
+        packetcraftr_core::document::tcp_profiles::parse(&document)
+            .map_err(CliError::classified)?,
+    )
+    .map_err(CliError::classified)
+}

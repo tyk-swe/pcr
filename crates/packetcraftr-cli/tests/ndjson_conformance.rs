@@ -19,6 +19,26 @@ use common::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
     (
+        output::contract::Command::Dedup,
+        false,
+        include_str!("../../../examples/documents/output-dedup-complete.json"),
+    ),
+    (
+        output::contract::Command::Split,
+        false,
+        include_str!("../../../examples/documents/output-split-complete.json"),
+    ),
+    (
+        output::contract::Command::ShiftTime,
+        false,
+        include_str!("../../../examples/documents/output-shift-time-complete.json"),
+    ),
+    (
+        output::contract::Command::Websocket,
+        false,
+        include_str!("../../../examples/documents/output-websocket-complete.json"),
+    ),
+    (
         output::contract::Command::Rewrite,
         false,
         include_str!("../../../examples/documents/output-rewrite-complete.json"),
@@ -213,6 +233,7 @@ fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
 fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        advertised_mtu: None,
         application: None,
         sequence,
         address,
@@ -232,6 +253,8 @@ fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
 
 fn trace_probe(sequence: u64) -> packetcraftr::traceroute::ProbeEvidence {
     packetcraftr::traceroute::ProbeEvidence {
+        advertised_mtu: None,
+        cycle: 1,
         sequence,
         hop_limit: 1,
         attempt: 1,
@@ -510,6 +533,7 @@ fn tls_session_event() -> output::tls::Event {
     let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
     let id = scopes.intern(None, Vec::new()).unwrap();
     output::tls::Event::from(output::tls::Session {
+        certificates: None,
         scope: scopes.definition(id).unwrap().try_into().unwrap(),
         session: 0,
         tcp_stream: 4,
@@ -536,6 +560,7 @@ fn validate_active_event_variants() {
     for event in [
         packetcraftr::scan::Event::Sent(packetcraftr::scan::SentProbe {
             probe: packetcraftr::scan::Probe {
+                tcp_mode: Default::default(),
                 udp_profile: None,
                 sequence: 0,
                 address: "192.0.2.2".parse().unwrap(),

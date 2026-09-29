@@ -49,10 +49,12 @@ def pcap(frames):
     return bytes(output)
 
 
-def tshark(data, fields, binary="tshark"):
+def tshark(data, fields, binary="tshark", decode_as=()):
     # stdin also works when an OS confines TShark's filesystem access.
     command = [binary, '-n', '-r', '-', '-o', 'ip.defragment:FALSE',
                '-o', 'tcp.desegment_tcp_streams:FALSE', '-T', 'fields', '-E', 'occurrence=a']
+    for declaration in decode_as:
+        command.extend(['-d', declaration])
     for field in fields:
         command.extend(['-e', field])
     return subprocess.check_output(command, input=data, stderr=subprocess.PIPE, timeout=30).decode().splitlines()
@@ -90,6 +92,8 @@ def tcp_options_wire(options):
 
 def normalize(value, kind, core=False):
     if kind == 'names': return value.rstrip('.')
+    if kind == 'text': return value
+    if kind == 'byte_text': return bytes(value).decode('utf-8') if core else value
     if kind == 'address':
         return str(ipaddress.ip_address(value))
     if kind == 'tcp_options':
@@ -109,6 +113,117 @@ def capture_inputs(full):
         captures.extend((f'{kind}-{size}', pcap(packets(kind, size)))
                         for kind in ['tcp-growth', 'tcp-growth-reverse'] for size in [128, 1024, 8192])
     return captures
+
+
+
+# Protocol fixtures use checked-in packet documents as the input to construction;
+# their interpretation is compared independently with TShark.
+PARITY_FIELDS = {
+    'lldp': (('ttl', 'lldp.time_to_live', 'integer'),),
+    'stp': (('version', 'stp.version', 'integer'),
+            ('bpdu_type', 'stp.type', 'integer'),
+            ('root_path_cost', 'stp.root.cost', 'integer'),
+            ('port_id', 'stp.port', 'integer')),
+    'tftp': (('opcode', 'tftp.opcode', 'integer'),
+             ('filename', 'tftp.source_file', 'byte_text')),
+    'rtp': (('payload_type', 'rtp.p_type', 'integer'),
+            ('sequence', 'rtp.seq', 'integer'),
+            ('timestamp', 'rtp.timestamp', 'integer'),
+            ('ssrc', 'rtp.ssrc', 'integer')),
+    'rtcp': (('packets[].packet_type', 'rtcp.pt', 'integer'),),
+    'mqtt': (('packet_type', 'mqtt.msgtype', 'integer'),
+             ('topic', 'mqtt.topic', 'byte_text')),
+    'http': (('method', 'http.request.method', 'text'),
+             ('target', 'http.request.uri', 'byte_text'),
+             ('version', 'http.request.version', 'text')),
+}
+
+
+def typed(kind, value):
+    return dict(type=kind, value=value)
+
+
+def parity_capture(args, protocol, directory):
+    document = json.loads((ROOT / f'examples/documents/packet-parity-{protocol}.json').read_text())
+    if protocol in ('rtp', 'rtcp'):
+        # Explicit decode-as changes dissection, not the default construction
+        # registry. Construct the media packet first, then carry its exact bytes
+        # through an otherwise unbound UDP port.
+        standalone = directory / f'{protocol}-payload.json'
+        standalone.write_text(json.dumps(document))
+        payload = subprocess.check_output([str(args.binary), '--output', 'raw', 'build',
+                  '--packet-file', str(standalone)], stderr=subprocess.PIPE, timeout=30)
+        document['layers'] = [dict(protocol='raw', fields={'bytes': typed('bytes', list(payload))})]
+    carrier = dict(protocol='ethernet', fields={})
+    transport = None
+    if protocol == 'stp':
+        document['layers'].insert(0, dict(protocol='llc', fields={
+            'dsap': typed('unsigned', 0x42), 'ssap': typed('unsigned', 0x42)}))
+    elif protocol != 'lldp':
+        transport = 'tcp' if protocol in ('mqtt', 'http') else 'udp'
+        port = dict(tftp=69, rtp=5004, rtcp=5005, mqtt=1883, http=80)[protocol]
+        fields = {'source_port': typed('unsigned', 40000),
+                  'destination_port': typed('unsigned', port)}
+        if transport == 'tcp':
+            fields['flags'] = typed('unsigned', 0x18)
+        document['layers'].insert(0, dict(protocol=transport, fields=fields))
+        document['layers'].insert(0, dict(protocol='ipv4', fields={
+            'source': typed('ipv4', '192.0.2.1'),
+            'destination': typed('ipv4', '198.51.100.2')}))
+    document['layers'].insert(0, carrier)
+    recipe = directory / f'{protocol}.json'
+    recipe.write_text(json.dumps(document))
+    command = [str(args.binary), '--output', 'pcap', 'build', '--packet-file', str(recipe),
+               '--link-type', 'ethernet']
+    data = subprocess.check_output(command, stderr=subprocess.PIPE, timeout=30)
+    capture = directory / f'{protocol}.pcap'
+    capture.write_bytes(data)
+    core_bindings = []
+    oracle_bindings = []
+    if protocol in ('rtp', 'rtcp'):
+        port = dict(rtp=5004, rtcp=5005)[protocol]
+        core_bindings = ['--decode-as', f'udp.port={port}:{protocol}']
+        oracle_bindings = [f'udp.port=={port},{protocol}']
+    records = subprocess.check_output([str(args.binary), '--output', 'ndjson', 'read',
+              str(capture), '--dissect', *core_bindings], stderr=subprocess.PIPE, timeout=30)
+    records = [json.loads(line) for line in records.splitlines()]
+    if len(records) != 2 or records[-1]['event'] != 'complete':
+        raise RuntimeError(f'{protocol}: incomplete parity fixture output')
+    layers = records[0]['result']['decoded']['packet']['layers']
+    layer = next((layer for layer in layers if layer['protocol'] == protocol), None)
+    if layer is None:
+        raise RuntimeError(f'{protocol}: generated fixture did not select its codec')
+    fields = PARITY_FIELDS[protocol]
+    rows = tshark(data, [field[1] for field in fields], args.tshark, oracle_bindings)
+    if len(rows) != 1 or len(rows[0].split('\t')) != len(fields):
+        raise RuntimeError(f'{protocol}: incomplete independent parity field row')
+    mismatches = []
+    for (field, oracle_field, kind), expected in zip(fields, rows[0].split('\t')):
+        if '[].' in field:
+            parent, member = field.split('[].')
+            values = [value['value'][member]['value']
+                      for value in layer['fields'][parent]['value']]
+        else:
+            values = [layer['fields'][field]['value']] if field in layer['fields'] else []
+        observed = [normalize(value, kind, True) for value in values]
+        reference = [normalize(value, kind) for value in expected.split(',') if value]
+        if observed != reference:
+            mismatches.append(dict(capture=f'parity-{protocol}', frame=1, field=oracle_field,
+                                   observed=observed, expected=reference))
+    return dict(name=f'parity-{protocol}', sha256=hashlib.sha256(data).hexdigest(),
+                frames=1, fields=[field[1] for field in fields],
+                status='failed' if mismatches else 'passed', mismatches=len(mismatches)), mismatches
+
+
+def compare_parity(args, report):
+    report['parity_captures'] = []
+    with tempfile.TemporaryDirectory(prefix='pcr-parity-oracle-') as directory:
+        for protocol in PARITY_FIELDS:
+            result, mismatches = parity_capture(args, protocol, pathlib.Path(directory))
+            report['parity_captures'].append(result)
+            report['mismatches'].extend(mismatches)
+    if any(result['mismatches'] for result in report['parity_captures']):
+        raise RuntimeError('independent parity codec comparison failed; see mismatches')
 
 
 def compare(args, report):
@@ -164,6 +279,7 @@ def compare(args, report):
     report['tls_ja3'] = dict(capture='tls-handshake', expected=ja3, observed=[session['client']['ja3']])
     if ja3 != [session['client']['ja3']] or any(item['mismatches'] for item in report['captures']):
         raise RuntimeError('independent decode comparison failed; see mismatches and tls_ja3')
+    compare_parity(args, report)
     report['status'] = 'passed'
 
 

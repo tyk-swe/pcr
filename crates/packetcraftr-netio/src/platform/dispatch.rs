@@ -111,6 +111,21 @@ pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, i
 }
 
 #[cfg(native_layer2)]
+pub(crate) fn validate_capture_filter(
+    interface: &crate::interface::Info,
+    snap_length: usize,
+    filter: &str,
+    netmask: Option<u32>,
+) -> Result<(), Error> {
+    capture_backend::validate_capture_filter(
+        interface,
+        snap_length,
+        filter,
+        netmask.unwrap_or(u32::MAX),
+    )
+}
+
+#[cfg(native_layer2)]
 pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: crate::capture::Limits,

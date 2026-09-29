@@ -162,7 +162,8 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         },
     )?;
     let filtered = filter.is_some();
-    let mut request = Request::new(Source::seekable(reader), routing, options);
+    let mut request = Request::new(Source::seekable(reader), routing, options)
+        .with_rewrite(arguments.headers.core());
     request.filter = filter;
     Ok(ReplayRun {
         client: crate::system::client(registry, policy, crate::system::Runtime::Client),

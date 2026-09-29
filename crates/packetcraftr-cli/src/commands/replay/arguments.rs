@@ -13,7 +13,7 @@ use clap::ValueEnum;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Replay is policy-gated and may require native features, dependencies, and privileges.
 
-Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. With original/scaled timing, the delay before a kept frame spans any skipped frames in between.
+Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. With original/scaled timing, the delay before a kept frame spans any skipped frames in between. Fixed MAC, IP, port, and VLAN edits apply after selection; live policy, route, MTU, byte budgets, and pacing use the transformed frame.
 
 --bps counts exact submitted frame bytes, with no synthetic link overhead. The first selected frame is immediate; subsequent targets use the cumulative bytes already sent. Filtered frames do not consume bit-rate timing. Scheduled duration and transmitted bytes describe the run; the requested bit rate is not a throughput guarantee.
 
@@ -95,6 +95,9 @@ pub(crate) struct Args {
     /// authorized or transmitted.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
+    /// Header edits applied after frame selection and before live authorization.
+    #[command(flatten)]
+    pub(crate) headers: crate::command_options::HeaderRewriteArgs,
     #[command(flatten)]
     pub(crate) policy: NumericPolicyArgs<Streamed>,
 }

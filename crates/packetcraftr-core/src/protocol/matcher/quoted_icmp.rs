@@ -23,6 +23,7 @@ pub enum IcmpErrorKind {
     AdministrativelyProhibited,
     DestinationUnreachable,
     TimeExceeded,
+    PacketTooBig { mtu: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +63,9 @@ pub fn quoted_icmp_error(
     let (icmp_type, code) = (icmp.icmp_type, icmp.code);
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
+            4 => IcmpErrorKind::PacketTooBig {
+                mtu: u32::from(u16::from_be_bytes(icmp.body.get(2..4)?.try_into().ok()?)),
+            },
             3 if transport == QuotedTransport::Udp => IcmpErrorKind::PortUnreachable,
             9 | 10 | 13 => IcmpErrorKind::AdministrativelyProhibited,
             _ => IcmpErrorKind::DestinationUnreachable,
@@ -71,6 +75,9 @@ pub fn quoted_icmp_error(
             4 if transport == QuotedTransport::Udp => IcmpErrorKind::PortUnreachable,
             1 | 5 | 6 => IcmpErrorKind::AdministrativelyProhibited,
             _ => IcmpErrorKind::DestinationUnreachable,
+        },
+        BuiltinProtocol::Icmpv6 if icmp_type == 2 && code == 0 => IcmpErrorKind::PacketTooBig {
+            mtu: u32::from_be_bytes(icmp.body.get(..4)?.try_into().ok()?),
         },
         BuiltinProtocol::Icmpv6 if icmp_type == 3 => IcmpErrorKind::TimeExceeded,
         _ => return None,
@@ -321,4 +328,14 @@ fn outer_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
         source: path.source,
         destination: path.header_destination,
     })
+}
+
+/// Returns the quoted UDP checksum only after the quote correlates with `request`.
+pub fn quoted_udp_checksum(request: &Packet, response: &Packet) -> Option<u16> {
+    quoted_icmp_error(request, response, QuotedTransport::Udp)?;
+    let (_, layer) = directly_received_icmp(response)?;
+    let quote = parse_quoted_probe(IcmpMessage::of(layer)?.body.get(4..)?)?;
+    Some(u16::from_be_bytes(
+        quote.payload.get(6..8)?.try_into().ok()?,
+    ))
 }

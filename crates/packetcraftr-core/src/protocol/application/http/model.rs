@@ -6,6 +6,7 @@ use bytes::Bytes;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Http {
     pub(super) head: Head,
+    pub(super) constructed_body: Bytes,
 }
 impl Http {
     pub fn head(&self) -> &Head {

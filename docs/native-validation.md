@@ -97,3 +97,8 @@ Capture drop counters, host offloading, acquisition location, and timestamp
 semantics remain contextual evidence. Zero or unavailable counters are not an
 automatic completeness guarantee. The comparator deliberately avoids inferring
 device loss or synchronized clocks from those observations.
+
+Decoder validation evidence now uses internal schema version 2, requiring the
+LLDP, STP, TFTP, RTP, RTCP, MQTT, and constructed HTTP oracle checks alongside
+the existing capture corpus. Older version 1 reports must be regenerated. This
+internal evidence version is independent of `packetcraftr.output/v7`.

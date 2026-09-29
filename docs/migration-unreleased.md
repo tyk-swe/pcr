@@ -2,8 +2,8 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v6` and
-validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents
+All structured command envelopes now identify `packetcraftr.output/v7` and
+validate against `schemas/packetcraftr.output.v7.schema.json`. Packet documents
 now use `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
 
@@ -11,12 +11,60 @@ Behavior and contract changes come first, grouped by topic. The
 [renamed and removed paths](#renamed-and-removed-paths) tables at the end map
 each 0.5.0-beta.3 name to its final name, by crate.
 
-## Forwarding semantics and output/v6
+## Thirty practical parity features
+
+Structured command output is now `packetcraftr.output/v7`. Adopt the new family
+explicitly; the bundled v6 schema remains unchanged for archived evidence.
+Packet documents remain v2, and new protocols use their existing generic layer
+representation. The new bounded TCP service-profile document family is
+`packetcraftr.tcp-profiles/v1`; existing UDP profiles and rewrite rules keep their
+versions. CIDR maps are separate arguments, outside rewrite-rule documents.
+
+The CLI adds `dedup`, `split`, `shift-time`, and `websocket`, plus the options
+listed in [codec/filter usage](parity-codecs.md), [offline usage](parity-offline.md),
+and [live usage](parity-live.md). Existing defaults are preserved. WebSocket
+explicit framing uses `websocket --decode-as websocket` with a selected TCP
+stream. Split accepts exactly one of `--packets`, `--bytes`, or `--interval-ms`.
+Capture transformations preserve source PCAP/PCAPNG formats and raw metadata.
+HTTP entity filenames derive from stream, canonical direction, generation, and
+message index; encoded `.body` files accompany optional `.body.decoded` files.
+Only complete entities are published, after successful analysis.
+
+Rust callers using struct literals must initialize new fields:
+
+- `scan::Request`: `tcp_mode`, `shuffle_seed`, and `tcp_profiles`; use SYN,
+  `None`, and an empty map to preserve defaults. New classifications are
+  `Unfiltered` and `OpenOrFiltered`. Probe evidence may contain advertised MTU.
+- `traceroute::Request`: `udp_port_mode`, `cycles`, and `cycle_interval`; defaults
+  are incrementing ports, one cycle, and 1,000 ms. Probe cycle numbers are
+  one-based. Hop evidence includes responders and RTT/loss accounting.
+- `capture::GroupRequest`: `filters`; an empty list keeps the global BPF.
+  `NativeSettings` and `RealizedSettings` include direction; an unspecified
+  native direction preserves the backend default.
+- Core statistics reports include `sizes` and `tcp_timing`; TLS sessions include
+  optional `certificates`. Certificate collection uses `Collector::with_certificates`.
+  HTTP collectors emit `BodyChunk` only after `with_body_chunks` is requested;
+  exhaustive event matches must handle that variant.
+
+Exhaustive matches on `protocol::BuiltinProtocol` must include `Lldp`, `Stp`,
+`Tftp`, `Rtp`, `Rtcp`, and `Mqtt`. Custom native capture providers can implement
+`capture::Provider::validate_capture` to compile backend-specific filters before
+group activation; the system provider performs dead-handle compilation for
+every source.
+
+Replay header editing uses `Request::with_rewrite(HeaderRewrite)` and applies
+selection before transformation. All live endpoint, byte, MTU, and budget checks
+then use the transformed frame. TCP service-profile exchanges recheck the peer
+before every I/O operation and retain partial evidence. Repeated traces share
+one authorization and cumulative resource budgets.
+
+
+## Forwarding semantics and output/v7
 
 `verify-forwarding` is new in this release. Its rule semantics are in
 [verification semantics](verification-contract.md), with
 [consumer compatibility](consumer-compatibility.md) and
-[resource presets](resource-presets.md). Two points matter to output/v6
+[resource presets](resource-presets.md). Two points matter to output/v7
 consumers: ordinary preservation no longer treats two missing fields as a
 satisfied check (use explicit `--preserve-presence` / `--expect-absent` for
 decoder-view absence), and checks expose evidence states, so an unrelated
@@ -183,7 +231,7 @@ update names such as `Aaaa` to `AAAA` and match constants or numeric codes with
 a fallback for other values. Use `Display` for presentation and the integer
 serde value for data; `.as_str()` is removed. Text parsing returns
 `dns::wire::Error` (`QueryTypeSyntax` or `QueryTypeRange`, which keeps the
-original integer parse error). The CLI contract constant is now `SCHEMA_V6`,
+original integer parse error). The CLI contract constant is now `SCHEMA_V7`,
 and CLI DNS output structs store `query_type` as `u16`.
 
 ## Packet templates and UDP scan payloads
@@ -247,7 +295,7 @@ same order, so those after `next_header` change position. `read --field`
 selects the new fields as `ipv6_fragment.reserved` and
 `ipv6_fragment.reserved_bits`, where they failed with `cli.projection_field`.
 Consumers that pin the exact field set of an `ipv6_fragment` layer must accept
-the two additions; the `packetcraftr.packet/v2` and output/v6 shapes are
+the two additions; the `packetcraftr.packet/v2` and output/v7 shapes are
 unchanged.
 
 `packetcraftr_core::protocol::network::Fragment` gains `pub reserved: u8` (the
@@ -276,7 +324,7 @@ bytes, with zero raw UDP cost. CLI `dns --tcp` works without native packet-I/O
 features. Packet-oriented route overrides and scoped IPv6 link-local TCP remain
 unsupported.
 
-For output/v6, a successful TCP query reports `fallback_attempted=false`, and
+For output/v7, a successful TCP query reports `fallback_attempted=false`, and
 successful aggregate TCP reports require a retained successful TCP attempt.
 Consumers must inspect the actual attempt transport rather than infer it from
 fallback. A fallback attempt keeps its preceding truncated UDP phase under the
@@ -326,7 +374,7 @@ The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
 that flag. DO requests DNSSEC data and performs no signature validation. The
 advertised receive size is independent of `--max-message-bytes`, which bounds
 response decoding. Existing output `edns` fields still describe the response;
-these request settings add no fields to the output/v6 or packet/v2 contracts.
+these request settings add no fields to the output/v7 or packet/v2 contracts.
 
 ## DNS question batches and reverse names
 
@@ -461,7 +509,7 @@ scan publishes no `probe_sent` events, only final `probe` events beside its
 `scan::Report` (the former `Summary`) and `scan::connect::Stats` gain `rtt`:
 confirmed sends, verdicts received inside their round, `lost = sent - received`,
 and min/avg/max over one sample per received probe. Rust literal constructors
-supply `scan::Rtt::default()` or an accumulated value. The output/v6 schema adds
+supply `scan::Rtt::default()` or an accumulated value. The output/v7 schema adds
 matching `rtt` objects on scan summaries and `socket_stats`; absent duration
 fields mean no response produced a sample.
 
@@ -626,7 +674,7 @@ a usage error naming `--live` where it used to accept and ignore it.
 
 `send` expands `--axis` templates as `build` and `exchange` do, and repeats the
 set with `--repeat` and `--rate` instead of sending exactly one packet. The
-output/v6 `sendResult` replaces `frame`/`route` with a `frames` list plus
+output/v7 `sendResult` replaces `frame`/`route` with a `frames` list plus
 `passes_completed`; each frame carries a one-based `pass` and its expansion
 `index`. Invalid repeat or rate values classify as `cli.send_limit`, and the
 pacing ceiling is `packetcraftr_netio::deadline::MAX_WAIT`. Rust callers use
@@ -674,7 +722,7 @@ input. `FrameEvidence::source_interface_id` is removed because it always equaled
 `frame.interface`; read `evidence.frame.interface`. `replay::Report` (the former
 `Summary`) adds `passes_completed` and `interfaces_used`; the aggregate
 requested interface is optional, and each sent frame keeps its actual output
-route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in output/v6
+route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in output/v7
 as `{"bit_rate": BITS_PER_SECOND}`.
 
 ## Resource and output hardening
@@ -690,7 +738,7 @@ when the pool as a whole is full. A client can share callback admission through
 `client.runtime().snapshot()`.
 
 `--resource-diagnostics` opts into an optional `resources` envelope member that
-the output/v6 schemas include; it adds no NDJSON events or sequence positions.
+the output/v7 schemas include; it adds no NDJSON events or sequence positions.
 `--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
 cleanup allowance remain one second, and operation deadlines take precedence.
 
@@ -1435,7 +1483,7 @@ for a row are in the sections above.
 
 | 0.5.0-beta.3 | Final |
 | --- | --- |
-| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V6` |
+| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V7` |
 | `output::envelope::Error.kind: core::error::Kind` | the CLI-owned `envelope::ErrorKind` (`ErrorKind::from(kind)`) |
 | `Command::require_format(format) -> Result<(), Error>` | `require_format::<F: FormatSubset>(format) -> Result<F, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |

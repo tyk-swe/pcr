@@ -86,6 +86,7 @@ pub(crate) enum Correlation {
     TimeExceeded,
     AdministrativelyProhibited,
     DestinationUnreachable,
+    PacketTooBig,
 }
 
 impl Correlation {
@@ -106,6 +107,7 @@ pub(crate) struct Observation {
     pub(crate) responder: IpAddr,
     pub(crate) reason: &'static str,
     pub(crate) correlation: Correlation,
+    pub(crate) advertised_mtu: Option<u32>,
 }
 
 impl Observation {
@@ -114,6 +116,7 @@ impl Observation {
             responder,
             reason,
             correlation,
+            advertised_mtu: None,
         }
     }
 }
@@ -242,6 +245,11 @@ fn classify_icmp_error(
         })?;
     let ipv6 = icmp_protocol == BuiltinProtocol::Icmpv6;
     let (correlation, ipv4_reason, ipv6_reason) = match kind {
+        IcmpErrorKind::PacketTooBig { .. } => (
+            Correlation::PacketTooBig,
+            "ICMPv4 fragmentation needed",
+            "ICMPv6 packet too big",
+        ),
         IcmpErrorKind::PortUnreachable => (
             Correlation::PortUnreachable,
             "ICMPv4 port unreachable",
@@ -264,7 +272,11 @@ fn classify_icmp_error(
         ),
     };
     let reason = if ipv6 { ipv6_reason } else { ipv4_reason };
-    Some(Observation::new(responder, correlation, reason))
+    let mut observation = Observation::new(responder, correlation, reason);
+    if let IcmpErrorKind::PacketTooBig { mtu } = kind {
+        observation.advertised_mtu = Some(mtu);
+    }
+    Some(observation)
 }
 
 #[cfg(test)]

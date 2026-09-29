@@ -110,7 +110,7 @@ Windows/macOS privileged runtime scenarios stay explicitly unexercised. Reports
 are archived on failure as well as success, and release preflight requires
 clean, exact-commit reports from a successful push CI run.
 `scripts/validation_evidence.py` defines the content contract (evidence version
-1) that producers check before publishing success; duplicate, skipped, missing
+2) that producers check before publishing success; duplicate, skipped, missing
 or contradictory results fail it. Regenerate older reports rather than editing
 or relabeling them, and update the evidence version and shared inventory
 deliberately when changing required coverage. This is an internal

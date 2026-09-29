@@ -19,6 +19,50 @@ fn collector() -> Collector {
 }
 
 #[test]
+fn streamed_entities_obey_the_configured_cumulative_limit() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
+    );
+    let (events, _) = collect_events(&capture.frames, collector().with_body_chunk_limit(5));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event,Event::BodyChunk { bytes,.. } if bytes.as_ref()==b"hello"))
+    );
+    let mut limited = collector().with_body_chunk_limit(4);
+    let result = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            limited
+                .observe(&record)
+                .map(|_| ())
+                .map_err(BoundaryError::from_error)
+        },
+    );
+    let error = result.unwrap_err();
+    assert_eq!(
+        error.classification().kind,
+        packetcraftr_core::error::Kind::Policy
+    );
+    assert!(
+        error
+            .causes()
+            .iter()
+            .any(|cause| cause.contains("max_http_exported_bytes")),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
@@ -38,7 +82,7 @@ fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
         .iter()
         .filter_map(|event| match event {
             Event::Issue(issue) => Some(issue),
-            Event::Message(_) => None,
+            Event::Message(_) | Event::BodyChunk { .. } => None,
         })
         .collect();
     assert_eq!(issues.len(), 2, "one eviction per TCP direction");
@@ -48,7 +92,7 @@ fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
         .into_iter()
         .filter_map(|event| match event {
             Event::Message(message) => Some(*message),
-            Event::Issue(_) => None,
+            Event::Issue(_) | Event::BodyChunk { .. } => None,
         })
         .collect();
     assert_eq!(messages.len(), 4);
@@ -436,6 +480,7 @@ fn message_and_issue_statuses(events: &[Event]) -> Vec<(&'static str, Status)> {
         .map(|event| match event {
             Event::Message(message) => ("message", message.status),
             Event::Issue(issue) => ("issue", issue.status),
+            Event::BodyChunk { .. } => panic!("body chunks disabled"),
         })
         .collect()
 }

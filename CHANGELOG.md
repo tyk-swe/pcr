@@ -8,6 +8,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Structured output advances to `packetcraftr.output/v7` for the thirty practical
+  parity additions. Consumers must explicitly adopt the new family, scan
+  classifications, certificate and WebSocket events, capture direction settings,
+  and traceroute cycle/hop evidence. The v6 schema is retained as a snapshot;
+  packet documents remain `packetcraftr.packet/v2`.
+- Scan and traceroute requests, capture group/native settings, statistics reports,
+  TLS sessions, and related evidence gain public fields and enum variants. See
+  [the parity migration notes](docs/migration-unreleased.md#thirty-practical-parity-features).
+
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
   `TcpProviders`, so each `Client` workflow requires only the provider cluster
@@ -52,7 +61,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   its capture-stream remediation; an oversized rules document reports
   `cli.error` instead of `policy.transform_limit`.
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
-  `packetcraftr.output/v6`. Schemas and published examples migrate together.
+  `packetcraftr.output/v7`. Schemas and published examples migrate together.
   DNS questions use one typed list and section counts use `WireValue<u16>`.
   See `docs/migration-unreleased.md`.
 - Rust APIs now use standard conversion and collection traits. Wire
@@ -672,6 +681,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   `docs/migration-unreleased.md`.
 
 ### Added
+
+- Thirty practical parity features for CLI and Rust users: regex filters; filter
+  functions; field comparisons; repeated-field quantifiers; LLDP; STP/RSTP;
+  TFTP; RTP; RTCP; MQTT 3.1.1; structured HTTP/1 construction; WebSocket
+  following; TLS certificate inspection; TCP timing; captured-size histograms;
+  HTTP entity export; gzip/deflate content decoding; capture deduplication;
+  offline splitting; exact timestamp shifts; CIDR address mapping; replay header
+  edits; capture direction; per-interface BPF overrides; scan shuffling; TCP
+  scan modes; bounded TCP profiles; fixed-tuple UDP traceroute; repeated traces;
+  and correlated advertised-MTU diagnostics. See [codec/filter usage](docs/parity-codecs.md),
+  [offline usage](docs/parity-offline.md), and [live usage](docs/parity-live.md).
+- `packetcraftr.tcp-profiles/v1` documents and schema, with exact request bytes,
+  bounded response checks, and retained partial banner evidence.
 
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own (or, for `cli.worker_capacity`,

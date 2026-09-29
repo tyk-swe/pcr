@@ -92,6 +92,7 @@ pub(super) fn run(
     let limits = args.limits.into_limits();
     limits.validate().map_err(CliError::classified)?;
     let native = net::capture::NativeSettings {
+        direction: args.direction.map(Into::into),
         buffer_size: args.capture_buffer_bytes,
         timestamp_source: args.timestamp_source.map(Into::into),
         timestamp_precision: args.timestamp_precision.map(Into::into),
@@ -159,8 +160,27 @@ pub(super) fn run(
             "multiple interfaces require PCAPNG capture output",
         ));
     }
+    let mut filters = Vec::new();
+    for entry in args.capture_filter_for {
+        let (selector, filter) = entry.split_once('=').ok_or_else(|| {
+            CliError::new(Kind::Usage, "capture-filter-for requires NAME_OR_INDEX=BPF")
+        })?;
+        let interface = interfaces
+            .iter()
+            .find(|interface| {
+                interface.name == selector || selector.parse::<u32>().ok() == Some(interface.index)
+            })
+            .ok_or_else(|| {
+                CliError::new(
+                    Kind::Usage,
+                    "capture-filter-for must name a selected source",
+                )
+            })?;
+        filters.push((interface.clone(), filter.to_owned()));
+    }
     let request = workflow::Request::new(
         net::capture::GroupRequest {
+            filters,
             interfaces,
             limits,
             filter: args.capture_filter,

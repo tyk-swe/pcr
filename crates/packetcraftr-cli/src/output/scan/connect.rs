@@ -64,11 +64,35 @@ pub struct Probe {
     pub elapsed: Duration,
     pub local: Option<SocketAddr>,
     pub error: Option<SocketError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<Banner>,
 }
+#[derive(Clone, Debug, Serialize)]
+pub struct Banner {
+    pub request_bytes_written: usize,
+    pub response_hex: String,
+    pub application: super::ApplicationEvidence,
+    pub error: Option<SocketError>,
+}
+
 impl TryFrom<connect::ProbeEvidence> for Probe {
     type Error = Error;
     fn try_from(probe: connect::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
+            banner: probe.banner.map(|banner| Banner {
+                request_bytes_written: banner.request_bytes_written,
+                response_hex: banner
+                    .response
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect(),
+                application: banner.application.into(),
+                error: banner.error.map(|error| SocketError {
+                    kind: format!("{:?}", error.kind()),
+                    os_code: error.raw_os_error(),
+                    message: error.to_string(),
+                }),
+            }),
             sequence: probe.sequence,
             address: probe.endpoint.ip(),
             port: probe.endpoint.port(),

@@ -21,6 +21,7 @@ pub(in crate::platform) const PCAP_ERROR_PROMISC_PERM_DENIED: c_int = -11;
 pub(in crate::platform) const PCAP_ERROR_CAPTURE_NOTSUP: c_int = -13;
 
 pub(in crate::platform) type PcapInit = unsafe extern "C" fn(c_uint, *mut c_char) -> c_int;
+pub(in crate::platform) type PcapOpenDead = unsafe extern "C" fn(c_int, c_int) -> *mut c_void;
 pub(in crate::platform) type PcapCreate =
     unsafe extern "C" fn(*const c_char, *mut c_char) -> *mut c_void;
 pub(in crate::platform) type PcapSetInteger = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;

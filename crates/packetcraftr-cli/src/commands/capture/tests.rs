@@ -106,6 +106,7 @@ fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
             captures: Mutex::new(captures),
         },
         GroupRequest {
+            filters: Vec::new(),
             interfaces,
             limits: native::Limits {
                 max_frames: 8,
@@ -262,6 +263,7 @@ fn single_session(
             captures: Mutex::new(VecDeque::from([session])),
         },
         GroupRequest {
+            filters: Vec::new(),
             interfaces: vec![interface],
             limits: native::Limits {
                 max_frames: 8,

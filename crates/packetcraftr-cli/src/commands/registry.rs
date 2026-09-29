@@ -6,9 +6,9 @@ use serde::Serialize;
 
 use super::dispatch::Launch;
 use super::{
-    Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
-    fragment, fuzz, http, interfaces, merge, plan, protocols, read, replay, rewrite, routes, scan,
-    send, stats, tls, traceroute, verify_forwarding,
+    Spec, build, capture, capture_transform, dissect, dns, dns_read, documentation, exchange,
+    expert, export, follow, fragment, fuzz, http, interfaces, merge, plan, protocols, read, replay,
+    rewrite, routes, scan, send, stats, tls, traceroute, verify_forwarding, websocket,
 };
 use crate::output::contract::{Format, FormatSubset};
 use crate::resources::Settings;
@@ -113,6 +113,12 @@ macro_rules! commands {
 }
 
 commands! {
+    /// Remove exact duplicate frames within a bounded recent input window.
+    Dedup(capture_transform::DedupArgs) = "dedup",
+    /// Split an offline capture into independently readable bounded files.
+    Split(capture_transform::SplitArgs) = "split",
+    /// Shift packet and known statistics timestamps by exact decimal seconds.
+    ShiftTime(capture_transform::ShiftArgs) = "shift-time",
     /// Merge time-ordered captures into scoped PCAPNG.
     #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
     Merge(merge::arguments::Args) = "merge",
@@ -182,6 +188,9 @@ commands! {
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
     #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
     Http(http::arguments::Args) = "http",
+    /// Follow WebSocket data messages and control frames over a TCP conversation.
+    #[command(after_long_help = websocket::AFTER_LONG_HELP)]
+    Websocket(websocket::Args) = "websocket",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
     #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
     Export(export::arguments::Args) = "export",
@@ -246,6 +255,29 @@ mod tests {
         const CAPTURE: &str = "capture.pcap";
         const PACKET: &str = "ipv4(destination=192.0.2.1)/raw(text=hello)";
         let cases: &[Case] = &[
+            (
+                &["dedup", CAPTURE, "--write", "out.pcap"],
+                undeclared_bounds::<capture_transform::DedupArgs>,
+            ),
+            (
+                &["split", CAPTURE, "--write", "out", "--packets", "10"],
+                undeclared_bounds::<capture_transform::SplitArgs>,
+            ),
+            (
+                &[
+                    "shift-time",
+                    CAPTURE,
+                    "--write",
+                    "out.pcap",
+                    "--seconds",
+                    "-1.25",
+                ],
+                undeclared_bounds::<capture_transform::ShiftArgs>,
+            ),
+            (
+                &["websocket", CAPTURE, "--stream", "tcp:0"],
+                undeclared_bounds::<websocket::Args>,
+            ),
             (
                 &["merge", "--write", "m.pcapng", CAPTURE, CAPTURE],
                 undeclared_bounds::<merge::arguments::Args>,

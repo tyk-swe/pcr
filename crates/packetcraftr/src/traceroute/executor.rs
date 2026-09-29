@@ -10,7 +10,7 @@ use crate::clock::Clock;
 use crate::providers::PacketProviders;
 
 use super::Probe;
-use super::evidence::classify_response;
+use super::evidence::classify_probe_response;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
@@ -21,45 +21,14 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
 
-        let varying_field = match first.target.transport() {
-            Transport::Udp => "destination_port",
-            Transport::Tcp => "sequence",
-            Transport::Icmp => "body",
-        };
-        let mut template = packetcraftr_core::template::Template::new(first.packet());
-        if batch.probes.len() > 1 {
-            let values = batch
-                .probes
-                .iter()
-                .map(|probe| {
-                    probe
-                        .packet()
-                        .iter()
-                        .nth(1)
-                        .and_then(|layer| layer.field(varying_field))
-                        .ok_or_else(|| {
-                            EXECUTOR_FAULT.invalid(format!(
-                                "{} probe has no {varying_field} correlation field",
-                                probe.target.transport()
-                            ))
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            template = template.axis(1, varying_field, values);
-        }
+        let template = probe_template(batch, first)?;
 
         let mut matches_request =
             |request_index: usize,
              sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
                 batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_response(
-                        self.client.registry(),
-                        probe.target.transport(),
-                        sent,
-                        response,
-                    )
-                    .is_some()
+                    classify_probe_response(self.client.registry(), probe, sent, response).is_some()
                 })
             };
         let exchange = self.exchange_for_workflow(
@@ -76,6 +45,41 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'
         let execution = Evidence::from_exchange(batch.permit, exchange);
         Ok(execution)
     }
+}
+
+fn probe_template(
+    batch: &Batch<Probe>,
+    first: &Probe,
+) -> Result<packetcraftr_core::template::Template, BoundaryError> {
+    let (varying_layer, varying_field) = match first.target.transport() {
+        Transport::Udp if first.udp_port_mode == super::UdpPortMode::Fixed => (2, "bytes"),
+        Transport::Udp => (1, "destination_port"),
+        Transport::Tcp => (1, "sequence"),
+        Transport::Icmp => (1, "body"),
+    };
+    let mut template = packetcraftr_core::template::Template::new(first.packet());
+    if batch.probes.len() > 1 {
+        let values = batch
+            .probes
+            .iter()
+            .map(|probe| {
+                probe
+                    .packet()
+                    .iter()
+                    .nth(varying_layer)
+                    .and_then(|layer| layer.field(varying_field))
+                    .ok_or_else(|| {
+                        EXECUTOR_FAULT.invalid(format!(
+                            "{} probe has no {varying_field} correlation field",
+                            probe.target.transport()
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        template = template.axis(varying_layer, varying_field, values);
+    }
+
+    Ok(template)
 }
 
 fn validate_batch(batch: &Batch<Probe>) -> Result<&Probe, BoundaryError> {
@@ -104,6 +108,9 @@ fn validate_batch(batch: &Batch<Probe>) -> Result<&Probe, BoundaryError> {
             || probe.target.transport() != first.target.transport()
             || probe.source_port != first.source_port
             || probe.hop_limit != first.hop_limit
+            || probe.cycle != first.cycle
+            || probe.udp_port_mode != first.udp_port_mode
+            || (probe.udp_port_mode == super::UdpPortMode::Fixed && probe.target != first.target)
             || (probe.target.transport() == Transport::Tcp && probe.target != first.target)
     }) {
         return Err(EXECUTOR_FAULT.invalid(
@@ -128,6 +135,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(index, source_port)| Probe {
+                    udp_port_mode: Default::default(),
+                    cycle: 1,
                     sequence: u64::try_from(index).expect("test index fits u64"),
                     address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                     target,
@@ -139,6 +148,43 @@ mod tests {
             timeout: Duration::from_secs(1),
             permit: ExecutionPermit::new(),
             sequence: 0,
+        }
+    }
+
+    #[test]
+    fn fixed_tuple_hop_templates_expand_every_distinct_token() {
+        let mut batch = batch(
+            ProbeEndpoint::Udp { port: 33_434 },
+            &[49_152, 49_152, 49_152],
+        );
+        for probe in &mut batch.probes {
+            probe.udp_port_mode = super::super::UdpPortMode::Fixed;
+        }
+        let template = probe_template(&batch, validate_batch(&batch).unwrap()).unwrap();
+        let packets = template
+            .expand(3)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        for (packet, probe) in packets.iter().zip(&batch.probes) {
+            assert!(super::super::plan::packet::sent_probe_matches(
+                probe, packet
+            ));
+            assert_eq!(
+                packet
+                    .get::<packetcraftr_core::layer::Raw>()
+                    .unwrap()
+                    .bytes
+                    .as_ref(),
+                ((probe.sequence + 1) as u16).to_be_bytes()
+            );
+            assert_eq!(
+                packet
+                    .get::<packetcraftr_core::protocol::transport::Udp>()
+                    .unwrap()
+                    .destination_port,
+                33_434
+            );
         }
     }
 

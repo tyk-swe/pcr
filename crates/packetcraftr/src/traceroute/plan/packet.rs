@@ -31,17 +31,29 @@ pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
             packet.push(Ipv6 {
                 destination,
                 hop_limit: probe.hop_limit,
-                flow_label: u32::from(probe.hop_limit),
+                flow_label: if probe.udp_port_mode == super::super::UdpPortMode::Fixed {
+                    0
+                } else {
+                    u32::from(probe.hop_limit)
+                },
                 ..Ipv6::default()
             });
         }
     }
     match probe.target {
-        ProbeEndpoint::Udp { port } => packet.push(Udp {
-            source_port: probe.source_port,
-            destination_port: port,
-            ..Udp::default()
-        }),
+        ProbeEndpoint::Udp { port } => {
+            packet.push(Udp {
+                source_port: probe.source_port,
+                destination_port: port,
+                ..Udp::default()
+            });
+            if probe.udp_port_mode == super::super::UdpPortMode::Fixed {
+                packet.push(packetcraftr_core::layer::Raw::new(
+                    bytes::Bytes::copy_from_slice(&((probe.sequence + 1) as u16).to_be_bytes()),
+                ));
+            }
+            &mut packet
+        }
         ProbeEndpoint::Tcp { port } => packet.push(Tcp {
             source_port: probe.source_port,
             destination_port: port,
@@ -80,7 +92,15 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
         ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
         ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
     };
-    if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+    let shape = if probe.udp_port_mode == super::super::UdpPortMode::Fixed {
+        crate::correlation::packet_shape_with_payload_matches(
+            sent,
+            &[network_protocol, transport_protocol],
+        )
+    } else {
+        packet_shape_matches(sent, &[network_protocol, transport_protocol])
+    };
+    if !shape {
         return false;
     }
     let network_matches = match probe.address {
@@ -105,7 +125,12 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
                 == 1
                 && sent.get::<Ipv6>().is_some_and(|ipv6| {
                     ipv6.destination == destination
-                        && ipv6.flow_label == u32::from(probe.hop_limit)
+                        && ipv6.flow_label
+                            == if probe.udp_port_mode == super::super::UdpPortMode::Fixed {
+                                0
+                            } else {
+                                u32::from(probe.hop_limit)
+                            }
                         && ipv6.hop_limit == probe.hop_limit
                 })
         }
@@ -115,7 +140,14 @@ pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) ->
     }
     match probe.target {
         ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
-            udp.source_port == probe.source_port && udp.destination_port == port
+            udp.source_port == probe.source_port
+                && udp.destination_port == port
+                && (probe.udp_port_mode != super::super::UdpPortMode::Fixed
+                    || sent
+                        .get::<packetcraftr_core::layer::Raw>()
+                        .is_some_and(|raw| {
+                            raw.bytes.as_ref() == ((probe.sequence + 1) as u16).to_be_bytes()
+                        }))
         }),
         ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.source_port == probe.source_port

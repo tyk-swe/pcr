@@ -6,6 +6,7 @@ mod error;
 mod parse;
 pub mod payload;
 pub mod recipe;
+pub mod tcp_profiles;
 mod types;
 pub mod udp_profiles;
 

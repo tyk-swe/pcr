@@ -58,3 +58,20 @@ include container metadata. See [analysis resource
 accounting](analysis-resources.md#what-the-ceilings-cover) for reader-level
 versus CLI-wrapper enforcement and the remaining state, allocation, and
 process-memory distinctions.
+
+## Practical parity defaults
+
+Regex patterns are limited to 8 KiB each and share 1 MiB of compiled storage.
+LLDP permits 256 TLVs; RTCP permits 64 compound entries; MQTT packets permit
+1 MiB. TLS certificate collection retains at most 32 entries within the existing
+128 KiB handshake ceiling. WebSocket messages and HTTP entities default to
+16 MiB; WebSocket direction buffers share 32 MiB. HTTP exports share a 256 MiB
+encoded-plus-decoded output budget. Capture deduplication keeps 1,024 preceding
+input frames within 64 MiB; exhaustion fails. Splitting creates at most 64 files.
+CIDR mapping allows 64 nonoverlapping source-prefix maps across both directions.
+TCP profile documents are limited to 1 MiB and responses default to 4 KiB,
+with a 64 KiB maximum. TCP timing retains at most 4,096 outstanding observations
+per direction. Traceroute defaults to one cycle with a requested-cycle interval
+of 1,000 ms, accepts at most 1,024 cycles, and applies existing time/probe limits
+to the full operation. Fixed UDP tuple mode additionally caps probes at 65,535.
+These intrinsic limits apply to Rust users as well as CLI users.

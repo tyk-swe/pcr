@@ -26,6 +26,7 @@ pub struct GroupRequest {
     pub interfaces: Vec<Id>,
     pub limits: Limits,
     pub filter: Option<String>,
+    pub filters: Vec<(Id, String)>,
     pub promiscuous: bool,
     pub native: NativeSettings,
 }
@@ -33,6 +34,15 @@ pub struct GroupRequest {
 impl GroupRequest {
     pub fn validate(&self) -> Result<(), Error> {
         super::validate_filter_length(self.filter.as_deref())?;
+        let mut overrides = HashSet::new();
+        for (interface, filter) in &self.filters {
+            super::validate_filter_length(Some(filter))?;
+            if !self.interfaces.contains(interface) || !overrides.insert(interface.index) {
+                return Err(invalid(
+                    "filter overrides must name distinct selected interfaces",
+                ));
+            }
+        }
         let count = self.interfaces.len();
         if count == 0 || count > MAX_SOURCES {
             return Err(invalid("select 1..=15 capture interfaces"));
@@ -70,7 +80,12 @@ impl GroupRequest {
                         + usize::from(index < self.limits.max_bytes % count),
                     ..self.limits
                 },
-                filter: self.filter.clone(),
+                filter: self
+                    .filters
+                    .iter()
+                    .find(|(id, _)| id == interface)
+                    .map(|(_, filter)| filter.clone())
+                    .or_else(|| self.filter.clone()),
                 promiscuous: self.promiscuous,
                 native: self.native.clone(),
             })
@@ -132,6 +147,11 @@ static UNARMED: Metadata = Metadata {
     link_type: LinkType(0),
     snap_length: 0,
     native: RealizedSettings {
+        direction: Realized {
+            requested: None,
+            applied: None,
+            effective: None,
+        },
         buffer_size: Realized {
             requested: None,
             applied: None,
@@ -196,6 +216,9 @@ impl<C: Session> Group<C> {
         if self.lifecycle != Lifecycle::New {
             return Err(Error::CaptureGroupState);
         }
+        for request in &self.requests {
+            provider.validate_capture(request, deadline)?;
+        }
         self.lifecycle = Lifecycle::Armed;
         for index in 0..self.requests.len() {
             deadline.check_cancelled()?;
@@ -211,7 +234,8 @@ impl<C: Session> Group<C> {
                     })?;
             let metadata = capture.metadata();
             let native = &metadata.native;
-            let valid = capture.source_count() == 1
+            let valid = native.direction.consistent_with(request.native.direction)
+                && capture.source_count() == 1
                 && metadata.interface == request.interface
                 && metadata.snap_length > 0
                 && metadata.snap_length <= request.limits.snap_length

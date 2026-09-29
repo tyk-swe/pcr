@@ -1,0 +1,71 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "tftp",
+      "fields": {
+        "opcode": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "filename": {
+          "type": "bytes",
+          "value": [
+            102,
+            105,
+            120,
+            116,
+            117,
+            114,
+            101,
+            46,
+            98,
+            105,
+            110
+          ]
+        },
+        "mode": {
+          "type": "bytes",
+          "value": [
+            111,
+            99,
+            116,
+            101,
+            116
+          ]
+        },
+        "options": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "name": {
+                  "type": "bytes",
+                  "value": [
+                    98,
+                    108,
+                    107,
+                    115,
+                    105,
+                    122,
+                    101
+                  ]
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    49,
+                    48,
+                    50,
+                    52
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

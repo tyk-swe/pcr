@@ -31,6 +31,62 @@ use crate::{
 };
 use bytes::Bytes;
 
+pub(in crate::platform) fn validate_capture_filter(
+    interface: &crate::interface::Info,
+    snap_length: usize,
+    filter: &str,
+    netmask: u32,
+) -> Result<(), Error> {
+    let api = crate::platform::common::npcap::loader::npcap_api()?;
+    let open_dead = api
+        .pcap_open_dead
+        .ok_or_else(|| Error::UnsupportedCaptureSetting {
+            setting: "capture_filter",
+            interface: interface.id.name.clone(),
+            message: "Npcap does not export pcap_open_dead for capture-filter preflight".into(),
+        })?;
+    let datalink = crate::platform::common::pcap_api::filter_datalink(interface)?;
+    let snap_length = c_int::try_from(snap_length).map_err(|_| Error::InvalidCaptureFilter {
+        interface: interface.id.name.clone(),
+        message: "capture snapshot exceeds native BPF range".to_owned(),
+    })?;
+    // SAFETY: validated native layout and snapshot integers produce an independent dead handle.
+    let raw = NonNull::new(unsafe { open_dead(datalink, snap_length) }).ok_or_else(|| {
+        Error::Capture {
+            message: "Npcap could not allocate a dead filter-compilation handle".to_owned(),
+            source: None,
+        }
+    })?;
+    let handle = NpcapHandle { api, raw };
+    let filter = CString::new(filter).map_err(|_| Error::InvalidCaptureFilter {
+        interface: interface.id.name.clone(),
+        message: "Npcap BPF expressions cannot contain an interior NUL byte".to_owned(),
+    })?;
+    let mut program = BpfProgram {
+        instruction_count: 0,
+        instructions: null_mut(),
+    };
+    // SAFETY: the owned dead handle is live, program is writable SDK layout, and filter is terminated.
+    let status = unsafe {
+        (handle.api.pcap_compile)(
+            handle.raw.as_ptr(),
+            &mut program,
+            filter.as_ptr(),
+            1,
+            netmask,
+        )
+    };
+    if status != 0 {
+        return Err(Error::InvalidCaptureFilter {
+            interface: interface.id.name.clone(),
+            message: format!("Npcap compilation failed: {}", handle.error_message()),
+        });
+    }
+    // SAFETY: successful pcap_compile initialized this program; this is its single release.
+    unsafe { (handle.api.pcap_freecode)(&mut program) };
+    Ok(())
+}
+
 pub(in crate::platform) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
@@ -50,6 +106,16 @@ pub(in crate::platform) fn open_capture(
     } else {
         PromiscuousMode::Disabled
     };
+    if native
+        .direction
+        .is_some_and(|direction| direction != crate::capture::Direction::Both)
+    {
+        return Err(Error::UnsupportedCaptureSetting {
+            setting: "direction",
+            interface: interface.name.clone(),
+            message: "Npcap does not provide direction selection through this backend".into(),
+        });
+    }
     let handle = open_handle(interface, snap_length, promiscuous_mode, native)?;
     if let Some(filter) = capture_filter {
         install_capture_filter(

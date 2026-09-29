@@ -120,6 +120,42 @@ impl From<tls::ServerSummary> for Server {
     }
 }
 
+published_enum! {
+    pub enum CertificateStatus from tls::CertificateStatus {
+        Complete => "complete",
+        Encrypted => "encrypted",
+        Incomplete => "incomplete",
+        Malformed => "malformed",
+        Limit => "limit",
+        NotObserved => "not_observed",
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Certificate {
+    pub der_hex: String,
+    pub sha256: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CertificateCollection {
+    pub status: CertificateStatus,
+    pub entries: Vec<Certificate>,
+}
+impl From<tls::CertificateCollection> for CertificateCollection {
+    fn from(value: tls::CertificateCollection) -> Self {
+        Self {
+            status: value.status.into(),
+            entries: value
+                .entries
+                .into_iter()
+                .map(|entry| Certificate {
+                    der_hex: super::hex::compact_hex(&entry.der),
+                    sha256: entry.sha256,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Session {
     /// Monotonic 0-based index in first-seen order. Unique for the run, which
@@ -140,6 +176,8 @@ pub struct Session {
     pub client: Option<Client>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<Server>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificates: Option<CertificateCollection>,
     pub hello_retry: bool,
     pub alerts: Vec<Alert>,
     #[serde(skip_serializing_if = "is_zero")]
@@ -164,6 +202,7 @@ impl TryFrom<tls::Session> for Session {
             handshake_rtt_ms: value.handshake_rtt_ms,
             client: value.client.map(Client::from),
             server: value.server.map(Server::from),
+            certificates: value.certificates.map(Into::into),
             hello_retry: value.hello_retry,
             alerts: value.alerts.into_iter().map(Alert::from).collect(),
             alerts_dropped: value.alerts_dropped,

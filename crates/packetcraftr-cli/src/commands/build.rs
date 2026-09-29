@@ -46,7 +46,7 @@ pub(super) fn run(
     let capture = arguments.capture.resolve(format.as_format())?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
+    let registry = arguments.decode.registry()?;
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
     let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
     if let Some(capture) = &capture {

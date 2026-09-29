@@ -565,7 +565,7 @@ fn missing_values_and_explicit_presence_have_different_contracts() {
         let output = run(&args);
         assert_eq!(output.status.code(), Some(code));
         let document = parse_json(&output);
-        assert_eq!(document["schema"], "packetcraftr.output/v6");
+        assert_eq!(document["schema"], "packetcraftr.output/v7");
         assert_eq!(document["result"]["verdict"], verdict);
         assert_eq!(
             document["result"]["matches"][0]["checks"][0]["actual_state"],

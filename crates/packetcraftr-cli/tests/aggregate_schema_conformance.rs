@@ -64,6 +64,10 @@ use common::{output_schema, schema_validator};
 type Case = fn() -> Value;
 
 const CASES: &[(Command, &str, Case)] = &[
+    (Command::Dedup, "exact duplicates", dedup_case),
+    (Command::Split, "independent files", split_case),
+    (Command::ShiftTime, "exact timestamps", shift_case),
+    (Command::Websocket, "assembled messages", websocket_case),
     (Command::Build, "built packet", build_case),
     (Command::Fragment, "fragment set", fragment_case),
     (Command::Merge, "empty merged captures", merge_case),
@@ -538,6 +542,7 @@ fn replay_case() -> Value {
 fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        advertised_mtu: None,
         application: None,
         sequence: 0,
         address,
@@ -588,6 +593,7 @@ fn scan_case() -> Value {
 fn scan_icmp_case() -> Value {
     let ipv6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
     let probe = |address: IpAddr| packetcraftr::scan::ProbeEvidence {
+        advertised_mtu: None,
         application: None,
         sequence: 1,
         address,
@@ -766,6 +772,7 @@ fn tls_case() -> Value {
         port,
     };
     let session = tls_output::Session {
+        certificates: None,
         scope: fixture_scope()
             .try_into()
             .expect("the fixture scope converts"),
@@ -851,6 +858,7 @@ fn tls_gap_case() -> Value {
         Command::Tls,
         tls_output::Report {
             sessions: vec![tls_output::Session {
+                certificates: None,
                 scope: fixture_scope()
                     .try_into()
                     .expect("the fixture scope converts"),
@@ -877,6 +885,8 @@ fn tls_gap_case() -> Value {
 
 fn trace_probe(responded: bool) -> packetcraftr::traceroute::ProbeEvidence {
     packetcraftr::traceroute::ProbeEvidence {
+        advertised_mtu: None,
+        cycle: 1,
         sequence: 0,
         hop_limit: 1,
         attempt: 1,
@@ -912,6 +922,8 @@ fn traceroute_case() -> Value {
             strategy: packetcraftr::probe::Transport::Udp,
             destination_port: Some(33_434),
             hops: vec![packetcraftr::traceroute::Hop {
+                responders: Default::default(),
+                rtt: Default::default(),
                 hop_limit: 1,
                 probes: vec![trace_probe(true), trace_probe(false)],
             }],
@@ -1446,8 +1458,12 @@ fn aggregate_payloads_accept_unknown_fields_in_nested_output_records() {
                 {
                     return;
                 }
-                for child in object.values_mut() {
-                    extend(child);
+                for (key, child) in object.iter_mut() {
+                    // Address-keyed responder counts are a typed map, rather
+                    // than a record with extensible member names.
+                    if key != "responders" {
+                        extend(child);
+                    }
                 }
                 object.insert("future_field".to_owned(), serde_json::json!({"value": 1}));
             }
@@ -1515,7 +1531,9 @@ fn vocabulary<T: serde::Serialize>(
 }
 
 fn frozen_vocabularies() -> Vec<Vocabulary> {
-    use packetcraftr_cli::output::capture::{Compression, Retention};
+    use packetcraftr_cli::output::capture::{
+        Compression, Direction as CaptureDirection, Retention,
+    };
     use packetcraftr_cli::output::diagnostic::Severity;
     use packetcraftr_cli::output::dns::{
         Outcome as DnsOutcome, Section, Transport as DnsTransport,
@@ -1530,6 +1548,15 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
     use packetcraftr_cli::output::traceroute::{Completion, ResponseKind};
 
     vec![
+        vocabulary(
+            "output::capture::Direction",
+            "/$defs/captureDirection/enum",
+            [
+                CaptureDirection::Both,
+                CaptureDirection::In,
+                CaptureDirection::Out,
+            ],
+        ),
         vocabulary(
             "output::capture::Retention",
             "/$defs/captureFiles/properties/retention/enum",
@@ -1610,6 +1637,8 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
                 Classification::Unreachable,
                 Classification::Unknown,
                 Classification::Timeout,
+                Classification::Unfiltered,
+                Classification::OpenOrFiltered,
             ],
         ),
         vocabulary(
@@ -1939,5 +1968,83 @@ fn capture_case() -> Value {
         summary,
         Vec::new(),
         OutputStats::default(),
+    )
+}
+
+fn dedup_case() -> Value {
+    use packetcraftr_cli::output::{capture_transform::Dedup, export::Selection};
+    envelope(
+        Command::Dedup,
+        Dedup {
+            path: "dedup.pcap".into(),
+            selection: Selection {
+                format: "pcap",
+                frames_read: 2,
+                frames_selected: 1,
+                captured_bytes_read: 40,
+                captured_bytes_selected: 20,
+                interfaces: 1,
+                metadata_records: 0,
+            },
+            duplicates: 1,
+        },
+        Vec::new(),
+    )
+}
+fn split_case() -> Value {
+    envelope(
+        Command::Split,
+        packetcraftr_cli::output::capture_transform::Split {
+            path: "split".into(),
+            format: "pcap",
+            files: 2,
+            frames: 2,
+            captured_bytes: 40,
+            frames_per_file: vec![1, 1],
+        },
+        Vec::new(),
+    )
+}
+fn shift_case() -> Value {
+    envelope(
+        Command::ShiftTime,
+        packetcraftr_cli::output::capture_transform::Shift {
+            path: "shift.pcapng".into(),
+            format: "pcapng",
+            frames: 2,
+            captured_bytes: 40,
+            shifted_packets: 2,
+            shifted_statistics: 1,
+        },
+        Vec::new(),
+    )
+}
+fn websocket_case() -> Value {
+    use packetcraftr_cli::output::{follow::PeerDirection, websocket};
+    let run = packetcraftr_core::analysis::Summary::default();
+    let summary = packetcraftr_core::analysis::websocket::Summary::default();
+    let complete = websocket::Complete::try_from((&run, summary, Vec::new())).unwrap();
+    envelope(
+        Command::Websocket,
+        websocket::Report {
+            stream: 0,
+            events: vec![
+                websocket::Event::Message {
+                    frame: 1,
+                    direction: PeerDirection::ClientToServer,
+                    index: 0,
+                    opcode: 1,
+                    bytes_hex: "6869".into(),
+                },
+                websocket::Event::Control {
+                    frame: 2,
+                    direction: PeerDirection::ServerToClient,
+                    opcode: 9,
+                    bytes_hex: String::new(),
+                },
+            ],
+            complete,
+        },
+        Vec::new(),
     )
 }

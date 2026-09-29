@@ -60,6 +60,12 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
         ProbeEndpoint::Tcp { port } => packet.push(Tcp {
             destination_port: port,
             sequence: probe.sequence as u32,
+            flags: probe.tcp_mode.flags(),
+            acknowledgment: if probe.tcp_mode == super::super::TcpMode::Ack {
+                probe.sequence as u32
+            } else {
+                0
+            },
             ..Tcp::default()
         }),
         ProbeEndpoint::Udp { port } => {
@@ -334,7 +340,13 @@ pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool 
         ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
-                && tcp.flags == Tcp::SYN
+                && tcp.flags == probe.tcp_mode.flags()
+                && tcp.acknowledgment
+                    == if probe.tcp_mode == super::super::TcpMode::Ack {
+                        probe.sequence as u32
+                    } else {
+                        0
+                    }
         }),
         ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == scan_udp_source_port(probe.attempt) && udp.destination_port == port
@@ -381,6 +393,7 @@ mod tests {
             address: "192.0.2.53".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 53 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -410,6 +423,7 @@ mod tests {
             address: "192.0.2.123".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 123 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: Bytes::copy_from_slice(payload),
         }
     }
@@ -463,6 +477,7 @@ mod tests {
                 address: address.parse().unwrap(),
                 endpoint: ProbeEndpoint::Udp { port: 50001 },
                 udp_profile: None,
+                tcp_mode: Default::default(),
                 udp_payload: Bytes::from_static(b"\x00query\xff"),
             };
             let mut packet = probe.packet();
@@ -581,6 +596,7 @@ mod tests {
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 4789 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -614,6 +630,7 @@ mod tests {
             address: "2001:db8::10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 6081 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -636,6 +653,7 @@ mod tests {
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 6081 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -657,6 +675,7 @@ mod tests {
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 4789 },
             udp_profile: None,
+            tcp_mode: Default::default(),
             udp_payload: Bytes::from_static(b"not a vxlan frame"),
         };
         let mut packet = probe.packet();

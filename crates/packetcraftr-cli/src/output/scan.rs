@@ -21,6 +21,8 @@ use packetcraftr::scan as library;
 published_enum! {
     pub enum Classification from library::Classification {
         Open => "open",
+        Unfiltered => "unfiltered",
+        OpenOrFiltered => "open_or_filtered",
         Closed => "closed",
         Filtered => "filtered",
         Unreachable => "unreachable",
@@ -32,6 +34,8 @@ published_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClassificationCounts {
     pub open: usize,
+    pub unfiltered: usize,
+    pub open_or_filtered: usize,
     pub closed: usize,
     pub filtered: usize,
     pub unreachable: usize,
@@ -43,6 +47,8 @@ impl From<library::ClassificationCounts> for ClassificationCounts {
     fn from(value: library::ClassificationCounts) -> Self {
         Self {
             open: value.open,
+            unfiltered: value.unfiltered,
+            open_or_filtered: value.open_or_filtered,
             closed: value.closed,
             filtered: value.filtered,
             unreachable: value.unreachable,
@@ -146,6 +152,8 @@ pub struct Probe {
     pub reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application: Option<ApplicationEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advertised_mtu: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -346,6 +354,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             frame: evidence.response.map(Captured::try_from).transpose()?,
             reason: evidence.reason,
             application: evidence.application.map(Into::into),
+            advertised_mtu: evidence.advertised_mtu,
         })
     }
 }

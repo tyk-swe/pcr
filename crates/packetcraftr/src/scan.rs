@@ -21,6 +21,37 @@ const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
+/// Raw TCP scan wire flags and silence interpretation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TcpMode {
+    #[default]
+    Syn,
+    Ack,
+    Fin,
+    Null,
+    Xmas,
+}
+impl TcpMode {
+    pub const fn flags(self) -> u16 {
+        use packetcraftr_core::protocol::transport::Tcp;
+        match self {
+            Self::Syn => Tcp::SYN,
+            Self::Ack => Tcp::ACK,
+            Self::Fin => Tcp::FIN,
+            Self::Null => 0,
+            Self::Xmas => Tcp::FIN | 0x08 | 0x20,
+        }
+    }
+    pub const fn silence(self) -> Classification {
+        match self {
+            Self::Syn => Classification::Timeout,
+            Self::Ack => Classification::Filtered,
+            Self::Fin | Self::Null | Self::Xmas => Classification::OpenOrFiltered,
+        }
+    }
+}
+
 pub mod connect;
 mod engine;
 mod error;
@@ -37,6 +68,7 @@ pub use error::Error;
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use executor::{PendingEvidence, PipelineFailure};
 pub use plan::Probe;
+pub(crate) use report::RttAccumulator;
 pub use report::{
     Aggregate, Classification, ClassificationCounts, Collector, Endpoint, Event, ProbeEvidence,
     Report, Rtt, SentProbe,

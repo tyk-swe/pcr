@@ -82,6 +82,9 @@ pub(crate) struct Args {
     #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = crate::command_options::stream_selector)]
     pub(crate) stream:
         Option<crate::command_options::Selector<packetcraftr_core::analysis::StreamRef>>,
+    /// Collect plaintext TLS through 1.2 certificate chains, exact DER and SHA-256.
+    #[arg(long)]
+    pub(crate) certificates: bool,
     /// Keep sessions whose server name matches, case-insensitively; `*` is
     /// accepted as a leading or trailing wildcard.
     #[arg(long, value_name = "PATTERN")]

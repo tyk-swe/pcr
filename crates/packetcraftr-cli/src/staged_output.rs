@@ -95,6 +95,93 @@ fn output(action: &'static str, destination: &Path, source: std::io::Error) -> C
     )
 }
 
+/// Stages a bounded set of files beside an absent destination directory.
+/// Publication reserves the destination exclusively, then moves only the files
+/// owned by this operation. A failed publication removes those files.
+#[derive(Debug)]
+pub(crate) struct StagedDirectory {
+    directory: tempfile::TempDir,
+    destination: PathBuf,
+    _registration: StagedRegistration,
+}
+
+impl StagedDirectory {
+    pub(crate) fn stage(destination: &Path) -> Result<Self, CliError> {
+        crate::cancellation::check()?;
+        match std::fs::symlink_metadata(destination) {
+            Ok(_) => {
+                return Err(CliError::from_classification(
+                    CLASSIFICATION,
+                    format!(
+                        "output destination {} already exists",
+                        destination.display()
+                    ),
+                    Vec::new(),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => return Err(output("inspect", destination, source)),
+        }
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let directory =
+            tempfile::tempdir_in(parent).map_err(|source| output("stage", destination, source))?;
+        let registration = StagedRegistration::new(directory.path());
+        Ok(Self {
+            directory,
+            destination: destination.to_owned(),
+            _registration: registration,
+        })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.directory.path()
+    }
+
+    pub(crate) fn persist(self) -> Result<(), CliError> {
+        let mut names = std::fs::read_dir(self.directory.path())
+            .map_err(|source| output("read staged directory", &self.destination, source))?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| output("read staged directory", &self.destination, source))?;
+        names.sort();
+        for name in &names {
+            crate::cancellation::check()?;
+            let path = self.directory.path().join(name);
+            // Windows FlushFileBuffers requires a writable handle.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .and_then(|file| file.sync_all())
+                .map_err(|source| output("sync", &path, source))?;
+        }
+        crate::cancellation::check()?;
+        std::fs::create_dir(&self.destination)
+            .map_err(|source| output("reserve directory", &self.destination, source))?;
+        let registration = StagedRegistration::new(&self.destination);
+        let mut published = Vec::new();
+        let result = names.iter().try_for_each(|name| {
+            crate::cancellation::check()?;
+            let destination = self.destination.join(name);
+            // Hard links publish a complete file exclusively on the same filesystem.
+            std::fs::hard_link(self.directory.path().join(name), &destination)
+                .map_err(|source| output("publish", &destination, source))?;
+            published.push(destination);
+            Ok(())
+        });
+        if result.is_err() {
+            for path in &published {
+                let _ = std::fs::remove_file(path);
+            }
+            let _ = std::fs::remove_dir(&self.destination);
+        }
+        drop(registration);
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

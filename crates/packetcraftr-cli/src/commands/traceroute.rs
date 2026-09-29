@@ -28,6 +28,8 @@ impl super::Spec for Args {
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
             max_hops: Count @ Operation,
+            cycles: Count @ Operation,
+            cycle_interval_ms: Milliseconds @ Operation,
             max_probes: Count @ Operation,
             max_undecoded: Count @ ResultRetention,
         ]);
@@ -126,6 +128,9 @@ fn prepare_request(
     let request = packetcraftr::traceroute::Request {
         target: parse_target(arguments.target.clone())?,
         strategy,
+        udp_port_mode: arguments.udp_port_mode.into(),
+        cycles: arguments.cycles,
+        cycle_interval: std::time::Duration::from_millis(arguments.cycle_interval_ms),
         address_family: arguments.family.into(),
         destination_port,
         source_port: arguments.source_port,

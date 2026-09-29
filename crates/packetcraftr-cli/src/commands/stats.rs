@@ -150,6 +150,12 @@ fn cap_table(
             )
         }
         Table::Io => cap(&mut report.io, limit, "stats.io_omitted", "io bucket(s)"),
-        Table::Fragments => Vec::new(),
+        Table::Fragments | Table::Sizes => Vec::new(),
+        Table::TcpTiming => cap(
+            &mut report.tcp_timing,
+            limit,
+            "stats.tcp_timing_omitted",
+            "TCP timing row(s)",
+        ),
     }
 }

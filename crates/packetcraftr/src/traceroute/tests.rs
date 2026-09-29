@@ -106,6 +106,9 @@ where
 
 fn udp_traceroute_request(target: Target) -> Request {
     Request {
+        udp_port_mode: Default::default(),
+        cycles: 1,
+        cycle_interval: Duration::from_millis(1000),
         target,
         strategy: Transport::Udp,
         address_family: Family::Any,
@@ -551,6 +554,8 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
     let mut probe = Probe {
+        udp_port_mode: Default::default(),
+        cycle: 1,
         sequence: 0,
         address: IpAddr::V4(remote),
         target: ProbeEndpoint::Udp {
@@ -606,6 +611,8 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
     let remote: Ipv6Addr = "fd00::9".parse().unwrap();
     let router: Ipv6Addr = "fd00::fe".parse().unwrap();
     let mut probe = Probe {
+        udp_port_mode: Default::default(),
+        cycle: 1,
         sequence: 9,
         address: IpAddr::V6(remote),
         target: ProbeEndpoint::Udp {
@@ -820,4 +827,229 @@ fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
         error.classification().code,
         "internal.traceroute_event_coherence"
     );
+}
+
+#[test]
+fn fixed_udp_keeps_tuple_and_flow_label_with_distinct_quoted_tokens() {
+    use packetcraftr_core::{
+        build::{Builder, Options},
+        codec::Context,
+        field::WireValue,
+        protocol::builtin,
+    };
+    let mut request = udp_traceroute_request(Target::Address("2001:db8::2".parse().unwrap()));
+    request.udp_port_mode = super::UdpPortMode::Fixed;
+    let batches = super::plan::build_batches(&request, "2001:db8::2".parse().unwrap()).unwrap();
+    let mut checksums = std::collections::HashSet::new();
+    for probe in batches.iter().flat_map(|batch| &batch.probes) {
+        let mut packet = probe.packet();
+        packet.get_mut::<Ipv6>().unwrap().source = "2001:db8::1".parse().unwrap();
+        let built = Builder::new(builtin::registry())
+            .build(packet, Context::default(), Options::default())
+            .unwrap();
+        let udp = built.packet.get::<Udp>().unwrap();
+        assert_eq!(udp.source_port, super::SOURCE_PORT);
+        assert_eq!(udp.destination_port, DEFAULT_UDP_PORT);
+        assert_eq!(built.packet.get::<Ipv6>().unwrap().flow_label, 0);
+        let WireValue::Exact(checksum) = udp.checksum else {
+            panic!("built checksum")
+        };
+        assert!(checksums.insert(checksum));
+        assert!(super::plan::packet::sent_probe_matches(
+            probe,
+            &built.packet
+        ));
+    }
+}
+
+#[test]
+fn repeated_cycles_share_plan_budget_and_keep_cycle_numbers() {
+    let mut request = udp_traceroute_request(Target::Address("192.0.2.2".parse().unwrap()));
+    request.cycles = 3;
+    request.udp_port_mode = super::UdpPortMode::Fixed;
+    assert_eq!(request.total_probe_count().unwrap(), 12);
+    let batches = super::plan::build_batches(&request, "192.0.2.2".parse().unwrap()).unwrap();
+    assert_eq!(
+        batches
+            .iter()
+            .flat_map(|batch| &batch.probes)
+            .map(|probe| probe.cycle)
+            .collect::<Vec<_>>(),
+        [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]
+    );
+    let mut authorizer = AddressListAuthorizer {
+        addresses: vec!["192.0.2.2".parse().unwrap()],
+    };
+    let mut executor = RejectingExecutor {
+        calls: Arc::new(AtomicUsize::new(0)),
+    };
+    request.limits.max_probes = 11;
+    assert!(
+        run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock
+        )
+        .is_err()
+    );
+    assert_eq!(executor.calls.load(Ordering::SeqCst), 0);
+    request.limits.max_probes = 12;
+    let mut authorized = FixedAuthorizer {
+        address: "192.0.2.2".parse().unwrap(),
+        operations: Vec::new(),
+    };
+    let aggregate = run(
+        &request,
+        &mut authorized,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut NoResponseExecutor::default(),
+        &mut NoopClock,
+    )
+    .unwrap();
+    assert_eq!(authorized.operations.len(), 1);
+    assert_eq!(aggregate.stats.packets_attempted, 12);
+    assert_eq!(
+        aggregate.stats.elapsed,
+        Duration::from_secs(2) + Duration::from_millis(6)
+    );
+    for hop in aggregate.hops {
+        assert_eq!(hop.probes.len(), 6);
+        assert_eq!(hop.rtt.sent, 6);
+        assert_eq!(hop.rtt.lost, 6);
+        assert_eq!(hop.rtt.received, 0);
+        assert!(hop.responders.is_empty());
+    }
+}
+
+#[test]
+fn advertised_mtu_is_retained_only_for_correlated_quotes() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "192.0.2.2".parse().unwrap(),
+            ..Default::default()
+        })
+        .push(Udp {
+            source_port: 49152,
+            destination_port: 33434,
+            ..Default::default()
+        });
+    let mut response = icmpv4_error(
+        "192.0.2.254".parse().unwrap(),
+        "192.0.2.1".parse().unwrap(),
+        3,
+        4,
+        ipv4_udp_quote(&request),
+        1,
+        Vec::new(),
+    );
+    let icmp = response.packet.get_mut::<Icmpv4>().unwrap();
+    let mut body = icmp.body.to_vec();
+    body[2..4].copy_from_slice(&1400u16.to_be_bytes());
+    icmp.body = Bytes::from(body);
+    assert_eq!(
+        classify_response(&registry, Transport::Udp, &request, &response)
+            .unwrap()
+            .advertised_mtu,
+        Some(1400)
+    );
+    let icmp = response.packet.get_mut::<Icmpv4>().unwrap();
+    let mut body = icmp.body.to_vec();
+    body[2..4].fill(0);
+    icmp.body = Bytes::from(body);
+    assert_eq!(
+        classify_response(&registry, Transport::Udp, &request, &response)
+            .unwrap()
+            .advertised_mtu,
+        Some(0)
+    );
+    request.get_mut::<Udp>().unwrap().destination_port += 1;
+    assert!(classify_response(&registry, Transport::Udp, &request, &response).is_none());
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source: "2001:db8::1".parse().unwrap(),
+            destination: "2001:db8::2".parse().unwrap(),
+            ..Default::default()
+        })
+        .push(Udp {
+            source_port: 49152,
+            destination_port: 33434,
+            ..Default::default()
+        });
+    let mut response = icmpv6_error(
+        "2001:db8::ff".parse().unwrap(),
+        "2001:db8::1".parse().unwrap(),
+        2,
+        0,
+        ipv6_udp_quote(&request),
+    );
+    let icmp = response.packet.get_mut::<Icmpv6>().unwrap();
+    let mut body = icmp.body.to_vec();
+    body[..4].copy_from_slice(&1280u32.to_be_bytes());
+    icmp.body = Bytes::from(body);
+    assert_eq!(
+        classify_response(&registry, Transport::Udp, &request, &response)
+            .unwrap()
+            .advertised_mtu,
+        Some(1280)
+    );
+}
+
+#[test]
+fn fixed_udp_accepts_only_the_exact_quoted_checksum_token() {
+    use crate::probe::runner::Classifier;
+    use packetcraftr_core::field::WireValue;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let probe = Probe {
+        sequence: 0,
+        cycle: 1,
+        udp_port_mode: super::UdpPortMode::Fixed,
+        address: "192.0.2.2".parse().unwrap(),
+        target: ProbeEndpoint::Udp {
+            port: DEFAULT_UDP_PORT,
+        },
+        hop_limit: 1,
+        attempt: 1,
+        source_port: super::SOURCE_PORT,
+    };
+    let mut packet = probe.packet();
+    packet.get_mut::<Ipv4>().unwrap().source = "192.0.2.1".parse().unwrap();
+    let sent = crate::test_support::sent_packet(packet);
+    let udp = sent.built().packet.get::<Udp>().unwrap();
+    let WireValue::Exact(token) = udp.checksum else {
+        panic!("built token")
+    };
+    let mut quote = ipv4_udp_quote(&sent.built().packet);
+    quote[26..28].copy_from_slice(&token.to_be_bytes());
+    let response = icmpv4_error(
+        "192.0.2.254".parse().unwrap(),
+        "192.0.2.1".parse().unwrap(),
+        11,
+        0,
+        quote.clone(),
+        1,
+        Vec::new(),
+    );
+    let classifier = super::evidence::ProbeClassifier {
+        registry: &registry,
+        target: Arc::from("192.0.2.2"),
+        termination: Termination::Timeout,
+    };
+    assert!(classifier.classify(&probe, &sent, &response).is_some());
+    quote[27] ^= 1;
+    let response = icmpv4_error(
+        "192.0.2.254".parse().unwrap(),
+        "192.0.2.1".parse().unwrap(),
+        11,
+        0,
+        quote,
+        1,
+        Vec::new(),
+    );
+    assert!(classifier.classify(&probe, &sent, &response).is_none());
 }

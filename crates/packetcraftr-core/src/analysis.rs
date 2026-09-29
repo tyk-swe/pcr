@@ -23,6 +23,7 @@ mod session;
 pub mod stats;
 mod stream;
 pub mod tls;
+pub mod websocket;
 
 pub use error::{Constraint, Error};
 pub use pipeline::{

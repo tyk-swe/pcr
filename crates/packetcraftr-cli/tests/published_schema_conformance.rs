@@ -166,3 +166,30 @@ fn udp_profile_schema_accepts_the_published_profiles_and_bounds_names_as_the_loa
         assert_eq!(validator.is_valid(&named), valid, "{name:?}");
     }
 }
+
+#[test]
+fn tcp_profile_schema_matches_bytes_only_loader_and_response_ceiling() {
+    let schema = validator(include_str!(
+        "../../../schemas/packetcraftr.tcp-profiles.v1.schema.json"
+    ));
+    let sample: Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/tcp-profiles.json"
+    ))
+    .unwrap();
+    schema.validate(&sample).unwrap();
+    packetcraftr_core::document::tcp_profiles::parse(&serde_json::to_vec(&sample).unwrap())
+        .unwrap();
+    let mut invalid = sample.clone();
+    invalid["profiles"][0]["profile"]["response"] = json!({"type":"dns"});
+    assert!(!schema.is_valid(&invalid));
+    assert!(
+        packetcraftr_core::document::tcp_profiles::parse(&serde_json::to_vec(&invalid).unwrap())
+            .is_err()
+    );
+    invalid = sample.clone();
+    invalid["profiles"][0]["profile"]["response"]["max_length"] = json!(65537);
+    assert!(!schema.is_valid(&invalid));
+    invalid = sample;
+    invalid["profiles"][0]["profile"]["request"]["type"] = json!("dns");
+    assert!(!schema.is_valid(&invalid));
+}

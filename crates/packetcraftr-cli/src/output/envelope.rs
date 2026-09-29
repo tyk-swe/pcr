@@ -10,7 +10,7 @@ use packetcraftr_core::diagnostic::Diagnostic as LibraryDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::capture::Stats as CaptureStats;
-use super::contract::{Command, Mode, SCHEMA_V6};
+use super::contract::{Command, Mode, SCHEMA_V7};
 use super::diagnostic::Diagnostic;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -225,7 +225,7 @@ impl<T> Envelope<T> {
             stats,
         } = published;
         Self {
-            schema: SCHEMA_V6,
+            schema: SCHEMA_V7,
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
@@ -245,7 +245,7 @@ impl<T> Envelope<T> {
         diagnostics: Vec<Diagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA_V6,
+            schema: SCHEMA_V7,
             command: Some(command),
             mode: Mode::Stream,
             sequence: Some(sequence),
@@ -273,7 +273,7 @@ impl<T> Envelope<T> {
 impl Envelope<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V6,
+            schema: SCHEMA_V7,
             command,
             mode: Mode::Aggregate,
             sequence: None,
@@ -287,7 +287,7 @@ impl Envelope<()> {
 
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V6,
+            schema: SCHEMA_V7,
             command,
             mode: Mode::Stream,
             sequence: Some(sequence),

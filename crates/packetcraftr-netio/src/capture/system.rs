@@ -6,9 +6,38 @@ use packetcraftr_core::budget::Deadline;
 use super::{ARMING, DISCOVERING_TIMESTAMP_TYPES, Request, Session, TimestampType, admit};
 use crate::{Error, interface::Id as InterfaceId};
 
+pub(super) fn validate_capture(request: &Request, deadline: &Deadline) -> Result<(), Error> {
+    request.validate()?;
+    admit(deadline, ARMING)?;
+    #[cfg(native_layer2)]
+    if let Some(filter) = request.filter.as_deref() {
+        super::filter::validate(&request.interface, filter)?;
+        let interface = crate::interface::current(&request.interface, deadline)?;
+        admit(deadline, ARMING)?;
+        crate::platform::validate_capture_filter(
+            &interface,
+            request.limits.snap_length,
+            filter,
+            netmask(&interface),
+        )?;
+        admit(deadline, ARMING)?;
+    }
+    #[cfg(not(native_layer2))]
+    if request.filter.is_some() {
+        return Err(crate::platform::unsupported(
+            crate::NativeCapability::Capture,
+            cfg!(feature = "native-layer2"),
+            "native-layer2",
+            "capture-filter compilation",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
-    request.validate()?;
+    validate_capture(request, deadline)?;
     let limits = request.limits;
     if let Some(filter) = request.filter.as_deref() {
         super::filter::validate(&request.interface, filter)?;

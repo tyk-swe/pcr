@@ -79,6 +79,15 @@ impl BodyDecoder {
         self.complete()
     }
     pub fn consume(&mut self, input: &[u8]) -> Result<Progress, Error> {
+        self.consume_with(input, |_| {})
+    }
+    /// Deliver entity bytes after transfer framing, in input order. Callers must
+    /// stage bytes until `complete` before publishing a complete entity.
+    pub fn consume_with(
+        &mut self,
+        input: &[u8],
+        mut entity: impl FnMut(&[u8]),
+    ) -> Result<Progress, Error> {
         let mut offset = 0;
         while offset < input.len() && !self.complete() {
             match self.state {
@@ -88,6 +97,7 @@ impl BodyDecoder {
                         .unwrap_or(usize::MAX)
                         .min(input.len() - offset);
                     self.add(take)?;
+                    entity(&input[offset..offset + take]);
                     offset += take;
                     let remaining = remaining - take as u64;
                     self.state = match self.state {
@@ -110,6 +120,7 @@ impl BodyDecoder {
                 State::Close => {
                     let take = input.len() - offset;
                     self.add(take)?;
+                    entity(&input[offset..offset + take]);
                     offset += take;
                 }
                 State::ChunkCr => {

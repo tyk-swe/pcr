@@ -36,7 +36,7 @@ def terminal(path):
                 raise ValueError(f"invalid capture JSON: {error}") from error
             if not isinstance(row, dict):
                 raise ValueError("capture envelope must be an object")
-            if (row.get("schema") != "packetcraftr.output/v6" or row.get("command") != "capture"
+            if (row.get("schema") != "packetcraftr.output/v7" or row.get("command") != "capture"
                     or type(row.get("sequence")) is not int or row["sequence"] != sequence):
                 raise ValueError("unexpected capture envelope")
             if row.get("event") in ("complete", "error"):

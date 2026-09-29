@@ -27,6 +27,8 @@ pub(crate) fn report(
         .intern(None, Vec::new())
         .expect("representative scope fits");
     Report {
+        sizes: Vec::new(),
+        tcp_timing: Vec::new(),
         clock: Default::default(),
         io_origin: Some(first),
         io_underflow_frames: 0,

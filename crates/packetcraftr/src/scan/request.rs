@@ -145,6 +145,9 @@ pub struct Request {
     pub max_in_flight: usize,
     pub targets: Selection,
     pub transport: Transport,
+    pub tcp_mode: super::TcpMode,
+    pub shuffle_seed: Option<u64>,
+    pub tcp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::TcpProfile>>,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
@@ -169,6 +172,25 @@ impl Request {
             });
         }
         self.targets.validate().map_err(Error::TargetSelection)?;
+        if self.transport != Transport::Tcp
+            && (self.tcp_mode != super::TcpMode::Syn || !self.tcp_profiles.is_empty())
+        {
+            return Err(Error::InvalidPort {
+                message: "TCP modes and profiles require TCP transport".to_owned(),
+            });
+        }
+        let mut unique_tcp = std::collections::HashSet::new();
+        let tcp_storage = self
+            .tcp_profiles
+            .values()
+            .filter(|profile| unique_tcp.insert(std::sync::Arc::as_ptr(profile)))
+            .map(|profile| profile.storage_bytes())
+            .sum::<usize>();
+        if self.tcp_profiles.len() > 4096 || tcp_storage > 1024 * 1024 {
+            return Err(Error::InvalidPort {
+                message: "TCP profiles exceed bounded storage or port count".to_owned(),
+            });
+        }
         if self.udp_profiles.len() > packetcraftr_core::document::udp_profiles::MAX_PROFILE_PORTS
             || (!self.udp_profiles.is_empty() && self.transport != Transport::Udp)
         {

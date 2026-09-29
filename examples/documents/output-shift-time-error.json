@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "shift-time",
+  "mode": "aggregate",
+  "status": "error",
+  "diagnostics": [],
+  "error": {
+    "code": "packet.transform_input",
+    "kind": "packet",
+    "message": "capture frame 1 transformation failed: invalid packet transform input: cannot change IP address family",
+    "causes": [
+      "invalid packet transform input: cannot change IP address family"
+    ],
+    "remediation": "supply a complete supported datagram"
+  }
+}

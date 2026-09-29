@@ -1088,6 +1088,7 @@ dependencies = [
  "memchr",
  "noyalib",
  "proptest",
+ "regex-automata",
  "serde",
  "serde_json",
  "sha2",

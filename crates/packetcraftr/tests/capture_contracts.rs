@@ -169,6 +169,7 @@ fn single() -> Request {
 fn capture_of(interfaces: Vec<Id>) -> Request {
     Request::new(
         GroupRequest {
+            filters: Vec::new(),
             interfaces,
             limits: native::Limits {
                 max_frames: 8,

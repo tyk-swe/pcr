@@ -4,6 +4,26 @@
 use super::Limits;
 use crate::Error;
 
+/// Requested ingress/egress selection. Backends must apply it before readiness.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    #[default]
+    Both,
+    In,
+    Out,
+}
+impl Direction {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::In => "in",
+            Self::Out => "out",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampPrecision {
@@ -71,6 +91,7 @@ pub const MAX_TIMESTAMP_TYPES: usize = 64;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NativeSettings {
+    pub direction: Option<Direction>,
     /// Kernel/driver capture-buffer size in bytes (`pcap_set_buffer_size`).
     pub buffer_size: Option<usize>,
     pub timestamp_source: Option<TimestampSource>,
@@ -128,12 +149,19 @@ impl<T> Default for Realized<T> {
 impl<T: PartialEq> Realized<T> {
     /// Backends must reject a confirmed effective mismatch before reporting a session.
     pub(crate) fn consistent_with(&self, request: Option<T>) -> bool {
-        self.requested == request && self.applied == request
+        self.requested == request
+            && self.applied == request
+            && self
+                .effective
+                .as_ref()
+                .zip(request.as_ref())
+                .is_none_or(|(effective, requested)| effective == requested)
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct RealizedSettings {
+    pub direction: Realized<Direction>,
     pub buffer_size: Realized<usize>,
     pub timestamp_source: Realized<TimestampSource>,
     pub timestamp_precision: Realized<TimestampPrecision>,
@@ -146,7 +174,8 @@ impl RealizedSettings {
                 || realized.applied.is_some()
                 || realized.effective.is_some()
         }
-        present(&self.buffer_size)
+        present(&self.direction)
+            || present(&self.buffer_size)
             || present(&self.timestamp_source)
             || present(&self.timestamp_precision)
     }
@@ -177,6 +206,7 @@ mod tests {
             buffer_size: Some(MAX_NATIVE_BUFFER_SIZE),
             timestamp_source: Some(TimestampSource::Adapter),
             timestamp_precision: Some(TimestampPrecision::Nano),
+            direction: None,
         }
         .validate(&limits)
         .unwrap();

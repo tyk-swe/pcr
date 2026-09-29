@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from validation_evidence import (
-    DECODE_FIELDS, DECODE_PROFILES, EVIDENCE_VERSION, NATIVE_SCENARIOS,
+    DECODE_FIELDS, DECODE_PROFILES, DECODE_PARITY_FIELDS, EVIDENCE_VERSION, NATIVE_SCENARIOS,
     checksum, digest, provenance, tshark_matches,
 )
 
@@ -59,6 +59,9 @@ def decoder_report(profile='pull-request'):
                 tshark_sha256='e' * 64, profile=profile, fields=[field[2] for field in DECODE_FIELDS],
                 captures=[dict(name=name, frames=count, sha256='f' * 64, status='passed', mismatches=0)
                           for name, count in DECODE_PROFILES[profile].items()], mismatches=[],
+                parity_captures=[dict(name=name, frames=1, sha256='f' * 64, status='passed',
+                                      mismatches=0, fields=list(fields))
+                                 for name, fields in DECODE_PARITY_FIELDS.items()],
                 tls_ja3=dict(capture='tls-handshake', expected=['1' * 32], observed=['1' * 32]))
 
 
@@ -106,7 +109,7 @@ class EvidenceTests(unittest.TestCase):
                     del report[key]
                     self.reject(report, kind)
             for key, values in {
-                'schema_version': [None, True, '1', 1.0, 0, 2],
+                'schema_version': [None, True, '2', 2.0, 0, 1, 3],
                 'status': [None, 'failed', 'skipped', 'unsupported'],
                 'commit': [None, 'b' * 40],
                 'dirty': [None, True, 0, 'false'],
@@ -286,8 +289,21 @@ class EvidenceTests(unittest.TestCase):
             def output(command, **kwargs):
                 if command[-1] == '--version':
                     return 'TShark (Wireshark) 4.6.4.\n'
+                if 'build' in command:
+                    return oracle.pcap([bytes(64)])
                 if 'ndjson' in command:
-                    count = physical_frames(pathlib.Path(command[-2]).read_bytes())
+                    path = pathlib.Path(command[command.index('read') + 1])
+                    protocol = path.stem
+                    if protocol in oracle.PARITY_FIELDS:
+                        example = json.loads((ROOT.parent / f'examples/documents/packet-parity-{protocol}.json').read_text())
+                        fields = example['layers'][0]['fields']
+                        if protocol == 'lldp': fields['ttl'] = dict(value=120)
+                        if protocol == 'stp': fields['root_path_cost'] = dict(value=0)
+                        if protocol == 'mqtt': fields['topic'] = dict(value=list(b'fixture'))
+                        frame = dict(event='frame', result=dict(decoded=dict(packet=dict(layers=[
+                            dict(protocol=protocol, fields=fields)]))))
+                        return b'\n'.join(json.dumps(record).encode() for record in [frame, dict(event='complete')])
+                    count = physical_frames(path.read_bytes())
                     frame = dict(event='frame', result=dict(decoded=dict(packet=dict(layers=[
                         dict(protocol='ipv4', fields={
                             'source': dict(value='192.0.2.1'),
@@ -297,9 +313,19 @@ class EvidenceTests(unittest.TestCase):
                     return b'\n'.join(json.dumps(record).encode() for record in [frame] * count + [dict(event='complete')])
                 return json.dumps(dict(result=dict(sessions=[dict(client=dict(ja3='1' * 32))]))).encode()
 
-            def tshark(data, fields, binary='tshark'):
+            def tshark(data, fields, binary='tshark', decode_as=()):
                 if fields == ['tls.handshake.ja3']:
                     return ['1' * 32]
+                parity_values = {
+                    'lldp.time_to_live': '120', 'stp.version': '2', 'stp.type': '2',
+                    'stp.root.cost': '0', 'stp.port': '32769', 'tftp.opcode': '1',
+                    'tftp.source_file': 'fixture.bin', 'rtp.p_type': '96', 'rtp.seq': '7',
+                    'rtp.timestamp': '8000', 'rtp.ssrc': '1', 'rtcp.pt': '201,210',
+                    'mqtt.msgtype': '3', 'mqtt.topic': 'fixture', 'http.request.method': 'POST',
+                    'http.request.uri': '/fixture', 'http.request.version': 'HTTP/1.1',
+                }
+                if all(field in parity_values for field in fields):
+                    return ['\t'.join(parity_values[field] for field in fields)]
                 row = '\t'.join('192.0.2.1' if field == 'ip.src' else '0' if field == 'ip.frag_offset' else ''
                                 for field in fields)
                 return [row] * physical_frames(data)
@@ -315,6 +341,24 @@ class EvidenceTests(unittest.TestCase):
                     self.assertEqual(oracle.main(), 0)
                 report = json.loads(report_path.read_text())
                 release.validate(report, COMMIT, DECODER)
+                self.assertEqual({item['name'] for item in report['parity_captures']}, set(DECODE_PARITY_FIELDS))
+
+    def test_parity_decoder_evidence_requires_all_protocols_and_fields(self):
+        for key in ['parity_captures']:
+            report = decoder_report()
+            del report[key]
+            self.reject(report, DECODER)
+        for index in range(len(DECODE_PARITY_FIELDS)):
+            report = decoder_report()
+            report['parity_captures'].pop(index)
+            self.reject(report, DECODER)
+            for key in ['sha256', 'frames', 'fields', 'status', 'mismatches']:
+                report = decoder_report()
+                del report['parity_captures'][index][key]
+                self.reject(report, DECODER)
+            report = decoder_report()
+            report['parity_captures'][index]['mismatches'] = 1
+            self.reject(report, DECODER)
 
     def test_producers_mark_incomplete_success_reports_failed_before_publication(self):
         for producer, factory, key in [(oracle, decoder_report, 'fields'),

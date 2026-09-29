@@ -1,0 +1,36 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "mqtt",
+      "fields": {
+        "packet_type": {
+          "type": "unsigned",
+          "value": 3
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "body": {
+          "type": "bytes",
+          "value": [
+            0,
+            7,
+            102,
+            105,
+            120,
+            116,
+            117,
+            114,
+            101,
+            98,
+            111,
+            100,
+            121
+          ]
+        }
+      }
+    }
+  ]
+}

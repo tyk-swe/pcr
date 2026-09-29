@@ -67,6 +67,9 @@ pub(super) fn run(
     }
     let Args {
         connect,
+        tcp_mode,
+        shuffle_seed,
+        tcp_profiles,
         max_in_flight,
         max_prepared_bytes,
         targets,
@@ -95,6 +98,13 @@ pub(super) fn run(
         udp_payload_file.as_deref(),
     )?;
     let udp_profiles = profiles::load(udp_profiles.as_deref(), transport)?;
+    if connect && tcp_mode != arguments::TcpMode::Syn {
+        return Err(CliError::new(
+            packetcraftr_core::error::Kind::Usage,
+            "--tcp-mode requires raw TCP scanning",
+        ));
+    }
+    let tcp_profiles = profiles::load_tcp(tcp_profiles.as_deref())?;
     let targets = packetcraftr::target::Selection {
         include: targets
             .iter()
@@ -122,6 +132,9 @@ pub(super) fn run(
         max_in_flight,
         targets,
         transport: transport.into(),
+        tcp_mode: tcp_mode.into(),
+        shuffle_seed,
+        tcp_profiles,
         udp_payload,
         udp_profiles,
         address_family: family.into(),

@@ -1,0 +1,20 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "dedup",
+  "mode": "stream",
+  "status": "success",
+  "diagnostics": [],
+  "result": {
+    "path": "unique.pcap",
+    "format": "pcap",
+    "frames_read": 2,
+    "frames_selected": 1,
+    "captured_bytes_read": 40,
+    "captured_bytes_selected": 20,
+    "interfaces": 1,
+    "metadata_records": 0,
+    "duplicates": 1
+  },
+  "sequence": 0,
+  "event": "complete"
+}

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "capture",
   "mode": "stream",
   "status": "success",
@@ -35,6 +35,11 @@
             "requested": "nano",
             "applied": "nano",
             "effective": "nano"
+          },
+          "direction": {
+            "requested": null,
+            "applied": null,
+            "effective": null
           }
         },
         "queue_frames": 4096,

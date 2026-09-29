@@ -21,7 +21,7 @@ use packetcraftr_core::{
     decode::Dissector,
     error::{BoundaryError, Kind},
     transform::{
-        self, ChecksumMode, HeaderRewrite,
+        self, ChecksumMode,
         rules::{self, Rules},
     },
 };
@@ -55,21 +55,13 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         .checksum_mode
         .map(ChecksumMode::from)
         .unwrap_or_default();
-    let patch = HeaderRewrite {
-        source_mac: args.source_mac,
-        destination_mac: args.destination_mac,
-        source_ip: args.source_ip,
-        destination_ip: args.destination_ip,
-        source_port: args.source_port,
-        destination_port: args.destination_port,
-        vlans: if args.strip_vlans {
-            Some(Vec::new())
-        } else if !args.vlans.is_empty() {
-            Some(args.vlans)
-        } else {
-            None
-        },
+    let patch = args.headers.core();
+    let maps = transform::CidrRemap {
+        source: args.source_cidr_maps,
+        destination: args.destination_cidr_maps,
     };
+    maps.validate().map_err(CliError::classified)?;
+    let has_maps = !maps.source.is_empty() || !maps.destination.is_empty();
     let registry = args.decode.registry()?;
     let rules = if let Some(path) = &args.rules_file {
         if !patch.is_empty() || args.filter.is_some() || !args.sets.is_empty() {
@@ -82,7 +74,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             crate::input::read_bounded_json_document(path, rules::MAX_REWRITE_DOCUMENT_BYTES)?;
         Rules::parse(&document, checksum_mode, &registry).map_err(CliError::classified)?
     } else {
-        if patch.is_empty() && args.sets.is_empty() {
+        if patch.is_empty() && args.sets.is_empty() && !has_maps {
             return Err(CliError::new(
                 Kind::Usage,
                 "rewrite requires a header edit, --set, or --rules-file",
@@ -103,7 +95,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             "--checksum-mode requires field assignments via --set or a v2 rules file",
         ));
     }
-    if args.dry_run && rules.has_header_edits() {
+    if args.dry_run && (rules.has_header_edits() || has_maps) {
         return Err(CliError::new(
             Kind::Usage,
             "--dry-run reports field-assignment changes only; it cannot preview header rewrites",
@@ -149,8 +141,35 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let report =
         capture_file::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
             check_deadline(&deadline)?;
+            let mapped = if has_maps
+                && rules
+                    .iter()
+                    .next()
+                    .expect("one direct rule")
+                    .filter
+                    .as_ref()
+                    .map(|filter| {
+                        filter.keep(number, frame).map_err(|error| {
+                            filtering::frame_error(number, error).into_boundary_error()
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(true)
+            {
+                transform::rewrite_with_cidr_maps(
+                    frame,
+                    &transform::HeaderRewrite::default(),
+                    &maps,
+                    transform::RewriteLimits {
+                        max_output_bytes: args.limits.reader.max_frame_bytes,
+                    },
+                )
+                .map_err(BoundaryError::from_error)?
+            } else {
+                frame.clone()
+            };
             let changed = rules.apply(
-                frame,
+                &mapped,
                 &dissector,
                 transform::RewriteLimits {
                     max_output_bytes: args.limits.reader.max_frame_bytes,

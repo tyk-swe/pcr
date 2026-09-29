@@ -82,6 +82,7 @@ fn execution(
 
 struct Planned {
     endpoints: Vec<SocketAddr>,
+    schedule: Vec<(SocketAddr, u32)>,
     count: usize,
     delay: Duration,
     limits: SocketLimits,
@@ -94,7 +95,7 @@ fn planned<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<(Vec<IpAddr>, Planned), Error> {
     request.validate()?;
-    if request.transport != Transport::Tcp {
+    if request.transport != Transport::Tcp || request.tcp_mode != super::super::TcpMode::Syn {
         return Err(invalid(
             "transport",
             0,
@@ -135,7 +136,7 @@ fn planned<A: Authorizer + ResolveTarget>(
                 planned_duration,
                 request.limits.max_duration,
             )?;
-            let endpoints = selected
+            let endpoints: Vec<SocketAddr> = selected
                 .addresses
                 .iter()
                 .flat_map(|address| {
@@ -144,11 +145,58 @@ fn planned<A: Authorizer + ResolveTarget>(
                         .map(move |port| SocketAddr::new(*address, *port))
                 })
                 .collect();
+            let schedule = if request.shuffle_seed.is_none() {
+                (1..=request.attempts)
+                    .flat_map(|attempt| {
+                        endpoints
+                            .iter()
+                            .copied()
+                            .map(move |endpoint| (endpoint, attempt))
+                    })
+                    .collect()
+            } else {
+                super::super::plan::schedule(
+                    &selected.addresses,
+                    &ports,
+                    request.attempts,
+                    request.shuffle_seed,
+                )
+                .into_iter()
+                .map(|(address, attempt, port)| (SocketAddr::new(address, port), attempt))
+                .collect()
+            };
+            let outbound = endpoints
+                .iter()
+                .map(|endpoint| {
+                    request
+                        .tcp_profiles
+                        .get(&endpoint.port())
+                        .map_or(0, |profile| profile.request().len() as u64)
+                })
+                .sum::<u64>()
+                .saturating_mul(u64::from(request.attempts));
+            let inbound = endpoints
+                .iter()
+                .map(|endpoint| {
+                    request
+                        .tcp_profiles
+                        .get(&endpoint.port())
+                        .map_or(0, |profile| profile.max_response() as u64)
+                })
+                .sum::<u64>()
+                .saturating_mul(u64::from(request.attempts));
+            let messages = endpoints
+                .iter()
+                .filter(|endpoint| request.tcp_profiles.contains_key(&endpoint.port()))
+                .count() as u64
+                * u64::from(request.attempts)
+                * 2;
             Ok(Planned {
                 endpoints,
+                schedule,
                 count,
                 delay,
-                limits: SocketLimits::new(count as u64, 0, 0),
+                limits: SocketLimits::new(count as u64, messages, outbound.saturating_add(inbound)),
                 planned_duration,
             })
         },
@@ -178,8 +226,7 @@ where
     Q::Stream: 'static,
     A: Authorizer + ResolveTarget,
 {
-    let endpoint = planned.endpoints[next % planned.endpoints.len()];
-    let attempt = (next / planned.endpoints.len()) as u32 + 1;
+    let (endpoint, attempt) = planned.schedule[next];
     let final_endpoints = [endpoint];
     let operation = SocketOperation::new(&final_endpoints, planned.limits)
         .map_err(|source| execution(next as u64, source))?;
@@ -211,6 +258,8 @@ fn settle_active<S: tcp::Stream>(
     active: &mut Vec<Active<S>>,
     index: usize,
     now: Instant,
+    request: &Request,
+    deadline: &Deadline,
 ) -> Result<Option<ProbeEvidence>, Error> {
     let result = active[index]
         .pending
@@ -218,7 +267,13 @@ fn settle_active<S: tcp::Stream>(
         .map_err(|source| execution(active[index].sequence, source))?;
     if let Some(result) = result {
         let entry = active.remove(index);
-        return Ok(Some(finish_probe(entry, result)?));
+        let port = entry.endpoint.port();
+        return Ok(Some(finish_probe_profile(
+            entry,
+            result,
+            request.tcp_profiles.get(&port),
+            deadline,
+        )?));
     }
     if now.saturating_duration_since(active[index].started) < active[index].timeout {
         return Ok(None);
@@ -237,6 +292,7 @@ fn settle_active<S: tcp::Stream>(
         elapsed: now.saturating_duration_since(entry.started),
         local: None,
         error: None,
+        banner: None,
     }))
 }
 
@@ -289,19 +345,29 @@ where
         let mut index = 0;
         while index < active.len() {
             enforce_deadline(&Probes, deadline)?;
-            let Some(probe) = settle_active(&mut active, index, clock.now())? else {
+            let Some(probe) = settle_active(&mut active, index, clock.now(), request, deadline)?
+            else {
                 index += 1;
                 continue;
             };
             evidence_bytes = evidence_bytes
                 .checked_add(std::mem::size_of::<ProbeEvidence>())
                 .and_then(|bytes| {
-                    bytes.checked_add(
-                        probe
-                            .error
-                            .as_ref()
-                            .map_or(0, |error| error.to_string().len()),
-                    )
+                    bytes
+                        .checked_add(
+                            probe
+                                .banner
+                                .as_ref()
+                                .map_or(0, |banner| banner.response.len()),
+                        )
+                        .and_then(|bytes| {
+                            bytes.checked_add(
+                                probe
+                                    .error
+                                    .as_ref()
+                                    .map_or(0, |error| error.to_string().len()),
+                            )
+                        })
                 })
                 .filter(|bytes| *bytes <= request.limits.max_evidence_bytes)
                 .ok_or_else(|| {
@@ -349,9 +415,11 @@ where
     })
 }
 
-fn finish_probe<S: tcp::Stream>(
+fn finish_probe_profile<S: tcp::Stream>(
     entry: Active<S>,
     result: tcp::ConnectOutcome<S>,
+    profile: Option<&Arc<super::super::profile::TcpProfile>>,
+    deadline: &Deadline,
 ) -> Result<ProbeEvidence, Error> {
     // Settled attempts keep the worker's completion time; publishing earlier
     // events can delay observation without extending the socket's latency.
@@ -368,9 +436,10 @@ fn finish_probe<S: tcp::Stream>(
         elapsed,
         local: None,
         error: None,
+        banner: None,
     };
     match result.result {
-        Ok(stream) => {
+        Ok(mut stream) => {
             match endpoint_query(entry.sequence, "peer", stream.peer_addr())? {
                 Some(peer) if peer != entry.endpoint => {
                     return Err(Error::InvalidEvidence {
@@ -384,6 +453,24 @@ fn finish_probe<S: tcp::Stream>(
                 None => {}
             }
             probe.outcome = Outcome::Connected;
+            if let Some(profile) = profile {
+                if stream.peer_addr().ok() != Some(entry.endpoint) {
+                    return Err(Error::InvalidEvidence {
+                        sequence: entry.sequence,
+                        message: "TCP banner requires the exact connected peer".to_owned(),
+                    });
+                }
+                let timeout = entry
+                    .timeout
+                    .saturating_sub(elapsed)
+                    .min(deadline.remaining().unwrap_or_default());
+                probe.banner = Some(super::banner::exchange(
+                    &mut stream,
+                    entry.endpoint,
+                    profile,
+                    &Deadline::new(timeout).with_parent(Some(Arc::new(deadline.clone()))),
+                ));
+            }
             drop(stream);
         }
         Err(error) => {

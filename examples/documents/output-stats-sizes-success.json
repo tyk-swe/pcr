@@ -1,0 +1,97 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 0,
+      "max_regression": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "max_forward_step_frame": 2
+    },
+    "table": "sizes",
+    "sizes": [
+      {
+        "minimum": 0,
+        "maximum": 63,
+        "frames": 5,
+        "bytes": 225
+      },
+      {
+        "minimum": 64,
+        "maximum": 127,
+        "frames": 2,
+        "bytes": 200
+      },
+      {
+        "minimum": 128,
+        "maximum": 255,
+        "frames": 0,
+        "bytes": 0
+      },
+      {
+        "minimum": 256,
+        "maximum": 511,
+        "frames": 0,
+        "bytes": 0
+      },
+      {
+        "minimum": 512,
+        "maximum": 1023,
+        "frames": 0,
+        "bytes": 0
+      },
+      {
+        "minimum": 1024,
+        "maximum": 1518,
+        "frames": 0,
+        "bytes": 0
+      },
+      {
+        "minimum": 1519,
+        "maximum": 4095,
+        "frames": 0,
+        "bytes": 0
+      },
+      {
+        "minimum": 4096,
+        "maximum": null,
+        "frames": 0,
+        "bytes": 0
+      }
+    ],
+    "frames_read": 7,
+    "frames_matched": 7,
+    "bytes_matched": 425,
+    "first_timestamp": {
+      "unix_seconds": 1,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 7,
+      "nanoseconds": 0
+    },
+    "duration": {
+      "secs": 6,
+      "nanos": 0
+    },
+    "average_packet_size": 60.714285714285715,
+    "packets_per_second": 1.1666666666666667,
+    "bytes_per_second": 70.83333333333333,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 228,
+        "snap_length": 65535
+      }
+    ]
+  },
+  "diagnostics": []
+}

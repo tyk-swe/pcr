@@ -1,0 +1,109 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "lldp",
+      "fields": {
+        "tlvs": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    7,
+                    99,
+                    104,
+                    97,
+                    115,
+                    115,
+                    105,
+                    115
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    7,
+                    112,
+                    111,
+                    114,
+                    116
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 3
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    0,
+                    120
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 5
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    102,
+                    105,
+                    120,
+                    116,
+                    117,
+                    114,
+                    101
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "kind": {
+                  "type": "unsigned",
+                  "value": 9
+                },
+                "value": {
+                  "type": "bytes",
+                  "value": [
+                    0,
+                    255
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

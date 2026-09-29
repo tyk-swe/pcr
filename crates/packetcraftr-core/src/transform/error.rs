@@ -7,6 +7,8 @@ use crate::protocol::headers;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cidr(#[from] super::CidrError),
     #[error("invalid packet transform input: {0}")]
     Invalid(InvalidInput),
     #[error("unsupported packet transform: {0}")]
@@ -32,6 +34,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cidr(source) => source.classification(),
             Self::Frame(source) => source.classification(),
             Self::Decode(source) => source.classification(),
             Self::Header(source) => source.classification(),

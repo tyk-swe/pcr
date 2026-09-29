@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("forwarding_consumer", ROOT / "examples/consumers/forwarding.py")
 consumer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(consumer)
-FIXTURE = json.loads((ROOT / "examples/consumers/fixtures/v6-forwarding.json").read_text())
+FIXTURE = json.loads((ROOT / "examples/consumers/fixtures/v7-forwarding.json").read_text())
 
 
 def encoded(value):

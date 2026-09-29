@@ -51,6 +51,7 @@ jsonschema = { version = "0.55.0", default-features = false }
 md5 = { package = "md-5", version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 # Linear-time substring search for the display-filter `contains` operator.
+regex-automata = "0.4.18"
 memchr = { version = "2.8.3", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["unbounded_depth"] }

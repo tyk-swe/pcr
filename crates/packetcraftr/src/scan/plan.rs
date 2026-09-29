@@ -18,6 +18,7 @@ use packetcraftr_core::error::BoundaryError;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
+    pub tcp_mode: super::TcpMode,
     pub address: IpAddr,
     pub endpoint: ProbeEndpoint,
     pub attempt: u32,
@@ -80,17 +81,11 @@ pub(super) fn build_batches<'a>(
     addresses: &'a [IpAddr],
     endpoints: &'a [ProbeEndpoint],
 ) -> impl Iterator<Item = Batch<Probe>> + 'a {
-    addresses
-        .iter()
-        .flat_map(move |address| {
-            (1..=request.attempts).flat_map(move |attempt| {
-                endpoints
-                    .iter()
-                    .map(move |endpoint| (*address, attempt, *endpoint))
-            })
-        })
-        .zip(0u64..)
-        .map(move |((address, attempt, endpoint), sequence)| {
+    schedule(addresses, endpoints, request.attempts, request.shuffle_seed)
+        .into_iter()
+        .enumerate()
+        .map(move |(sequence, (address, attempt, endpoint))| {
+            let sequence = sequence as u64;
             let profile = endpoint
                 .port()
                 .and_then(|port| request.udp_profiles.get(&port));
@@ -100,6 +95,7 @@ pub(super) fn build_batches<'a>(
                     address,
                     endpoint,
                     attempt,
+                    tcp_mode: request.tcp_mode,
                     udp_profile: profile.cloned(),
                     udp_payload: profile.map_or_else(
                         || request.udp_payload.clone(),
@@ -111,6 +107,36 @@ pub(super) fn build_batches<'a>(
         })
 }
 
+/// Stable Fisher–Yates scheduling shared by raw and kernel TCP scans.
+pub(crate) fn schedule<T: Copy>(
+    addresses: &[IpAddr],
+    endpoints: &[T],
+    attempts: u32,
+    seed: Option<u64>,
+) -> Vec<(IpAddr, u32, T)> {
+    let mut planned: Vec<_> = addresses
+        .iter()
+        .flat_map(|address| {
+            (1..=attempts).flat_map(move |attempt| {
+                endpoints
+                    .iter()
+                    .map(move |endpoint| (*address, attempt, *endpoint))
+            })
+        })
+        .collect();
+    if let Some(mut state) = seed {
+        for index in (1..planned.len()).rev() {
+            state = state.wrapping_add(0x9e3779b97f4a7c15);
+            let mut value = state;
+            value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+            value ^= value >> 31;
+            planned.swap(index, (value % (index as u64 + 1)) as usize);
+        }
+    }
+    planned
+}
+
 pub(super) fn worst_case_duration(
     request: &Request,
     batch_count: usize,
@@ -120,7 +146,7 @@ pub(super) fn worst_case_duration(
         limit: request.limits.max_duration,
     };
     let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
-    let windows = if request.max_in_flight == 1 {
+    let windows = if request.max_in_flight == 1 || !request.tcp_profiles.is_empty() {
         batch_count_u32
     } else {
         batch_count_u32.div_ceil(request.max_in_flight as u32)
@@ -149,6 +175,9 @@ mod tests {
             max_in_flight: 1,
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
             transport: crate::probe::Transport::Tcp,
+            tcp_mode: Default::default(),
+            shuffle_seed: None,
+            tcp_profiles: Default::default(),
             address_family: Family::Any,
             ports: vec![80],
             attempts: 1,

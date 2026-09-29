@@ -21,6 +21,8 @@ use super::Error;
 #[serde(rename_all = "snake_case")]
 pub enum Classification {
     Open,
+    Unfiltered,
+    OpenOrFiltered,
     Closed,
     Filtered,
     Unreachable,
@@ -32,6 +34,8 @@ impl Classification {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::Unfiltered => "unfiltered",
+            Self::OpenOrFiltered => "open_or_filtered",
             Self::Closed => "closed",
             Self::Filtered => "filtered",
             Self::Unreachable => "unreachable",
@@ -48,11 +52,12 @@ impl Classification {
 
     pub(in crate::scan) fn rank(self) -> u8 {
         match self {
-            Self::Open => 6,
+            Self::Open => 8,
+            Self::Unfiltered => 7,
             Self::Closed => 5,
             Self::Filtered => 4,
             Self::Unreachable => 3,
-            Self::Unknown => 2,
+            Self::Unknown | Self::OpenOrFiltered => 2,
             Self::Timeout => 1,
         }
     }
@@ -80,6 +85,7 @@ pub struct ProbeEvidence {
     pub response: Option<Frame>,
     pub reason: String,
     pub application: Option<super::profile::Evidence>,
+    pub advertised_mtu: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +197,8 @@ pub struct Report {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClassificationCounts {
     pub open: usize,
+    pub unfiltered: usize,
+    pub open_or_filtered: usize,
     pub closed: usize,
     pub filtered: usize,
     pub unreachable: usize,
@@ -202,6 +210,8 @@ impl ClassificationCounts {
     pub(in crate::scan) fn increment(&mut self, classification: Classification) {
         let counter = match classification {
             Classification::Open => &mut self.open,
+            Classification::Unfiltered => &mut self.unfiltered,
+            Classification::OpenOrFiltered => &mut self.open_or_filtered,
             Classification::Closed => &mut self.closed,
             Classification::Filtered => &mut self.filtered,
             Classification::Unreachable => &mut self.unreachable,

@@ -1534,3 +1534,61 @@ mod client {
         assert!(matches!(error, Error::Cancelled(_)), "{error:?}");
     }
 }
+
+#[test]
+fn replay_rechecks_rewritten_destination_before_any_transmission() {
+    struct DestinationGate;
+    impl ReplayAdmission for DestinationGate {
+        fn admit_frame(
+            &mut self,
+            limits: WireLimits,
+            frame: &Frame,
+            _: LinkMode,
+        ) -> Result<(), BoundaryError> {
+            assert_eq!(limits.wire_bytes(), 28);
+            assert_eq!(&frame.bytes()[16..20], &[198, 51, 100, 99]);
+            Err(BoundaryError::new(
+                "rewritten destination denied",
+                Classification::new("policy.test", Kind::Policy, None),
+                Vec::new(),
+            ))
+        }
+        fn authorize_final_wire(&mut self, _: &Frame, _: &RoutePlan) -> Result<(), BoundaryError> {
+            panic!("initial transformed destination was denied")
+        }
+    }
+    let bytes = [
+        0x45, 0, 0, 28, 0, 0, 0, 0, 64, 17, 0, 0, 192, 0, 2, 1, 192, 0, 2, 2, 0xc0, 0, 0, 80, 0, 8,
+        0, 0,
+    ];
+    let reader = capture_reader(LinkType::RAW, &[(Duration::ZERO, &bytes)]);
+    let request = Request::new(
+        Source::stream(reader),
+        super::routing::Routing::new(Vec::new(), Some(Interface::Id(test_interface()))).unwrap(),
+        replay_options(Timing::Immediate),
+    )
+    .with_rewrite(packetcraftr_core::transform::HeaderRewrite {
+        destination_ip: Some("198.51.100.99".parse().unwrap()),
+        ..Default::default()
+    });
+    let mut transmitter = RecordingTransmitter::default();
+    let mut clock = RecordingClock::default();
+    let error = run(
+        request.into_parts(),
+        &mut DestinationGate,
+        &mut transmitter,
+        &mut clock,
+        Deadline::new(Duration::from_secs(1)),
+        |_, _| Ok(()),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Authorization {
+            source_index: 0,
+            ..
+        }
+    ));
+    assert_eq!(transmitter.validation_calls, 0);
+    assert_eq!(transmitter.transmission_calls, 0);
+}

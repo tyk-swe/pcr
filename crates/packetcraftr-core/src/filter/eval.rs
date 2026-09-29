@@ -34,6 +34,7 @@ pub struct DerivedPacket<'a> {
 
 pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
     match predicate {
+        Predicate::Advanced(predicate) => super::advanced::test(predicate, context),
         Predicate::LayerPresent {
             protocol,
             occurrence,

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "traceroute",
   "mode": "aggregate",
   "status": "success",
@@ -49,7 +49,8 @@
               "direction": "inbound",
               "bytes_hex": "deadbeef"
             },
-            "reason": "ICMPv4 time exceeded before reaching the endpoint"
+            "reason": "ICMPv4 time exceeded before reaching the endpoint",
+            "cycle": 1
           },
           {
             "sequence": 1,
@@ -63,9 +64,30 @@
               "unix_seconds": 1770000000,
               "nanoseconds": 10000000
             },
-            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+            "reason": "no checksum-valid, protocol-consistent response before the deadline",
+            "cycle": 1
           }
-        ]
+        ],
+        "responders": {
+          "192.168.56.1": 1
+        },
+        "rtt": {
+          "sent": 2,
+          "received": 1,
+          "lost": 1,
+          "min": {
+            "secs": 0,
+            "nanos": 4000000
+          },
+          "avg": {
+            "secs": 0,
+            "nanos": 4000000
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 4000000
+          }
+        }
       },
       {
         "hop_limit": 2,
@@ -92,9 +114,30 @@
               "secs": 0,
               "nanos": 5000000
             },
-            "reason": "ICMPv4 port unreachable"
+            "reason": "ICMPv4 port unreachable",
+            "cycle": 1
           }
-        ]
+        ],
+        "responders": {
+          "192.168.56.10": 1
+        },
+        "rtt": {
+          "sent": 1,
+          "received": 1,
+          "lost": 0,
+          "min": {
+            "secs": 0,
+            "nanos": 5000000
+          },
+          "avg": {
+            "secs": 0,
+            "nanos": 5000000
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 5000000
+          }
+        }
       }
     ],
     "undecoded": [

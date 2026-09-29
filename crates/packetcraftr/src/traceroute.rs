@@ -23,6 +23,14 @@ const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UdpPortMode {
+    #[default]
+    Increment,
+    Fixed,
+}
+
 mod engine;
 mod error;
 mod evidence;

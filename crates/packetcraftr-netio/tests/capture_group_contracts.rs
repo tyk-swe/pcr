@@ -99,6 +99,7 @@ fn realized(native: &capture::NativeSettings) -> capture::RealizedSettings {
         }
     }
     capture::RealizedSettings {
+        direction: realized(native.direction),
         buffer_size: realized(native.buffer_size),
         timestamp_source: realized(native.timestamp_source),
         timestamp_precision: realized(native.timestamp_precision),
@@ -143,6 +144,7 @@ fn arm(
 }
 fn request(count: usize) -> GroupRequest {
     GroupRequest {
+        filters: Vec::new(),
         interfaces: (0..count)
             .map(|index| Id {
                 index: index as u32 + 7,
@@ -359,6 +361,7 @@ fn native_settings_reach_every_partitioned_request_and_report_per_source() {
         buffer_size: Some(2 * 1024 * 1024),
         timestamp_source: Some(capture::TimestampSource::Host),
         timestamp_precision: Some(capture::TimestampPrecision::Nano),
+        direction: None,
     };
     let (mut group, armed) = arm(&provider, &request, &live());
     armed.unwrap();
@@ -557,4 +560,62 @@ fn single_sessions_and_groups_share_the_filter_limit() {
         .expect("groups apply the same limit");
     assert!(matches!(error, net::Error::CaptureFilterTooLong { .. }));
     assert_eq!(error.classification().code, "cli.capture_filter");
+}
+
+#[test]
+fn per_source_filters_replace_global_and_direction_is_confirmed_before_readiness() {
+    let provider = Provider::new(vec![Script::default(), Script::default()]);
+    let mut request = request(2);
+    request.filter = Some("udp".to_owned());
+    request.filters = vec![(request.interfaces[1].clone(), "tcp port 443".to_owned())];
+    request.native.direction = Some(capture::Direction::In);
+    let (mut group, armed) = arm(&provider, &request, &live());
+    armed.unwrap();
+    group.wait_ready(&live()).unwrap();
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests[0].filter.as_deref(), Some("udp"));
+    assert_eq!(requests[1].filter.as_deref(), Some("tcp port 443"));
+    assert!(
+        group
+            .sources()
+            .all(|source| source.metadata.native.direction.applied == Some(capture::Direction::In))
+    );
+}
+
+#[test]
+fn all_source_filter_validation_precedes_first_activation() {
+    struct RejectLast(Provider);
+    impl capture::Provider for RejectLast {
+        type Capture = Session;
+        fn validate_capture(
+            &self,
+            request: &capture::Request,
+            _: &Deadline,
+        ) -> Result<(), net::Error> {
+            if request.filter.as_deref() == Some("invalid") {
+                Err(net::Error::InvalidCaptureGroup {
+                    reason: "fixture invalid filter",
+                })
+            } else {
+                request.validate()
+            }
+        }
+        fn arm_capture(
+            &self,
+            request: &capture::Request,
+            deadline: &Deadline,
+        ) -> Result<Session, net::Error> {
+            self.0.arm_capture(request, deadline)
+        }
+    }
+    let provider = RejectLast(Provider::new(vec![Script::default(), Script::default()]));
+    let mut request = request(2);
+    request.filters = vec![(request.interfaces[1].clone(), "invalid".to_owned())];
+    let mut group = Group::new(&request).unwrap();
+    assert!(group.arm(&provider, &live()).is_err());
+    assert!(provider.0.requests.lock().unwrap().is_empty());
+    request
+        .filters
+        .push((request.interfaces[1].clone(), "udp".to_owned()));
+    assert!(request.validate().is_err());
 }

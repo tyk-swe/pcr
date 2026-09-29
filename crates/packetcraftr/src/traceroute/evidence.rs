@@ -23,6 +23,7 @@ pub struct CorrelatedResponse {
     pub kind: ResponseKind,
     pub responder: IpAddr,
     pub reason: &'static str,
+    pub advertised_mtu: Option<u32>,
 }
 
 /// Pure traceroute classifier. Corrupt, unrelated, pre-probe, and
@@ -54,7 +55,31 @@ pub fn classify_response(
         kind,
         responder: observation.responder,
         reason: observation.reason,
+        advertised_mtu: observation.advertised_mtu,
     })
+}
+
+pub(super) fn classify_probe_response(
+    registry: &Registry,
+    probe: &Probe,
+    sent: &Packet,
+    response: &DecodedPacket,
+) -> Option<CorrelatedResponse> {
+    if probe.udp_port_mode == super::UdpPortMode::Fixed {
+        use packetcraftr_core::field::WireValue;
+        let WireValue::Exact(expected) = sent
+            .get::<packetcraftr_core::protocol::transport::Udp>()?
+            .checksum
+        else {
+            return None;
+        };
+        if packetcraftr_core::protocol::quoted_udp_checksum(sent, &response.packet)
+            != Some(expected)
+        {
+            return None;
+        }
+    }
+    classify_response(registry, probe.target.transport(), sent, response)
 }
 
 fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
@@ -109,12 +134,7 @@ impl Classifier for ProbeClassifier<'_> {
         sent: &SentPacket,
         response: &DecodedPacket,
     ) -> Option<CorrelatedResponse> {
-        classify_response(
-            self.registry,
-            probe.target.transport(),
-            &sent.built().packet,
-            response,
-        )
+        classify_probe_response(self.registry, probe, &sent.built().packet, response)
     }
 
     fn rank(&self, observation: &CorrelatedResponse) -> u8 {
@@ -133,6 +153,7 @@ impl Classifier for ProbeClassifier<'_> {
     ) -> Event {
         let mut evidence = ProbeEvidence {
             sequence: probe.sequence,
+            cycle: probe.cycle,
             hop_limit: probe.hop_limit,
             attempt: probe.attempt,
             destination: probe.address,
@@ -146,6 +167,7 @@ impl Classifier for ProbeClassifier<'_> {
             latency: None,
             response: None,
             reason: NO_RESPONSE_REASON.to_owned(),
+            advertised_mtu: None,
         };
         if let Outcome::Reply(reply) = outcome {
             evidence.status = ProbeStatus::Response;
@@ -155,6 +177,7 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.latency = Some(reply.latency);
             evidence.response = reply.frame;
             evidence.reason = reply.observation.reason.to_owned();
+            evidence.advertised_mtu = reply.observation.advertised_mtu;
         }
         self.observe(&evidence);
         Event::Probe {

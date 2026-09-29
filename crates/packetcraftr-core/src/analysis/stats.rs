@@ -14,7 +14,11 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::{Constraint, Error};
 
 mod report;
-pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
+mod timing;
+pub use report::{
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report, SizeBinStat,
+};
+pub use timing::{AckRttStat, TcpTimingStat};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Table {
@@ -26,6 +30,8 @@ pub enum Table {
     Ports,
     Io,
     Fragments,
+    Sizes,
+    TcpTiming,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -77,6 +83,8 @@ pub struct Collector {
     endpoints: BTreeMap<IpAddr, EndpointTally>,
     ports: BTreeMap<(StreamTransport, u16), Tally>,
     io: BTreeMap<u64, Tally>,
+    sizes: [Tally; 8],
+    tcp_timing: BTreeMap<u64, timing::State>,
 }
 
 impl Collector {
@@ -106,6 +114,8 @@ impl Collector {
             endpoints: BTreeMap::new(),
             ports: BTreeMap::new(),
             io: BTreeMap::new(),
+            sizes: [Tally::default(); 8],
+            tcp_timing: BTreeMap::new(),
         })
     }
 
@@ -115,6 +125,34 @@ impl Collector {
         self.frames = self.frames.saturating_add(1);
         self.bytes = self.bytes.saturating_add(bytes);
         self.observe_time(timestamp, bytes);
+        if self.collects(Table::Sizes) {
+            let bin = match bytes {
+                0..=63 => 0,
+                64..=127 => 1,
+                128..=255 => 2,
+                256..=511 => 3,
+                512..=1023 => 4,
+                1024..=1518 => 5,
+                1519..=4095 => 6,
+                _ => 7,
+            };
+            self.sizes[bin].add(bytes);
+        }
+        if self.collects(Table::TcpTiming)
+            && let Some(view) = record.tcp
+            && let Some(conversation) = view.conversation
+        {
+            self.tcp_timing
+                .entry(conversation.index)
+                .or_insert_with(|| timing::State::new(conversation.index, conversation.flow))
+                .observe(
+                    conversation.flow,
+                    view.header,
+                    view.payload.len(),
+                    timestamp,
+                    record.clock_regression.is_some(),
+                );
+        }
 
         if self.collects(Table::Protocols) {
             let mut seen: Vec<&str> = Vec::new();
@@ -335,6 +373,38 @@ impl Collector {
             io,
             ip_reassembly,
             interfaces: summary.interfaces.clone(),
+            sizes: if self.table == Table::All || self.table == Table::Sizes {
+                self.sizes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, tally)| {
+                        const LOW: [u32; 8] = [0, 64, 128, 256, 512, 1024, 1519, 4096];
+                        const HIGH: [Option<u32>; 8] = [
+                            Some(63),
+                            Some(127),
+                            Some(255),
+                            Some(511),
+                            Some(1023),
+                            Some(1518),
+                            Some(4095),
+                            None,
+                        ];
+                        report::SizeBinStat {
+                            minimum: LOW[index],
+                            maximum: HIGH[index],
+                            frames: tally.frames,
+                            bytes: tally.bytes,
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            tcp_timing: self
+                .tcp_timing
+                .into_values()
+                .map(timing::State::finish)
+                .collect(),
         }
     }
 }

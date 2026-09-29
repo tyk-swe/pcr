@@ -132,6 +132,7 @@ pub(super) struct Live {
     hello_retry: bool,
     alerts: Vec<Alert>,
     alerts_dropped: u64,
+    certificates: Option<super::CertificateCollection>,
 }
 
 impl Live {
@@ -158,7 +159,15 @@ impl Live {
             hello_retry: false,
             alerts: Vec::new(),
             alerts_dropped: 0,
+            certificates: None,
         }
+    }
+
+    pub(super) fn with_certificates(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.certificates = Some(super::CertificateCollection::default());
+        }
+        self
     }
 
     /// Bytes this session charges against the run's aggregate buffer budget:
@@ -168,6 +177,9 @@ impl Live {
             .charged()
             .saturating_add(self.reverse_direction.charged())
             .saturating_add(self.alerts.len().saturating_mul(ALERT_CHARGE))
+            .saturating_add(self.certificates.as_ref().map_or(0, |collection| {
+                collection.entries.iter().map(|entry| entry.der.len()).sum()
+            }))
     }
 
     /// How much of a `length`-byte delivery this direction can still retain,
@@ -378,6 +390,18 @@ impl Live {
                 self.drain_messages(direction)
             }
             CONTENT_TYPE_CHANGE_CIPHER_SPEC => {
+                if self.role(direction) == Role::Server
+                    && self.server.is_some()
+                    && self.certificates.is_some()
+                {
+                    self.certificates.as_mut().expect("enabled").status =
+                        super::CertificateStatus::NotObserved;
+                    self.side_mut(direction).finish();
+                    return Verdict::Finished {
+                        status: Status::Complete,
+                        reason: None,
+                    };
+                }
                 // TLS 1.3 middlebox-compatibility mode sends one of these
                 // mid-handshake, between a HelloRetryRequest and the second
                 // ClientHello. Skipping exactly one keeps that handshake
@@ -436,6 +460,41 @@ impl Live {
 
     fn drain_messages(&mut self, direction: Side) -> Verdict {
         loop {
+            if self.certificates.is_some()
+                && self.role(direction) == Role::Server
+                && self.server.is_some()
+            {
+                let messages = &self.side(direction).messages;
+                if messages.len() >= 4 {
+                    let kind = messages[0];
+                    let length = (usize::from(messages[1]) << 16)
+                        | (usize::from(messages[2]) << 8)
+                        | usize::from(messages[3]);
+                    if messages.len() >= length + 4 && matches!(kind, 11 | 14) {
+                        if kind == 11 {
+                            let collection = super::certificates::parse(&messages[4..length + 4]);
+                            let malformed = collection.status != super::CertificateStatus::Complete;
+                            self.certificates = Some(collection);
+                            self.side_mut(direction).finish();
+                            return Verdict::Finished {
+                                status: if malformed {
+                                    Status::Malformed
+                                } else {
+                                    Status::Complete
+                                },
+                                reason: None,
+                            };
+                        }
+                        self.certificates.as_mut().expect("enabled").status =
+                            super::CertificateStatus::NotObserved;
+                        self.side_mut(direction).finish();
+                        return Verdict::Finished {
+                            status: Status::Complete,
+                            reason: None,
+                        };
+                    }
+                }
+            }
             let outcome = parse_handshake(&self.side_mut(direction).messages);
             match outcome {
                 Outcome::Complete { consumed, value } => {
@@ -519,10 +578,17 @@ impl Live {
         // TLS 1.3 encrypts everything after this point and TLS 1.2 follows
         // with a certificate chain this record does not carry; either way the
         // server has nothing more to say in the clear.
-        self.side_mut(direction).finish();
         if self.client.is_none() {
+            self.side_mut(direction).finish();
             return finished(Status::Gap, "no ClientHello observed");
         }
+        if let Some(collection) = self.certificates.as_mut() {
+            if hello.selected_version <= 0x0303 {
+                return Verdict::Open;
+            }
+            collection.status = super::CertificateStatus::Encrypted;
+        }
+        self.side_mut(direction).finish();
         Verdict::Finished {
             status: Status::Complete,
             reason: None,
@@ -533,7 +599,9 @@ impl Live {
     /// nothing this collector should report.
     pub(super) fn close_status(&self) -> Option<Status> {
         self.client.as_ref()?;
-        if self.hello_retry {
+        if self.server.is_some() {
+            Some(Status::Complete)
+        } else if self.hello_retry {
             Some(Status::Retry)
         } else {
             Some(Status::ClientOnly)
@@ -581,6 +649,7 @@ impl Live {
             hello_retry: self.hello_retry,
             alerts: self.alerts,
             alerts_dropped: self.alerts_dropped,
+            certificates: self.certificates,
             status,
             reason,
         }

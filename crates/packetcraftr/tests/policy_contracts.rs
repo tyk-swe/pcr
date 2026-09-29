@@ -160,6 +160,9 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
             .expect("hostname must parse")
             .into(),
         transport: Transport::Tcp,
+        tcp_mode: Default::default(),
+        shuffle_seed: None,
+        tcp_profiles: Default::default(),
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
         address_family: Family::Any,

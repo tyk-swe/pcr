@@ -1,0 +1,98 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 0,
+      "max_regression": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "max_forward_step_frame": 2
+    },
+    "table": "tcp-timing",
+    "tcp_timing": [
+      {
+        "stream": 0,
+        "handshake_syn_to_syn_ack": {
+          "secs": 1,
+          "nanos": 0
+        },
+        "handshake_syn_to_ack": {
+          "secs": 2,
+          "nanos": 0
+        },
+        "ack_rtt_a_to_b": {
+          "count": 3,
+          "minimum": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "mean": {
+            "secs": 1,
+            "nanos": 333333333
+          },
+          "maximum": {
+            "secs": 2,
+            "nanos": 0
+          },
+          "excluded_retransmission": 0,
+          "excluded_clock_regression": 0,
+          "excluded_missing_ack": 0,
+          "excluded_limit": 0
+        },
+        "ack_rtt_b_to_a": {
+          "count": 1,
+          "minimum": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "mean": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "maximum": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "excluded_retransmission": 0,
+          "excluded_clock_regression": 0,
+          "excluded_missing_ack": 2,
+          "excluded_limit": 0
+        }
+      }
+    ],
+    "frames_read": 7,
+    "frames_matched": 7,
+    "bytes_matched": 425,
+    "first_timestamp": {
+      "unix_seconds": 1,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 7,
+      "nanoseconds": 0
+    },
+    "duration": {
+      "secs": 6,
+      "nanos": 0
+    },
+    "average_packet_size": 60.714285714285715,
+    "packets_per_second": 1.1666666666666667,
+    "bytes_per_second": 70.83333333333333,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 228,
+        "snap_length": 65535
+      }
+    ]
+  },
+  "diagnostics": []
+}

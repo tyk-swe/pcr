@@ -15,3 +15,10 @@ pub(crate) use llc::{LLC_FRAME_DISCRIMINATOR, LlcCodec, SnapCodec};
 pub use llc::{Llc, Snap};
 pub use vlan::{Vlan, Vlan8021ad};
 pub(crate) use vlan::{Vlan8021adCodec, VlanCodec};
+
+mod lldp;
+mod stp;
+pub(crate) use lldp::LldpCodec;
+pub use lldp::{Lldp, MAX_TLVS as MAX_LLDP_TLVS, Tlv as LldpTlv};
+pub use stp::Stp;
+pub(crate) use stp::StpCodec;

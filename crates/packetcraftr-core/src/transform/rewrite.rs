@@ -217,7 +217,7 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
     {
         return Err(Error::Unsupported(Unsupported::UpperLayerChecksum));
     }
-    let addresses = header.addresses(ip);
+    let addresses = header.addresses(ip)?;
     let (protocol, start) = header.upper_layer();
     let end = header.datagram_length();
     transport(&mut ip[start..end], patch, protocol, addresses)?;

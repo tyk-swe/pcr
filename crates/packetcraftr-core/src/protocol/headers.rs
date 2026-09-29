@@ -323,24 +323,28 @@ impl IpHeader {
 
     /// Source and destination addresses in `ip`, the bytes this header was
     /// walked from.
-    pub fn addresses(&self, ip: &[u8]) -> (IpAddr, IpAddr) {
-        fn read<const N: usize>(ip: &[u8], range: Range<usize>) -> IpAddr
+    pub fn addresses(&self, ip: &[u8]) -> Result<(IpAddr, IpAddr), Error> {
+        fn read<const N: usize>(
+            ip: &[u8],
+            range: Range<usize>,
+            header: Header,
+        ) -> Result<IpAddr, Error>
         where
             IpAddr: From<[u8; N]>,
         {
             let mut octets = [0; N];
-            octets.copy_from_slice(&ip[range]);
-            IpAddr::from(octets)
+            octets.copy_from_slice(ip.get(range).ok_or(Error::Truncated(header))?);
+            Ok(IpAddr::from(octets))
         }
         match self {
-            Self::V4(_) => (
-                read::<4>(ip, Ipv4Header::SOURCE),
-                read::<4>(ip, Ipv4Header::DESTINATION),
-            ),
-            Self::V6(_) => (
-                read::<16>(ip, Ipv6Header::SOURCE),
-                read::<16>(ip, Ipv6Header::DESTINATION),
-            ),
+            Self::V4(_) => Ok((
+                read::<4>(ip, Ipv4Header::SOURCE, Header::Ipv4)?,
+                read::<4>(ip, Ipv4Header::DESTINATION, Header::Ipv4)?,
+            )),
+            Self::V6(_) => Ok((
+                read::<16>(ip, Ipv6Header::SOURCE, Header::Ipv6)?,
+                read::<16>(ip, Ipv6Header::DESTINATION, Header::Ipv6)?,
+            )),
         }
     }
 }
@@ -913,10 +917,10 @@ mod tests {
         let ip = ipv4(&[], 8);
         assert_eq!(
             IpHeader::walk(&ip).unwrap().addresses(&ip),
-            (
+            Ok((
                 "192.0.2.1".parse::<IpAddr>().unwrap(),
                 "198.51.100.2".parse().unwrap()
-            )
+            ))
         );
         let mut ip = ipv6(ip_protocol::UDP, &[], 8);
         ip[Ipv6Header::DESTINATION].copy_from_slice(
@@ -927,10 +931,27 @@ mod tests {
         );
         assert_eq!(
             IpHeader::walk(&ip).unwrap().addresses(&ip),
-            (
+            Ok((
                 "2001:db8::".parse::<IpAddr>().unwrap(),
                 "2001:db8::2".parse().unwrap()
-            )
+            ))
+        );
+    }
+
+    #[test]
+    fn addresses_check_the_slice_they_are_given() {
+        let ip = ipv4(&[], 8);
+        let header = IpHeader::walk(&ip).unwrap();
+        assert_eq!(
+            header.addresses(&ip[..Ipv4Header::SOURCE.start]),
+            Err(Error::Truncated(Header::Ipv4))
+        );
+        let ip = ipv6(ip_protocol::UDP, &[], 8);
+        let header = IpHeader::walk(&ip).unwrap();
+        assert_eq!(header.addresses(&[]), Err(Error::Truncated(Header::Ipv6)));
+        assert_eq!(
+            header.addresses(&ip[..Ipv6Header::SOURCE.start]),
+            Err(Error::Truncated(Header::Ipv6))
         );
     }
 

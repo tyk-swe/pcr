@@ -530,7 +530,7 @@ fn repair_transport(
     } else {
         (crate::protocol::network::ip_protocol::TCP, "tcp")
     };
-    let addresses = header.addresses(&bytes[network_start..]);
+    let addresses = header.addresses(&bytes[network_start..])?;
     let Some(value) = super::repair_checksum(
         &mut bytes[span.start..span.end],
         checksum_range.start - span.start..checksum_range.end - span.start,

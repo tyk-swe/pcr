@@ -76,19 +76,6 @@ fn additional_dns_ports_keep_the_standard_port() {
 fn application_output_budget_counts_only_compact_event_payloads() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/dns-response.pcap");
-    let path = path.to_str().unwrap();
-    let document = parse_json(&run_success(&["--output", "json", "dns-read", path]));
-    let total: usize = ["messages", "transactions", "issues"]
-        .iter()
-        .flat_map(|key| document["result"][key].as_array().unwrap().iter())
-        .map(|value| serde_json::to_vec(value).unwrap().len())
-        .sum();
-    let command = "dns-read";
-    let event_collections = [
-        ("dns_message", "messages"),
-        ("dns_transaction", "transactions"),
-        ("dns_stream_issue", "issues"),
-    ];
     let expected_text = concat!(
         "DNS udp:0 message=1 status=complete 192.0.2.53:53 -> 198.51.100.8:49152 frames=1\n",
         "  dns question: example.test. type=1 class=1\n",
@@ -99,67 +86,18 @@ fn application_output_budget_counts_only_compact_event_payloads() {
         "  transaction id=4660 status=orphan_response queries=none response=1 latest_latency=none\n",
         "1 DNS messages; 0 matched and 0 unanswered transactions in 1 captured frames\n",
     );
-    let error_message = "application output exceeds --max-application-output-bytes";
-    let exact = total.to_string();
-    let under = (total - 1).to_string();
-    for format in ["json", "ndjson", "text"] {
-        let success = run_success(&[
-            "--output",
-            format,
-            command,
-            path,
-            "--max-application-output-bytes",
-            &exact,
-        ]);
-        match format {
-            "json" => assert_eq!(parse_json(&success)["result"], document["result"]),
-            "ndjson" => {
-                let records = parse_ndjson(&success);
-                assert_contiguous(&records);
-                assert_eq!(records.last().unwrap()["event"], "complete");
-                for &(event, key) in &event_collections {
-                    let values = records
-                        .iter()
-                        .filter(|record| record["event"] == event)
-                        .map(|record| record["result"].clone())
-                        .collect();
-                    assert_eq!(serde_json::Value::Array(values), document["result"][key]);
-                }
-            }
-            "text" => assert_eq!(String::from_utf8(success.stdout).unwrap(), expected_text),
-            _ => unreachable!(),
-        }
-        let failure = run(&[
-            "--output",
-            format,
-            command,
-            path,
-            "--max-application-output-bytes",
-            &under,
-        ]);
-        assert_eq!(failure.status.code(), Some(6), "format {format}");
-        let error = match format {
-            "json" => parse_json(&failure)["error"].clone(),
-            "ndjson" => {
-                let records = parse_ndjson(&failure);
-                assert_contiguous(&records);
-                assert_eq!(records.last().unwrap()["event"], "error");
-                assert_eq!(
-                    records
-                        .iter()
-                        .filter(|record| record["event"] == "error")
-                        .count(),
-                    1
-                );
-                assert!(records.iter().all(|record| record["event"] != "complete"));
-                records.last().unwrap()["error"].clone()
-            }
-            "text" => continue,
-            _ => unreachable!(),
-        };
-        assert_eq!(error["code"], "policy.denied");
-        assert_eq!(error["message"], error_message);
-    }
+    common::application_output::assert_exact_budget(
+        "dns-read",
+        &path,
+        &[
+            ("dns_message", "messages"),
+            ("dns_transaction", "transactions"),
+            ("dns_stream_issue", "issues"),
+        ],
+        expected_text,
+        "application output exceeds --max-application-output-bytes",
+        &[],
+    );
 }
 
 #[test]

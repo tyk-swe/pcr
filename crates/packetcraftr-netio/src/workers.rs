@@ -581,12 +581,11 @@ mod tests {
         let resource = permit.clone();
         let mut task = permit.spawn(move || resource).unwrap();
         drop(permit);
-        let resource = loop {
-            if let Some(outcome) = task.try_take() {
-                break outcome.unwrap();
-            }
-            thread::yield_now();
-        };
+        task.wait_ready(&Deadline::new(Duration::from_secs(5)));
+        let resource = task
+            .try_take()
+            .expect("the job returns its resource")
+            .unwrap();
         assert!(task.try_take().is_none(), "an outcome is taken once");
         assert_eq!(pool.tcp_snapshot().active, 1);
         drop(resource);

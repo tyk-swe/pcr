@@ -165,14 +165,10 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
         tcp::start_connect(provider, endpoint, &Deadline::new(Duration::from_secs(1))).unwrap();
     started.recv_timeout(Duration::from_secs(2)).unwrap();
     release.send(()).unwrap();
-    let until = Instant::now() + Duration::from_secs(2);
-    let outcome = loop {
-        if let Some(outcome) = pending.poll().unwrap() {
-            break outcome;
-        }
-        assert!(Instant::now() < until);
-        std::thread::sleep(Duration::from_millis(1));
-    };
+    let outcome = pending
+        .wait(&Deadline::new(Duration::from_secs(2)))
+        .unwrap()
+        .expect("the released provider completes");
     assert!(outcome.attempted);
     let socket = outcome.result.unwrap();
     assert_eq!(socket.peer_addr().unwrap(), endpoint);
@@ -184,8 +180,6 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
 
 #[test]
 fn a_spent_or_cancelled_caller_starts_no_connection() {
-    use packetcraftr_core::budget::Cancellation;
-
     let _pool = exclusive_pool();
     let (entered, started) = mpsc::channel();
     let (_release, gate) = mpsc::channel();

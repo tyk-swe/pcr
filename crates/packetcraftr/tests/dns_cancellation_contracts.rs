@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use packetcraftr::dns;
 use packetcraftr::policy::Policy;
-use packetcraftr::target::{Family, Hostname, Resolver};
+use packetcraftr::target::{Hostname, Resolver};
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::error::{BoundaryError, Classified};
@@ -52,24 +52,17 @@ fn cancellation_before_authorization_or_during_resolution_prevents_dns_execution
     }) {
         for progressive in [false, true] {
             for cancel_during_resolution in [true, false] {
+                let case = format!(
+                    "transport={transport:?}, edns={edns:?}, progressive={progressive}, \
+                     cancel_during_resolution={cancel_during_resolution}"
+                );
                 let signal = Cancellation::default();
                 let request = dns::Request {
                     server: "dns.example.test".parse().unwrap(),
-                    address_family: Family::Any,
-                    server_port: 53,
-                    source_port: 40_000,
-                    query_name: "example.test".to_owned(),
-                    query_type: dns::QueryType::A,
-                    transaction_id: 0x1234,
-                    recursion_desired: true,
                     edns,
                     transport,
-                    attempts: 1,
                     timeout: Duration::from_secs(1),
-                    queries_per_second: None,
-                    limits: dns::Limits::default(),
-                    route: Default::default(),
-                    collection: Default::default(),
+                    ..common::dns::tcp_request("example.test")
                 };
                 let resolutions = Arc::new(AtomicUsize::new(0));
                 let base = common::providers(common::FixedRoutes, common::NeverTransmit);
@@ -107,10 +100,11 @@ fn cancellation_before_authorization_or_during_resolution_prevents_dns_execution
                 };
                 assert_eq!(
                     resolutions.load(Ordering::SeqCst),
-                    usize::from(cancel_during_resolution)
+                    usize::from(cancel_during_resolution),
+                    "{case}"
                 );
-                assert!(connects.take().is_empty(), "no TCP query started");
-                assert_eq!(error.classification().code, "io.cancelled");
+                assert!(connects.take().is_empty(), "no TCP query started: {case}");
+                assert_eq!(error.classification().code, "io.cancelled", "{case}");
             }
         }
     }

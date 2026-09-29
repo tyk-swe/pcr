@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod clock;
+pub(crate) mod dns;
 pub(crate) mod responder;
 
 use std::collections::VecDeque;

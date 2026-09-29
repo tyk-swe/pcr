@@ -88,18 +88,6 @@ fn http_rejects_zero_ports_and_out_of_range_body_limits_as_usage_errors() {
 fn application_output_budget_counts_only_compact_event_payloads() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
-    let path = path.to_str().unwrap();
-    let document = parse_json(&run_success(&["--output", "json", "http", path]));
-    let total: usize = ["messages", "issues"]
-        .iter()
-        .flat_map(|key| document["result"][key].as_array().unwrap().iter())
-        .map(|value| serde_json::to_vec(value).unwrap().len())
-        .sum();
-    let command = "http";
-    let event_collections = [
-        ("http_message", "messages"),
-        ("http_stream_issue", "issues"),
-    ];
     let expected_text = concat!(
         "HTTP tcp:0 message=1 status=complete GET /example body_bytes=0 request=none frames=4,5\n",
         "  Host: example.test\n",
@@ -109,69 +97,17 @@ fn application_output_budget_counts_only_compact_event_payloads() {
         "  Transfer-Encoding: chunked\n",
         "2 HTTP/1 messages, 2 complete, 0 incomplete, 0 malformed; 0 requests without a captured final response\n",
     );
-    let error_message = "analysis consumer failed at frame 7";
-    let error_cause = "application output exceeds --max-application-output-bytes";
-    let exact = total.to_string();
-    let under = (total - 1).to_string();
-    for format in ["json", "ndjson", "text"] {
-        let success = run_success(&[
-            "--output",
-            format,
-            command,
-            path,
-            "--max-application-output-bytes",
-            &exact,
-        ]);
-        match format {
-            "json" => assert_eq!(parse_json(&success)["result"], document["result"]),
-            "ndjson" => {
-                let records = parse_ndjson(&success);
-                assert_contiguous(&records);
-                assert_eq!(records.last().unwrap()["event"], "complete");
-                for &(event, key) in &event_collections {
-                    let values = records
-                        .iter()
-                        .filter(|record| record["event"] == event)
-                        .map(|record| record["result"].clone())
-                        .collect();
-                    assert_eq!(serde_json::Value::Array(values), document["result"][key]);
-                }
-            }
-            "text" => assert_eq!(String::from_utf8(success.stdout).unwrap(), expected_text),
-            _ => unreachable!(),
-        }
-        let failure = run(&[
-            "--output",
-            format,
-            command,
-            path,
-            "--max-application-output-bytes",
-            &under,
-        ]);
-        assert_eq!(failure.status.code(), Some(6), "format {format}");
-        let error = match format {
-            "json" => parse_json(&failure)["error"].clone(),
-            "ndjson" => {
-                let records = parse_ndjson(&failure);
-                assert_contiguous(&records);
-                assert_eq!(records.last().unwrap()["event"], "error");
-                assert_eq!(
-                    records
-                        .iter()
-                        .filter(|record| record["event"] == "error")
-                        .count(),
-                    1
-                );
-                assert!(records.iter().all(|record| record["event"] != "complete"));
-                records.last().unwrap()["error"].clone()
-            }
-            "text" => continue,
-            _ => unreachable!(),
-        };
-        assert_eq!(error["code"], "policy.denied");
-        assert_eq!(error["message"], error_message);
-        assert_eq!(error["causes"][0], error_cause);
-    }
+    common::application_output::assert_exact_budget(
+        "http",
+        &path,
+        &[
+            ("http_message", "messages"),
+            ("http_stream_issue", "issues"),
+        ],
+        expected_text,
+        "analysis consumer failed at frame 7",
+        &["application output exceeds --max-application-output-bytes"],
+    );
 }
 
 #[test]

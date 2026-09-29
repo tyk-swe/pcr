@@ -4,6 +4,7 @@
 mod common;
 
 use bytes::Bytes;
+use common::packets::transport_frame;
 use packetcraftr_core::{
     build::Builder,
     capture_file,
@@ -12,69 +13,42 @@ use packetcraftr_core::{
     field::WireValue,
     frame::{Frame, LinkType},
     layer::Raw,
-    packet::Packet,
     protocol::{
         builtin,
-        link::{Ethernet, Vlan},
-        network::{Ipv4, Ipv6},
         transport::{Tcp, Udp},
     },
     transform::{self, FragmentOptions, HeaderRewrite, RewriteLimits, VlanRewrite},
 };
 use std::{io::Cursor, time::UNIX_EPOCH};
 fn frame(ipv6: bool, tcp: bool, ethernet: bool, disabled: bool) -> Frame {
-    let mut packet = Packet::new();
-    if ethernet {
-        packet.push(Ethernet::default());
-        packet.push(Vlan::default());
-    }
-    if ipv6 {
-        packet.push(Ipv6 {
-            source: "2001:db8::1".parse().unwrap(),
-            destination: "2001:db8::2".parse().unwrap(),
-            ..Default::default()
-        });
-    } else {
-        packet.push(Ipv4 {
-            source: "192.0.2.1".parse().unwrap(),
-            destination: "198.51.100.2".parse().unwrap(),
-            ..Default::default()
-        });
-    }
     if tcp {
-        packet.push(Tcp {
-            source_port: 40000,
-            destination_port: 40001,
-            ..Default::default()
-        });
-    } else {
-        packet.push(Udp {
-            source_port: 40000,
-            destination_port: 40001,
-            checksum: if disabled {
-                WireValue::Exact(0)
-            } else {
-                WireValue::Auto
+        transport_frame(
+            ipv6,
+            ethernet,
+            Tcp {
+                source_port: 40000,
+                destination_port: 40001,
+                ..Default::default()
             },
-            ..Default::default()
-        });
+            &[0x51; 301],
+        )
+    } else {
+        transport_frame(
+            ipv6,
+            ethernet,
+            Udp {
+                source_port: 40000,
+                destination_port: 40001,
+                checksum: if disabled {
+                    WireValue::Exact(0)
+                } else {
+                    WireValue::Auto
+                },
+                ..Default::default()
+            },
+            &[0x51; 301],
+        )
     }
-    packet.push(Raw::new(vec![0x51; 301]));
-    let built = Builder::new(builtin::registry())
-        .build(packet, Default::default(), Default::default())
-        .unwrap();
-    Frame::new(
-        UNIX_EPOCH,
-        if ethernet {
-            LinkType::ETHERNET
-        } else if ipv6 {
-            LinkType::IPV6
-        } else {
-            LinkType::IPV4
-        },
-        built.bytes,
-    )
-    .unwrap()
 }
 #[test]
 fn both_families_and_transports_rewrite_checksums_with_unchanged_entity_bytes() {

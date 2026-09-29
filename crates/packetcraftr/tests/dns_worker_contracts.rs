@@ -4,7 +4,7 @@
 mod common;
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -12,7 +12,6 @@ use std::time::Duration;
 use packetcraftr::Client;
 use packetcraftr::dns;
 use packetcraftr::policy::Policy;
-use packetcraftr::target::{Family, Target};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::Classified;
 use packetcraftr_netio::{resources, tcp};
@@ -60,22 +59,8 @@ fn dns_connects_are_admitted_and_cancellation_releases_the_workflow() {
     let workflow = thread::spawn(move || {
         let outcome = client.dns(
             dns::Request {
-                server: Target::Address(Ipv4Addr::LOCALHOST.into()),
-                address_family: Family::Any,
-                server_port: 53,
-                source_port: 40000,
-                query_name: "example.test".to_owned(),
-                query_type: dns::QueryType::A,
-                transaction_id: 0x1234,
-                recursion_desired: true,
-                edns: None,
-                transport: dns::TransportMode::Tcp,
-                attempts: 1,
                 timeout: Duration::from_secs(3),
-                queries_per_second: None,
-                limits: dns::Limits::default(),
-                route: Default::default(),
-                collection: Default::default(),
+                ..common::dns::tcp_request("example.test")
             },
             dns::Collector::default(),
         );

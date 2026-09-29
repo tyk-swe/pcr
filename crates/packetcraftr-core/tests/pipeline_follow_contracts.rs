@@ -4,15 +4,41 @@
 mod common;
 
 use common::{CLIENT, SERVER, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame};
-use packetcraftr_core::analysis::follow::PeerDirection as FollowDirection;
+use packetcraftr_core::analysis::follow::{self, PeerDirection as FollowDirection};
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::{
     Options, StreamRef, StreamTransport, Summary as RunSummary, run,
 };
+use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
+use packetcraftr_core::registry::Registry;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+
+fn collect_follow(
+    registry: &Arc<Registry>,
+    frames: &[Frame],
+    selector: StreamRef,
+) -> (Vec<follow::Chunk>, follow::Summary, RunSummary) {
+    let mut collector = follow::Collector::new(selector);
+    let mut chunks = Vec::new();
+    let run_summary = run(
+        &mut reader(frames),
+        Arc::clone(registry),
+        &Options {
+            tcp_events: selector.transport == StreamTransport::Tcp,
+            ..Options::default()
+        },
+        |record| {
+            chunks.extend(collector.observe(&record));
+            Ok(())
+        },
+    )
+    .expect("follow pass succeeds");
+    let summary = collector.finish(&run_summary);
+    (chunks, summary, run_summary)
+}
 
 #[test]
 fn tcp_follow_delivers_gap_fill_in_order_and_classifies_both_directions() {
@@ -39,26 +65,14 @@ fn tcp_follow_delivers_gap_fill_in_order_and_classifies_both_directions() {
             b"xy",
         ),
     ];
-    let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Tcp,
-        index: 0,
-    });
-    let mut chunks = Vec::new();
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options {
-            tcp_events: true,
-            ..Options::default()
+    let (chunks, summary, _) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
         },
-        |record| {
-            chunks.extend(collector.observe(&record));
-            Ok(())
-        },
-    )
-    .expect("follow pass succeeds");
-    let summary = collector.finish(&run_summary);
+    );
     assert_eq!(chunks.len(), 2);
     assert_eq!(chunks[0].number, 3);
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
@@ -110,26 +124,14 @@ fn tcp_follow_deduplicates_fast_open_data_across_directional_close() {
             b"A",
         ),
     ];
-    let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Tcp,
-        index: 0,
-    });
-    let mut chunks = Vec::new();
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options {
-            tcp_events: true,
-            ..Options::default()
+    let (chunks, summary, _) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
         },
-        |record| {
-            chunks.extend(collector.observe(&record));
-            Ok(())
-        },
-    )
-    .expect("Fast Open follow pass succeeds");
-    let summary = collector.finish(&run_summary);
+    );
 
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
@@ -163,26 +165,14 @@ fn tcp_follow_starts_a_fresh_delivery_generation_for_four_tuple_reuse() {
             b"B",
         ),
     ];
-    let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Tcp,
-        index: 0,
-    });
-    let mut chunks = Vec::new();
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options {
-            tcp_events: true,
-            ..Options::default()
+    let (chunks, summary, _) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
         },
-        |record| {
-            chunks.extend(collector.observe(&record));
-            Ok(())
-        },
-    )
-    .expect("reused four-tuple follow pass succeeds");
-    let summary = collector.finish(&run_summary);
+    );
 
     assert_eq!(
         chunks
@@ -226,39 +216,48 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
             9_000,
             b"other",
         ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(3),
+            CLIENT,
+            SERVER,
+            4_000,
+            9_000,
+            b"",
+        ),
     ];
-    let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Udp,
-        index: 0,
-    });
-    let mut chunks = Vec::new();
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options::default(),
-        |record| {
-            chunks.extend(collector.observe(&record));
-            Ok(())
+    let (chunks, summary, _) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Udp,
+            index: 0,
         },
-    )
-    .expect("UDP follow succeeds");
-    let summary = collector.finish(&run_summary);
-    assert_eq!(chunks.len(), 2);
+    );
+    assert_eq!(chunks.len(), 3);
     assert_eq!(chunks[0].bytes.as_ref(), b"query");
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
     assert_eq!(chunks[1].bytes.as_ref(), b"answer");
     assert_eq!(chunks[1].direction, FollowDirection::ServerToClient);
-    assert_eq!(summary.frames, 2);
+    assert!(chunks[2].bytes.is_empty());
+    assert_eq!(chunks[2].direction, FollowDirection::ClientToServer);
+    assert_eq!(chunks[2].number, 4);
+    assert_eq!(summary.frames, 3);
     assert_eq!(summary.client_bytes, 5);
     assert_eq!(summary.server_bytes, 6);
 
-    let empty = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Udp,
-        index: 99,
-    })
-    .finish(&RunSummary::default());
+    let (chunks, empty, _) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Udp,
+            index: 99,
+        },
+    );
+    assert!(chunks.is_empty());
     assert_eq!(empty.frames, 0);
+    assert_eq!(empty.client_bytes, 0);
+    assert_eq!(empty.server_bytes, 0);
     assert!(empty.client_flow.is_none());
 }
 
@@ -275,31 +274,21 @@ fn tcp_follow_reports_bytes_stranded_behind_a_gap_at_end() {
             b"late",
         ),
     ];
-    let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
-        transport: StreamTransport::Tcp,
-        index: 0,
-    });
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options {
-            tcp_events: true,
-            ..Options::default()
+    let (chunks, summary, run_summary) = collect_follow(
+        &registry,
+        &frames,
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
         },
-        |record| {
-            assert!(collector.observe(&record).is_empty());
-            Ok(())
-        },
-    )
-    .expect("follow pass succeeds");
+    );
+    assert!(chunks.is_empty());
     assert!(
         run_summary
             .trailing_tcp_events
             .iter()
             .any(|event| matches!(event, tcp::Event::Gap { .. }))
     );
-    let summary = collector.finish(&run_summary);
     assert_eq!(summary.frames, 2);
     assert_eq!(summary.client_bytes, 0);
     assert_eq!(summary.undelivered_bytes, 4);

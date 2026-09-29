@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #![allow(dead_code)]
 
+pub(crate) mod application_output;
+
 use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::OnceLock;

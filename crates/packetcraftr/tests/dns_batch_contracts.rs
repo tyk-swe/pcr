@@ -10,13 +10,14 @@ use std::time::Duration;
 
 use packetcraftr::dns::{self, batch};
 use packetcraftr::policy::Policy;
-use packetcraftr::target::{Family, Target};
+use packetcraftr::target::Target;
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_netio::tcp;
 
 use common::clock::VirtualClock;
+use common::dns::tcp_request as request;
 use common::{Step, Steps};
 
 #[derive(Clone, Default)]
@@ -124,27 +125,6 @@ fn connects(steps: &Steps) -> usize {
         .iter()
         .filter(|step| matches!(step, Step::Connect(_)))
         .count()
-}
-
-fn request(name: &str) -> dns::Request {
-    dns::Request {
-        server: Target::Address(Ipv4Addr::LOCALHOST.into()),
-        address_family: Family::Any,
-        server_port: 53,
-        source_port: 40000,
-        query_name: name.to_owned(),
-        query_type: dns::QueryType::A,
-        transaction_id: 0x1234,
-        recursion_desired: true,
-        edns: None,
-        transport: dns::TransportMode::Tcp,
-        attempts: 1,
-        timeout: Duration::from_millis(200),
-        queries_per_second: None,
-        limits: dns::Limits::default(),
-        route: Default::default(),
-        collection: Default::default(),
-    }
 }
 
 fn batch(questions: impl IntoIterator<Item = dns::Request>) -> batch::Request {

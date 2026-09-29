@@ -189,18 +189,23 @@ mod tests {
     #[test]
     fn stalled_activation_obeys_the_deadline_even_with_a_frozen_clock() {
         let (release, blocked) = mpsc::channel::<()>();
+        let (finished, completed) = mpsc::channel();
         let frozen = Instant::now();
         let result = open(
             Limits::default(),
             &Deadline::with_time_source(Duration::from_millis(10), move || frozen),
             move || {
-                let _ = blocked.recv_timeout(Duration::from_millis(200));
+                let _ = blocked.recv_timeout(Duration::from_secs(5));
+                let _ = finished.send(());
                 Err(activation_error())
             },
         );
-        drop(release);
         assert_eq!(error_code(result), "io.deadline_exceeded");
-        assert!(frozen.elapsed() < Duration::from_millis(150));
+        assert!(
+            completed.try_recv().is_err(),
+            "the deadline must stop waiting before activation completes"
+        );
+        drop(release);
     }
 
     #[test]
@@ -210,20 +215,21 @@ mod tests {
             Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal.clone()));
         let (started, activating) = mpsc::channel();
         let (release, blocked) = mpsc::channel::<()>();
+        let (finished, completed) = mpsc::channel();
         let cancel = std::thread::spawn(move || {
             activating.recv_timeout(Duration::from_secs(1)).unwrap();
             signal.cancel();
         });
-        let began = Instant::now();
         let result = open(Limits::default(), &deadline, move || {
             started.send(()).unwrap();
-            let _ = blocked.recv_timeout(Duration::from_millis(200));
+            let _ = blocked.recv_timeout(Duration::from_secs(5));
+            let _ = finished.send(());
             Err(activation_error())
         });
-        drop(release);
         cancel.join().unwrap();
         assert_eq!(error_code(result), "io.cancelled");
-        assert!(began.elapsed() < Duration::from_millis(150));
+        assert_eq!(completed.try_recv(), Err(mpsc::TryRecvError::Empty));
+        drop(release);
     }
 
     struct LateSource {

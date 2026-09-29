@@ -47,8 +47,12 @@ forbid unsafe at their roots. Prefer typed errors with their original sources.
 
 Put unit tests beside their owner, in one inline `mod tests` or
 `<module>/tests.rs`, with in-crate helpers in `test_support` modules. Put public
-behavior regressions in `crates/*/tests/`, named by the test vocabulary in
-`CONTEXT.md` (schema checks go in `*_conformance.rs`, not `*_contracts.rs`).
+behavior regressions in `crates/*/tests/`, named by kind: `*_contracts.rs` for
+public behavior (the default), `*_conformance.rs` for schema and wire-format
+checks, `*_matrix.rs` for exhaustive combinations, `*_smoke.rs` for shallow
+passes over real inputs such as fuzz corpora, and `native_isolated.rs` for tests
+under the isolated netns launcher. Shared integration helpers go in
+`tests/common/`.
 Test observable behavior and meaningful failure paths; avoid source-layout tests
 and duplicate verification. Keep schemas, examples, CLI tests, and release
 assets synchronized when changing machine contracts.

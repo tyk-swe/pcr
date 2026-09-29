@@ -111,7 +111,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   gains `BUILTIN_ROOTS`, `root_protocol`, `for_root_protocol`, and `is_raw_ip`.
   `protocol::capture::{CaptureRoot, BUILTIN_CAPTURE_ROOTS}` are removed in
   favor of `LinkType::BUILTIN_ROOTS`. See `docs/migration-unreleased.md`.
-- Live-policy vocabulary leaves core (ADR 0002).
+- Live-policy vocabulary leaves core.
   `build::BuiltPacket::requires_live_opt_in` is replaced by the neutral
   `BuiltPacket::mode` field and the `contains_malformed()` and
   `contains_network_trailer()` methods; the predicate is now
@@ -221,7 +221,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   rather than derived from `max_flows`. `decode::Options` and `build::Options`
   hold their `max_layers` and `max_packet_size` in a shared `packet::Limits`.
   See `docs/migration-unreleased.md`.
-- `packetcraftr_cli::output` types own every published field (ADR 0003).
+- `packetcraftr_cli::output` types own every published field.
   Output types embed only the versioned `packetcraftr.packet` document and its
   field values; every other field is a CLI-owned mirror with the same JSON
   shape (`envelope::Stats`, `diagnostic::Diagnostic`, `envelope::ErrorContext`,
@@ -257,7 +257,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `fuzz::{Constraint, TargetFault, BaseFault}`; messages and codes are
   unchanged. See `docs/migration-unreleased.md`.
 - Route planning moved from `packetcraftr_netio::route` to
-  `packetcraftr::route` (ADR 0001): `plan`, `Plan`, `Options`, `Error`,
+  `packetcraftr::route`: `plan`, `Plan`, `Options`, `Error`,
   `materialize`, and `Materialized`. netio keeps the route contract
   (`Provider`, `Decision`, `Scope`, `SelectionReason`, `SystemProvider`,
   `Error`). `Client::plan` returns `packetcraftr::route::Plan`.
@@ -267,7 +267,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `Materialized::for_prepared_layer2_frame` is removed. See
   `docs/migration-unreleased.md`.
 - Neighbor resolution moved from `packetcraftr_netio::neighbor` to
-  `packetcraftr::neighbor` (ADR 0001): `Error`, `Request`, `Resolution`, and
+  `packetcraftr::neighbor`: `Error`, `Request`, `Resolution`, and
   `Options`. The `Client` now resolves neighbors itself over its transmit and
   capture providers, so `Client<R, N, I>` is `Client<R, I>`, `Client::new`
   takes no resolver, and `probe::ExchangeExecutor<'a, R, N, I>` is
@@ -764,7 +764,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,
   `Ipv6Header` with its extension chain, and option iterators). Code that
   edits or inspects bytes a codec round trip would not reproduce uses it
-  instead of parsing headers by hand (ADR 0004); `transform::rewrite` and
+  instead of parsing headers by hand; `transform::rewrite` and
   `transform::fragment` now share it, and field edits use it for checksum
   coverage. `protocol::headers::Error` implements `Classified`, and
   `transform::Error::Header` carries it with the same codes as before

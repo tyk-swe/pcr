@@ -777,7 +777,7 @@ from any hand-built `DecodedPacket { .. }` literal or destructuring pattern.
 ## Live-policy vocabulary out of core
 
 Core keeps packet facts, and `packetcraftr` owns what they mean for live
-traffic (ADR 0002). `build::BuiltPacket` now records the codec `mode` it was
+traffic. `build::BuiltPacket` now records the codec `mode` it was
 built with and exposes `contains_malformed()` and `contains_network_trailer()`;
 the predicate is `packetcraftr::policy::requires_live_opt_in(&built)`, and the
 published `requires_live_opt_in` output field is unchanged. `Deadline` gains
@@ -940,7 +940,7 @@ the message, and `SendEvidenceFault` implements `Classified`
 ## Route planning and neighbor resolution
 
 Route planning and neighbor resolution interpret packets or drive active
-discovery, so they moved out of netio (ADR 0001). netio keeps the route
+discovery, so they moved out of netio. netio keeps the route
 contract a provider implements: `route::{Provider, Decision, Scope,
 SelectionReason, SystemProvider}` and its native `route::Error` (formerly
 `SystemError`). `packetcraftr::route` plans and materializes routes over it, and

@@ -257,8 +257,7 @@ jobs:
           shutil.copy2(binary, staging / binary.name)
           shutil.copy2(temporary / "BUILD-METADATA.json", staging / "BUILD-METADATA.json")
           shutil.copytree("schemas", staging / "schemas")
-          # docs/agents configures repository agents and is not user documentation.
-          shutil.copytree("docs", staging / "docs", ignore=shutil.ignore_patterns("agents"))
+          shutil.copytree("docs", staging / "docs")
           # Completions and man pages come from the packaged binary itself, so
           # they always describe the shipped command definitions.
           subprocess.run([

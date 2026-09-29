@@ -9,7 +9,7 @@ use packetcraftr_netio::capture::GroupRequest;
 
 use packetcraftr_core::error::BoundaryError;
 
-type SelectFrame = Box<dyn FnMut(u64, &Frame) -> Result<bool, BoundaryError> + Send>;
+pub(super) type SelectFrame = Box<dyn FnMut(u64, &Frame) -> Result<bool, BoundaryError> + Send>;
 
 pub struct Request {
     pub group: GroupRequest,

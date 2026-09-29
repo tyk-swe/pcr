@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{Dhcpv4, Option4, Value4};
+use super::super::MAX_OPTIONS;
+use super::{Dhcpv4, Kind4, Option4, Value4};
 use crate::{
     field::{self, FieldKind, FieldValue},
     layer::{FieldSchema, reflect_set, reflective_layer},
@@ -72,7 +73,7 @@ fn options_value(options: &[Option4]) -> FieldValue {
     )
 }
 fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::Error> {
-    list(value, 4096, schema(), field)?
+    list(value, MAX_OPTIONS, schema(), field)?
         .into_iter()
         .map(|value| {
             let mut option = Object::new(value, schema(), field)?;
@@ -82,13 +83,15 @@ fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::
             let data = if value.contains("data") {
                 Value4::Raw(value.required_value("data")?)
             } else {
-                match code {
-                    53 => Value4::MessageType(value.required_value("message_type")?),
-                    52 => Value4::Overload(value.required_value("overload")?),
-                    1 | 16 | 28 | 32 | 50 | 54 => Value4::Address(
+                match Kind4::of(code) {
+                    Some(Kind4::MessageType) => {
+                        Value4::MessageType(value.required_value("message_type")?)
+                    }
+                    Some(Kind4::Overload) => Value4::Overload(value.required_value("overload")?),
+                    Some(Kind4::Address) => Value4::Address(
                         value.required_with("address", std::net::Ipv4Addr::UNSPECIFIED)?,
                     ),
-                    3..=11 | 41 | 42 | 44 | 45 | 48 | 49 | 65 | 68..=76 => Value4::Addresses(
+                    Some(Kind4::Addresses) => Value4::Addresses(
                         list(value.required("addresses")?, 63, schema(), field)?
                             .into_iter()
                             .map(|value| {
@@ -98,19 +101,15 @@ fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::
                             })
                             .collect::<Result<_, field::Error>>()?,
                     ),
-                    24 | 35 | 38 | 51 | 58 | 59 => {
-                        Value4::Seconds(value.required_value("seconds")?)
-                    }
-                    13 | 22 | 26 | 57 => Value4::Number(value.required_value("number")?),
-                    55 => Value4::Codes(value.required_value("codes")?),
-                    12 | 14 | 15 | 17 | 18 | 40 | 56 | 60 | 64 | 66 | 67 => {
-                        Value4::Text(value.required_value("text")?)
-                    }
-                    61 => Value4::ClientIdentifier {
+                    Some(Kind4::Seconds) => Value4::Seconds(value.required_value("seconds")?),
+                    Some(Kind4::Number) => Value4::Number(value.required_value("number")?),
+                    Some(Kind4::Codes) => Value4::Codes(value.required_value("codes")?),
+                    Some(Kind4::Text) => Value4::Text(value.required_value("text")?),
+                    Some(Kind4::ClientIdentifier) => Value4::ClientIdentifier {
                         hardware_type: value.required_value("hardware_type")?,
                         identifier: value.required_value("identifier")?,
                     },
-                    _ => {
+                    None => {
                         return Err(wrong_type(
                             schema(),
                             field,

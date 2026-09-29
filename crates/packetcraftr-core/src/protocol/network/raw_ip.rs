@@ -11,7 +11,7 @@ use crate::{
     layer::Layer,
 };
 
-use crate::protocol::common::{invalid, protocol, truncated};
+use crate::protocol::common::{invalid, protocol, truncated, unsupported};
 
 use super::{Ipv4Codec, Ipv6Codec};
 
@@ -22,14 +22,10 @@ const NAME: &str = BuiltinProtocol::RawIp.as_str();
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RawIpCodec;
 
-fn raw_ip_protocol() -> &'static crate::layer::Id {
-    static PROTOCOL: std::sync::OnceLock<crate::layer::Id> = std::sync::OnceLock::new();
-    PROTOCOL.get_or_init(|| protocol(NAME))
-}
-
 impl LayerCodec for RawIpCodec {
     fn protocol_id(&self) -> &'static crate::layer::Id {
-        raw_ip_protocol()
+        const PROTOCOL: &crate::layer::Id = &protocol(NAME);
+        PROTOCOL
     }
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
         matches!(protocol.as_str(), "ipv4" | "ipv6")
@@ -40,10 +36,10 @@ impl LayerCodec for RawIpCodec {
         _payload: &[u8],
         _context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        Err(crate::codec::Error::Unsupported {
-            protocol: protocol(NAME),
-            message: "raw_ip is a decode-only link root; build IPv4 or IPv6 directly".to_string(),
-        })
+        Err(unsupported(
+            NAME,
+            "raw_ip is a decode-only link root; build IPv4 or IPv6 directly",
+        ))
     }
 
     fn decode(
@@ -68,9 +64,6 @@ impl LayerCodec for RawIpCodec {
         &self,
         _fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        Err(crate::codec::Error::Unsupported {
-            protocol: protocol(NAME),
-            message: "raw_ip has no constructible layer".to_string(),
-        })
+        Err(unsupported(NAME, "raw_ip has no constructible layer"))
     }
 }

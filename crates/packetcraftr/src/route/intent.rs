@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::model::MAX_VLAN_TAGS;
+use crate::neighbor::MAX_VLAN_TAGS;
 use packetcraftr_core::{
     packet::{MacAddress, Packet, VlanTag},
     protocol::BuiltinProtocol,
@@ -35,17 +35,22 @@ fn set_mac(value: [u8; 6]) -> Option<MacAddress> {
 }
 
 pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
-    let tags = semantics::vlan_tags(packet).map_err(|source| Error::InvalidNeighborVlan {
+    semantics::vlan_tags(packet).map_err(|source| Error::InvalidNeighborVlan {
         message: "the VLAN stack could not be read".to_owned(),
         source: Some(Box::new(source)),
-    })?;
+    })
+}
+
+/// Only neighbor discovery replays the stack, so only plans that resolve a
+/// neighbor are bound by the discovery cap.
+pub(super) fn reject_oversized_discovery_stack(tags: &[VlanTag]) -> Result<(), Error> {
     if tags.len() > MAX_VLAN_TAGS {
         return Err(Error::InvalidNeighborVlan {
             message: format!("more than {MAX_VLAN_TAGS} VLAN headers are not supported"),
             source: None,
         });
     }
-    Ok(tags)
+    Ok(())
 }
 
 pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
@@ -54,6 +59,6 @@ pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacA
         return (None, None);
     };
     let target = set_mac(arp.target_hardware)
-        .or_else(|| (arp.operation == 1).then_some(MacAddress([0xff; 6])));
+        .or_else(|| (arp.operation == Arp::OPERATION_REQUEST).then_some(MacAddress::BROADCAST));
     (set_mac(arp.sender_hardware), target)
 }

@@ -7,8 +7,11 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
+
+use crate::StatsOverflow;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -41,6 +44,8 @@ pub enum Error {
     Family { family: &'static str },
     #[error("DNS-over-TCP cannot address scoped IPv6 link-local server {address}")]
     TcpLinkLocal { address: Ipv6Addr },
+    #[error("DNS-over-TCP uses kernel route and source selection")]
+    UnsupportedTcpRoute,
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("DNS execution failed on attempt {attempt}")]
@@ -115,6 +120,11 @@ impl Classified for Error {
                 Kind::Capability,
                 Some("use --udp-only for a scoped IPv6 link-local DNS server"),
             ),
+            Self::UnsupportedTcpRoute => Classification::new(
+                "capability.dns_tcp",
+                Kind::Capability,
+                Some("use --udp-only or omit interface, source, and link-mode overrides"),
+            ),
             Self::DurationLimit { .. } => Classification::new(
                 "policy.dns_duration_limit",
                 Kind::Policy,
@@ -174,7 +184,6 @@ pub enum EvidenceFault {
     SentQueryChanged,
     SentCount,
     ResponseOutsideQuery,
-    TcpQueryLengthOverflow,
     AttemptDeadlineRegressed,
     TcpBytesUnauthorized,
     TcpReceipt,
@@ -196,9 +205,6 @@ impl fmt::Display for EvidenceFault {
             Self::ResponseOutsideQuery => formatter.write_str(
                 "single-query DNS exchange returned a response for an unknown request index",
             ),
-            Self::TcpQueryLengthOverflow => {
-                formatter.write_str("TCP query length accounting overflowed")
-            }
             Self::AttemptDeadlineRegressed => {
                 formatter.write_str("shared DNS attempt deadline regressed after accounting")
             }
@@ -215,6 +221,52 @@ impl fmt::Display for EvidenceFault {
                 "TCP destination reauthorization did not preserve selected server {server}"
             ),
         }
+    }
+}
+
+pub(super) struct Attempts;
+
+impl crate::execution::Errors for Attempts {
+    type Error = Error;
+    type Step = u32;
+
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        }
+    }
+
+    fn authorization(&self, source: BoundaryError) -> Error {
+        Error::Authorization(source)
+    }
+
+    fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
+        Error::from(source)
+    }
+
+    fn interrupted(&self, _: u32, source: Interrupted) -> Error {
+        Error::from(source)
+    }
+
+    fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock { attempt, source }
+    }
+
+    fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
+        Error::Execution { attempt, source }
+    }
+
+    fn invalid_evidence(&self, attempt: u32, source: crate::evidence::Error) -> Error {
+        Error::InvalidEvidence {
+            attempt,
+            fault: EvidenceFault::Exchange(source),
+        }
+    }
+
+    fn stats_overflow(&self, attempt: u32, _: StatsOverflow) -> Error {
+        Error::StatisticsOverflow { attempt }
     }
 }
 

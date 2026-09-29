@@ -14,9 +14,9 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, expected_discriminator,
-    invalid, make_layer, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic,
-    truncated, typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    payload_without_padding, protocol, resolve_u16, resolve_u16_discriminator,
+    strict_or_diagnostic, truncated, typed_layer, unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -111,24 +111,10 @@ impl LayerCodec for GreCodec {
                 &mut diagnostics,
             )?;
         }
-        validate_auto_raw_discriminator(
+        let (protocol_type, materialized_protocol_type) = resolve_u16_discriminator(
             NAME,
             "protocol_type",
             &layer.protocol_type,
-            context,
-            &mut diagnostics,
-        )?;
-        let (protocol_type, materialized_protocol_type) = resolve_u16(
-            NAME,
-            "protocol_type",
-            &layer.protocol_type,
-            expected_discriminator(NAME, context, 0_u16, &layer.protocol_type),
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(
-            NAME,
-            u64::from(protocol_type),
             context,
             &mut diagnostics,
         )?;
@@ -173,25 +159,22 @@ impl LayerCodec for GreCodec {
         let flags = u16::from_be_bytes([header[0], header[1]]);
         let version = flags & VERSION_MASK;
         if version != 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: format!("GRE version {version} is not supported"),
-            });
+            return Err(unsupported(
+                NAME,
+                format!("GRE version {version} is not supported"),
+            ));
         }
         if flags & ROUTING_PRESENT != 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: "GRE routing fields are not supported".to_owned(),
-            });
+            return Err(unsupported(NAME, "GRE routing fields are not supported"));
         }
         if flags & MUST_DISCARD_FLAGS != 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: format!(
+            return Err(unsupported(
+                NAME,
+                format!(
                     "must-discard GRE flags are non-zero (0x{:04x})",
                     flags & MUST_DISCARD_FLAGS
                 ),
-            });
+            ));
         }
 
         let protocol_type = u16::from_be_bytes([header[2], header[3]]);

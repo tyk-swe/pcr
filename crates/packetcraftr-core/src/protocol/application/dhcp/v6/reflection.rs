@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use super::super::{MAX_NESTING, MAX_OPTIONS};
 use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
     field::{self, FieldKind, FieldValue},
@@ -213,7 +214,7 @@ fn parse_message(
     depth: usize,
     count: &mut usize,
 ) -> Result<Dhcpv6, field::Error> {
-    if depth > 8 {
+    if depth > MAX_NESTING {
         return Err(out_of_range(schema(), field));
     }
     let mut value = Object::new(value, schema(), field)?;
@@ -242,15 +243,15 @@ fn parse_options(
     depth: usize,
     count: &mut usize,
 ) -> Result<Vec<Option6>, field::Error> {
-    let values = list(value, 4096, schema(), field)?;
-    if depth > 8 && !values.is_empty() {
+    let values = list(value, MAX_OPTIONS, schema(), field)?;
+    if depth > MAX_NESTING && !values.is_empty() {
         return Err(out_of_range(schema(), field));
     }
     values
         .into_iter()
         .map(|value| {
             *count += 1;
-            if *count > 4096 {
+            if *count > MAX_OPTIONS {
                 return Err(out_of_range(schema(), field));
             }
             let mut option = Object::new(value, schema(), field)?;
@@ -337,294 +338,74 @@ fn parse_options(
         .collect()
 }
 
-const VALUE_0: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, &[]),
-    member("message", FieldKind::Object, &[]),
-];
-const OPTIONS_0: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_0),
-];
-const MESSAGE_0: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_0),
-];
+const fn value_fields(
+    options: &'static [FieldSchema],
+    message: &'static [FieldSchema],
+) -> [FieldSchema; 18] {
+    [
+        member("duid", FieldKind::Object, DUID_FIELDS),
+        member("iaid", FieldKind::Unsigned, &[]),
+        member("t1", FieldKind::Unsigned, &[]),
+        member("t2", FieldKind::Unsigned, &[]),
+        member("address", FieldKind::Ipv6, &[]),
+        member("prefix", FieldKind::Ipv6, &[]),
+        member("prefix_length", FieldKind::Unsigned, &[]),
+        member("preferred_lifetime", FieldKind::Unsigned, &[]),
+        member("valid_lifetime", FieldKind::Unsigned, &[]),
+        member("codes", FieldKind::List, &[]),
+        member("number", FieldKind::Unsigned, &[]),
+        member("seconds", FieldKind::Unsigned, &[]),
+        member("status", FieldKind::Unsigned, &[]),
+        member("message_text", FieldKind::Bytes, &[]),
+        member("addresses", FieldKind::List, &[]),
+        member("data", FieldKind::Bytes, &[]),
+        member("options", FieldKind::List, options),
+        member("message", FieldKind::Object, message),
+    ]
+}
+const fn options_fields(value: &'static [FieldSchema]) -> [FieldSchema; 2] {
+    [
+        member("code", FieldKind::Unsigned, &[]),
+        member("value", FieldKind::Object, value),
+    ]
+}
+const fn message_fields(options: &'static [FieldSchema]) -> [FieldSchema; 6] {
+    [
+        member("message_type", FieldKind::Unsigned, &[]),
+        member("transaction_id", FieldKind::Unsigned, &[]),
+        member("hop_count", FieldKind::Unsigned, &[]),
+        member("link_address", FieldKind::Ipv6, &[]),
+        member("peer_address", FieldKind::Ipv6, &[]),
+        member("options", FieldKind::List, options),
+    ]
+}
 
-const VALUE_1: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_0),
-    member("message", FieldKind::Object, MESSAGE_0),
-];
-const OPTIONS_1: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_1),
-];
-const MESSAGE_1: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_1),
-];
-
-const VALUE_2: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_1),
-    member("message", FieldKind::Object, MESSAGE_1),
-];
-const OPTIONS_2: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_2),
-];
-const MESSAGE_2: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_2),
-];
-
-const VALUE_3: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_2),
-    member("message", FieldKind::Object, MESSAGE_2),
-];
-const OPTIONS_3: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_3),
-];
-const MESSAGE_3: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_3),
-];
-
-const VALUE_4: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_3),
-    member("message", FieldKind::Object, MESSAGE_3),
-];
-const OPTIONS_4: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_4),
-];
-const MESSAGE_4: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_4),
-];
-
-const VALUE_5: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_4),
-    member("message", FieldKind::Object, MESSAGE_4),
-];
-const OPTIONS_5: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_5),
-];
-const MESSAGE_5: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_5),
-];
-
-const VALUE_6: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_5),
-    member("message", FieldKind::Object, MESSAGE_5),
-];
-const OPTIONS_6: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_6),
-];
-const MESSAGE_6: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_6),
-];
-
-const VALUE_7: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_6),
-    member("message", FieldKind::Object, MESSAGE_6),
-];
-const OPTIONS_7: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_7),
-];
-const MESSAGE_7: &[FieldSchema] = &[
-    member("message_type", FieldKind::Unsigned, &[]),
-    member("transaction_id", FieldKind::Unsigned, &[]),
-    member("hop_count", FieldKind::Unsigned, &[]),
-    member("link_address", FieldKind::Ipv6, &[]),
-    member("peer_address", FieldKind::Ipv6, &[]),
-    member("options", FieldKind::List, OPTIONS_7),
-];
-
-const VALUE_8: &[FieldSchema] = &[
-    member("duid", FieldKind::Object, DUID_FIELDS),
-    member("iaid", FieldKind::Unsigned, &[]),
-    member("t1", FieldKind::Unsigned, &[]),
-    member("t2", FieldKind::Unsigned, &[]),
-    member("address", FieldKind::Ipv6, &[]),
-    member("prefix", FieldKind::Ipv6, &[]),
-    member("prefix_length", FieldKind::Unsigned, &[]),
-    member("preferred_lifetime", FieldKind::Unsigned, &[]),
-    member("valid_lifetime", FieldKind::Unsigned, &[]),
-    member("codes", FieldKind::List, &[]),
-    member("number", FieldKind::Unsigned, &[]),
-    member("seconds", FieldKind::Unsigned, &[]),
-    member("status", FieldKind::Unsigned, &[]),
-    member("message_text", FieldKind::Bytes, &[]),
-    member("addresses", FieldKind::List, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("options", FieldKind::List, OPTIONS_7),
-    member("message", FieldKind::Object, MESSAGE_7),
-];
-const OPTIONS_8: &[FieldSchema] = &[
-    member("code", FieldKind::Unsigned, &[]),
-    member("value", FieldKind::Object, VALUE_8),
-];
+const VALUE_0: &[FieldSchema] = &value_fields(&[], &[]);
+const OPTIONS_0: &[FieldSchema] = &options_fields(VALUE_0);
+const MESSAGE_0: &[FieldSchema] = &message_fields(OPTIONS_0);
+const VALUE_1: &[FieldSchema] = &value_fields(OPTIONS_0, MESSAGE_0);
+const OPTIONS_1: &[FieldSchema] = &options_fields(VALUE_1);
+const MESSAGE_1: &[FieldSchema] = &message_fields(OPTIONS_1);
+const VALUE_2: &[FieldSchema] = &value_fields(OPTIONS_1, MESSAGE_1);
+const OPTIONS_2: &[FieldSchema] = &options_fields(VALUE_2);
+const MESSAGE_2: &[FieldSchema] = &message_fields(OPTIONS_2);
+const VALUE_3: &[FieldSchema] = &value_fields(OPTIONS_2, MESSAGE_2);
+const OPTIONS_3: &[FieldSchema] = &options_fields(VALUE_3);
+const MESSAGE_3: &[FieldSchema] = &message_fields(OPTIONS_3);
+const VALUE_4: &[FieldSchema] = &value_fields(OPTIONS_3, MESSAGE_3);
+const OPTIONS_4: &[FieldSchema] = &options_fields(VALUE_4);
+const MESSAGE_4: &[FieldSchema] = &message_fields(OPTIONS_4);
+const VALUE_5: &[FieldSchema] = &value_fields(OPTIONS_4, MESSAGE_4);
+const OPTIONS_5: &[FieldSchema] = &options_fields(VALUE_5);
+const MESSAGE_5: &[FieldSchema] = &message_fields(OPTIONS_5);
+const VALUE_6: &[FieldSchema] = &value_fields(OPTIONS_5, MESSAGE_5);
+const OPTIONS_6: &[FieldSchema] = &options_fields(VALUE_6);
+const MESSAGE_6: &[FieldSchema] = &message_fields(OPTIONS_6);
+const VALUE_7: &[FieldSchema] = &value_fields(OPTIONS_6, MESSAGE_6);
+const OPTIONS_7: &[FieldSchema] = &options_fields(VALUE_7);
+const MESSAGE_7: &[FieldSchema] = &message_fields(OPTIONS_7);
+const VALUE_8: &[FieldSchema] = &value_fields(OPTIONS_7, MESSAGE_7);
+const OPTIONS_8: &[FieldSchema] = &options_fields(VALUE_8);
 
 reflective_layer! {
     pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}

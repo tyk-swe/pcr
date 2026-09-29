@@ -4,6 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use packetcraftr_core::build::{self, Builder};
+use packetcraftr_core::codec::Context;
 use packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES;
 use packetcraftr_core::document::Format;
 use packetcraftr_core::document::Packet;
@@ -83,6 +85,15 @@ fn every_published_packet_example_loads_and_builds() {
             reconverted.layers.len(),
             document.layers.len(),
             "{} must round-trip its layer count",
+            path.display()
+        );
+
+        let built = Builder::new(registry.clone())
+            .build(packet, Context::default(), build::Options::default())
+            .unwrap_or_else(|error| panic!("{} must build: {error}", path.display()));
+        assert!(
+            !built.bytes.is_empty(),
+            "{} must build bytes",
             path.display()
         );
     }

@@ -81,9 +81,12 @@ fn set_errors_precede_output_or_live_preparation() {
             "--axis",
             "0.ttl=[1,2]",
         ]);
-        assert!(!output.status.success());
-        if format == "raw" {
+        assert_eq!(output.status.code(), Some(2), "{format}");
+        if format == "json" {
+            assert_eq!(parse_json(&output)["error"]["code"], "cli.error");
+        } else {
             assert!(output.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("require exactly one packet"));
         }
     }
     let output = run(&[
@@ -232,37 +235,65 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
         vec![0_u8; packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES + 1],
     )
     .expect("oversized fixture");
-    for spec in [
-        missing,
-        format!("1.dport={}", payload_path.display()),
-        format!("5.bytes={}", payload_path.display()),
-        format!("bytes={}", payload_path.display()),
-        format!("2.bytes={}", oversized_path.display()),
+    let syntax = "--payload-file requires LAYER.FIELD=PATH";
+    let unfillable = "--payload-file cannot fill its recipe field";
+    // The payload file is already removed: a refused target must win over the missing file.
+    for (spec, status, code, message) in [
+        (missing, 5, "io.runtime", None),
+        (
+            format!("2.bytes={}", oversized_path.display()),
+            2,
+            "cli.error",
+            None,
+        ),
+        (
+            format!("1.dport={}", payload_path.display()),
+            2,
+            "cli.error",
+            Some(unfillable),
+        ),
+        (
+            format!("5.bytes={}", payload_path.display()),
+            2,
+            "cli.error",
+            Some(unfillable),
+        ),
+        (
+            format!("bytes={}", payload_path.display()),
+            2,
+            "cli.error",
+            Some(syntax),
+        ),
+        ("2.bytes".to_owned(), 2, "cli.error", Some(syntax)),
     ] {
         let output = run(&[
             "--output",
-            "raw",
+            "json",
             "build",
             "--packet",
             recipe,
             "--payload-file",
             &spec,
         ]);
-        assert!(!output.status.success(), "{spec} unexpectedly succeeded");
-        assert!(output.stdout.is_empty(), "{spec} emitted bytes on failure");
+        assert_eq!(output.status.code(), Some(status), "{spec}");
+        let document = parse_json(&output);
+        assert_eq!(document["error"]["code"], code, "{spec}");
+        if let Some(message) = message {
+            assert_eq!(document["error"]["message"], message, "{spec}");
+        }
     }
 
-    let output = run(&[
+    let refused = run(&[
         "--output",
         "raw",
         "build",
         "--packet",
-        "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/raw(hex=\"aa\")",
+        recipe,
         "--payload-file",
-        &format!("2.bytes={}", oversized_path.display()),
+        &format!("5.bytes={}", payload_path.display()),
     ]);
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert!(!refused.status.success());
+    assert!(refused.stdout.is_empty());
 }
 
 #[test]
@@ -421,63 +452,92 @@ fn build_capture_output_round_trips_through_read_and_the_capture_reader() {
 
 #[test]
 fn build_capture_output_requires_a_compatible_explicit_link_type() {
-    for arguments in [
-        vec!["--output", "pcap", "build", "--packet", PACKET],
-        vec![
-            "--output",
-            "pcap",
-            "build",
-            "--packet",
-            PACKET,
-            "--link-type",
-            "ethernet",
-        ],
-        vec!["build", "--packet", PACKET, "--link-type", "raw"],
-        vec!["build", "--packet", PACKET, "--timestamp", "1"],
-        vec![
-            "--output",
-            "pcap",
-            "build",
-            "--packet",
-            PACKET,
-            "--link-type",
-            "fddi",
-        ],
-        vec![
-            "--output",
-            "pcap",
-            "build",
-            "--packet",
-            PACKET,
-            "--link-type",
-            "raw",
-            "--timestamp",
-            "-1",
-        ],
+    for (arguments, message) in [
+        (
+            vec!["--output", "pcap", "build", "--packet", PACKET],
+            "capture output requires --link-type",
+        ),
+        (
+            vec![
+                "--output",
+                "pcap",
+                "build",
+                "--packet",
+                PACKET,
+                "--link-type",
+                "ethernet",
+            ],
+            "decodes as ethernet but the recipe begins with ipv4",
+        ),
+        (
+            vec!["build", "--packet", PACKET, "--link-type", "raw"],
+            "--link-type requires PCAP or PCAPNG output",
+        ),
+        (
+            vec!["build", "--packet", PACKET, "--timestamp", "1"],
+            "--timestamp requires PCAP or PCAPNG output",
+        ),
+        (
+            vec![
+                "--output",
+                "pcap",
+                "build",
+                "--packet",
+                PACKET,
+                "--link-type",
+                "fddi",
+            ],
+            "unknown link type \"fddi\"",
+        ),
+        (
+            vec![
+                "--output",
+                "pcap",
+                "build",
+                "--packet",
+                PACKET,
+                "--link-type",
+                "raw",
+                "--timestamp=-1",
+            ],
+            "invalid timestamp \"-1\"; use non-negative Unix seconds",
+        ),
+        (
+            vec![
+                "--output",
+                "pcapng",
+                "build",
+                "--packet",
+                PACKET,
+                "--link-type",
+                "276",
+            ],
+            "decodes as linux_sll2 but the recipe begins with ipv4",
+        ),
+        (
+            vec![
+                "--output",
+                "pcapng",
+                "build",
+                "--packet",
+                PACKET,
+                "--link-type",
+                "999",
+            ],
+            "link type 999 has no built-in decode root",
+        ),
     ] {
         let output = run(&arguments);
-        assert!(
-            !output.status.success(),
-            "{arguments:?} unexpectedly succeeded"
-        );
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
         assert!(
             output.stdout.is_empty(),
             "{arguments:?} emitted bytes on failure"
         );
-    }
-
-    for link_type in ["276", "999"] {
-        let output = run(&[
-            "--output",
-            "pcapng",
-            "build",
-            "--packet",
-            PACKET,
-            "--link-type",
-            link_type,
-        ]);
-        assert!(!output.status.success(), "link type {link_type} succeeded");
-        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(message),
+            "{arguments:?} did not report {message:?}: {stderr}"
+        );
     }
 }
 

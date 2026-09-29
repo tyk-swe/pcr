@@ -195,16 +195,10 @@ pub struct FilterField {
     pub description: String,
 }
 
-impl FilterField {
-    pub fn for_protocol(registry: &Registry, protocol: &str) -> Vec<Self> {
-        registry
-            .filter_fields()
-            .filter(|(_, binding)| binding.protocol().as_str() == protocol)
-            .filter_map(|(path, binding)| Self::from_binding(path, binding))
-            .collect()
-    }
+impl TryFrom<(&str, &FilterFieldBinding)> for FilterField {
+    type Error = Error;
 
-    pub fn from_binding(path: &str, binding: &FilterFieldBinding) -> Option<Self> {
+    fn try_from((path, binding): (&str, &FilterFieldBinding)) -> Result<Self, Error> {
         let fields: Vec<_> = binding
             .fields()
             .iter()
@@ -237,9 +231,13 @@ impl FilterField {
                 Some(*shift),
                 format!("Reads ({protocol}.{field} & {mask}) >> {shift} before comparison."),
             ),
-            _ => return None,
+            _ => {
+                return Err(Error::Unpublished {
+                    value: "filter field binding",
+                });
+            }
         };
-        Some(Self {
+        Ok(Self {
             path: path.to_owned(),
             kind,
             fields,
@@ -252,13 +250,8 @@ impl FilterField {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Detail {
-    pub protocol: String,
-    pub aliases: Vec<String>,
-    pub build: bool,
-    pub dissect: bool,
-    pub exact_round_trip: bool,
-    pub matcher: bool,
-    pub decode_only: bool,
+    #[serde(flatten)]
+    pub summary: Summary,
     pub fields: Vec<Field>,
     pub bindings: Vec<Binding>,
     pub filter_fields: Vec<FilterField>,
@@ -268,7 +261,6 @@ impl TryFrom<(&Registry, BuiltinProtocol)> for Detail {
     type Error = Error;
 
     fn try_from((registry, protocol): (&Registry, BuiltinProtocol)) -> Result<Self, Error> {
-        let summary = Summary::from(protocol);
         let fields = registry
             .schema(protocol.as_str())
             .map(|schema| {
@@ -288,17 +280,16 @@ impl TryFrom<(&Registry, BuiltinProtocol)> for Detail {
                 discriminator: discriminator.0,
             })
             .collect();
+        let filter_fields = registry
+            .filter_fields()
+            .filter(|(_, binding)| binding.protocol().as_str() == protocol.as_str())
+            .map(FilterField::try_from)
+            .collect::<Result<_, _>>()?;
         Ok(Self {
-            protocol: summary.protocol,
-            aliases: summary.aliases,
-            build: summary.build,
-            dissect: summary.dissect,
-            exact_round_trip: summary.exact_round_trip,
-            matcher: summary.matcher,
-            decode_only: summary.decode_only,
+            summary: Summary::from(protocol),
             fields,
             bindings,
-            filter_fields: FilterField::for_protocol(registry, protocol.as_str()),
+            filter_fields,
         })
     }
 }

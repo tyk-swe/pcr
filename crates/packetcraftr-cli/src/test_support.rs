@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::output::{contract::Command, stream::StreamEncoder};
+use packetcraftr_core::diagnostic::Diagnostic;
 use serde_json::Value;
 
 #[derive(Clone, Default)]
@@ -91,4 +92,56 @@ impl<T: serde::Serialize> crate::output::stream::StreamRecord for TestRecord<T> 
     fn event_name(&self) -> &'static str {
         "frame"
     }
+}
+
+/// Sent evidence for one raw byte whose build carried `diagnostics`.
+pub fn sent_packet_with(diagnostics: Vec<Diagnostic>) -> Arc<packetcraftr::evidence::SentPacket> {
+    use packetcraftr::route::{Materialized, Plan};
+    use packetcraftr_core::{build, codec, frame::LinkType, layer::Raw, packet::Packet};
+    use packetcraftr_netio::link::{Capability, Mode};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
+
+    let mut packet = Packet::new();
+    packet.push(Raw::new(vec![0_u8]));
+    let mut built = build::Builder::new(packetcraftr_core::protocol::builtin::registry())
+        .build(packet, codec::Context::default(), build::Options::default())
+        .expect("sent fixture builds");
+    built.diagnostics = diagnostics;
+    let route = Materialized {
+        plan: Plan {
+            decision: Decision {
+                interface: packetcraftr_netio::interface::Id {
+                    name: "fixture0".to_owned(),
+                    index: 1,
+                },
+                source_mac: None,
+                selected_source: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: SelectionReason::InterfaceOnly,
+                destination_scope: Scope::Link,
+                mtu: u32::MAX,
+                capability: Capability::Layer3,
+                link_type: LinkType::RAW,
+            },
+            mode: Mode::Layer3,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: None,
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        },
+        neighbor_resolution: None,
+    };
+    let report = packetcraftr_netio::transmit::Submission::start()
+        .complete(built.bytes.len(), built.bytes.clone());
+    Arc::new(
+        packetcraftr::evidence::SentPacket::try_new(built, route, report)
+            .expect("trusted sent fixture"),
+    )
 }

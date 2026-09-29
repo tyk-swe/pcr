@@ -11,7 +11,10 @@ use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
 use crate::execution::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
-use crate::execution::validation::validate_response_frames_and_deadlines;
+use crate::execution::validation::{
+    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
+};
 
 use super::error::{CaseErrors, Error, duration_limit};
 use super::executor::CaseEvidence;
@@ -81,7 +84,6 @@ impl Recorder {
         self.retain(responses, &mut evidence.responses, deadline)?;
         self.retain(execution.unmatched, &mut evidence.unmatched, deadline)?;
         self.retain(execution.undecoded, &mut evidence.undecoded, deadline)?;
-        deadline.check().map_err(duration_limit)?;
         deadline.enforce()?;
         Ok(evidence)
     }
@@ -115,20 +117,13 @@ pub(super) fn validate_execution(
     execution: &CaseEvidence,
     timeout: Duration,
     max_packet_bytes: usize,
-    deadline: &Deadline,
 ) -> Result<(), Error> {
+    let invalid = |source| CaseErrors.invalid_evidence(case.index, source);
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
-        return Err(Error::InvalidEvidence {
-            case_index: case.index,
-            message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
-        });
+        return Err(invalid(crate::evidence::Error::IncompleteStatistics));
     }
-    if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
-        return Err(Error::InvalidEvidence {
-            case_index: case.index,
-            message: "sent receipt and byte statistics disagree".to_owned(),
-        });
-    }
+    validate_sent_byte_accounting(std::slice::from_ref(&execution.sent), execution.stats.bytes)
+        .map_err(invalid)?;
     if execution.sent.built().bytes.len() > max_packet_bytes {
         return Err(Error::InvalidEvidence {
             case_index: case.index,
@@ -139,17 +134,6 @@ pub(super) fn validate_execution(
             ),
         });
     }
-    execution
-        .stats
-        .capture
-        .validate()
-        .map_err(|source| Error::InvalidEvidence {
-            case_index: case.index,
-            message: format!("invalid capture statistics: {source}"),
-        })?;
-    deadline.check().map_err(duration_limit)?;
-    validate_response_frames_and_deadlines(&execution.responses, &[], timeout)
-        .map_err(|error| CaseErrors.invalid_evidence(case.index, error))?;
-    deadline.check().map_err(duration_limit)?;
-    Ok(())
+    validate_capture_statistics_evidence(execution.stats.capture).map_err(invalid)?;
+    validate_response_frames_and_deadlines(&execution.responses, &[], timeout).map_err(invalid)
 }

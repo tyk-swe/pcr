@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Options, StreamRef, StreamTransport,
+    FrameRecord, Options, StreamRef, StreamTransport,
     provenance::{IncompleteSources, SourceSet},
 };
 use crate::{
@@ -45,12 +45,11 @@ impl Selection<'_> {
                 limit: MAX_SELECTORS,
             });
         }
-        if self.max_selected_frames == 0 || self.max_selected_frames > MAX_SELECTED_FRAMES {
-            return Err(Error::Limit {
-                field: "max_selected_frames",
-                limit: MAX_SELECTED_FRAMES,
-            });
-        }
+        super::error::check_ceiling(
+            "max_selected_frames",
+            self.max_selected_frames as u64,
+            MAX_SELECTED_FRAMES as u64,
+        )?;
         if self.datagram_frames.contains(&0)
             || (self.streams.is_empty() && self.datagram_frames.is_empty() && self.filter.is_none())
         {
@@ -107,21 +106,75 @@ pub fn plan<R: Read>(
     selection: &Selection<'_>,
 ) -> Result<Plan, Error> {
     selection.validate()?;
-    let requested_streams: BTreeSet<_> = selection.streams.iter().copied().collect();
-    let requested_datagrams: BTreeSet<_> = selection.datagram_frames.iter().copied().collect();
-    let mut matched_streams = BTreeSet::new();
-    let mut matched_datagrams = BTreeSet::new();
-    let mut frames = BTreeSet::new();
-    let mut selected_complete_datagrams = 0;
+    let mut selected = Selected::new(selection);
     let run_options = Options {
         track_sources: true,
         tcp_events: false,
         filter: None,
+        stream: None,
+        plan: super::Plan::default(),
         ..options.clone()
     };
     let run = super::run(reader, registry, &run_options, |record| {
-        let mut selected_views = Vec::new();
-        let matched_filter = selection
+        selected.visit(&record)
+    })?;
+    let mut selected_incomplete_datagrams = Vec::new();
+    let mut unselected_incomplete_datagrams = 0;
+    for group in run.incomplete_sources {
+        if selected.matches(&group.sources) {
+            selected.include(&group.sources)?;
+            selected_incomplete_datagrams.push(group);
+        } else {
+            unselected_incomplete_datagrams += 1;
+        }
+    }
+    Ok(Plan {
+        source_frames: selected.frames,
+        unmatched_streams: selected
+            .requested_streams
+            .difference(&selected.matched_streams)
+            .copied()
+            .collect(),
+        matched_streams: selected.matched_streams.into_iter().collect(),
+        unmatched_datagram_frames: selected
+            .requested_datagrams
+            .difference(&selected.matched_datagrams)
+            .copied()
+            .collect(),
+        selected_complete_datagrams: selected.complete_datagrams,
+        selected_incomplete_datagrams,
+        unselected_incomplete_datagrams,
+        source_outcomes_omitted: run.source_outcomes_omitted,
+        frames_read: run.frames_read,
+        scopes: run.scopes,
+        ip_reassembly: run.ip_reassembly,
+    })
+}
+struct Selected<'a> {
+    filter: Option<&'a Filter>,
+    limit: usize,
+    requested_streams: BTreeSet<StreamRef>,
+    requested_datagrams: BTreeSet<u64>,
+    frames: BTreeSet<u64>,
+    matched_streams: BTreeSet<StreamRef>,
+    matched_datagrams: BTreeSet<u64>,
+    complete_datagrams: u64,
+}
+impl<'a> Selected<'a> {
+    fn new(selection: &Selection<'a>) -> Self {
+        Self {
+            filter: selection.filter,
+            limit: selection.max_selected_frames,
+            requested_streams: selection.streams.iter().copied().collect(),
+            requested_datagrams: selection.datagram_frames.iter().copied().collect(),
+            frames: BTreeSet::new(),
+            matched_streams: BTreeSet::new(),
+            matched_datagrams: BTreeSet::new(),
+            complete_datagrams: 0,
+        }
+    }
+    fn visit(&mut self, record: &FrameRecord<'_>) -> Result<(), BoundaryError> {
+        let matched_filter = self
             .filter
             .map(|filter| record.matches(filter))
             .transpose()
@@ -133,43 +186,40 @@ pub fn plan<R: Read>(
             })?
             .unwrap_or(false);
         if matched_filter {
-            insert(&mut frames, record.number, selection.max_selected_frames)
+            self.insert(record.number)
                 .map_err(BoundaryError::from_error)?;
         }
-        for (transport, conversation, sources) in [
+        let mut selected_views = Vec::new();
+        for (transport, view, sources) in [
             (
                 StreamTransport::Tcp,
-                record.tcp.and_then(|view| view.conversation),
+                record
+                    .tcp
+                    .and_then(|view| Some((view.conversation?, view.decoded))),
                 record.tcp_sources(),
             ),
             (
                 StreamTransport::Udp,
-                record.udp.and_then(|view| view.conversation),
+                record
+                    .udp
+                    .and_then(|view| Some((view.conversation?, view.decoded))),
                 record.udp_sources(),
             ),
         ] {
-            if let Some(conversation) = conversation {
+            if let Some((conversation, decoded)) = view {
                 let stream = StreamRef {
                     transport,
                     index: conversation.index,
                 };
-                if requested_streams.contains(&stream) {
-                    matched_streams.insert(stream);
-                    selected_views.push(match transport {
-                        StreamTransport::Tcp => {
-                            record.tcp.expect("conversation came from TCP").decoded
-                        }
-                        StreamTransport::Udp => {
-                            record.udp.expect("conversation came from UDP").decoded
-                        }
-                    });
+                if self.requested_streams.contains(&stream) {
+                    self.matched_streams.insert(stream);
+                    selected_views.push(decoded);
                     let sources = sources.ok_or_else(|| {
                         BoundaryError::from_error(Error::Sources {
                             number: record.number,
                         })
                     })?;
-                    include(&mut frames, sources, selection.max_selected_frames)
-                        .map_err(BoundaryError::from_error)?;
+                    self.include(sources).map_err(BoundaryError::from_error)?;
                 }
             }
         }
@@ -179,77 +229,43 @@ pub fn plan<R: Read>(
                     number: record.number,
                 })
             })?;
-            let selected = matches_sources(sources, &requested_datagrams, &mut matched_datagrams);
+            let selected = self.matches(sources);
             if selected
                 || matched_filter
                 || selected_views
                     .iter()
                     .any(|decoded| std::ptr::eq(*decoded, &datagram.decoded))
             {
-                selected_complete_datagrams += 1;
-                include(&mut frames, sources, selection.max_selected_frames)
-                    .map_err(BoundaryError::from_error)?;
+                self.complete_datagrams += 1;
+                self.include(sources).map_err(BoundaryError::from_error)?;
             }
         }
         Ok(())
-    })?;
-    let mut selected_incomplete_datagrams = Vec::new();
-    let mut unselected_incomplete_datagrams = 0;
-    for group in run.incomplete_sources {
-        if matches_sources(&group.sources, &requested_datagrams, &mut matched_datagrams) {
-            include(&mut frames, &group.sources, selection.max_selected_frames)?;
-            selected_incomplete_datagrams.push(group);
-        } else {
-            unselected_incomplete_datagrams += 1;
+    }
+    fn matches(&mut self, sources: &SourceSet) -> bool {
+        let mut found = false;
+        for frame in sources.frames() {
+            if self.requested_datagrams.contains(&frame.number) {
+                self.matched_datagrams.insert(frame.number);
+                found = true;
+            }
         }
+        found
     }
-    Ok(Plan {
-        source_frames: frames,
-        unmatched_streams: requested_streams
-            .difference(&matched_streams)
-            .copied()
-            .collect(),
-        matched_streams: matched_streams.into_iter().collect(),
-        unmatched_datagram_frames: requested_datagrams
-            .difference(&matched_datagrams)
-            .copied()
-            .collect(),
-        selected_complete_datagrams,
-        selected_incomplete_datagrams,
-        unselected_incomplete_datagrams,
-        source_outcomes_omitted: run.source_outcomes_omitted,
-        frames_read: run.frames_read,
-        scopes: run.scopes,
-        ip_reassembly: run.ip_reassembly,
-    })
-}
-fn matches_sources(
-    sources: &SourceSet,
-    requested: &BTreeSet<u64>,
-    matched: &mut BTreeSet<u64>,
-) -> bool {
-    let mut found = false;
-    for frame in sources.frames() {
-        if requested.contains(&frame.number) {
-            matched.insert(frame.number);
-            found = true;
+    fn include(&mut self, sources: &SourceSet) -> Result<(), Error> {
+        for source in sources.frames() {
+            self.insert(source.number)?;
         }
+        Ok(())
     }
-    found
-}
-fn include(frames: &mut BTreeSet<u64>, sources: &SourceSet, limit: usize) -> Result<(), Error> {
-    for source in sources.frames() {
-        insert(frames, source.number, limit)?;
+    fn insert(&mut self, number: u64) -> Result<(), Error> {
+        if !self.frames.contains(&number) && self.frames.len() >= self.limit {
+            return Err(Error::Limit {
+                field: "max_selected_frames",
+                limit: self.limit,
+            });
+        }
+        self.frames.insert(number);
+        Ok(())
     }
-    Ok(())
-}
-fn insert(frames: &mut BTreeSet<u64>, number: u64, limit: usize) -> Result<(), Error> {
-    if !frames.contains(&number) && frames.len() >= limit {
-        return Err(Error::Limit {
-            field: "max_selected_frames",
-            limit,
-        });
-    }
-    frames.insert(number);
-    Ok(())
 }

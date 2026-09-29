@@ -74,12 +74,9 @@ impl Collector {
                     flow,
                     pending_bytes,
                 } = event
-                    && (*flow == client || *flow == client.reverse())
+                    && direction_of(flow, &client).is_some()
                 {
-                    self.summary.undelivered_bytes = self
-                        .summary
-                        .undelivered_bytes
-                        .saturating_add(*pending_bytes as u64);
+                    self.add_undelivered(*pending_bytes);
                 }
             }
         }
@@ -95,15 +92,12 @@ impl Collector {
                     TcpEvent::Evicted {
                         flow,
                         pending_bytes,
-                    } if *flow == client || *flow == client.reverse() => {
-                        self.summary.undelivered_bytes = self
-                            .summary
-                            .undelivered_bytes
-                            .saturating_add(*pending_bytes as u64);
+                    } if direction_of(flow, &client).is_some() => {
+                        self.add_undelivered(*pending_bytes);
                         self.dedup.mark_evicted(flow, &client);
                     }
                     TcpEvent::Closed { flow, reset: false }
-                        if *flow == client || *flow == client.reverse() =>
+                        if direction_of(flow, &client).is_some() =>
                     {
                         self.dedup.mark_closed(flow, &client);
                     }
@@ -122,14 +116,7 @@ impl Collector {
         };
         let tcp = view.header;
         let flow = conversation.flow;
-        let client = self
-            .client_flow
-            .get_or_insert_with(|| {
-                self.summary.client_flow = Some(flow.flow.clone());
-                self.summary.scope = record.scope_definition(flow.scope).cloned();
-                flow.clone()
-            })
-            .clone();
+        let client = self.claim_client(record, flow);
 
         self.dedup.observe_syn(flow, &client, tcp);
         self.summary.frames = self.summary.frames.saturating_add(1);
@@ -141,11 +128,7 @@ impl Collector {
                 bytes,
             } = event
             {
-                let direction = if *sender == client {
-                    PeerDirection::ClientToServer
-                } else if *sender == client.reverse() {
-                    PeerDirection::ServerToClient
-                } else {
+                let Some(direction) = direction_of(sender, &client) else {
                     continue;
                 };
                 if bytes.is_empty() {
@@ -177,14 +160,7 @@ impl Collector {
             return Vec::new();
         };
         let flow = conversation.flow;
-        let client = self
-            .client_flow
-            .get_or_insert_with(|| {
-                self.summary.client_flow = Some(flow.flow.clone());
-                self.summary.scope = record.scope_definition(flow.scope).cloned();
-                flow.clone()
-            })
-            .clone();
+        let client = self.claim_client(record, flow);
         self.summary.frames = self.summary.frames.saturating_add(1);
         let direction = if *flow == client {
             PeerDirection::ClientToServer
@@ -201,12 +177,39 @@ impl Collector {
         }]
     }
 
+    fn claim_client(&mut self, record: &FrameRecord<'_>, flow: &ScopedFlowKey) -> ScopedFlowKey {
+        self.client_flow
+            .get_or_insert_with(|| {
+                self.summary.client_flow = Some(flow.flow.clone());
+                self.summary.scope = record.scope_definition(flow.scope).cloned();
+                flow.clone()
+            })
+            .clone()
+    }
+
+    fn add_undelivered(&mut self, pending_bytes: usize) {
+        self.summary.undelivered_bytes = self
+            .summary
+            .undelivered_bytes
+            .saturating_add(pending_bytes as u64);
+    }
+
     fn tally(&mut self, direction: PeerDirection, length: usize) {
         let counter = match direction {
             PeerDirection::ClientToServer => &mut self.summary.client_bytes,
             PeerDirection::ServerToClient => &mut self.summary.server_bytes,
         };
         *counter = counter.saturating_add(length as u64);
+    }
+}
+
+fn direction_of(flow: &ScopedFlowKey, client: &ScopedFlowKey) -> Option<PeerDirection> {
+    if flow == client {
+        Some(PeerDirection::ClientToServer)
+    } else if *flow == client.reverse() {
+        Some(PeerDirection::ServerToClient)
+    } else {
+        None
     }
 }
 

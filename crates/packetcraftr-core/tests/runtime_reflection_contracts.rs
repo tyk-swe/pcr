@@ -134,6 +134,34 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
 }
 
 #[test]
+fn layer_removal_shifts_only_padding_boundaries_above_the_removed_layer() {
+    let mut packet = Packet::new();
+    packet
+        .push(Probe::default())
+        .push(Child::default())
+        .push(Probe::default())
+        .push(Padding::after_layer(vec![0xaa], 0))
+        .push(Padding::after_layer(vec![0xbb], 1))
+        .push(Padding::after_layer(vec![0xcc], 2))
+        .push(Padding::new(vec![0xdd]));
+    let boundaries = |packet: &Packet| {
+        packet
+            .iter()
+            .filter_map(|layer| layer.downcast_ref::<Padding>())
+            .map(|padding| padding.outside_layer)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(boundaries(&packet), [Some(0), Some(1), Some(2), None]);
+
+    packet
+        .remove(1)
+        .expect("the padding ending at layer 1 sits past layer 2, so layer 1 can be removed");
+
+    assert_eq!(packet.len(), 6);
+    assert_eq!(boundaries(&packet), [Some(0), Some(1), Some(1), None]);
+}
+
+#[test]
 fn reflected_fields_cover_supported_types_and_fail_closed() {
     let mut layer = Probe::default();
     layer.set_field("enabled", true.into()).expect("bool");
@@ -224,6 +252,42 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
         }]
     );
     assert_eq!(Raw::layout(3)[0].range, ByteRange::new(0, 3));
+}
+
+#[test]
+fn mac_text_requires_six_hex_pairs_under_one_separator() {
+    for accepted in ["aa:bb:cc:dd:ee:ff", "AA-BB-CC-DD-EE-FF"] {
+        let mut layer = Probe::default();
+        layer
+            .set_field("mac", accepted.into())
+            .unwrap_or_else(|error| panic!("{accepted} must parse: {error}"));
+        assert_eq!(
+            layer.field("mac"),
+            Some(FieldValue::Mac([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]))
+        );
+    }
+    for refused in [
+        "+1:22:33:44:55:66",
+        "aa:bb:cc:dd:ee:+f",
+        "aa:bb-cc:dd-ee:ff",
+        "aa-bb:cc-dd:ee-ff",
+        "aa:bb:cc:dd:ee",
+        "aa:bb:cc:dd:ee:ff:00",
+        "aabbccddeeff",
+        "a:bb:cc:dd:ee:fff",
+    ] {
+        let mut layer = Probe::default();
+        assert!(
+            matches!(
+                layer.set_field("mac", refused.into()),
+                Err(field::Error::WrongType {
+                    expected: "mac address",
+                    ..
+                })
+            ),
+            "{refused} must be refused"
+        );
+    }
 }
 
 #[test]

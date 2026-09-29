@@ -167,6 +167,19 @@ fn ipv4_with_tos(fragment: Fragment, tos: u8) -> Fragment {
     Fragment::Ipv4(fragment)
 }
 
+fn ipv4_with_ttl(fragment: Fragment, ttl: u8) -> Fragment {
+    let Fragment::Ipv4(mut fragment) = fragment else {
+        unreachable!("fixture is IPv4");
+    };
+    let mut header = fragment.header.to_vec();
+    header[8] = ttl;
+    header[10..12].fill(0);
+    let checksum = packetcraftr_core::protocol::checksum(&header);
+    header[10..12].copy_from_slice(&checksum.to_be_bytes());
+    fragment.header = Bytes::from(header);
+    Fragment::Ipv4(fragment)
+}
+
 fn ipv6_with_traffic_class(fragment: Fragment, traffic_class: u8) -> Fragment {
     let Fragment::Ipv6(mut fragment) = fragment else {
         unreachable!("fixture is IPv6");
@@ -1077,6 +1090,40 @@ fn repeated_offset_zero_fragments_may_differ_only_in_ecn() {
         mismatched.push(changed_dscp, now),
         Err(Error::Malformed(Malformed::InconsistentIpv4Header))
     );
+}
+
+#[test]
+fn repeated_offset_zero_fragments_may_differ_in_ttl() {
+    let key = ipv4_key();
+    let now = Instant::now();
+    let ingress = ipv4_with_ttl(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 64);
+    let egress = ipv4_with_ttl(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 63);
+    let tail = ipv4_fragment(&key, 1, false, &b"ijkl"[..]);
+
+    for (first, duplicate, ttl) in [(ingress.clone(), egress.clone(), 64), (egress, ingress, 63)] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
+        reassembler
+            .push(first, now)
+            .expect("the first offset-zero fragment is retained");
+        let outcome = reassembler
+            .push(duplicate, now)
+            .expect("a TTL difference does not make the offset-zero headers inconsistent");
+        assert!(matches!(
+            outcome,
+            PushOutcome::Accepted(outcome)
+                if matches!(outcome.disposition, FragmentDisposition::Duplicate { .. })
+        ));
+        let datagram = completed(
+            reassembler
+                .push(tail.clone(), now)
+                .expect("tail completes the datagram"),
+        );
+        assert_eq!(datagram.bytes[8], ttl);
+        assert_eq!(
+            packetcraftr_core::protocol::checksum(&datagram.bytes[..20]),
+            0
+        );
+    }
 }
 
 #[test]

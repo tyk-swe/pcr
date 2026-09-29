@@ -54,13 +54,15 @@ fn boundary_value(
             FieldValue::Signed(VALUES[index_from(selector, VALUES.len())])
         }
         FieldKind::Text => {
-            let values = [
+            let mut values = vec![
                 String::new(),
                 "A".to_owned(),
                 "\u{1b}[31mcontrol\u{1b}[0m".to_owned(),
                 "x".repeat(limits.max_field_bytes.min(256)),
             ];
-            FieldValue::Text(values[index_from(selector, values.len())].clone())
+            values.retain(|value| value.len() <= limits.max_field_bytes);
+            // the empty string always remains, so `values` is never empty
+            FieldValue::Text(values.swap_remove(index_from(selector, values.len())))
         }
         FieldKind::Bytes => {
             let lengths = [0, 1, limits.max_field_bytes.min(64), limits.max_field_bytes];
@@ -95,7 +97,7 @@ fn boundary_value(
             FieldValue::List(values) if selector & 1 == 1 => {
                 let candidate = FieldValue::List(values.first().cloned().into_iter().collect());
                 if bounded_value_size(&candidate, limits.max_field_bytes, limits.max_list_items)
-                    .is_some()
+                    .is_ok()
                 {
                     candidate
                 } else {
@@ -158,7 +160,7 @@ pub(super) fn random_value(
                         .max_field_bytes
                         .saturating_sub(bytes)
                         .saturating_sub(1);
-                    let Some(value_bytes) =
+                    let Ok(value_bytes) =
                         bounded_value_size(value, remaining, limits.max_list_items)
                     else {
                         break;
@@ -182,11 +184,18 @@ pub(super) fn random_value(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ValueLimit {
+    Bytes,
+    Items { items: usize },
+    Nesting,
+}
+
 pub(super) fn bounded_value_size(
     value: &FieldValue,
     remaining: usize,
     max_list_items: usize,
-) -> Option<usize> {
+) -> Result<usize, ValueLimit> {
     bounded_size_at(value, remaining, max_list_items, 0)
 }
 
@@ -195,9 +204,9 @@ fn bounded_size_at(
     remaining: usize,
     max_list_items: usize,
     depth: usize,
-) -> Option<usize> {
+) -> Result<usize, ValueLimit> {
     if depth > MAX_VALUE_NESTING {
-        return None;
+        return Err(ValueLimit::Nesting);
     }
     let size = match value {
         FieldValue::Bool(_) => 1,
@@ -209,48 +218,58 @@ fn bounded_size_at(
         FieldValue::Mac(_) => 6,
         FieldValue::Object(values) => {
             if values.len() > max_list_items {
-                return None;
+                return Err(ValueLimit::Items {
+                    items: values.len(),
+                });
             }
             let mut total = values.len();
             for (name, value) in values {
-                total = total.checked_add(name.len())?;
+                total = total.checked_add(name.len()).ok_or(ValueLimit::Bytes)?;
                 if total > remaining {
-                    return None;
+                    return Err(ValueLimit::Bytes);
                 }
-                total = total.checked_add(bounded_size_at(
-                    value,
-                    remaining - total,
-                    max_list_items,
-                    depth.checked_add(1)?,
-                )?)?;
+                total = total
+                    .checked_add(bounded_size_at(
+                        value,
+                        remaining - total,
+                        max_list_items,
+                        depth.checked_add(1).ok_or(ValueLimit::Nesting)?,
+                    )?)
+                    .ok_or(ValueLimit::Bytes)?;
             }
             total
         }
         FieldValue::List(values) => {
             if values.len() > max_list_items {
-                return None;
+                return Err(ValueLimit::Items {
+                    items: values.len(),
+                });
             }
             // Charge every list node, even a zero-byte nested list, to bound structural cloning.
             let mut total = values.len();
             if total > remaining {
-                return None;
+                return Err(ValueLimit::Bytes);
             }
             for value in values {
                 let value_size = bounded_size_at(
                     value,
                     remaining.saturating_sub(total),
                     max_list_items,
-                    depth.checked_add(1)?,
+                    depth.checked_add(1).ok_or(ValueLimit::Nesting)?,
                 )?;
-                total = total.checked_add(value_size)?;
+                total = total.checked_add(value_size).ok_or(ValueLimit::Bytes)?;
                 if total > remaining {
-                    return None;
+                    return Err(ValueLimit::Bytes);
                 }
             }
             total
         }
     };
-    (size <= remaining).then_some(size)
+    if size <= remaining {
+        Ok(size)
+    } else {
+        Err(ValueLimit::Bytes)
+    }
 }
 
 fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize) -> FieldValue {
@@ -260,24 +279,13 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
     if bytes.is_empty() {
         return FieldValue::Bytes(Bytes::from_static(&[1]));
     }
-    if bytes.len() > maximum {
-        if maximum == 0 {
-            return FieldValue::Bytes(Bytes::new());
-        }
-        // the branch is entered only when `bytes.len() > maximum`
-        let mut value = bytes[..maximum].to_vec();
-        let index = index_below(random, value.len());
-        {
-            value[index] ^= 1 << (random.next_u64() % 8);
-        }
-        return FieldValue::Bytes(Bytes::from(value));
+    let kept = bytes.len().min(maximum);
+    if kept == 0 {
+        return FieldValue::Bytes(Bytes::new());
     }
-    let mut value = bytes.to_vec();
-    let index = index_below(random, value.len());
-    // `index_below` reduces below `value.len()`, which the emptiness check above proves non-zero
-    {
-        value[index] ^= 1 << (random.next_u64() % 8);
-    }
+    let mut value = bytes[..kept].to_vec();
+    let index = index_below(random, kept);
+    value[index] ^= 1 << (random.next_u64() % 8);
     FieldValue::Bytes(Bytes::from(value))
 }
 
@@ -289,10 +297,7 @@ fn malformed_value(
     limits: Limits,
 ) -> FieldValue {
     if kind == FieldKind::Unsigned {
-        if limits.max_field_bytes == 0 {
-            return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
-        }
-        if round & 1 == 0 {
+        if limits.max_field_bytes == 0 || round & 1 == 0 {
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
         let length = 1 + index_below(random, limits.max_field_bytes.min(4));
@@ -371,9 +376,7 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         FieldValue::List(value) => {
             push(FieldValue::List(Vec::new()));
             if value.len() > 1 {
-                {
-                    push(FieldValue::List(value[..value.len() / 2].to_vec()));
-                }
+                push(FieldValue::List(value[..value.len() / 2].to_vec()));
             }
         }
     }
@@ -492,11 +495,43 @@ mod tests {
                 assert_eq!(first, repeated, "{kind:?} round {round}");
                 assert!(
                     bounded_value_size(&first, limits.max_field_bytes, limits.max_list_items)
-                        .is_some(),
+                        .is_ok(),
                     "{kind:?} round {round}: {first:?}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn boundary_text_candidates_drop_values_over_the_field_ceiling() {
+        let text = resolved(FieldKind::Text);
+        let original = FieldValue::Text("original".to_owned());
+        let candidates = |limits: Limits, count: u64| {
+            (0..count)
+                .map(|round| mutation_value(Strategy::Boundary, &text, &original, 0, round, limits))
+                .collect::<Vec<_>>()
+        };
+        let texts = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| FieldValue::Text((*value).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        let control = "\u{1b}[31mcontrol\u{1b}[0m";
+
+        assert_eq!(
+            candidates(Limits::default(), 4),
+            texts(&["", "A", control, &"x".repeat(256)])
+        );
+        assert_eq!(
+            candidates(limits(16, 2), 4),
+            texts(&["", "A", control, &"x".repeat(16)])
+        );
+        assert_eq!(
+            candidates(limits(15, 2), 3),
+            texts(&["", "A", &"x".repeat(15)])
+        );
+        assert_eq!(candidates(limits(1, 2), 3), texts(&["", "A", "x"]));
     }
 
     #[test]
@@ -542,7 +577,7 @@ mod tests {
             );
             assert_eq!(first, repeated, "{kind:?}");
             assert!(
-                bounded_value_size(&first, limits.max_field_bytes, limits.max_list_items).is_some(),
+                bounded_value_size(&first, limits.max_field_bytes, limits.max_list_items).is_ok(),
                 "{kind:?}: {first:?}"
             );
         }
@@ -656,24 +691,44 @@ mod tests {
     }
 
     #[test]
-    fn bounded_size_counts_list_structure_and_rejects_depth_and_item_overflow() {
+    fn bounded_size_counts_list_structure_and_names_the_limit_it_exceeds() {
         let nested = FieldValue::List(vec![
             FieldValue::List(Vec::new()),
             FieldValue::Text("ab".to_owned()),
         ]);
-        assert_eq!(bounded_value_size(&nested, 4, 2), Some(4));
-        assert_eq!(bounded_value_size(&nested, 3, 2), None);
-        assert_eq!(bounded_value_size(&nested, 16, 1), None);
+        assert_eq!(bounded_value_size(&nested, 4, 2), Ok(4));
+        assert_eq!(bounded_value_size(&nested, 3, 2), Err(ValueLimit::Bytes));
+        assert_eq!(
+            bounded_value_size(&nested, 16, 1),
+            Err(ValueLimit::Items { items: 2 })
+        );
         assert_eq!(
             bounded_value_size(&FieldValue::Ipv6(Ipv6Addr::LOCALHOST), 15, 2),
-            None
+            Err(ValueLimit::Bytes)
         );
+
+        let object = FieldValue::Object(
+            [
+                ("a".to_owned(), FieldValue::Bool(true)),
+                ("b".to_owned(), FieldValue::Bool(true)),
+                ("c".to_owned(), FieldValue::Bool(true)),
+            ]
+            .into(),
+        );
+        assert_eq!(
+            bounded_value_size(&object, 16, 2),
+            Err(ValueLimit::Items { items: 3 })
+        );
+        assert_eq!(bounded_value_size(&object, 5, 3), Err(ValueLimit::Bytes));
 
         let mut too_deep = FieldValue::Bool(false);
         for _ in 0..=MAX_VALUE_NESTING {
             too_deep = FieldValue::List(vec![too_deep]);
         }
-        assert_eq!(bounded_value_size(&too_deep, 1_000, 1), None);
+        assert_eq!(
+            bounded_value_size(&too_deep, 1_000, 1),
+            Err(ValueLimit::Nesting)
+        );
     }
 
     #[test]

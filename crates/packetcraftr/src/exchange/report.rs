@@ -13,11 +13,11 @@ use packetcraftr_core::error::BoundaryError;
 
 use super::{Error, Event, Observed, Response};
 
+/// Diagnostics are not repeated here: each one already reached the caller as
+/// [`Event::Diagnostic`].
 #[derive(Clone, Debug)]
 pub struct Report {
     pub unanswered: Vec<usize>,
-    /// Diagnostics not already published as [`Event::Diagnostic`].
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 
@@ -58,7 +58,6 @@ mod tests {
     fn collector_rejects_a_report_without_matching_sent_events() {
         let report = Report {
             unanswered: Vec::new(),
-            diagnostics: Vec::new(),
             stats: Stats {
                 packets_completed: 1,
                 ..Stats::default()

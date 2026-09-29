@@ -13,7 +13,7 @@ use std::{
     io::{self, Read, Write},
     net::SocketAddr,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -21,6 +21,13 @@ use std::{
 };
 
 const GATE_WATCHDOG: Duration = Duration::from_secs(30);
+
+/// The tests sample process-wide pool counters, so they run one at a time.
+static POOL: Mutex<()> = Mutex::new(());
+
+fn exclusive_pool() -> MutexGuard<'static, ()> {
+    POOL.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 struct Socket {
     peer: SocketAddr,
@@ -91,6 +98,8 @@ fn wait_empty() {
 
 #[test]
 fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
+    let _pool = exclusive_pool();
+    wait_empty();
     let (entered, started) = mpsc::channel();
     let (release, gate) = mpsc::channel();
     let closed = Arc::new(AtomicUsize::new(0));
@@ -100,15 +109,15 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
         closed: Arc::clone(&closed),
     });
     let endpoint = "127.0.0.1:9".parse().unwrap();
-    assert_eq!(tcp_connect_snapshot().active, 0);
-    let mut pending = tcp::start_connect(
-        Arc::clone(&provider),
-        endpoint,
-        &Deadline::new(Duration::from_millis(10)),
-    )
-    .unwrap();
+    let clock = Arc::new(Mutex::new(Instant::now()));
+    let caller = Deadline::with_time_source(Duration::from_secs(60), {
+        let clock = Arc::clone(&clock);
+        move || *clock.lock().unwrap()
+    });
+    let mut pending = tcp::start_connect(Arc::clone(&provider), endpoint, &caller).unwrap();
     started.recv_timeout(Duration::from_secs(2)).unwrap();
-    std::thread::sleep(Duration::from_millis(20));
+    *clock.lock().unwrap() += Duration::from_secs(61);
+    assert!(caller.remaining().is_err());
     assert!(pending.poll().unwrap().is_none());
     assert!(pending.cancel());
     drop(pending);
@@ -177,6 +186,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
 fn a_spent_or_cancelled_caller_starts_no_connection() {
     use packetcraftr_core::budget::Cancellation;
 
+    let _pool = exclusive_pool();
     let (entered, started) = mpsc::channel();
     let (_release, gate) = mpsc::channel();
     let provider = Arc::new(Gate {
@@ -217,6 +227,7 @@ fn tcp_workers_observe_parent_cancellation_after_dispatch() {
         }
     }
 
+    let _pool = exclusive_pool();
     let signal = Cancellation::default();
     let parent = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal.clone()));
     let child = Deadline::new(Duration::from_secs(1)).with_parent(Some(Arc::new(parent)));

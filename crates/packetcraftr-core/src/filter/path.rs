@@ -80,6 +80,15 @@ impl FieldRef {
         }
         !self.specs.is_empty() && self.specs.iter().all(|spec| spec.kind == FieldKind::Bool)
     }
+
+    /// Every spec is a byte kind, so an unquoted word can only mean bytes. A slice always reads bytes.
+    pub(super) fn is_byte_run(&self) -> bool {
+        !self.specs.is_empty()
+            && self
+                .specs
+                .iter()
+                .all(|spec| matches!(spec.kind, FieldKind::Bytes | FieldKind::Mac))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -257,7 +266,7 @@ fn resolve_synthetic(
             })
         })
     };
-    if head == "frame" {
+    if head.eq_ignore_ascii_case("frame") {
         let field = frame_field(tail).ok_or_else(|| Error::UnknownField {
             offset,
             path: path.to_owned(),
@@ -275,11 +284,11 @@ fn resolve_synthetic(
             path: path.to_owned(),
         })));
     }
-    if tail != "stream" || !matches!(head, "tcp" | "udp") {
+    if tail != "stream" || !(head.eq_ignore_ascii_case("tcp") || head.eq_ignore_ascii_case("udp")) {
         return Ok(None);
     }
     reject_occurrence(stripped)?;
-    let transport = if head == "tcp" {
+    let transport = if head.eq_ignore_ascii_case("tcp") {
         StreamTransport::Tcp
     } else {
         StreamTransport::Udp

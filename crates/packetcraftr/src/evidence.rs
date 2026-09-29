@@ -35,15 +35,11 @@ pub enum Error {
     SentByteCountMismatch { reported: u64, actual: u64 },
     #[error("executor returned {evidence} without a timestamp")]
     TimestampUnavailable { evidence: &'static str },
-    #[error("{message}")]
-    InvalidMatchedResponse { message: String },
     #[error("matched response latency {latency:?} exceeds timeout {timeout:?}")]
     ResponseAfterTimeout {
         latency: Duration,
         timeout: Duration,
     },
-    #[error("{message}")]
-    InvalidUnsolicitedResponse { message: String },
     #[error("{message}")]
     InvalidCaptureStatistics { message: String },
     #[error("successful exchange statistics do not account for every request")]

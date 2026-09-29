@@ -10,31 +10,30 @@ use crate::rendering::StreamEncoder;
 /// Engines publish through a runtime-budgeted worker, so the sink is `Send` and `'static`.
 pub(super) type Emit<E> = Box<dyn FnMut(E) -> Result<(), core::error::BoundaryError> + Send>;
 
-type Collect<'a, S, R> = Box<dyn FnOnce(&mut S) -> Result<R, CliError> + 'a>;
+type Collect<'a, R> = Box<dyn FnOnce() -> Result<R, CliError> + 'a>;
 
-type Publish<'a, S, E, U> = Box<dyn FnOnce(&mut S, Emit<E>) -> Result<U, CliError> + 'a>;
+type Publish<'a, E, U> = Box<dyn FnOnce(Emit<E>) -> Result<U, CliError> + 'a>;
 
 type Convert<'a, R, T> =
     Box<dyn FnOnce(R) -> Result<output::envelope::Published<T>, CliError> + 'a>;
 
 type Render<'a, R, F> = Box<dyn FnOnce(R, F) -> Result<(), CliError> + 'a>;
 
-pub(super) struct Hooks<'a, S, E, U, R, F, T> {
+pub(super) struct Hooks<'a, E, U, R, F, T> {
     pub(super) command: output::contract::Command,
-    pub(super) run: Collect<'a, S, R>,
-    pub(super) run_with_events: Publish<'a, S, E, U>,
+    pub(super) run: Collect<'a, R>,
+    pub(super) run_with_events: Publish<'a, E, U>,
     pub(super) on_event: fn(E, &StreamEncoder) -> Result<(), CliError>,
     pub(super) into_result: Convert<'a, R, T>,
     pub(super) render_text: Render<'a, R, F>,
     pub(super) complete: fn(U, &StreamEncoder) -> Result<(), CliError>,
 }
 
-pub(super) fn run_workflow<S, E, U, R, F, T>(
-    session: &mut S,
+pub(super) fn run_workflow<E, U, R, F, T>(
     format: F,
     stream: &StreamEncoder,
     cancellation: &core::budget::Cancellation,
-    hooks: Hooks<'_, S, E, U, R, F, T>,
+    hooks: Hooks<'_, E, U, R, F, T>,
 ) -> Result<(), CliError>
 where
     E: 'static,
@@ -46,17 +45,14 @@ where
             let events = stream.clone();
             let on_event = hooks.on_event;
             let cancellation = cancellation.clone();
-            let summary = (hooks.run_with_events)(
-                session,
-                Box::new(move |event| {
-                    emission_check(&cancellation).map_err(CliError::into_boundary_error)?;
-                    on_event(event, &events).map_err(CliError::into_boundary_error)
-                }),
-            )?;
+            let summary = (hooks.run_with_events)(Box::new(move |event| {
+                emission_check(&cancellation).map_err(CliError::into_boundary_error)?;
+                on_event(event, &events).map_err(CliError::into_boundary_error)
+            }))?;
             (hooks.complete)(summary, stream)
         }
         wide => {
-            let report = (hooks.run)(session)?;
+            let report = (hooks.run)()?;
             emission_check(cancellation)?;
             if wide == output::contract::Format::Json {
                 crate::rendering::emit_published(hooks.command, (hooks.into_result)(report)?)
@@ -103,11 +99,11 @@ mod tests {
 
     fn hooks<'a>(
         log: &'a RefCell<Vec<String>>,
-        stream_engine: impl FnOnce(&mut (), Emit<u64>) -> Result<u64, CliError> + 'a,
-    ) -> Hooks<'a, (), u64, u64, u64, ToolFormat, u64> {
+        stream_engine: impl FnOnce(Emit<u64>) -> Result<u64, CliError> + 'a,
+    ) -> Hooks<'a, u64, u64, u64, ToolFormat, u64> {
         Hooks {
             command: output::contract::Command::Scan,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 log.borrow_mut().push("run".to_owned());
                 Ok(41_u64)
             }),
@@ -131,11 +127,10 @@ mod tests {
         let (stream, output) = stream(output::contract::Command::Scan);
         let log = RefCell::new(Vec::new());
         run_workflow(
-            &mut (),
             ToolFormat::Ndjson,
             &stream,
             &Cancellation::default(),
-            hooks(&log, |_, mut emit| {
+            hooks(&log, |mut emit| {
                 emit(10).map_err(CliError::classified)?;
                 emit(11).map_err(CliError::classified)?;
                 Ok(7_u64)
@@ -160,11 +155,10 @@ mod tests {
         let (stream, output) = stream(output::contract::Command::Scan);
         let log = RefCell::new(Vec::new());
         run_workflow(
-            &mut (),
             ToolFormat::Text,
             &stream,
             &Cancellation::default(),
-            hooks(&log, |_, _| unreachable!("aggregate never streams")),
+            hooks(&log, |_| unreachable!("aggregate never streams")),
         )
         .expect("the scripted aggregate run succeeds");
 
@@ -183,11 +177,10 @@ mod tests {
         let (stream, output) = stream(output::contract::Command::Scan);
         let log = RefCell::new(Vec::new());
         run_workflow(
-            &mut (),
             ToolFormat::Json,
             &stream,
             &Cancellation::default(),
-            hooks(&log, |_, _| unreachable!("aggregate never streams")),
+            hooks(&log, |_| unreachable!("aggregate never streams")),
         )
         .expect("the scripted aggregate run succeeds");
 
@@ -207,10 +200,8 @@ mod tests {
         let log = RefCell::new(Vec::new());
         let hooks = Hooks {
             command: output::contract::Command::Exchange,
-            run: Box::new(|_: &mut ()| Ok(41_u64)),
-            run_with_events: Box::new(|_: &mut (), _: Emit<u64>| {
-                unreachable!("aggregate never streams")
-            }),
+            run: Box::new(|| Ok(41_u64)),
+            run_with_events: Box::new(|_: Emit<u64>| unreachable!("aggregate never streams")),
             on_event: emit_event,
             into_result: Box::new(|report| {
                 Ok(output::envelope::Published::new(report, Vec::new()))
@@ -223,7 +214,6 @@ mod tests {
             complete,
         };
         run_workflow(
-            &mut (),
             ExchangeFormat::PcapNg,
             &stream,
             &Cancellation::default(),
@@ -241,11 +231,10 @@ mod tests {
         let injector = cancellation.clone();
         let log = RefCell::new(Vec::new());
         let error = run_workflow(
-            &mut (),
             ToolFormat::Ndjson,
             &stream,
             &cancellation,
-            hooks(&log, move |_, mut emit| {
+            hooks(&log, move |mut emit| {
                 emit(10).map_err(CliError::classified)?;
                 injector.cancel();
                 emit(11).map_err(CliError::classified)?;
@@ -265,7 +254,7 @@ mod tests {
     fn an_event_adapter_failure_aborts_the_stream() {
         let (stream, output) = stream(output::contract::Command::Scan);
         let log = RefCell::new(Vec::new());
-        let mut hooks = hooks(&log, |_, mut emit| {
+        let mut hooks = hooks(&log, |mut emit| {
             emit(10).map_err(CliError::classified)?;
             emit(11).map_err(CliError::classified)?;
             Ok(0_u64)
@@ -276,14 +265,8 @@ mod tests {
             }
             emit_event(event, stream)
         };
-        let error = run_workflow(
-            &mut (),
-            ToolFormat::Ndjson,
-            &stream,
-            &Cancellation::default(),
-            hooks,
-        )
-        .expect_err("the adapter failure propagates");
+        let error = run_workflow(ToolFormat::Ndjson, &stream, &Cancellation::default(), hooks)
+            .expect_err("the adapter failure propagates");
 
         assert_eq!(error.exit_code(), 2);
         let records = output.records();

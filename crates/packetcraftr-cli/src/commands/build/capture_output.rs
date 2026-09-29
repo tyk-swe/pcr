@@ -109,7 +109,6 @@ impl CaptureOutput {
                 &packetcraftr_core::codec::LayerDecodeContext {
                     parent: None,
                     registry: &registry,
-                    allow_trailing_padding: false,
                     network: None,
                     discriminator: None,
                 },
@@ -138,10 +137,40 @@ impl CaptureOutput {
 
     pub(crate) fn writer(
         &self,
+        limits: capture_file::Limits,
     ) -> Result<capture_file::Writer<capture_file::compression::Output<std::io::Stdout>>, CliError>
     {
         let destination = self.compression.writer(std::io::stdout())?;
-        capture_file::Writer::new(destination, self.format, self.link_type).map_err(|source| {
+        self.writer_over(destination, limits)
+    }
+
+    fn writer_over<W: std::io::Write>(
+        &self,
+        destination: W,
+        stream_limits: capture_file::Limits,
+    ) -> Result<capture_file::Writer<W>, CliError> {
+        let writer = match self.format {
+            capture_file::Format::Pcap => capture_file::Writer::pcap_with_options(
+                destination,
+                self.link_type,
+                capture_file::PcapOptions {
+                    stream_limits,
+                    ..capture_file::PcapOptions::default()
+                },
+            ),
+            capture_file::Format::PcapNg => capture_file::Writer::pcapng_with_options(
+                destination,
+                capture_file::PcapNgOptions {
+                    stream_limits,
+                    ..capture_file::PcapNgOptions::default()
+                },
+            )
+            .and_then(|mut writer| {
+                writer.add_interface(self.link_type)?;
+                Ok(writer)
+            }),
+        };
+        writer.map_err(|source| {
             crate::rendering::stream_capture_error("initialize capture output failed", source)
         })
     }
@@ -212,6 +241,40 @@ impl Destination for GeneratedCapture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writer_accepts_more_frames_than_the_default_stream_limit() {
+        let count = capture_file::DEFAULT_MAX_STREAM_FRAMES + 1;
+        for format in [capture_file::Format::Pcap, capture_file::Format::PcapNg] {
+            let output = CaptureOutput {
+                link_type: LinkType::IPV4,
+                timestamp: SystemTime::UNIX_EPOCH,
+                format,
+                compression: crate::command_options::Compression::None,
+            };
+            let mut writer = output
+                .writer_over(
+                    Vec::new(),
+                    capture_file::Limits {
+                        max_frames: count,
+                        max_bytes: count,
+                    },
+                )
+                .expect("writer opens");
+            let frame = packetcraftr_core::frame::Frame::new(
+                SystemTime::UNIX_EPOCH,
+                LinkType::IPV4,
+                vec![1_u8],
+            )
+            .expect("valid fixture frame");
+            for _ in 0..count {
+                writer
+                    .write_frame(&frame)
+                    .unwrap_or_else(|error| panic!("{format:?}: {error}"));
+            }
+            assert_eq!(writer.frames_written(), count, "{format:?}");
+        }
+    }
 
     #[test]
     fn link_types_resolve_names_and_numbers() {

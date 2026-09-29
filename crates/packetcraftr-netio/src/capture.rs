@@ -32,6 +32,9 @@ pub use settings::{
 
 pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 
+const ARMING: &str = "arming capture";
+const DISCOVERING_TIMESTAMP_TYPES: &str = "discovering timestamp types";
+
 /// Owned capture session: arm through [`Provider`] (or compose a [`Group`]),
 /// pass [`Session::wait_ready`] before transmission, read records, then call
 /// [`Session::shutdown`] to join every backend.
@@ -112,6 +115,12 @@ fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
     }
 }
 
+fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
+    crate::deadline::remaining(deadline)
+        .map(drop)
+        .map_err(|interrupted| Error::interrupted(interrupted, operation))
+}
+
 pub(crate) fn wait_end(deadline: &Deadline) -> Result<Option<Instant>, Error> {
     deadline.check_cancelled()?;
     let Some(timeout) = deadline
@@ -154,9 +163,7 @@ pub trait Provider: Send + Sync {
         _interface: &InterfaceId,
         deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
-        crate::deadline::remaining(deadline).map_err(|interrupted| {
-            Error::interrupted(interrupted, "discovering timestamp types")
-        })?;
+        admit(deadline, DISCOVERING_TIMESTAMP_TYPES)?;
         Err(crate::Unsupported::new(
             crate::NativeCapability::Capture,
             "this capture provider cannot enumerate timestamp types",

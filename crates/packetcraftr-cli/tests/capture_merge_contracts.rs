@@ -69,3 +69,24 @@ fn per_section_interface_limit_does_not_bound_the_merged_output() {
     while reader.next_frame().unwrap().is_some() {}
     assert_eq!(reader.interfaces().len(), 2);
 }
+
+#[test]
+fn source_count_and_repeated_stdin_are_usage_errors_before_any_output_is_staged() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("merged.pcapng");
+    let absent = directory.path().join("absent.pcap");
+    for sources in [vec![absent.to_str().unwrap(); 65], vec!["-", "-"]] {
+        let mut arguments = vec!["--output", "json", "merge"];
+        arguments.extend(sources);
+        arguments.extend(["--write", target.to_str().unwrap()]);
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let error = parse_json(&output)["error"].clone();
+        assert_eq!(error["kind"], "cli");
+        assert_eq!(
+            error["message"],
+            "merge accepts at most 64 captures and one stdin source"
+        );
+        assert!(!target.exists());
+    }
+}

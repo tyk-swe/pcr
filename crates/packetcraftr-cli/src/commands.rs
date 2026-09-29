@@ -43,6 +43,8 @@ mod routes;
 mod scan;
 mod send;
 mod stats;
+#[cfg(test)]
+mod test_support;
 mod tls;
 mod traceroute;
 mod verify_forwarding;

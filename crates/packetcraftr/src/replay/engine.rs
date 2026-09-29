@@ -11,13 +11,13 @@ use packetcraftr_core::frame::Frame;
 
 use crate::clock::Clock;
 use crate::execution::{self, Paused};
-use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
+use crate::policy::WireLimits;
 use crate::providers::PacketProviders;
 use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
-use super::admission::{FinalWire, FrameAdmission};
+use super::admission::{FrameAdmission, ReplayAdmission};
 use super::error::Error;
 use super::evidence::{FrameEvidence, Transmission, validate_transmission};
 use super::executor::{Executor, ProviderExecutor};
@@ -97,14 +97,21 @@ fn interruption(error: &BoundaryError) -> Option<Interrupted> {
 struct ReadFrame {
     frame: Frame,
     capture_interface: Interface,
-    number: u64,
 }
 
 struct Session {
     deadline: Deadline,
     tally: Tally,
-    anchor: Instant,
+    started: Instant,
+    anchor: Option<Instant>,
     pass: u32,
+}
+
+impl Session {
+    fn anchor_at(&mut self, anchor: Instant) {
+        self.anchor = Some(anchor);
+        self.tally.setup_duration = anchor.saturating_duration_since(self.started);
+    }
 }
 
 struct Run<'a, 'x, 'c, S, A, X, C, F> {
@@ -127,7 +134,7 @@ pub(crate) fn run<R, S, A, X, C, F>(
 where
     R: Read,
     S: Selector,
-    A: Authorizer + FinalWire,
+    A: ReplayAdmission,
     X: Executor,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
@@ -144,7 +151,8 @@ where
     let mut session = Session {
         deadline,
         tally: Tally::default(),
-        anchor: clock.now(),
+        started: clock.now(),
+        anchor: None,
         pass: 1,
     };
     let rewound = |reader: &mut Reader<R>| match rewind {
@@ -197,7 +205,7 @@ where
 impl<S, A, X, C, F> Run<'_, '_, '_, S, A, X, C, F>
 where
     S: Selector,
-    A: Authorizer + FinalWire,
+    A: ReplayAdmission,
     X: Executor,
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
@@ -223,15 +231,17 @@ where
             .pause_duration
             .checked_add(options.inter_pass_delay)
             .ok_or_else(overflow)?;
-        session.anchor = self
-            .clock
-            .now()
-            .checked_sub(tally.scheduled_duration)
-            .ok_or_else(overflow)?;
+        let scheduled = tally.scheduled_duration;
         if matches!(options.timing, Timing::Original | Timing::Scaled(_)) {
             tally.has_previous = false;
             tally.previous_timestamp = None;
         }
+        let anchor = self
+            .clock
+            .now()
+            .checked_sub(scheduled)
+            .ok_or_else(overflow)?;
+        session.anchor_at(anchor);
         Ok(())
     }
 
@@ -254,7 +264,6 @@ where
                 break;
             };
             session.tally.frames_read += 1;
-            source_index = read.number - 1;
             if !self.select(&session.deadline, source_index, &read)? {
                 source_index += 1;
                 continue;
@@ -268,7 +277,7 @@ where
                 &plan,
                 &read.frame,
             )?;
-            let interface = self.interface(source_index, &read)?;
+            let interface = self.selector.interface(source_index, &read.frame)?;
             let route = plan_frame_route(
                 self.executor,
                 &interface,
@@ -284,19 +293,33 @@ where
                 &read.frame,
                 &route.plan,
             )?;
+            let overflow = || {
+                duration_limit(
+                    source_index,
+                    DeadlineExceeded {
+                        actual: Duration::MAX,
+                        limit: limits.max_duration,
+                    },
+                )
+            };
+            // The first frame of a schedule starts it, so its one-time setup
+            // cost does not shorten the gaps that follow.
+            let anchor = match session.anchor {
+                Some(anchor) if session.tally.has_previous => anchor,
+                _ => {
+                    let anchor = self
+                        .clock
+                        .now()
+                        .checked_sub(plan.next_duration)
+                        .ok_or_else(overflow)?;
+                    session.anchor_at(anchor);
+                    anchor
+                }
+            };
             // Overdue frames are sent immediately; later targets stay on the same anchor.
-            let target = session
-                .anchor
+            let target = anchor
                 .checked_add(plan.next_duration)
-                .ok_or_else(|| {
-                    duration_limit(
-                        source_index,
-                        DeadlineExceeded {
-                            actual: Duration::MAX,
-                            limit: limits.max_duration,
-                        },
-                    )
-                })?;
+                .ok_or_else(overflow)?;
             let remaining = target.saturating_duration_since(self.clock.now());
             pace(self.clock, &mut session.deadline, source_index, remaining)?;
             let transmission = transmit_frame(
@@ -313,7 +336,6 @@ where
                 FrameEvidence {
                     pass: session.pass,
                     source_index,
-                    source_interface_id: read.frame.interface,
                     capture_interface: read.capture_interface,
                     link_mode: plan.mode,
                     scheduled_delay: plan.delay,
@@ -341,14 +363,6 @@ where
         enforce_deadline(deadline, source_index)?;
         Ok(selected)
     }
-
-    fn interface(
-        &mut self,
-        source_index: u64,
-        read: &ReadFrame,
-    ) -> Result<route::Interface, Error> {
-        self.selector.interface(source_index, &read.frame)
-    }
 }
 
 fn read_frame<R: Read>(
@@ -369,11 +383,6 @@ fn read_frame<R: Read>(
         return Ok(None);
     };
     let capture_interface = capture_interface(reader, &frame, source_index)?;
-    let number = source_index.checked_add(1).ok_or(Error::SourceFrameLimit {
-        source_index,
-        actual: u64::MAX,
-        limit: limits.max_source_frames,
-    })?;
     let total = frames_read.checked_add(1).ok_or(Error::SourceFrameLimit {
         source_index,
         actual: u64::MAX,
@@ -396,7 +405,6 @@ fn read_frame<R: Read>(
     Ok(Some(ReadFrame {
         frame,
         capture_interface,
-        number,
     }))
 }
 
@@ -424,7 +432,7 @@ fn capture_interface<R: Read>(
         })
 }
 
-fn authorize_frame<A: Authorizer>(
+fn authorize_frame<A: ReplayAdmission>(
     authorizer: &mut A,
     deadline: &Deadline,
     source_index: u64,
@@ -432,11 +440,11 @@ fn authorize_frame<A: Authorizer>(
     frame: &Frame,
 ) -> Result<(), Error> {
     enforce_deadline(deadline, source_index)?;
-    let authorization = authorizer.authorize_operation(Operation::Replay(ReplayFrame::new(
+    let authorization = authorizer.admit_frame(
         WireLimits::new(plan.next_completed, plan.next_bytes),
         frame,
         plan.mode,
-    )));
+    );
     enforce_deadline(deadline, source_index)?;
     authorization.map_err(|source| Error::Authorization {
         source_index,
@@ -470,7 +478,7 @@ fn plan_frame_route<X: Executor>(
     Ok(route)
 }
 
-fn authorize_final_wire<A: FinalWire>(
+fn authorize_final_wire<A: ReplayAdmission>(
     authorizer: &mut A,
     deadline: &Deadline,
     source_index: u64,
@@ -510,27 +518,17 @@ fn transmit_frame<X: Executor>(
     frame: &Frame,
 ) -> Result<Transmission, Error> {
     enforce_deadline(deadline, source_index)?;
-    let interface = &route.plan.decision.interface;
-    let transmission = executor
+    let report = executor
         .transmit(route, frame)
         .map_err(|source| Error::Transmission {
             source_index,
             source,
         })?;
-    if &transmission.interface != interface {
-        return Err(Error::InvalidEvidence {
-            source_index,
-            message: format!(
-                "backend reported transmission on {} (index {}) after validating {} (index {})",
-                transmission.interface.name,
-                transmission.interface.index,
-                interface.name,
-                interface.index
-            ),
-        });
-    }
-    validate_transmission(source_index, frame, &transmission.report)?;
-    Ok(transmission)
+    validate_transmission(source_index, frame, &report)?;
+    Ok(Transmission {
+        interface: route.plan.decision.interface.clone(),
+        report,
+    })
 }
 
 fn enforce_deadline(deadline: &Deadline, source_index: u64) -> Result<(), Error> {

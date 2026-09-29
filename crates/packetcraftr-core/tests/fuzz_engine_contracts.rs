@@ -8,10 +8,11 @@ use bytes::Bytes;
 use packetcraftr_core::build::Options;
 use packetcraftr_core::codec::Mode;
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz::{
     CaseOutcome, Error, Limits, Request, Strategy, run as fuzz, run_observed,
 };
-use packetcraftr_core::layer::Raw;
+use packetcraftr_core::layer::{Malformed, Raw};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
@@ -127,6 +128,71 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
         "policy.fuzz_resource_limit",
         "{error:?}"
     );
+}
+
+#[test]
+fn fuzz_base_packet_values_above_max_list_items_name_that_limit() {
+    let registry = fuzz_protocol_registry();
+    let packet = packetcraftr_core::expression::parse(
+        r#"ipv4()/udp(destination_port=53)/dns(questions=[{name="example.test.",type=1,class=1}])"#,
+        &registry,
+        Default::default(),
+    )
+    .expect("recipe parses");
+    let error = fuzz(
+        &Request {
+            cases: 1,
+            limits: Limits {
+                max_list_items: 1,
+                ..Limits::default()
+            },
+            ..Request::default()
+        },
+        packet,
+        registry,
+    )
+    .expect_err("a question object has more than one member");
+
+    assert!(
+        matches!(error, Error::ValueItems { items: 3, limit: 1 }),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("max_list_items=1"), "{error}");
+    let classification = error.classification();
+    assert_eq!(classification.code, "policy.fuzz_resource_limit");
+    assert_eq!(classification.kind, Kind::Policy);
+}
+
+#[test]
+fn fuzz_boundary_text_mutations_respect_the_field_byte_limit() {
+    let mut packet = Packet::new();
+    packet.push(Malformed::new(None, Bytes::from_static(b"abcd"), "fixture"));
+    let report = fuzz(
+        &Request {
+            cases: 32,
+            strategies: vec![Strategy::Boundary],
+            targets: vec!["0.reason".parse().unwrap()],
+            limits: Limits {
+                max_field_bytes: 8,
+                ..Limits::default()
+            },
+            ..Request::default()
+        },
+        packet,
+        fuzz_protocol_registry(),
+    )
+    .unwrap();
+
+    assert_eq!(report.cases.len(), 32);
+    for case in &report.cases {
+        let FieldValue::Text(text) = &case.mutation.value else {
+            panic!(
+                "case {} did not mutate text: {:?}",
+                case.index, case.mutation
+            );
+        };
+        assert!(text.len() <= 8, "case {}: {text:?}", case.index);
+    }
 }
 
 #[test]

@@ -9,11 +9,10 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_netio::deadline::MAX_WAIT;
 
-use crate::execution::limits::EvidenceLimits;
+use crate::execution::limits::{EvidenceLimits, check_rate, duration_violation};
 use crate::{exchange, route, send};
 
-use super::MAX_RATE;
-use super::error::Error;
+use super::error::{CaseErrors, Error};
 
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -56,21 +55,13 @@ impl Request {
                 value,
                 reason,
             })?;
-        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
+        if duration_violation(self.timeout, MAX_WAIT) {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: MAX_WAIT,
             });
         }
-        if let Some(rate) = self.cases_per_second
-            && (rate == 0 || rate > MAX_RATE)
-        {
-            return Err(Error::InvalidLimit {
-                field: "cases_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
-            });
-        }
+        check_rate(&CaseErrors, "cases_per_second", self.cases_per_second)?;
         self.campaign.validate()?;
         Ok(())
     }

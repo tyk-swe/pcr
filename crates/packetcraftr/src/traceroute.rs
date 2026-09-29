@@ -14,7 +14,7 @@ pub const DEFAULT_TCP_PORT: u16 = 80;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_PROBES_PER_HOP: u32 = 32;
 pub const MAX_PROBES: usize = 100_000;
-pub const MAX_RATE: u32 = 1_000_000;
+pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 
 // A generated probe is no larger than Ethernet + IPv6 + TCP without options.
 // The deliberately conservative value makes complete byte-policy approval

@@ -15,7 +15,10 @@
 //! tests presence; a bare flag reads the flag, so `!tcp.flags.ack` means "ACK
 //! clear". An unqualified path matches any occurrence in a tunnelled stack
 //! (`ipv4#1`/`ipv4#2` select one), and either-field paths hold when either
-//! side matches. There is no regex operator.
+//! side matches. Byte fields take separated bytes (`c0:00`) or quoted text; an
+//! unquoted run of hex digits such as `c000`, or a byte run with a malformed
+//! group such as `c0:0`, is an error, not an ASCII needle. There is no regex
+//! operator.
 
 mod ast;
 mod comparison;

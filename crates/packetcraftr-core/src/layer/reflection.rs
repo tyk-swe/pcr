@@ -7,7 +7,10 @@ use super::Schema;
 use crate::field::{self, FieldValue, WireValue, parse_mac};
 
 /// Declares a layer's reflective schema, its [`Layer`](crate::layer::Layer)
-/// implementation, and a function returning its static field layout.
+/// implementation, and a function returning its static field layout. The
+/// schema is a `static`, so the `protocol` expression must be a constant
+/// expression (`Id::new("name")`, a `const` item, or a `const fn` call). Field
+/// metadata, including each `children` value, is constant as well.
 ///
 /// ```
 /// use packetcraftr_core::field::FieldValue;
@@ -68,26 +71,24 @@ macro_rules! reflective_layer {
         layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
     ) => {
         $schema_vis fn $schema() -> &'static $crate::layer::Schema {
-            static SCHEMA: std::sync::OnceLock<$crate::layer::Schema> =
-                std::sync::OnceLock::new();
-            static FIELDS: &[$crate::layer::FieldSchema] = &[
-                $(
-                    $crate::layer::FieldSchema {
-                        name: $field,
-                        aliases: &[$($alias),*],
-                        kind: $crate::field::FieldKind::$kind,
-                        derived: $derived,
-                        required: $required,
-                        description: $description,
-                        children: $crate::reflective_layer!(@children $($children)?),
-                    }
-                ),*
-            ];
-            SCHEMA.get_or_init(|| $crate::layer::Schema {
+            static SCHEMA: $crate::layer::Schema = $crate::layer::Schema {
                 protocol: $protocol,
                 name: $layer_name,
-                fields: FIELDS,
-            })
+                fields: &[
+                    $(
+                        $crate::layer::FieldSchema {
+                            name: $field,
+                            aliases: &[$($alias),*],
+                            kind: $crate::field::FieldKind::$kind,
+                            derived: $derived,
+                            required: $required,
+                            description: $description,
+                            children: $crate::reflective_layer!(@children $($children)?),
+                        }
+                    ),*
+                ],
+            };
+            &SCHEMA
         }
 
         impl $crate::layer::Layer for $ty {

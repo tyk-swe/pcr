@@ -11,17 +11,17 @@ mod wire;
 
 pub use capture::CaptureBudget;
 pub use model::{
+    DEFAULT_MAX_BYTES_PER_OPERATION, DEFAULT_MAX_PACKETS_PER_OPERATION,
     DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES,
 };
 pub use model::{DestinationConstraint, Error, Policy};
 
-pub(crate) use operation::{Authorizer, unsupported_operation};
+pub(crate) use operation::Authorizer;
 pub use operation::{
-    DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive, ReplayFrame,
-    SocketLimits, SocketOperation, WireLimits,
+    DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive, SocketLimits,
+    SocketOperation, WireLimits,
 };
 pub use wire::requires_live_opt_in;
 pub(crate) use wire::{
-    authorize_permissive_live, authorize_wire, authorize_wire_destinations, authorize_wire_sources,
-    decode_wire,
+    authorize_permissive_live, authorize_wire, authorize_wire_destinations, decode_wire,
 };

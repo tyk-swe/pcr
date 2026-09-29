@@ -45,11 +45,7 @@ struct StreamState {
 
 impl StreamState {
     fn new(limits: OfflineCaptureLimitsArgs) -> Result<Self, CliError> {
-        let budget = capture::Budget::new(Limits {
-            max_frames: limits.max_frames,
-            max_bytes: limits.max_bytes,
-        })
-        .map_err(CliError::classified)?;
+        let budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
         Ok(Self {
             budget,
             frames_matched: 0,
@@ -140,15 +136,11 @@ pub(super) fn run(
     }
     if let Some(rewrite_format) = rewrite_format {
         validate_rewrite_format(reader.format(), rewrite_format)?;
-        let stream_limits = Limits {
-            max_frames: limits.max_frames,
-            max_bytes: limits.max_bytes,
-        };
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
         let result = rewrite_capture(
             &mut reader,
-            stream_limits,
+            limits.stream_limits(),
             bounds,
             decoding.as_ref(),
             &mut destination,
@@ -289,22 +281,23 @@ fn normalize_capture(
     decoding: Option<&Decoding>,
     destination: impl Write,
 ) -> Result<(), CliError> {
+    reader.refuse_declared_fcs().map_err(CliError::classified)?;
     let mut writer = capture::Writer::pcapng_with_options(
         destination,
         capture::PcapNgOptions {
             max_size: limits.reader.max_frame_bytes,
             max_interfaces: limits.reader.max_interfaces,
-            stream_limits: Limits {
-                max_frames: limits.max_frames,
-                max_bytes: limits.max_bytes,
-            },
+            stream_limits: limits.stream_limits(),
             ..capture::PcapNgOptions::default()
         },
     )
     .map_err(CliError::classified)?;
     let mut interfaces = BTreeMap::new();
     let mut state = StreamState::new(limits)?;
-    while let Some(mut frame) = reader.next_frame().map_err(CliError::classified)? {
+    loop {
+        let next = reader.next_frame().map_err(CliError::classified)?;
+        reader.refuse_declared_fcs().map_err(CliError::classified)?;
+        let Some(mut frame) = next else { break };
         let source_frame = account_frame(&mut state, &frame)?;
         if !kept_by_time(bounds, &frame) {
             continue;

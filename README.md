@@ -106,8 +106,10 @@ section lengths become unknown and interface statistics still describe the
 source capture. Filters use original frame numbers and do not pull in related
 packets or fragments; use `export` for whole conversations. `--normalize`
 writes one new section with remapped interfaces and discards comments, unknown
-blocks and options, and the original section structure. It never invents
-times, so a selected frame without an exactly representable timestamp fails.
+blocks and options, and the original section structure. It refuses a capture
+that declares a frame check sequence, which the new section cannot record. It
+never invents times, so a selected frame without an exactly representable
+timestamp fails.
 All input frames, including filtered-out ones, count toward the finite frame
 and byte limits. An empty selection is a valid capture, errors can leave partial
 output, and without `--filter` or `--normalize` output is a byte-for-byte
@@ -315,8 +317,8 @@ Depend on the crate that owns the capability you need:
 | `packetcraftr-cli` | Arguments, composition, and rendering behind `packetcraftr_cli::main()`; its `output` module owns machine representations and the stream encoder |
 
 Core is portable and independent of native I/O. A workflow uses one policy
-implementation for operation admission and final-wire checks; resolver and
-replay adapters add their specific boundaries. Offline analysis exposes a
+implementation for operation admission and final-wire checks; target
+resolution and replay frame admission add their specific boundaries. Offline analysis exposes a
 physical `FrameRecord` with optional `TcpView` and `UdpView` observations.
 Library callers run DNS with `client.dns(request, sink)`, whose TCP queries use
 the client's `tcp` provider; the CLI composes
@@ -362,7 +364,7 @@ Time budgets are checked at workflow boundaries and passed to native I/O where
 its interface accepts a deadline. Event publication bounds the caller's wait.
 Synchronous provider, reader, and resolver calls use their own I/O timeouts;
 workflow checks cannot interrupt them or arbitrary injected callbacks. Timed-out
-workers retain their permits and resources until cleanup finishes.
+or cancelled workers retain their permits and resources until cleanup finishes.
 
 | Platform | Requirements and notable limits |
 | --- | --- |

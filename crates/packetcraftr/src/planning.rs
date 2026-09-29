@@ -12,7 +12,7 @@ use crate::Client;
 use crate::Error;
 use crate::clock::Clock;
 use crate::providers::PacketProviders;
-use crate::route::{Options, Plan, plan as plan_route};
+use crate::route::{Error as RouteError, Interface, Options, Plan, plan as plan_route};
 
 /// The boundary itself is expired: no time remains once nothing is left.
 #[must_use]
@@ -68,12 +68,35 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         self.policy.authorize_packet_destinations(packet)?;
         before_lookup()?;
         let options = self.resolve_interface(options, deadline)?;
-        let plan = plan_route(packet, destination, &options, routes, deadline)?;
+        let plan = plan_route(packet, destination, &options, routes, deadline)
+            .inspect_err(|error| self.forget_rejected_interface(&options, error, deadline))?;
         self.policy.authorize_packet_sources(packet, &plan)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }
         Ok(plan)
+    }
+
+    /// A rejected route may mean the memoized identity no longer names a
+    /// device; an interrupted lookup says nothing about the interface.
+    fn forget_rejected_interface(
+        &self,
+        options: &Options,
+        error: &RouteError,
+        deadline: &Deadline,
+    ) {
+        let rejected = matches!(
+            error,
+            RouteError::RouteLookup { .. }
+                | RouteError::InterfaceLookup { .. }
+                | RouteError::InterfaceMismatch { .. }
+        );
+        if rejected
+            && deadline.enforce().is_ok()
+            && let Some(id) = options.interface.as_ref().and_then(Interface::id)
+        {
+            self.interfaces.forget(id);
+        }
     }
 
     fn resolve_interface<'o>(

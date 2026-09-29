@@ -7,6 +7,7 @@ use std::io::{self, Write};
 
 use packetcraftr_core as core;
 
+use super::stdout::stdout_error;
 use crate::output;
 use serde::Serialize;
 
@@ -90,12 +91,12 @@ pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+        .map_err(|source| stdout_error("write stdout failed", source))
 }
 
 fn json_error(source: serde_json::Error) -> CliError {
     if source.is_io() {
-        CliError::new(Kind::Io, format!("write stdout failed: {source}"))
+        stdout_error("write stdout failed", io::Error::from(source))
     } else {
         CliError::new(Kind::Internal, format!("serialize output failed: {source}"))
     }
@@ -137,11 +138,12 @@ pub(crate) fn emit_published<T: Serialize>(
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::io::{self, Write};
 
     use serde::Serialize;
     use serde::ser::{Error as _, SerializeSeq};
 
-    use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len};
+    use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len, json_error};
 
     struct Instrumented<'a> {
         second: &'a Cell<bool>,
@@ -171,6 +173,33 @@ mod tests {
             sequence.serialize_element(&0u8)?;
             Err(S::Error::custom("fixture serialization failure"))
         }
+    }
+
+    #[test]
+    fn json_write_failures_are_stdout_failures_and_serialization_failures_are_internal() {
+        struct Closed;
+
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "consumer closed"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let write = json_error(serde_json::to_writer(Closed, &0).unwrap_err());
+        assert_eq!(write.exit_code(), 5);
+        assert_eq!(write.classification.code, "io.stdout");
+        assert!(write.classification.remediation.is_some());
+        assert_eq!(write.message, "write stdout failed");
+        assert_eq!(write.causes, ["consumer closed"]);
+
+        let serialize =
+            json_error(serde_json::to_writer(Vec::new(), &FailingSerialization).unwrap_err());
+        assert_eq!(serialize.exit_code(), 70);
+        assert_eq!(serialize.classification.code, "internal.error");
     }
 
     #[test]

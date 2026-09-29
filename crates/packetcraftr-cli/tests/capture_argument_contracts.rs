@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
-use common::{parse_json, run};
+use common::{parse_json, parse_ndjson, run};
 #[test]
 fn storage_limits_are_checked_before_interface_lookup_or_activation() {
     let directory = tempfile::tempdir().unwrap();
@@ -160,17 +160,38 @@ fn decoded_output_options_are_checked_before_interface_lookup() {
             }
         }
     }
-    let output = run(&[
-        "--output",
-        "ndjson",
-        "capture",
-        "--interface",
-        "does-not-exist",
-        "--dissect",
-        "--field",
-        "frame.len",
-    ]);
-    assert!(!output.status.success());
+    for extra in [vec!["--dissect"], vec!["--field", "frame.len"]] {
+        let mut args = vec![
+            "--output",
+            "ndjson",
+            "capture",
+            "--interface",
+            "does-not-exist",
+        ];
+        args.extend(extra);
+        let output = run(&args);
+        let records = parse_ndjson(&output);
+        let error = &records.last().expect("failure record")["error"];
+        assert_ne!(error["code"], "cli.capture_decode_format", "{args:?}");
+        if cfg!(any(
+            feature = "native-route",
+            feature = "native-layer2",
+            feature = "native-layer3"
+        )) {
+            assert_eq!(output.status.code(), Some(5), "{args:?}: {error}");
+            assert_eq!(error["code"], "io.device", "{args:?}");
+            assert!(
+                error["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("does-not-exist"),
+                "{args:?}: {error}"
+            );
+        } else {
+            assert_eq!(output.status.code(), Some(4), "{args:?}: {error}");
+            assert_eq!(error["code"], "capability.unsupported", "{args:?}");
+        }
+    }
 }
 
 #[test]

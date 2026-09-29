@@ -99,6 +99,18 @@ pub(super) fn parse(word: &str) -> Option<Literal> {
     None
 }
 
+/// Hex digits that `parse` refused as bytes and that would otherwise fall back to ASCII text: bare digits (`c000`) or one- and two-digit groups around a separator (`c0:0`, `47:45:`).
+pub(super) fn is_malformed_byte_word(word: &str) -> bool {
+    let hex = |text: &str| text.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !word.contains([':', '-']) {
+        return word.len() >= 2 && hex(word);
+    }
+    word.bytes().any(|byte| byte.is_ascii_hexdigit())
+        && word
+            .split([':', '-'])
+            .all(|group| group.len() <= 2 && hex(group))
+}
+
 fn hex_groups(word: &str) -> Option<Vec<u8>> {
     let separator = if word.contains(':') {
         ':'
@@ -165,13 +177,6 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
 
 pub(super) fn searchable(kind: FieldKind) -> bool {
     matches!(kind, FieldKind::Bytes | FieldKind::Text | FieldKind::Mac)
-}
-
-pub(super) fn searchable_needle(literal: &Literal) -> bool {
-    matches!(
-        literal,
-        Literal::Bytes(_) | Literal::Text(_) | Literal::Mac(_)
-    )
 }
 
 #[cfg(test)]
@@ -250,6 +255,32 @@ mod tests {
     }
 
     #[test]
+    fn only_hex_digit_words_that_fail_as_bytes_look_like_mistyped_bytes() {
+        for word in [
+            "ff", "160301ff", "DEADBEEF", "c000", "123", "47:45:5", "47:45:", ":45", "c0:0",
+            "aa:bb-cc", "1-2",
+        ] {
+            assert!(is_malformed_byte_word(word), "{word}");
+        }
+        for word in [
+            "",
+            "f",
+            "GET",
+            "0xff",
+            "auto",
+            "fg",
+            "dead-beef",
+            "2026-09-29",
+            "host:80",
+            "-",
+            "--",
+            "::",
+        ] {
+            assert!(!is_malformed_byte_word(word), "{word}");
+        }
+    }
+
+    #[test]
     fn field_compatibility_rejects_impossible_comparisons() {
         assert!(compatible(spec(FieldKind::Bool), &Literal::Bool(true)));
         assert!(compatible(spec(FieldKind::Bool), &Literal::Unsigned(1)));
@@ -295,9 +326,6 @@ mod tests {
         ] {
             assert!(!searchable(kind), "{}", kind_name(kind));
         }
-        assert!(searchable_needle(&Literal::Text("x".to_owned())));
-        assert!(searchable_needle(&Literal::Mac([0; 6])));
-        assert!(!searchable_needle(&Literal::Unsigned(0)));
         assert!(Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0).is_prefix());
         assert!(!Literal::Ipv4(Ipv4Addr::UNSPECIFIED).is_prefix());
     }

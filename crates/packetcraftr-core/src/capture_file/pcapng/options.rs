@@ -10,15 +10,12 @@ use crate::capture_file::{
     wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},
 };
 
-pub(super) fn visit_options<F>(
+pub(super) fn parse_options(
     options: &[u8],
     endianness: Endianness,
     context: &'static str,
-    mut visitor: F,
-) -> Result<(), Error>
-where
-    F: FnMut(u16, &[u8]) -> Result<(), Error>,
-{
+) -> Result<Vec<PcapNgOption>, Error> {
+    let mut parsed = Vec::new();
     let mut offset = 0_usize;
     while offset < options.len() {
         let header_end = offset.checked_add(4).ok_or(Error::InvalidData {
@@ -45,16 +42,14 @@ where
                     reason: "end-of-options marker has a non-zero length",
                 });
             }
-            if options
-                .get(offset..)
-                .is_some_and(|trailing| trailing.iter().any(|byte| *byte != 0))
-            {
+            // the header read succeeded, so `offset <= options.len()`
+            if options[offset..].iter().any(|byte| *byte != 0) {
                 return Err(Error::InvalidData {
                     format: Format::PcapNg,
                     reason: "non-zero bytes follow the end-of-options marker",
                 });
             }
-            return Ok(());
+            return Ok(parsed);
         }
         let padded_length = align_to_usize(length)?;
         let end = offset
@@ -70,33 +65,29 @@ where
                 actual: options.len(),
             });
         }
-        let value_end = offset.checked_add(length).ok_or(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "option length overflow",
-        })?;
-        let value = options.get(offset..value_end).ok_or(Error::Truncated {
-            context,
-            expected: value_end,
-            actual: options.len(),
-        })?;
-        visitor(code, value)?;
-        offset = end;
-    }
-    Ok(())
-}
-
-pub(super) fn parse_options(
-    options: &[u8],
-    endianness: Endianness,
-    context: &'static str,
-) -> Result<Vec<PcapNgOption>, Error> {
-    let mut parsed = Vec::new();
-    visit_options(options, endianness, context, |code, value| {
+        // `length <= padded_length`, so the value ends at or before `end`, within `options`
+        let value = &options[offset..offset + length];
         parsed.push(PcapNgOption {
             code,
             value: Bytes::copy_from_slice(value),
         });
-        Ok(())
-    })?;
+        offset = end;
+    }
     Ok(parsed)
+}
+
+pub(super) fn unique_option<'a>(
+    options: &'a [PcapNgOption],
+    code: u16,
+    duplicate: &'static str,
+) -> Result<Option<&'a [u8]>, Error> {
+    let mut matching = options.iter().filter(|option| option.code == code);
+    let first = matching.next();
+    if matching.next().is_some() {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: duplicate,
+        });
+    }
+    Ok(first.map(|option| option.value.as_ref()))
 }

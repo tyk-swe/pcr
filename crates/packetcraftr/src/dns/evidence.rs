@@ -166,59 +166,9 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
     }
 }
 
-#[derive(Debug)]
-enum AttemptClassification {
-    Accepted {
-        /// The server set the truncation flag, so records were not accepted.
-        truncated: bool,
-        response_code: u16,
-        reason: String,
-        response: ValidatedResponse,
-    },
-    Failed {
-        status: Outcome,
-        reason: String,
-    },
-}
-
 pub(super) struct ClassifiedAttempt {
     pub(super) evidence: AttemptEvidence,
     pub(super) response: Option<ValidatedResponse>,
-}
-
-fn classify_attempt(classification: ResponseClassification) -> AttemptClassification {
-    match classification {
-        ResponseClassification::Response(response) => {
-            let truncated = response.metadata.truncated;
-            let reason = if truncated {
-                "validated DNS response set the truncation flag; partial records were not accepted"
-                    .to_owned()
-            } else {
-                format!(
-                    "validated DNS response with code {}",
-                    response_code_name(response.metadata.response_code)
-                )
-            };
-            AttemptClassification::Accepted {
-                truncated,
-                response_code: response.metadata.response_code,
-                reason,
-                response,
-            }
-        }
-        ResponseClassification::NetworkFailure { reason } => AttemptClassification::Failed {
-            status: Outcome::NetworkFailure,
-            reason,
-        },
-        ResponseClassification::DecodeFailure { reason, .. } => AttemptClassification::Failed {
-            status: Outcome::DecodeFailure,
-            reason,
-        },
-        ResponseClassification::Unrelated { reason, .. } => AttemptClassification::Failed {
-            status: Outcome::Unrelated,
-            reason,
-        },
-    }
 }
 
 pub(super) fn candidate_evidence(
@@ -228,23 +178,27 @@ pub(super) fn candidate_evidence(
     evidence: &mut EvidenceState,
 ) -> ClassifiedAttempt {
     let response_frame = evidence.retain_response(&candidate.decoded.frame);
-    let (status, response_code, reason, response) = match classify_attempt(candidate.observation) {
-        AttemptClassification::Accepted {
-            truncated,
-            response_code,
-            reason,
-            response,
-        } => (
-            if truncated {
-                Outcome::Truncated
+    let status = candidate.observation.outcome();
+    let (response_code, reason, response) = match candidate.observation {
+        ResponseClassification::Response(response) => {
+            let reason = if response.metadata.truncated {
+                "validated DNS response set the truncation flag; partial records were not accepted"
+                    .to_owned()
             } else {
-                Outcome::Response
-            },
-            Some(response_code),
-            reason,
-            Some(response),
-        ),
-        AttemptClassification::Failed { status, reason } => (status, None, reason, None),
+                format!(
+                    "validated DNS response with code {}",
+                    response_code_name(response.metadata.response_code)
+                )
+            };
+            (
+                Some(response.metadata.response_code),
+                reason,
+                Some(response),
+            )
+        }
+        ResponseClassification::NetworkFailure { reason }
+        | ResponseClassification::DecodeFailure { reason, .. }
+        | ResponseClassification::Unrelated { reason, .. } => (None, reason, None),
     };
     ClassifiedAttempt {
         evidence: crate::dns::AttemptEvidence {
@@ -320,17 +274,9 @@ pub(super) fn classify_tcp_response(
     response: crate::dns::tcp::Response,
     limits: MessageLimits,
 ) -> Result<ClassifiedAttempt, Error> {
-    let expected_written = probe
-        .query
-        .len()
-        .checked_add(2)
-        .ok_or(Error::InvalidEvidence {
-            attempt: probe.attempt,
-            fault: EvidenceFault::TcpQueryLengthOverflow,
-        })?;
     if response.local_address.port() == 0
         || response.peer_address != SocketAddr::new(probe.server_address, probe.server_port)
-        || response.bytes_written != expected_written
+        || response.bytes_written != probe.framed_query_bytes()
         || response.elapsed > timeout
         || response.latency > response.elapsed
     {
@@ -401,30 +347,10 @@ pub(super) fn validate_dns_execution(
     } else {
         BuiltinProtocol::Ipv6
     };
-    let network_index = execution
-        .sent
-        .built()
-        .packet
-        .iter()
-        .next()
-        .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
-        .map_or(0usize, |_| 1);
-    if sent_packet.len() != network_index.saturating_add(3)
-        || !execution
-            .sent
-            .built()
-            .packet
-            .iter()
-            .nth(network_index)
-            .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(network_protocol))
-        || !execution
-            .sent
-            .built()
-            .packet
-            .iter()
-            .nth(network_index.saturating_add(1))
-            .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
-        || dns_payload(sent_packet).as_deref() != Some(probe.query.as_ref())
+    if !correlation::packet_shape_with_payload_matches(
+        sent_packet,
+        &[network_protocol, BuiltinProtocol::Udp],
+    ) || dns_payload(sent_packet).as_deref() != Some(probe.query.as_ref())
         || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
@@ -500,12 +426,225 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
 
 #[cfg(test)]
 mod tests {
-    use super::response_code_name;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::protocol::link::Ethernet;
+
+    use super::*;
+    use crate::Stats;
+    use crate::dns::{QueryType, ResponseMetadata};
+    use crate::evidence::ExecutionPermit;
+    use crate::execution::evidence::EvidenceState;
 
     #[test]
     fn response_code_names_include_the_dso_type_code() {
         assert_eq!(response_code_name(10), "not_zone");
         assert_eq!(response_code_name(11), "dso_type_not_implemented");
         assert_eq!(response_code_name(12), "unknown");
+    }
+
+    fn probe() -> Probe {
+        Probe {
+            attempt: 1,
+            server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+            server_port: 5353,
+            source_port: 40_000,
+            transaction_id: 0x1234,
+            query_name: "example.test".to_owned(),
+            query_type: QueryType::A,
+            query: Bytes::from_static(b"query"),
+        }
+    }
+
+    fn validate(probe: &Probe, sent: Packet) -> Result<(), Error> {
+        let sent = crate::test_support::sent_packet(sent);
+        let bytes = u64::try_from(sent.bytes_sent()).unwrap();
+        let execution = ExchangeEvidence {
+            permit: ExecutionPermit::new(),
+            sent,
+            responses: Vec::new(),
+            unsolicited: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: Stats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes,
+                elapsed: Duration::from_millis(1),
+                ..Stats::default()
+            },
+        };
+        validate_dns_execution(probe, &execution, Limits::default(), Duration::from_secs(1))
+    }
+
+    fn fault(result: Result<(), Error>) -> EvidenceFault {
+        match result {
+            Err(Error::InvalidEvidence { fault, .. }) => fault,
+            other => panic!("expected invalid evidence, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_sent_query_that_keeps_the_probe_shape_is_valid() {
+        let probe = probe();
+        validate(&probe, probe.packet()).expect("probe packet is valid evidence");
+    }
+
+    #[test]
+    fn a_leading_ethernet_layer_does_not_change_the_query_shape() {
+        let probe = probe();
+        let mut sent = probe.packet();
+        sent.insert(0, Ethernet::default()).unwrap();
+        validate(&probe, sent).expect("link header is outside the query shape");
+    }
+
+    #[test]
+    fn a_sent_query_with_an_extra_or_missing_payload_layer_is_changed() {
+        let probe = probe();
+        let mut extra = probe.packet();
+        extra.push(Raw::new(Bytes::from_static(b"trailer")));
+        assert_eq!(
+            fault(validate(&probe, extra)),
+            EvidenceFault::SentQueryChanged
+        );
+
+        let mut missing = probe.packet();
+        missing.remove(2).unwrap();
+        assert_eq!(
+            fault(validate(&probe, missing)),
+            EvidenceFault::SentQueryChanged
+        );
+    }
+
+    #[test]
+    fn a_sent_query_whose_payload_layer_cannot_carry_dns_is_changed() {
+        let probe = Probe {
+            server_port: 123,
+            ..probe()
+        };
+        let mut other = probe.packet();
+        other.remove(2).unwrap();
+        other.push(packetcraftr_core::protocol::application::ntp::Ntp::default());
+        assert_eq!(
+            fault(validate(&probe, other)),
+            EvidenceFault::SentQueryChanged
+        );
+    }
+
+    #[test]
+    fn a_sent_query_with_different_bytes_is_changed() {
+        let probe = probe();
+        let mut other = probe.clone();
+        other.query = Bytes::from_static(b"other");
+        assert_eq!(
+            fault(validate(&probe, other.packet())),
+            EvidenceFault::SentQueryChanged
+        );
+    }
+
+    #[test]
+    fn a_sent_packet_without_udp_is_reported_before_the_shape_check() {
+        let probe = probe();
+        let mut without_udp = probe.packet();
+        without_udp.remove(2).unwrap();
+        without_udp.remove(1).unwrap();
+        assert_eq!(
+            fault(validate(&probe, without_udp)),
+            EvidenceFault::SentWithoutUdp
+        );
+    }
+
+    fn validated(response_code: u16, truncated: bool) -> ResponseClassification {
+        ResponseClassification::Response(ValidatedResponse {
+            metadata: ResponseMetadata {
+                response_code,
+                edns: None,
+                authoritative: false,
+                truncated,
+                recursion_desired: true,
+                recursion_available: true,
+                authenticated_data: false,
+                checking_disabled: false,
+                rejected_record_count: 0,
+            },
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additionals: Vec::new(),
+            rejected_records: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn a_classified_response_states_its_status_code_and_reason() {
+        let bytes = Bytes::from_static(&[0xff]);
+        let decoded = DecodedPacket {
+            packet: Packet::new(),
+            frame: Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap(),
+            layout: Default::default(),
+            diagnostics: Vec::new(),
+        };
+        let reason = |text: &str| text.to_owned();
+        for (observation, status, code, expected) in [
+            (
+                validated(3, false),
+                Outcome::Response,
+                Some(3),
+                "validated DNS response with code name_error",
+            ),
+            (
+                validated(0, true),
+                Outcome::Truncated,
+                Some(0),
+                "validated DNS response set the truncation flag; partial records were not accepted",
+            ),
+            (
+                ResponseClassification::NetworkFailure {
+                    reason: reason("port unreachable"),
+                },
+                Outcome::NetworkFailure,
+                None,
+                "port unreachable",
+            ),
+            (
+                ResponseClassification::DecodeFailure {
+                    reason: reason("bad checksum"),
+                    source: None,
+                },
+                Outcome::DecodeFailure,
+                None,
+                "bad checksum",
+            ),
+            (
+                ResponseClassification::Unrelated {
+                    reason: reason("other transaction"),
+                    source: None,
+                },
+                Outcome::Unrelated,
+                None,
+                "other transaction",
+            ),
+        ] {
+            let expects_response = code.is_some();
+            let mut state = EvidenceState::new(
+                Limits::default().evidence(),
+                crate::dns::EVIDENCE_DIAGNOSTICS,
+            );
+            let attempt = candidate_evidence(
+                &probe(),
+                UNIX_EPOCH,
+                ResponseCandidate {
+                    observation,
+                    decoded: &decoded,
+                    latency: Duration::from_millis(1),
+                },
+                &mut state,
+            );
+            assert_eq!(attempt.evidence.status, status);
+            assert_eq!(attempt.evidence.response_code, code);
+            assert_eq!(attempt.evidence.reason, expected);
+            assert_eq!(attempt.response.is_some(), expects_response);
+        }
     }
 }

@@ -3,22 +3,15 @@
 
 use crate::analysis::reassembly::tcp::{
     Error, Limits, Resource,
-    state::{
-        TcpFlowState, buffer_memory_charge_parts, flow_memory_charge_parts,
-        planned_history_allocation,
-    },
+    state::{TcpFlowState, memory_charge_parts, planned_history_allocation},
 };
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PushAccountingPlan {
     pub(super) initial_history_capacity: usize,
     pub(super) history_allocation: usize,
-    prospective_aggregate_bytes: usize,
-    prospective_aggregate_memory: usize,
-    aggregate_base_bytes: usize,
-    aggregate_base_memory_charge: usize,
-    old_retained_bytes: usize,
-    old_memory_charge: usize,
+    pub(super) aggregate_bytes: usize,
+    pub(super) aggregate_memory_charge: usize,
 }
 
 pub(super) struct PushAccountingInput<'a> {
@@ -28,8 +21,6 @@ pub(super) struct PushAccountingInput<'a> {
     pub(super) storage_bytes: usize,
     pub(super) emitted_segment_bytes: usize,
     pub(super) segment_count: usize,
-    pub(super) old_retained_bytes: usize,
-    pub(super) old_memory_charge: usize,
     pub(super) aggregate_base_bytes: usize,
     pub(super) aggregate_base_memory_charge: usize,
     pub(super) retains_flow_state: bool,
@@ -45,8 +36,6 @@ pub(super) fn plan_push_accounting(
         storage_bytes,
         emitted_segment_bytes,
         segment_count,
-        old_retained_bytes,
-        old_memory_charge,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         retains_flow_state,
@@ -75,71 +64,37 @@ pub(super) fn plan_push_accounting(
         prospective_history,
         final_history_capacity,
     );
-    let prospective_retained = final_pending_bytes.checked_add(prospective_history).ok_or(
-        Resource::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        },
-    )?;
-    let prospective_memory = if retains_flow_state {
-        flow_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
-    } else {
-        // A closed generation never enters the flow table, but its buffers remain budgeted.
-        buffer_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
-    }
-    .ok_or(Resource::AggregateByteLimit {
-        limit: limits.max_aggregate_bytes,
-    })?;
+    let prospective_retained = final_pending_bytes
+        .checked_add(prospective_history)
+        .ok_or(limits.aggregate_byte_error())?;
+    // A closed generation never enters the flow table, but its buffers remain budgeted.
+    let prospective_memory = memory_charge_parts(
+        storage_bytes,
+        final_pending_segments,
+        history_allocation,
+        retains_flow_state,
+    )
+    .ok_or(limits.aggregate_byte_error())?;
     let prospective_aggregate_bytes = aggregate_base_bytes
-        .checked_sub(old_retained_bytes)
-        .and_then(|bytes| bytes.checked_add(prospective_retained))
-        .ok_or(Resource::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
+        .checked_add(prospective_retained)
+        .ok_or(limits.aggregate_byte_error())?;
     let prospective_aggregate_memory = aggregate_base_memory_charge
-        .checked_sub(old_memory_charge)
-        .and_then(|charge| charge.checked_add(prospective_memory))
-        .ok_or(Resource::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
+        .checked_add(prospective_memory)
+        .ok_or(limits.aggregate_byte_error())?;
     if prospective_aggregate_bytes > limits.max_aggregate_bytes
         || prospective_aggregate_memory > limits.max_aggregate_bytes
     {
-        return Err(Resource::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        }
-        .into());
+        return Err(limits.aggregate_byte_error().into());
     }
+    let (aggregate_bytes, aggregate_memory_charge) = if retains_flow_state {
+        (prospective_aggregate_bytes, prospective_aggregate_memory)
+    } else {
+        (aggregate_base_bytes, aggregate_base_memory_charge)
+    };
     Ok(PushAccountingPlan {
         initial_history_capacity,
         history_allocation,
-        prospective_aggregate_bytes,
-        prospective_aggregate_memory,
-        aggregate_base_bytes,
-        aggregate_base_memory_charge,
-        old_retained_bytes,
-        old_memory_charge,
+        aggregate_bytes,
+        aggregate_memory_charge,
     })
-}
-
-impl PushAccountingPlan {
-    pub(super) fn final_aggregates(
-        self,
-        closed: bool,
-        limit: usize,
-    ) -> Result<(usize, usize), Error> {
-        if !closed {
-            return Ok((
-                self.prospective_aggregate_bytes,
-                self.prospective_aggregate_memory,
-            ));
-        }
-        Ok((
-            self.aggregate_base_bytes
-                .checked_sub(self.old_retained_bytes)
-                .ok_or(Resource::AggregateByteLimit { limit })?,
-            self.aggregate_base_memory_charge
-                .checked_sub(self.old_memory_charge)
-                .ok_or(Resource::AggregateByteLimit { limit })?,
-        ))
-    }
 }

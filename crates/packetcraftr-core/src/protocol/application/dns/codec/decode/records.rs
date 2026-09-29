@@ -5,7 +5,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::advance;
 use super::decode_name;
 use super::primitives::{read_u16, read_u32};
 use crate::protocol::application::dns::Error as WireError;
@@ -26,22 +25,11 @@ pub(super) fn decode_records(
         let (owner, next) = decode_name(message, offset, limits)?;
         offset = next;
         let type_code = read_u16(message, offset, "record type")?;
-        let class = read_u16(message, advance(offset, 2, "record class")?, "record class")?;
-        let ttl = read_u32(message, advance(offset, 4, "record TTL")?, "record TTL")?;
-        let rdata_length = usize::from(read_u16(
-            message,
-            advance(offset, 8, "RDATA length")?,
-            "RDATA length",
-        )?);
-        let rdata_offset = advance(offset, 10, "RDATA")?;
-        let rdata_end = advance(rdata_offset, rdata_length, "RDATA")?;
-        message
-            .get(rdata_offset..rdata_end)
-            .ok_or(WireError::TruncatedField {
-                field: "RDATA",
-                offset: rdata_offset,
-                needed: rdata_end,
-            })?;
+        let class = read_u16(message, offset + 2, "record class")?;
+        let ttl = read_u32(message, offset + 4, "record TTL")?;
+        let rdata_length = usize::from(read_u16(message, offset + 8, "RDATA length")?);
+        let rdata_offset = offset + 10;
+        let rdata_end = rdata_offset + rdata_length;
         let value = decode_rdata(
             message,
             type_code,
@@ -91,25 +79,17 @@ impl Rdata<'_> {
     fn decode_soa(&self) -> Result<RecordValue, WireError> {
         let (primary_name_server, next) = decode_name(self.message, self.offset, self.limits)?;
         let (responsible_mailbox, next) = decode_name(self.message, next, self.limits)?;
-        if next.checked_add(20) != Some(self.end) {
+        if next + 20 != self.end {
             return Err(self.invalid("SOA RDATA must end with five 32-bit integers"));
         }
         Ok(RecordValue::Soa {
             primary_name_server,
             responsible_mailbox,
             serial: read_u32(self.message, next, "SOA serial")?,
-            refresh: read_u32(
-                self.message,
-                advance(next, 4, "SOA refresh")?,
-                "SOA refresh",
-            )?,
-            retry: read_u32(self.message, advance(next, 8, "SOA retry")?, "SOA retry")?,
-            expire: read_u32(self.message, advance(next, 12, "SOA expire")?, "SOA expire")?,
-            minimum: read_u32(
-                self.message,
-                advance(next, 16, "SOA minimum")?,
-                "SOA minimum",
-            )?,
+            refresh: read_u32(self.message, next + 4, "SOA refresh")?,
+            retry: read_u32(self.message, next + 8, "SOA retry")?,
+            expire: read_u32(self.message, next + 12, "SOA expire")?,
+            minimum: read_u32(self.message, next + 16, "SOA minimum")?,
         })
     }
 
@@ -118,11 +98,7 @@ impl Rdata<'_> {
             return Err(self.invalid("MX RDATA is shorter than preference plus name"));
         }
         let preference = read_u16(self.message, self.offset, "MX preference")?;
-        let (exchange, next) = decode_name(
-            self.message,
-            advance(self.offset, 2, "MX exchange")?,
-            self.limits,
-        )?;
+        let (exchange, next) = decode_name(self.message, self.offset + 2, self.limits)?;
         if next != self.end {
             return Err(self.invalid("MX name does not consume the declared RDATA"));
         }
@@ -167,21 +143,9 @@ impl Rdata<'_> {
             return Err(self.invalid("SRV RDATA is shorter than priority, weight, port, and name"));
         }
         let priority = read_u16(self.message, self.offset, "SRV priority")?;
-        let weight = read_u16(
-            self.message,
-            advance(self.offset, 2, "SRV weight")?,
-            "SRV weight",
-        )?;
-        let port = read_u16(
-            self.message,
-            advance(self.offset, 4, "SRV port")?,
-            "SRV port",
-        )?;
-        let (target, next) = decode_name(
-            self.message,
-            advance(self.offset, 6, "SRV target")?,
-            self.limits,
-        )?;
+        let weight = read_u16(self.message, self.offset + 2, "SRV weight")?;
+        let port = read_u16(self.message, self.offset + 4, "SRV port")?;
+        let (target, next) = decode_name(self.message, self.offset + 6, self.limits)?;
         if next != self.end {
             return Err(self.invalid("SRV name does not consume the declared RDATA"));
         }

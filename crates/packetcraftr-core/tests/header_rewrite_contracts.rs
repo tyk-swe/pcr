@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+
+mod common;
+
 use bytes::Bytes;
 use packetcraftr_core::{
     build::Builder,
@@ -7,7 +10,7 @@ use packetcraftr_core::{
     decode::Dissector,
     error::BoundaryError,
     field::WireValue,
-    frame::{Frame, Lengths, LinkType},
+    frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
     protocol::{
@@ -238,16 +241,7 @@ fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
         )
         .is_err()
     );
-    let truncated = Frame::try_with_lengths(
-        UNIX_EPOCH,
-        original.link_type,
-        Lengths {
-            captured: 40,
-            original: original.original_length(),
-        },
-        original.bytes().slice(..40),
-    )
-    .unwrap();
+    let truncated = common::truncated(&original, original.bytes().len() - 40);
     assert!(transform::rewrite(&truncated, &mac, Default::default()).is_err());
 }
 #[test]

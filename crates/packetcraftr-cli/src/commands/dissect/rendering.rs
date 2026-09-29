@@ -11,7 +11,7 @@ use crate::rendering::{
 pub(super) fn render_text(decoded: &DecodedPacket) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "decoded {} bytes into {} layer(s)",
-        decoded.original.len(),
+        decoded.frame.bytes().len(),
         decoded.packet.len()
     ))?;
     for (index, layer) in decoded.packet.iter().enumerate() {

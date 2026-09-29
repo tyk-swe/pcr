@@ -114,7 +114,13 @@ impl Classified for Error {
         match self {
             Self::OperationAndCleanup {
                 operation, cleanup, ..
-            } => vec![operation.to_string(), cleanup.to_string()],
+            } => {
+                let mut causes = vec![operation.to_string()];
+                causes.extend(operation.causes());
+                causes.push(cleanup.to_string());
+                causes.extend(cleanup.causes());
+                causes
+            }
             error => packetcraftr_core::error::source_chain(error),
         }
     }

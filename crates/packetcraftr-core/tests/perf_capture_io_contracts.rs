@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
+use common::pcap::{option, put_i64, put_u16, words};
 use std::io::{self, Cursor, Write};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -32,29 +35,6 @@ fn interface(resolution: TimestampResolution, offset: i64) -> Interface {
     }
 }
 
-fn words(order: Endianness, values: &[u32]) -> Vec<u8> {
-    values
-        .iter()
-        .flat_map(|value| match order {
-            Endianness::Little => value.to_le_bytes(),
-            Endianness::Big => value.to_be_bytes(),
-        })
-        .collect()
-}
-
-fn option(order: Endianness, code: u16, value: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    for field in [code, value.len() as u16] {
-        bytes.extend(match order {
-            Endianness::Little => field.to_le_bytes(),
-            Endianness::Big => field.to_be_bytes(),
-        });
-    }
-    bytes.extend(value);
-    bytes.resize(bytes.len().next_multiple_of(4), 0);
-    bytes
-}
-
 fn expected_interface(order: Endianness, description: &Interface) -> Vec<u8> {
     let length = if description.timestamp_offset == 0 {
         32
@@ -62,10 +42,7 @@ fn expected_interface(order: Endianness, description: &Interface) -> Vec<u8> {
         44
     };
     let mut bytes = words(order, &[1, length]);
-    bytes.extend(match order {
-        Endianness::Little => (description.link_type.0 as u16).to_le_bytes(),
-        Endianness::Big => (description.link_type.0 as u16).to_be_bytes(),
-    });
+    put_u16(&mut bytes, order, description.link_type.0 as u16);
     bytes.extend([0, 0]);
     bytes.extend(words(order, &[description.snap_len]));
     let resolution = match description.timestamp_resolution {
@@ -74,14 +51,9 @@ fn expected_interface(order: Endianness, description: &Interface) -> Vec<u8> {
     };
     bytes.extend(option(order, 9, &[resolution]));
     if description.timestamp_offset != 0 {
-        bytes.extend(option(
-            order,
-            14,
-            &match order {
-                Endianness::Little => description.timestamp_offset.to_le_bytes(),
-                Endianness::Big => description.timestamp_offset.to_be_bytes(),
-            },
-        ));
+        let mut offset = Vec::new();
+        put_i64(&mut offset, order, description.timestamp_offset);
+        bytes.extend(option(order, 14, &offset));
     }
     bytes.extend(option(order, 0, &[]));
     bytes.extend(words(order, &[length]));
@@ -162,6 +134,7 @@ fn classic_preview_matches_exact_bytes_and_metadata() {
                 expected.push(packet);
             }
             let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            assert_eq!(reader.format(), Format::Pcap);
             assert_eq!(reader.endianness(), order);
             for packet in expected {
                 assert_eq!(reader.next_frame().unwrap().unwrap(), packet);

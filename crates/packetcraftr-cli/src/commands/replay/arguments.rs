@@ -6,9 +6,8 @@ use std::path::PathBuf;
 use crate::command_options::InterfaceSelector;
 
 use crate::command_options::{
-    Budget, CaptureReaderBoundsArgs, CaptureStdout, CompressionArgs, DestinationAllowlistArgs,
-    LinkMode, MaxDurationArgs, PermissivePacketArgs, PublicDestinationArgs, RunTime,
-    SourceSpoofingArgs, TrafficBudgetArgs,
+    Budget, CaptureReaderBoundsArgs, CaptureStdout, CompressionArgs, LinkMode, MaxDurationArgs,
+    NumericPolicyArgs, RunTime,
 };
 use clap::ValueEnum;
 
@@ -97,54 +96,15 @@ pub(crate) struct Args {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]
-    pub(crate) policy: PolicyArgs,
+    pub(crate) policy: NumericPolicyArgs<Streamed>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Streamed;
 
 impl Budget for Streamed {
-    fn max_packets() -> u64 {
-        packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_FRAMES
-    }
-
-    fn max_bytes() -> u64 {
-        packetcraftr_core::capture_file::DEFAULT_MAX_STREAM_BYTES
-    }
-
     const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
     const BYTES_HELP: &'static str = "Maximum wire bytes this operation is authorized to transmit";
-}
-
-/// `replay`: captured frames sent as they were captured, sources included.
-#[derive(Clone, Debug, clap::Args)]
-pub(crate) struct PolicyArgs {
-    #[command(flatten)]
-    public_destination: PublicDestinationArgs,
-    #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
-    #[command(flatten)]
-    source_spoofing: SourceSpoofingArgs,
-    #[command(flatten)]
-    destination_allowlist: DestinationAllowlistArgs,
-    #[command(flatten)]
-    budgets: TrafficBudgetArgs<Streamed>,
-}
-
-impl PolicyArgs {
-    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        self.budgets.resources(settings);
-    }
-
-    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
-        let mut policy = packetcraftr::policy::Policy::default();
-        self.public_destination.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
-        self.source_spoofing.apply_to(&mut policy);
-        self.destination_allowlist.apply_to(&mut policy);
-        self.budgets.apply_to(&mut policy);
-        policy
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]

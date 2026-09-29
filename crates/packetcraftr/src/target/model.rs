@@ -249,26 +249,36 @@ impl Resolver for SystemResolver {
                     hostname: hostname.to_string(),
                     source: Box::new(source),
                 })?;
-        let mut addresses = Vec::new();
-        for address in resolved.map(|address| address.ip()) {
-            if addresses.contains(&address) {
-                continue;
-            }
-            if addresses.len() >= limit {
-                return Err(Error::AddressLimit {
-                    hostname: hostname.to_string(),
-                    limit,
-                });
-            }
-            addresses.push(address);
+        distinct_addresses(hostname, resolved.map(|address| address.ip()), limit)
+    }
+}
+
+/// Keeps each address in first-seen order. Only distinct addresses count
+/// toward `limit`.
+pub(crate) fn distinct_addresses(
+    hostname: &Hostname,
+    resolved: impl IntoIterator<Item = IpAddr>,
+    limit: usize,
+) -> Result<Vec<IpAddr>, Error> {
+    let mut addresses = Vec::new();
+    for address in resolved {
+        if addresses.contains(&address) {
+            continue;
         }
-        if addresses.is_empty() {
-            return Err(Error::NoAddresses {
+        if addresses.len() >= limit {
+            return Err(Error::AddressLimit {
                 hostname: hostname.to_string(),
+                limit,
             });
         }
-        Ok(addresses)
+        addresses.push(address);
     }
+    if addresses.is_empty() {
+        return Err(Error::NoAddresses {
+            hostname: hostname.to_string(),
+        });
+    }
+    Ok(addresses)
 }
 
 #[cfg(test)]
@@ -282,5 +292,26 @@ mod tests {
         for invalid in ["", "a..b", "-bad.example", "bad_.example", "é.example"] {
             assert!(serde_json::from_value::<Hostname>(serde_json::json!(invalid)).is_err());
         }
+    }
+
+    #[test]
+    fn distinct_addresses_are_bounded_and_ordered_by_first_sighting() {
+        let name: Hostname = "example.test".parse().unwrap();
+        let [a, b, c]: [IpAddr; 3] =
+            ["192.0.2.1", "192.0.2.2", "2001:db8::3"].map(|s| s.parse().unwrap());
+
+        assert_eq!(
+            distinct_addresses(&name, [b, a, b, a], 2).unwrap(),
+            [b, a],
+            "repeats neither reorder the answer nor count toward the limit"
+        );
+        assert!(matches!(
+            distinct_addresses(&name, [a, b, c], 2),
+            Err(Error::AddressLimit { hostname, limit: 2 }) if hostname == "example.test"
+        ));
+        assert!(matches!(
+            distinct_addresses(&name, [], 2),
+            Err(Error::NoAddresses { hostname }) if hostname == "example.test"
+        ));
     }
 }

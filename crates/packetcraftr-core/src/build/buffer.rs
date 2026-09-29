@@ -55,16 +55,10 @@ impl PacketBuffer {
         }
 
         let start = self.start - prefix.len();
-        {
-            self.storage[start..self.start].copy_from_slice(prefix);
-        }
-        {
-            self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
-        }
+        self.storage[start..self.start].copy_from_slice(prefix);
+        self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
         self.start = start;
-        {
-            self.end += suffix.len();
-        }
+        self.end += suffix.len();
         Ok(())
     }
 
@@ -80,21 +74,13 @@ impl PacketBuffer {
             .checked_sub(total)
             .ok_or(Error::LengthOverflow)?;
         let start = spare / 2;
-        let prefix_end = start
-            .checked_add(prefix.len())
-            .ok_or(Error::LengthOverflow)?;
-        let payload_end = prefix_end
-            .checked_add(self.len())
-            .ok_or(Error::LengthOverflow)?;
-        let end = payload_end
-            .checked_add(suffix.len())
-            .ok_or(Error::LengthOverflow)?;
+        let prefix_end = start + prefix.len();
+        let end = start + total;
+        let payload_end = end - suffix.len();
         self.storage.copy_within(self.start..self.end, prefix_end);
         // `end = start + total` and `start = (storage.len() - total) / 2`, so `end <= storage.len()`
-        {
-            self.storage[start..prefix_end].copy_from_slice(prefix);
-            self.storage[payload_end..end].copy_from_slice(suffix);
-        }
+        self.storage[start..prefix_end].copy_from_slice(prefix);
+        self.storage[payload_end..end].copy_from_slice(suffix);
         self.start = start;
         self.end = end;
         Ok(())
@@ -124,21 +110,13 @@ impl PacketBuffer {
             (true, false) => 0,
             _ => spare / 2,
         };
-        let prefix_end = start
-            .checked_add(prefix.len())
-            .ok_or(Error::LengthOverflow)?;
-        let payload_end = prefix_end
-            .checked_add(self.len())
-            .ok_or(Error::LengthOverflow)?;
-        let end = payload_end
-            .checked_add(suffix.len())
-            .ok_or(Error::LengthOverflow)?;
+        let prefix_end = start + prefix.len();
+        let end = start + total;
+        let payload_end = end - suffix.len();
         // `end = start + total` with `start <= capacity - total` and `storage.len() == capacity`
-        {
-            storage[start..prefix_end].copy_from_slice(prefix);
-            storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
-            storage[payload_end..end].copy_from_slice(suffix);
-        }
+        storage[start..prefix_end].copy_from_slice(prefix);
+        storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
+        storage[payload_end..end].copy_from_slice(suffix);
         self.storage = storage;
         self.start = start;
         self.end = end;

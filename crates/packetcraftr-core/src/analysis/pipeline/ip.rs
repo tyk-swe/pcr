@@ -185,10 +185,10 @@ impl IpDispatch {
     pub(super) fn charge_derived_memory(
         &self,
         current: usize,
-        datagram_bytes: usize,
+        charge: usize,
     ) -> Result<usize, ip::Error> {
         let derived = current
-            .checked_add(datagram_bytes)
+            .checked_add(charge)
             .ok_or_else(|| self.aggregate_memory_error())?;
         self.retained_memory_charge()
             .checked_add(derived)
@@ -197,7 +197,7 @@ impl IpDispatch {
         Ok(derived)
     }
 
-    fn aggregate_memory_error(&self) -> ip::Error {
+    pub(super) fn aggregate_memory_error(&self) -> ip::Error {
         ip::Resource::AggregateMemoryLimit {
             limit: self.max_aggregate_bytes,
         }

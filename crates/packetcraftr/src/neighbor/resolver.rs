@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
@@ -16,6 +16,8 @@ use packetcraftr_netio::{
     route::{Decision, Scope, SelectionReason},
     transmit::{self, Layer2Frame},
 };
+
+use crate::deadline::DeadlineExt as _;
 
 use super::cache::{NeighborCache, NeighborCacheKey};
 use super::error::{invalid_options, map_io_error};
@@ -107,7 +109,7 @@ where
             });
         }
 
-        let (request_bytes, _) = build_request_frame(request)?;
+        let request_bytes = build_request_frame(request)?;
         let decision = discovery_decision(request);
         let capture_request = capture::Request {
             interface: request.interface.clone(),
@@ -202,7 +204,7 @@ where
         deadline: &Deadline,
     ) -> Result<ExchangeOutcome, Error> {
         let cancellation = deadline.cancellation().cloned();
-        let Some(ready_timeout) = self.remaining_attempt_budget(deadline) else {
+        let Ok(ready) = deadline.for_wait(self.state.options.attempt_timeout) else {
             return Ok(ExchangeOutcome {
                 mac_address: None,
                 attempts: 0,
@@ -211,14 +213,15 @@ where
             });
         };
         capture
-            .wait_ready(&Deadline::new(ready_timeout).with_cancellation(cancellation.clone()))
+            .wait_ready(&ready)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         let mut evidence = EvidenceBuffer::new(&self.state.options);
         self.drain_pre_request(request, capture, &mut evidence, &cancellation)?;
 
         let mut attempts = 0;
         for attempt in 1..=self.state.options.max_attempts {
-            let Some(attempt_budget) = self.remaining_attempt_budget(deadline) else {
+            let Ok(attempt_budget) = deadline.bounded_timeout(self.state.options.attempt_timeout)
+            else {
                 break;
             };
             attempts = attempt;
@@ -277,14 +280,6 @@ where
                 evidence_truncated,
             })
         }
-    }
-
-    fn remaining_attempt_budget(&self, deadline: &Deadline) -> Option<Duration> {
-        deadline
-            .remaining()
-            .ok()
-            .filter(|remaining| !remaining.is_zero())
-            .map(|remaining| remaining.min(self.state.options.attempt_timeout))
     }
 
     fn drain_pre_request<S: Session>(

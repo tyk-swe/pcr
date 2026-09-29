@@ -10,7 +10,6 @@ use crate::errors::CliError;
 
 pub(crate) fn collection(
     timeout: Duration,
-    max_template_packets: usize,
     limits: net::capture::Limits,
 ) -> Result<packetcraftr::exchange::Collection, CliError> {
     let mut collection = packetcraftr::exchange::Collection {
@@ -21,8 +20,8 @@ pub(crate) fn collection(
     };
     collection.decode.limits.max_packet_size = limits.snap_length;
     packetcraftr::exchange::Request {
-        timeout,
-        max_template_packets,
+        // A zero window is left to the calling workflow's own limit error.
+        timeout: timeout.max(Duration::from_nanos(1)),
         collection: collection.clone(),
         ..packetcraftr::exchange::Request::new(
             core::template::Template::new(core::packet::Packet::new()),

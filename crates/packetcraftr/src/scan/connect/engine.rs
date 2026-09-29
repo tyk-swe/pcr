@@ -14,6 +14,7 @@ use crate::providers::{TargetProviders, TcpOf, TcpProviders};
 use crate::{
     Client, Sink,
     clock::Clock,
+    execution::rate_delay,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Transport, enforce_deadline},
     target::ResolveTarget,
@@ -22,6 +23,7 @@ use crate::{
 use packetcraftr_core::error::BoundaryError;
 
 use super::super::error::Probes;
+use super::super::plan::{probe_count, worst_case_duration};
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request};
 use super::{Event, Outcome, ProbeEvidence, Report, Stats};
@@ -36,15 +38,10 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     {
         let started = self.now();
         let mut deadline = self.deadline(request.limits.max_duration);
-        let mut publish = crate::execution::publisher(
-            &self.runtime,
-            sink,
-            |error| Error::DurationLimit {
-                actual: error.actual,
-                limit: error.limit,
-            },
-            |source| Error::Output { source },
-        )?;
+        let mut publish =
+            crate::execution::publisher(&self.runtime, sink, Error::from, |source| {
+                Error::Output { source }
+            })?;
         run(
             &request,
             &mut self.admission(),
@@ -104,10 +101,7 @@ fn planned<A: Authorizer + ResolveTarget>(
             "TCP connect requires TCP transport",
         ));
     }
-    if request.route.interface.is_some()
-        || request.route.preferred_source.is_some()
-        || request.route.link_mode != packetcraftr_netio::link::Mode::Auto
-    {
+    if request.route.requires_packet_route() {
         return Err(Error::UnsupportedTcpRoute);
     }
     if request.max_in_flight > tcp::MAX_PENDING_CONNECTIONS {
@@ -132,26 +126,10 @@ fn planned<A: Authorizer + ResolveTarget>(
         },
         Error::TargetSelection,
         |selected| {
-            let count = selected
-                .addresses
-                .len()
-                .checked_mul(ports.len())
-                .and_then(|count| count.checked_mul(request.attempts as usize))
-                .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
+            let count = probe_count(selected.addresses.len(), ports.len(), request.attempts)?;
             crate::probe::check_probe_count(&Probes, count, request.limits.max_probes)?;
-            let delay = crate::clock::rate_delay(1, request.probes_per_second)
-                .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
-            let windows = u32::try_from(count.div_ceil(request.max_in_flight))
-                .map_err(|_| invalid("probes", count, "duration overflow"))?;
-            let planned_duration = request
-                .timeout
-                .checked_mul(windows)
-                .and_then(|duration| {
-                    delay
-                        .checked_mul(count.saturating_sub(1) as u32)
-                        .and_then(|pacing| duration.checked_add(pacing))
-                })
-                .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
+            let delay = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+            let planned_duration = worst_case_duration(request, count)?;
             crate::probe::check_probe_duration(
                 &Probes,
                 planned_duration,
@@ -206,12 +184,7 @@ where
     let operation = SocketOperation::new(&final_endpoints, planned.limits)
         .map_err(|source| execution(next as u64, source))?;
     approve_operation(authorizer, Operation::Socket(operation), deadline, &Probes)?;
-    let timeout = deadline
-        .bounded_timeout(request.timeout)
-        .map_err(|source| Error::DurationLimit {
-            actual: source.actual,
-            limit: source.limit,
-        })?;
+    let timeout = deadline.bounded_timeout(request.timeout)?;
     let admitted = clock.now();
     let scheduled_at = SystemTime::now();
     let pending = match tcp::start_connect(
@@ -357,12 +330,7 @@ where
                 wait = wait.min(next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
-                deadline
-                    .start_accounting(Duration::ZERO)
-                    .map_err(|source| Error::DurationLimit {
-                        actual: source.actual,
-                        limit: source.limit,
-                    })?;
+                deadline.start_accounting(Duration::ZERO)?;
                 clock.sleep(wait, deadline).map_err(|source| Error::Clock {
                     sequence: next as u64,
                     source: Box::new(source),
@@ -403,35 +371,19 @@ fn finish_probe<S: tcp::Stream>(
     };
     match result.result {
         Ok(stream) => {
-            let peer = stream.peer_addr().map_err(|source| {
-                execution(
-                    entry.sequence,
-                    tcp::Error::Evidence {
-                        operation: "peer",
-                        source,
-                    },
-                )
-            })?;
-            if peer != entry.endpoint {
-                return Err(Error::InvalidEvidence {
-                    sequence: entry.sequence,
-                    message: "TCP provider returned a different peer endpoint".to_owned(),
-                });
+            match endpoint_query(entry.sequence, "peer", stream.peer_addr())? {
+                Some(peer) if peer != entry.endpoint => {
+                    return Err(Error::InvalidEvidence {
+                        sequence: entry.sequence,
+                        message: "TCP provider returned a different peer endpoint".to_owned(),
+                    });
+                }
+                Some(_) => {
+                    probe.local = endpoint_query(entry.sequence, "local", stream.local_addr())?;
+                }
+                None => {}
             }
-            probe.local = Some(stream.local_addr().map_err(|source| {
-                execution(
-                    entry.sequence,
-                    tcp::Error::Evidence {
-                        operation: "local",
-                        source,
-                    },
-                )
-            })?);
-            probe.outcome = if elapsed > entry.timeout {
-                Outcome::DeadlineExpired
-            } else {
-                Outcome::Connected
-            };
+            probe.outcome = Outcome::Connected;
             drop(stream);
         }
         Err(error) => {
@@ -451,6 +403,23 @@ fn finish_probe<S: tcp::Stream>(
         probe.outcome = Outcome::DeadlineExpired;
     }
     Ok(probe)
+}
+
+/// A peer that reset after the handshake leaves no endpoint to query, but the
+/// completed connect is still evidence, so `NotConnected` yields `None`.
+fn endpoint_query(
+    sequence: u64,
+    operation: &'static str,
+    result: io::Result<SocketAddr>,
+) -> Result<Option<SocketAddr>, Error> {
+    match result {
+        Ok(endpoint) => Ok(Some(endpoint)),
+        Err(source) if source.kind() == io::ErrorKind::NotConnected => Ok(None),
+        Err(source) => Err(execution(
+            sequence,
+            tcp::Error::Evidence { operation, source },
+        )),
+    }
 }
 
 fn socket_error(error: tcp::Error) -> io::Error {

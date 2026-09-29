@@ -3,11 +3,18 @@
 
 use std::fmt;
 use std::net::IpAddr;
+use std::str::FromStr;
+
+use super::Error;
+use crate::field::parse_mac;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct MacAddress(pub [u8; 6]);
 
 impl MacAddress {
+    /// The Ethernet broadcast address, `ff:ff:ff:ff:ff:ff`.
+    pub const BROADCAST: Self = Self([0xff; 6]);
+
     /// The Ethernet group address an IP multicast destination maps to
     /// (RFC 1112 section 6.4 for IPv4, RFC 2464 section 7 for IPv6).
     pub fn for_ip_multicast(destination: IpAddr) -> Option<Self> {
@@ -29,6 +36,16 @@ impl fmt::Display for MacAddress {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [a, b, c, d, e, f] = self.0;
         write!(formatter, "{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
+    }
+}
+
+impl FromStr for MacAddress {
+    type Err = Error;
+
+    /// Accepts six two-digit hexadecimal bytes joined by one repeated `:` or `-`, in upper- or
+    /// lower-case digits; [`fmt::Display`] writes lower-case with `:`.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_mac(text).map(Self).ok_or(Error::InvalidMacAddress)
     }
 }
 
@@ -87,6 +104,51 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
+
+    #[test]
+    fn broadcast_is_the_all_ones_ethernet_address() {
+        assert_eq!(MacAddress::BROADCAST, MacAddress([0xff; 6]));
+        assert_eq!(MacAddress::BROADCAST.to_string(), "ff:ff:ff:ff:ff:ff");
+    }
+
+    #[test]
+    fn mac_addresses_parse_with_either_separator_and_digit_case() {
+        let expected = MacAddress([0x02, 0x00, 0xab, 0xcd, 0xef, 0x01]);
+        for text in [
+            "02:00:ab:cd:ef:01",
+            "02-00-AB-CD-EF-01",
+            "02:00:aB:Cd:eF:01",
+        ] {
+            assert_eq!(text.parse(), Ok(expected), "{text}");
+        }
+        assert_eq!(expected.to_string().parse(), Ok(expected));
+    }
+
+    #[test]
+    fn malformed_mac_addresses_are_refused() {
+        for text in [
+            "",
+            "02:00:00:00:00",
+            "02:00:00:00:00:01:02",
+            "02:00:00:00:00:01:",
+            "02:00-00:00:00:01",
+            "02-00:00-00:00-01",
+            "0200.0000.0001",
+            "020000000001",
+            "2:0:0:0:0:1",
+            "002:00:00:00:00:01",
+            "02:00:00:00:00:0g",
+            "+2:00:00:00:00:01",
+            "02:00:00:00:00:-1",
+            " 02:00:00:00:00:01",
+        ] {
+            assert_eq!(
+                text.parse::<MacAddress>(),
+                Err(Error::InvalidMacAddress),
+                "{text:?}"
+            );
+        }
+    }
 
     #[test]
     fn ip_multicast_groups_map_to_their_ethernet_group_addresses() {

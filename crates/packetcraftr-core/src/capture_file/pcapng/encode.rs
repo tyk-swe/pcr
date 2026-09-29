@@ -83,17 +83,7 @@ pub(in crate::capture_file) fn write_interface_description<W: Write>(
     write_u32(writer, endianness, snap_len)?;
     write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;
     write_u16(writer, endianness, 1)?;
-    let resolution = match timestamp_resolution {
-        TimestampResolution::Decimal(exponent) if exponent <= 0x7f => exponent,
-        TimestampResolution::Binary(exponent) if exponent <= 0x7f => exponent | 0x80,
-        TimestampResolution::Decimal(exponent) => {
-            return Err(Error::InvalidTimestampResolution { base: 10, exponent });
-        }
-        TimestampResolution::Binary(exponent) => {
-            return Err(Error::InvalidTimestampResolution { base: 2, exponent });
-        }
-    };
-    writer.write_all(&[resolution, 0, 0, 0])?;
+    writer.write_all(&[timestamp_resolution.to_tsresol()?, 0, 0, 0])?;
     if timestamp_offset != 0 {
         write_u16(writer, endianness, PCAPNG_OPTION_IF_TSOFFSET)?;
         write_u16(writer, endianness, 8)?;

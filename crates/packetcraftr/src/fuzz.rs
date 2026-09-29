@@ -3,7 +3,7 @@
 
 //! Authorized, paced live execution of packet-layer fuzz campaigns.
 
-pub const MAX_RATE: u32 = 1_000_000;
+pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 
 const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 

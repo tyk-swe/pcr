@@ -20,7 +20,7 @@ fn client() -> Client<common::FakeProviders<FixedRoutes, NeverTransmit>> {
 
 #[test]
 fn clients_share_only_the_runtime_selected_by_the_embedder() {
-    let runtime = Runtime::new(1);
+    let runtime = Runtime::new(1).unwrap();
     let first = client().with_runtime(runtime.clone());
     let second = client().with_runtime(runtime.clone());
     let isolated = client();

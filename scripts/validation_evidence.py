@@ -1,9 +1,10 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Shared contracts and provenance for validation reports (not product output)."""
+"""Shared contracts, provenance and frame checksum for validation reports (not product output)."""
 import hashlib
 import pathlib
 import re
+import struct
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -130,8 +131,19 @@ def validate_decoder(report, expected_tshark=TSHARK_VERSION):
 
 
 def digest(path):
+    hasher = hashlib.sha256()
     with pathlib.Path(path).open('rb') as source:
-        return hashlib.file_digest(source, 'sha256').hexdigest()
+        for block in iter(lambda: source.read(65536), b''):
+            hasher.update(block)
+    return hasher.hexdigest()
+
+
+def checksum(data):
+    data += b'\0' * (len(data) % 2)
+    total = sum(struct.unpack(f'!{len(data) // 2}H', data))
+    while total >> 16:
+        total = (total & 0xffff) + (total >> 16)
+    return (~total) & 0xffff
 
 
 def provenance(binary):

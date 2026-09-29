@@ -59,8 +59,9 @@ pub struct ByteCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResponseCheck {
-    Any,
-    Dns,
+    // Struct variants, because serde ignores `deny_unknown_fields` on tagged unit variants.
+    Any {},
+    Dns {},
     Bytes {
         checks: Vec<ByteCheck>,
         #[serde(default)]
@@ -217,6 +218,20 @@ mod tests {
         );
         for invalid in ["0", "zz", &"00".repeat(MAX_PAYLOAD_BYTES + 1)] {
             assert!(hex::decode(invalid).is_err(), "{}", invalid.len());
+        }
+    }
+
+    #[test]
+    fn response_checks_without_fields_keep_their_tag_only_shape() {
+        for (check, json) in [
+            (ResponseCheck::Any {}, serde_json::json!({"type": "any"})),
+            (ResponseCheck::Dns {}, serde_json::json!({"type": "dns"})),
+        ] {
+            assert_eq!(serde_json::to_value(&check).expect("serializes"), json);
+            assert_eq!(
+                serde_json::from_value::<ResponseCheck>(json).expect("parses"),
+                check
+            );
         }
     }
 }

@@ -13,9 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const MAX_SOURCES: usize = 16;
+/// Sources one group arms at once. One worker-pool slot stays free for the
+/// persistent Linux netlink route worker and other pooled work; without it the
+/// last source of a full group is refused while the other readers run.
+pub const MAX_SOURCES: usize = crate::resources::WORKER_CAPACITY - 1;
 /// Longest wait on one source before the group checks the others.
 const POLL_SLICE: Duration = Duration::from_millis(5);
+const MAX_INTERFACE_NAME_BYTES: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct GroupRequest {
@@ -31,13 +35,15 @@ impl GroupRequest {
         super::validate_filter_length(self.filter.as_deref())?;
         let count = self.interfaces.len();
         if count == 0 || count > MAX_SOURCES {
-            return Err(invalid("select 1..=16 capture interfaces"));
+            return Err(invalid("select 1..=15 capture interfaces"));
         }
         self.limits.validate()?;
         self.native.validate(&self.limits)?;
         let mut identities = HashSet::new();
         for interface in &self.interfaces {
-            if interface.name.len() > 4096 || !identities.insert(interface.index) {
+            if interface.name.len() > MAX_INTERFACE_NAME_BYTES
+                || !identities.insert(interface.index)
+            {
                 return Err(invalid("interface identities must be distinct and bounded"));
             }
         }
@@ -144,14 +150,20 @@ static UNARMED: Metadata = Metadata {
     },
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lifecycle {
+    New,
+    Armed,
+    Ready,
+    Closed,
+}
+
 pub struct Group<C: Session> {
     requests: Vec<Request>,
     sources: Vec<Owned<C>>,
     cleanup: Vec<Error>,
     cursor: usize,
-    armed: bool,
-    ready: bool,
-    closed: bool,
+    lifecycle: Lifecycle,
 }
 
 impl<C: Session> Group<C> {
@@ -163,9 +175,7 @@ impl<C: Session> Group<C> {
             requests,
             cleanup: Vec::new(),
             cursor: 0,
-            armed: false,
-            ready: false,
-            closed: false,
+            lifecycle: Lifecycle::New,
         })
     }
 
@@ -174,27 +184,31 @@ impl<C: Session> Group<C> {
         provider: &P,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        if self.armed || self.closed {
-            return Err(self.fail(Error::CaptureGroupState));
+        self.arm_sources(provider, deadline)
+            .map_err(|error| self.fail(error))
+    }
+
+    fn arm_sources<P: Provider<Capture = C>>(
+        &mut self,
+        provider: &P,
+        deadline: &Deadline,
+    ) -> Result<(), Error> {
+        if self.lifecycle != Lifecycle::New {
+            return Err(Error::CaptureGroupState);
         }
-        self.armed = true;
+        self.lifecycle = Lifecycle::Armed;
         for index in 0..self.requests.len() {
-            if let Err(error) = check_cancelled(deadline) {
-                return Err(self.fail(error));
-            }
+            deadline.check_cancelled()?;
             let request = &self.requests[index];
-            let capture = match provider.arm_capture(request, deadline) {
-                Ok(capture) => capture,
-                Err(source) => {
-                    let failure = Error::CaptureSource {
+            let capture =
+                provider
+                    .arm_capture(request, deadline)
+                    .map_err(|source| Error::CaptureSource {
                         index,
                         interface: request.interface.clone(),
                         phase: Phase::Arm,
                         source: Box::new(source),
-                    };
-                    return Err(self.fail(failure));
-                }
-            };
+                    })?;
             let metadata = capture.metadata();
             let native = &metadata.native;
             let valid = capture.source_count() == 1
@@ -212,7 +226,7 @@ impl<C: Session> Group<C> {
                     .consistent_with(request.native.timestamp_precision);
             // Keep reported identity even on a contract failure, while bounding
             // an injected provider's invalid name before copying it.
-            let reported_name = if metadata.interface.name.len() > 4096 {
+            let reported_name = if metadata.interface.name.len() > MAX_INTERFACE_NAME_BYTES {
                 format!(
                     "{}... [truncated]",
                     metadata
@@ -252,10 +266,10 @@ impl<C: Session> Group<C> {
                 shutdown_attempted: false,
             });
             if !valid {
-                return Err(self.fail(Error::CaptureSourceContract {
+                return Err(Error::CaptureSourceContract {
                     index,
                     reason: "activation metadata disagrees with the request",
-                }));
+                });
             }
         }
         Ok(())
@@ -285,17 +299,14 @@ impl<C: Session> Group<C> {
         wait: &Deadline,
         caller: &Deadline,
     ) -> Result<Option<Captured>, Error> {
-        let mut captured = match self.sources[index].capture.next_captured_frame(wait) {
-            Ok(Some(captured)) => captured,
-            Ok(None) => return Ok(None),
-            Err(source) => {
-                let failure = self.failure(index, Phase::Receive, source);
-                return Err(self.fail(failure));
-            }
+        let Some(mut captured) = self.sources[index]
+            .capture
+            .next_captured_frame(wait)
+            .map_err(|source| self.failure(index, Phase::Receive, source))?
+        else {
+            return Ok(None);
         };
-        if let Err(error) = check_cancelled(caller) {
-            return Err(self.fail(error));
-        }
+        caller.check_cancelled()?;
         let source = &mut self.sources[index].source;
         if captured.frame.link_type != source.metadata.link_type
             || captured.frame.bytes().len() > source.metadata.snap_length
@@ -304,10 +315,10 @@ impl<C: Session> Group<C> {
                 .interface
                 .is_some_and(|interface| interface != source.metadata.interface.index)
         {
-            return Err(self.fail(Error::CaptureSourceContract {
+            return Err(Error::CaptureSourceContract {
                 index,
                 reason: "captured frame disagrees with activated source metadata",
-            }));
+            });
         }
         let (Some(frames), Some(bytes)) = (
             source.delivered_frames.checked_add(1),
@@ -315,15 +326,90 @@ impl<C: Session> Group<C> {
                 .delivered_bytes
                 .checked_add(u64::from(captured.frame.captured_length())),
         ) else {
-            return Err(self.fail(Error::CaptureSourceContract {
+            return Err(Error::CaptureSourceContract {
                 index,
                 reason: "delivery counters overflowed",
-            }));
+            });
         };
         source.delivered_frames = frames;
         source.delivered_bytes = bytes;
         captured.source = index;
         Ok(Some(captured))
+    }
+
+    fn wait_sources_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
+        if self.lifecycle != Lifecycle::Armed {
+            return Err(Error::CaptureGroupState);
+        }
+        let Some(deadline) = super::wait_end(caller)? else {
+            return Err(Error::CaptureReadiness {
+                message: "capture readiness deadline expired".to_owned(),
+            });
+        };
+        for index in 0..self.sources.len() {
+            caller.check_cancelled()?;
+            if crate::deadline::remaining_before(deadline).is_none() {
+                return Err(self.failure(
+                    index,
+                    Phase::Ready,
+                    Error::CaptureReadiness {
+                        message: "shared capture readiness deadline expired".to_owned(),
+                    },
+                ));
+            }
+            self.sources[index]
+                .capture
+                .wait_ready(caller)
+                .map_err(|source| self.failure(index, Phase::Ready, source))?;
+            if Instant::now() > deadline {
+                return Err(self.failure(
+                    index,
+                    Phase::Ready,
+                    Error::CaptureReadiness {
+                        message: "provider exceeded shared readiness timeout".to_owned(),
+                    },
+                ));
+            }
+            self.sources[index].source.ready = true;
+        }
+        caller.check_cancelled()?;
+        self.lifecycle = Lifecycle::Ready;
+        Ok(())
+    }
+
+    /// Rotation after every returned record prevents a busy interface starving
+    /// the others.
+    fn receive_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
+        if self.lifecycle != Lifecycle::Ready {
+            return Err(Error::CaptureGroupState);
+        }
+        let deadline = super::wait_end(caller)?;
+        let immediate = Deadline::new(Duration::ZERO);
+        loop {
+            caller.check_cancelled()?;
+            for _ in 0..self.sources.len() {
+                let index = self.cursor;
+                self.cursor = (self.cursor + 1) % self.sources.len();
+                if let Some(captured) = self.poll(index, &immediate, caller)? {
+                    return Ok(Some(captured));
+                }
+            }
+            let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
+                return Ok(None);
+            };
+            let index = self.cursor;
+            self.cursor = (self.cursor + 1) % self.sources.len();
+            let wait = remaining.min(POLL_SLICE);
+            let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
+            let started = Instant::now();
+            if let Some(captured) = self.poll(index, &slice, caller)? {
+                return Ok(Some(captured));
+            }
+            // Test/injected providers may return early: keep the wait from busy-looping.
+            if let Some(pause) = wait.checked_sub(started.elapsed()) {
+                std::thread::sleep(pause.min(Duration::from_millis(1)));
+            }
+        }
     }
 
     fn failure(&self, index: usize, phase: Phase, source: Error) -> Error {
@@ -341,8 +427,7 @@ impl<C: Session> Group<C> {
     }
 
     fn shutdown_all(&mut self) {
-        self.closed = true;
-        self.ready = false;
+        self.lifecycle = Lifecycle::Closed;
         for owned in &mut self.sources {
             if owned.shutdown_attempted {
                 continue;
@@ -384,96 +469,12 @@ impl<C: Session> Session for Group<C> {
     }
 
     fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
-        if !self.armed || self.closed || self.ready {
-            return Err(self.fail(Error::CaptureGroupState));
-        }
-        if let Err(error) = check_cancelled(caller) {
-            return Err(self.fail(error));
-        }
-        let deadline = match super::wait_end(caller) {
-            Ok(Some(deadline)) => deadline,
-            Ok(None) => {
-                return Err(self.fail(Error::CaptureReadiness {
-                    message: "capture readiness deadline expired".to_owned(),
-                }));
-            }
-            Err(error) => return Err(self.fail(error)),
-        };
-        for index in 0..self.sources.len() {
-            if let Err(error) = check_cancelled(caller) {
-                return Err(self.fail(error));
-            }
-            if crate::deadline::remaining_before(deadline).is_none() {
-                let failure = self.failure(
-                    index,
-                    Phase::Ready,
-                    Error::CaptureReadiness {
-                        message: "shared capture readiness deadline expired".to_owned(),
-                    },
-                );
-                return Err(self.fail(failure));
-            }
-            if let Err(source) = self.sources[index].capture.wait_ready(caller) {
-                let failure = self.failure(index, Phase::Ready, source);
-                return Err(self.fail(failure));
-            }
-            if Instant::now() > deadline {
-                let failure = self.failure(
-                    index,
-                    Phase::Ready,
-                    Error::CaptureReadiness {
-                        message: "provider exceeded shared readiness timeout".to_owned(),
-                    },
-                );
-                return Err(self.fail(failure));
-            }
-            self.sources[index].source.ready = true;
-        }
-        if let Err(error) = check_cancelled(caller) {
-            return Err(self.fail(error));
-        }
-        self.ready = true;
-        Ok(())
+        self.wait_sources_ready(caller)
+            .map_err(|error| self.fail(error))
     }
 
-    /// Rotation after every returned record prevents a busy interface starving
-    /// the others.
     fn next_captured_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
-        if !self.ready || self.closed {
-            return Err(self.fail(Error::CaptureGroupState));
-        }
-        let deadline = match super::wait_end(caller) {
-            Ok(deadline) => deadline,
-            Err(error) => return Err(self.fail(error)),
-        };
-        let immediate = Deadline::new(Duration::ZERO);
-        loop {
-            if let Err(error) = check_cancelled(caller) {
-                return Err(self.fail(error));
-            }
-            for _ in 0..self.sources.len() {
-                let index = self.cursor;
-                self.cursor = (self.cursor + 1) % self.sources.len();
-                if let Some(captured) = self.poll(index, &immediate, caller)? {
-                    return Ok(Some(captured));
-                }
-            }
-            let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
-                return Ok(None);
-            };
-            let index = self.cursor;
-            self.cursor = (self.cursor + 1) % self.sources.len();
-            let wait = remaining.min(POLL_SLICE);
-            let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
-            let started = Instant::now();
-            if let Some(captured) = self.poll(index, &slice, caller)? {
-                return Ok(Some(captured));
-            }
-            // Test/injected providers may return early: keep the wait from busy-looping.
-            if let Some(pause) = wait.checked_sub(started.elapsed()) {
-                std::thread::sleep(pause.min(Duration::from_millis(1)));
-            }
-        }
+        self.receive_frame(caller).map_err(|error| self.fail(error))
     }
 
     fn shutdown(&mut self) -> Result<(), Error> {
@@ -506,10 +507,6 @@ impl<C: Session> Session for Group<C> {
                 }
             })
     }
-}
-
-fn check_cancelled(deadline: &Deadline) -> Result<(), Error> {
-    deadline.check_cancelled().map_err(Error::from)
 }
 
 impl<C: Session> Drop for Group<C> {

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::borrow::Cow;
-use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
 
@@ -12,6 +11,7 @@ use super::lexer::CompareOperator;
 use super::path::{ByteSlice, FieldRef, FieldSource, FrameField, StreamTransport};
 use crate::decode::DecodedPacket;
 use crate::field::{FieldKind, FieldValue};
+use crate::frame::unix_floor;
 use crate::layer::Layer;
 use crate::registry::FilterFieldBinding;
 
@@ -165,14 +165,6 @@ fn is_set(value: &FieldValue) -> bool {
     }
 }
 
-/// The compiler rejects other kinds; keep this list aligned with the projection implementation.
-pub(super) fn byte_addressable(kind: FieldKind) -> bool {
-    matches!(
-        kind,
-        FieldKind::Bytes | FieldKind::Mac | FieldKind::Text | FieldKind::Ipv4 | FieldKind::Ipv6
-    )
-}
-
 fn project(
     value: FieldValue,
     binding: &FilterFieldBinding,
@@ -184,40 +176,40 @@ fn project(
         }
         FilterFieldBinding::Direct { .. } | FilterFieldBinding::Either { .. } => value,
     };
-    let Some(slice) = slice else {
-        return Some(value);
-    };
-    let bytes: Bytes = match value {
-        FieldValue::Bytes(bytes) => bytes,
-        FieldValue::Mac(mac) => Bytes::copy_from_slice(&mac),
-        FieldValue::Text(text) => Bytes::from(text.into_bytes()),
-        FieldValue::Ipv4(address) => Bytes::copy_from_slice(&address.octets()),
-        FieldValue::Ipv6(address) => Bytes::copy_from_slice(&address.octets()),
-        _ => return None,
-    };
-    let (start, end) = slice_range(bytes.len(), slice)?;
-    Some(FieldValue::Bytes(crate::byte_slice::checked_slice(
-        &bytes, start, end,
-    )?))
+    match slice {
+        Some(slice) => slice_value(&value, slice),
+        None => Some(value),
+    }
 }
 
 fn project_nested<'a>(
     value: &'a FieldValue,
     slice: Option<ByteSlice>,
 ) -> Option<Cow<'a, FieldValue>> {
-    let Some(slice) = slice else {
-        return Some(Cow::Borrowed(value));
-    };
+    match slice {
+        Some(slice) => slice_value(value, slice).map(Cow::Owned),
+        None => Some(Cow::Borrowed(value)),
+    }
+}
+
+/// The compiler rejects other kinds; keep this list aligned with `slice_value`.
+pub(super) fn byte_addressable(kind: FieldKind) -> bool {
+    matches!(
+        kind,
+        FieldKind::Bytes | FieldKind::Mac | FieldKind::Text | FieldKind::Ipv4 | FieldKind::Ipv6
+    )
+}
+
+fn slice_value(value: &FieldValue, slice: ByteSlice) -> Option<FieldValue> {
     match value {
         FieldValue::Bytes(bytes) => {
             let (start, end) = slice_range(bytes.len(), slice)?;
-            crate::byte_slice::checked_slice(bytes, start, end)
-                .map(|bytes| Cow::Owned(FieldValue::Bytes(bytes)))
+            crate::byte_slice::checked_slice(bytes, start, end).map(FieldValue::Bytes)
         }
-        FieldValue::Mac(mac) => sliced_bytes(mac, slice).map(Cow::Owned),
-        FieldValue::Text(text) => sliced_bytes(text.as_bytes(), slice).map(Cow::Owned),
-        FieldValue::Ipv4(address) => sliced_bytes(&address.octets(), slice).map(Cow::Owned),
-        FieldValue::Ipv6(address) => sliced_bytes(&address.octets(), slice).map(Cow::Owned),
+        FieldValue::Mac(mac) => sliced_bytes(mac, slice),
+        FieldValue::Text(text) => sliced_bytes(text.as_bytes(), slice),
+        FieldValue::Ipv4(address) => sliced_bytes(&address.octets(), slice),
+        FieldValue::Ipv6(address) => sliced_bytes(&address.octets(), slice),
         _ => None,
     }
 }
@@ -242,24 +234,51 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
     Some(match which {
         FrameField::Number => FieldValue::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.
-        FrameField::TimeEpoch => match frame.timestamp?.duration_since(UNIX_EPOCH) {
-            Ok(elapsed) => FieldValue::Unsigned(elapsed.as_secs()),
-            Err(error) => {
-                let elapsed = error.duration();
-                let magnitude = elapsed
-                    .as_secs()
-                    .checked_add(u64::from(elapsed.subsec_nanos() != 0))?;
-                let seconds = if magnitude == 1_u64 << 63 {
-                    i64::MIN
-                } else {
-                    i64::try_from(magnitude).ok()?.checked_neg()?
-                };
-                FieldValue::Signed(seconds)
+        FrameField::TimeEpoch => {
+            let (seconds, _) = unix_floor(frame.timestamp?);
+            match u64::try_from(seconds) {
+                Ok(seconds) => FieldValue::Unsigned(seconds),
+                Err(_) => FieldValue::Signed(i64::try_from(seconds).ok()?),
             }
-        },
+        }
         FrameField::Length => FieldValue::Unsigned(u64::from(frame.original_length())),
         FrameField::CapturedLength => FieldValue::Unsigned(u64::from(frame.captured_length())),
         FrameField::InterfaceId => FieldValue::Unsigned(u64::from(frame.interface?)),
         FrameField::LinkType => FieldValue::Unsigned(u64::from(frame.link_type.0)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::*;
+
+    #[test]
+    fn slice_value_accepts_exactly_the_byte_addressable_kinds() {
+        let whole = ByteSlice {
+            start: 0,
+            end: None,
+        };
+        for value in [
+            FieldValue::Bool(true),
+            FieldValue::Unsigned(1),
+            FieldValue::Signed(-1),
+            FieldValue::Text("ab".to_owned()),
+            FieldValue::Bytes(Bytes::from_static(b"ab")),
+            FieldValue::Ipv4(Ipv4Addr::LOCALHOST),
+            FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
+            FieldValue::Mac([0; 6]),
+            FieldValue::List(Vec::new()),
+            FieldValue::Object(BTreeMap::new()),
+        ] {
+            assert_eq!(
+                slice_value(&value, whole).is_some(),
+                byte_addressable(value.kind()),
+                "{:?}",
+                value.kind()
+            );
+        }
+    }
 }

@@ -54,15 +54,17 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
                 ..Default::default()
             },
             |record| {
+                let context = record.physical_context();
                 let kept = filter
                     .as_ref()
-                    .map(|filter| record.matches(filter))
+                    .map(|filter| filter.matches(&context))
                     .transpose()
                     .map_err(|source| CliError::classified(source).into_boundary_error())?
                     .unwrap_or(true);
                 if kept {
-                    let values = record
-                        .project(&projector.projection, projector.remaining())
+                    let values = projector
+                        .projection
+                        .values(&context, projector.remaining())
                         .map_err(|source| CliError::classified(source).into_boundary_error())?;
                     projector
                         .emit(record.number, values, stream)
@@ -97,13 +99,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             else {
                 continue;
             };
-            let context = core::filter::Context {
-                decoded: &decoded,
-                derived: &[],
-                number: frames,
-                tcp_stream: None,
-                udp_stream: None,
-            };
+            let context = core::filter::Context::frame(&decoded, frames);
             let values = projector
                 .projection
                 .values(&context, projector.remaining())

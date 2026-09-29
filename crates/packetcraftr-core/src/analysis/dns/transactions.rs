@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Message, Transport};
+use super::Message;
 use crate::analysis::{
+    StreamTransport,
     application::{Error, Limits},
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
@@ -43,7 +44,7 @@ impl Latency {
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub status: TransactionStatus,
-    pub transport: Transport,
+    pub transport: StreamTransport,
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
@@ -57,7 +58,7 @@ pub struct Transaction {
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Key {
-    transport: Transport,
+    transport: StreamTransport,
     stream: u64,
     generation: u64,
     flow: ScopedFlowKey,
@@ -117,7 +118,6 @@ pub(super) struct Tracker {
     pending: BTreeMap<Key, Pending>,
     answered: BTreeMap<Key, Answered>,
     waiting: BTreeMap<Key, Vec<Waiting>>,
-    charged: usize,
 }
 impl Tracker {
     pub(super) fn new(limits: Limits) -> Self {
@@ -126,10 +126,13 @@ impl Tracker {
             pending: BTreeMap::new(),
             answered: BTreeMap::new(),
             waiting: BTreeMap::new(),
-            charged: 0,
         }
     }
-    pub(super) fn observe(&mut self, message: &Message) -> Result<Vec<Transaction>, Error> {
+    pub(super) fn observe(
+        &mut self,
+        message: &Message,
+        retained: &mut usize,
+    ) -> Result<Vec<Transaction>, Error> {
         let Some(key) = Key::from(message) else {
             return Ok(Vec::new());
         };
@@ -140,7 +143,7 @@ impl Tracker {
             .last()
             .ok_or(Error::Sources { number: 0 })?
             .timestamp;
-        self.charged = self.charged.saturating_add(
+        *retained = retained.saturating_add(
             512 + key
                 .questions
                 .iter()
@@ -149,12 +152,7 @@ impl Tracker {
                 })
                 .sum::<usize>(),
         );
-        if self.charged > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.limits.check_retained(*retained)?;
         if !dns.response {
             self.answered.remove(&key);
             if let Some(pending) = self.pending.get_mut(&key) {

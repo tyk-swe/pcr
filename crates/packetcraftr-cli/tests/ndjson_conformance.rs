@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr_core as core;
 
 use packetcraftr_cli::output;
+use packetcraftr_cli::test_support::sent_packet_with;
 use serde_json::{Value, json};
 
 mod common;
@@ -203,7 +204,6 @@ fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
     packet.push(core::layer::Raw::new(bytes.to_vec()));
     core::decode::DecodedPacket {
         packet,
-        original: frame.bytes().clone(),
         frame,
         layout: core::layout::PacketLayout::default(),
         diagnostics: Vec::new(),
@@ -298,65 +298,13 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Event) {
     (case, live)
 }
 
-fn sent_packet() -> packetcraftr::evidence::SentPacket {
-    use packetcraftr::route::{Materialized, Plan};
-    use packetcraftr_netio::link::{Capability, Mode};
-    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
-
-    let mut packet = core::packet::Packet::new();
-    packet.push(core::layer::Raw::new(vec![0_u8]));
-    let registry = core::protocol::builtin::registry();
-    let built = core::build::Builder::new(registry)
-        .build(
-            packet,
-            core::codec::Context::default(),
-            core::build::Options::default(),
-        )
-        .expect("sent fixture builds");
-    let route = Materialized {
-        plan: Plan {
-            decision: Decision {
-                interface: packetcraftr_netio::interface::Id {
-                    name: "fixture0".to_owned(),
-                    index: 1,
-                },
-                source_mac: None,
-                selected_source: None,
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: SelectionReason::InterfaceOnly,
-                destination_scope: Scope::Link,
-                mtu: u32::MAX,
-                capability: Capability::Layer3,
-                link_type: core::frame::LinkType::RAW,
-            },
-            mode: Mode::Layer3,
-            lookup_destination: None,
-            final_destination: None,
-            visited_destinations: Vec::new(),
-            packet_source: None,
-            neighbor_source: None,
-            neighbor_target: None,
-            destination_mac: None,
-            source_mac: None,
-            neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: false,
-        },
-        neighbor_resolution: None,
-    };
-    let report = packetcraftr_netio::transmit::Submission::start()
-        .complete(built.bytes.len(), built.bytes.clone());
-    packetcraftr::evidence::SentPacket::try_new(built, route, report).expect("trusted sent fixture")
-}
-
 #[test]
 fn production_typed_event_variants_are_schema_valid() {
     let read = output::read::Event::from(output::read::Frame::try_from((1, frame(&[1]))).unwrap());
     validate_typed_event(output::contract::Command::Read, read, Vec::new());
-    let capture = output::capture::Event::try_from((1, frame(&[1]))).unwrap();
+    let capture = output::read::Frame::try_from((1, frame(&[1]))).unwrap();
     validate_typed_event(output::contract::Command::Capture, capture, Vec::new());
-    let capture_decoded =
-        output::capture::Event::try_from((1, frame(&[1]), &decoded(&[1]))).unwrap();
+    let capture_decoded = output::read::Frame::try_from((1, frame(&[1]), &decoded(&[1]))).unwrap();
     validate_typed_event(
         output::contract::Command::Capture,
         capture_decoded,
@@ -595,7 +543,7 @@ fn validate_active_event_variants() {
                 attempt: 1,
                 udp_payload: bytes::Bytes::new(),
             },
-            sent: Arc::new(sent_packet()),
+            sent: sent_packet_with(Vec::new()),
         }),
         packetcraftr::scan::Event::Probe {
             target: Arc::from("scan.test"),
@@ -834,7 +782,7 @@ fn validate_exchange_event_variants() {
     let events = vec![
         packetcraftr::exchange::Event::Sent {
             request_index: 0,
-            sent: Arc::new(sent_packet()),
+            sent: sent_packet_with(Vec::new()),
         },
         packetcraftr::exchange::Event::Response(packetcraftr::exchange::Response {
             request_index: 0,

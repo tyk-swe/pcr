@@ -124,7 +124,7 @@ fn client(
     provider: Provider,
     count: u64,
 ) -> packetcraftr::Client<impl packetcraftr::CaptureProviders> {
-    crate::system::fixture::capturing(
+    crate::commands::test_support::capturing(
         registry(),
         packetcraftr::policy::Policy {
             max_packets_per_operation: count,
@@ -218,6 +218,8 @@ fn runtime_failure_finalizes_saved_capture_and_retains_partial_evidence() {
         value["capture"]["summary"]["files"]["files"][0]["finalized"],
         true
     );
+    assert_eq!(value["capture"]["summary"]["files"]["compression"], "gzip");
+    assert_eq!(value["capture"]["summary"]["files"]["retention"], "stop");
     assert_eq!(value["capture"]["summary"]["files"]["frames_written"], 2);
     assert_eq!(buffer.records().len(), 2);
     let input =

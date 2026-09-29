@@ -4,7 +4,7 @@
 use crate::command_options::InterfaceSelector;
 use crate::command_options::{
     Budget, CaptureLimitsArgs, CompressionArgs, DecodeArgs, Destination, TimeoutArgs,
-    TrafficBudgetArgs, Window, default_limit_bytes,
+    TrafficBudgetArgs, Window,
 };
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
@@ -212,17 +212,7 @@ impl From<Retention> for crate::output::capture::Retention {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Captured;
 
-pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
-
 impl Budget for Captured {
-    fn max_packets() -> u64 {
-        DEFAULT_CAPTURED_FRAMES
-    }
-
-    fn max_bytes() -> u64 {
-        default_limit_bytes()
-    }
-
     const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
     const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
 }

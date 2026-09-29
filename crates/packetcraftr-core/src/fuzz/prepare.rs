@@ -14,13 +14,13 @@ use crate::{
     registry::Registry,
 };
 
-use super::MAX_TARGET_FIELDS;
 use super::decode::dissect_built;
 use super::error::{BaseFault, Error, TargetFault};
-use super::mutation::{bounded_value_size, index_from, mutation_value, shrink_values};
-use super::report::{Case, CaseFailure, CaseOutcome, Mutation};
+use super::mutation::{ValueLimit, bounded_value_size, index_from, mutation_value, shrink_values};
+use super::report::{Case, CaseFailure, CaseOutcome, Mutation, Stats};
 use super::request::{Limits, Request, Strategy, Target};
 use super::rng::case_seed;
+use super::{MAX_TARGET_FIELDS, MAX_VALUE_NESTING};
 
 #[derive(Clone)]
 pub(super) struct ResolvedField {
@@ -37,7 +37,7 @@ pub(super) fn prepare_with_events<F>(
     registry: Arc<Registry>,
     deadline: &mut Deadline,
     emit: &mut F,
-) -> Result<PreparedCases, Error>
+) -> Result<Stats, Error>
 where
     F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
@@ -75,11 +75,16 @@ where
         builder: &builder,
         dissector: &dissector,
     };
-    let mut campaign = prepare_cases(&inputs, deadline, emit)?;
-    campaign.elapsed = started.elapsed();
+    let counters = prepare_cases(&inputs, deadline, emit)?;
+    let elapsed = started.elapsed();
     deadline.check_cancelled()?;
-    deadline.account(campaign.elapsed).map_err(Error::from)?;
-    Ok(campaign)
+    deadline.account(elapsed).map_err(Error::from)?;
+    Ok(Stats {
+        cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
+        cases_built: counters.built_cases,
+        bytes: counters.built_bytes,
+        elapsed,
+    })
 }
 
 #[derive(Default)]
@@ -87,12 +92,6 @@ struct Counters {
     built_cases: u64,
     built_bytes: u64,
     retained_bytes: u64,
-}
-
-pub(super) struct PreparedCases {
-    pub(super) built_case_count: u64,
-    pub(super) built_byte_count: u64,
-    pub(super) elapsed: Duration,
 }
 
 struct CaseInputs<'a> {
@@ -108,7 +107,7 @@ fn prepare_cases<F>(
     inputs: &CaseInputs<'_>,
     deadline: &Deadline,
     emit: &mut F,
-) -> Result<PreparedCases, Error>
+) -> Result<Counters, Error>
 where
     F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
@@ -118,11 +117,7 @@ where
         let case = prepare_case(inputs, offset, &mut counters)?;
         emit(case, deadline)?;
     }
-    Ok(PreparedCases {
-        built_case_count: counters.built_cases,
-        built_byte_count: counters.built_bytes,
-        elapsed: Duration::ZERO,
-    })
+    Ok(counters)
 }
 
 fn prepare_case(
@@ -272,9 +267,7 @@ fn build_case(
             }
             case.built = Some(built);
             case.outcome = CaseOutcome::Built;
-            {
-                counters.built_cases += 1;
-            }
+            counters.built_cases += 1;
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
@@ -358,14 +351,26 @@ fn charge_value(total: u64, value: &FieldValue, limits: Limits) -> Result<u64, E
     let remaining = limits
         .max_total_bytes
         .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
-    let size = bounded_value_size(value, remaining, limits.max_list_items).ok_or(
-        Error::ValueTooLarge {
-            limit: limits.max_total_bytes,
-        },
-    )?;
+    let size = bounded_value_size(value, remaining, limits.max_list_items)
+        .map_err(|reason| value_limit_error(reason, limits))?;
     total
         .checked_add(u64::try_from(size).unwrap_or(u64::MAX))
         .ok_or(byte_limit(u64::MAX, limit))
+}
+
+fn value_limit_error(reason: ValueLimit, limits: Limits) -> Error {
+    match reason {
+        ValueLimit::Bytes => Error::ValueTooLarge {
+            limit: limits.max_total_bytes,
+        },
+        ValueLimit::Items { items } => Error::ValueItems {
+            items,
+            limit: limits.max_list_items,
+        },
+        ValueLimit::Nesting => Error::ValueNesting {
+            limit: MAX_VALUE_NESTING,
+        },
+    }
 }
 
 fn total_byte_limit(limits: Limits) -> u64 {
@@ -536,8 +541,7 @@ mod tests {
                     Ok(())
                 },
             )
-            .err()
-            .expect("cancelled preparation must fail");
+            .expect_err("cancelled preparation must fail");
             assert_eq!(emitted, 1);
             assert_eq!(error.classification().code, "io.cancelled");
         }

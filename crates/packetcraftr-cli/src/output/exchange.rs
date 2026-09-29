@@ -42,7 +42,9 @@ impl TryFrom<packetcraftr::exchange::Aggregate> for Published<Report> {
             .into_iter()
             .map(|sent| {
                 let (frame, sent_diagnostics) = sent_output(sent);
-                diagnostics.extend(sent_diagnostics);
+                for diagnostic in sent_diagnostics {
+                    packetcraftr_core::diagnostic::push_once(&mut diagnostics, diagnostic);
+                }
                 frame
             })
             .collect();
@@ -157,16 +159,12 @@ impl TryFrom<packetcraftr::exchange::Event> for Published<Event> {
 
 impl From<packetcraftr::exchange::Report> for Published<Event> {
     fn from(summary: packetcraftr::exchange::Report) -> Self {
-        let packetcraftr::exchange::Report {
-            unanswered,
-            diagnostics,
-            stats,
-        } = summary;
+        let packetcraftr::exchange::Report { unanswered, stats } = summary;
         Self::new(
             Event::Complete {
                 unanswered: unanswered.into_iter().map(request_index).collect(),
             },
-            diagnostics,
+            Vec::new(),
         )
         .with_stats(stats)
     }

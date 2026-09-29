@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_cli::output::stream::StreamRecord;
+use packetcraftr_cli::test_support::sent_packet_with;
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -10,7 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_cli::output::{build as build_output, dissect as dissect_output};
-use packetcraftr_cli::output::{capture, contract, expert, follow, read, stats};
+use packetcraftr_cli::output::{contract, expert, follow, read, stats};
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamRef;
 use packetcraftr_core::analysis::StreamTransport as AnalysisStreamTransport;
@@ -108,10 +109,6 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         read::Frame::try_from((0, frame.clone())),
         Err(contract::Error::InvalidSourceFrame)
     ));
-    assert!(matches!(
-        capture::Event::try_from((0, frame.clone())),
-        Err(contract::Error::InvalidSourceFrame)
-    ));
     let raw_record = read::Frame::try_from((7, frame.clone())).expect("raw frame converts");
     let dissected_record =
         read::Frame::try_from((7, frame, &decoded)).expect("dissected frame converts");
@@ -154,7 +151,7 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
             .any(|diagnostic| diagnostic.code == "decode.fixture")
     );
 
-    let original = decoded.original.clone();
+    let original = decoded.frame.bytes().clone();
     let link_type = decoded.frame.link_type.0;
     let packetcraftr_cli::output::envelope::Published {
         result: dissected_output,
@@ -386,5 +383,73 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     assert_eq!(
         serde_json::to_value(empty).expect("empty follow output serializes")["chunks"],
         Value::Array(Vec::new())
+    );
+}
+
+fn exchange_aggregate(
+    diagnostics: Vec<Diagnostic>,
+    sent: Vec<Arc<packetcraftr::evidence::SentPacket>>,
+) -> packetcraftr::exchange::Aggregate {
+    packetcraftr::exchange::Aggregate {
+        sent,
+        responses: Vec::new(),
+        unanswered: Vec::new(),
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+        diagnostics,
+        stats: packetcraftr::Stats::default(),
+    }
+}
+
+#[test]
+fn exchange_aggregate_collapses_repeated_build_diagnostics_by_code() {
+    let unbound = || Diagnostic::warning("build.unbound_layers", "layers are unbound");
+    let sent = (0..3).map(|_| sent_packet_with(vec![unbound()])).collect();
+    let published = packetcraftr_cli::output::envelope::Published::<
+        packetcraftr_cli::output::exchange::Report,
+    >::try_from(exchange_aggregate(Vec::new(), sent))
+    .expect("exchange evidence converts");
+
+    assert_eq!(published.result.sent.len(), 3);
+    assert_eq!(
+        published
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>(),
+        ["build.unbound_layers"]
+    );
+}
+
+#[test]
+fn exchange_aggregate_keeps_the_first_diagnostic_seen_for_a_code() {
+    let sent = [
+        vec![
+            Diagnostic::warning("build.unbound_layers", "from a build"),
+            Diagnostic::info("build.fixture", "fixture note"),
+        ],
+        vec![Diagnostic::warning("build.unbound_layers", "from a build")],
+    ]
+    .into_iter()
+    .map(sent_packet_with)
+    .collect();
+    let published = packetcraftr_cli::output::envelope::Published::<
+        packetcraftr_cli::output::exchange::Report,
+    >::try_from(exchange_aggregate(
+        vec![Diagnostic::warning("build.unbound_layers", "from the run")],
+        sent,
+    ))
+    .expect("exchange evidence converts");
+
+    assert_eq!(
+        published
+            .diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.code, diagnostic.message.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("build.unbound_layers", "from the run"),
+            ("build.fixture", "fixture note"),
+        ]
     );
 }

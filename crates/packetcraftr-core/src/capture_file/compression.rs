@@ -93,32 +93,43 @@ impl Classified for Error {
     }
 }
 
-type Source<R> = BufReader<io::Chain<Cursor<Vec<u8>>, EncodedInput<R>>>;
+type Source<R> = BufReader<io::Chain<Cursor<Vec<u8>>, Bounded<R>>>;
 
-struct EncodedInput<R> {
+struct Bounded<R> {
     inner: R,
     remaining: u64,
     limit: u64,
     exceeded: bool,
+    error: fn(u64) -> Error,
 }
-impl<R: Read> Read for EncodedInput<R> {
+impl<R> Bounded<R> {
+    fn new(inner: R, limit: u64, error: fn(u64) -> Error) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+            limit,
+            exceeded: false,
+            error,
+        }
+    }
+    fn limit_error(&self) -> io::Error {
+        io::Error::other((self.error)(self.limit))
+    }
+}
+impl<R: Read> Read for Bounded<R> {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         if bytes.is_empty() {
             return Ok(0);
         }
         if self.exceeded {
-            return Err(io::Error::other(Error::EncodedByteLimit {
-                limit: self.limit,
-            }));
+            return Err(self.limit_error());
         }
         if self.remaining == 0 {
             if self.inner.read(&mut [0u8; 1])? == 0 {
                 return Ok(0);
             }
             self.exceeded = true;
-            return Err(io::Error::other(Error::EncodedByteLimit {
-                limit: self.limit,
-            }));
+            return Err(self.limit_error());
         }
         let allowed = bytes
             .len()
@@ -131,50 +142,50 @@ impl<R: Read> Read for EncodedInput<R> {
         Ok(count)
     }
 }
+
 enum Decoder<R: Read> {
     Plain(Source<R>),
     Gzip(flate2::bufread::MultiGzDecoder<Source<R>>),
     Zstd(zstd::stream::read::Decoder<'static, Source<R>>),
 }
+impl<R: Read> Decoder<R> {
+    fn format(&self) -> Format {
+        match self {
+            Self::Plain(_) => Format::None,
+            Self::Gzip(_) => Format::Gzip,
+            Self::Zstd(_) => Format::Zstd,
+        }
+    }
+}
+impl<R: Read> Read for Decoder<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        let format = self.format();
+        match self {
+            Self::Plain(reader) => reader.read(output),
+            Self::Gzip(reader) => reader.read(output),
+            Self::Zstd(reader) => reader.read(output),
+        }
+        .map_err(|source| io::Error::other(Error::Io { format, source }))
+    }
+}
 
 pub struct Input<R: Read> {
-    decoder: Decoder<R>,
-    format: Format,
-    remaining: u64,
-    limit: u64,
-    exceeded: bool,
+    reader: Bounded<Decoder<R>>,
 }
 impl<R: Read> Input<R> {
     pub fn new(source: R, limits: Limits) -> Result<Self, Error> {
         limits.validate()?;
-        let mut source = EncodedInput {
-            inner: source,
-            remaining: limits.max_encoded_bytes,
-            limit: limits.max_encoded_bytes,
-            exceeded: false,
-        };
-        let mut prefix = vec![0; 4];
-        let mut filled = 0;
-        while filled < prefix.len() {
-            match source.read(&mut prefix[filled..]) {
-                Ok(0) => break,
-                Ok(n) if n <= prefix.len() - filled => filled += n,
-                Ok(_) => {
-                    return Err(Error::Io {
-                        format: Format::None,
-                        source: io::Error::other("reader exceeded prefix buffer"),
-                    });
-                }
-                Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
-                Err(source) => {
-                    return Err(Error::Io {
-                        format: Format::None,
-                        source,
-                    });
-                }
-            }
-        }
-        prefix.truncate(filled);
+        let mut source = Bounded::new(source, limits.max_encoded_bytes, |limit| {
+            Error::EncodedByteLimit { limit }
+        });
+        let mut prefix = Vec::with_capacity(4);
+        (&mut source)
+            .take(4)
+            .read_to_end(&mut prefix)
+            .map_err(|source| Error::Io {
+                format: Format::None,
+                source,
+            })?;
         let format = if prefix.starts_with(&[0x1f, 0x8b]) {
             Format::Gzip
         } else if prefix == [0x28, 0xb5, 0x2f, 0xfd]
@@ -198,55 +209,18 @@ impl<R: Read> Input<R> {
             }
         };
         Ok(Self {
-            decoder,
-            format,
-            remaining: limits.max_decoded_bytes,
-            limit: limits.max_decoded_bytes,
-            exceeded: false,
+            reader: Bounded::new(decoder, limits.max_decoded_bytes, |limit| {
+                Error::ByteLimit { limit }
+            }),
         })
     }
     pub fn format(&self) -> Format {
-        self.format
-    }
-    fn read_inner(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        match &mut self.decoder {
-            Decoder::Plain(reader) => reader.read(output),
-            Decoder::Gzip(reader) => reader.read(output),
-            Decoder::Zstd(reader) => reader.read(output),
-        }
-        .map_err(|source| {
-            io::Error::other(Error::Io {
-                format: self.format,
-                source,
-            })
-        })
+        self.reader.inner.format()
     }
 }
 impl<R: Read> Read for Input<R> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if output.is_empty() {
-            return Ok(0);
-        }
-        if self.exceeded {
-            return Err(io::Error::other(Error::ByteLimit { limit: self.limit }));
-        }
-        if self.remaining == 0 {
-            let count = self.read_inner(&mut [0u8; 1])?;
-            if count == 0 {
-                return Ok(0);
-            }
-            self.exceeded = true;
-            return Err(io::Error::other(Error::ByteLimit { limit: self.limit }));
-        }
-        let allowed = output
-            .len()
-            .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
-        let count = self.read_inner(&mut output[..allowed])?;
-        self.remaining = self
-            .remaining
-            .checked_sub(count as u64)
-            .ok_or_else(|| io::Error::other("decoder exceeded its output buffer"))?;
-        Ok(count)
+        self.reader.read(output)
     }
 }
 

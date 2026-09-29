@@ -137,6 +137,53 @@ impl TryFrom<&scope::Definition> for Scope {
     }
 }
 
+macro_rules! analysis_complete {
+    ($library:ty) => {
+        #[derive(Debug, ::serde::Serialize)]
+        pub struct Complete {
+            pub frames_read: u64,
+            pub frames_matched: u64,
+            pub summary: Summary,
+            pub scopes: Vec<$crate::output::analysis::Scope>,
+            pub incomplete_datagrams: usize,
+            pub source_outcomes_omitted: u64,
+            pub ip_reassembly: $crate::output::reassembly::Report,
+        }
+
+        impl
+            TryFrom<(
+                &::packetcraftr_core::analysis::Summary,
+                $library,
+                Vec<::packetcraftr_core::analysis::scope::Definition>,
+            )> for Complete
+        {
+            type Error = $crate::output::contract::Error;
+
+            fn try_from(
+                (run, summary, scopes): (
+                    &::packetcraftr_core::analysis::Summary,
+                    $library,
+                    Vec<::packetcraftr_core::analysis::scope::Definition>,
+                ),
+            ) -> Result<Self, Self::Error> {
+                Ok(Self {
+                    frames_read: run.frames_read,
+                    frames_matched: run.frames_matched,
+                    summary: summary.into(),
+                    scopes: scopes
+                        .into_iter()
+                        .map($crate::output::analysis::Scope::try_from)
+                        .collect::<Result<_, _>>()?,
+                    incomplete_datagrams: run.incomplete_sources.len(),
+                    source_outcomes_omitted: run.source_outcomes_omitted,
+                    ip_reassembly: (&run.ip_reassembly).into(),
+                })
+            }
+        }
+    };
+}
+pub(super) use analysis_complete;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Clock {
     pub regressions: u64,

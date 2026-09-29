@@ -6,9 +6,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::error::BoundaryError;
-use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::link::Mode as LinkMode;
 
 use super::{Error, Policy, authorize_permissive_live};
 
@@ -226,39 +224,6 @@ impl<'a> DeclaredPackets<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct ReplayFrame<'a> {
-    limits: WireLimits,
-    frame: &'a Frame,
-    mode: LinkMode,
-}
-
-impl<'a> ReplayFrame<'a> {
-    #[must_use]
-    pub const fn new(limits: WireLimits, frame: &'a Frame, mode: LinkMode) -> Self {
-        Self {
-            limits,
-            frame,
-            mode,
-        }
-    }
-
-    #[must_use]
-    pub const fn limits(&self) -> WireLimits {
-        self.limits
-    }
-
-    #[must_use]
-    pub const fn frame(&self) -> &'a Frame {
-        self.frame
-    }
-
-    #[must_use]
-    pub const fn mode(&self) -> LinkMode {
-        self.mode
-    }
-}
-
 /// There is deliberately no `Default` and no permissive fallback:
 ///
 /// ```compile_fail,E0599
@@ -280,7 +245,6 @@ pub enum Operation<'a> {
     Wire(WireLimits),
     Dns(DnsOperation),
     Declared(DeclaredPackets<'a>),
-    Replay(ReplayFrame<'a>),
 }
 
 impl Operation<'_> {
@@ -291,31 +255,8 @@ impl Operation<'_> {
             Self::Wire(limits) => *limits,
             Self::Dns(dns) => dns.limits(),
             Self::Declared(declared) => declared.limits,
-            Self::Replay(replay) => replay.limits,
         }
     }
-
-    #[must_use]
-    pub const fn shape(&self) -> &'static str {
-        match self {
-            Self::Socket(_) => "socket",
-            Self::Wire(_) => "wire",
-            Self::Dns(_) => "dns",
-            Self::Declared(_) => "declared-packet",
-            Self::Replay(_) => "replay",
-        }
-    }
-}
-
-#[must_use]
-pub(crate) fn unsupported_operation(
-    authorizer: &'static str,
-    request: &Operation<'_>,
-) -> BoundaryError {
-    BoundaryError::from_error(Error::UnsupportedOperation {
-        authorizer,
-        operation: request.shape(),
-    })
 }
 
 pub(crate) trait Authorizer {
@@ -358,18 +299,12 @@ impl Policy {
                 }
                 Ok(())
             }
-            Operation::Replay(_) => Err(Error::UnsupportedOperation {
-                authorizer: "the policy authorizer",
-                operation: request.shape(),
-            }),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_core::frame::LinkType;
-
     use packetcraftr_core::error::Classified;
 
     use super::*;
@@ -413,27 +348,6 @@ mod tests {
             .authorize(dns)
             .expect_err("UDP plus TCP connection/message units exceed the policy");
         assert_eq!(error.classification().code, "policy.traffic_unit_limit");
-    }
-
-    #[test]
-    fn the_policy_rejects_replay_requests_explicitly() {
-        let policy = crate::policy::Policy::default();
-        let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
-            .expect("fixture frame");
-
-        let error = policy
-            .authorize(Operation::Replay(ReplayFrame::new(
-                WireLimits::new(1, 20),
-                &frame,
-                LinkMode::Layer3,
-            )))
-            .expect_err("policy authorization cannot stand in for the replay round trip");
-
-        assert_eq!(
-            error.classification().code,
-            "internal.unsupported_operation"
-        );
-        assert!(error.to_string().contains("replay"));
     }
 
     #[test]

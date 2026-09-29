@@ -201,11 +201,7 @@ impl Rules {
             .iter()
             .chain(self.expectations.iter().map(|e| &e.actual))
         {
-            let next = projection.requirements();
-            requirements.stream_index |= next.stream_index;
-            requirements.tcp_stream |= next.tcp_stream;
-            requirements.udp_stream |= next.udp_stream;
-            requirements.timestamp |= next.timestamp;
+            requirements = requirements.union(projection.requirements());
         }
         requirements
     }
@@ -397,7 +393,10 @@ fn compile_fields(
     let projection = Projection::compile(fields.iter().map(String::as_str), registry)
         .map_err(Error::Projection)?;
     for column in projection.columns() {
-        if let Some((_, why)) = CAPTURE_LOCAL_FIELDS.iter().find(|(name, _)| name == column) {
+        if let Some((_, why)) = CAPTURE_LOCAL_FIELDS
+            .iter()
+            .find(|(name, _)| column.eq_ignore_ascii_case(name))
+        {
             return Err(Error::CaptureLocal {
                 role,
                 field: column.clone(),

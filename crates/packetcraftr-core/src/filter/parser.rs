@@ -17,8 +17,9 @@ pub const MAX_FILTER_SET_MEMBERS: usize = 1024;
 
 /// Ceilings on one display filter, applied while compiling it.
 ///
-/// Every value is honored as given, and each ceiling also has a stable
-/// maximum, which [`validate`](Self::validate) enforces.
+/// Every value is honored as given. `max_nesting`, `max_terms`, and
+/// `max_set_members` also have stable maxima, which
+/// [`validate`](Self::validate) enforces; `max_bytes` has none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_bytes: usize,
@@ -80,6 +81,17 @@ pub struct Requirements {
 }
 
 impl Requirements {
+    /// Everything either operand requires.
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            stream_index: self.stream_index || other.stream_index,
+            tcp_stream: self.tcp_stream || other.tcp_stream,
+            udp_stream: self.udp_stream || other.udp_stream,
+            timestamp: self.timestamp || other.timestamp,
+        }
+    }
+
     fn require_stream(&mut self, transport: StreamTransport) {
         self.stream_index = true;
         match transport {
@@ -375,11 +387,10 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
             candidate.push_str(tail);
             next += 1;
         }
-        if !matches!(
-            path::resolve(&candidate, registry, offset),
-            Ok(Resolved::Field(_))
-        ) {
-            break;
+        match path::resolve(&candidate, registry, offset) {
+            Ok(Resolved::Field(_)) => {}
+            Err(error) if next > index + 1 => return Err(error),
+            _ => break,
         }
         combined = candidate;
         index = next;
@@ -444,7 +455,8 @@ fn parse_field_predicate(
             token: Token::Compare(operator),
             offset: operator_offset,
         }) => {
-            let (value, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
+            let (value, next) =
+                parse_literal(&field, tokens, index.saturating_add(1), *operator_offset)?;
             check_literal(&field, &value, *operator_offset)?;
             if value.is_prefix()
                 && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
@@ -468,12 +480,11 @@ fn parse_field_predicate(
             token: Token::Contains,
             offset: operator_offset,
         }) => {
-            let (needle, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
+            let (needle, next) =
+                parse_literal(&field, tokens, index.saturating_add(1), *operator_offset)?;
             check_searchable(&field, &needle, *operator_offset)?;
-            let needle = match Needle::new(needle) {
-                Ok(needle) => needle,
-                Err(literal) => return Err(incompatible(&field, &literal, *operator_offset)),
-            };
+            let needle = Needle::new(needle)
+                .map_err(|literal| incompatible(&field, &literal, *operator_offset))?;
             Ok((Predicate::Contains { field, needle }, next))
         }
         Some(Spanned {
@@ -507,7 +518,7 @@ fn parse_membership(
         });
     };
     if !matches!(first.token, Token::LeftBrace) {
-        let (value, next) = parse_literal(tokens, start, offset)?;
+        let (value, next) = parse_literal(&field, tokens, start, offset)?;
         check_literal(&field, &value, offset)?;
         return Ok((
             Predicate::Membership {
@@ -540,7 +551,7 @@ fn parse_membership(
             index = index.saturating_add(1);
         }
         let member_offset = tokens.get(index).map_or(offset, |token| token.offset);
-        let (value, next) = parse_literal(tokens, index, offset)?;
+        let (value, next) = parse_literal(&field, tokens, index, offset)?;
         check_literal(&field, &value, member_offset)?;
         values.push(value);
         if values.len() > limits.max_set_members {
@@ -560,6 +571,7 @@ fn parse_membership(
 }
 
 fn parse_literal(
+    field: &FieldRef,
     tokens: &[Spanned],
     index: usize,
     operator_offset: usize,
@@ -572,7 +584,17 @@ fn parse_literal(
     };
     let value = match token {
         Token::Text(text) => Literal::Text(text.clone()),
-        Token::Word(word) => literal::parse(word).unwrap_or_else(|| Literal::Text(word.clone())),
+        Token::Word(word) => match literal::parse(word) {
+            Some(value) => value,
+            None if field.is_byte_run() && literal::is_malformed_byte_word(word) => {
+                return Err(Error::UnquotedByteWord {
+                    offset: *offset,
+                    path: field.path.clone(),
+                    literal: word.clone(),
+                });
+            }
+            None => Literal::Text(word.clone()),
+        },
         other => {
             return Err(Error::Syntax {
                 offset: *offset,
@@ -599,9 +621,6 @@ fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(),
 
 /// Without this, a mistyped `contains` compiles and then filters out every packet.
 fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result<(), Error> {
-    if !literal::searchable_needle(needle) {
-        return Err(incompatible(field, needle, offset));
-    }
     if field.specs.is_empty() {
         return Ok(());
     }
@@ -798,6 +817,70 @@ mod tests {
     }
 
     #[test]
+    fn hex_looking_words_are_rejected_only_where_text_would_silently_become_ascii_bytes() {
+        use crate::filter::path::FieldSpec;
+
+        fn field(kinds: &[FieldKind]) -> FieldRef {
+            FieldRef {
+                source: FieldSource::Frame(FrameField::Number),
+                slice: None,
+                specs: kinds
+                    .iter()
+                    .map(|kind| FieldSpec {
+                        kind: *kind,
+                        derived: false,
+                    })
+                    .collect(),
+                path: "fixture".to_owned(),
+            }
+        }
+
+        fn word(text: &str) -> Vec<Spanned> {
+            vec![Spanned {
+                token: Token::Word(text.to_owned()),
+                offset: 7,
+            }]
+        }
+
+        for kinds in [
+            &[FieldKind::Bytes][..],
+            &[FieldKind::Mac],
+            &[FieldKind::Bytes, FieldKind::Mac],
+        ] {
+            for malformed in ["c000", "c0:0"] {
+                assert!(
+                    matches!(
+                        parse_literal(&field(kinds), &word(malformed), 0, 0),
+                        Err(Error::UnquotedByteWord {
+                            offset: 7,
+                            ref path,
+                            ref literal,
+                        }) if path == "fixture" && literal == malformed
+                    ),
+                    "{kinds:?} {malformed}"
+                );
+            }
+            assert!(parse_literal(&field(kinds), &word("GET"), 0, 0).is_ok());
+        }
+        for kinds in [
+            &[][..],
+            &[FieldKind::Text],
+            &[FieldKind::Bytes, FieldKind::Text],
+            &[FieldKind::List],
+        ] {
+            for malformed in ["c000", "c0:0"] {
+                assert!(
+                    matches!(
+                        parse_literal(&field(kinds), &word(malformed), 0, 0),
+                        Ok((Literal::Text(ref text), 1)) if text == malformed
+                    ),
+                    "{kinds:?} {malformed}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn incompatible_prefix_and_contains_operations_fail_during_compilation() {
         let registry = crate::protocol::builtin::registry();
         assert!(matches!(
@@ -820,5 +903,67 @@ mod tests {
             compile("raw.bytes contains 1", &registry, &Limits::default()),
             Err(Error::IncompatibleLiteral { .. })
         ));
+    }
+
+    #[test]
+    fn contains_refusals_report_the_operator_offset_field_kind_and_literal() {
+        let registry = crate::protocol::builtin::registry();
+        let cases = [
+            ("raw.bytes contains 1", 10, "raw.bytes", "bytes", "1"),
+            (
+                "tcp.source_port contains \"x\"",
+                16,
+                "tcp.source_port",
+                "an unsigned number",
+                "\"x\"",
+            ),
+        ];
+
+        for (source, offset, path, kind, literal) in cases {
+            let error = match compile(source, &registry, &Limits::default()) {
+                Ok(_) => panic!("{source} unexpectedly compiled"),
+                Err(error) => error,
+            };
+            let Error::IncompatibleLiteral {
+                offset: actual_offset,
+                path: actual_path,
+                kind: actual_kind,
+                literal: actual_literal,
+            } = error
+            else {
+                panic!("{source}: unexpected error {error}");
+            };
+            assert_eq!(actual_offset, offset, "{source}");
+            assert_eq!(actual_path, path, "{source}");
+            assert_eq!(actual_kind, kind, "{source}");
+            assert_eq!(actual_literal, literal, "{source}");
+        }
+    }
+
+    #[test]
+    fn requirements_union_ors_each_flag_independently() {
+        let none = Requirements::default();
+        let flags: [fn(&mut Requirements); 4] = [
+            |requirements| requirements.stream_index = true,
+            |requirements| requirements.tcp_stream = true,
+            |requirements| requirements.udp_stream = true,
+            |requirements| requirements.timestamp = true,
+        ];
+
+        for (index, set) in flags.iter().enumerate() {
+            let mut one = Requirements::default();
+            set(&mut one);
+            assert_ne!(one, none, "flag {index}");
+            assert_eq!(one.union(none), one, "flag {index}");
+            assert_eq!(none.union(one), one, "flag {index}");
+            for (other_index, other_set) in flags.iter().enumerate() {
+                let mut other = Requirements::default();
+                other_set(&mut other);
+                let mut both = one;
+                other_set(&mut both);
+                assert_eq!(one.union(other), both, "flags {index} and {other_index}");
+            }
+        }
+        assert_eq!(none.union(none), none);
     }
 }

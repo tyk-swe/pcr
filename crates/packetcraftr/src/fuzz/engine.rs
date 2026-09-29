@@ -95,9 +95,7 @@ where
                         timeout: grant.timeout,
                     })
                 },
-                |_, execution, grant, deadline| {
-                    validate_case(request, &builder, &case, execution, grant, deadline)
-                },
+                |_, execution, grant, _| validate_case(request, &builder, &case, execution, grant),
             )?;
             evidence = Some(recorder.record(&mut case, execution, context.deadline())?);
         }
@@ -217,7 +215,6 @@ fn validate_case(
     case: &packet_fuzz::Case,
     execution: &CaseEvidence,
     grant: Grant,
-    deadline: &Deadline,
 ) -> Result<(), Error> {
     let route = execution.sent.route();
     let expected = exact_bytes(builder, &request.campaign.build, case.recipe.clone(), route)
@@ -236,7 +233,6 @@ fn validate_case(
         execution,
         grant.timeout,
         request.campaign.limits.max_packet_bytes,
-        deadline,
     )
 }
 

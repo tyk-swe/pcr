@@ -46,7 +46,14 @@ pub fn fragment_link_type(packet: &Packet) -> Result<LinkType, Error> {
 
 /// Fragments raw-IP or Ethernet/VLAN datagrams.
 pub fn fragment(frame: &Frame, options: FragmentOptions) -> Result<Vec<Frame>, Error> {
-    if options.max_fragments == 0 || options.max_fragments > 8192 {
+    if options.max_fragments == 0 {
+        return Err(Error::LimitRange {
+            field: Limit::MaxFragments,
+            min: 1,
+            max: 8192,
+        });
+    }
+    if options.max_fragments > 8192 {
         return Err(Error::Limit {
             field: Limit::MaxFragments,
             limit: 8192,
@@ -210,7 +217,7 @@ fn ipv6(
             size
         }
         ip_protocol::UDP | ip_protocol::ICMPV6 => 8,
-        132 => 12,
+        ip_protocol::SCTP => 12,
         _ => return Err(Error::Unsupported(Unsupported::Ipv6UpperLayer)),
     };
     if cursor + transport_len > length {

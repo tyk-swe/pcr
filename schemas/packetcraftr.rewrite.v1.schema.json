@@ -26,8 +26,7 @@
             "type": [
               "string",
               "null"
-            ],
-            "maxLength": 8192
+            ]
           },
           "patch": {
             "type": "object",

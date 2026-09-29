@@ -259,6 +259,39 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
     assert!(request.validate().is_err());
 }
 
+#[test]
+fn scan_request_bounds_the_timeout_and_the_probe_rate() {
+    let request = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+
+    let error = Request {
+        timeout: Duration::ZERO,
+        ..request.clone()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::InvalidTimeout { maximum, .. } if maximum == packetcraftr_netio::deadline::MAX_WAIT),
+        "{error:?}"
+    );
+
+    let error = Request {
+        probes_per_second: Some(0),
+        ..request
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "probes_per_second",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
 struct LateResponseExecutor(TimeoutExecutor);
 
 impl Executor<Batch<Probe>> for LateResponseExecutor {
@@ -500,6 +533,68 @@ fn scan_probe_limit_precedes_duration_planning() {
         "{error:?}"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_serial_scan_refuses_a_collection_wider_than_its_evidence_limits_before_any_execution() {
+    let address = "192.0.2.1".parse().unwrap();
+    let mut frames = tcp_scan_request(Target::Address(address));
+    frames.limits.max_evidence_frames = 16;
+    frames.limits.max_undecoded = 16;
+    let mut bytes = tcp_scan_request(Target::Address(address));
+    bytes.limits.max_evidence_bytes = 1 << 20;
+
+    for (request, field) in [(frames, "capture_max_frames"), (bytes, "capture_max_bytes")] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let error = run(
+            &request,
+            &mut AddressListAuthorizer {
+                addresses: vec![address],
+            },
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut RejectingExecutor {
+                calls: Arc::clone(&calls),
+            },
+            &mut NoopClock,
+        )
+        .expect_err("the collection captures more than the evidence limits retain");
+
+        assert!(
+            matches!(&error, Error::InvalidLimit { field: named, .. } if *named == field),
+            "{error:?}"
+        );
+        assert_eq!(
+            packetcraftr_core::error::Classified::classification(&error).code,
+            "cli.scan_limit"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
+fn a_serial_scan_runs_when_its_collection_matches_narrow_evidence_limits() {
+    let address = "192.0.2.1".parse().unwrap();
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_evidence_frames = 16;
+    request.limits.max_undecoded = 16;
+    request.limits.max_evidence_bytes = 1 << 20;
+    request.collection.capture.max_frames = 16;
+    request.collection.capture.max_bytes = 1 << 20;
+    request.collection.max_responses = 16;
+    request.collection.max_unmatched_frames = 16;
+
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TimeoutExecutor::default(),
+        &mut NoopClock,
+    )
+    .expect("bounds that agree are not refused");
+
+    assert_eq!(report.stats.packets_completed, 1);
 }
 
 #[test]

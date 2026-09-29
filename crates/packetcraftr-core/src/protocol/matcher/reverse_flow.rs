@@ -31,12 +31,7 @@ impl ReverseFlowMatcher {
 
 impl ResponseMatcher for ReverseFlowMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
-        let transport = match self.protocol {
-            BuiltinProtocol::Tcp => QuotedTransport::Tcp,
-            BuiltinProtocol::Udp => QuotedTransport::Udp,
-            BuiltinProtocol::Sctp => QuotedTransport::Sctp,
-            _ => return None,
-        };
+        let transport = QuotedTransport::of(self.protocol)?;
         if quoted_icmp_error(request, response, transport).is_some() {
             return Some(Match::new(150));
         }

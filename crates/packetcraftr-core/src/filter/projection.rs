@@ -64,10 +64,7 @@ impl Projection {
             };
             projection.columns.push(field.path.clone());
             projection.fields.push(field.clone());
-            projection.requirements.stream_index |= compiled.requirements.stream_index;
-            projection.requirements.tcp_stream |= compiled.requirements.tcp_stream;
-            projection.requirements.udp_stream |= compiled.requirements.udp_stream;
-            projection.requirements.timestamp |= compiled.requirements.timestamp;
+            projection.requirements = projection.requirements.union(compiled.requirements);
         }
         if projection.fields.is_empty() {
             return Err(invalid_field(Error::Empty));

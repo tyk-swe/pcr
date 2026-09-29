@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{BuiltinProtocol, builtin, network::Ipv4, transport::Udp};
+use packetcraftr_core::registry::Discriminator;
 use packetcraftr_core::{build, codec, decode, layer::Raw, packet::Packet};
 
 fn representative_packet() -> Packet {
@@ -175,6 +176,28 @@ fn every_mapped_link_type_maps_to_its_root_protocol_and_back() {
     assert_eq!(unmapped.root_protocol(), None);
     assert!(!unmapped.is_raw_ip());
     assert!(registry.root_for_link_type(unmapped).is_none());
+}
+
+#[test]
+fn raw_ip_root_is_not_a_parent_of_any_protocol() {
+    let registry = builtin::registry();
+
+    for &protocol in BuiltinProtocol::ALL {
+        let parents = registry.parent_bindings(protocol.as_str());
+        assert!(
+            parents
+                .iter()
+                .all(|(parent, _)| parent.as_str() != "raw_ip"),
+            "{} lists raw_ip as a parent: {parents:?}",
+            protocol.as_str()
+        );
+    }
+    for protocol_number in [1, 4, 6, 17, 41, 58] {
+        assert_eq!(
+            registry.child_for("raw_ip", Discriminator(protocol_number)),
+            None
+        );
+    }
 }
 
 #[test]

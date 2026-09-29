@@ -79,7 +79,7 @@ pub(super) fn build_batches(
     Ok(batches)
 }
 
-fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndpoint, Error> {
+pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndpoint, Error> {
     let declared_port = || {
         request.destination_port.ok_or_else(|| Error::InvalidPort {
             message: format!(

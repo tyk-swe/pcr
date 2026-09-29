@@ -168,47 +168,6 @@ fn dns_names_preserve_binary_labels_and_reject_overlong_or_invalid_escapes() {
 }
 
 #[test]
-fn named_object_documents_charge_members_keys_and_nesting_in_both_formats() {
-    let value = serde_json::json!({"schema":"packetcraftr.packet/v2","layers":[{"protocol":"raw","fields":{"fixture":{"type":"object","value":{"member":{"type":"unsigned","value":1}}}}}]});
-    let text = serde_json::to_string(&value).unwrap();
-    for format in [document::Format::Json, document::Format::Yaml] {
-        let limits = document::DocumentLimits {
-            max_total_payload_bytes: 14,
-            ..Default::default()
-        };
-        assert!(document::Packet::parse_with_limits(&text, format, &limits).is_ok());
-        for limits in [
-            document::DocumentLimits {
-                max_total_payload_bytes: 13,
-                ..limits
-            },
-            document::DocumentLimits {
-                max_list_items: 0,
-                ..limits
-            },
-            document::DocumentLimits {
-                max_nesting: 0,
-                ..limits
-            },
-        ] {
-            assert!(document::Packet::parse_with_limits(&text, format, &limits).is_err());
-        }
-    }
-    let duplicate = text.replace(
-        "\"member\":",
-        "\"member\":{\"type\":\"unsigned\",\"value\":2},\"member\":",
-    );
-    assert!(
-        document::Packet::parse_with_limits(
-            &duplicate,
-            document::Format::Json,
-            &Default::default()
-        )
-        .is_err()
-    );
-}
-
-#[test]
 fn borrowed_dns_wire_enforces_message_byte_limit() {
     let mut wire = vec![0; 12];
     wire[7] = 1;

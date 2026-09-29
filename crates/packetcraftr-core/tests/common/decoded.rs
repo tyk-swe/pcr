@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Decoded-packet fixtures shared by the filter contract tests.
+//! Decoded-packet fixtures and views shared by the contract tests.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -98,6 +98,15 @@ pub(crate) fn ipv6_tcp() -> decode::DecodedPacket {
     });
     packet.push(Raw::new(PAYLOAD.to_vec()));
     decoded(packet)
+}
+
+/// The protocol id of every decoded layer, outermost first.
+pub(crate) fn protocols(decoded: &decode::DecodedPacket) -> Vec<&str> {
+    decoded
+        .packet
+        .iter()
+        .map(|layer| layer.protocol_id().as_str())
+        .collect()
 }
 
 pub(crate) fn context(decoded: &decode::DecodedPacket) -> Context<'_> {

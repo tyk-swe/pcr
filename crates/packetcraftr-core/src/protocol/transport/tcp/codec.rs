@@ -20,8 +20,8 @@ use crate::{
         BuiltinProtocol,
         common::{
             ValueExpectation, invalid, make_layer, pad_options_to_four_bytes,
-            payload_without_padding, resolve_u16, transport_checksum, transport_checksum_parts,
-            truncated, typed_layer,
+            payload_without_padding, resolve_u16, strict_or_diagnostic, transport_checksum,
+            transport_checksum_parts, truncated, typed_layer,
         },
         network::{ip_protocol, resolve_envelope},
         transport::ports::child_discriminators,
@@ -58,13 +58,14 @@ impl LayerCodec for TcpCodec {
         let serialized = serialize(&layer.options)?;
         let mut diagnostics = Vec::new();
         if layer.reserved_bits != 0 {
-            let message = "reserved TCP header bits are non-zero";
-            if context.mode == crate::codec::Mode::Strict {
-                return Err(invalid(NAME, message));
-            }
-            diagnostics.push(
-                Diagnostic::warning("build.tcp_reserved_bits", message).at_field("reserved_bits"),
-            );
+            strict_or_diagnostic(
+                NAME,
+                "build.tcp_reserved_bits",
+                "reserved_bits",
+                "reserved TCP header bits are non-zero",
+                context,
+                &mut diagnostics,
+            )?;
         }
         let options = pad_options_to_four_bytes(
             &serialized,

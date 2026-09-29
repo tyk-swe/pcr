@@ -143,6 +143,13 @@ impl OfflineCaptureLimitsArgs {
     pub(crate) fn retention_ceiling(self) -> usize {
         usize::try_from(self.max_frames).unwrap_or(usize::MAX)
     }
+
+    pub(crate) const fn stream_limits(self) -> capture::Limits {
+        capture::Limits {
+            max_frames: self.max_frames,
+            max_bytes: self.max_bytes,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -305,5 +312,26 @@ mod tests {
         bounds(1, 8, 8, 1)
             .validate()
             .expect("equal byte bounds are valid");
+    }
+
+    #[test]
+    fn stream_limits_carry_the_frame_and_byte_bounds_unchanged() {
+        let args = OfflineCaptureLimitsArgs {
+            max_frames: 3,
+            max_bytes: 5,
+            reader: CaptureReaderBoundsArgs {
+                max_encoded_bytes: 7,
+                max_decoded_bytes: 11,
+                max_frame_bytes: 2,
+                max_interfaces: 13,
+            },
+        };
+        assert_eq!(
+            args.stream_limits(),
+            capture::Limits {
+                max_frames: 3,
+                max_bytes: 5,
+            }
+        );
     }
 }

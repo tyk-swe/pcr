@@ -10,6 +10,8 @@ use crate::layout::PacketLayout;
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
 
+use super::validation::is_network_boundary;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub mode: Mode,
@@ -49,17 +51,7 @@ impl BuiltPacket {
                 .downcast_ref::<Padding>()
                 .and_then(|padding| padding.outside_layer)
                 .and_then(|outside_layer| self.packet.layer(outside_layer))
-                .is_some_and(|outside| {
-                    matches!(
-                        BuiltinProtocol::of(outside),
-                        Some(
-                            BuiltinProtocol::Ipv4
-                                | BuiltinProtocol::Ipv6
-                                | BuiltinProtocol::Udp
-                                | BuiltinProtocol::Pppoe
-                        )
-                    )
-                })
+                .is_some_and(|outside| is_network_boundary(BuiltinProtocol::of(outside)))
         })
     }
 }

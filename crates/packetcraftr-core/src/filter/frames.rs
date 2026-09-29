@@ -9,6 +9,19 @@ use crate::registry::Registry;
 
 use super::{Context, Error, Filter};
 
+impl<'a> Context<'a> {
+    /// For callers that assign no derived packets or conversation indexes.
+    pub fn frame(decoded: &'a DecodedPacket, number: u64) -> Self {
+        Self {
+            decoded,
+            derived: &[],
+            number,
+            tcp_stream: None,
+            udp_stream: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FrameDecoder {
     dissector: Dissector,
@@ -55,13 +68,7 @@ impl FrameDecoder {
     ) -> Result<Option<DecodedPacket>, Error> {
         let decoded = self.decode(frame).map_err(Error::from)?;
         if let Some(filter) = &self.filter {
-            let keep = filter.matches(&Context {
-                decoded: &decoded,
-                derived: &[],
-                number,
-                tcp_stream: None,
-                udp_stream: None,
-            })?;
+            let keep = filter.matches(&Context::frame(&decoded, number))?;
             if !keep {
                 return Ok(None);
             }

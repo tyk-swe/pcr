@@ -1,19 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::{Dns, Error, Limits, Name, Question};
+use super::super::{Dns, Error, Limits, MAX_QUESTIONS, Name, Question};
+use super::HEADER_LEN;
 use bytes::Bytes;
 use primitives::read_u16;
 mod primitives;
 mod records;
-
-pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Error> {
-    offset.checked_add(delta).ok_or(Error::TruncatedField {
-        field,
-        offset,
-        needed: usize::MAX,
-    })
-}
 
 /// Decodes the possibly-compressed name that starts at `offset` in `message`,
 /// returning it with the offset where the reader continues.
@@ -55,10 +48,10 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
             maximum,
         });
     }
-    if message.len() < 12 {
+    if message.len() < HEADER_LEN {
         return Err(Error::MessageTooShort {
             actual: message.len(),
-            minimum: 12,
+            minimum: HEADER_LEN,
         });
     }
     let flags = read_u16(message, 2, "flags")?;
@@ -66,10 +59,10 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
     let answer_count = read_u16(message, 6, "answer count")?;
     let authority_count = read_u16(message, 8, "authority count")?;
     let additional_count = read_u16(message, 10, "additional count")?;
-    if question_count > 64 {
+    if usize::from(question_count) > MAX_QUESTIONS {
         return Err(Error::QuestionLimit {
             actual: usize::from(question_count),
-            limit: 64,
+            limit: MAX_QUESTIONS,
         });
     }
     let count =
@@ -82,19 +75,15 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
         });
     }
     let mut questions = Vec::with_capacity(usize::from(question_count));
-    let mut offset = 12;
+    let mut offset = HEADER_LEN;
     for _ in 0..question_count {
         let (name, next) = decode_name(&wire, offset, limits)?;
         questions.push(Question {
             name,
             query_type: read_u16(message, next, "question type")?,
-            class: read_u16(
-                message,
-                advance(next, 2, "question class")?,
-                "question class",
-            )?,
+            class: read_u16(message, next + 2, "question class")?,
         });
-        offset = advance(next, 4, "question")?;
+        offset = next + 4;
     }
     let (answers, next) =
         records::decode_records(&wire, offset, usize::from(answer_count), limits)?;

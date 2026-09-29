@@ -106,13 +106,18 @@ fn a_second_change_cipher_spec_ends_what_one_direction_can_still_say() {
         &handshake_record(&server_hello(&ServerHelloSpec::default())),
     );
     let (sessions, summary) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Gap);
+    assert_eq!(
+        sessions[0].reason.as_deref(),
+        Some("no ClientHello observed")
+    );
     assert!(
-        sessions
-            .iter()
-            .all(|session| session.status != Status::Complete),
+        sessions[0].client.is_none(),
         "a hello after the second change_cipher_spec is not read"
     );
-    assert!(sessions.iter().all(|session| session.client.is_none()));
+    assert!(sessions[0].server.is_some());
+    assert_eq!(summary.by_status.get(&Status::Gap), Some(&1));
     assert_eq!(summary.by_status.get(&Status::Complete), None);
 }
 

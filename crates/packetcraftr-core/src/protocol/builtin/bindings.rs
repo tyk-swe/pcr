@@ -146,7 +146,6 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
 
 fn register_ip(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     bind_ip_children(builder, BuiltinProtocol::Ipv4, 1)?;
-    bind_ip_children(builder, BuiltinProtocol::RawIp, 1)?;
     bind_ipv6_children(builder, BuiltinProtocol::Ipv6)?;
     bind_ipv6_extensions(builder, BuiltinProtocol::Ipv6)?;
     for parent in [
@@ -158,11 +157,6 @@ fn register_ip(builder: &mut crate::registry::Builder) -> Result<(), crate::regi
         bind_ipv6_children(builder, parent)?;
         bind_ipv6_extensions(builder, parent)?;
     }
-    bind_children(
-        builder,
-        BuiltinProtocol::RawIp,
-        &[(58, BuiltinProtocol::Icmpv6, 100)],
-    )?;
     bind_ip_children(builder, BuiltinProtocol::Ah, 1)?;
     bind_children(
         builder,

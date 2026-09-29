@@ -256,7 +256,6 @@ impl Executor<Exchange> for InvalidResponseIndexExecutor {
             request_index: 1,
             response: DecodedPacket {
                 packet: Packet::new(),
-                original: frame.bytes().clone(),
                 frame,
                 layout: packetcraftr_core::layout::PacketLayout::default(),
                 diagnostics: Vec::new(),
@@ -466,7 +465,6 @@ fn scripted_udp_execution(
                 request_index: 0,
                 response: DecodedPacket {
                     packet,
-                    original: frame.bytes().clone(),
                     frame,
                     layout: packetcraftr_core::layout::PacketLayout::default(),
                     diagnostics: Vec::new(),
@@ -537,7 +535,6 @@ impl Executor<Exchange> for ClassifiedResponseExecutor {
                 request_index: 0,
                 response: DecodedPacket {
                     packet,
-                    original: response_frame.bytes().clone(),
                     frame: response_frame,
                     layout: packetcraftr_core::layout::PacketLayout::default(),
                     diagnostics: Vec::new(),
@@ -642,7 +639,7 @@ impl Authorizer for RecordingAuthorizer {
                 self.limits.push(dns.limits());
                 self.socket_limits.push(dns.tcp());
             }
-            Operation::Socket(_) | Operation::Declared(_) | Operation::Replay(_) => {
+            Operation::Socket(_) | Operation::Declared(_) => {
                 panic!("DNS must submit a DNS or wire-limits operation")
             }
         }
@@ -1337,6 +1334,144 @@ fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
         packetcraftr_core::error::Classified::classification(&error).code,
         "capability.dns_tcp_scope"
     );
+}
+
+fn packet_oriented_route_overrides() -> Vec<crate::route::Options> {
+    let mut overrides = vec![
+        crate::route::Options {
+            interface: Some(crate::route::Interface::Name("fixture0".to_owned())),
+            ..Default::default()
+        },
+        crate::route::Options {
+            preferred_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            ..Default::default()
+        },
+    ];
+    overrides.extend(
+        [
+            packetcraftr_netio::link::Mode::Layer2,
+            packetcraftr_netio::link::Mode::Layer3,
+        ]
+        .map(|link_mode| crate::route::Options {
+            link_mode,
+            ..Default::default()
+        }),
+    );
+    overrides
+}
+
+#[test]
+fn tcp_transports_reject_route_overrides_before_authorization_and_io() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    for transport in [super::TransportMode::Tcp, super::TransportMode::UdpThenTcp] {
+        for route in packet_oriented_route_overrides() {
+            let mut request = dns_request(address);
+            request.transport = transport;
+            request.timeout = Duration::from_secs(1);
+            request.route = route;
+            let context = format!("{transport:?} with {:?}", request.route);
+
+            let error = request.validate().expect_err(&context);
+            assert!(
+                matches!(error, super::Error::UnsupportedTcpRoute),
+                "{context}"
+            );
+            assert!(request.canonical_name().is_err(), "{context}");
+
+            let mut authorizer = RecordingAuthorizer::new(address);
+            let mut executor = ScriptedExecutor::new([Some(truncated_dns_response())]);
+            let error = run(
+                &request,
+                &mut authorizer,
+                &registry,
+                &mut executor,
+                &mut NoopClock,
+            )
+            .expect_err(&context);
+            assert!(
+                matches!(error, super::Error::UnsupportedTcpRoute),
+                "{context}"
+            );
+            let classification = packetcraftr_core::error::Classified::classification(&error);
+            assert_eq!(classification.code, "capability.dns_tcp", "{context}");
+            assert_eq!(classification.kind, Kind::Capability, "{context}");
+            assert!(authorizer.limits.is_empty(), "{context}");
+            assert!(authorizer.targets.is_empty(), "{context}");
+            assert_eq!(executor.udp_calls + executor.tcp_calls, 0, "{context}");
+
+            let mut authorizer = RecordingAuthorizer::new(address);
+            let mut executor = ScriptedExecutor::new([Some(truncated_dns_response())]);
+            let error = run_batch(
+                &[
+                    super::Request {
+                        query_name: "first.test".to_owned(),
+                        transaction_id: 1,
+                        ..request.clone()
+                    },
+                    request,
+                ],
+                &mut authorizer,
+                &registry,
+                &mut executor,
+                &mut NoopClock,
+            )
+            .expect_err(&context);
+            assert!(
+                matches!(error, super::Error::UnsupportedTcpRoute),
+                "{context}"
+            );
+            assert!(authorizer.limits.is_empty(), "{context}");
+            assert!(authorizer.targets.is_empty(), "{context}");
+            assert_eq!(executor.udp_calls + executor.tcp_calls, 0, "{context}");
+        }
+    }
+}
+
+#[test]
+fn route_overrides_stay_valid_for_udp_and_default_routes_for_every_transport() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    for transport in [
+        super::TransportMode::Udp,
+        super::TransportMode::UdpThenTcp,
+        super::TransportMode::Tcp,
+    ] {
+        let mut request = dns_request(address);
+        request.transport = transport;
+        request.validate().expect("the default route fits");
+    }
+    for route in packet_oriented_route_overrides() {
+        let mut request = dns_request(address);
+        request.transport = super::TransportMode::Udp;
+        request.route = route;
+        request.validate().expect("UDP-only DNS honors the route");
+    }
+}
+
+#[test]
+fn queries_per_second_must_stay_within_the_shared_rate_ceiling() {
+    let request = dns_request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)));
+    for rate in [0, super::MAX_RATE + 1, u32::MAX] {
+        let error = super::Request {
+            queries_per_second: Some(rate),
+            ..request.clone()
+        }
+        .validate()
+        .unwrap_err();
+        assert!(
+            matches!(&error, super::Error::InvalidLimit { field: "queries_per_second", value, reason }
+                if *value == u64::from(rate) && reason == "must be within 1..=1000000"),
+            "{error:?}"
+        );
+    }
+    for rate in [1, super::MAX_RATE] {
+        super::Request {
+            queries_per_second: Some(rate),
+            ..request.clone()
+        }
+        .validate()
+        .expect("rates up to the ceiling are accepted");
+    }
 }
 
 #[test]

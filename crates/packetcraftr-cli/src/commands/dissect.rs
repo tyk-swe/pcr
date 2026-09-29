@@ -92,34 +92,17 @@ pub(super) fn run(
             arguments.budget.decode_options(),
         )
         .map_err(CliError::classified)?;
+    let context = core::filter::Context::frame(&decoded, 1);
     // The filter selects emission, not validity.
     let kept = match &filter {
-        Some(filter) => filtering::matches_decoded(
-            filter,
-            &core::filter::Context {
-                decoded: &decoded,
-                derived: &[],
-                number: 1,
-                tcp_stream: None,
-                udp_stream: None,
-            },
-        )?,
+        Some(filter) => filtering::matches_decoded(filter, &context)?,
         None => true,
     };
     if let Some(mut projector) = projector {
         if kept {
             let values = projector
                 .projection
-                .values(
-                    &core::filter::Context {
-                        decoded: &decoded,
-                        derived: &[],
-                        number: 1,
-                        tcp_stream: None,
-                        udp_stream: None,
-                    },
-                    projector.remaining(),
-                )
+                .values(&context, projector.remaining())
                 .map_err(CliError::classified)?;
             projector.emit(1, values, stream)?;
         }
@@ -131,8 +114,8 @@ pub(super) fn run(
     }
     match format {
         DissectFormat::Text => rendering::render_text(&decoded),
-        DissectFormat::Hex => write_hex_line(&decoded.original),
-        DissectFormat::Raw => write_raw(&decoded.original),
+        DissectFormat::Hex => write_hex_line(decoded.frame.bytes()),
+        DissectFormat::Raw => write_raw(decoded.frame.bytes()),
         DissectFormat::Json => emit_published(
             output::contract::Command::Dissect,
             output::envelope::Published::<output::dissect::AggregateResult>::from((kept, decoded)),

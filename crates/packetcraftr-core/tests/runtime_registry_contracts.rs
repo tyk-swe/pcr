@@ -84,7 +84,7 @@ fn build_and_decode_probe(
     let decoded = decode_probe(registry, built.bytes.clone(), decode::Options::default())
         .expect("bound packet decodes");
     assert_eq!(decoded.packet.len(), 2);
-    assert_eq!(decoded.original.as_ref(), &[9, 4]);
+    assert_eq!(decoded.frame.bytes().as_ref(), &[9, 4]);
     assert_eq!(decoded.layout.layers.len(), 2);
     assert_eq!(decoded.packet.encoded_payload_length(0), Some(1));
     assert_eq!(decoded.packet.encoded_payload_length(1), Some(0));

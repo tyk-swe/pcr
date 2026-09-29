@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use packetcraftr::capture::Source;
 use packetcraftr_core::capture_file::{self, Error, Format, Writer};
+use packetcraftr_core::frame::Frame;
 use std::io::Write;
 pub(super) fn initialize<W: Write>(
     destination: W,
@@ -78,4 +79,92 @@ pub(super) fn initialize<W: Write>(
         }
     }
     Ok(writer)
+}
+/// Classic PCAP carries no interface IDs; `initialize` admits one source for it.
+pub(super) fn write_frame<W: Write>(writer: &mut Writer<W>, mut frame: Frame) -> Result<(), Error> {
+    if writer.format() == Format::Pcap {
+        frame.interface = None;
+    }
+    writer.write_frame(&frame)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_netio::{
+        capture::{Limits, Metadata, Stats},
+        interface::Id,
+    };
+    use std::time::{Duration, UNIX_EPOCH};
+    fn sources() -> Vec<Source> {
+        vec![Source {
+            index: 0,
+            metadata: Metadata {
+                interface: Id {
+                    name: "fixture0".to_owned(),
+                    index: 1,
+                },
+                link_type: LinkType::RAW,
+                snap_length: 64,
+                native: Default::default(),
+            },
+            limits: Limits {
+                snap_length: 64,
+                ..Default::default()
+            },
+            metadata_valid: true,
+            ready: true,
+            shutdown_confirmed: false,
+            statistics_valid: true,
+            statistics: Stats::default(),
+            delivered_frames: 0,
+            delivered_bytes: 0,
+            admitted_frames: 0,
+            matched_frames: 0,
+            emitted_frames: 0,
+            late_frames: 0,
+        }]
+    }
+    fn engine_frame() -> Frame {
+        let mut frame = Frame::new(
+            UNIX_EPOCH + Duration::new(7, 123_456_789),
+            LinkType::RAW,
+            vec![0x45; 32],
+        )
+        .unwrap();
+        frame.interface = Some(0);
+        frame
+    }
+    fn round_trip(format: Format) -> Frame {
+        let mut writer = initialize(
+            Vec::new(),
+            format,
+            &sources(),
+            capture_file::Limits {
+                max_frames: 10,
+                max_bytes: 1024,
+            },
+        )
+        .unwrap();
+        write_frame(&mut writer, engine_frame()).unwrap();
+        let bytes = writer.into_inner();
+        let mut reader = capture_file::Reader::new(bytes.as_slice()).unwrap();
+        let frame = reader.next_frame().unwrap().expect("one frame");
+        assert!(reader.next_frame().unwrap().is_none());
+        frame
+    }
+    #[test]
+    fn classic_pcap_writes_engine_frames_without_interface_ids() {
+        let frame = round_trip(Format::Pcap);
+        assert_eq!(frame.interface, None);
+        assert_eq!(frame.bytes(), engine_frame().bytes());
+        assert_eq!(frame.timestamp, engine_frame().timestamp);
+    }
+    #[test]
+    fn pcapng_keeps_the_engine_interface_id() {
+        let frame = round_trip(Format::PcapNg);
+        assert_eq!(frame.interface, Some(0));
+        assert_eq!(frame.bytes(), engine_frame().bytes());
+        assert_eq!(frame.timestamp, engine_frame().timestamp);
+    }
 }

@@ -2,26 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    analysis::{Scope, ScopedFlowKey},
+    analysis::{ScopedFlowKey, StreamTransport, analysis_complete},
     contract::Error,
     hex::compact_hex,
     provenance::Source,
     stream::StreamRecord,
 };
 use packetcraftr_core::{
-    analysis::{self as library, dns, provenance::SourceSet, scope::Definition},
+    analysis::{dns, provenance::SourceSet},
     field::FieldValue,
     layer::Layer,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
-
-published_enum! {
-    pub enum Transport from dns::Transport {
-        Udp => "udp",
-        Tcp => "tcp",
-    }
-}
 
 published_enum! {
     pub enum Status from dns::Status {
@@ -66,7 +59,7 @@ fn sources(value: &SourceSet) -> Result<Vec<Source>, Error> {
 #[derive(Debug, Serialize)]
 pub struct Message {
     pub index: u64,
-    pub transport: Transport,
+    pub transport: StreamTransport,
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
@@ -115,7 +108,7 @@ impl StreamRecord for Message {
 #[derive(Debug, Serialize)]
 pub struct Transaction {
     pub status: TransactionStatus,
-    pub transport: Transport,
+    pub transport: StreamTransport,
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
@@ -196,35 +189,7 @@ impl From<dns::Summary> for Summary {
         }
     }
 }
-#[derive(Debug, Serialize)]
-pub struct Complete {
-    pub frames_read: u64,
-    pub frames_matched: u64,
-    pub summary: Summary,
-    pub scopes: Vec<Scope>,
-    pub incomplete_datagrams: usize,
-    pub source_outcomes_omitted: u64,
-    pub ip_reassembly: super::reassembly::Report,
-}
-impl TryFrom<(&library::Summary, dns::Summary, Vec<Definition>)> for Complete {
-    type Error = Error;
-    fn try_from(
-        (run, summary, scopes): (&library::Summary, dns::Summary, Vec<Definition>),
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            frames_read: run.frames_read,
-            frames_matched: run.frames_matched,
-            summary: summary.into(),
-            scopes: scopes
-                .into_iter()
-                .map(Scope::try_from)
-                .collect::<Result<_, _>>()?,
-            incomplete_datagrams: run.incomplete_sources.len(),
-            source_outcomes_omitted: run.source_outcomes_omitted,
-            ip_reassembly: (&run.ip_reassembly).into(),
-        })
-    }
-}
+analysis_complete!(dns::Summary);
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub messages: Vec<Message>,

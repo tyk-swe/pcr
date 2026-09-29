@@ -15,7 +15,7 @@ use crate::{
 
 use crate::protocol::common::{
     ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, typed_layer, validate_raw_child_discriminator, wrong_type,
+    truncated, typed_layer, unsupported, validate_raw_child_discriminator, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -151,10 +151,10 @@ impl LayerCodec for ErspanCodec {
                 }
             }
             other => {
-                return Err(crate::codec::Error::Unsupported {
-                    protocol: protocol(NAME),
-                    message: format!("ERSPAN version {other} is not supported"),
-                });
+                return Err(unsupported(
+                    NAME,
+                    format!("ERSPAN version {other} is not supported"),
+                ));
             }
         };
         if input.len() < header_len {
@@ -408,7 +408,6 @@ mod tests {
         let context = LayerDecodeContext {
             parent: None,
             registry: &registry,
-            allow_trailing_padding: false,
             network: None,
             discriminator: discriminator.map(Discriminator),
         };

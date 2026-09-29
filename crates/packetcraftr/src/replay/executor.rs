@@ -11,14 +11,14 @@ use packetcraftr_netio::{
     Error as LiveIoError, NativeCapability, Unsupported,
     interface::{Info as InterfaceInfo, Provider as InterfaceProvider},
     link::Mode as LinkMode,
-    transmit::{Outbound, Provider as TransmitProvider},
+    transmit::{Outbound, Provider as TransmitProvider, Report as IoSendReport},
 };
 
 use crate::policy::decode_wire;
 use crate::providers::PacketProviders;
 use crate::route::{Interface, Materialized as MaterializedRoute};
 
-use super::evidence::{Transmission, network_envelope};
+use super::evidence::network_envelope;
 
 pub(crate) trait Executor {
     /// Resolve and validate the concrete interface, then passively select and
@@ -35,7 +35,7 @@ pub(crate) trait Executor {
         &mut self,
         route: &MaterializedRoute,
         frame: &Frame,
-    ) -> Result<Transmission, LiveIoError>;
+    ) -> Result<IoSendReport, LiveIoError>;
 }
 
 pub(super) fn map_route_error<E: Classified + Send + Sync + 'static>(source: E) -> LiveIoError {
@@ -68,82 +68,6 @@ impl<'c, P: PacketProviders> ProviderExecutor<'c, P> {
             providers,
             validated_interface: None,
         }
-    }
-
-    fn resolve(
-        &mut self,
-        requested: &Interface,
-        mode: LinkMode,
-        frame: &Frame,
-        deadline: &Deadline,
-    ) -> Result<MaterializedRoute, LiveIoError> {
-        let network = match mode {
-            LinkMode::Layer3 => Some(network_envelope(frame)?),
-            LinkMode::Layer2 | LinkMode::Auto => None,
-        };
-        let cached = self
-            .validated_interface
-            .take()
-            .filter(|selected| requested.matches(&selected.id));
-        let selected = match cached {
-            Some(selected) => selected,
-            None => {
-                let interfaces = self.providers.interface().interfaces(deadline)?;
-                let selected = interfaces
-                    .into_iter()
-                    .find(|interface| requested.matches(&interface.id))
-                    .ok_or_else(|| LiveIoError::Device {
-                        interface: requested_name(requested),
-                        message: "no interface matches the requested name or index".to_owned(),
-                        source: None,
-                    })?;
-                if !selected.flags.up {
-                    return Err(LiveIoError::Device {
-                        interface: selected.id.name,
-                        message: "selected interface is not up".to_owned(),
-                        source: None,
-                    });
-                }
-                selected
-            }
-        };
-        self.validated_interface = Some(selected.clone());
-        if !selected.capability.supports(mode) {
-            return Err(Unsupported::new(
-                NativeCapability::Transmission(mode),
-                format!(
-                    "interface {} does not support requested {mode:?} replay",
-                    selected.id.name
-                ),
-            )
-            .into());
-        }
-        if mode == LinkMode::Layer2 && selected.link_type != frame.link_type {
-            return Err(LiveIoError::Device {
-                interface: selected.id.name.clone(),
-                message: format!(
-                    "interface link type {} differs from captured link type {}",
-                    selected.link_type.0, frame.link_type.0
-                ),
-                source: None,
-            });
-        }
-        materialized_route(
-            self.providers.route(),
-            &selected,
-            mode,
-            frame,
-            network,
-            deadline,
-        )
-    }
-}
-
-fn requested_name(requested: &Interface) -> String {
-    match requested {
-        Interface::Id(id) => id.name.clone(),
-        Interface::Name(name) => name.clone(),
-        Interface::Index(_) => String::new(),
     }
 }
 
@@ -262,41 +186,95 @@ fn interface_owned_packet_source(
 impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
     fn plan_frame(
         &mut self,
-        interface: &Interface,
+        requested: &Interface,
         mode: LinkMode,
         frame: &Frame,
         deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError> {
-        self.resolve(interface, mode, frame, deadline)
+        let network = match mode {
+            LinkMode::Layer3 => Some(network_envelope(frame)?),
+            LinkMode::Layer2 | LinkMode::Auto => None,
+        };
+        let cached = self
+            .validated_interface
+            .take()
+            .filter(|selected| requested.matches(&selected.id));
+        let selected = match cached {
+            Some(selected) => selected,
+            None => {
+                let interfaces = self.providers.interface().interfaces(deadline)?;
+                let selected = interfaces
+                    .into_iter()
+                    .find(|interface| requested.matches(&interface.id))
+                    .ok_or_else(|| LiveIoError::Device {
+                        interface: requested.to_string(),
+                        message: "no interface matches the requested name or index".to_owned(),
+                        source: None,
+                    })?;
+                if !selected.flags.up {
+                    return Err(LiveIoError::Device {
+                        interface: selected.id.name,
+                        message: "selected interface is not up".to_owned(),
+                        source: None,
+                    });
+                }
+                selected
+            }
+        };
+        self.validated_interface = Some(selected.clone());
+        if !selected.capability.supports(mode) {
+            return Err(Unsupported::new(
+                NativeCapability::Transmission(mode),
+                format!(
+                    "interface {} does not support requested {mode:?} replay",
+                    selected.id.name
+                ),
+            )
+            .into());
+        }
+        if mode == LinkMode::Layer2 && selected.link_type != frame.link_type {
+            return Err(LiveIoError::Device {
+                interface: selected.id.name.clone(),
+                message: format!(
+                    "interface link type {} differs from captured link type {}",
+                    selected.link_type.0, frame.link_type.0
+                ),
+                source: None,
+            });
+        }
+        materialized_route(
+            self.providers.route(),
+            &selected,
+            mode,
+            frame,
+            network,
+            deadline,
+        )
     }
 
     fn transmit(
         &mut self,
         route: &MaterializedRoute,
         frame: &Frame,
-    ) -> Result<Transmission, LiveIoError> {
+    ) -> Result<IoSendReport, LiveIoError> {
         if route.plan.mode == LinkMode::Auto {
             return Err(LiveIoError::UnresolvedLinkMode);
         }
         let interface = &route.plan.decision.interface;
-        let selected = self
+        if !self
             .validated_interface
             .as_ref()
-            .filter(|selected| selected.id == *interface)
-            .cloned()
-            .ok_or_else(|| LiveIoError::Device {
+            .is_some_and(|selected| selected.id == *interface)
+        {
+            return Err(LiveIoError::Device {
                 interface: interface.name.clone(),
                 message: "interface was not validated before replay transmission".to_owned(),
                 source: None,
-            })?;
-        let report = self
-            .providers
+            });
+        }
+        self.providers
             .transmit()
-            .send(Outbound::try_new(frame.bytes(), route.transmit_route())?)?;
-        Ok(Transmission {
-            interface: selected.id,
-            report,
-        })
+            .send(Outbound::try_new(frame.bytes(), route.transmit_route())?)
     }
 }
 
@@ -304,6 +282,7 @@ impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
 mod tests {
     use crate::test_support::{FakeProviders, live};
     use std::net::{IpAddr, Ipv4Addr};
+    use std::num::NonZeroU32;
     use std::time::UNIX_EPOCH;
 
     use packetcraftr_core::build::{Builder, Options};
@@ -403,6 +382,31 @@ mod tests {
         assert_eq!(Interface::Id(route.plan.decision.interface), requested);
         assert_eq!(route.plan.mode, LinkMode::Layer2);
         assert!(route.neighbor_resolution.is_none());
+    }
+
+    #[test]
+    fn unmatched_interface_selector_is_named_in_the_device_error() {
+        let frame = ethernet_frame(LinkType::ETHERNET);
+        for (requested, named) in [
+            (Interface::Index(NonZeroU32::new(9).unwrap()), "9"),
+            (Interface::Name("missing0".to_owned()), "missing0"),
+        ] {
+            let mut executor = ProviderExecutor::new(providers());
+            let error = executor
+                .plan_frame(&requested, LinkMode::Layer2, &frame, &live())
+                .expect_err("no fixture interface matches the selector");
+            assert!(
+                matches!(&error, LiveIoError::Device { interface, .. } if interface == named),
+                "{error:?}"
+            );
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "network device {named} is unavailable: \
+                     no interface matches the requested name or index"
+                )
+            );
+        }
     }
 
     #[test]

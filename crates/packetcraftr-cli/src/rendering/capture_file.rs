@@ -3,12 +3,15 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use packetcraftr_core::capture_file::{Error as CaptureError, Format, Writer};
+use packetcraftr_core::capture_file::{
+    Error as CaptureError, Format, Limits, PcapNgOptions, PcapOptions, Writer,
+};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 
 use super::LinkCaptureWriter;
-use crate::errors::CliError;
+use super::stdout::stdout_error;
+use crate::errors::{CliError, source_causes};
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -32,22 +35,42 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     create_spool: impl FnOnce() -> io::Result<S>,
     open_destination: impl FnOnce() -> Result<D, CliError>,
 ) -> Result<D, CliError> {
-    let mut frames = frames.into_iter();
-    let first = frames.next().ok_or_else(|| {
-        CliError::new(
+    let frames = frames.into_iter().collect::<Vec<_>>();
+    let Some(first) = frames.first() else {
+        return Err(CliError::new(
             Kind::Usage,
             "capture-file output requires at least one captured or transmitted frame",
-        )
-    })?;
+        ));
+    };
+    let link_type = first.link_type;
+    let stream_limits = stream_limits(
+        frames.len() as u64,
+        frames.iter().fold(0_u64, |total, frame| {
+            total.saturating_add(u64::from(frame.captured_length()))
+        }),
+    );
     let spool = create_spool()
         .map_err(|source| capture_io_error("create temporary capture output failed", source))?;
     let writer = match format {
-        Format::Pcap => Writer::new(spool, format, first.link_type),
-        Format::PcapNg => Writer::pcapng(spool),
+        Format::Pcap => Writer::pcap_with_options(
+            spool,
+            link_type,
+            PcapOptions {
+                stream_limits,
+                ..PcapOptions::default()
+            },
+        ),
+        Format::PcapNg => Writer::pcapng_with_options(
+            spool,
+            PcapNgOptions {
+                stream_limits,
+                ..PcapNgOptions::default()
+            },
+        ),
     }
     .map_err(initialize_error)?;
     let mut output = LinkCaptureWriter::new(writer);
-    for frame in std::iter::once(first).chain(frames) {
+    for frame in frames {
         output.write_link_mapped(frame).map_err(write_error)?;
     }
     output.flush().map_err(write_error)?;
@@ -59,6 +82,16 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     let mut destination = open_destination()?;
     copy_spool(&mut spool, &mut destination)?;
     Ok(destination)
+}
+
+/// Stream limits for a capture whose frame set the caller's own budgets have
+/// already admitted, so core's default ceiling cannot refuse it after
+/// transmission. Zero is not a valid ceiling.
+pub(crate) fn stream_limits(max_frames: u64, max_bytes: u64) -> Limits {
+    Limits {
+        max_frames: max_frames.max(1),
+        max_bytes: max_bytes.max(1),
+    }
 }
 
 fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), CliError> {
@@ -104,8 +137,8 @@ fn capture_io_error(operation: &str, source: io::Error) -> CliError {
             Kind::Io,
             Some("inspect temporary storage availability and retry the capture output operation"),
         ),
-        format!("{operation}: {source}"),
-        vec![source.to_string()],
+        operation,
+        source_causes(&source),
     )
 }
 
@@ -114,26 +147,6 @@ pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> Cli
         CaptureError::Io(source) => stdout_error(operation, source),
         source => CliError::classified(source),
     }
-}
-
-pub(crate) fn stdout_error(operation: &str, source: io::Error) -> CliError {
-    CliError::from_classification(
-        Classification::new(
-            "io.stdout",
-            Kind::Io,
-            Some("restore the stdout consumer or choose a writable output destination"),
-        ),
-        format!("{operation}: {source}"),
-        vec![source.to_string()],
-    )
-}
-
-pub(crate) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(bytes)
-        .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
 }
 
 #[cfg(test)]

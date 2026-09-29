@@ -10,7 +10,9 @@ use packetcraftr_core::{
     frame::{Frame, LinkType},
     layer::{Layer, Malformed},
     protocol::{
-        application::dhcp::{Dhcpv4, Dhcpv6, Duid, Limits, Option4, Option6, Value4, Value6},
+        application::dhcp::{
+            Dhcpv4, Dhcpv6, Duid, Error, Limit, Limits, Option4, Option6, Value4, Value6,
+        },
         builtin,
     },
     template::Template,
@@ -179,7 +181,7 @@ fn dhcpv6_relay_address_associations_and_prefixes_are_typed_and_editable() {
 #[test]
 fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
     let wire = reply().to_wire().unwrap();
-    assert!(
+    assert_eq!(
         Dhcpv6::from_wire_with_limits(
             wire.clone(),
             Limits {
@@ -187,10 +189,25 @@ fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
                 ..Default::default()
             }
         )
-        .is_err()
+        .unwrap_err(),
+        Error::Limit(Limit::OptionCount)
     );
-    assert!(Dhcpv6::try_from(wire.slice(..wire.len() - 1)).is_err());
-    assert!(Dhcpv4::try_from(vec![0; 239]).is_err());
+    assert!(matches!(
+        Dhcpv6::try_from(wire.slice(..wire.len() - 1)),
+        Err(Error::Truncated {
+            needed: 3,
+            available: 2,
+            ..
+        })
+    ));
+    assert_eq!(
+        Dhcpv4::try_from(vec![0; 239]).unwrap_err(),
+        Error::Truncated {
+            offset: 0,
+            needed: 240,
+            available: 239
+        }
+    );
     let mut relay = Dhcpv6::default();
     for _ in 0..9 {
         relay = Dhcpv6::relay_forward(
@@ -200,19 +217,26 @@ fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
             relay,
         );
     }
-    assert!(relay.to_wire().is_err());
+    assert_eq!(
+        relay.to_wire().unwrap_err(),
+        Error::Limit(Limit::RelayNesting)
+    );
     let mut raw = Dhcpv6::default();
     raw.options = vec![Option6::raw(9, wire.clone())];
-    assert!(
+    assert_eq!(
         raw.to_wire_with_limits(Limits {
             max_nesting: 0,
             ..Default::default()
         })
-        .is_err()
+        .unwrap_err(),
+        Error::Limit(Limit::RelayNesting)
     );
     let mut invalid = Dhcpv4::default();
     invalid.file_options = vec![Option4::raw(220, Bytes::from(vec![1; 128]))];
-    assert!(invalid.to_wire().is_err());
+    assert_eq!(
+        invalid.to_wire().unwrap_err(),
+        Error::Limit(Limit::EncodedBytes)
+    );
     let mut packet=expression::parse("ipv6(source=2001:db8::1,destination=2001:db8::2)/udp(source_port=547,destination_port=546)/dhcpv6()",&builtin::registry(),Default::default()).unwrap();
     packet.get_mut::<Dhcpv6>().unwrap().options = reply().options;
     let built = Builder::new(builtin::registry())
@@ -231,7 +255,7 @@ fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
         decoded.packet.get::<Malformed>().unwrap().bytes.as_ref(),
         &malformed[48..]
     );
-    assert_eq!(decoded.original.as_ref(), malformed);
+    assert_eq!(decoded.frame.bytes().as_ref(), malformed);
 }
 
 #[test]
@@ -272,14 +296,18 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
     packet.push(Dhcpv6::try_from(relay.to_wire().unwrap()).unwrap());
     let document = document::Packet::from_packet(&packet);
     assert!(document.to_packet(&builtin::registry(), 8).is_ok());
-    assert!(Duid::link_layer(1, vec![0; 65_536]).is_err());
-    assert!(Duid::link_layer(1, []).is_err());
+    assert_eq!(
+        Duid::link_layer(1, vec![0; 65_536]).unwrap_err(),
+        Error::Limit(Limit::DuidBytes)
+    );
+    assert_eq!(
+        Duid::link_layer(1, []).unwrap_err(),
+        Error::Invalid("empty DUID identifier")
+    );
 }
 
 #[test]
 fn borrowed_dhcp_wire_enforces_message_byte_limit() {
-    use packetcraftr_core::protocol::application::dhcp::{Error, Limit};
-
     let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
     v4.resize(65_535, 0);
     assert_eq!(Dhcpv4::try_from(v4.as_slice()).unwrap().wire().as_ref(), v4);
@@ -402,4 +430,79 @@ fn dhcp_limits_above_their_ceiling_are_refused_rather_than_lowered() {
     assert_eq!(widest.validate(), Ok(()));
     assert!(Dhcpv4::from_wire_with_limits(v4_wire, widest).is_ok());
     assert!(Dhcpv6::from_wire_with_limits(v6_wire, widest).is_ok());
+}
+
+#[test]
+fn dhcp_recipes_reject_a_field_supplied_under_two_spellings() {
+    use packetcraftr_core::{codec, document};
+    use std::collections::BTreeMap;
+
+    let registry = builtin::registry();
+    let bytes = |value: u8| FieldValue::Bytes(Bytes::from(vec![value]));
+    let address = |last: u8| FieldValue::Ipv4([192, 0, 2, last].into());
+    for (protocol, name, alias, first, second) in [
+        ("dhcpv4", "operation", "op", 1u32.into(), 2u32.into()),
+        ("dhcpv4", "transaction_id", "xid", 1u32.into(), 2u32.into()),
+        ("dhcpv4", "client_address", "ciaddr", address(1), address(2)),
+        (
+            "dhcpv4",
+            "client_hardware_address",
+            "chaddr",
+            bytes(1),
+            bytes(2),
+        ),
+        ("dhcpv4", "boot_file", "file", bytes(1), bytes(2)),
+        ("dhcpv6", "transaction_id", "xid", 1u32.into(), 2u32.into()),
+    ] {
+        let fields = BTreeMap::from([
+            (name.to_owned(), first.clone()),
+            (alias.to_owned(), second.clone()),
+        ]);
+        let expected = format!("both {alias} and {name} were supplied");
+        let error = registry
+            .codec(protocol)
+            .expect("built-in DHCP codec")
+            .make_layer(&fields)
+            .expect_err("two spellings of one field are ambiguous");
+        assert!(
+            matches!(&error, codec::Error::Invalid { message, .. } if *message == expected),
+            "{protocol} {name}/{alias}: {error:?}"
+        );
+    }
+
+    let error = expression::parse(
+        "dhcp(xid=1,transaction_id=2)",
+        &registry,
+        Default::default(),
+    )
+    .expect_err("the expression names one field twice");
+    assert!(
+        matches!(
+            &error,
+            expression::Error::Layer {
+                source: codec::Error::Invalid { message, .. },
+                ..
+            } if message == "both xid and transaction_id were supplied"
+        ),
+        "{error:?}"
+    );
+
+    let text = r#"{"schema":"packetcraftr.packet/v2","layers":[{"protocol":"dhcpv6","fields":{"xid":{"type":"unsigned","value":1},"transaction_id":{"type":"unsigned","value":2}}}]}"#;
+    let error = document::Packet::parse(text, document::Format::Json, 4096)
+        .unwrap()
+        .to_packet(&registry, 8)
+        .expect_err("the document names one field twice");
+    assert!(
+        matches!(
+            &error,
+            document::Error::Layer {
+                source: codec::Error::Invalid { message, .. },
+                ..
+            } if message == "both xid and transaction_id were supplied"
+        ),
+        "{error:?}"
+    );
+
+    let packet = expression::parse("dhcp(xid=1)", &registry, Default::default()).unwrap();
+    assert_eq!(packet.get::<Dhcpv4>().unwrap().transaction_id, 1);
 }

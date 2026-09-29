@@ -8,14 +8,19 @@ use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, SelectionReason};
 
-pub const MAX_VLAN_TAGS: usize = 8;
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub link_mode: Mode,
     pub interface: Option<super::Interface>,
     /// Interface-owned source that constrains route selection without rewriting packet source.
     pub preferred_source: Option<IpAddr>,
+}
+
+impl Options {
+    /// Kernel sockets choose their own route, so any override needs packet-oriented I/O.
+    pub(crate) fn requires_packet_route(&self) -> bool {
+        *self != Self::default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,4 +67,39 @@ pub(super) fn is_ipv4_broadcast(route: &Decision, destination: Option<IpAddr>) -
         && matches!(destination, Some(IpAddr::V4(address)) if
             address == Ipv4Addr::BROADCAST
                 || route.selection_reason == SelectionReason::Broadcast)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::route::Interface;
+
+    #[test]
+    fn every_route_override_requires_a_packet_route() {
+        assert!(!Options::default().requires_packet_route());
+        assert!(
+            Options {
+                interface: Some(Interface::Name("fixture0".to_owned())),
+                ..Options::default()
+            }
+            .requires_packet_route()
+        );
+        assert!(
+            Options {
+                preferred_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+                ..Options::default()
+            }
+            .requires_packet_route()
+        );
+        for link_mode in [Mode::Layer2, Mode::Layer3] {
+            assert!(
+                Options {
+                    link_mode,
+                    ..Options::default()
+                }
+                .requires_packet_route(),
+                "{link_mode:?}"
+            );
+        }
+    }
 }

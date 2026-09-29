@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame::LinkType;
 
 use super::format::{Endianness, Format, TimestampResolution};
+use super::wire::PCAPNG_OPTION_IF_FCSLEN;
 
 /// Metadata associated with one capture interface.
 ///
@@ -31,6 +32,19 @@ pub struct PcapNgOption {
     pub value: Bytes,
 }
 
+impl PcapNgOption {
+    /// An `if_fcslen` of zero bits declares no FCS; any other value, including a malformed one,
+    /// is treated as declaring one.
+    pub(super) fn declares_fcs(&self) -> bool {
+        self.code == PCAPNG_OPTION_IF_FCSLEN && self.value.as_ref() != [0]
+    }
+}
+
+/// libpcap's `LT_FCS_LENGTH_PRESENT` flag and `LT_FCS_LENGTH` field, in 16-bit words, above the
+/// LINKTYPE; the length is ignored unless the flag is set.
+const PCAP_FCS_LENGTH_PRESENT: u32 = 0x0400_0000;
+const PCAP_FCS_LENGTH: u32 = 0xf000_0000;
+
 /// Parsed classic-PCAP global-header fields that affect packet interpretation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcapHeader {
@@ -41,6 +55,12 @@ pub struct PcapHeader {
     pub network: u32,
     #[serde(skip)]
     pub(super) raw: Bytes,
+}
+
+impl PcapHeader {
+    pub(super) fn declares_fcs(&self) -> bool {
+        self.network & PCAP_FCS_LENGTH_PRESENT != 0 && self.network & PCAP_FCS_LENGTH != 0
+    }
 }
 
 /// Parsed PCAPNG section-header fields.

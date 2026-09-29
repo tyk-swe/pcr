@@ -147,10 +147,12 @@ fn parse_range(text: &str) -> Result<NumericRange, CliError> {
 }
 
 fn parse_unsigned(text: &str) -> Option<u64> {
-    if let Some(hexadecimal) = text.strip_prefix("0x") {
-        u64::from_str_radix(hexadecimal, 16).ok()
-    } else {
-        text.parse().ok()
+    match text.strip_prefix("0x") {
+        Some(digits) if digits.bytes().all(|digit| digit.is_ascii_hexdigit()) => {
+            u64::from_str_radix(digits, 16).ok()
+        }
+        Some(_) => None,
+        None => text.parse().ok(),
     }
 }
 
@@ -229,6 +231,10 @@ mod tests {
             ("0.ttl=1..5:2:3", "cli.error"),
             ("0.ttl=1..2..3", "cli.error"),
             ("0.ttl=abc", "cli.error"),
+            ("0.ttl=0x+1..5", "cli.error"),
+            ("0.ttl=1..0x+5", "cli.error"),
+            ("0.ttl=1..5:0x+1", "cli.error"),
+            ("0.ttl=0x..5", "cli.error"),
         ] {
             let error = TemplateArgs {
                 axes: vec![source.to_owned()],

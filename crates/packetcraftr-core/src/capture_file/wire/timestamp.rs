@@ -5,19 +5,46 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Format, TimestampResolution};
+use crate::frame::unix_floor;
+
+impl TimestampResolution {
+    pub(in crate::capture_file) fn ticks_per_second(self) -> Option<u128> {
+        match self {
+            Self::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
+            Self::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),
+        }
+    }
+
+    /// The `if_tsresol` byte: the exponent, with the high bit set for base 2.
+    pub(in crate::capture_file) fn to_tsresol(self) -> Result<u8, Error> {
+        match self {
+            Self::Decimal(exponent) if exponent <= 0x7f => Ok(exponent),
+            Self::Binary(exponent) if exponent <= 0x7f => Ok(exponent | 0x80),
+            Self::Decimal(exponent) => {
+                Err(Error::InvalidTimestampResolution { base: 10, exponent })
+            }
+            Self::Binary(exponent) => Err(Error::InvalidTimestampResolution { base: 2, exponent }),
+        }
+    }
+
+    pub(in crate::capture_file) fn from_tsresol(tsresol: u8) -> Self {
+        if tsresol & 0x80 == 0 {
+            Self::Decimal(tsresol)
+        } else {
+            Self::Binary(tsresol & 0x7f)
+        }
+    }
+}
 
 pub(in crate::capture_file) fn validate_timestamp_resolution(
     resolution: TimestampResolution,
 ) -> Result<(), Error> {
-    match resolution {
-        TimestampResolution::Decimal(exponent) if exponent <= 0x7f => Ok(()),
-        TimestampResolution::Binary(exponent) if exponent <= 0x7f => Ok(()),
-        TimestampResolution::Decimal(exponent) => {
-            Err(Error::InvalidTimestampResolution { base: 10, exponent })
-        }
-        TimestampResolution::Binary(exponent) => {
-            Err(Error::InvalidTimestampResolution { base: 2, exponent })
-        }
+    resolution.to_tsresol().map(|_| ())
+}
+
+fn out_of_range() -> Error {
+    Error::TimestampOutOfRange {
+        format: Format::PcapNg,
     }
 }
 
@@ -26,11 +53,7 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
     resolution: TimestampResolution,
     offset_seconds: i64,
 ) -> Result<SystemTime, Error> {
-    let ticks_per_second = match resolution {
-        TimestampResolution::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
-        TimestampResolution::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),
-    };
-    let (whole_seconds, nanoseconds) = match ticks_per_second {
+    let (whole_seconds, nanoseconds) = match resolution.ticks_per_second() {
         Some(exact_ticks_per_second) => {
             // A power that fits in u128 is never zero, so every division below is defined.
             let wide_ticks = u128::from(ticks);
@@ -63,9 +86,7 @@ pub(in crate::capture_file) fn timestamp_from_ticks(
     let unix_seconds = i128::try_from(whole_seconds)
         .ok()
         .and_then(|seconds| seconds.checked_add(i128::from(offset_seconds)))
-        .ok_or(Error::TimestampOutOfRange {
-            format: Format::PcapNg,
-        })?;
+        .ok_or_else(out_of_range)?;
     system_time_from_signed_unix(unix_seconds, nanoseconds)
 }
 
@@ -74,51 +95,21 @@ pub(in crate::capture_file) fn timestamp_to_ticks(
     resolution: TimestampResolution,
     offset_seconds: i64,
 ) -> Result<u64, Error> {
-    // seconds come from a `u64` and `subsec_nanos` is below one billion, so nothing can overflow
-    let (unix_seconds, nanoseconds) = match timestamp.duration_since(UNIX_EPOCH) {
-        Ok(elapsed) => (i128::from(elapsed.as_secs()), elapsed.subsec_nanos()),
-        Err(error) => {
-            let elapsed = error.duration();
-            if elapsed.subsec_nanos() == 0 {
-                (-i128::from(elapsed.as_secs()), 0)
-            } else {
-                (
-                    -i128::from(elapsed.as_secs()) - 1,
-                    1_000_000_000 - elapsed.subsec_nanos(),
-                )
-            }
-        }
-    };
-    let relative_seconds =
-        unix_seconds
-            .checked_sub(i128::from(offset_seconds))
-            .ok_or(Error::TimestampOutOfRange {
-                format: Format::PcapNg,
-            })?;
+    let (unix_seconds, nanoseconds) = unix_floor(timestamp);
+    let relative_seconds = unix_seconds
+        .checked_sub(i128::from(offset_seconds))
+        .ok_or_else(out_of_range)?;
     if relative_seconds < 0 {
-        return Err(Error::TimestampOutOfRange {
-            format: Format::PcapNg,
-        });
+        return Err(out_of_range());
     }
     if relative_seconds == 0 && nanoseconds == 0 {
         return Ok(0);
     }
-    let ticks_per_second = match resolution {
-        TimestampResolution::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
-        TimestampResolution::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),
-    }
-    .ok_or(Error::TimestampOutOfRange {
-        format: Format::PcapNg,
-    })?;
-    let whole_seconds =
-        u128::try_from(relative_seconds).map_err(|_| Error::TimestampOutOfRange {
-            format: Format::PcapNg,
-        })?;
+    let ticks_per_second = resolution.ticks_per_second().ok_or_else(out_of_range)?;
+    let whole_seconds = u128::try_from(relative_seconds).map_err(|_| out_of_range())?;
     let fractional_numerator = u128::from(nanoseconds)
         .checked_mul(ticks_per_second)
-        .ok_or(Error::TimestampOutOfRange {
-            format: Format::PcapNg,
-        })?;
+        .ok_or_else(out_of_range)?;
     if !fractional_numerator.is_multiple_of(1_000_000_000) {
         return Err(Error::MetadataNotRepresentable {
             format: Format::PcapNg,
@@ -129,21 +120,14 @@ pub(in crate::capture_file) fn timestamp_to_ticks(
     let ticks = whole_seconds
         .checked_mul(ticks_per_second)
         .and_then(|whole_ticks| whole_ticks.checked_add(fractional))
-        .ok_or(Error::TimestampOutOfRange {
-            format: Format::PcapNg,
-        })?;
-    u64::try_from(ticks).map_err(|_| Error::TimestampOutOfRange {
-        format: Format::PcapNg,
-    })
+        .ok_or_else(out_of_range)?;
+    u64::try_from(ticks).map_err(|_| out_of_range())
 }
 
 pub(in crate::capture_file) fn system_time_from_signed_unix(
     seconds: i128,
     nanoseconds: u32,
 ) -> Result<SystemTime, Error> {
-    let out_of_range = || Error::TimestampOutOfRange {
-        format: Format::PcapNg,
-    };
     if seconds >= 0 {
         let seconds_since_epoch = u64::try_from(seconds).map_err(|_| out_of_range())?;
         UNIX_EPOCH

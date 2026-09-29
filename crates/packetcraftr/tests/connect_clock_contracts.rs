@@ -1,36 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::convert::Infallible;
+mod common;
+
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
-use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::sync::{Mutex, mpsc};
+use std::time::Duration;
 
-use packetcraftr::clock::Clock;
 use packetcraftr::policy::Policy;
 use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
 use packetcraftr::target::{Family, SystemResolver, Target};
 use packetcraftr::{Client, ProviderSet, Sink};
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_netio::{capture, interface, route, tcp, transmit};
+use packetcraftr_netio::tcp;
 
-#[derive(Clone)]
-struct AdvancingClock(Arc<Mutex<Instant>>);
-
-impl Clock for AdvancingClock {
-    type Error = Infallible;
-
-    fn now(&self) -> Instant {
-        *self.0.lock().unwrap()
-    }
-
-    fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Infallible> {
-        *self.0.lock().unwrap() += delay;
-        Ok(())
-    }
-}
+use common::clock::VirtualClock;
 
 struct Blocked(Mutex<mpsc::Receiver<()>>);
 
@@ -46,20 +32,12 @@ impl tcp::Provider for Blocked {
 #[test]
 fn an_attempt_expires_on_the_client_clock_before_the_operation_deadline() {
     let (release, blocked) = mpsc::channel();
-    let clock = AdvancingClock(Arc::new(Mutex::new(Instant::now())));
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet {
-            route: route::SystemProvider,
-            interface: interface::SystemProvider,
-            capture: capture::SystemProvider,
-            transmit: transmit::SystemProvider,
-            tcp: Blocked(Mutex::new(blocked)),
-            resolver: SystemResolver,
-        },
+        ProviderSet::tcp(Blocked(Mutex::new(blocked)), SystemResolver),
     )
-    .with_clock(clock);
+    .with_clock(VirtualClock::default());
     let timeout = Duration::from_millis(20);
     let request = scan::Request {
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
@@ -101,14 +79,7 @@ fn a_slow_sink_preserves_completed_connect_verdicts_and_latency() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet {
-            route: route::SystemProvider,
-            interface: interface::SystemProvider,
-            capture: capture::SystemProvider,
-            transmit: transmit::SystemProvider,
-            tcp: tcp::SystemProvider,
-            resolver: SystemResolver,
-        },
+        ProviderSet::tcp(tcp::SystemProvider, SystemResolver),
     );
     let request = scan::Request {
         targets: Target::Address(Ipv4Addr::LOCALHOST.into()).into(),

@@ -8,13 +8,6 @@ use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture::Stats;
 
-fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
-    if decoded.original != decoded.frame.bytes() {
-        return Err(format!("{kind} original bytes differ from its exact frame"));
-    }
-    Ok(())
-}
-
 fn validate_capture_statistics(statistics: Stats) -> Result<(), String> {
     statistics
         .validate()
@@ -73,8 +66,6 @@ pub(crate) fn validate_response_frames_and_deadlines(
     timeout: Duration,
 ) -> Result<(), evidence::Error> {
     for response in matched_responses {
-        validate_decoded_frame(&response.response, "matched response")
-            .map_err(|message| evidence::Error::InvalidMatchedResponse { message })?;
         validate_frame_timestamp(&response.response.frame, "matched response")?;
         if response.latency > timeout {
             return Err(evidence::Error::ResponseAfterTimeout {
@@ -84,8 +75,6 @@ pub(crate) fn validate_response_frames_and_deadlines(
         }
     }
     for response in unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| evidence::Error::InvalidUnsolicitedResponse { message })?;
         validate_frame_timestamp(&response.frame, "unsolicited response")?;
     }
     Ok(())

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::codec::NAME;
-use super::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
+use super::{
+    Dns, Edns, EdnsOption, Limits, MAX_EDNS_OPTIONS, MAX_QUESTIONS, MAX_RECORDS, Name, Question,
+    Record, RecordValue,
+};
 use crate::field::{self, FieldKind, FieldValue};
 use crate::layer::{FieldSchema, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
@@ -297,7 +300,12 @@ fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Err
         },
         "txt" => {
             let mut strings = Vec::new();
-            for value in list(o.required("strings")?, 4096, dns_schema(), field)? {
+            for value in list(
+                o.required("strings")?,
+                Limits::CEILING.max_txt_strings,
+                dns_schema(),
+                field,
+            )? {
                 let mut bytes = Bytes::new();
                 reflect_set(&mut bytes, dns_schema(), field, value)?;
                 if bytes.len() > 255 {
@@ -321,7 +329,7 @@ fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Err
             flags = (flags & !0x8000) | (u16::from(dnssec_ok) << 15);
             let mut options = Vec::new();
             if let Some(value) = o.take("options") {
-                for value in list(value, 4096, dns_schema(), field)? {
+                for value in list(value, MAX_EDNS_OPTIONS, dns_schema(), field)? {
                     let mut option = Object::new(value, dns_schema(), field)?;
                     options.push(EdnsOption {
                         code: option.value("code", 0u16)?,
@@ -376,7 +384,7 @@ fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), f
     match field {
         "questions" => {
             let mut questions = Vec::new();
-            for value in list(value, 64, dns_schema(), field)? {
+            for value in list(value, MAX_QUESTIONS, dns_schema(), field)? {
                 let mut q = Object::new(value, dns_schema(), field)?;
                 questions.push(Question {
                     name: name(&mut q, "name")?,
@@ -388,7 +396,7 @@ fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), f
             layer.questions = questions;
         }
         "answers" | "authorities" | "additionals" => {
-            let records = list(value, 4096, dns_schema(), field)?
+            let records = list(value, MAX_RECORDS, dns_schema(), field)?
                 .into_iter()
                 .map(|value| record(value, field))
                 .collect::<Result<Vec<_>, _>>()?;

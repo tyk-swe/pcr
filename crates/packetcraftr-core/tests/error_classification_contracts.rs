@@ -3,9 +3,11 @@
 
 use std::net::Ipv6Addr;
 
+use packetcraftr_core::analysis::{self, Constraint};
+use packetcraftr_core::capture_file::Error as CaptureError;
 use packetcraftr_core::codec;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::{BoundaryError, Classified, Kind};
 use packetcraftr_core::field;
 use packetcraftr_core::frame::{Error as FrameError, Frame, LinkType};
 use packetcraftr_core::layer::{Id, Malformed};
@@ -227,18 +229,8 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
                 declared: 4,
                 actual: 3,
             }),
-            FrameError::CapturedLengthMismatch {
-                declared: 4,
-                actual: 3,
-            }
-            .classification()
-            .code,
-            FrameError::CapturedLengthMismatch {
-                declared: 4,
-                actual: 3,
-            }
-            .classification()
-            .kind,
+            "packet.frame_metadata",
+            Kind::Packet,
         ),
     ];
 
@@ -252,8 +244,6 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
 
 #[test]
 fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
-    use packetcraftr_core::analysis;
-
     type Case = (fn() -> decode::Error, &'static str, Kind);
     let cases: [Case; 4] = [
         (
@@ -301,6 +291,100 @@ fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
 }
 
 #[test]
+fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
+    let invalid = analysis::Error::InvalidLimit {
+        field: "max_flows",
+        value: 0,
+        reason: Constraint::NonZero,
+    };
+    assert_eq!(invalid.classification().kind, Kind::Usage);
+    let stream = analysis::Error::StreamLimit {
+        number: 2,
+        limit: 1,
+    };
+    assert_eq!(stream.classification().kind, Kind::Policy);
+    let malformed = analysis::Error::Reassembly {
+        number: 3,
+        source: analysis::reassembly::tcp::Malformed::ConflictingFinalSequence {
+            existing_offset: 1,
+            new_offset: 2,
+        }
+        .into(),
+    };
+    assert_eq!(malformed.classification().kind, Kind::Packet);
+    assert_eq!(malformed.causes().len(), 1);
+    let bounded = analysis::Error::Reassembly {
+        number: 3,
+        source: analysis::reassembly::tcp::Resource::FlowByteLimit { limit: 8 }.into(),
+    };
+    assert_eq!(bounded.classification().kind, Kind::Policy);
+    let tcp_remediation = bounded
+        .classification()
+        .remediation
+        .expect("TCP resource failures have remediation");
+    assert!(tcp_remediation.contains("trim or pre-filter the capture"));
+    assert!(tcp_remediation.contains("--max-tcp-*"));
+    let bounded_ip = analysis::Error::IpReassembly {
+        number: 3,
+        source: analysis::reassembly::ip::Resource::AggregateMemoryLimit { limit: 8 }.into(),
+    };
+    let remediation = bounded_ip
+        .classification()
+        .remediation
+        .expect("IP resource failures have remediation");
+    assert!(remediation.contains("trim or pre-filter the capture"));
+    assert!(remediation.contains("--max-ip-*"));
+    let inconsistent = analysis::Error::IpReassembly {
+        number: 4,
+        source: analysis::reassembly::ip::Error::Inconsistent {
+            reason: "retained datagram family disagrees with its key",
+        },
+    };
+    assert_eq!(inconsistent.classification().kind, Kind::Internal);
+    assert_eq!(inconsistent.classification().code, "internal.ip_reassembly");
+    let bounded_scope = analysis::Error::Scope {
+        number: 3,
+        source: analysis::scope::Error::Limit { limit: 8 },
+    };
+    assert_eq!(bounded_scope.classification().kind, Kind::Policy);
+    for source in [
+        analysis::scope::Error::Unknown { scope: 7 },
+        analysis::scope::Error::ReplayMismatch { scope: 7 },
+    ] {
+        let invariant = analysis::Error::Scope { number: 3, source };
+        assert_eq!(invariant.classification().kind, Kind::Internal);
+        assert_eq!(
+            invariant.classification().code,
+            "internal.scope_composition"
+        );
+    }
+    let sink = analysis::Error::Sink {
+        number: 4,
+        source: BoundaryError::execution_validation("bad sink", "test.sink", "repair it"),
+    };
+    assert_eq!(sink.classification().code, "test.sink");
+    assert_eq!(sink.to_string(), "analysis consumer failed at frame 4");
+    assert_eq!(sink.causes(), ["bad sink"]);
+}
+
+#[test]
+fn capture_errors_expose_stable_classifications_and_causes() {
+    let policy = CaptureError::MetadataBlockLimit { limit: 1 }.classification();
+    assert_eq!(policy.kind, Kind::Policy);
+    assert_eq!(policy.code, "policy.capture_stream_limit");
+    let cli = CaptureError::InvalidTimestampResolution {
+        base: 10,
+        exponent: 2,
+    }
+    .classification();
+    assert_eq!(cli.kind, Kind::Usage);
+    let io = CaptureError::Io(std::io::Error::other("disk gone"));
+    assert_eq!(io.classification().kind, Kind::Io);
+    assert_eq!(io.causes(), vec!["disk gone"]);
+    assert!(CaptureError::EmptyInput.causes().is_empty());
+}
+
+#[test]
 fn model_layer_errors_classify_without_a_wrapper() {
     let cases: Vec<(Box<dyn Classified>, &str, Kind)> = vec![
         (
@@ -332,12 +416,21 @@ fn model_layer_errors_classify_without_a_wrapper() {
             Kind::Usage,
         ),
         (
+            Box::new(
+                "02:00:00:00:00"
+                    .parse::<packetcraftr_core::packet::MacAddress>()
+                    .expect_err("five bytes are not a MAC address"),
+            ),
+            "cli.error",
+            Kind::Usage,
+        ),
+        (
             Box::new(registry::Error::DuplicateMatcher { protocol: tcp() }),
             "internal.registry",
             Kind::Internal,
         ),
         (
-            Box::new(SemanticsError::LayerIndexOutOfRange),
+            Box::new(SemanticsError::SegmentCount),
             "packet.semantics",
             Kind::Packet,
         ),
@@ -388,13 +481,49 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
     let active: Ipv6Addr = "2001:db8::2".parse().expect("fixture address");
     let cases: Vec<(&str, SemanticsError, &str)> = vec![
         (
-            "Field",
+            "Field(PriorityAtMost7)",
             SemanticsError::Field {
                 protocol: Id::new("vlan"),
                 field: "priority",
                 reason: semantics::Constraint::PriorityAtMost7,
             },
             "field priority on layer vlan is outside 0..=7",
+        ),
+        (
+            "Field(VlanIdAtMost4095)",
+            SemanticsError::Field {
+                protocol: Id::new("vlan"),
+                field: "vlan_id",
+                reason: semantics::Constraint::VlanIdAtMost4095,
+            },
+            "field vlan_id on layer vlan is outside 0..=4095",
+        ),
+        (
+            "Field(NonEmptySegments)",
+            SemanticsError::Field {
+                protocol: Id::new("ipv6_srh"),
+                field: "segments",
+                reason: semantics::Constraint::NonEmptySegments,
+            },
+            "field segments on layer ipv6_srh must contain at least one address",
+        ),
+        (
+            "Field(AtMost256Segments)",
+            SemanticsError::Field {
+                protocol: Id::new("ipv6_srh"),
+                field: "segments",
+                reason: semantics::Constraint::AtMost256Segments,
+            },
+            "field segments on layer ipv6_srh contains more than 256 addresses",
+        ),
+        (
+            "Field(OneByte)",
+            SemanticsError::Field {
+                protocol: Id::new("ipv6_srh"),
+                field: "segments_left",
+                reason: semantics::Constraint::OneByte,
+            },
+            "field segments_left on layer ipv6_srh is not Auto, an unsigned u8, or one raw byte",
         ),
         (
             "NonAtomicFragment",
@@ -418,11 +547,6 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
             "destination cannot be determined because unknown protocol route_mimic carries route-bearing field destination",
         ),
         (
-            "LayerIndexOutOfRange",
-            SemanticsError::LayerIndexOutOfRange,
-            "IP layer index is outside the packet",
-        ),
-        (
             "DuplicateSegmentRoutingHeader",
             SemanticsError::DuplicateSegmentRoutingHeader,
             "more than one SRH",
@@ -436,11 +560,6 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
             "SegmentCount",
             SemanticsError::SegmentCount,
             "SRH requires 1..=127 IPv6 segments",
-        ),
-        (
-            "SegmentCountUnrepresentable",
-            SemanticsError::SegmentCountUnrepresentable,
-            "SRH segment count cannot be represented",
         ),
         (
             "SegmentLastEntry",
@@ -462,6 +581,11 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
             "SegmentFlags",
             SemanticsError::SegmentFlags,
             "unsupported SRH flags are non-zero",
+        ),
+        (
+            "ReducedSegmentDestination",
+            SemanticsError::ReducedSegmentDestination,
+            "reduced SRH requires an explicit outer IPv6 destination",
         ),
         (
             "SegmentDestinationMismatch",

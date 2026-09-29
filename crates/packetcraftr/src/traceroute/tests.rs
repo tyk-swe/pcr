@@ -407,6 +407,39 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
 }
 
 #[test]
+fn traceroute_request_bounds_the_timeout_and_the_probe_rate() {
+    let request = udp_traceroute_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))));
+
+    let error = Request {
+        timeout: Duration::ZERO,
+        ..request.clone()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::InvalidTimeout { maximum, .. } if maximum == packetcraftr_netio::deadline::MAX_WAIT),
+        "{error:?}"
+    );
+
+    let error = Request {
+        probes_per_second: Some(0),
+        ..request
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "probes_per_second",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn traceroute_udp_port_overflow_precedes_duration_limit() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));

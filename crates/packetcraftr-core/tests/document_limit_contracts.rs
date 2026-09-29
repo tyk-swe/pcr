@@ -475,6 +475,55 @@ fn many_small_scalars_exhaust_the_total_payload_budget() {
 }
 
 #[test]
+fn named_object_documents_charge_members_keys_and_nesting_in_both_formats() {
+    let json = document(&layer(
+        "raw",
+        &[
+            "\"fixture\":{\"type\":\"object\",\"value\":{\"member\":{\"type\":\"unsigned\",\"value\":1}}}"
+                .to_owned(),
+        ],
+    ));
+    let exact = DocumentLimits {
+        max_total_payload_bytes: 14,
+        ..DocumentLimits::DEFAULT
+    };
+    parse_both(&json, &exact).expect("the member key and its integer are 14 payload bytes");
+    for (limits, expected) in [
+        (
+            DocumentLimits {
+                max_total_payload_bytes: 13,
+                ..exact
+            },
+            Limit::TotalPayloadBytes,
+        ),
+        (
+            DocumentLimits {
+                max_list_items: 0,
+                ..exact
+            },
+            Limit::ListItems,
+        ),
+        (
+            DocumentLimits {
+                max_nesting: 0,
+                ..exact
+            },
+            Limit::Nesting,
+        ),
+    ] {
+        assert_eq!(limit_of(parse_both(&json, &limits)), expected);
+    }
+    let duplicate = json.replace(
+        "\"member\":",
+        "\"member\":{\"type\":\"unsigned\",\"value\":2},\"member\":",
+    );
+    assert!(matches!(
+        Packet::parse_with_limits(&duplicate, Format::Json, &DocumentLimits::DEFAULT),
+        Err(Error::Parse { .. })
+    ));
+}
+
+#[test]
 fn layers_share_one_total_node_budget() {
     let layers = (0..4)
         .map(|i| layer(&format!("p{i}"), &[unsigned("a", 1), unsigned("b", 2)]))
@@ -767,6 +816,11 @@ fn shipped_examples_remain_valid_under_default_limits() {
         let parsed = Packet::parse_with_limits(&input, format, &DocumentLimits::DEFAULT)
             .unwrap_or_else(|error| panic!("{name} rejected: {error}"));
         parsed.validate_schema().expect("current schema");
+        let reserialized = serde_json::to_string(&parsed).expect("serialize");
+        let reparsed =
+            Packet::parse_with_limits(&reserialized, Format::Json, &DocumentLimits::DEFAULT)
+                .unwrap_or_else(|error| panic!("{name} does not reparse: {error}"));
+        assert_eq!(reparsed, parsed, "{name} changed across a JSON round trip");
         checked += 1;
     }
     assert!(

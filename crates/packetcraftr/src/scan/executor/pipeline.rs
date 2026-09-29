@@ -12,10 +12,13 @@ use crate::{
     execution::{
         ExchangeExecutor,
         evidence::{CandidateKey, candidate_precedes},
+        limits::check_rate,
+        rate_delay,
     },
     preparation::RebuildError,
     probe::Evidence,
-    providers::PacketProviders,
+    providers::{CaptureProviders, PacketProviders},
+    scan::error::Probes,
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -26,12 +29,13 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{self, Group, GroupRequest, Session as _},
+    capture::{self, Group, GroupRequest, RecordIdentity, Session as _},
     deadline::MAX_WAIT,
 };
-use prepare::AdmittedProbe;
+use prepare::{AdmittedProbe, Plan};
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
+    iter::Peekable,
     net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -76,6 +80,36 @@ impl Classified for PipelineFailure {
 struct EvidenceUsage {
     frames: usize,
     bytes: usize,
+}
+struct SeenFrames {
+    set: HashSet<RecordIdentity>,
+    order: VecDeque<RecordIdentity>,
+    capacity: usize,
+}
+
+impl SeenFrames {
+    fn new(capacity: usize) -> Self {
+        Self {
+            set: HashSet::new(),
+            order: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    /// Reports whether `identity` is new, forgetting the oldest identity once
+    /// more than `capacity` are held.
+    fn insert(&mut self, identity: RecordIdentity) -> bool {
+        if !self.set.insert(identity) {
+            return false;
+        }
+        self.order.push_back(identity);
+        if self.order.len() > self.capacity
+            && let Some(old) = self.order.pop_front()
+        {
+            self.set.remove(&old);
+        }
+        true
+    }
 }
 struct Pending {
     sent: Arc<SentPacket>,
@@ -132,8 +166,8 @@ fn validate_options(
         ),
         (
             "max_prepared_bytes",
-            256 * 1024 * 1024,
-            within(options.max_prepared_bytes, 256 * 1024 * 1024),
+            crate::scan::MAX_PREPARED_BYTES,
+            within(options.max_prepared_bytes, crate::scan::MAX_PREPARED_BYTES),
         ),
         (
             "max_evidence_frames",
@@ -151,18 +185,11 @@ fn validate_options(
         (
             "probes_per_second",
             crate::scan::MAX_RATE as usize,
-            options
-                .probes_per_second
-                .is_none_or(|rate| (1..=crate::scan::MAX_RATE).contains(&rate)),
-        ),
-        (
-            "max_undecoded",
-            options.max_evidence_frames,
-            options.max_undecoded <= options.max_evidence_frames,
+            check_rate(&Probes, "probes_per_second", options.probes_per_second).is_ok(),
         ),
         (
             "max_duration",
-            usize::try_from(MAX_WAIT.as_secs()).unwrap_or(usize::MAX),
+            max_wait_secs(),
             !options.max_duration.is_zero() && options.max_duration <= MAX_WAIT,
         ),
     ];
@@ -211,6 +238,10 @@ fn definitive(observation: &Observation) -> bool {
         })
 }
 
+fn max_wait_secs() -> usize {
+    usize::try_from(MAX_WAIT.as_secs()).unwrap_or(usize::MAX)
+}
+
 pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
     BoundaryError::new(
         format!("scan pipeline exceeds {field}={maximum}"),
@@ -248,48 +279,79 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     let started = executor.client.now();
     let deadline = started
         .checked_add(options.max_duration)
-        .ok_or_else(|| limit("duration", 3600))?;
-    let planned = batches
-        .iter()
-        .map(Planned::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    let cancellation = executor.client.cancellation.clone();
+        .ok_or_else(|| limit("duration", max_wait_secs()))?;
     let preparation = until(executor.client, deadline);
-    let mut plan = prepare::plan(executor, &planned, options, deadline, &preparation)?;
-    let request = GroupRequest {
-        interfaces: plan.interfaces.clone(),
-        limits: executor.collection.capture,
-        filter: None,
-        promiscuous: false,
-        native: Default::default(),
-    };
-    let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
-    group
-        .arm(
-            executor.client.providers.capture(),
-            &until(executor.client, deadline),
-        )
-        .map_err(BoundaryError::from_error)?;
-    let mut stats = Stats::default();
-    let mut pending = BTreeMap::new();
-    let mut failed_probe = None;
-    let mut evidence = EvidenceUsage::default();
-    let mut undecoded = 0usize;
-    let mut seen = HashSet::new();
-    let mut seen_order = VecDeque::new();
-    let mut diagnostics = HashSet::new();
-    let result = (|| -> Result<(), BoundaryError> {
-        check(executor.client, deadline)?;
+    let mut pipeline = Pipeline::open(
+        executor,
+        batches,
+        options,
+        deadline,
+        started,
+        &preparation,
+        emit,
+    )?;
+    let result = pipeline.drive();
+    pipeline.finish(result)
+}
+
+type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
+
+struct Pipeline<'a, P: PacketProviders, K> {
+    executor: &'a ExchangeExecutor<'a, P, K>,
+    batches: &'a [Batch<Probe>],
+    planned: Vec<Planned<'a>>,
+    options: PipelineOptions,
+    deadline: Instant,
+    started: Instant,
+    emit: &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    plan: Plan<'a, P, K>,
+    group: Group<CaptureSession<P>>,
+    decoder: Dissector,
+    spacing: Duration,
+    stats: Stats,
+    pending: BTreeMap<usize, Pending>,
+    retained: usize,
+    evidence: EvidenceUsage,
+    failed_probe: Option<Probe>,
+    seen: SeenFrames,
+    diagnostics: HashSet<&'static str>,
+    next: usize,
+    next_send: Instant,
+    admitted: Peekable<std::vec::IntoIter<AdmittedProbe>>,
+    capture_drain_limit: usize,
+    capture_drain_remaining: usize,
+    draining_expired: HashSet<usize>,
+}
+
+impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
+    fn open(
+        executor: &'a ExchangeExecutor<'a, P, K>,
+        batches: &'a [Batch<Probe>],
+        options: PipelineOptions,
+        deadline: Instant,
+        started: Instant,
+        preparation: &'a Deadline,
+        emit: &'a mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Self, BoundaryError> {
+        let planned = batches
+            .iter()
+            .map(Planned::new)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut plan = prepare::plan(executor, &planned, options, deadline, preparation)?;
+        let request = GroupRequest {
+            interfaces: plan.interfaces.clone(),
+            limits: executor.collection.capture,
+            filter: None,
+            promiscuous: false,
+            native: Default::default(),
+        };
+        let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
         group
-            .wait_ready(&until(executor.client, deadline))
+            .arm(
+                executor.client.providers.capture(),
+                &until(executor.client, deadline),
+            )
             .map_err(BoundaryError::from_error)?;
-        let decoder = Dissector::new(executor.client.registry.clone());
-        let spacing = crate::clock::rate_delay(1, options.probes_per_second)
-            .ok_or_else(|| limit("probe rate", crate::scan::MAX_RATE as usize))?;
-        let mut next = 0usize;
-        let mut next_send = executor.client.now();
-        let mut retained = plan.base_bytes;
-        let mut admitted = std::mem::take(&mut plan.probes).into_iter().peekable();
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()
@@ -297,298 +359,405 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
             .max()
             .expect("validated capture group contains a source")
             * source_count;
-        let mut capture_drain_remaining = capture_drain_limit;
-        let mut draining_expired = HashSet::new();
-        while next < batches.len() || !pending.is_empty() {
-            check(executor.client, deadline)?;
-            let now = executor.client.now();
-            let expired: Vec<_> = pending
-                .iter()
-                .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
-                .map(|(index, _)| *index)
-                .collect();
-            let cohort_len = draining_expired.len();
-            draining_expired.extend(expired.iter().copied());
-            if draining_expired.len() > cohort_len {
-                capture_drain_remaining = capture_drain_limit;
-            }
-            // A callback can consume the rest of another probe's timeout after
-            // its reply has already entered a capture queue.
-            let draining_captures = !expired.is_empty() && capture_drain_remaining > 0;
-            if !draining_captures {
-                if !expired.is_empty() {
-                    for index in expired {
-                        complete(
-                            index,
-                            &planned,
-                            &mut pending,
-                            &mut retained,
-                            emit,
-                            &mut failed_probe,
-                            &mut evidence,
-                        )?;
-                    }
-                }
-                draining_expired.clear();
-                capture_drain_remaining = capture_drain_limit;
-            }
-            while !draining_captures
-                && pending.len() < options.max_in_flight
-                && executor.client.now() >= next_send
-                && let Some(AdmittedProbe { cost, memory }) = admitted.next_if(|probe| {
-                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
-                })
-            {
-                check(executor.client, deadline)?;
-                let batch = &batches[next];
-                let probe = planned[next].probe;
-                failed_probe = Some(probe.clone());
-                let prepared = plan
-                    .discovery
-                    .rebuild(probe.packet(), &plan.routes[&probe.address], cost)
-                    .map_err(|error| match error {
-                        RebuildError::Changed { admitted } => {
-                            limit("changed preparation size", admitted)
-                        }
-                        RebuildError::Preparation(source) => BoundaryError::from_error(source),
-                    })?;
-                if !crate::scan::plan::packet::sent_probe_matches(probe, &prepared.built().packet) {
-                    return Err(BoundaryError::internal_execution(
-                        "materialized scan packet differs from its probe",
-                        "internal.scan_probe_mismatch",
-                        "preserve the planned endpoint and identity",
-                    ));
-                }
-                check(executor.client, deadline)?;
-                stats.packets_attempted += 1;
-                let sent = Arc::new(
-                    prepared
-                        .transmit(executor.client.providers.transmit(), || {
-                            Ok::<(), LiveIoError>(())
-                        })
-                        .map_err(BoundaryError::from_error)?,
-                );
-                stats.packets_completed += 1;
-                stats.bytes = stats
-                    .bytes
-                    .checked_add(sent.bytes_sent() as u64)
-                    .ok_or_else(|| limit("sent bytes", usize::MAX))?;
-                let end = sent
-                    .timing()
-                    .freshness_marker()
-                    .monotonic()
-                    .checked_add(batch.timeout)
-                    .ok_or_else(|| limit("probe timeout", 3600))?
-                    .min(deadline);
-                pending.insert(
-                    next,
-                    Pending {
-                        sent: sent.clone(),
-                        deadline: end,
-                        best: None,
-                        last_response: None,
-                        charge: memory,
-                    },
-                );
-                retained += memory;
-                emit(PipelineEvent::Sent { index: next, sent })?;
-                failed_probe = None;
-                next += 1;
-                next_send = executor
-                    .client
-                    .now()
-                    .checked_add(spacing)
-                    .ok_or_else(|| limit("pacing delay", 3600))?;
-                if !spacing.is_zero() {
-                    break;
-                }
-            }
-            if next == batches.len() && pending.is_empty() {
+        Ok(Self {
+            executor,
+            batches,
+            planned,
+            options,
+            deadline,
+            started,
+            emit,
+            group,
+            decoder: Dissector::new(executor.client.registry.clone()),
+            spacing: Duration::ZERO,
+            stats: Stats::default(),
+            pending: BTreeMap::new(),
+            retained: plan.base_bytes,
+            evidence: EvidenceUsage::default(),
+            failed_probe: None,
+            seen: SeenFrames::new(options.max_evidence_frames),
+            diagnostics: HashSet::new(),
+            next: 0,
+            next_send: started,
+            admitted: std::mem::take(&mut plan.probes).into_iter().peekable(),
+            plan,
+            capture_drain_limit,
+            capture_drain_remaining: capture_drain_limit,
+            draining_expired: HashSet::new(),
+        })
+    }
+
+    /// Runs the scan to completion or first failure. The caller passes the
+    /// result to [`Self::finish`] either way.
+    fn drive(&mut self) -> Result<(), BoundaryError> {
+        check(self.executor.client, self.deadline)?;
+        self.group
+            .wait_ready(&until(self.executor.client, self.deadline))
+            .map_err(BoundaryError::from_error)?;
+        self.spacing = rate_delay(
+            &Probes,
+            "probes_per_second",
+            1,
+            self.options.probes_per_second,
+        )
+        .map_err(BoundaryError::from_error)?;
+        self.next_send = self.executor.client.now();
+        while self.next < self.batches.len() || !self.pending.is_empty() {
+            check(self.executor.client, self.deadline)?;
+            let draining_captures = self.settle_expired()?;
+            self.send_ready(draining_captures)?;
+            if self.next == self.batches.len() && self.pending.is_empty() {
                 break;
             }
-            let earliest = pending
-                .values()
-                .map(|entry| entry.deadline)
-                .min()
-                .unwrap_or(deadline)
-                .min(deadline);
-            let wake = if pending.len() < options.max_in_flight
-                && admitted.peek().is_some_and(|probe| {
-                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
-                }) {
-                earliest.min(next_send)
-            } else {
-                earliest
-            };
-            let mut wait = wake
-                .saturating_duration_since(executor.client.now())
-                .min(Duration::from_millis(5));
-            if draining_captures {
-                capture_drain_remaining -= 1;
-                wait = Duration::ZERO;
-            }
-            let wait = Deadline::new(wait).with_cancellation(cancellation.clone());
-            let Some(captured) = group
-                .next_captured_frame(&wait)
-                .map_err(BoundaryError::from_error)?
-            else {
-                if draining_captures {
-                    capture_drain_remaining = 0;
-                }
+            let Some(captured) = self.read_frame(draining_captures)? else {
                 continue;
             };
-            if !seen.insert(captured.identity()) {
-                continue;
+            self.ingest(captured)?;
+        }
+        Ok(())
+    }
+
+    /// Completes the probes past their timeout once the capture queues have
+    /// been drained, and reports whether they are still being drained.
+    fn settle_expired(&mut self) -> Result<bool, BoundaryError> {
+        let now = self.executor.client.now();
+        let expired: Vec<_> = self
+            .pending
+            .iter()
+            .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
+            .map(|(index, _)| *index)
+            .collect();
+        let cohort_len = self.draining_expired.len();
+        self.draining_expired.extend(expired.iter().copied());
+        if self.draining_expired.len() > cohort_len {
+            self.capture_drain_remaining = self.capture_drain_limit;
+        }
+        // A callback can consume the rest of another probe's timeout after
+        // its reply has already entered a capture queue.
+        let draining_captures = !expired.is_empty() && self.capture_drain_remaining > 0;
+        if !draining_captures {
+            for index in expired {
+                self.complete(index)?;
             }
-            seen_order.push_back(captured.identity());
-            if seen_order.len() > options.max_evidence_frames
-                && let Some(old) = seen_order.pop_front()
-            {
-                seen.remove(&old);
-            }
-            let source = captured.source;
-            let raw = captured.frame.clone();
-            let decoded = match decoder.decode(captured.frame, executor.collection.decode.clone()) {
-                Ok(decoded) => decoded,
-                Err(error) => {
-                    if diagnostics.insert("decode") {
-                        emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                            "scan.decode_error",
-                            packetcraftr_core::error::render(&error),
-                        )))?;
-                    }
-                    if undecoded < options.max_undecoded {
-                        emit(PipelineEvent::Undecoded { frame: raw })?;
-                        undecoded += 1;
-                    }
-                    continue;
-                }
-            };
-            if decoded
-                .diagnostics
-                .iter()
-                .any(Diagnostic::is_checksum_failure)
-            {
-                if diagnostics.insert("integrity") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "scan.integrity_rejected",
-                        "checksum-invalid capture was not correlated",
-                    )))?;
-                }
-                continue;
-            }
-            let Some(received) = captured.received_at else {
-                if diagnostics.insert("ingress") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "capture.ingress_time_unavailable",
-                        "capture lacks a monotonic ingress marker and was not correlated",
-                    )))?;
-                }
-                continue;
-            };
-            let mut candidates = candidates(
-                &pending,
-                &planned,
-                &executor.client.registry,
-                &decoded,
-                &plan.interfaces[source],
-                received,
-            );
-            if candidates.len() != 1 {
-                if candidates.len() > 1 && diagnostics.insert("ambiguous") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "scan.ambiguous_response",
-                        "capture matched multiple pending probes and was not attributed",
-                    )))?;
-                }
-                continue;
-            }
-            let (index, observation) = candidates.pop().expect("one candidate");
-            let definitive = definitive(&observation);
-            let entry = pending.get_mut(&index).expect("candidate is pending");
-            let candidate = Best {
-                rank: observation.rank(),
-                responder: observation.response.responder,
-                response: crate::exchange::Response {
-                    request_index: 0,
-                    response: decoded,
-                    latency: received
-                        .duration_since(entry.sent.timing().freshness_marker().monotonic()),
-                },
-            };
-            if entry
-                .best
-                .as_ref()
-                .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
-            {
-                if let Some(previous) = &entry.best {
-                    evidence.frames -= 1;
-                    evidence.bytes -= previous.response.response.frame.bytes().len();
-                }
-                retain(raw.bytes().len(), &mut evidence, options)?;
-                entry.best = Some(candidate);
-            }
-            if definitive {
-                complete(
-                    index,
-                    &planned,
-                    &mut pending,
-                    &mut retained,
-                    emit,
-                    &mut failed_probe,
-                    &mut evidence,
-                )?;
+            self.draining_expired.clear();
+            self.capture_drain_remaining = self.capture_drain_limit;
+        }
+        Ok(draining_captures)
+    }
+
+    fn send_ready(&mut self, draining_captures: bool) -> Result<(), BoundaryError> {
+        while !draining_captures
+            && self.pending.len() < self.options.max_in_flight
+            && self.executor.client.now() >= self.next_send
+            && let Some(probe) = self.admitted.next_if(|probe| {
+                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
+            })
+        {
+            self.send(probe)?;
+            if !self.spacing.is_zero() {
+                break;
             }
         }
         Ok(())
-    })();
-    let mut cleanup = None;
-    let mut result = result;
-    // A group failure already shut every source down; this reports that
-    // cleanup, or performs it after any other exit.
-    if let Err(error) = group.shutdown() {
-        if result.is_ok() {
-            result = Err(BoundaryError::from_error(error));
+    }
+
+    fn send(&mut self, AdmittedProbe { cost, memory }: AdmittedProbe) -> Result<(), BoundaryError> {
+        let client = self.executor.client;
+        check(client, self.deadline)?;
+        let batch = &self.batches[self.next];
+        let probe = self.planned[self.next].probe;
+        self.failed_probe = Some(probe.clone());
+        let prepared = self
+            .plan
+            .discovery
+            .rebuild(probe.packet(), &self.plan.routes[&probe.address], cost)
+            .map_err(|error| match error {
+                RebuildError::Changed { admitted } => limit("changed preparation size", admitted),
+                RebuildError::Preparation(source) => BoundaryError::from_error(source),
+            })?;
+        if !crate::scan::plan::packet::sent_probe_matches(probe, &prepared.built().packet) {
+            return Err(BoundaryError::internal_execution(
+                "materialized scan packet differs from its probe",
+                "internal.scan_probe_mismatch",
+                "preserve the planned endpoint and identity",
+            ));
+        }
+        check(client, self.deadline)?;
+        self.stats.packets_attempted += 1;
+        let sent = Arc::new(
+            prepared
+                .transmit(client.providers.transmit(), || Ok::<(), LiveIoError>(()))
+                .map_err(BoundaryError::from_error)?,
+        );
+        self.stats.packets_completed += 1;
+        self.stats.bytes = self
+            .stats
+            .bytes
+            .checked_add(sent.bytes_sent() as u64)
+            .ok_or_else(|| limit("sent bytes", usize::MAX))?;
+        let end = sent
+            .timing()
+            .freshness_marker()
+            .monotonic()
+            .checked_add(batch.timeout)
+            .ok_or_else(|| limit("probe timeout", max_wait_secs()))?
+            .min(self.deadline);
+        self.pending.insert(
+            self.next,
+            Pending {
+                sent: sent.clone(),
+                deadline: end,
+                best: None,
+                last_response: None,
+                charge: memory,
+            },
+        );
+        self.retained += memory;
+        (self.emit)(PipelineEvent::Sent {
+            index: self.next,
+            sent,
+        })?;
+        self.failed_probe = None;
+        self.next += 1;
+        self.next_send = client
+            .now()
+            .checked_add(self.spacing)
+            .ok_or_else(|| limit("pacing delay", max_wait_secs()))?;
+        Ok(())
+    }
+
+    fn wake_time(&mut self) -> Instant {
+        let earliest = self
+            .pending
+            .values()
+            .map(|entry| entry.deadline)
+            .min()
+            .unwrap_or(self.deadline)
+            .min(self.deadline);
+        if self.pending.len() < self.options.max_in_flight
+            && self.admitted.peek().is_some_and(|probe| {
+                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
+            })
+        {
+            earliest.min(self.next_send)
         } else {
-            cleanup = Some(Box::new(error));
+            earliest
         }
     }
-    let capture_sources = group.snapshot();
-    for source in &capture_sources {
-        if let Some(sum) = stats.capture.checked_add(source.statistics) {
-            stats.capture = sum;
-        } else {
-            if result.is_ok() {
-                result = Err(limit("capture statistics", usize::MAX));
-            }
-            break;
+
+    fn read_frame(
+        &mut self,
+        draining_captures: bool,
+    ) -> Result<Option<capture::Captured>, BoundaryError> {
+        let wake = self.wake_time();
+        let mut wait = wake
+            .saturating_duration_since(self.executor.client.now())
+            .min(Duration::from_millis(5));
+        if draining_captures {
+            self.capture_drain_remaining -= 1;
+            wait = Duration::ZERO;
         }
+        let wait = Deadline::new(wait).with_cancellation(self.executor.client.cancellation.clone());
+        let captured = self
+            .group
+            .next_captured_frame(&wait)
+            .map_err(BoundaryError::from_error)?;
+        if captured.is_none() && draining_captures {
+            self.capture_drain_remaining = 0;
+        }
+        Ok(captured)
     }
-    stats.elapsed = executor.client.now().saturating_duration_since(started);
-    let result = result.and_then(|()| {
-        for source in &capture_sources {
-            if let Some(loss) = source.statistics.evidence_loss_error() {
-                if source.limits.overflow_policy == capture::OverflowPolicy::Fail {
-                    return Err(BoundaryError::from_error(loss));
+
+    fn ingest(&mut self, captured: capture::Captured) -> Result<(), BoundaryError> {
+        if !self.seen.insert(captured.identity()) {
+            return Ok(());
+        }
+        let source = captured.source;
+        let raw = captured.frame.clone();
+        let decoded = match self
+            .decoder
+            .decode(captured.frame, self.executor.collection.decode.clone())
+        {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                if self.diagnostics.insert("decode") {
+                    (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                        "scan.decode_error",
+                        packetcraftr_core::error::render(&error),
+                    )))?;
                 }
-                emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                    "capture.evidence_incomplete",
-                    format!("source {}: {loss}", source.index),
+                (self.emit)(PipelineEvent::Undecoded { frame: raw })?;
+                return Ok(());
+            }
+        };
+        if decoded
+            .diagnostics
+            .iter()
+            .any(Diagnostic::is_checksum_failure)
+        {
+            if self.diagnostics.insert("integrity") {
+                (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.integrity_rejected",
+                    "checksum-invalid capture was not correlated",
                 )))?;
             }
+            return Ok(());
+        }
+        let Some(received) = captured.received_at else {
+            if self.diagnostics.insert("ingress") {
+                (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "capture.ingress_time_unavailable",
+                    "capture lacks a monotonic ingress marker and was not correlated",
+                )))?;
+            }
+            return Ok(());
+        };
+        let mut candidates = candidates(
+            &self.pending,
+            &self.planned,
+            &self.executor.client.registry,
+            &decoded,
+            &self.plan.interfaces[source],
+            received,
+        );
+        if candidates.len() != 1 {
+            if candidates.len() > 1 && self.diagnostics.insert("ambiguous") {
+                (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.ambiguous_response",
+                    "capture matched multiple pending probes and was not attributed",
+                )))?;
+            }
+            return Ok(());
+        }
+        let (index, observation) = candidates.pop().expect("one candidate");
+        let definitive = definitive(&observation);
+        let entry = self.pending.get_mut(&index).expect("candidate is pending");
+        let candidate = Best {
+            rank: observation.rank(),
+            responder: observation.response.responder,
+            response: crate::exchange::Response {
+                request_index: 0,
+                response: decoded,
+                latency: received
+                    .duration_since(entry.sent.timing().freshness_marker().monotonic()),
+            },
+        };
+        if entry
+            .best
+            .as_ref()
+            .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
+        {
+            if let Some(previous) = &entry.best {
+                self.evidence.frames -= 1;
+                self.evidence.bytes -= previous.response.response.frame.bytes().len();
+            }
+            retain(raw.bytes().len(), &mut self.evidence, self.options)?;
+            entry.best = Some(candidate);
+        }
+        if definitive {
+            self.complete(index)?;
         }
         Ok(())
-    });
-    match result {
-        Ok(()) => Ok(stats),
-        Err(source) => Err(BoundaryError::from_error(PipelineFailure {
-            source,
+    }
+
+    fn complete(&mut self, index: usize) -> Result<(), BoundaryError> {
+        let entry = self
+            .pending
+            .get_mut(&index)
+            .expect("completed pending probe");
+        entry.last_response = entry
+            .best
+            .as_ref()
+            .map(|best| best.response.response.frame.clone());
+        self.failed_probe = Some(self.planned[index].probe.clone());
+        let stats = Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: entry.sent.bytes_sent() as u64,
+            elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
+            capture: Default::default(),
+        };
+        let execution = Evidence {
+            permit: self.planned[index].permit,
+            sent: vec![entry.sent.as_ref().clone()],
+            responses: entry
+                .best
+                .take()
+                .map(|best| best.response)
+                .into_iter()
+                .collect(),
+            unsolicited: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
             stats,
-            pending: pending_evidence(&pending, &planned),
-            failed_probe,
-            capture_sources,
-            cleanup,
-        })),
+        };
+        (self.emit)(PipelineEvent::Completed { index, execution })?;
+        let entry = self
+            .pending
+            .remove(&index)
+            .expect("completed pending probe");
+        self.retained -= entry.charge;
+        if let Some(response) = entry.last_response {
+            self.evidence.frames -= 1;
+            self.evidence.bytes -= response.bytes().len();
+        }
+        self.failed_probe = None;
+        Ok(())
+    }
+
+    fn finish(mut self, result: Result<(), BoundaryError>) -> Result<Stats, BoundaryError> {
+        let mut cleanup = None;
+        let mut result = result;
+        // A group failure already shut every source down; this reports that
+        // cleanup, or performs it after any other exit.
+        if let Err(error) = self.group.shutdown() {
+            if result.is_ok() {
+                result = Err(BoundaryError::from_error(error));
+            } else {
+                cleanup = Some(Box::new(error));
+            }
+        }
+        let capture_sources = self.group.snapshot();
+        for source in &capture_sources {
+            if let Some(sum) = self.stats.capture.checked_add(source.statistics) {
+                self.stats.capture = sum;
+            } else {
+                if result.is_ok() {
+                    result = Err(limit("capture statistics", usize::MAX));
+                }
+                break;
+            }
+        }
+        self.stats.elapsed = self
+            .executor
+            .client
+            .now()
+            .saturating_duration_since(self.started);
+        let result = result.and_then(|()| {
+            for source in &capture_sources {
+                if let Some(loss) = source.statistics.evidence_loss_error() {
+                    if source.limits.overflow_policy == capture::OverflowPolicy::Fail {
+                        return Err(BoundaryError::from_error(loss));
+                    }
+                    (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                        "capture.evidence_incomplete",
+                        format!("source {}: {loss}", source.index),
+                    )))?;
+                }
+            }
+            Ok(())
+        });
+        match result {
+            Ok(()) => Ok(self.stats),
+            Err(source) => Err(BoundaryError::from_error(PipelineFailure {
+                source,
+                stats: self.stats,
+                pending: pending_evidence(&self.pending, &self.planned),
+                failed_probe: self.failed_probe,
+                capture_sources,
+                cleanup,
+            })),
+        }
     }
 }
 fn retain(
@@ -606,52 +775,6 @@ fn retain(
         .checked_add(bytes)
         .filter(|count| *count <= options.max_evidence_bytes)
         .ok_or_else(|| limit("evidence bytes", options.max_evidence_bytes))?;
-    Ok(())
-}
-fn complete(
-    index: usize,
-    planned: &[Planned<'_>],
-    pending: &mut BTreeMap<usize, Pending>,
-    retained: &mut usize,
-    emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
-    failed: &mut Option<Probe>,
-    usage: &mut EvidenceUsage,
-) -> Result<(), BoundaryError> {
-    let entry = pending.get_mut(&index).expect("completed pending probe");
-    entry.last_response = entry
-        .best
-        .as_ref()
-        .map(|best| best.response.response.frame.clone());
-    *failed = Some(planned[index].probe.clone());
-    let stats = Stats {
-        packets_attempted: 1,
-        packets_completed: 1,
-        bytes: entry.sent.bytes_sent() as u64,
-        elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
-        capture: Default::default(),
-    };
-    let execution = Evidence {
-        permit: planned[index].permit,
-        sent: vec![entry.sent.as_ref().clone()],
-        responses: entry
-            .best
-            .take()
-            .map(|best| best.response)
-            .into_iter()
-            .collect(),
-        unsolicited: Vec::new(),
-        undecoded: Vec::new(),
-        diagnostics: Vec::new(),
-        stats,
-    };
-    emit(PipelineEvent::Completed { index, execution })?;
-    let entry = pending.remove(&index).expect("completed pending probe");
-    *retained -= entry.charge;
-    if let Some(response) = entry.last_response {
-        usage.frames -= 1;
-        usage.bytes -= response.bytes().len();
-    }
-    *failed = None;
     Ok(())
 }
 fn pending_evidence(
@@ -679,7 +802,9 @@ mod tests {
     use super::*;
     use crate::probe::ProbeEndpoint;
     use crate::scan::{MAX_PROBES, MAX_RATE, Probe};
+    use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::deadline::MAX_WAIT;
+    use std::time::SystemTime;
 
     fn options() -> PipelineOptions {
         PipelineOptions {
@@ -689,7 +814,6 @@ mod tests {
             max_prepared_bytes: 1024,
             max_evidence_frames: 8,
             max_evidence_bytes: 1024,
-            max_undecoded: 8,
         }
     }
 
@@ -724,13 +848,6 @@ mod tests {
             ),
             (
                 PipelineOptions {
-                    max_undecoded: 9,
-                    ..options()
-                },
-                "max_undecoded=8".to_owned(),
-            ),
-            (
-                PipelineOptions {
                     max_duration: Duration::ZERO,
                     ..options()
                 },
@@ -747,5 +864,24 @@ mod tests {
                 .to_string(),
             format!("scan pipeline exceeds probes={}", MAX_PROBES)
         );
+    }
+
+    fn identity() -> RecordIdentity {
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0]).expect("frame");
+        capture::Captured::new(frame, Instant::now()).identity()
+    }
+
+    #[test]
+    fn seen_frames_reject_repeats_and_forget_the_oldest_identity_past_capacity() {
+        let (first, second, third) = (identity(), identity(), identity());
+        let mut seen = SeenFrames::new(2);
+
+        assert!(seen.insert(first));
+        assert!(!seen.insert(first));
+        assert!(seen.insert(second));
+        assert!(seen.insert(third), "a third identity evicts the first");
+        assert!(!seen.insert(second));
+        assert!(!seen.insert(third));
+        assert!(seen.insert(first), "the evicted identity is new again");
     }
 }

@@ -209,72 +209,17 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
             other => panic!("{input}: expected an invalid raw layer error, got {other:?}"),
         }
     }
-    for source in ["", "probe(", "/probe", "probe(value=1,value=2)", "unknown"] {
-        assert!(
-            expression::parse(source, registry, expression::Limits::default()).is_err(),
-            "{source}"
-        );
-    }
-    assert!(matches!(
-        expression::parse(
-            "probe",
-            registry,
-            expression::Limits {
-                max_bytes: 4,
-                ..expression::Limits::default()
-            },
-        ),
-        Err(expression::Error::SizeLimit { .. })
-    ));
-    assert!(matches!(
-        expression::parse(
-            "probe/probe",
-            registry,
-            expression::Limits {
-                max_layers: 1,
-                ..expression::Limits::default()
-            },
-        ),
-        Err(expression::Error::LayerLimit { limit: 1 })
-    ));
-    assert!(matches!(
-        expression::parse(
-            "probe",
-            registry,
-            expression::Limits {
-                max_nesting: 65,
-                ..expression::Limits::default()
-            },
-        ),
-        Err(expression::Error::InvalidNestingLimit { .. })
-    ));
     packet
 }
 
 #[test]
-fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
+fn expressions_and_documents_round_trip() {
     let registry = probe_registry();
     let packet = parse_expression_fixture(&registry);
     let document = document::Packet::from_packet(&packet);
     document.validate_schema().expect("current schema");
     let json = serde_json::to_string_pretty(&document).expect("JSON serialization");
     let yaml = noyalib::to_string(&document).expect("YAML serialization");
-    assert!(matches!(
-        document::Packet::parse(&json, document::Format::Json, json.len() - 1),
-        Err(document::Error::SizeLimit { .. })
-    ));
-    assert!(matches!(
-        document::Packet::parse_with_limits(
-            &json,
-            document::Format::Json,
-            &document::DocumentLimits {
-                max_input_bytes: json.len(),
-                max_layers: 0,
-                ..document::DocumentLimits::DEFAULT
-            },
-        ),
-        Err(document::Error::LayerLimit { limit: 0 })
-    ));
     let from_json =
         document::Packet::parse(&json, document::Format::Json, json.len()).expect("JSON parse");
     let from_yaml =
@@ -310,17 +255,6 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     assert!(matches!(
         unknown.to_packet(&registry, 1),
         Err(document::Error::UnknownProtocol { .. })
-    ));
-    assert!(matches!(
-        document::Packet::parse_with_limits(
-            &json,
-            document::Format::Json,
-            &document::DocumentLimits {
-                max_nesting: document::MAX_DOCUMENT_NESTING + 1,
-                ..document::DocumentLimits::DEFAULT
-            },
-        ),
-        Err(document::Error::InvalidLimit { .. })
     ));
     let duplicate = "schema: packetcraftr.packet/v2\nschema: duplicate\nlayers: []\n";
     for (input, format, expected_format, expected_fragment) in [

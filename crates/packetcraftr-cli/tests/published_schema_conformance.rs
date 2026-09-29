@@ -113,6 +113,39 @@ fn rewrite_v2_schema_rejects_unknown_assignment_properties() {
 }
 
 #[test]
+fn rewrite_schemas_accept_filters_up_to_the_filter_length_limit_as_the_loader_does() {
+    let filter = format!("udp && ({})", vec!["udp.port == 53"; 700].join(" || "));
+    assert!(
+        8192 < filter.len() && filter.len() <= packetcraftr_core::filter::DEFAULT_MAX_FILTER_BYTES
+    );
+    let v1 = json!({
+        "schema": "packetcraftr.rewrite/v1",
+        "rules": [{"filter": filter, "patch": {"source_port": 1}}],
+    });
+    let v2 = json!({
+        "schema": "packetcraftr.rewrite/v2",
+        "rules": [{"filter": filter, "assign": ["ipv4.ttl=63"]}],
+    });
+    rewrite_v1_validator()
+        .validate(&v1)
+        .unwrap_or_else(|error| panic!("v1 filter within the limit is valid: {error}"));
+    rewrite_v2_validator()
+        .validate(&v2)
+        .unwrap_or_else(|error| panic!("v2 filter within the limit is valid: {error}"));
+}
+
+#[test]
+fn rewrite_v2_schema_accepts_zero_padded_assignment_text_as_the_loader_does() {
+    let document = json!({
+        "schema": "packetcraftr.rewrite/v2",
+        "rules": [{"assign": [format!("ipv4.ttl={}63", "0".repeat(9000))]}],
+    });
+    rewrite_v2_validator()
+        .validate(&document)
+        .unwrap_or_else(|error| panic!("zero-padded assignment text is valid: {error}"));
+}
+
+#[test]
 fn udp_profile_schema_accepts_the_published_profiles_and_bounds_names_as_the_loader_does() {
     let validator = validator(include_str!(
         "../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
@@ -124,6 +157,8 @@ fn udp_profile_schema_accepts_the_published_profiles_and_bounds_names_as_the_loa
     assert!(validator.is_valid(&sample));
     for (name, valid) in [
         ("\u{e9}".repeat(128), true),
+        ("\u{e9}".repeat(129), false),
+        (String::new(), false),
         ("tab\tname".to_owned(), false),
     ] {
         let mut named = sample.clone();

@@ -8,8 +8,7 @@ use bytes::Bytes;
 
 use super::request::push_vlan;
 use super::{build_request_frame, is_unicast_mac, match_neighbor_response};
-use crate::neighbor::Request as NeighborRequest;
-use crate::route::MAX_VLAN_TAGS;
+use crate::neighbor::{MAX_VLAN_TAGS, Request as NeighborRequest};
 use packetcraftr_core::build::{Builder, Options};
 use packetcraftr_core::codec::{Context, Mode};
 use packetcraftr_core::decode::{self, Dissector};
@@ -299,9 +298,8 @@ fn arp_request_has_exact_broadcast_envelope_and_wire_fields() {
         IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99)),
     );
-    let (frame, destination) = build_request_frame(&request).expect("ARP request");
+    let frame = build_request_frame(&request).expect("ARP request");
 
-    assert_eq!(destination, MacAddress([0xff; 6]));
     assert_eq!(
         frame.as_ref(),
         &[
@@ -321,12 +319,8 @@ fn neighbor_solicitation_uses_solicited_multicast_and_valid_checksum() {
         IpAddr::V6("2001:db8::1".parse().expect("source")),
         IpAddr::V6("2001:db8::abcd".parse().expect("target")),
     );
-    let (frame, destination) = build_request_frame(&request).expect("neighbor solicitation");
+    let frame = build_request_frame(&request).expect("neighbor solicitation");
 
-    assert_eq!(
-        destination,
-        MacAddress([0x33, 0x33, 0xff, 0x00, 0xab, 0xcd])
-    );
     assert_eq!(
         frame.as_ref(),
         &[
@@ -381,7 +375,7 @@ fn vlan_tagged_requests_carry_the_stack_in_order_and_keep_untagged_padding() {
         tag(VlanKind::Ieee8021Ad, 5, true, 100),
         tag(VlanKind::Ieee8021Q, 1, false, 200),
     ];
-    let (frame, _) = build_request_frame(&arp).expect("tagged ARP request");
+    let frame = build_request_frame(&arp).expect("tagged ARP request");
     assert_eq!(frame.as_ref(), STACKED_ARP_REQUEST);
 
     let mut solicitation = request(
@@ -389,7 +383,7 @@ fn vlan_tagged_requests_carry_the_stack_in_order_and_keep_untagged_padding() {
         IpAddr::V6("2001:db8::abcd".parse().expect("target")),
     );
     solicitation.vlan_tags = vec![tag(VlanKind::Ieee8021Q, 3, true, 409)];
-    let (frame, _) = build_request_frame(&solicitation).expect("tagged solicitation");
+    let frame = build_request_frame(&solicitation).expect("tagged solicitation");
     assert_eq!(frame.as_ref(), TAGGED_SOLICITATION);
 }
 

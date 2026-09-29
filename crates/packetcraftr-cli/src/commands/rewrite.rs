@@ -195,20 +195,37 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
 }
 
 fn check_deadline(deadline: &Deadline) -> Result<(), BoundaryError> {
-    deadline.enforce().map_err(|error| match error {
-        packetcraftr_core::budget::Interrupted::Cancelled(error) => {
-            BoundaryError::from_error(error)
-        }
-        packetcraftr_core::budget::Interrupted::Exceeded(error) => BoundaryError::with_source(
-            error.to_string(),
-            packetcraftr_core::error::Classification::new(
-                "policy.rewrite_duration",
-                Kind::Policy,
-                None,
-            ),
-            Vec::new(),
-            error,
-        ),
-        _ => BoundaryError::from_error(packetcraftr_core::budget::Cancelled),
-    })
+    deadline.enforce().map_err(BoundaryError::from_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    use packetcraftr_core::budget::DeadlineExceeded;
+    use packetcraftr_core::error::Classified;
+
+    use super::*;
+
+    #[test]
+    fn an_expired_rewrite_duration_reports_the_shared_duration_limit() {
+        let ticks = Arc::new(AtomicU64::new(0));
+        let observed = ticks.clone();
+        let start = Instant::now();
+        let deadline = Deadline::with_time_source(Duration::from_millis(5), move || {
+            start + Duration::from_millis(observed.load(Ordering::SeqCst))
+        });
+        check_deadline(&deadline).expect("the deadline has not expired");
+
+        ticks.store(6, Ordering::SeqCst);
+        let error = check_deadline(&deadline).expect_err("the deadline has expired");
+        let exceeded = DeadlineExceeded {
+            actual: Duration::from_millis(6),
+            limit: Duration::from_millis(5),
+        };
+        assert_eq!(error.classification(), exceeded.classification());
+        assert_eq!(error.to_string(), exceeded.to_string());
+    }
 }

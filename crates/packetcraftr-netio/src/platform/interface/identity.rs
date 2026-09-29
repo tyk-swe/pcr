@@ -49,20 +49,14 @@ fn current_name(index: u32) -> Option<String> {
 mod tests {
     use super::*;
     use crate::error::test_support::assert_same_failure;
+    use crate::test_support::interface_id;
 
     const ABSENT_NAME: &str = "pcr-absent0";
     const ABSENT_INDEX: u32 = u32::MAX - 1;
 
-    fn identifier(name: &str, index: u32) -> InterfaceId {
-        InterfaceId {
-            name: name.to_owned(),
-            index,
-        }
-    }
-
     fn current_interface() -> InterfaceId {
         (1..=16_u32)
-            .find_map(|index| current_name(index).map(|name| identifier(&name, index)))
+            .find_map(|index| current_name(index).map(|name| interface_id(&name, index)))
             .expect("the host must own at least one nameable interface")
     }
 
@@ -78,7 +72,7 @@ mod tests {
     fn verification_rejects_a_name_that_no_longer_resolves_and_names_the_current_holder() {
         let current = current_interface();
 
-        let error = verify_interface_identity(&identifier(ABSENT_NAME, current.index))
+        let error = verify_interface_identity(&interface_id(ABSENT_NAME, current.index))
             .expect_err("a name that resolves to no index must fail closed");
 
         assert_same_failure(
@@ -98,7 +92,7 @@ mod tests {
     fn verification_rejects_a_name_that_resolves_to_a_different_index() {
         let current = current_interface();
 
-        let error = verify_interface_identity(&identifier(&current.name, ABSENT_INDEX))
+        let error = verify_interface_identity(&interface_id(&current.name, ABSENT_INDEX))
             .expect_err("a moved index must fail closed");
 
         assert_same_failure(

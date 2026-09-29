@@ -3,8 +3,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::neighbor::Request as NeighborRequest;
-use crate::route::MAX_VLAN_TAGS;
+use crate::neighbor::{MAX_VLAN_TAGS, Request as NeighborRequest};
 use packetcraftr_core::decode::{self, DecodedPacket, Dissector};
 use packetcraftr_core::diagnostic::ICMPV6_CHECKSUM;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -19,8 +18,6 @@ use packetcraftr_core::protocol::tunnel::Ah;
 
 use super::is_unicast_mac;
 use super::request::NDP_HOP_LIMIT;
-
-const ARP_REPLY: u16 = 2;
 
 pub(in crate::neighbor) fn match_neighbor_response(
     request: &NeighborRequest,
@@ -96,7 +93,7 @@ fn arp_reply(
     target: Ipv4Addr,
 ) -> Option<MacAddress> {
     let arp = layer.downcast_ref::<Arp>()?;
-    (arp.operation == ARP_REPLY
+    (arp.operation == Arp::OPERATION_REPLY
         && arp.sender_protocol == target
         && arp.target_protocol == source
         && arp.target_hardware == request.interface_mac.0)

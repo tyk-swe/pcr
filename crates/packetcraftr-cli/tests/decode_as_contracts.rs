@@ -102,6 +102,23 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
         }
         parse_json(&run_success(&arguments));
     }
+    let document = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path_text(&capture),
+        "--table",
+        "protocols",
+        "--decode-as",
+        "udp.port=5353:dns",
+    ]));
+    let dns = document["result"]["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["protocol"] == "dns")
+        .expect("the decode-as binding makes the capture count as dns");
+    assert_eq!(dns["frames"], 2);
 }
 
 #[test]

@@ -16,7 +16,9 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::rendering::{StreamEncoder, render_diagnostics_stderr, stream_capture_error};
+use crate::rendering::{
+    StreamEncoder, render_diagnostics_stderr, stream_capture_error, stream_limits,
+};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::BuildFormat;
@@ -61,9 +63,13 @@ pub(super) fn run(
         ));
     }
     let builder = core::build::Builder::new(registry);
+    let limits = stream_limits(
+        maximum as u64,
+        (maximum as u64).saturating_mul(arguments.budget.max_packet_size as u64),
+    );
     let mut writer = capture
         .as_ref()
-        .map(capture_output::CaptureOutput::writer)
+        .map(|capture| capture.writer(limits))
         .transpose()?;
     let mut summary = output::build::Complete::default();
     let mut diagnostics = Vec::new();

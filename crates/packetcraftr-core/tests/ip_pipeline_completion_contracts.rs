@@ -105,6 +105,7 @@ fn ipv6_ah_tcp_frames(registry: &Arc<packetcraftr_core::registry::Registry>) -> 
             fragment_offset: offset,
             more_fragments: more,
             identification: 43,
+            ..Ipv6Fragment::default()
         });
         packet.push(Raw::new(payload.to_vec()));
         Frame::new(timestamp, LinkType::IPV6, build(registry, packet))
@@ -170,6 +171,7 @@ fn ipv6_ah_gre_tcp_frames(registry: &Arc<packetcraftr_core::registry::Registry>)
             fragment_offset: offset,
             more_fragments: more,
             identification: 45,
+            ..Ipv6Fragment::default()
         });
         packet.push(Raw::new(payload.to_vec()));
         Frame::new(timestamp, LinkType::IPV6, build(registry, packet))
@@ -207,6 +209,18 @@ fn with_nonzero_ah_reserved(frame: &Frame) -> Frame {
     .expect("mutated AH frame remains valid")
 }
 
+fn with_ipv6_fragment_ignored_bits(frame: &Frame, reserved: u8, reserved_bits: u8) -> Frame {
+    let mut bytes = frame.bytes().to_vec();
+    bytes[41] = reserved;
+    bytes[43] |= reserved_bits << 1;
+    Frame::new(
+        frame.timestamp.expect("fixture has a timestamp"),
+        frame.link_type,
+        bytes,
+    )
+    .expect("mutated fragment frame remains valid")
+}
+
 fn ipv6_destination_options_fragments(
     registry: &Arc<packetcraftr_core::registry::Registry>,
 ) -> [Frame; 2] {
@@ -241,6 +255,7 @@ fn ipv6_destination_options_fragments(
             fragment_offset: offset,
             more_fragments: more,
             identification: 44,
+            ..Ipv6Fragment::default()
         });
         packet.push(Raw::new(payload.to_vec()));
         Frame::new(timestamp, LinkType::IPV6, build(registry, packet))
@@ -269,6 +284,7 @@ fn atomic_ipv6_frame(registry: &Arc<packetcraftr_core::registry::Registry>) -> F
         fragment_offset: 0,
         more_fragments: false,
         identification: 7,
+        ..Ipv6Fragment::default()
     });
     packet.push(Udp {
         source_port: 40_000,
@@ -304,6 +320,7 @@ fn ipv6_fragment_frame(
         fragment_offset: offset,
         more_fragments: more,
         identification: 42,
+        ..Ipv6Fragment::default()
     });
     packet.push(Raw::new(payload.to_vec()));
     Frame::new(timestamp, LinkType::IPV6, build(registry, packet)).expect("valid IPv6 frame")
@@ -347,7 +364,7 @@ fn assert_derived_udp(link_type: LinkType, family: Family, frames: &[Frame]) {
                 record.number,
                 record.decoded.frame.captured_length(),
                 derived.decoded.frame.captured_length(),
-                derived.decoded.original.len(),
+                derived.decoded.frame.bytes().len(),
                 record
                     .udp
                     .and_then(|view| view.conversation)
@@ -410,6 +427,46 @@ fn ipv6_completion_removes_fragment_header_and_dispatches_udp() {
     let registry = registry();
     let frames = ipv6_fragments(&registry);
     assert_derived_udp(LinkType::IPV6, Family::Ipv6, &frames);
+}
+
+#[test]
+fn ipv6_fragments_with_receiver_ignored_bits_set_are_reassembled() {
+    let registry = registry();
+    let [first, second] = ipv6_fragments(&registry);
+    let frames = [
+        with_ipv6_fragment_ignored_bits(&first, 0x01, 0),
+        with_ipv6_fragment_ignored_bits(&second, 0, 0b11),
+    ];
+    let mut capture = reader_with_link_type(LinkType::IPV6, &frames);
+    let mut observed = Vec::new();
+    let summary =
+        packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
+            observed.push((
+                record.decoded.packet.get::<Ipv6Fragment>().is_some(),
+                record
+                    .decoded
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "decode.ipv6_fragment_reserved"),
+                record.derived().is_some(),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+            ));
+            Ok(())
+        })
+        .expect("fragments with ignored bits analyze");
+
+    assert_eq!(
+        observed,
+        [(true, true, false, None), (true, true, true, Some(0))]
+    );
+    let counters = &summary.ip_reassembly.counters.ipv6;
+    assert_eq!(counters.physical_fragments, 2);
+    assert_eq!(counters.admitted_fragments, 2);
+    assert_eq!(counters.completed_datagrams, 1);
+    assert_eq!(counters.derived_payload_bytes, 24);
 }
 
 #[test]
@@ -600,6 +657,7 @@ fn partial_ipv6_extension_fragment_does_not_read_link_padding() {
         fragment_offset: 0,
         more_fragments: true,
         identification: 86,
+        ..Ipv6Fragment::default()
     });
     packet.push(Raw::new(vec![60, 0, 0, 0, 0, 0, 0, 0]));
     packet.push(Padding::new(vec![17, 0, 0, 0, 0, 0, 0, 0]));

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use packetcraftr_core::{
     error::Kind,
+    packet::MacAddress,
     transform::{ChecksumMode, FieldAssignment, HeaderRewrite, VlanRewrite},
 };
 
@@ -121,29 +122,22 @@ fn assignment(value: &str) -> Result<FieldAssignment, CliError> {
 }
 
 fn mac(value: &str) -> Result<[u8; 6], CliError> {
-    let parts: Vec<_> = value.split(':').collect();
-    if parts.len() != 6 || parts.iter().any(|part| part.len() != 2) {
-        return Err(CliError::new(
-            Kind::Usage,
-            "MAC addresses require six colon-separated hexadecimal bytes",
-        ));
-    }
-    let mut address = [0; 6];
-    for (part, byte) in parts.iter().zip(&mut address) {
-        *byte = u8::from_str_radix(part, 16)
-            .map_err(|_| CliError::new(Kind::Usage, "invalid hexadecimal MAC address"))?;
-    }
-    Ok(address)
+    value
+        .parse::<MacAddress>()
+        .map(|address| address.0)
+        .map_err(|error| CliError::caused(Kind::Usage, &error))
 }
 
 fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
     fn number(value: &str) -> Result<u16, CliError> {
-        if let Some(value) = value.strip_prefix("0x") {
-            u16::from_str_radix(value, 16)
-        } else {
-            value.parse()
+        match value.strip_prefix("0x") {
+            Some(digits) if digits.bytes().all(|digit| digit.is_ascii_hexdigit()) => {
+                u16::from_str_radix(digits, 16).ok()
+            }
+            Some(_) => None,
+            None => value.parse().ok(),
         }
-        .map_err(|_| CliError::new(Kind::Usage, "invalid VLAN number"))
+        .ok_or_else(|| CliError::new(Kind::Usage, "invalid VLAN number"))
     }
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {

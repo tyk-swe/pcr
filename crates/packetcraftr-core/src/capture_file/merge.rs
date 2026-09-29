@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::pcapng::validate_rewritable_packet_flags;
-use super::wire::{PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_IF_FCSLEN};
+use super::reader::DECLARED_FCS;
+use super::wire::PCAPNG_OPTION_COMMENT;
 use super::{
     Budget, CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind,
     PcapNgOption, Reader, RecordKind, Writer,
@@ -10,8 +11,7 @@ use super::{
 use crate::frame::Frame;
 use serde::Serialize;
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
+    collections::HashMap,
     io::{Read, Write},
     time::SystemTime,
 };
@@ -21,6 +21,7 @@ pub struct MergeSource<R> {
     pub reader: Reader<R>,
 }
 pub const MAX_MERGE_SOURCES: usize = 64;
+pub(super) const MAX_SOURCE_NAME_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MergeLimits {
@@ -68,6 +69,7 @@ pub struct MergeReport {
 }
 struct Pending {
     frame: Frame,
+    time: SystemTime,
     description: Interface,
     section: Option<u64>,
     local: Option<u32>,
@@ -89,7 +91,9 @@ pub fn merge<R: Read, W: Write>(
     let mut budget = Budget::new(limits.streams)?;
     if sources.is_empty()
         || sources.len() > limits.max_sources
-        || sources.iter().any(|source| source.name.len() > 4096)
+        || sources
+            .iter()
+            .any(|source| source.name.len() > MAX_SOURCE_NAME_BYTES)
     {
         return Err(Error::MergeSources {
             maximum: limits.max_sources,
@@ -104,16 +108,14 @@ pub fn merge<R: Read, W: Write>(
     let mut states = Vec::new();
     let mut interface_count = 0usize;
     for (index, source) in sources.iter().enumerate() {
+        if source.reader.declares_fcs() {
+            return Err(Error::MergeMetadata {
+                input: index,
+                field: DECLARED_FCS,
+            });
+        }
         let endianness = match source.reader.header() {
-            CaptureHeader::Pcap(header) => {
-                if header.network & 0xffff0000 != 0 {
-                    return Err(Error::MergeMetadata {
-                        input: index,
-                        field: "classic PCAP extended link/FCS metadata",
-                    });
-                }
-                header.endianness
-            }
+            CaptureHeader::Pcap(header) => header.endianness,
             CaptureHeader::PcapNg(section) => section.endianness,
         };
         interface_count = interface_count
@@ -136,11 +138,9 @@ pub fn merge<R: Read, W: Write>(
         source_frames: vec![0; sources.len()],
         ..Default::default()
     };
-    let mut pending: Vec<Option<Pending>> = (0..sources.len()).map(|_| None).collect();
-    let mut heap = BinaryHeap::new();
-    let mut mappings = HashMap::new();
+    let mut pending = Vec::with_capacity(sources.len());
     for index in 0..sources.len() {
-        if let Some(frame) = advance(
+        pending.push(advance(
             index,
             &mut sources[index],
             &mut states[index],
@@ -148,19 +148,10 @@ pub fn merge<R: Read, W: Write>(
             &mut report,
             &mut budget,
             limits,
-        )? {
-            heap.push(Reverse((
-                frame.frame.timestamp.expect("checked timestamp"),
-                index,
-                report.source_frames[index],
-            )));
-            pending[index] = Some(frame);
-        }
+        )?);
     }
-    while let Some(Reverse((_, index, _))) = heap.pop() {
-        let mut current = pending[index]
-            .take()
-            .expect("one heap entry per pending source");
+    let mut mappings = HashMap::new();
+    while let Some((index, mut current)) = take_earliest(&mut pending) {
         let key = (index, current.global);
         let id = if let Some(id) = mappings.get(&key) {
             *id
@@ -173,14 +164,12 @@ pub fn merge<R: Read, W: Write>(
                 global_interface: current.global,
                 output_interface: 0,
             };
-            let provenance = serde_json::to_vec(&serde_json::json!({
+            let provenance = serde_json::json!({
                 "schema": "packetcraftr.capture-source/v1", "source": mapping.source,
                 "source_name": mapping.source_name, "section": mapping.section,
                 "local_interface": mapping.local_interface, "global_interface": mapping.global_interface,
-            })).map_err(|_| Error::InvalidData {
-                format: Format::PcapNg,
-                reason: "interface provenance serialization failed",
-            })?;
+            })
+            .to_string();
             let id = output.add_interface_description_with_options(
                 current.description,
                 &[PcapNgOption {
@@ -197,7 +186,7 @@ pub fn merge<R: Read, W: Write>(
         };
         current.frame.interface = Some(id);
         output.write_frame(&current.frame)?;
-        if let Some(frame) = advance(
+        pending[index] = advance(
             index,
             &mut sources[index],
             &mut states[index],
@@ -205,17 +194,19 @@ pub fn merge<R: Read, W: Write>(
             &mut report,
             &mut budget,
             limits,
-        )? {
-            heap.push(Reverse((
-                frame.frame.timestamp.expect("checked timestamp"),
-                index,
-                report.source_frames[index],
-            )));
-            pending[index] = Some(frame);
-        }
+        )?;
     }
     output.flush()?;
     Ok(report)
+}
+
+fn take_earliest(pending: &mut [Option<Pending>]) -> Option<(usize, Pending)> {
+    let (_, index) = pending
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| slot.as_ref().map(|pending| (pending.time, index)))
+        .min()?;
+    pending[index].take().map(|pending| (index, pending))
 }
 
 fn advance<R: Read>(
@@ -267,14 +258,12 @@ fn advance<R: Read>(
                     .ok_or(Error::MetadataBlockLimit { limit: usize::MAX })?;
                 match metadata {
                     MetadataBlockKind::Section(section) => state.endianness = section.endianness,
-                    MetadataBlockKind::InterfaceDescription { options, .. }
-                        if options
-                            .iter()
-                            .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN) =>
+                    MetadataBlockKind::InterfaceDescription { .. }
+                        if source.reader.declares_fcs() =>
                     {
                         return Err(Error::MergeMetadata {
                             input: index,
-                            field: "interface FCS length",
+                            field: DECLARED_FCS,
                         });
                     }
                     _ => {}
@@ -321,6 +310,7 @@ fn advance<R: Read>(
             .clone();
         return Ok(Some(Pending {
             frame,
+            time,
             description,
             section,
             local,

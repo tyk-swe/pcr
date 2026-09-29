@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::frame::{Direction, Frame, Lengths};
 
-use super::options::visit_options;
+use super::options::{parse_options, unique_option};
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, Format};
 use crate::capture_file::header::{Interface, PcapNgOption};
@@ -14,19 +14,19 @@ use crate::capture_file::wire::{
     timestamp_from_ticks, validate_declared_lengths,
 };
 
-pub(in crate::capture_file) struct ParsedPacket<'a> {
+pub(in crate::capture_file) struct ParsedPacket {
     pub(in crate::capture_file) frame: Frame,
     pub(in crate::capture_file) interface_id: u32,
-    pub(in crate::capture_file) options: &'a [u8],
+    pub(in crate::capture_file) options: Vec<PcapNgOption>,
 }
 
-pub(in crate::capture_file) fn parse_enhanced_packet<'a>(
-    body: &'a [u8],
+pub(in crate::capture_file) fn parse_enhanced_packet(
+    body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<ParsedPacket<'a>, Error> {
+) -> Result<ParsedPacket, Error> {
     parse(
         body,
         endianness,
@@ -37,24 +37,24 @@ pub(in crate::capture_file) fn parse_enhanced_packet<'a>(
     )
 }
 
-pub(in crate::capture_file) fn parse_obsolete_packet<'a>(
-    body: &'a [u8],
+pub(in crate::capture_file) fn parse_obsolete_packet(
+    body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<ParsedPacket<'a>, Error> {
+) -> Result<ParsedPacket, Error> {
     parse(body, endianness, interfaces, interface_base, max_size, true)
 }
 
-fn parse<'a>(
-    body: &'a [u8],
+fn parse(
+    body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
     obsolete_layout: bool,
-) -> Result<ParsedPacket<'a>, Error> {
+) -> Result<ParsedPacket, Error> {
     const HEADER_LENGTH: usize = 20;
 
     let Some(header) = body
@@ -106,19 +106,9 @@ fn parse<'a>(
             actual: body.len(),
         });
     }
-    let actual_data_end =
-        HEADER_LENGTH
-            .checked_add(captured_length as usize)
-            .ok_or(Error::InvalidData {
-                format: Format::PcapNg,
-                reason: "packet data offset overflow",
-            })?;
-    let trailing_options = body.get(data_end..).ok_or(Error::Truncated {
-        context: "pcapng packet data",
-        expected: data_end,
-        actual: body.len(),
-    })?;
-    let direction = parse_packet_direction(trailing_options, endianness)?;
+    // `captured_length <= padded_length`, so the data ends at or before `data_end <= body.len()`
+    let options = parse_options(&body[data_end..], endianness, "pcapng packet options")?;
+    let direction = packet_direction(&options, endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
         interface.timestamp_resolution,
@@ -127,13 +117,7 @@ fn parse<'a>(
     let global_interface = interface_base
         .checked_add(interface_id)
         .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
-    let data = body
-        .get(HEADER_LENGTH..actual_data_end)
-        .ok_or(Error::Truncated {
-            context: "pcapng packet data",
-            expected: actual_data_end,
-            actual: body.len(),
-        })?;
+    let data = &body[HEADER_LENGTH..HEADER_LENGTH + captured_length as usize];
     let mut frame = Frame::try_with_lengths(
         timestamp,
         interface.link_type,
@@ -148,17 +132,17 @@ fn parse<'a>(
     Ok(ParsedPacket {
         frame,
         interface_id,
-        options: trailing_options,
+        options,
     })
 }
 
-pub(in crate::capture_file) fn parse_simple_packet<'a>(
-    body: &'a [u8],
+pub(in crate::capture_file) fn parse_simple_packet(
+    body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<ParsedPacket<'a>, Error> {
+) -> Result<ParsedPacket, Error> {
     if body.len() < 4 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -194,17 +178,8 @@ pub(in crate::capture_file) fn parse_simple_packet<'a>(
             reason: "simple packet block length does not match its packet length",
         });
     }
-    let data_end = 4_usize
-        .checked_add(captured_length as usize)
-        .ok_or(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "simple packet data offset overflow",
-        })?;
-    let data = body.get(4..data_end).ok_or(Error::Truncated {
-        context: "pcapng simple packet data",
-        expected: data_end,
-        actual: body.len(),
-    })?;
+    // `body.len() == 4 + padded_length`, and `captured_length <= padded_length`
+    let data = &body[4..4 + captured_length as usize];
     let mut frame = Frame::try_with_optional_timestamp(
         None,
         interface.link_type,
@@ -218,45 +193,33 @@ pub(in crate::capture_file) fn parse_simple_packet<'a>(
     Ok(ParsedPacket {
         frame,
         interface_id: 0,
-        options: &[],
+        options: Vec::new(),
     })
 }
 
-pub(in crate::capture_file) fn parse_packet_direction(
-    options: &[u8],
+fn packet_direction(
+    options: &[PcapNgOption],
     endianness: Endianness,
 ) -> Result<Option<Direction>, Error> {
-    let mut direction = None;
-    let mut saw_flags = false;
-    visit_options(
+    let Some(flags) = unique_option(
         options,
-        endianness,
-        "pcapng packet options",
-        |code, value| {
-            if code == PCAPNG_OPTION_EPB_FLAGS {
-                if saw_flags {
-                    return Err(Error::InvalidData {
-                        format: Format::PcapNg,
-                        reason: "packet flags option appears more than once",
-                    });
-                }
-                saw_flags = true;
-                if value.len() != 4 {
-                    return Err(Error::InvalidData {
-                        format: Format::PcapNg,
-                        reason: "epb_flags option must contain four bytes",
-                    });
-                }
-                direction = Some(match decode_u32(endianness, value)? & 0b11 {
-                    1 => Direction::Inbound,
-                    2 => Direction::Outbound,
-                    _ => Direction::Unknown,
-                });
-            }
-            Ok(())
-        },
-    )?;
-    Ok(direction)
+        PCAPNG_OPTION_EPB_FLAGS,
+        "packet flags option appears more than once",
+    )?
+    else {
+        return Ok(None);
+    };
+    if flags.len() != 4 {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "epb_flags option must contain four bytes",
+        });
+    }
+    Ok(Some(match decode_u32(endianness, flags)? & 0b11 {
+        1 => Direction::Inbound,
+        2 => Direction::Outbound,
+        _ => Direction::Unknown,
+    }))
 }
 
 /// Only a defined inbound/outbound `epb_flags` direction survives a rewrite; the rest is refused.
@@ -291,12 +254,95 @@ pub(in crate::capture_file) fn validate_rewritable_packet_flags(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture_file::wire::DEFAULT_TIMESTAMP_RESOLUTION;
+    use crate::frame::LinkType;
 
     fn flags(value: u32) -> Vec<PcapNgOption> {
         vec![PcapNgOption {
             code: PCAPNG_OPTION_EPB_FLAGS,
             value: Bytes::copy_from_slice(&value.to_le_bytes()),
         }]
+    }
+
+    #[test]
+    fn direction_comes_from_one_four_byte_flags_option() {
+        let direction = |options: &[PcapNgOption]| packet_direction(options, Endianness::Little);
+        assert_eq!(direction(&[]).unwrap(), None);
+        for (value, expected) in [
+            (0, Direction::Unknown),
+            (1, Direction::Inbound),
+            (2, Direction::Outbound),
+            (3, Direction::Unknown),
+        ] {
+            assert_eq!(direction(&flags(value)).unwrap(), Some(expected));
+        }
+        let repeated = [flags(1), flags(2)].concat();
+        assert!(matches!(
+            direction(&repeated),
+            Err(Error::InvalidData { reason, .. }) if reason == "packet flags option appears more than once"
+        ));
+        let short = [PcapNgOption {
+            code: PCAPNG_OPTION_EPB_FLAGS,
+            value: Bytes::from_static(&[1, 0]),
+        }];
+        assert!(matches!(
+            direction(&short),
+            Err(Error::InvalidData { reason, .. }) if reason == "epb_flags option must contain four bytes"
+        ));
+    }
+
+    #[test]
+    fn a_malformed_option_list_is_reported_before_a_malformed_flags_option() {
+        let interface = Interface {
+            link_type: LinkType(1),
+            snap_len: 0,
+            timestamp_resolution: DEFAULT_TIMESTAMP_RESOLUTION,
+            timestamp_offset: 0,
+        };
+        let parse = |options: &[u8]| {
+            let mut body = vec![0; 20];
+            body.extend_from_slice(options);
+            parse_enhanced_packet(
+                &body,
+                Endianness::Little,
+                std::slice::from_ref(&interface),
+                0,
+                1500,
+            )
+        };
+        let cases = [
+            (
+                vec![2, 0, 2, 0, 1, 0, 0, 0],
+                "epb_flags option must contain four bytes",
+            ),
+            (
+                [[2, 0, 4, 0, 1, 0, 0, 0]; 2].concat(),
+                "packet flags option appears more than once",
+            ),
+        ];
+        for (flags_error, expected) in cases {
+            assert!(
+                matches!(
+                    parse(&flags_error),
+                    Err(Error::InvalidData { reason, .. }) if reason == expected
+                ),
+                "{expected}"
+            );
+            assert!(matches!(
+                parse(&[flags_error.as_slice(), &[1, 0]].concat()),
+                Err(Error::Truncated {
+                    context: "pcapng packet options",
+                    ..
+                })
+            ));
+            assert!(matches!(
+                parse(&[flags_error.as_slice(), &[0, 0, 0, 0, 1, 0, 0, 0]].concat()),
+                Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    reason: "non-zero bytes follow the end-of-options marker",
+                })
+            ));
+        }
     }
 
     #[test]

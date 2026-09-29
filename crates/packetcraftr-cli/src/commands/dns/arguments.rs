@@ -13,7 +13,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr dns 127.0.0.1 example.test --tcp
   packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv
   packetcraftr dns 192.0.2.53 example.test other.test --reverse 192.0.2.1 --reverse 2001:db8::1
-  packetcraftr dns 192.0.2.53 example.test --udp-only --help";
+  packetcraftr dns 192.0.2.53 example.test --udp-only";
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. By default, each attempt starts over UDP and one validated matching truncated response may continue over TCP to the same reauthorized numeric server. --tcp queries directly over ordinary TCP sockets without raw capture. Both modes retain the --timeout-ms attempt window and bounded retries. --udp-only disables fallback and supports packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport; direct TCP reports fallback_attempted=false.
 
@@ -75,7 +75,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) duration: MaxDurationArgs<Resolution>,
     /// Maximum complete DNS message bytes decoded.
-    #[arg(long, default_value_t = packetcraftr::dns::MAX_MESSAGE_BYTES)]
+    #[arg(long, default_value_t = packetcraftr::dns::MessageLimits::default().max_message_bytes)]
     pub(crate) max_message_bytes: usize,
     /// Maximum total answer, authority, and additional records decoded.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_RECORDS)]

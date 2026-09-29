@@ -195,7 +195,6 @@ mod tests {
             !Plan::compile(Vec::new()).evaluate(&Context {
                 decoded: &crate::decode::DecodedPacket {
                     packet: crate::packet::Packet::new(),
-                    original: bytes::Bytes::new(),
                     frame: crate::frame::Frame::new(
                         std::time::UNIX_EPOCH,
                         crate::frame::LinkType::RAW,

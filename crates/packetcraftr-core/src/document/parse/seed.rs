@@ -101,8 +101,9 @@ impl<'de> Visitor<'de> for PacketSeed<'_, '_> {
                     if schema.is_some() {
                         return Err(de::Error::duplicate_field("schema"));
                     }
-                    schema = Some(map.next_value_seed(SchemaString {
+                    schema = Some(map.next_value_seed(BoundedString {
                         budget: self.budget,
+                        limit: Limit::TextBytes,
                     })?);
                 }
                 PacketField::Layers => {
@@ -292,38 +293,6 @@ impl<'de> Visitor<'de> for FieldsSeed<'_, '_> {
     }
 }
 
-struct SchemaString<'b, 'l> {
-    budget: &'b Budget<'l>,
-}
-
-impl<'de> DeserializeSeed<'de> for SchemaString<'_, '_> {
-    type Value = String;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(self)
-    }
-}
-
-impl Visitor<'_> for SchemaString<'_, '_> {
-    type Value = String;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "a schema identifier of at most {} bytes",
-            self.budget.limits.max_text_bytes
-        )
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        self.budget.check_width(value.len(), Limit::TextBytes)?;
-        Ok(value.to_owned())
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct BoundedString<'b, 'l> {
     pub(super) budget: &'b Budget<'l>,
@@ -354,17 +323,11 @@ impl<'de> Visitor<'de> for BoundedString<'_, '_> {
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
         self.budget.check_width(value.len(), self.limit)?;
-        if self.limit == Limit::TextBytes {
-            self.budget.charge_payload(value.len())?;
-        }
         Ok(value.to_owned())
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
         self.budget.check_width(value.len(), self.limit)?;
-        if self.limit == Limit::TextBytes {
-            self.budget.charge_payload(value.len())?;
-        }
         Ok(value)
     }
 }

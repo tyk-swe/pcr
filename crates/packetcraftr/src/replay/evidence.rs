@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
+use std::ops::Range;
 use std::time::Duration;
 
 use packetcraftr_core::capture_file::Interface;
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::protocol::headers::{Ipv4Header, Ipv6Header};
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
     transmit::Report as IoSendReport,
@@ -20,7 +22,6 @@ pub struct FrameEvidence {
     /// One-based pass identity; source_index remains relative to the input capture.
     pub pass: u32,
     pub source_index: u64,
-    pub source_interface_id: Option<u32>,
     pub capture_interface: Interface,
     pub link_mode: LinkMode,
     pub scheduled_delay: Duration,
@@ -62,44 +63,32 @@ pub(super) fn network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoE
         _ => {}
     }
     match version {
-        4 if bytes.len() >= 20 => {
-            let source: [u8; 4] = bytes
-                .get(12..16)
-                .and_then(|octets| octets.try_into().ok())
-                .ok_or_else(|| invalid("replay frame has a truncated IPv4 header".to_owned()))?;
-            let destination: [u8; 4] = bytes
-                .get(16..20)
-                .and_then(|octets| octets.try_into().ok())
-                .ok_or_else(|| invalid("replay frame has a truncated IPv4 header".to_owned()))?;
-            Ok(NetworkEnvelope {
-                source: IpAddr::V4(Ipv4Addr::from(source)),
-                destination: IpAddr::V4(Ipv4Addr::from(destination)),
+        4 => bytes
+            .get(..Ipv4Header::MIN_LENGTH)
+            .and_then(|header| {
+                Some(NetworkEnvelope {
+                    source: IpAddr::V4(octets::<4>(header, Ipv4Header::SOURCE)?.into()),
+                    destination: IpAddr::V4(octets::<4>(header, Ipv4Header::DESTINATION)?.into()),
+                })
             })
-        }
-        6 if bytes.len() >= 40 => {
-            let source: [u8; 16] = bytes
-                .get(8..24)
-                .and_then(|octets| octets.try_into().ok())
-                .ok_or_else(|| invalid("replay frame has a truncated IPv6 header".to_owned()))?;
-            let destination: [u8; 16] = bytes
-                .get(24..40)
-                .and_then(|octets| octets.try_into().ok())
-                .ok_or_else(|| invalid("replay frame has a truncated IPv6 header".to_owned()))?;
-            Ok(NetworkEnvelope {
-                source: IpAddr::V6(Ipv6Addr::from(source)),
-                destination: IpAddr::V6(Ipv6Addr::from(destination)),
+            .ok_or_else(|| invalid("replay frame has a truncated IPv4 header".to_owned())),
+        6 => bytes
+            .get(..Ipv6Header::LENGTH)
+            .and_then(|header| {
+                Some(NetworkEnvelope {
+                    source: IpAddr::V6(octets::<16>(header, Ipv6Header::SOURCE)?.into()),
+                    destination: IpAddr::V6(octets::<16>(header, Ipv6Header::DESTINATION)?.into()),
+                })
             })
-        }
-        4 => Err(invalid(
-            "replay frame has a truncated IPv4 header".to_owned(),
-        )),
-        6 => Err(invalid(
-            "replay frame has a truncated IPv6 header".to_owned(),
-        )),
+            .ok_or_else(|| invalid("replay frame has a truncated IPv6 header".to_owned())),
         value => Err(invalid(format!(
             "replay frame has unsupported IP version {value}"
         ))),
     }
+}
+
+fn octets<const N: usize>(bytes: &[u8], range: Range<usize>) -> Option<[u8; N]> {
+    bytes.get(range)?.try_into().ok()
 }
 
 pub(super) fn validate_transmission(

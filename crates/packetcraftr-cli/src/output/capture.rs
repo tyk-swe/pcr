@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::decode::DecodedPacket;
-use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture as native;
 use serde::Serialize;
 
-use super::contract::Error;
 use super::envelope::{self, is_zero};
-use super::frame::{Captured, SourceFrame, Stack};
+use super::frame::SourceFrame;
 use super::network::InterfaceId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -94,51 +91,6 @@ published_enum! {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(untagged)]
-pub enum Event {
-    Frame {
-        source_frame: SourceFrame,
-        frame: Captured,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        decoded: Option<Stack>,
-    },
-}
-
-impl TryFrom<(u64, Frame)> for Event {
-    type Error = Error;
-
-    fn try_from((source_frame, frame): (u64, Frame)) -> Result<Self, Error> {
-        Ok(Self::Frame {
-            source_frame: source_frame.try_into()?,
-            frame: frame.try_into()?,
-            decoded: None,
-        })
-    }
-}
-
-impl TryFrom<(u64, Frame, &DecodedPacket)> for Event {
-    type Error = Error;
-
-    fn try_from(
-        (source_frame, frame, decoded): (u64, Frame, &DecodedPacket),
-    ) -> Result<Self, Error> {
-        Ok(Self::Frame {
-            source_frame: source_frame.try_into()?,
-            frame: frame.try_into()?,
-            decoded: Some(Stack::from(decoded)),
-        })
-    }
-}
-
-impl crate::output::stream::StreamRecord for Event {
-    fn event_name(&self) -> &'static str {
-        match self {
-            Self::Frame { .. } => "frame",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Retention {
@@ -146,6 +98,23 @@ pub enum Retention {
     Stop,
     Ring,
 }
+
+published_enum! {
+    pub enum Compression from packetcraftr_core::capture_file::compression::Format {
+        None => "none",
+        Gzip => "gzip",
+        Zstd => "zstd",
+    }
+}
+
+published_enum! {
+    pub enum OverflowPolicy from native::OverflowPolicy {
+        Fail => "fail",
+        DropNewest => "drop_newest",
+        DropOldest => "drop_oldest",
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct File {
     pub path: String,
@@ -161,7 +130,7 @@ pub struct File {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Files {
     pub retention: Retention,
-    pub compression: String,
+    pub compression: Compression,
     pub rotate_bytes: Option<u64>,
     pub rotate_interval_ms: Option<u64>,
     pub maximum_files: usize,
@@ -183,7 +152,7 @@ pub struct Source {
     pub capture_settings: Option<RealizedSettings>,
     pub queue_frames: usize,
     pub queue_bytes: usize,
-    pub overflow_policy: String,
+    pub overflow_policy: OverflowPolicy,
     pub metadata_valid: bool,
     pub ready: bool,
     pub shutdown_confirmed: bool,
@@ -195,14 +164,6 @@ pub struct Source {
     pub matched_frames: u64,
     pub emitted_frames: u64,
     pub late_frames: u64,
-}
-fn overflow_policy_name(policy: native::OverflowPolicy) -> &'static str {
-    use native::OverflowPolicy;
-    match policy {
-        OverflowPolicy::Fail => "fail",
-        OverflowPolicy::DropNewest => "drop_newest",
-        OverflowPolicy::DropOldest => "drop_oldest",
-    }
 }
 impl From<&packetcraftr::capture::Source> for Source {
     fn from(source: &packetcraftr::capture::Source) -> Self {
@@ -218,7 +179,7 @@ impl From<&packetcraftr::capture::Source> for Source {
                 .then(|| source.metadata.native.into()),
             queue_frames: source.limits.max_frames,
             queue_bytes: source.limits.max_bytes,
-            overflow_policy: overflow_policy_name(source.limits.overflow_policy).to_owned(),
+            overflow_policy: source.limits.overflow_policy.into(),
             metadata_valid: source.metadata_valid,
             ready: source.ready,
             shutdown_confirmed: source.shutdown_confirmed,

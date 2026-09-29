@@ -85,6 +85,15 @@ impl ResolvedInterface {
             Some((selector.clone(), id.clone()));
         Ok(id)
     }
+
+    /// Drops the memo only while it still names `stale`; another operation
+    /// may already have replaced it with a fresh resolution.
+    pub(crate) fn forget(&self, stale: &InterfaceId) {
+        let mut cached = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if cached.as_ref().is_some_and(|(_, id)| id == stale) {
+            *cached = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +166,28 @@ mod tests {
                 .name,
             "fixture0"
         );
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn forgetting_an_interface_drops_only_the_memo_that_names_it() {
+        let provider = Flaky {
+            calls: AtomicUsize::new(1),
+        };
+        let resolved = ResolvedInterface::default();
+        let selector = Interface::Name("fixture0".to_owned());
+        let id = resolved.resolve(&selector, &provider, &live()).unwrap();
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+
+        resolved.forget(&InterfaceId {
+            name: "fixture0".to_owned(),
+            index: id.index + 1,
+        });
+        resolved.resolve(&selector, &provider, &live()).unwrap();
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+
+        resolved.forget(&id);
+        resolved.resolve(&selector, &provider, &live()).unwrap();
         assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
     }
 

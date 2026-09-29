@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::transform::FragmentOptions;
+
 use crate::command_options::{CaptureStdout, CompressionArgs, PacketBudgetArgs, RecipeArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Fragmentation is explicit and offline: the recipe is built strictly, then split at --mtu, which excludes the link header. IPv6 requires --identification; IPv4 uses the header's own unless --identification replaces it.
@@ -24,11 +26,11 @@ pub(crate) struct Args {
     /// Fragment identification; required when splitting IPv6.
     #[arg(long)]
     pub(crate) identification: Option<u32>,
-    /// Maximum fragments produced from the datagram; at most 8192.
-    #[arg(long, default_value_t = 1024)]
+    /// Maximum fragments produced from the datagram, from 1 to 8192.
+    #[arg(long, default_value_t = FragmentOptions::default().max_fragments)]
     pub(crate) max_fragments: usize,
     /// Maximum bytes across all produced fragment frames.
-    #[arg(long, default_value_t = 256 * 1024 * 1024)]
+    #[arg(long, default_value_t = FragmentOptions::default().max_output_bytes)]
     pub(crate) max_output_bytes: usize,
     #[command(flatten)]
     pub(crate) budget: PacketBudgetArgs,

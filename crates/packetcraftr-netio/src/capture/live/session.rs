@@ -164,10 +164,9 @@ impl Session for NativeCaptureSession {
                 return Err(expired());
             };
             // Wait in slices: the queue signals readiness, not cancellation.
-            let (next, _) = self
+            state = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
-            state = next;
             if !state.ready && !state.closed && state.error.is_none() {
                 caller.check_cancelled()?;
             }
@@ -192,15 +191,8 @@ impl Session for NativeCaptureSession {
         let deadline = crate::capture::wait_end(caller)?;
         let mut state = self.shared.lock();
         loop {
-            if let Some(captured) = state.queue.front() {
-                let queued_bytes = state
-                    .queued_bytes
-                    .checked_sub(captured.frame.bytes().len())
-                    .ok_or_else(|| Error::InvalidCaptureStatistics {
-                        message: "native capture queue byte accounting underflowed".to_owned(),
-                    })?;
-                state.queued_bytes = queued_bytes;
-                return Ok(state.queue.pop_front());
+            if let Some(captured) = state.pop_front()? {
+                return Ok(Some(captured));
             }
             if let Some(error) = state.error.clone() {
                 state.error_observed = true;
@@ -212,10 +204,9 @@ impl Session for NativeCaptureSession {
             let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Ok(None);
             };
-            let (next_state, _) = self
+            state = self
                 .shared
                 .wait_timeout(state, remaining.min(POLL_INTERVAL));
-            state = next_state;
             if state.queue.is_empty() && state.error.is_none() {
                 caller.check_cancelled()?;
             }
@@ -344,10 +335,7 @@ mod tests {
         test_support::capture_metadata,
         workers::{
             Class, Pool,
-            reaper::{
-                shared_reaper,
-                test_support::{client_with_receiver, retained_tasks},
-            },
+            reaper::{shared_reaper, test_support::client_with_receiver},
         },
     };
 
@@ -775,7 +763,7 @@ mod tests {
                     .unwrap();
             }
         }
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, _receiver) = client_with_receiver(1);
         let (entered, waiting) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -809,11 +797,12 @@ mod tests {
 
     #[test]
     fn session_drop_is_no_panic_when_reaper_queue_is_saturated() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, _receiver) = client_with_receiver(1);
         reaper.transfer(Box::new(|| {}));
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
+        let (interrupt_dropped, interrupt_drop_receiver) = mpsc::channel();
         let session = spawn_on(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
@@ -821,7 +810,9 @@ mod tests {
                     release: release_receiver,
                     finished: None,
                 }),
-                interrupt: Arc::new(FakeInterrupt::default()),
+                interrupt: Arc::new(LifetimeInterrupt {
+                    dropped: interrupt_dropped,
+                }),
                 metadata: capture_metadata("saturated-reaper", 12),
             },
             &pool,
@@ -831,7 +822,11 @@ mod tests {
         wait_until_blocked(started_receiver);
 
         assert!(catch_unwind(AssertUnwindSafe(|| drop(session))).is_ok());
-        assert_eq!(retained_tasks(&reaper), 1);
+        assert!(matches!(
+            interrupt_drop_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(pool.admit(Class::Native).is_err());
         release_sender
             .send(())
             .expect("retained test worker can still finish safely");
@@ -867,7 +862,7 @@ mod tests {
 
     #[test]
     fn reaper_keeps_native_interrupt_alive_until_capture_worker_stops() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, receiver) = client_with_receiver(1);
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();

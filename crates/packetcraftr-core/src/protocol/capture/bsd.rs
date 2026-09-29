@@ -14,8 +14,8 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    binding_protocol, invalid, make_layer, out_of_range, protocol, truncated, typed_layer,
-    validate_raw_child_discriminator, wrong_type,
+    binding_protocol, make_layer, out_of_range, protocol, strict_or_diagnostic, truncated,
+    typed_layer, validate_raw_child_discriminator, wrong_type,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -127,11 +127,14 @@ pub(crate) fn validate_family_binding(
         "address family {family} does not select child {}",
         child.protocol_id()
     );
-    if context.mode == crate::codec::Mode::Strict {
-        return Err(invalid(parent, message));
-    }
-    diagnostics
-        .push(Diagnostic::warning("build.capture_family_binding", message).at_field("family"));
+    strict_or_diagnostic(
+        parent,
+        "build.capture_family_binding",
+        "family",
+        message,
+        context,
+        &mut diagnostics,
+    )?;
     Ok(diagnostics)
 }
 

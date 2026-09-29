@@ -17,6 +17,13 @@ impl Read for OneByte {
     }
 }
 
+fn compression_cause(error: &io::Error) -> Option<&Error> {
+    match error.get_ref()?.downcast_ref::<Error>()? {
+        Error::Io { source, .. } => compression_cause(source),
+        cause => Some(cause),
+    }
+}
+
 #[test]
 fn format_detection_and_concatenated_members_preserve_every_decoded_byte() {
     for format in [Format::None, Format::Gzip, Format::Zstd] {
@@ -67,7 +74,11 @@ fn expansion_and_encoded_source_limits_fail_without_exposing_excess_bytes() {
             },
         )
         .unwrap();
-        assert!(input.read_to_end(&mut Vec::new()).is_err());
+        let error = input.read_to_end(&mut Vec::new()).unwrap_err();
+        assert!(matches!(
+            compression_cause(&error),
+            Some(Error::EncodedByteLimit { limit: 4 })
+        ));
     }
     let mut encoded = compressed(Format::Gzip, b"");
     encoded.extend(compressed(Format::Gzip, b""));
@@ -79,7 +90,11 @@ fn expansion_and_encoded_source_limits_fail_without_exposing_excess_bytes() {
         },
     )
     .unwrap();
-    assert!(input.read_to_end(&mut Vec::new()).is_err());
+    let error = input.read_to_end(&mut Vec::new()).unwrap_err();
+    assert!(matches!(
+        compression_cause(&error),
+        Some(Error::EncodedByteLimit { limit: 21 })
+    ));
 }
 
 #[test]
@@ -88,7 +103,15 @@ fn truncated_compressed_data_and_hostile_zstd_windows_are_rejected() {
         let mut encoded = compressed(format, b"capture payload");
         encoded.pop();
         let mut input = Input::new(Cursor::new(encoded), Default::default()).unwrap();
-        assert!(input.read_to_end(&mut Vec::new()).is_err());
+        let error = input.read_to_end(&mut Vec::new()).unwrap_err();
+        assert!(
+            matches!(
+                error.get_ref().and_then(|source| source.downcast_ref::<Error>()),
+                Some(Error::Io { format: actual, source })
+                    if *actual == format && source.kind() == io::ErrorKind::UnexpectedEof
+            ),
+            "{error:?}"
+        );
     }
     // RFC 8878: descriptor 0, window exponent 17 => 128 MiB, empty last raw block.
     let hostile = [0x28, 0xb5, 0x2f, 0xfd, 0, 0x88, 1, 0, 0];
@@ -113,4 +136,41 @@ fn finalization_reports_underlying_flush_errors() {
         output.write_all(b"capture").unwrap();
         assert!(matches!(output.finish(), Err(Error::Io { .. })));
     }
+}
+
+#[test]
+fn short_and_interrupted_prefixes_stay_plain_and_are_bounded_by_the_encoded_limit() {
+    struct Flaky(Cursor<Vec<u8>>, bool);
+    impl Read for Flaky {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            if std::mem::take(&mut self.1) {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            let length = bytes.len().min(1);
+            self.0.read(&mut bytes[..length])
+        }
+    }
+    for bytes in [&b""[..], b"a", b"abc", b"abcd", b"abcde"] {
+        let mut input =
+            Input::new(Flaky(Cursor::new(bytes.to_vec()), true), Default::default()).unwrap();
+        assert_eq!(input.format(), Format::None);
+        let mut decoded = Vec::new();
+        input.read_to_end(&mut decoded).unwrap();
+        assert_eq!(decoded, bytes);
+    }
+    let limits = Limits {
+        max_encoded_bytes: 2,
+        ..Default::default()
+    };
+    let Err(Error::Io {
+        format: Format::None,
+        source,
+    }) = Input::new(Cursor::new(b"abcdefgh"), limits)
+    else {
+        panic!("prefix beyond the encoded limit must fail construction");
+    };
+    assert!(matches!(
+        compression_cause(&source),
+        Some(Error::EncodedByteLimit { limit: 2 })
+    ));
 }

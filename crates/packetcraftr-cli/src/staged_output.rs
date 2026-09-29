@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::errors::CliError;
+use crate::cancellation::StagedRegistration;
+use crate::errors::{CliError, source_causes};
 
 const CLASSIFICATION: Classification = Classification::new(
     "io.output_file",
@@ -17,6 +18,8 @@ const CLASSIFICATION: Classification = Classification::new(
 pub(crate) struct StagedFile {
     file: tempfile::NamedTempFile,
     destination: PathBuf,
+    /// Declared last so the file is unlinked before its path is deregistered.
+    _registration: StagedRegistration,
 }
 
 impl StagedFile {
@@ -44,9 +47,11 @@ impl StagedFile {
             .unwrap_or(Path::new("."));
         let file = tempfile::NamedTempFile::new_in(parent)
             .map_err(|source| output("stage", destination, source))?;
+        let registration = StagedRegistration::new(file.path());
         Ok(Self {
             file,
             destination: destination.to_owned(),
+            _registration: registration,
         })
     }
 
@@ -83,13 +88,10 @@ impl StagedFile {
 }
 
 fn output(action: &'static str, destination: &Path, source: std::io::Error) -> CliError {
-    let causes = std::iter::once(source.to_string())
-        .chain(packetcraftr_core::error::source_chain(&source))
-        .collect();
     CliError::from_classification(
         CLASSIFICATION,
-        format!("{action} output {}: {source}", destination.display()),
-        causes,
+        format!("{action} output {}", destination.display()),
+        source_causes(&source),
     )
 }
 
@@ -139,6 +141,25 @@ mod tests {
     }
 
     #[test]
+    fn staged_paths_stay_registered_for_forced_exit_until_published_or_dropped() {
+        use crate::cancellation::is_staged;
+
+        let directory = tempfile::tempdir().expect("destination dir");
+        let published = StagedFile::stage(&directory.path().join("published.pcapng")).unwrap();
+        let dropped = StagedFile::stage(&directory.path().join("dropped.pcapng")).unwrap();
+        let published_path = published.file.path().to_owned();
+        let dropped_path = dropped.file.path().to_owned();
+        assert!(is_staged(&published_path));
+        assert!(is_staged(&dropped_path));
+
+        published.persist().expect("publish succeeds");
+        drop(dropped);
+        assert!(!is_staged(&published_path));
+        assert!(!is_staged(&dropped_path));
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
     fn a_destination_appearing_after_staging_fails_publish_without_clobbering() {
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("out.pcapng");
@@ -152,6 +173,21 @@ mod tests {
         assert!(!error.causes.is_empty());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn output_failures_name_the_action_and_state_the_io_error_only_as_a_cause() {
+        let directory = tempfile::tempdir().expect("destination dir");
+        let destination = directory.path().join("missing").join("out.pcapng");
+
+        let error = StagedFile::stage(&destination).expect_err("absent parent fails to stage");
+        assert_eq!(error.classification.code, "io.output_file");
+        assert_eq!(
+            error.message,
+            format!("stage output {}", destination.display())
+        );
+        let cause = error.causes.first().expect("the I/O error is a cause");
+        assert!(!error.message.contains(cause.as_str()), "{error:?}");
     }
 
     #[test]

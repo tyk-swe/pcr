@@ -16,6 +16,9 @@ pub(super) struct Tally {
     pub(super) bytes_transmitted: u64,
     pub(super) scheduled_duration: Duration,
     pub(super) pause_duration: Duration,
+    /// Wall time that passed before the schedule's anchor. It counts against
+    /// the duration limit but is not part of the schedule.
+    pub(super) setup_duration: Duration,
     pub(super) passes_completed: u32,
     pub(super) interfaces_used: Vec<InterfaceId>,
     pub(super) previous_timestamp: Option<SystemTime>,
@@ -27,7 +30,12 @@ impl Tally {
         self.frames_transmitted = plan.next_completed;
         self.bytes_transmitted = plan.next_bytes;
         self.scheduled_duration = plan.next_duration;
-        self.previous_timestamp = timestamp;
+        // Capture stamps can step backwards; the newest one stays the pacing
+        // reference so the step is not paid again by the next frame.
+        self.previous_timestamp = match (self.previous_timestamp, timestamp) {
+            (Some(previous), Some(current)) => Some(previous.max(current)),
+            (_, current) => current,
+        };
         self.has_previous = true;
     }
 
@@ -79,10 +87,11 @@ pub(super) fn plan_frame(
                 actual: Duration::MAX,
                 limit: limits.max_duration,
             })?;
-    if next_duration > limits.max_duration {
+    let wall_duration = next_duration.saturating_add(tally.setup_duration);
+    if wall_duration > limits.max_duration {
         return Err(Error::DurationLimit {
             source_index,
-            actual: next_duration,
+            actual: wall_duration,
             limit: limits.max_duration,
         });
     }
@@ -113,7 +122,7 @@ fn scheduled_delay(
     if !tally.has_previous {
         return Ok(Duration::ZERO);
     }
-    match timing.delay_between(
+    timing.delay_between(
         tally.previous_timestamp,
         frame.timestamp,
         source_index,
@@ -121,15 +130,7 @@ fn scheduled_delay(
         tally
             .scheduled_duration
             .saturating_sub(tally.pause_duration),
-    ) {
-        Ok(delay) => Ok(delay),
-        Err(Error::InvalidTiming { mode, value }) => Err(Error::Timing {
-            source_index,
-            mode,
-            value,
-        }),
-        Err(error) => Err(error),
-    }
+    )
 }
 
 impl Timing {
@@ -141,46 +142,29 @@ impl Timing {
         transmitted_bytes: u64,
         scheduled_duration: Duration,
     ) -> Result<Duration, Error> {
-        self.validate()?;
+        let invalid = |value| Error::Timing {
+            source_index,
+            mode: self.mode(),
+            value,
+        };
         match self {
             Self::Original => {
                 let (previous, current) =
-                    required_times(previous, current, source_index, "original")?;
+                    required_times(previous, current, source_index, self.mode())?;
                 Ok(current.duration_since(previous).unwrap_or(Duration::ZERO))
             }
             Self::Scaled(factor) => {
                 let (previous, current) =
-                    required_times(previous, current, source_index, "scaled")?;
+                    required_times(previous, current, source_index, self.mode())?;
                 let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
-                let delay =
-                    Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
-                        Error::InvalidTiming {
-                            mode: "scaled",
-                            value: factor,
-                        }
-                    })?;
+                let delay = Duration::try_from_secs_f64(original.as_secs_f64() * factor)
+                    .map_err(|_| invalid(factor))?;
                 if !original.is_zero() && delay.is_zero() {
-                    return Err(Error::InvalidTiming {
-                        mode: "scaled",
-                        value: factor,
-                    });
+                    return Err(invalid(factor));
                 }
                 Ok(delay)
             }
-            Self::FixedRate(rate) => {
-                let delay =
-                    Duration::try_from_secs_f64(1.0 / rate).map_err(|_| Error::InvalidTiming {
-                        mode: "fixed_rate",
-                        value: rate,
-                    })?;
-                if delay.is_zero() {
-                    return Err(Error::InvalidTiming {
-                        mode: "fixed_rate",
-                        value: rate,
-                    });
-                }
-                Ok(delay)
-            }
+            Self::FixedRate(rate) => Self::fixed_rate_period(rate).ok_or_else(|| invalid(rate)),
             Self::Immediate => Ok(Duration::ZERO),
             Self::BitRate(rate) => {
                 // u64 bytes * eight bits * one billion nanoseconds fits u128.
@@ -189,10 +173,7 @@ impl Timing {
                 let nanos =
                     (u128::from(transmitted_bytes) * 8 * 1_000_000_000).div_ceil(u128::from(rate));
                 let seconds =
-                    u64::try_from(nanos / 1_000_000_000).map_err(|_| Error::InvalidTiming {
-                        mode: "bit_rate",
-                        value: rate as f64,
-                    })?;
+                    u64::try_from(nanos / 1_000_000_000).map_err(|_| invalid(rate as f64))?;
                 let fraction = (nanos % 1_000_000_000) as u32;
                 Ok(Duration::new(seconds, fraction).saturating_sub(scheduled_duration))
             }
@@ -235,5 +216,173 @@ pub(super) fn link_mode(
             link_type: link_type.0,
             requested,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use super::*;
+    use crate::replay::request::Limits;
+
+    fn delays(timing: Timing, stamps: &[Option<Duration>]) -> Result<Vec<Duration>, Error> {
+        let options = Options {
+            repeat: 1,
+            inter_pass_delay: Duration::ZERO,
+            link_mode: LinkMode::Auto,
+            timing,
+            limits: Limits::default(),
+            allow_permissive_live: false,
+        };
+        let mut tally = Tally::default();
+        let mut delays = Vec::new();
+        for (index, stamp) in stamps.iter().enumerate() {
+            let frame = match stamp {
+                Some(offset) => Frame::new(UNIX_EPOCH + *offset, LinkType::ETHERNET, vec![0; 14]),
+                None => Frame::without_timestamp(LinkType::ETHERNET, vec![0; 14]),
+            }
+            .expect("capture frame");
+            let plan = plan_frame(&options, &tally, &frame, index as u64)?;
+            tally.complete(&plan, frame.timestamp);
+            delays.push(plan.delay);
+        }
+        Ok(delays)
+    }
+
+    fn seconds(values: &[u64]) -> Vec<Option<Duration>> {
+        values
+            .iter()
+            .map(|value| Some(Duration::from_secs(*value)))
+            .collect()
+    }
+
+    fn millis(values: &[u64]) -> Vec<Option<Duration>> {
+        values
+            .iter()
+            .map(|value| Some(Duration::from_millis(*value)))
+            .collect()
+    }
+
+    #[test]
+    fn a_backward_capture_step_is_not_paid_again_by_the_next_frame() {
+        let stamps = seconds(&[10, 9, 11]);
+        assert_eq!(
+            delays(Timing::Original, &stamps).unwrap(),
+            [Duration::ZERO, Duration::ZERO, Duration::from_secs(1)]
+        );
+        assert_eq!(
+            delays(Timing::Scaled(2.0), &stamps).unwrap(),
+            [Duration::ZERO, Duration::ZERO, Duration::from_secs(2)]
+        );
+    }
+
+    #[test]
+    fn interleaved_capture_clocks_add_only_the_forward_progress() {
+        let stamps = millis(&[10_000, 9_000, 10_100, 9_100, 10_200, 9_200]);
+        assert_eq!(
+            delays(Timing::Original, &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::from_millis(100),
+                Duration::ZERO,
+                Duration::from_millis(100),
+                Duration::ZERO,
+            ]
+        );
+    }
+
+    #[test]
+    fn forward_capture_stamps_keep_their_spacing() {
+        let stamps = millis(&[1_000, 1_250, 1_250, 2_000]);
+        assert_eq!(
+            delays(Timing::Original, &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::from_millis(250),
+                Duration::ZERO,
+                Duration::from_millis(750),
+            ]
+        );
+        assert_eq!(
+            delays(Timing::Scaled(0.5), &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::from_millis(125),
+                Duration::ZERO,
+                Duration::from_millis(375),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_frame_without_a_capture_timestamp_cannot_be_paced_from_capture_time() {
+        for (timing, mode) in [
+            (Timing::Original, "original"),
+            (Timing::Scaled(2.0), "scaled"),
+        ] {
+            let mut stamps = seconds(&[10, 9]);
+            stamps.push(None);
+            assert!(
+                matches!(
+                    delays(timing, &stamps),
+                    Err(Error::TimestampUnavailable {
+                        source_index: 2,
+                        mode: found
+                    }) if found == mode
+                ),
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrepresentable_scaled_delay_fails_at_the_frame_that_needs_it() {
+        for factor in [f64::MAX, 1e-300] {
+            let error = delays(Timing::Scaled(factor), &seconds(&[1, 2])).expect_err("scaled");
+            assert!(
+                matches!(
+                    error,
+                    Error::Timing { source_index: 1, mode: "scaled", value } if value == factor
+                ),
+                "{factor}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bit_rate_target_beyond_the_duration_range_fails_with_the_source_index() {
+        let options = Options {
+            repeat: 1,
+            inter_pass_delay: Duration::ZERO,
+            link_mode: LinkMode::Auto,
+            timing: Timing::BitRate(1),
+            limits: Limits {
+                max_transmitted_bytes: u64::MAX,
+                ..Limits::default()
+            },
+            allow_permissive_live: false,
+        };
+        let tally = Tally {
+            bytes_transmitted: u64::MAX / 2,
+            has_previous: true,
+            ..Tally::default()
+        };
+        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0; 14]).expect("capture frame");
+        let error = plan_frame(&options, &tally, &frame, 4)
+            .map(|plan| plan.delay)
+            .expect_err("the cumulative target overflows Duration");
+        assert!(
+            matches!(
+                error,
+                Error::Timing {
+                    source_index: 4,
+                    mode: "bit_rate",
+                    value: 1.0
+                }
+            ),
+            "{error:?}"
+        );
     }
 }

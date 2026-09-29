@@ -11,15 +11,21 @@ mod raw_ip;
 
 pub mod ip_protocol {
     pub const HOP_BY_HOP: u8 = 0;
+    pub const ICMPV4: u8 = 1;
+    pub const IGMP: u8 = 2;
+    pub const IPV4: u8 = 4;
     pub const TCP: u8 = 6;
     pub const UDP: u8 = 17;
+    pub const IPV6: u8 = 41;
     pub const ROUTING: u8 = 43;
     pub const FRAGMENT: u8 = 44;
+    pub const GRE: u8 = 47;
     pub const ESP: u8 = 50;
     pub const AH: u8 = 51;
     pub const ICMPV6: u8 = 58;
     pub const NO_NEXT_HEADER: u8 = 59;
     pub const DESTINATION_OPTIONS: u8 = 60;
+    pub const SCTP: u8 = 132;
 }
 
 pub(crate) use envelope::resolve_envelope;

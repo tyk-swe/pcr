@@ -100,6 +100,8 @@ pub enum Constraint {
     WithinClockRange,
     AtLeastTlsDirectionBuffer,
     AtMostOneHour,
+    AtMost { maximum: u64 },
+    NonEmptyNonZeroPorts,
 }
 
 impl std::fmt::Display for Constraint {
@@ -119,6 +121,10 @@ impl std::fmt::Display for Constraint {
                 super::tls::MAX_DIRECTION_BUFFER
             ),
             Self::AtMostOneHour => formatter.write_str("exceeds the one-hour ceiling"),
+            Self::AtMost { maximum } => write!(formatter, "cannot exceed {maximum}"),
+            Self::NonEmptyNonZeroPorts => {
+                formatter.write_str("must name at least one port, and port 0 is not a service port")
+            }
         }
     }
 }
@@ -195,6 +201,22 @@ impl Classified for Error {
 }
 
 crate::budget::deadline_error_conversions!(Error);
+
+/// Rejects a zero limit and one above its fixed ceiling.
+pub(super) fn check_ceiling(field: &'static str, value: u64, maximum: u64) -> Result<(), Error> {
+    let reason = if value == 0 {
+        Constraint::NonZero
+    } else if value > maximum {
+        Constraint::AtMost { maximum }
+    } else {
+        return Ok(());
+    };
+    Err(Error::InvalidLimit {
+        field,
+        value,
+        reason,
+    })
+}
 
 pub(super) const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
 pub(super) fn resource_limit(remediation: &'static str) -> Classification {

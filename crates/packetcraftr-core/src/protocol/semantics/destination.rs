@@ -44,7 +44,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
         }
         match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Ipv6Srh) => {
-                validate_attached_srh(packet, index)?;
+                require_srh_attached_to_ipv6(packet, index)?;
             }
             Some(_) => {}
             None => {
@@ -116,22 +116,15 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
     }
 }
 
-fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error> {
-    for (network_index, candidate) in packet.iter().enumerate().take(srh_index).rev() {
-        if let Some(ipv6) = candidate.downcast_ref::<Ipv6>() {
-            ip_path_at(
-                packet,
-                network_index,
-                srh_index.saturating_add(1),
-                IpHeader::V6(ipv6),
-            )?;
-            return Ok(());
-        }
-        if !BuiltinProtocol::of(candidate).is_some_and(BuiltinProtocol::is_ipv6_extension) {
-            break;
-        }
+fn require_srh_attached_to_ipv6(packet: &Packet, srh_index: usize) -> Result<(), Error> {
+    let nearest_non_extension =
+        packet.iter().take(srh_index).rev().find(|layer| {
+            !BuiltinProtocol::of(*layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
+        });
+    match nearest_non_extension {
+        Some(layer) if layer.is::<Ipv6>() => Ok(()),
+        _ => Err(Error::DetachedSegmentRoutingHeader),
     }
-    Err(Error::DetachedSegmentRoutingHeader)
 }
 
 fn push_if_specified(destinations: &mut Vec<IpAddr>, destination: IpAddr) {

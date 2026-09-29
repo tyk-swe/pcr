@@ -148,7 +148,7 @@ fn the_session_table_ceiling_retires_the_oldest_handshake_as_a_gap() {
 }
 
 #[test]
-fn mutated_handshake_bytes_never_panic_and_never_grow_past_a_ceiling() {
+fn mutated_handshake_bytes_never_panic_and_yield_at_most_one_ordered_session() {
     let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
     let answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
     let mut seed = 0x2545_f491_4f6c_dd1d_u64;
@@ -178,7 +178,7 @@ fn mutated_handshake_bytes_never_panic_and_never_grow_past_a_ceiling() {
         assert!(sessions.len() <= 1);
         assert!(summary.sessions <= 1);
         for session in &sessions {
-            assert!(Status::ALL.contains(&session.status));
+            assert!(session.first_frame <= session.last_frame);
         }
     }
 }

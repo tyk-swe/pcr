@@ -12,6 +12,6 @@ mod resolver;
 mod wire;
 
 pub use error::Error;
-pub use model::{Request, Resolution};
+pub use model::{MAX_VLAN_TAGS, Request, Resolution};
 pub use options::Options;
 pub(crate) use resolver::{Resolver, State};

@@ -4,7 +4,7 @@
 mod transactions;
 
 use super::{
-    FrameRecord, Summary as RunSummary,
+    FrameRecord, StreamTransport, Summary as RunSummary,
     application::{self, Error, Limits, TcpSources},
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
@@ -24,12 +24,6 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 pub use transactions::{Latency, Transaction, TransactionStatus};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Transport {
-    Udp,
-    Tcp,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -44,7 +38,7 @@ pub enum Status {
 #[derive(Clone, Debug)]
 pub struct Message {
     pub index: u64,
-    pub transport: Transport,
+    pub transport: StreamTransport,
     pub stream: u64,
     pub generation: u64,
     pub flow: ScopedFlowKey,
@@ -112,12 +106,12 @@ impl Direction {
 pub struct Collector {
     limits: Limits,
     ports: Vec<u16>,
-    seen_streams: BTreeSet<(Transport, u64)>,
+    seen_streams: BTreeSet<(StreamTransport, u64)>,
     tcp: TcpSources,
     directions: BTreeMap<ScopedFlowKey, Direction>,
     scopes: BTreeMap<u32, Definition>,
     buffered: usize,
-    emitted_bytes: usize,
+    retained: usize,
     transactions: transactions::Tracker,
     summary: Summary,
 }
@@ -133,19 +127,14 @@ impl Collector {
             directions: BTreeMap::new(),
             scopes: BTreeMap::new(),
             buffered: 0,
-            emitted_bytes: 0,
+            retained: 0,
             transactions: transactions::Tracker::new(limits),
             summary: Summary::default(),
         })
     }
-    fn register_stream(&mut self, transport: Transport, stream: u64) -> Result<(), Error> {
-        if !self.seen_streams.contains(&(transport, stream))
-            && self.seen_streams.len() >= self.limits.max_streams
-        {
-            return Err(Error::Limit {
-                field: "max_streams",
-                limit: self.limits.max_streams,
-            });
+    fn register_stream(&mut self, transport: StreamTransport, stream: u64) -> Result<(), Error> {
+        if !self.seen_streams.contains(&(transport, stream)) {
+            self.limits.check_streams(self.seen_streams.len())?;
         }
         self.seen_streams.insert((transport, stream));
         Ok(())
@@ -167,7 +156,7 @@ impl Collector {
             if self.ports.contains(&flow.flow.source_port)
                 || self.ports.contains(&flow.flow.destination_port)
             {
-                self.register_stream(Transport::Udp, conversation.index)?;
+                self.register_stream(StreamTransport::Udp, conversation.index)?;
                 if let Some(scope) = record.scope_definition(flow.scope) {
                     self.scopes
                         .entry(scope.id.get())
@@ -198,12 +187,12 @@ impl Collector {
                 let expected = usize::from(length).saturating_sub(8);
                 let end = start
                     .saturating_add(expected)
-                    .min(view.decoded.original.len());
+                    .min(view.decoded.frame.bytes().len());
                 // The emitted wire and every decoded name/rdata slice derived
                 // from it must own their bytes; slicing the record would pin
                 // the entire frame allocation behind a few DNS bytes.
                 let start = start.min(end);
-                let wire = Bytes::copy_from_slice(&view.decoded.original[start..end]);
+                let wire = Bytes::copy_from_slice(&view.decoded.frame.bytes()[start..end]);
                 let sources = record
                     .udp_sources()
                     .ok_or(Error::Sources {
@@ -213,7 +202,7 @@ impl Collector {
                 self.emit(
                     Message {
                         index: 0,
-                        transport: Transport::Udp,
+                        transport: StreamTransport::Udp,
                         stream: conversation.index,
                         generation: 0,
                         flow: flow.clone(),
@@ -239,7 +228,7 @@ impl Collector {
                     .ports
                     .contains(&conversation.flow.flow.destination_port))
         {
-            self.register_stream(Transport::Tcp, conversation.index)?;
+            self.register_stream(StreamTransport::Tcp, conversation.index)?;
         }
         for event in self.tcp.observe(record)? {
             self.tcp_event(event, record.number, &mut events)?;
@@ -309,12 +298,8 @@ impl Collector {
                             usize::from(len) - direction.body.len()
                         });
                     let take = needed.min(input.len());
-                    if self.buffered.saturating_add(take) > self.limits.max_buffer_bytes {
-                        return Err(Error::Limit {
-                            field: "max_buffer_bytes",
-                            limit: self.limits.max_buffer_bytes,
-                        });
-                    }
+                    self.limits
+                        .check_buffer(self.buffered.saturating_add(take))?;
                     direction.sources = Some(match direction.sources.take() {
                         Some(old) => old.union(&data.sources)?,
                         None => data.sources.clone(),
@@ -391,7 +376,7 @@ impl Collector {
         self.emit(
             Message {
                 index: 0,
-                transport: Transport::Tcp,
+                transport: StreamTransport::Tcp,
                 stream: direction.stream,
                 generation: direction.generation,
                 flow: flow.clone(),
@@ -407,21 +392,11 @@ impl Collector {
         )
     }
     fn emit(&mut self, mut message: Message, events: &mut Vec<Event>) -> Result<(), Error> {
-        if self.summary.messages as usize >= self.limits.max_messages {
-            return Err(Error::Limit {
-                field: "max_messages",
-                limit: self.limits.max_messages,
-            });
-        }
-        // The decoder's bounded object expansion is conservatively charged along with wire.
-        let charge = message.wire.len().saturating_mul(32).saturating_add(4096);
-        self.emitted_bytes = self.emitted_bytes.saturating_add(charge);
-        if self.emitted_bytes > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.limits.check_messages(self.summary.messages as usize)?;
+        self.retained = self
+            .retained
+            .saturating_add(Limits::decoded_charge(message.wire.len()));
+        self.limits.check_retained(self.retained)?;
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {
@@ -436,7 +411,7 @@ impl Collector {
                 }
             }
         }
-        let transactions = self.transactions.observe(&message)?;
+        let transactions = self.transactions.observe(&message, &mut self.retained)?;
         events.push(Event::Message(Box::new(message)));
         for transaction in transactions {
             self.transaction(transaction, events);

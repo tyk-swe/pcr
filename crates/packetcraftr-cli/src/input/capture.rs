@@ -69,18 +69,7 @@ pub(crate) fn snapshot_capture<R: Read>(
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    Reader::with_limits(
-        snapshot,
-        ReaderLimits {
-            max_size: bounds.max_frame_bytes,
-            max_interfaces_per_section: bounds.max_interfaces,
-            ..Default::default()
-        },
-    )
-    .map(|reader| {
-        crate::invocation::reader(reader.with_cancellation(crate::cancellation::signal().clone()))
-    })
-    .map_err(CliError::classified)
+    bounded_reader(snapshot, bounds)
 }
 
 fn capture_reader<R: Read + 'static>(
@@ -99,7 +88,16 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(CliError::classified)?,
     );
-    let reader = Reader::with_limits(
+    let reader = bounded_reader(source, bounds)?;
+    crate::cancellation::check()?;
+    Ok(reader)
+}
+
+fn bounded_reader<R: Read>(
+    source: R,
+    bounds: CaptureReaderBoundsArgs,
+) -> Result<Reader<R>, CliError> {
+    Reader::with_limits(
         source,
         ReaderLimits {
             max_size: bounds.max_frame_bytes,
@@ -107,9 +105,8 @@ fn capture_reader<R: Read + 'static>(
             ..ReaderLimits::default()
         },
     )
-    .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
-    Ok(crate::invocation::reader(
-        reader.with_cancellation(crate::cancellation::signal().clone()),
-    ))
+    .map(|reader| {
+        crate::invocation::reader(reader.with_cancellation(crate::cancellation::signal().clone()))
+    })
+    .map_err(CliError::classified)
 }

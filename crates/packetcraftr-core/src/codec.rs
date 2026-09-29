@@ -70,6 +70,27 @@ impl Error {
             source: Source::new(source),
         }
     }
+
+    pub(crate) fn invalid(protocol: Id, message: impl Into<String>) -> Self {
+        Self::Invalid {
+            protocol,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn unsupported(protocol: Id, message: impl Into<String>) -> Self {
+        Self::Unsupported {
+            protocol,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn wrong_layer(expected: Id, actual: &dyn Layer) -> Self {
+        Self::WrongLayer {
+            expected,
+            actual: *actual.protocol_id(),
+        }
+    }
 }
 
 impl Classified for Error {
@@ -109,6 +130,21 @@ pub struct LayerEncodeContext<'a> {
     pub remaining_packet_bytes: usize,
 }
 
+impl LayerEncodeContext<'_> {
+    pub(crate) fn ensure_room(&self, protocol: Id, contribution: usize) -> Result<(), Error> {
+        if contribution > self.remaining_packet_bytes {
+            return Err(Error::invalid(
+                protocol,
+                format!(
+                    "layer contributes {contribution} bytes but only {} remain in the packet-size budget",
+                    self.remaining_packet_bytes
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub struct EncodedLayer {
     pub prefix: Vec<u8>,
     pub suffix: Vec<u8>,
@@ -144,7 +180,6 @@ impl EncodedLayer {
 pub struct LayerDecodeContext<'a> {
     pub parent: Option<Id>,
     pub registry: &'a Registry,
-    pub allow_trailing_padding: bool,
     pub network: Option<NetworkEnvelope>,
     pub discriminator: Option<Discriminator>,
 }
@@ -204,4 +239,72 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
     -> Result<DecodedLayer, Error>;
 
     fn make_layer(&self, fields: &BTreeMap<String, FieldValue>) -> Result<Box<dyn Layer>, Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layer::Raw;
+
+    const PROTOCOL: Id = Id::new("test");
+
+    fn ensure_room(remaining_packet_bytes: usize, contribution: usize) -> Result<(), Error> {
+        let registry = Registry::default();
+        let packet = Packet::new();
+        let build_context = Context::default();
+        LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode: Mode::Strict,
+            registry: &registry,
+            child: None,
+            remaining_packet_bytes,
+        }
+        .ensure_room(PROTOCOL, contribution)
+    }
+
+    #[test]
+    fn a_layer_may_fill_the_packet_size_budget_exactly() {
+        assert_eq!(ensure_room(8, 8), Ok(()));
+        assert_eq!(ensure_room(8, 0), Ok(()));
+        assert_eq!(ensure_room(0, 0), Ok(()));
+    }
+
+    #[test]
+    fn a_layer_over_the_packet_size_budget_is_invalid() {
+        assert_eq!(
+            ensure_room(8, 9),
+            Err(Error::Invalid {
+                protocol: PROTOCOL,
+                message: "layer contributes 9 bytes but only 8 remain in the packet-size budget"
+                    .to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn constructors_build_the_matching_variants() {
+        assert_eq!(
+            Error::invalid(PROTOCOL, "bad"),
+            Error::Invalid {
+                protocol: PROTOCOL,
+                message: "bad".to_owned(),
+            }
+        );
+        assert_eq!(
+            Error::unsupported(PROTOCOL, String::from("nope")),
+            Error::Unsupported {
+                protocol: PROTOCOL,
+                message: "nope".to_owned(),
+            }
+        );
+        assert_eq!(
+            Error::wrong_layer(PROTOCOL, &Raw::default()),
+            Error::WrongLayer {
+                expected: PROTOCOL,
+                actual: Raw::ID,
+            }
+        );
+    }
 }

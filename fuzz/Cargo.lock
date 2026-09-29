@@ -237,7 +237,6 @@ dependencies = [
  "packetcraftr-core",
  "packetcraftr-netio",
  "serde",
- "serde_json",
  "thiserror",
 ]
 

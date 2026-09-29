@@ -891,7 +891,7 @@ fn slow_send_consumes_attempt_timeout_before_capture_wait() {
     )
     .expect("resolver options");
     let request = request();
-    let (request_bytes, _) = build_request_frame(&request).expect("discovery frame");
+    let request_bytes = build_request_frame(&request).expect("discovery frame");
     let decision = discovery_decision(&request);
     let route = transmit::Route {
         decision: &decision,

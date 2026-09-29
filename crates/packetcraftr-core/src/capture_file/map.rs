@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::pcapng::validate_rewritable_packet_flags;
-use super::wire::{
-    PCAPNG_OPTION_END, PCAPNG_OPTION_IF_FCSLEN, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
-};
+use super::wire::{PCAPNG_OPTION_END, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL};
 use super::{
     Budget, CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
     Reader, RecordKind, Writer,
@@ -45,10 +43,8 @@ where
     }
     let mut report = MapReport::default();
     let mut endianness = reader.endianness();
-    if let CaptureHeader::Pcap(header) = reader.header() {
-        if header.network & 0xffff0000 != 0 {
-            return Err(Error::TransformMetadata("classic link/FCS flags"));
-        }
+    reader.refuse_declared_fcs()?;
+    if matches!(reader.header(), CaptureHeader::Pcap(_)) {
         for interface in reader.interfaces() {
             let id = add_interface(output, interface.clone(), &[], maximum_growth)?;
             if id as usize != report.interfaces {
@@ -69,12 +65,7 @@ where
                         options,
                         ..
                     } => {
-                        if options
-                            .iter()
-                            .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN)
-                        {
-                            return Err(Error::TransformMetadata("interface FCS length"));
-                        }
+                        reader.refuse_declared_fcs()?;
                         let id = add_interface(output, interface, &options, maximum_growth)?;
                         if id != global_id {
                             return Err(Error::TransformMetadata(

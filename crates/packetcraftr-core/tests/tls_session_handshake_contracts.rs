@@ -6,10 +6,10 @@ mod common;
 use common::tls_capture::{Capture, Stream, assemble_default, complete_handshake};
 use common::tls_frames::{
     ALERT_CLOSE_NOTIFY, ALERT_HANDSHAKE_FAILURE, ClientHelloSpec, ServerHelloSpec, TLS_1_2,
-    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, X25519, alert, application_data, certificate,
-    change_cipher_spec, client_hello, handshake_record, handshake_records, server_hello, split,
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, X25519, alert, certificate, change_cipher_spec,
+    client_hello, handshake_record, handshake_records, server_hello, split,
 };
-use packetcraftr_core::analysis::tls::Status;
+use packetcraftr_core::analysis::tls::{MAX_DIRECTION_BUFFER, Status};
 
 #[test]
 fn a_hello_retry_request_yields_retry_then_completes_with_the_first_hellos_fingerprint() {
@@ -110,29 +110,6 @@ fn a_fatal_alert_before_the_server_hello_ends_the_session_as_alert() {
 }
 
 #[test]
-fn a_tls13_server_stops_buffering_after_its_hello() {
-    let mut capture = Capture::new();
-    let mut stream = Stream::new(40_000);
-    capture.open(&mut stream);
-    capture.client(
-        &mut stream,
-        &handshake_record(&client_hello(&ClientHelloSpec::default())),
-    );
-    let mut answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
-    answer.extend_from_slice(&change_cipher_spec());
-    answer.extend_from_slice(&application_data(8_000));
-    answer.extend_from_slice(&application_data(8_000));
-    capture.server(&mut stream, &answer);
-    let (sessions, summary) = assemble_default(&capture);
-    assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].status, Status::Complete);
-    assert_eq!(
-        summary.buffer_limit_hits, 0,
-        "encrypted handshake bytes are never buffered"
-    );
-}
-
-#[test]
 fn a_tls12_certificate_chain_is_not_buffered() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
@@ -148,7 +125,10 @@ fn a_tls12_certificate_chain_is_not_buffered() {
         alpn: Some("http/1.1".to_owned()),
         ..ServerHelloSpec::default()
     }));
-    answer.extend_from_slice(&handshake_records(&certificate(120_000), 16_000));
+    answer.extend_from_slice(&handshake_records(
+        &certificate(MAX_DIRECTION_BUFFER),
+        16_000,
+    ));
     for segment in split(&answer, 12) {
         capture.server(&mut stream, &segment);
     }

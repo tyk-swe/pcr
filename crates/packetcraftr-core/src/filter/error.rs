@@ -48,6 +48,14 @@ pub enum Error {
         literal: String,
     },
     #[error(
+        "unquoted word {literal} at byte {offset} for field {path} is neither separated bytes nor quoted text"
+    )]
+    UnquotedByteWord {
+        offset: usize,
+        path: String,
+        literal: String,
+    },
+    #[error(
         "field {path} at byte {offset} is compared to prefix {literal}, \
          which only `==` and `!=` can test"
     )]
@@ -106,6 +114,9 @@ impl Classified for Error {
             Self::IncompatibleLiteral { .. } | Self::OrderedPrefixComparison { .. } => {
                 cli_filter("compare the field against a value of its own type")
             }
+            Self::UnquotedByteWord { .. } => cli_filter(
+                "write bytes as two-digit groups with separators such as c0:00; on byte fields, quote the word to match it as ASCII text",
+            ),
             Self::UnsliceableField { .. } => {
                 cli_filter("slice only fields that hold bytes, such as an address or a byte string")
             }
@@ -168,11 +179,42 @@ mod tests {
     }
 
     #[test]
+    fn byte_spelling_advice_is_limited_to_byte_word_errors() {
+        let registry = builtin::registry();
+        let remediation = |source: &str| {
+            Filter::compile(source, &registry, Limits::default())
+                .expect_err("fixture filter must fail")
+                .classification()
+                .remediation
+        };
+
+        for source in [
+            "tcp.source_port == \"abc\"",
+            "tcp.source_port contains \"x\"",
+            "ipv4.source == 7",
+            "ipv4.source == 300.0.0.1",
+        ] {
+            assert_eq!(
+                remediation(source),
+                Some("compare the field against a value of its own type"),
+                "{source}"
+            );
+        }
+        for source in ["raw.bytes contains deadbeef", "raw.bytes contains 47:45:5"] {
+            let advice = remediation(source).expect("byte word errors have remediation");
+            assert!(advice.contains("c0:00"), "{source}: {advice}");
+            assert!(advice.contains("quote"), "{source}: {advice}");
+        }
+    }
+
+    #[test]
     fn filter_error_remediation_is_specific() {
         let registry = builtin::registry();
         let cases = [
             ("ipv4.missing == 1", "list the fields a protocol exposes"),
             ("udp.destination_port == 192.0.2.1", "value of its own type"),
+            ("raw.bytes contains deadbeef", "two-digit groups"),
+            ("raw.bytes contains 47:45:5", "two-digit groups"),
             ("frame.len[0] == 1", "slice only fields that hold bytes"),
             ("(ethernet", "check the filter syntax"),
         ];
@@ -181,6 +223,7 @@ mod tests {
             let error = Filter::compile(source, &registry, Limits::default())
                 .expect_err("fixture filter must fail");
             assert_eq!(error.classification().code, "cli.filter", "{source}");
+            assert_eq!(error.classification().kind, Kind::Usage, "{source}");
             assert!(
                 error
                     .classification()

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::Stats;
 use crate::exchange::Response;
@@ -26,34 +26,6 @@ impl Sequenced for Probe {
     fn sequence(&self) -> u64 {
         self.0
     }
-}
-
-#[test]
-fn a_response_that_differs_from_its_exact_frame_is_invalid_evidence() {
-    let frame = frame(&[1]);
-    let decoded = DecodedPacket {
-        packet: Packet::new(),
-        original: Bytes::from_static(&[2]),
-        frame,
-        layout: PacketLayout::default(),
-        diagnostics: Vec::new(),
-    };
-    let mut execution = execution(&[1, 2], 2);
-    execution.responses.push(Response {
-        request_index: 0,
-        response: decoded,
-        latency: Duration::from_millis(1),
-    });
-
-    assert_eq!(
-        validate(&execution, true),
-        Err((
-            7,
-            crate::evidence::Error::InvalidMatchedResponse {
-                message: "matched response original bytes differ from its exact frame".to_owned()
-            }
-        ))
-    );
 }
 
 #[test]
@@ -149,15 +121,10 @@ fn raw_packet(bytes: &'static [u8]) -> Packet {
     packet
 }
 
-fn frame(bytes: &'static [u8]) -> Frame {
-    Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).expect("evidence frame")
-}
-
 fn decoded_without_timestamp(bytes: &'static [u8]) -> DecodedPacket {
     let frame = Frame::without_timestamp(LinkType::RAW, bytes).expect("untimestamped frame");
     DecodedPacket {
         packet: Packet::new(),
-        original: frame.bytes().clone(),
         frame,
         layout: PacketLayout::default(),
         diagnostics: Vec::new(),

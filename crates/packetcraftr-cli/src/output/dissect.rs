@@ -21,14 +21,13 @@ impl From<DecodedPacket> for Published<Report> {
     fn from(decoded: DecodedPacket) -> Self {
         let DecodedPacket {
             packet,
-            original,
             frame,
             layout,
             diagnostics,
         } = decoded;
         Self::new(
             Report {
-                frame: original.into(),
+                frame: frame.bytes().clone().into(),
                 link_type: frame.link_type.0,
                 packet: packetcraftr_core::document::Packet::from_packet(&packet),
                 layout: layout.into(),

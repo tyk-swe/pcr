@@ -18,8 +18,9 @@ pub(crate) struct ApplicationLimitsArgs {
     #[arg(long, default_value_t = Limits::default().max_buffer_bytes)]
     pub(crate) max_application_buffer_bytes: usize,
     /// Cumulative byte charge for retained and emitted evidence, including a
-    /// conservative decoded-object expansion multiplier; bounds analysis
-    /// state, not serialized output (see --max-application-output-bytes).
+    /// flat decoded-object expansion multiplier (DNS name compression can
+    /// exceed it); bounds analysis state, not serialized output (see
+    /// --max-application-output-bytes).
     #[arg(long, default_value_t = Limits::default().max_retained_bytes)]
     pub(crate) max_application_retained_bytes: usize,
     /// TCP sequence spans retained to attribute deliveries to physical source

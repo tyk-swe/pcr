@@ -30,7 +30,6 @@ fn layered(layers: Vec<Box<dyn Layer>>) -> DecodedPacket {
     }
     DecodedPacket {
         packet,
-        original: Bytes::new(),
         frame: Frame::new(
             UNIX_EPOCH + Duration::from_secs(123),
             LinkType::IPV4,

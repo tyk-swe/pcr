@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -168,6 +168,25 @@ impl Frame {
     }
 }
 
+/// Splits `time` into whole Unix seconds, floored, and the nanoseconds past that second.
+pub(crate) fn unix_floor(time: SystemTime) -> (i128, u32) {
+    // seconds come from a `u64` and `subsec_nanos` is below one billion, so nothing can overflow
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => (i128::from(elapsed.as_secs()), elapsed.subsec_nanos()),
+        Err(error) => {
+            let elapsed = error.duration();
+            if elapsed.subsec_nanos() == 0 {
+                (-i128::from(elapsed.as_secs()), 0)
+            } else {
+                (
+                    -i128::from(elapsed.as_secs()) - 1,
+                    1_000_000_000 - elapsed.subsec_nanos(),
+                )
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeBounds {
     start: Option<SystemTime>,
@@ -238,6 +257,19 @@ impl<'de> Deserialize<'de> for Frame {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn unix_floor_rounds_instants_before_the_epoch_down() {
+        let at =
+            |seconds, nanoseconds| unix_floor(UNIX_EPOCH + Duration::new(seconds, nanoseconds));
+        let before =
+            |seconds, nanoseconds| unix_floor(UNIX_EPOCH - Duration::new(seconds, nanoseconds));
+        assert_eq!(at(0, 0), (0, 0));
+        assert_eq!(at(7, 125_000_000), (7, 125_000_000));
+        assert_eq!(before(2, 0), (-2, 0));
+        assert_eq!(before(0, 1), (-1, 999_999_999));
+        assert_eq!(before(1, 250_000_000), (-2, 750_000_000));
+    }
 
     #[test]
     fn time_bounds_are_inclusive_at_representable_submicrosecond_precision() {

@@ -254,7 +254,13 @@ mod tests {
 
     impl Authorizer for RecordingAuthorizer {
         fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-            self.calls.push(Call::Approve(operation.shape()));
+            let shape = match operation {
+                Operation::Socket(_) => "socket",
+                Operation::Wire(_) => "wire",
+                Operation::Dns(_) => "dns",
+                Operation::Declared(_) => "declared-packet",
+            };
+            self.calls.push(Call::Approve(shape));
             if let Some(cancellation) = &self.cancel {
                 cancellation.cancel();
             }

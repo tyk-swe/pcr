@@ -17,30 +17,25 @@ use packetcraftr_core::protocol::link::{Arp, Ethernet, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Ipv6, ndp};
 
 const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
-const ARP_REQUEST: u16 = 1;
 /// Hop limit RFC 4861 requires on every Neighbor Discovery message.
 pub(super) const NDP_HOP_LIMIT: u8 = 255;
 
 pub(in crate::neighbor) fn build_request_frame(
     request: &NeighborRequest,
-) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
+) -> Result<Bytes, crate::neighbor::Error> {
     match (request.interface_source, request.target) {
         (IpAddr::V4(source), IpAddr::V4(target)) => {
-            let destination = MacAddress([0xff; 6]);
-            let mut packet = link_header(request, destination);
+            let mut packet = link_header(request, MacAddress::BROADCAST);
             let network = packet.len();
             packet.push(Arp {
-                operation: ARP_REQUEST,
+                operation: Arp::OPERATION_REQUEST,
                 sender_hardware: request.interface_mac.0,
                 sender_protocol: source,
                 target_hardware: [0; 6],
                 target_protocol: target,
                 ..Arp::default()
             });
-            Ok((
-                finish(request, packet, network, "ARP request")?,
-                destination,
-            ))
+            finish(request, packet, network, "ARP request")
         }
         (IpAddr::V6(source), IpAddr::V6(target)) => {
             let group = ndp::solicited_node_multicast(target);
@@ -63,8 +58,7 @@ pub(in crate::neighbor) fn build_request_frame(
                 ..Ipv6::default()
             });
             packet.push(message);
-            let bytes = finish(request, packet, network, "IPv6 neighbor solicitation")?;
-            Ok((bytes, destination))
+            finish(request, packet, network, "IPv6 neighbor solicitation")
         }
         _ => Err(invalid_request("source and target address families differ")),
     }

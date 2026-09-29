@@ -28,7 +28,16 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
         "--max-probes",
         "1",
     ]);
-    assert!(!denied.status.success());
+    assert_eq!(denied.status.code(), Some(2));
+    let denied = parse_json(&denied);
+    assert_eq!(denied["error"]["code"], "cli.scan_limit");
+    assert!(
+        denied["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exceeds max_probes=1"),
+        "{denied}"
+    );
     assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
     let report = parse_json(&run_success(&[
         "--output",
@@ -86,5 +95,11 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
         "missing",
     ]);
     assert!(!rejected.status.success());
-    assert_eq!(parse_json(&rejected)["error"]["kind"], "capability");
+    let rejected = parse_json(&rejected);
+    assert_eq!(rejected["error"]["code"], "capability.scan_tcp_route");
+    assert_eq!(rejected["error"]["kind"], "capability");
+    assert_eq!(
+        rejected["error"]["remediation"],
+        "omit packet interface/source/link overrides for ordinary TCP"
+    );
 }

@@ -24,8 +24,8 @@ pub fn validate_segment_route(
     let Some(&final_destination) = segments.last().filter(|_| segments.len() <= 127) else {
         return Err(Error::SegmentCount);
     };
-    let expected_last = u8::try_from(segments.len().saturating_sub(1))
-        .map_err(|_| Error::SegmentCountUnrepresentable)?;
+    let expected_last =
+        u8::try_from(segments.len().saturating_sub(1)).map_err(|_| Error::SegmentCount)?;
     if last_entry != expected_last {
         return Err(Error::SegmentLastEntry {
             last_entry,

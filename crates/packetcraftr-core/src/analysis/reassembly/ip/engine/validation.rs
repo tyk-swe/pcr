@@ -279,11 +279,12 @@ pub(super) fn validate_reconstruction_consistency(
 fn ipv4_headers_match(first: &[u8], second: &[u8]) -> bool {
     first.len() == second.len()
         && first.first() == second.first()
-        // ECN, total length, offset/MF and checksum may differ; DSCP and Reserved/DF must agree.
+        // ECN, TTL, total length, offset/MF and checksum may differ; DSCP and Reserved/DF must
+        // agree.
         && ipv4_dscp(first) == ipv4_dscp(second)
         && first.get(4..6) == second.get(4..6)
         && ipv4_preserved_flags(first) == ipv4_preserved_flags(second)
-        && first.get(8..10) == second.get(8..10)
+        && first.get(9..10) == second.get(9..10)
         && first.get(12..) == second.get(12..)
 }
 

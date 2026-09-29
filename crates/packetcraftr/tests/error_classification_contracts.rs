@@ -8,6 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr::Error;
 use packetcraftr::policy;
 use packetcraftr::replay::{self, Error as ReplayError, Limits, Options as ReplayOptions, Timing};
+use packetcraftr::runtime::{MAX_WORKER_CAPACITY, Runtime};
 use packetcraftr::send;
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::build::{self, Builder};
@@ -55,7 +56,7 @@ fn send_and_exchange_template_failures_publish_each_source_only_once() {
     let client = Client::new(
         protocol::builtin::registry(),
         policy::Policy::default(),
-        packetcraftr::SystemProviders,
+        common::providers(FixedRoutes, NeverTransmit),
     );
     let mut packet = Packet::new();
     packet.push(Ipv4 {
@@ -388,6 +389,22 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
         "policy.invalid_packet_semantics"
     );
     assert_eq!(error.classification().kind, Kind::Policy);
+}
+
+#[test]
+fn a_worker_capacity_above_the_ceiling_is_a_classified_usage_refusal() {
+    let error = Runtime::new(MAX_WORKER_CAPACITY + 1).unwrap_err();
+
+    let classification = error.classification();
+    assert_eq!(classification.code, "cli.worker_capacity");
+    assert_eq!(classification.kind, Kind::Usage);
+    assert!(
+        classification
+            .remediation
+            .is_some_and(|remediation| remediation.contains("MAX_WORKER_CAPACITY")),
+        "{classification:?}"
+    );
+    assert_message_is_stable(&error.to_string(), "CapacityError");
 }
 
 #[test]

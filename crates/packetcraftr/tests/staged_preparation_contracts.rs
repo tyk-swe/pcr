@@ -4,11 +4,15 @@
 mod common;
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use packetcraftr::fuzz;
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::{Client, exchange, route, send};
+use packetcraftr::runtime::Runtime;
+use packetcraftr::{Client, ProviderSet, exchange, route, send};
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz as packet_fuzz;
@@ -18,11 +22,13 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::template::Template;
+use packetcraftr_netio::interface::{self, Id as InterfaceId};
 use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::route::{Decision, Error as RouteError, Provider as RouteProvider};
 
 use common::{
-    FakeProviders, FixedRoutes, NEIGHBOR_MAC, RecordingRoutes, RecordingTransmit, SELECTED_SOURCE,
-    Step, Steps,
+    FakeProviders, FixedRoutes, NEIGHBOR_MAC, NeverTransmit, RecordingRoutes, RecordingTransmit,
+    SELECTED_SOURCE, Step, Steps, live,
 };
 
 const FIRST: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
@@ -205,6 +211,28 @@ fn a_late_exchange_denial_triggers_no_neighbor_discovery() {
         assert_eq!(error.classification().code, code);
         assert_eq!(steps.take(), [], "{code}: no discovery and no transmission");
     }
+}
+
+#[test]
+fn an_exchange_refused_a_sink_worker_causes_no_neighbor_discovery_traffic() {
+    let (client, steps, io) = recording_client(Policy::default());
+    let client = client.with_runtime(Runtime::new(0).unwrap());
+
+    let error = client
+        .exchange(
+            exchange_request(template(&[FIRST])),
+            exchange::Collector::default(),
+        )
+        .expect_err("the runtime has no worker for the sink");
+
+    assert!(matches!(error, exchange::Error::Output { .. }), "{error:?}");
+    assert_eq!(
+        error.classification().code,
+        "internal.progressive_output_worker_exhausted"
+    );
+    assert_eq!(steps.take(), [], "no ARP request and no transmission");
+    assert_eq!(io.armed(), 0, "no discovery capture was armed");
+    assert_eq!(client.runtime().snapshot().rejected_admissions, 1);
 }
 
 #[test]
@@ -394,4 +422,138 @@ fn an_admitted_operation_resolves_its_interface_before_the_route_and_the_neighbo
         ],
         "one interface resolution serves every packet: {steps:?}"
     );
+}
+
+/// One device the operating system can re-create under a new index. A strict
+/// route provider refuses an interface hint it does not know; a lenient one
+/// answers with the current device whatever the hint says.
+#[derive(Clone)]
+struct Replugged {
+    index: Arc<AtomicU32>,
+    enumerations: Arc<AtomicUsize>,
+    strict: bool,
+}
+
+impl Replugged {
+    fn new(index: u32, strict: bool) -> Self {
+        Self {
+            index: Arc::new(AtomicU32::new(index)),
+            enumerations: Arc::new(AtomicUsize::new(0)),
+            strict,
+        }
+    }
+
+    fn recreate(&self, index: u32) {
+        self.index.store(index, Ordering::SeqCst);
+    }
+
+    fn enumerations(&self) -> usize {
+        self.enumerations.load(Ordering::SeqCst)
+    }
+
+    fn current(&self) -> InterfaceId {
+        InterfaceId {
+            name: "fixture0".to_owned(),
+            index: self.index.load(Ordering::SeqCst),
+        }
+    }
+}
+
+impl interface::Provider for Replugged {
+    fn interfaces(&self, _deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
+        self.enumerations.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![interface::Info {
+            id: self.current(),
+            ..common::fixture_interface()
+        }])
+    }
+}
+
+impl RouteProvider for Replugged {
+    type Error = RouteError;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<Decision, Self::Error> {
+        deadline.check_cancelled()?;
+        let current = self.current();
+        if let Some(hint) = interface_hint
+            && self.strict
+            && *hint != current
+        {
+            return Err(RouteError::InterfaceNotFound {
+                name: hint.name.clone(),
+                index: hint.index,
+            });
+        }
+        let mut decision = FixedRoutes
+            .lookup_with_preferences(destination, interface_hint, preferred_source, deadline)
+            .expect("fixed routes cannot fail");
+        decision.interface = current;
+        Ok(decision)
+    }
+}
+
+fn replugged_client(device: &Replugged) -> Client<impl packetcraftr::PacketProviders> {
+    Client::new(
+        builtin::registry(),
+        Policy::default(),
+        ProviderSet::packet(device.clone(), device.clone(), NeverTransmit, NeverTransmit),
+    )
+}
+
+fn plan_by_name(
+    client: &Client<impl packetcraftr::PacketProviders>,
+    deadline: &Deadline,
+) -> Result<route::Plan, packetcraftr::Error> {
+    client.plan(
+        &first_packet(&[FIRST]),
+        None,
+        &route::Options {
+            interface: Some(route::Interface::Name("fixture0".to_owned())),
+            ..route::Options::default()
+        },
+        deadline,
+    )
+}
+
+#[test]
+fn a_plan_the_provider_rejects_forgets_the_interface_it_resolved() {
+    for (strict, code) in [
+        (true, "io.interface_not_found"),
+        (false, "internal.route_contract"),
+    ] {
+        let device = Replugged::new(12, strict);
+        let client = replugged_client(&device);
+        let plan = plan_by_name(&client, &live()).expect("the interface resolves and routes");
+        assert_eq!(plan.decision.interface.index, 12);
+
+        device.recreate(15);
+        let error = plan_by_name(&client, &live()).expect_err("index 12 no longer exists");
+        assert_eq!(error.classification().code, code);
+
+        let plan = plan_by_name(&client, &live()).expect("the next plan enumerates again");
+        assert_eq!(plan.decision.interface.index, 15);
+        assert_eq!(device.enumerations(), 2);
+    }
+}
+
+#[test]
+fn an_interrupted_plan_keeps_the_interface_it_resolved() {
+    let device = Replugged::new(12, true);
+    let client = replugged_client(&device);
+    plan_by_name(&client, &live()).expect("the interface resolves and routes");
+
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    let cancelled = live().with_cancellation(Some(cancellation));
+    let error = plan_by_name(&client, &cancelled).expect_err("the caller cancelled");
+    assert_eq!(error.classification().code, "io.cancelled");
+
+    plan_by_name(&client, &live()).expect("the remembered interface still routes");
+    assert_eq!(device.enumerations(), 1);
 }

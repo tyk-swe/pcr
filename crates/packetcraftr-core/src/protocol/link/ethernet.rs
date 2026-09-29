@@ -7,18 +7,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
-    registry::Discriminator,
 };
 
-use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
-use crate::protocol::common::{
-    ValueExpectation, binds_as, expected_discriminator, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator,
-};
+use super::ether_type::{link_payload_selection, resolve_ether_type};
+use crate::protocol::common::{make_layer, protocol, truncated, typed_layer};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -26,99 +20,12 @@ const NAME: &str = BuiltinProtocol::Ethernet.as_str();
 
 const ETHERNET_LEN: usize = 14;
 const MAC_LEN: usize = 6;
-const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
 
 fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
     input
         .get(offset..)
         .and_then(<[u8]>::first_chunk::<N>)
         .copied()
-}
-
-pub(super) fn link_payload_selection(
-    name: &'static str,
-    ether_type: u16,
-    available: usize,
-    header_len: usize,
-) -> Result<(usize, Vec<Discriminator>), crate::codec::Error> {
-    if ether_type >= 0x0600 {
-        return Ok((available, vec![Discriminator(u64::from(ether_type))]));
-    }
-    if ether_type <= MAX_FRAME_LENGTH {
-        let length = usize::from(ether_type);
-        if length > available {
-            return Err(truncated(
-                name,
-                header_len.saturating_add(length),
-                header_len.saturating_add(available),
-            ));
-        }
-        let next = if length == 0 {
-            Vec::new()
-        } else {
-            vec![Discriminator(LLC_FRAME_DISCRIMINATOR)]
-        };
-        return Ok((length, next));
-    }
-    Ok((available, vec![Discriminator(u64::from(ether_type))]))
-}
-
-pub(super) fn link_type_expectation(
-    name: &'static str,
-    context: &LayerEncodeContext<'_>,
-    value: &WireValue<u16>,
-    covered_payload_len: usize,
-) -> Result<ValueExpectation<u16>, crate::codec::Error> {
-    if context
-        .child
-        .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
-    {
-        let length = u16::try_from(covered_payload_len)
-            .ok()
-            .filter(|length| *length <= MAX_FRAME_LENGTH)
-            .ok_or_else(|| {
-                invalid(
-                    name,
-                    format!("an 802.3 frame length exceeds {MAX_FRAME_LENGTH} bytes"),
-                )
-            })?;
-        return Ok(ValueExpectation::Required(length));
-    }
-    if matches!(value, WireValue::Auto)
-        && context
-            .child
-            .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
-    {
-        return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
-    }
-    Ok(expected_discriminator(name, context, 0_u16, value))
-}
-
-pub(super) fn validate_link_length_form(
-    name: &'static str,
-    ether_type: u16,
-    covered_payload_len: usize,
-    context: &LayerEncodeContext<'_>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), crate::codec::Error> {
-    if ether_type > MAX_FRAME_LENGTH
-        || (ether_type == 0 && covered_payload_len == 0)
-        || context
-            .child
-            .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
-    {
-        return Ok(());
-    }
-    strict_or_diagnostic(
-        name,
-        "build.link_length_form",
-        "ether_type",
-        format!(
-            "ether_type {ether_type} is an 802.3 payload length and dissects as LLC framing; only an llc child can follow it"
-        ),
-        context,
-        diagnostics,
-    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,33 +70,8 @@ impl LayerCodec for EthernetCodec {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<Ethernet>(NAME, layer)?;
-        let covered_payload = payload_without_padding(NAME, payload, context)?;
-        let expectation =
-            link_type_expectation(NAME, context, &layer.ether_type, covered_payload.len())?;
-        let mut diagnostics = Vec::new();
-        validate_auto_raw_discriminator(
-            NAME,
-            "ether_type",
-            &layer.ether_type,
-            context,
-            &mut diagnostics,
-        )?;
-        let (ether_type, materialized_type) = resolve_u16(
-            NAME,
-            "ether_type",
-            &layer.ether_type,
-            expectation,
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_link_length_form(
-            NAME,
-            ether_type,
-            covered_payload.len(),
-            context,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(NAME, u64::from(ether_type), context, &mut diagnostics)?;
+        let (ether_type, materialized_type, diagnostics) =
+            resolve_ether_type(NAME, &layer.ether_type, payload, context)?;
         let mut header = Vec::with_capacity(ETHERNET_LEN);
         header.extend_from_slice(&layer.destination);
         header.extend_from_slice(&layer.source);

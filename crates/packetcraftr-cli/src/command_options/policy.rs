@@ -5,7 +5,6 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use clap::Args;
-use packetcraftr_netio as net;
 
 use crate::resources::{Settings, declare};
 
@@ -50,8 +49,6 @@ pub(crate) struct DestinationAllowlistArgs {
 }
 
 pub(crate) trait Budget: Clone + fmt::Debug + Default {
-    fn max_packets() -> u64;
-    fn max_bytes() -> u64;
     const PACKETS_HELP: &'static str;
     const BYTES_HELP: &'static str;
 }
@@ -59,32 +56,28 @@ pub(crate) trait Budget: Clone + fmt::Debug + Default {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Transmitted;
 
-pub(crate) const DEFAULT_TRANSMITTED_PACKETS: u64 = 10_000;
-
-pub(crate) fn default_limit_bytes() -> u64 {
-    u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
-}
-
 impl Budget for Transmitted {
-    fn max_packets() -> u64 {
-        DEFAULT_TRANSMITTED_PACKETS
-    }
-
-    fn max_bytes() -> u64 {
-        default_limit_bytes()
-    }
-
     const PACKETS_HELP: &'static str =
         "Maximum transmitted packets or bounded socket traffic units authorized";
     const BYTES_HELP: &'static str =
         "Maximum wire or socket application bytes authorized for one operation";
 }
 
+// clap shares one `default_value_t` static across every `TrafficBudgetArgs<B>`,
+// so these defaults cannot vary by `B`.
 #[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs<B: Budget> {
-    #[arg(long, default_value_t = B::max_packets(), help = B::PACKETS_HELP)]
+    #[arg(
+        long,
+        default_value_t = packetcraftr::policy::DEFAULT_MAX_PACKETS_PER_OPERATION,
+        help = B::PACKETS_HELP
+    )]
     max_packets: u64,
-    #[arg(long, default_value_t = B::max_bytes(), help = B::BYTES_HELP)]
+    #[arg(
+        long,
+        default_value_t = packetcraftr::policy::DEFAULT_MAX_BYTES_PER_OPERATION,
+        help = B::BYTES_HELP
+    )]
     max_bytes: u64,
     #[arg(skip)]
     budget: PhantomData<B>,
@@ -105,6 +98,22 @@ pub(crate) struct SendPolicyArgs {
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs<Transmitted>,
+}
+
+/// `fuzz` and `replay`: packets addressed numerically, so no hostname
+/// resolution.
+#[derive(Clone, Debug, Args)]
+pub(crate) struct NumericPolicyArgs<B: Budget> {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    permissive_packet: PermissivePacketArgs,
+    #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    budgets: TrafficBudgetArgs<B>,
 }
 
 /// `scan`, `traceroute`, and `dns`: a named target, packets built by the
@@ -139,6 +148,12 @@ impl<B: Budget> TrafficBudgetArgs<B> {
 impl SendPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.hostname_resolution.resources(settings);
+        self.budgets.resources(settings);
+    }
+}
+
+impl<B: Budget> NumericPolicyArgs<B> {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.budgets.resources(settings);
     }
 }
@@ -207,6 +222,18 @@ impl SendPolicyArgs {
     }
 }
 
+impl<B: Budget> NumericPolicyArgs<B> {
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
+        self.budgets.apply_to(&mut policy);
+        policy
+    }
+}
+
 impl HostnamePolicyArgs {
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
@@ -222,9 +249,14 @@ impl HostnamePolicyArgs {
 mod tests {
 
     use clap::Parser as _;
+    use packetcraftr_core::capture_file;
+    use packetcraftr_netio as net;
 
     use crate::cli::Cli;
     use crate::commands::CommandLine;
+    use packetcraftr::policy::{
+        DEFAULT_MAX_BYTES_PER_OPERATION, DEFAULT_MAX_PACKETS_PER_OPERATION,
+    };
 
     #[test]
     fn destination_allowlists_parse_and_reject_malformed_entries() {
@@ -290,5 +322,65 @@ mod tests {
             panic!("replay command")
         };
         assert!(opted_in.policy.into_policy().allow_source_spoofing);
+    }
+
+    fn budgets_for(arguments: &[&str]) -> (u64, u64) {
+        let cli = Cli::try_parse_from(arguments).expect("command must parse with defaults");
+        let policy = match cli.command {
+            CommandLine::Send(send) => send.send.policy.into_policy(),
+            CommandLine::Exchange(exchange) => exchange.send.policy.into_policy(),
+            CommandLine::Scan(scan) => scan.policy.into_policy(),
+            CommandLine::Fuzz(fuzz) => fuzz.policy.into_policy(),
+            CommandLine::Replay(replay) => replay.policy.into_policy(),
+            CommandLine::Capture(capture) => capture.budgets.into_policy(),
+            other => panic!("unbudgeted command {other:?}"),
+        };
+        (
+            policy.max_packets_per_operation,
+            policy.max_bytes_per_operation,
+        )
+    }
+
+    #[test]
+    fn every_budgeted_command_starts_from_the_shared_defaults() {
+        let shared = (
+            DEFAULT_MAX_PACKETS_PER_OPERATION,
+            DEFAULT_MAX_BYTES_PER_OPERATION,
+        );
+        for arguments in [
+            &["packetcraftr", "send", "--packet", "raw(hex=00)"][..],
+            &["packetcraftr", "exchange", "--packet", "raw(hex=00)"],
+            &["packetcraftr", "scan", "192.0.2.1"],
+            &["packetcraftr", "fuzz", "--packet", "raw(hex=00)"],
+            &[
+                "packetcraftr",
+                "replay",
+                "capture.pcapng",
+                "--interface",
+                "7",
+            ],
+            &["packetcraftr", "capture", "--interface", "7"],
+        ] {
+            assert_eq!(budgets_for(arguments), shared, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn shared_defaults_match_the_library_defaults_they_stand_in_for() {
+        assert_eq!(
+            (
+                DEFAULT_MAX_PACKETS_PER_OPERATION,
+                DEFAULT_MAX_BYTES_PER_OPERATION
+            ),
+            (
+                capture_file::DEFAULT_MAX_STREAM_FRAMES,
+                capture_file::DEFAULT_MAX_STREAM_BYTES
+            ),
+        );
+        assert_eq!(
+            DEFAULT_MAX_BYTES_PER_OPERATION,
+            u64::try_from(net::capture::Limits::default().max_bytes)
+                .expect("default max bytes fits u64"),
+        );
     }
 }

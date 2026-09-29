@@ -3,8 +3,6 @@
 
 mod client;
 mod exchange;
-#[cfg(test)]
-pub(crate) mod fixture;
 mod interface;
 mod preparation;
 mod route;

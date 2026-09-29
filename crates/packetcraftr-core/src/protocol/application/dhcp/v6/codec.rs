@@ -13,7 +13,7 @@ use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
-    layer::{Id, Layer, Schema},
+    layer::{Id, Layer, Raw, Schema},
     layout::FieldLayout,
     protocol::BuiltinProtocol,
 };
@@ -417,7 +417,7 @@ impl LayerCodec for Dhcpv6Codec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         if input.len() < 4 {
-            return Ok(shared::raw(input));
+            return Ok(Raw::decoded(input));
         }
         shared::decode::<Dhcpv6>(input)
     }

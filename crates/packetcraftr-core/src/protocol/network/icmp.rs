@@ -10,11 +10,11 @@ use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
     field::{self, FieldValue, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Layer, Schema, reflective_layer},
     layout::{ByteRange, FieldLayout},
 };
 
-use super::resolve_envelope;
+use super::{ip_protocol, resolve_envelope};
 use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
     out_of_range, payload_without_padding, protocol, resolve_u16, transport_checksum,
@@ -96,43 +96,39 @@ fn patch_body_rest(body: &mut Bytes, rest: &[u8]) {
     *body = Bytes::from(edited);
 }
 
-fn body_unsigned_value(
-    schema: &'static crate::layer::Schema,
-    field: &str,
+fn set_body_unsigned(
+    body: &mut Bytes,
+    start: usize,
+    width: usize,
+    schema: &'static Schema,
     value: FieldValue,
-) -> Result<u64, field::Error> {
-    match value {
-        FieldValue::Unsigned(value) => Ok(value),
-        _ => Err(wrong_type(schema, field, "unsigned")),
+    name: &str,
+) -> Result<(), field::Error> {
+    let FieldValue::Unsigned(value) = value else {
+        return Err(wrong_type(schema, name, "unsigned"));
+    };
+    let bytes = value.to_be_bytes();
+    let (high, low) = bytes.split_at(bytes.len() - width);
+    if high.iter().any(|byte| *byte != 0) {
+        return Err(out_of_range(schema, name));
     }
+    patch_body(body, start, low);
+    Ok(())
 }
 
-macro_rules! icmp_body_view_setters {
-    ($schema:ident) => {
-        fn set_identifier(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-            let value = body_unsigned_value($schema(), name, value)?;
-            let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
-            patch_body(&mut self.body, 0, &value.to_be_bytes());
+fn set_rest(
+    body: &mut Bytes,
+    schema: &'static Schema,
+    value: FieldValue,
+    name: &str,
+) -> Result<(), field::Error> {
+    match value {
+        FieldValue::Bytes(value) => {
+            patch_body_rest(body, &value);
             Ok(())
         }
-
-        fn set_sequence(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-            let value = body_unsigned_value($schema(), name, value)?;
-            let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
-            patch_body(&mut self.body, 2, &value.to_be_bytes());
-            Ok(())
-        }
-
-        fn set_rest(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-            match value {
-                FieldValue::Bytes(value) => {
-                    patch_body_rest(&mut self.body, &value);
-                    Ok(())
-                }
-                _ => Err(wrong_type($schema(), name, "bytes")),
-            }
-        }
-    };
+        _ => Err(wrong_type(schema, name, "bytes")),
+    }
 }
 
 /// `body` starts at message offset four.
@@ -183,19 +179,19 @@ reflective_layer! {
             kind: Unsigned, derived: false, required: false,
             description: "Identifier (echo-style and extended messages)",
             get |layer| body_unsigned(&layer.body, 0, 2),
-            set |layer, value, name| layer.set_identifier(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 0, 2, icmpv4_schema(), value, name)
         },
         "sequence" => {
             kind: Unsigned, derived: false, required: false,
             description: "Sequence number (echo-style and extended messages)",
             get |layer| body_unsigned(&layer.body, 2, 2),
-            set |layer, value, name| layer.set_sequence(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 2, 2, icmpv4_schema(), value, name)
         },
         "rest" => {
             kind: Bytes, derived: false, required: false,
             description: "Quoted datagram or payload after the type-specific field",
             get |layer| body_rest(&layer.body),
-            set |layer, value, name| layer.set_rest(value, name)
+            set |layer, value, name| set_rest(&mut layer.body, icmpv4_schema(), value, name)
         },
         "gateway" => {
             kind: Ipv4, derived: false, required: false,
@@ -209,13 +205,13 @@ reflective_layer! {
             kind: Unsigned, derived: false, required: false,
             description: "Next-hop MTU (destination unreachable, code 4)",
             get |layer| body_unsigned(&layer.body, 2, 2),
-            set |layer, value, name| layer.set_mtu(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 2, 2, icmpv4_schema(), value, name)
         },
         "pointer" => {
             kind: Unsigned, derived: false, required: false,
             description: "Erroneous header octet (parameter problem)",
             get |layer| body_unsigned(&layer.body, 0, 1),
-            set |layer, value, name| layer.set_pointer(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 0, 1, icmpv4_schema(), value, name)
         },
         "body" => {
             kind: Bytes, derived: false, required: false,
@@ -238,8 +234,6 @@ fn icmpv4_layout(body_len: usize) -> Vec<FieldLayout> {
 }
 
 impl Icmpv4 {
-    icmp_body_view_setters!(icmpv4_schema);
-
     fn set_gateway(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let address = match value {
             FieldValue::Ipv4(address) => address,
@@ -249,20 +243,6 @@ impl Icmpv4 {
             _ => return Err(wrong_type(icmpv4_schema(), name, "ipv4")),
         };
         patch_body(&mut self.body, 0, &address.octets());
-        Ok(())
-    }
-
-    fn set_mtu(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-        let value = body_unsigned_value(icmpv4_schema(), name, value)?;
-        let value = u16::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
-        patch_body(&mut self.body, 2, &value.to_be_bytes());
-        Ok(())
-    }
-
-    fn set_pointer(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-        let value = body_unsigned_value(icmpv4_schema(), name, value)?;
-        let value = u8::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
-        patch_body(&mut self.body, 0, &[value]);
         Ok(())
     }
 }
@@ -292,31 +272,31 @@ reflective_layer! {
             kind: Unsigned, derived: false, required: false,
             description: "Identifier (echo-style and extended messages)",
             get |layer| body_unsigned(&layer.body, 0, 2),
-            set |layer, value, name| layer.set_identifier(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 0, 2, icmpv6_schema(), value, name)
         },
         "sequence" => {
             kind: Unsigned, derived: false, required: false,
             description: "Sequence number (echo-style and extended messages)",
             get |layer| body_unsigned(&layer.body, 2, 2),
-            set |layer, value, name| layer.set_sequence(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 2, 2, icmpv6_schema(), value, name)
         },
         "rest" => {
             kind: Bytes, derived: false, required: false,
             description: "Quoted datagram or payload after the type-specific field",
             get |layer| body_rest(&layer.body),
-            set |layer, value, name| layer.set_rest(value, name)
+            set |layer, value, name| set_rest(&mut layer.body, icmpv6_schema(), value, name)
         },
         "mtu" => {
             kind: Unsigned, derived: false, required: false,
             description: "Packet-too-big MTU",
             get |layer| body_unsigned(&layer.body, 0, 4),
-            set |layer, value, name| layer.set_body_word(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 0, 4, icmpv6_schema(), value, name)
         },
         "pointer" => {
             kind: Unsigned, derived: false, required: false,
             description: "Erroneous header offset (parameter problem)",
             get |layer| body_unsigned(&layer.body, 0, 4),
-            set |layer, value, name| layer.set_body_word(value, name)
+            set |layer, value, name| set_body_unsigned(&mut layer.body, 0, 4, icmpv6_schema(), value, name)
         },
         "body" => {
             kind: Bytes, derived: false, required: false,
@@ -335,17 +315,6 @@ fn icmpv6_layout(body_len: usize) -> Vec<FieldLayout> {
     view_layout(&mut fields, body_len, "pointer", ByteRange::new(4, 8));
     view_layout(&mut fields, body_len, "sequence", ByteRange::new(6, 8));
     finish_layout(fields, body_len)
-}
-
-impl Icmpv6 {
-    icmp_body_view_setters!(icmpv6_schema);
-
-    fn set_body_word(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
-        let value = body_unsigned_value(icmpv6_schema(), name, value)?;
-        let value = u32::try_from(value).map_err(|_| out_of_range(icmpv6_schema(), name))?;
-        patch_body(&mut self.body, 0, &value.to_be_bytes());
-        Ok(())
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -459,7 +428,7 @@ impl LayerCodec for Icmpv6Codec {
         let expected = transport_checksum_parts(
             V6_NAME,
             resolve_envelope(V6_NAME, context)?,
-            58,
+            ip_protocol::ICMPV6,
             &[&prefix, covered_payload],
         )?;
         let mut diagnostics = Vec::new();
@@ -493,7 +462,7 @@ impl LayerCodec for Icmpv6Codec {
         let body_len = body.len();
         let mut diagnostics = Vec::new();
         if let Some(network) = context.network
-            && transport_checksum(V6_NAME, network, 58, &input)? != 0
+            && transport_checksum(V6_NAME, network, ip_protocol::ICMPV6, &input)? != 0
         {
             diagnostics.push(
                 Diagnostic::warning(ICMPV6_CHECKSUM, "ICMPv6 checksum mismatch")
@@ -624,6 +593,26 @@ mod tests {
             &[0, 0, 0, 0],
             "failed writes leave the body untouched"
         );
+    }
+
+    #[test]
+    fn views_accept_exactly_the_values_their_width_holds() {
+        let mut v4 = Icmpv4::default();
+        set(&mut v4, "pointer", 0xff_u64);
+        assert_eq!(v4.body.as_ref(), &[0xff, 0, 0, 0]);
+        assert!(matches!(
+            v4.set_field("pointer", FieldValue::Unsigned(0x100)),
+            Err(field::Error::OutOfRange { .. })
+        ));
+
+        let mut v6 = Icmpv6::default();
+        set(&mut v6, "mtu", u64::from(u32::MAX));
+        assert_eq!(v6.body.as_ref(), &[0xff; 4]);
+        assert!(matches!(
+            v6.set_field("mtu", FieldValue::Unsigned(1 << 32)),
+            Err(field::Error::OutOfRange { .. })
+        ));
+        assert_eq!(v6.body.as_ref(), &[0xff; 4]);
     }
 
     #[test]

@@ -86,10 +86,19 @@ pub(super) fn interrupted_or(deadline: &Deadline, cause: Cause) -> Cause {
 }
 
 pub(super) fn failure(cause: Cause, report: Report, source_frame: Option<u64>) -> Error {
+    failure_after_cleanup(cause, report, source_frame, Vec::new())
+}
+
+pub(super) fn failure_after_cleanup(
+    cause: Cause,
+    report: Report,
+    source_frame: Option<u64>,
+    cleanup: Vec<packetcraftr_netio::Error>,
+) -> Error {
     Error {
         cause: Box::new(cause),
         report: Box::new(report),
-        cleanup: Vec::new(),
+        cleanup,
         source_frame,
     }
 }

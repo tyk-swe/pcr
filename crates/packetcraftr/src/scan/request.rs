@@ -10,15 +10,15 @@ use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRA
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::EvidenceLimits;
-use crate::execution::limits::{check_limits, duration_violation};
+use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Selection;
 
 use super::Error;
+use super::error::Probes;
 use crate::probe::Transport;
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
-    MAX_RATE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +63,7 @@ impl Limits {
                 (
                     "max_prepared_bytes",
                     self.max_prepared_bytes,
-                    256 * 1024 * 1024,
+                    super::MAX_PREPARED_BYTES,
                 ),
                 ("max_targets", self.max_targets, super::MAX_PROBES),
                 ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
@@ -211,21 +211,13 @@ impl Request {
                 reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
+        if duration_violation(self.timeout, MAX_WAIT) {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: MAX_WAIT,
             });
         }
-        if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_RATE)
-        {
-            return Err(Error::InvalidLimit {
-                field: "probes_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
-            });
-        }
+        check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
         match self.transport {
             Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
                 return Err(Error::InvalidPort {

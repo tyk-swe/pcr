@@ -85,25 +85,15 @@ pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
         });
     }
 
-    let remaining_length = block_length_usize
-        .checked_sub(12)
-        .ok_or(Error::InvalidBlockLength {
-            length: block_length,
-        })?;
-    read_exact_vec(reader, scratch, remaining_length, "pcapng section header")?;
-    let footer_offset = scratch
-        .len()
-        .checked_sub(4)
-        .ok_or(Error::InvalidBlockLength {
-            length: block_length,
-        })?;
-    let truncated = || Error::InvalidBlockLength {
-        length: block_length,
-    };
-    let trailing_length = decode_u32(
-        endianness,
-        scratch.get(footer_offset..).ok_or_else(truncated)?,
+    // `block_length >= 28`, so `scratch` holds the 12 fixed bytes and the trailing length
+    read_exact_vec(
+        reader,
+        scratch,
+        block_length_usize - 12,
+        "pcapng section header",
     )?;
+    let (fields, footer) = scratch.split_at(scratch.len() - 4);
+    let trailing_length = decode_u32(endianness, footer)?;
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {
             leading: block_length,
@@ -111,8 +101,8 @@ pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
         });
     }
 
-    let major = decode_u16(endianness, scratch.get(0..2).ok_or_else(truncated)?)?;
-    let minor = decode_u16(endianness, scratch.get(2..4).ok_or_else(truncated)?)?;
+    let major = decode_u16(endianness, &fields[0..2])?;
+    let minor = decode_u16(endianness, &fields[2..4])?;
     if major != 1 || (minor != 0 && minor != 2) {
         return Err(Error::UnsupportedVersion {
             format: Format::PcapNg,
@@ -120,7 +110,7 @@ pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
             minor,
         });
     }
-    let section_length = decode_i64(endianness, scratch.get(4..12).ok_or_else(truncated)?)?;
+    let section_length = decode_i64(endianness, &fields[4..12])?;
     if section_length < -1 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -133,11 +123,7 @@ pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
             reason: "section length is not a multiple of four",
         });
     }
-    let options = parse_options(
-        scratch.get(12..footer_offset).ok_or_else(truncated)?,
-        endianness,
-        "pcapng section options",
-    )?;
+    let options = parse_options(&fields[12..], endianness, "pcapng section options")?;
     let mut raw = Vec::new();
     raw.try_reserve_exact(block_length_usize)
         .map_err(|_| Error::AllocationFailed {

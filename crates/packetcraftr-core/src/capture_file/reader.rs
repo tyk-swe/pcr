@@ -4,24 +4,21 @@
 use std::io::{Read, Seek};
 
 use crate::budget::Cancellation;
-use crate::frame::{Frame, LinkType};
+use crate::frame::Frame;
 
-use super::classic::{read_next_pcap_record, read_pcap_header};
+use super::classic::{PcapState, pcap_layout, read_next_pcap_record, read_pcap_header};
 use super::error::Error;
-use super::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
-use super::header::{CaptureHeader, Interface, Section};
+use super::format::{Endianness, Format};
+use super::header::{CaptureHeader, Interface, PcapNgOption, Section};
 use super::limits::ReaderLimits;
 use super::pcapng::{PcapNgState, read_next_pcapng_record, read_section_header_after_type};
-use super::record::CaptureRecord;
+use super::record::{CaptureRecord, MetadataBlockKind, RecordKind};
 use super::wire::{PCAPNG_SECTION_HEADER, read_exact_or_eof};
 
+pub(super) const DECLARED_FCS: &str = "declared frame check sequence";
+
 pub(super) enum ReaderState {
-    Pcap {
-        endianness: Endianness,
-        precision: TimestampPrecision,
-        snap_len: u32,
-        link_type: LinkType,
-    },
+    Pcap(PcapState),
     PcapNg(PcapNgState),
 }
 
@@ -31,17 +28,12 @@ pub struct Reader<R> {
     state: ReaderState,
     header: CaptureHeader,
     interfaces: Vec<Interface>,
+    declares_fcs: bool,
     limits: ReaderLimits,
     scratch: Vec<u8>,
     finished: bool,
     cancellation: Option<Cancellation>,
     deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
-}
-
-fn wrap_pcap_header(
-    value: (ReaderState, super::header::PcapHeader),
-) -> (ReaderState, CaptureHeader) {
-    (value.0, CaptureHeader::Pcap(value.1))
 }
 
 impl<R: Read> Reader<R> {
@@ -59,30 +51,6 @@ impl<R: Read> Reader<R> {
         }
 
         let (state, header) = match magic {
-            [0xd4, 0xc3, 0xb2, 0xa1] => wrap_pcap_header(read_pcap_header(
-                &mut inner,
-                magic,
-                Endianness::Little,
-                TimestampPrecision::Microseconds,
-            )?),
-            [0xa1, 0xb2, 0xc3, 0xd4] => wrap_pcap_header(read_pcap_header(
-                &mut inner,
-                magic,
-                Endianness::Big,
-                TimestampPrecision::Microseconds,
-            )?),
-            [0x4d, 0x3c, 0xb2, 0xa1] => wrap_pcap_header(read_pcap_header(
-                &mut inner,
-                magic,
-                Endianness::Little,
-                TimestampPrecision::Nanoseconds,
-            )?),
-            [0xa1, 0xb2, 0x3c, 0x4d] => wrap_pcap_header(read_pcap_header(
-                &mut inner,
-                magic,
-                Endianness::Big,
-                TimestampPrecision::Nanoseconds,
-            )?),
             PCAPNG_SECTION_HEADER => {
                 let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
                 let section = Section {
@@ -99,28 +67,17 @@ impl<R: Read> Reader<R> {
                     CaptureHeader::PcapNg(section),
                 )
             }
-            unknown_magic => {
-                return Err(Error::UnrecognizedFormat {
-                    magic: unknown_magic,
-                });
+            magic => {
+                let Some((endianness, precision)) = pcap_layout(magic) else {
+                    return Err(Error::UnrecognizedFormat { magic });
+                };
+                let (state, header) = read_pcap_header(&mut inner, magic, endianness, precision)?;
+                (ReaderState::Pcap(state), CaptureHeader::Pcap(header))
             }
         };
 
         let interfaces = match &state {
-            ReaderState::Pcap {
-                precision,
-                snap_len,
-                link_type,
-                ..
-            } => vec![Interface {
-                link_type: *link_type,
-                snap_len: *snap_len,
-                timestamp_resolution: match precision {
-                    TimestampPrecision::Microseconds => TimestampResolution::Decimal(6),
-                    TimestampPrecision::Nanoseconds => TimestampResolution::Decimal(9),
-                },
-                timestamp_offset: 0,
-            }],
+            ReaderState::Pcap(state) => vec![state.interface()],
             ReaderState::PcapNg(_) => Vec::new(),
         };
         if interfaces.len() > max_total_interfaces {
@@ -129,11 +86,13 @@ impl<R: Read> Reader<R> {
             });
         }
 
+        let declares_fcs = matches!(&header, CaptureHeader::Pcap(header) if header.declares_fcs());
         Ok(Self {
             inner,
             state,
             header,
             interfaces,
+            declares_fcs,
             limits,
             scratch,
             finished: false,
@@ -181,9 +140,9 @@ impl<R: Read> Reader<R> {
     }
 
     pub fn endianness(&self) -> Endianness {
-        match self.state {
-            ReaderState::Pcap { endianness, .. } => endianness,
-            ReaderState::PcapNg(ref state) => state.endianness(),
+        match &self.state {
+            ReaderState::Pcap(state) => state.endianness(),
+            ReaderState::PcapNg(state) => state.endianness(),
         }
     }
 
@@ -193,6 +152,20 @@ impl<R: Read> Reader<R> {
 
     pub fn header(&self) -> &CaptureHeader {
         &self.header
+    }
+
+    /// Fails with [`Error::TransformMetadata`] when the header or an interface read so far
+    /// declares a frame check sequence that frames still carry, which a PCAPNG re-encoding
+    /// without that declaration would expose as payload.
+    pub fn refuse_declared_fcs(&self) -> Result<(), Error> {
+        if self.declares_fcs {
+            return Err(Error::TransformMetadata(DECLARED_FCS));
+        }
+        Ok(())
+    }
+
+    pub(super) fn declares_fcs(&self) -> bool {
+        self.declares_fcs
     }
 
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
@@ -217,19 +190,9 @@ impl<R: Read> Reader<R> {
     fn read_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
         self.check_interrupted()?;
         let record = match &mut self.state {
-            ReaderState::Pcap {
-                endianness,
-                precision,
-                snap_len,
-                link_type,
-            } => read_next_pcap_record(
-                &mut self.inner,
-                *endianness,
-                *precision,
-                *snap_len,
-                *link_type,
-                self.limits.max_size,
-            ),
+            ReaderState::Pcap(state) => {
+                read_next_pcap_record(&mut self.inner, state, self.limits.max_size)
+            }
             ReaderState::PcapNg(state) => read_next_pcapng_record(
                 &mut self.inner,
                 state,
@@ -239,6 +202,14 @@ impl<R: Read> Reader<R> {
             ),
         }?;
         self.check_interrupted()?;
+        if let Some(CaptureRecord {
+            kind: RecordKind::Metadata(MetadataBlockKind::InterfaceDescription { options, .. }),
+            ..
+        }) = &record
+            && options.iter().any(PcapNgOption::declares_fcs)
+        {
+            self.declares_fcs = true;
+        }
         Ok(record)
     }
 
@@ -285,6 +256,7 @@ impl<R: Read + Seek> Reader<R> {
         self.state = fresh.state;
         self.header = fresh.header;
         self.interfaces = fresh.interfaces;
+        self.declares_fcs = fresh.declares_fcs;
         self.scratch = fresh.scratch;
         self.finished = false;
         self.check_interrupted()?;
@@ -295,8 +267,9 @@ impl<R: Read + Seek> Reader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture_file::{Limits, Writer, rewrite, select};
+    use crate::capture_file::{Limits, TimestampResolution, Writer, rewrite, select};
     use crate::error::Classified;
+    use crate::frame::LinkType;
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
@@ -356,6 +329,113 @@ mod tests {
                     assert!(reader.next_record().unwrap().is_none());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn declared_fcs_comes_from_the_classic_header_or_a_read_pcapng_interface() {
+        let mut classic = Vec::new();
+        Writer::pcap(&mut classic, LinkType::IPV4)
+            .unwrap()
+            .flush()
+            .unwrap();
+        assert!(
+            Reader::new(Cursor::new(&classic))
+                .unwrap()
+                .refuse_declared_fcs()
+                .is_ok()
+        );
+        classic[20..24].copy_from_slice(&(0x2400_0000 | LinkType::IPV4.0).to_le_bytes());
+        assert!(matches!(
+            Reader::new(Cursor::new(&classic))
+                .unwrap()
+                .refuse_declared_fcs(),
+            Err(Error::TransformMetadata(DECLARED_FCS))
+        ));
+
+        let mut writer = Writer::pcapng(Vec::new()).unwrap();
+        writer.add_interface(LinkType::IPV4).unwrap();
+        writer
+            .add_interface_description_with_options(
+                Interface {
+                    link_type: LinkType::IPV4,
+                    snap_len: 65535,
+                    timestamp_resolution: TimestampResolution::Decimal(9),
+                    timestamp_offset: 0,
+                },
+                &[PcapNgOption {
+                    code: 13,
+                    value: bytes::Bytes::from_static(&[4]),
+                }],
+            )
+            .unwrap();
+        let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert!(reader.refuse_declared_fcs().is_ok());
+        reader.next_record().unwrap().unwrap();
+        assert!(reader.refuse_declared_fcs().is_ok());
+        reader.next_record().unwrap().unwrap();
+        assert!(reader.refuse_declared_fcs().is_err());
+        reader.rewind().unwrap();
+        assert!(reader.refuse_declared_fcs().is_ok());
+    }
+
+    #[test]
+    fn a_declared_fcs_needs_a_nonzero_length_in_either_format() {
+        let mut classic = Vec::new();
+        Writer::pcap(&mut classic, LinkType::IPV4)
+            .unwrap()
+            .flush()
+            .unwrap();
+        for (high_bits, declared) in [
+            (0x0000_0000_u32, false),
+            (0x0400_0000, false),
+            (0x5000_0000, false),
+            (0x0100_0000, false),
+            (0x0008_0000, false),
+            (0x0800_0000, false),
+            (0x1400_0000, true),
+            (0x2400_0000, true),
+            (0xf400_0000, true),
+            (0x5500_0000, true),
+        ] {
+            classic[20..24].copy_from_slice(&(high_bits | LinkType::IPV4.0).to_le_bytes());
+            let reader = Reader::new(Cursor::new(&classic)).unwrap();
+            assert_eq!(
+                reader.refuse_declared_fcs().is_err(),
+                declared,
+                "network {high_bits:#010x}"
+            );
+        }
+
+        for (value, declared) in [
+            (&[0_u8][..], false),
+            (&[4], true),
+            (&[255], true),
+            (&[], true),
+            (&[0, 0], true),
+        ] {
+            let mut writer = Writer::pcapng(Vec::new()).unwrap();
+            writer
+                .add_interface_description_with_options(
+                    Interface {
+                        link_type: LinkType::IPV4,
+                        snap_len: 65535,
+                        timestamp_resolution: TimestampResolution::Decimal(9),
+                        timestamp_offset: 0,
+                    },
+                    &[PcapNgOption {
+                        code: 13,
+                        value: bytes::Bytes::copy_from_slice(value),
+                    }],
+                )
+                .unwrap();
+            let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            while reader.next_record().unwrap().is_some() {}
+            assert_eq!(
+                reader.refuse_declared_fcs().is_err(),
+                declared,
+                "if_fcslen {value:?}"
+            );
         }
     }
 

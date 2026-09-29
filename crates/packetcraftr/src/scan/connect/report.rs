@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::Sink;
 use crate::execution::Shared;
+use crate::probe::index_or_push;
 use packetcraftr_core::error::BoundaryError;
 
 use super::super::{Classification, Error, Rtt};
@@ -119,19 +120,16 @@ impl Collector {
         let mut indices = HashMap::new();
         for probe in probes {
             let key = probe.endpoint;
-            let index = *indices.entry(key).or_insert_with(|| {
-                endpoints.push(Endpoint {
-                    address: key.ip(),
-                    port: key.port(),
-                    classification: Classification::Timeout,
-                    probes: Vec::new(),
-                });
-                endpoints.len() - 1
+            let endpoint = index_or_push(&mut endpoints, &mut indices, key, || Endpoint {
+                address: key.ip(),
+                port: key.port(),
+                classification: Classification::Timeout,
+                probes: Vec::new(),
             });
-            endpoints[index]
+            endpoint
                 .classification
                 .promote(probe.outcome.classification());
-            endpoints[index].probes.push(probe);
+            endpoint.probes.push(probe);
         }
         Ok(Aggregate { report, endpoints })
     }

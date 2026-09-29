@@ -14,15 +14,18 @@ pub(crate) mod tls_capture;
 pub(crate) mod tls_frames;
 pub(crate) mod tls_vectors;
 
+use std::error::Error as StdError;
 use std::io::Cursor;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use packetcraftr_core::analysis::{self, application};
 use packetcraftr_core::build::{Builder, Options};
 use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::codec::Context;
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -144,4 +147,69 @@ pub(crate) fn reader(frames: &[Frame]) -> Reader<Cursor<Vec<u8>>> {
         writer.write_frame(frame).expect("fixture frame writes");
     }
     Reader::new(Cursor::new(writer.into_inner())).expect("fixture capture opens")
+}
+
+/// `message` behind the two-byte big-endian length prefix of TCP-carried DNS.
+pub(crate) fn length_prefixed(message: &[u8]) -> Vec<u8> {
+    let mut framed = u16::try_from(message.len())
+        .expect("fixture message fits a two-byte length prefix")
+        .to_be_bytes()
+        .to_vec();
+    framed.extend_from_slice(message);
+    framed
+}
+
+/// `frame` without its last `dropped` captured bytes, still declaring the
+/// original wire length.
+pub(crate) fn truncated(frame: &Frame, dropped: usize) -> Frame {
+    let kept = frame.bytes().len() - dropped;
+    Frame::try_with_optional_timestamp(
+        frame.timestamp,
+        frame.link_type,
+        Lengths {
+            captured: u32::try_from(kept).expect("fixture capture length fits u32"),
+            original: frame.original_length(),
+        },
+        frame.bytes().slice(..kept),
+    )
+    .expect("truncated fixture frame must be valid")
+}
+
+/// The typed error a sink raised inside an analysis run: the run wraps it in a
+/// boundary error, which keeps the original as its source.
+pub(crate) fn sink_cause<'a, E: StdError + 'static>(error: &'a (dyn StdError + 'static)) -> &'a E {
+    error
+        .source()
+        .and_then(|boundary| boundary.source())
+        .and_then(|source| source.downcast_ref::<E>())
+        .unwrap_or_else(|| {
+            panic!(
+                "{error:?} must retain a {} two sources deep",
+                std::any::type_name::<E>()
+            )
+        })
+}
+
+/// Asserts that `error` refuses `field` at construction as a usage error, not
+/// as an exhausted application-analysis budget.
+pub(crate) fn assert_invalid_application_limit(
+    error: application::Error,
+    field: &str,
+    value: u64,
+    reason: analysis::Constraint,
+) {
+    assert!(
+        matches!(
+            &error,
+            application::Error::Analysis(analysis::Error::InvalidLimit {
+                field: actual_field,
+                value: actual_value,
+                reason: actual_reason,
+            }) if (*actual_field, *actual_value, *actual_reason) == (field, value, reason)
+        ),
+        "{error:?}"
+    );
+    let classification = error.classification();
+    assert_eq!(classification.code, "cli.analysis_limit");
+    assert_eq!(classification.kind, Kind::Usage);
 }

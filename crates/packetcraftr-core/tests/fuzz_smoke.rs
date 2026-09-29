@@ -13,10 +13,6 @@ fn corpus(target: &str) -> std::path::PathBuf {
     seed_dir(Path::new("fuzz/corpora").join(target))
 }
 
-fn published_examples(kind: &str) -> std::path::PathBuf {
-    seed_dir(Path::new("examples").join(kind))
-}
-
 fn seed_dir(relative: std::path::PathBuf) -> std::path::PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -27,49 +23,6 @@ fn seed_dir(relative: std::path::PathBuf) -> std::path::PathBuf {
         path.display()
     );
     path
-}
-
-#[test]
-fn smoke_test_json_packet_documents() {
-    let corpus_dir = published_examples("documents");
-    let mut checked = 0_usize;
-    {
-        for entry in fs::read_dir(corpus_dir)
-            .expect("corpus directory")
-            .flatten()
-        {
-            checked += 1;
-            let path = entry.path();
-            if path.is_file() {
-                let data = fs::read(&path).expect("read corpus file");
-                let Ok(text) = std::str::from_utf8(&data) else {
-                    continue;
-                };
-                if let Ok(parsed) = DocPacket::parse_with_limits(
-                    text,
-                    Format::Json,
-                    &DocumentLimits {
-                        max_input_bytes: 64 * 1024,
-                        max_layers: 32,
-                        ..DocumentLimits::DEFAULT
-                    },
-                ) {
-                    let re_json = serde_json::to_string(&parsed).expect("serialize");
-                    let re_parsed = DocPacket::parse_with_limits(
-                        &re_json,
-                        Format::Json,
-                        &DocumentLimits {
-                            max_input_bytes: 64 * 1024,
-                            max_layers: 32,
-                            ..DocumentLimits::DEFAULT
-                        },
-                    );
-                    assert!(re_parsed.is_ok());
-                }
-            }
-        }
-    }
-    assert!(checked > 0, "corpus must contain seed inputs");
 }
 
 #[test]

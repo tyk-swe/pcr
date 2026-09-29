@@ -1,12 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::{Read, Write};
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::io::{self, Cursor, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use packetcraftr::dns::tcp as dns_tcp;
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::deadline::POLL_INTERVAL;
+use packetcraftr_netio::tcp;
 
 const QUERY: &[u8] = b"bounded query";
 
@@ -51,7 +55,7 @@ fn ipv4_loopback_handles_fragmented_response_io() {
             cancellation: None,
             max_message_bytes: 512,
         },
-        std::sync::Arc::new(packetcraftr_netio::tcp::SystemProvider),
+        Arc::new(tcp::SystemProvider),
     )
     .expect("bounded loopback query");
     server.join().expect("loopback server");
@@ -67,51 +71,99 @@ fn ipv4_loopback_handles_fragmented_response_io() {
     assert_eq!(&response.frame[2..], RESPONSE);
 }
 
-#[test]
-fn ipv4_loopback_completes_within_a_short_attempt_window() {
-    use packetcraftr_core::budget::Deadline;
-    use packetcraftr_netio::tcp::{self, Provider};
+const SHORT_ATTEMPT: Duration = Duration::from_millis(20);
 
-    struct DelayedConnect;
+const _: () = assert!(SHORT_ATTEMPT.as_millis() < POLL_INTERVAL.as_millis());
 
-    impl Provider for DelayedConnect {
-        type Stream = tcp::SystemStream;
+struct ScriptedConnect {
+    written: Arc<Mutex<Vec<u8>>>,
+}
 
-        fn connect(
-            &self,
-            endpoint: std::net::SocketAddr,
-            deadline: &Deadline,
-        ) -> Result<Self::Stream, tcp::Error> {
-            // Ensure the caller waits while the worker is still connecting.
-            thread::sleep(Duration::from_millis(1));
-            tcp::SystemProvider.connect(endpoint, deadline)
-        }
-    }
+struct ScriptedStream {
+    endpoint: SocketAddr,
+    reply: Cursor<Vec<u8>>,
+    written: Arc<Mutex<Vec<u8>>>,
+}
 
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    let endpoint = listener.local_addr().unwrap();
-    let server = thread::spawn(move || {
-        let mut stream = accept_bounded(&listener);
-        read_query(&mut stream);
-        let mut frame = u16::try_from(RESPONSE.len())
+impl tcp::Provider for ScriptedConnect {
+    type Stream = ScriptedStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        _deadline: &Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        // Ensure the caller waits while the worker is still connecting.
+        thread::sleep(Duration::from_millis(1));
+        let mut reply = u16::try_from(RESPONSE.len())
             .unwrap()
             .to_be_bytes()
             .to_vec();
-        frame.extend_from_slice(RESPONSE);
-        stream.write_all(&frame).unwrap();
-    });
+        reply.extend_from_slice(RESPONSE);
+        Ok(ScriptedStream {
+            endpoint,
+            reply: Cursor::new(reply),
+            written: Arc::clone(&self.written),
+        })
+    }
+}
+
+impl Read for ScriptedStream {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.reply.read(bytes)
+    }
+}
+
+impl Write for ScriptedStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.written.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tcp::Stream for ScriptedStream {
+    fn peer_addr(&self) -> io::Result<SocketAddr> {
+        Ok(self.endpoint)
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok(SocketAddr::from((Ipv4Addr::LOCALHOST, 50_000)))
+    }
+
+    fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_finished_connect_wakes_an_attempt_shorter_than_the_poll_interval() {
+    let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
+    let written = Arc::new(Mutex::new(Vec::new()));
     let response = dns_tcp::query(
         dns_tcp::Request {
             endpoint,
             query: QUERY,
-            timeout: Duration::from_millis(10),
+            timeout: SHORT_ATTEMPT,
             cancellation: None,
             max_message_bytes: 512,
         },
-        std::sync::Arc::new(DelayedConnect),
-    );
-    let response = response.expect("completion wakes the short DNS attempt");
-    server.join().unwrap();
+        Arc::new(ScriptedConnect {
+            written: Arc::clone(&written),
+        }),
+    )
+    .expect("completion wakes the short DNS attempt");
+
     assert_eq!(&response.frame[2..], RESPONSE);
     assert_eq!(response.bytes_written, QUERY.len() + 2);
+    let mut expected = u16::try_from(QUERY.len()).unwrap().to_be_bytes().to_vec();
+    expected.extend_from_slice(QUERY);
+    assert_eq!(*written.lock().unwrap(), expected);
 }

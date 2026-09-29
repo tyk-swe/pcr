@@ -71,7 +71,7 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
                 }
             }
             b'[' => {
-                let (contents, next) = read_slice(bytes, index)?;
+                let (contents, next) = read_slice(source, index)?;
                 index = next;
                 Token::Slice(contents)
             }
@@ -130,10 +130,10 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
                 let word = &source[start..index];
                 keyword(word).unwrap_or_else(|| Token::Word(word.to_owned()))
             }
-            other => {
+            _ => {
                 return Err(syntax(
                     offset,
-                    format!("unexpected character `{}`", char::from(other)),
+                    format!("unexpected character `{}`", character_at(source, offset)),
                 ));
             }
         };
@@ -160,7 +160,15 @@ fn keyword(word: &str) -> Option<Token> {
     })
 }
 
-fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
+fn character_at(source: &str, index: usize) -> char {
+    source
+        .get(index..)
+        .and_then(|rest| rest.chars().next())
+        .unwrap_or(char::REPLACEMENT_CHARACTER)
+}
+
+fn read_slice(source: &str, open: usize) -> Result<(String, usize), Error> {
+    let bytes = source.as_bytes();
     let start = open.saturating_add(1);
     let mut index = start;
     while let Some(&byte) = bytes.get(index) {
@@ -175,42 +183,27 @@ fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
     if index >= bytes.len() {
         return Err(syntax(open, "unterminated byte slice, expected `]`"));
     }
-    // start <= index <= bytes.len(): index starts at start and only advances while it addresses a byte
-    let contents = String::from_utf8(bytes[start..index].to_vec())
-        .map_err(|_| syntax(open, "byte slice bounds must be ASCII"))?;
-    Ok((contents, index.saturating_add(1)))
+    // start and index follow and address the ASCII `[` and `]`, so both are char boundaries
+    Ok((source[start..index].to_owned(), index.saturating_add(1)))
 }
 
 fn read_quoted(source: &str, open: usize) -> Result<(String, usize), Error> {
-    let bytes = source.as_bytes();
-    let mut contents = Vec::new();
-    let mut index = open.saturating_add(1);
-    while let Some(&byte) = bytes.get(index) {
-        match byte {
-            b'"' => {
-                let text = String::from_utf8(contents)
-                    .map_err(|_| syntax(open, "quoted text must be valid UTF-8"))?;
-                return Ok((text, index.saturating_add(1)));
-            }
-            b'\\' => {
-                let Some(escaped) = bytes.get(index.saturating_add(1)) else {
-                    return Err(syntax(index, "trailing escape in quoted text"));
-                };
-                match escaped {
-                    b'\\' | b'"' => contents.push(*escaped),
-                    other => {
-                        return Err(syntax(
-                            index,
-                            format!("unsupported escape `\\{}`", char::from(*other)),
-                        ));
-                    }
+    let start = open.saturating_add(1);
+    let mut contents = String::new();
+    // start follows the ASCII `"` at open, so it is a char boundary
+    let mut chars = source[start..].char_indices();
+    while let Some((relative, character)) = chars.next() {
+        let index = start.saturating_add(relative);
+        match character {
+            '"' => return Ok((contents, index.saturating_add(1))),
+            '\\' => match chars.next() {
+                None => return Err(syntax(index, "trailing escape in quoted text")),
+                Some((_, escaped @ ('\\' | '"'))) => contents.push(escaped),
+                Some((_, other)) => {
+                    return Err(syntax(index, format!("unsupported escape `\\{other}`")));
                 }
-                index = index.saturating_add(2);
-            }
-            other => {
-                contents.push(other);
-                index = index.saturating_add(1);
-            }
+            },
+            other => contents.push(other),
         }
     }
     Err(syntax(open, "unterminated quoted text, expected `\"`"))

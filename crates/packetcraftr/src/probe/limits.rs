@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::DeadlineExceeded;
 
+use crate::exchange::Collection;
 use crate::execution::Errors;
+use crate::execution::limits::EvidenceLimits;
 
 pub(crate) fn check_probe_count<G: Errors>(
     errors: &G,
@@ -18,6 +20,37 @@ pub(crate) fn check_probe_count<G: Errors>(
             u64::try_from(total_probes).unwrap_or(u64::MAX),
             format!("exceeds max_probes={max_probes}"),
         ));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_collection_evidence<G: Errors>(
+    errors: &G,
+    collection: &Collection,
+    limits: EvidenceLimits,
+) -> Result<(), G::Error> {
+    let capture = &collection.capture;
+    for (field, captured, limit, name) in [
+        (
+            "capture_max_frames",
+            capture.max_frames,
+            limits.max_frames,
+            "max_evidence_frames",
+        ),
+        (
+            "capture_max_bytes",
+            capture.max_bytes,
+            limits.max_bytes,
+            "max_evidence_bytes",
+        ),
+    ] {
+        if captured > limit {
+            return Err(errors.invalid_limit(
+                field,
+                u64::try_from(captured).unwrap_or(u64::MAX),
+                format!("exceeds {name}={limit}"),
+            ));
+        }
     }
     Ok(())
 }

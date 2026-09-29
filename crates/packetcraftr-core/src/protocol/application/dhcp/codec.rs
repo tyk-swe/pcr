@@ -9,9 +9,9 @@ use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
     field::FieldValue,
-    layer::{Layer, Raw},
+    layer::Layer,
     layout::FieldLayout,
-    protocol::common::{invalid, rejected, typed_layer},
+    protocol::common::{invalid, reject_aliased_duplicates, rejected, typed_layer},
 };
 
 pub(super) trait Message: Layer + Default + Sized + 'static {
@@ -43,12 +43,6 @@ pub(super) fn encode<M: Message>(
     Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
 }
 
-pub(super) fn raw(input: Bytes) -> DecodedLayer {
-    let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-    raw.fields = Raw::layout(input.len());
-    raw
-}
-
 pub(super) fn decode<M: Message>(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
     let layer = M::decode_wire(input.clone()).map_err(|error| rejected(M::NAME, error))?;
     let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
@@ -66,6 +60,7 @@ pub(super) fn make_layer<M: Message>(
         Some(_) => return Err(invalid(M::NAME, "wire must be retained bytes")),
         None => M::default(),
     };
+    reject_aliased_duplicates(layer.schema(), fields)?;
     for (name, value) in fields {
         if name == "wire" || layer.field(name).as_ref() == Some(value) {
             continue;

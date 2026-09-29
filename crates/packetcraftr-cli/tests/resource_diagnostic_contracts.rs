@@ -178,6 +178,23 @@ fn capture_retention_is_reported_as_a_policy_setting() {
     assert!(!target.exists());
 }
 #[test]
+fn packet_budget_reports_the_packet_size_ceiling_in_bytes_and_layers_as_a_count() {
+    let report = parse_json(&run_success(&[
+        "--resource-diagnostics",
+        "--output",
+        "json",
+        "dissect",
+        "--hex",
+        "4500001c0000000040017cdf7f0000017f0000010800f7ff00000000",
+        "--max-packet-size",
+        "1500",
+    ]));
+    assert_eq!(setting(&report, "--max-packet-size")["value"], 1500);
+    assert_eq!(setting(&report, "--max-packet-size")["unit"], "bytes");
+    assert_eq!(setting(&report, "--max-layers")["unit"], "count");
+}
+
+#[test]
 fn a_probe_workflow_reports_its_one_event_runtime() {
     let output = run(&[
         "--resource-diagnostics",

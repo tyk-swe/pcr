@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::{Dns, Name, Record, RecordValue};
+use super::super::{
+    Dns, Limits, MAX_EDNS_OPTIONS, MAX_MESSAGE_BYTES, MAX_QUESTIONS, MAX_RECORDS, Name, Record,
+    RecordValue,
+};
 use super::NAME;
 use crate::codec::{Error, Mode};
 use crate::diagnostic::Diagnostic;
@@ -13,20 +16,20 @@ pub(super) fn message(
     mode: Mode,
     maximum: usize,
 ) -> Result<(Vec<u8>, Dns, Vec<Diagnostic>), Error> {
-    let maximum = maximum.min(65_535);
+    let maximum = maximum.min(MAX_MESSAGE_BYTES);
     if layer.retained_wire_matches() {
         if layer.wire.len() > maximum {
             return Err(invalid(NAME, "retained DNS message exceeds output budget"));
         }
         return Ok((layer.wire.to_vec(), layer.clone(), Vec::new()));
     }
-    if layer.questions.len() > 64
+    if layer.questions.len() > MAX_QUESTIONS
         || layer
             .answers
             .len()
             .saturating_add(layer.authorities.len())
             .saturating_add(layer.additionals.len())
-            > 4096
+            > MAX_RECORDS
     {
         return Err(invalid(NAME, "DNS question or record limit exceeded"));
     }
@@ -114,23 +117,18 @@ fn name(output: &mut Encoder, value: &Name) -> Result<(), Error> {
 fn encode_record(output: &mut Encoder, record: &Record, maximum: usize) -> Result<(), Error> {
     name(output, &record.owner)?;
     output.u16(record.value.type_code())?;
-    let (class, ttl) = match &record.value {
-        RecordValue::Opt(edns) => {
-            if record.class != edns.udp_payload_size
-                || record.ttl != edns.record_ttl()
-                || (edns.flags & 0x8000 != 0) != edns.dnssec_ok
-            {
-                return Err(invalid(
-                    NAME,
-                    "OPT record class/TTL and EDNS fields disagree",
-                ));
-            }
-            (record.class, record.ttl)
-        }
-        _ => (record.class, record.ttl),
-    };
-    output.u16(class)?;
-    output.u32(ttl)?;
+    if let RecordValue::Opt(edns) = &record.value
+        && (record.class != edns.udp_payload_size
+            || record.ttl != edns.record_ttl()
+            || (edns.flags & 0x8000 != 0) != edns.dnssec_ok)
+    {
+        return Err(invalid(
+            NAME,
+            "OPT record class/TTL and EDNS fields disagree",
+        ));
+    }
+    output.u16(record.class)?;
+    output.u32(record.ttl)?;
     let mut data = Encoder::new(NAME, maximum);
     match &record.value {
         RecordValue::A(address) => data.bytes(&address.octets())?,
@@ -180,7 +178,7 @@ fn encode_record(output: &mut Encoder, record: &Record, maximum: usize) -> Resul
             data.bytes(value)?;
         }
         RecordValue::Txt(strings) => {
-            if strings.len() > 4096 {
+            if strings.len() > Limits::CEILING.max_txt_strings {
                 return Err(invalid(NAME, "TXT string count exceeded"));
             }
             for string in strings {
@@ -190,7 +188,7 @@ fn encode_record(output: &mut Encoder, record: &Record, maximum: usize) -> Resul
             }
         }
         RecordValue::Opt(edns) => {
-            if edns.options.len() > 4096 {
+            if edns.options.len() > MAX_EDNS_OPTIONS {
                 return Err(invalid(NAME, "EDNS option count exceeded"));
             }
             for option in &edns.options {

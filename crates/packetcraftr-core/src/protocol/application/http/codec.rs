@@ -359,9 +359,7 @@ impl LayerCodec for HttpCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Ok(Some((head, consumed))) = parse_head(&input) else {
-            let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-            raw.fields = Raw::layout(input.len());
-            return Ok(raw);
+            return Ok(Raw::decoded(input));
         };
         Ok(DecodedLayer {
             layer: Box::new(Http { head }),

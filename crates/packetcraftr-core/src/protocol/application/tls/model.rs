@@ -81,9 +81,8 @@ impl Handshake {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Extension {
-    pub data: Bytes,
     pub kind: u16,
-    pub len: usize,
+    pub data: Bytes,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -177,12 +176,6 @@ pub enum HelloKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HelloExtension {
-    pub kind: u16,
-    pub data: Bytes,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hello {
     pub kind: HelloKind,
     pub record_version: u16,
@@ -191,7 +184,7 @@ pub struct Hello {
     pub session_id: Bytes,
     pub cipher_suites: Vec<u16>,
     pub compression: Vec<u8>,
-    pub extensions: Vec<HelloExtension>,
+    pub extensions: Vec<Extension>,
 }
 
 impl Default for Hello {

@@ -13,7 +13,7 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, make_layer, protocol, resolve_u8, truncated, typed_layer,
+    ValueExpectation, make_layer, protocol, resolve_u8, truncated, typed_layer, unsupported,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -43,6 +43,13 @@ pub struct Arp {
     pub target_protocol: Ipv4Addr,
 }
 
+impl Arp {
+    /// The RFC 826 request operation code.
+    pub const OPERATION_REQUEST: u16 = 1;
+    /// The RFC 826 reply operation code.
+    pub const OPERATION_REPLY: u16 = 2;
+}
+
 impl Default for Arp {
     fn default() -> Self {
         Self {
@@ -50,7 +57,7 @@ impl Default for Arp {
             protocol_type: 0x0800,
             hardware_len: WireValue::Auto,
             protocol_len: WireValue::Auto,
-            operation: 1,
+            operation: Self::OPERATION_REQUEST,
             sender_hardware: [0; 6],
             sender_protocol: Ipv4Addr::UNSPECIFIED,
             target_hardware: [0; 6],
@@ -97,10 +104,7 @@ impl LayerCodec for ArpCodec {
                 layer.hardware_type, layer.protocol_type
             );
             if context.mode == crate::codec::Mode::Strict {
-                return Err(crate::codec::Error::Unsupported {
-                    protocol: protocol(NAME),
-                    message,
-                });
+                return Err(unsupported(NAME, message));
             }
             diagnostics.push(
                 crate::diagnostic::Diagnostic::warning("build.arp_address_types", message)
@@ -154,12 +158,12 @@ impl LayerCodec for ArpCodec {
         let hardware_type = u16::from_be_bytes([head[0], head[1]]);
         let protocol_type = u16::from_be_bytes([head[2], head[3]]);
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || protocol_len != 4 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: format!(
+            return Err(unsupported(
+                NAME,
+                format!(
                     "only Ethernet/IPv4 ARP is typed (htype={hardware_type}, ptype=0x{protocol_type:04x}, hlen={hardware_len}, plen={protocol_len})"
                 ),
-            });
+            ));
         }
         let (
             Some(sender_hardware),
@@ -203,5 +207,17 @@ impl LayerCodec for ArpCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Arp::default(), fields)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operation_codes_follow_rfc_826() {
+        assert_eq!(Arp::OPERATION_REQUEST, 1);
+        assert_eq!(Arp::OPERATION_REPLY, 2);
+        assert_eq!(Arp::default().operation, Arp::OPERATION_REQUEST);
     }
 }

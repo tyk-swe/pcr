@@ -25,7 +25,7 @@ pub(super) fn render_batch_text(
     } = published;
     let stats = stats.unwrap_or_default();
     let total = result.questions.len();
-    for (index, question) in result.questions.iter().enumerate() {
+    for (index, question) in result.questions.into_iter().enumerate() {
         write_stdout_line(format_args!(
             "question={}/{} name={} type={} id={} status={} error={}",
             index + 1,
@@ -36,11 +36,8 @@ pub(super) fn render_batch_text(
             question.status.as_str(),
             question.error.as_deref().unwrap_or("none"),
         ))?;
-        if let Some(report) = &question.result {
-            render_text(output::envelope::Published::new(
-                (**report).clone(),
-                Vec::new(),
-            ))?;
+        if let Some(report) = question.result {
+            render_text(output::envelope::Published::new(*report, Vec::new()))?;
         }
     }
     write_stdout_line(format_args!(

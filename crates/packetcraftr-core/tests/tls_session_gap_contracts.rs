@@ -9,7 +9,6 @@ use common::tls_frames::{
     server_hello, split,
 };
 use packetcraftr_core::analysis::tls::{Limits as TlsLimits, Status};
-use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
 #[test]
 fn a_reassembly_gap_reports_the_session_as_a_gap_with_a_reason() {
@@ -121,19 +120,7 @@ fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
     capture.client(&mut stream, &segments[0]);
     capture.client(&mut stream, &segments[1]);
     let cut = capture.frames.pop().expect("the segment was pushed");
-    let bytes = cut.bytes().slice(..cut.bytes().len() - 16);
-    capture.frames.push(
-        Frame::try_with_optional_timestamp(
-            cut.timestamp,
-            LinkType::IPV4,
-            Lengths {
-                captured: u32::try_from(bytes.len()).expect("captured length fits"),
-                original: cut.original_length(),
-            },
-            bytes,
-        )
-        .expect("a snaplen-truncated frame is valid"),
-    );
+    capture.frames.push(common::truncated(&cut, 16));
     capture.client(&mut stream, &segments[2]);
     capture.server(
         &mut stream,
@@ -168,7 +155,6 @@ fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
         max_buffered_bytes: 1_000,
         ..TlsLimits::default()
     };
-    assert!(limits.validate().is_ok());
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -195,7 +181,6 @@ fn deliveries_to_a_finished_direction_never_evict_another_session() {
         max_buffered_bytes: 40_000,
         ..TlsLimits::default()
     };
-    assert!(limits.validate().is_ok());
     let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
 
     let mut capture = Capture::new();

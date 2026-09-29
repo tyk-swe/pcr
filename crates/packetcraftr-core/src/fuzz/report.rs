@@ -35,25 +35,11 @@ pub struct Mutation {
 pub struct CaseFailure {
     message: String,
     classification: Classification,
-    causes: Vec<String>,
     #[source]
-    source: Option<crate::error::Source>,
+    source: crate::error::Source,
 }
 
 impl CaseFailure {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-            source: None,
-        }
-    }
-
     pub fn with_source(
         message: impl Into<String>,
         classification: Classification,
@@ -62,8 +48,7 @@ impl CaseFailure {
         Self {
             message: message.into(),
             classification,
-            causes: Vec::new(),
-            source: Some(crate::error::Source::new(source)),
+            source: crate::error::Source::new(source),
         }
     }
 }
@@ -71,13 +56,6 @@ impl CaseFailure {
 impl Classified for CaseFailure {
     fn classification(&self) -> Classification {
         self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match &self.source {
-            Some(_) => crate::error::source_chain(self),
-            None => self.causes.clone(),
-        }
     }
 }
 
@@ -109,7 +87,6 @@ pub struct Report {
     pub seed: u64,
     pub first_case: u64,
     pub cases: Vec<Case>,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 
@@ -120,7 +97,6 @@ impl Report {
             seed: summary.seed,
             first_case: summary.first_case,
             cases,
-            diagnostics: summary.diagnostics,
             stats: summary.stats,
         }
     }
@@ -130,6 +106,5 @@ impl Report {
 pub struct Summary {
     pub seed: u64,
     pub first_case: u64,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

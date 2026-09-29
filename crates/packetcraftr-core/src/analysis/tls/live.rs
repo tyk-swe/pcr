@@ -115,9 +115,9 @@ pub(super) struct Live {
     /// [`Side::Reverse`] keep deduplication tied to capture direction even if
     /// client and server roles swap.
     first_flow: ScopedFlowKey,
-    /// Which captured direction turned out to be the client.
+    /// Which captured direction turned out to be the client. It starts as
+    /// [`Side::First`], and [`Side::Reverse`] marks the one permitted swap.
     client_side: Side,
-    swapped: bool,
     dedup: Deduplicator,
     first_direction: DirectionState,
     reverse_direction: DirectionState,
@@ -145,7 +145,6 @@ impl Live {
             scope,
             first_flow,
             client_side: Side::First,
-            swapped: false,
             dedup: Deduplicator::default(),
             first_direction: DirectionState::default(),
             reverse_direction: DirectionState::default(),
@@ -480,14 +479,13 @@ impl Live {
         if self.role(direction) == Role::Server {
             // The capture began with a server frame, so the roles were
             // elected the wrong way round. A ClientHello settles it — once.
-            if self.swapped || self.client.is_some() {
+            if self.client_side == Side::Reverse || self.client.is_some() {
                 return finished(
                     Status::Malformed,
                     "ClientHello observed in both directions of one connection",
                 );
             }
             self.client_side = direction;
-            self.swapped = true;
         }
         if self.client.is_some() {
             // The second hello of a HelloRetryRequest exchange. The retained
@@ -502,14 +500,13 @@ impl Live {
 
     fn apply_server_hello(&mut self, direction: Side, hello: &ServerHello) -> Verdict {
         if self.role(direction) == Role::Client {
-            if self.swapped || self.client.is_some() {
+            if self.client_side == Side::Reverse || self.client.is_some() {
                 return finished(
                     Status::Malformed,
                     "ServerHello observed on the client's direction",
                 );
             }
             self.client_side = direction.other();
-            self.swapped = true;
         }
         if hello.is_hello_retry_request {
             // Not a decision yet: the client answers with a second hello and

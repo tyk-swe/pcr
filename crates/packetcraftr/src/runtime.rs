@@ -3,6 +3,7 @@
 
 use std::{
     cell::Cell,
+    io,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -24,12 +25,22 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Zero capacity refuses publication; larger capacities are capped at
-    /// [`MAX_WORKER_CAPACITY`].
-    pub fn new(capacity: usize) -> Self {
+    /// Zero capacity refuses every publication. A capacity above
+    /// [`MAX_WORKER_CAPACITY`] is refused, not lowered.
+    pub fn new(capacity: usize) -> Result<Self, CapacityError> {
+        if capacity > MAX_WORKER_CAPACITY {
+            return Err(CapacityError {
+                value: capacity,
+                maximum: MAX_WORKER_CAPACITY,
+            });
+        }
+        Ok(Self::with_valid_capacity(capacity))
+    }
+
+    fn with_valid_capacity(capacity: usize) -> Self {
         Self {
             budget: Arc::new(WorkerBudget {
-                capacity: capacity.min(MAX_WORKER_CAPACITY),
+                capacity,
                 active: AtomicUsize::new(0),
                 rejected: AtomicUsize::new(0),
                 timed_out: AtomicUsize::new(0),
@@ -53,7 +64,28 @@ impl Runtime {
 
 impl Default for Runtime {
     fn default() -> Self {
-        Self::new(MAX_WORKER_CAPACITY)
+        Self::with_valid_capacity(MAX_WORKER_CAPACITY)
+    }
+}
+
+/// A worker capacity above [`MAX_WORKER_CAPACITY`] was requested.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("worker capacity {value} exceeds the maximum of {maximum}")]
+#[non_exhaustive]
+pub struct CapacityError {
+    /// The refused capacity.
+    pub value: usize,
+    /// The largest capacity a [`Runtime`] admits.
+    pub maximum: usize,
+}
+
+impl Classified for CapacityError {
+    fn classification(&self) -> Classification {
+        Classification::new(
+            "cli.worker_capacity",
+            Kind::Usage,
+            Some("use a worker capacity no greater than runtime::MAX_WORKER_CAPACITY"),
+        )
     }
 }
 
@@ -228,14 +260,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
             thread::Builder::new()
                 .name("packetcraftr-worker".to_owned())
                 .spawn(move || worker.run(receiver, outcomes))
-                .map_err(|source| {
-                    BoundaryError::with_source(
-                        "could not start progressive output worker",
-                        output_classification(),
-                        Vec::new(),
-                        source,
-                    )
-                })?,
+                .map_err(spawn_failure)?,
         );
         Ok(Self {
             events,
@@ -260,21 +285,20 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
             })
             .into());
         }
-        let result = (|| {
+        let waited: Result<_, Interrupted> = (|| {
             loop {
                 deadline.enforce()?;
                 let remaining = deadline.remaining()?.min(POLL_INTERVAL);
                 match self.outcomes.recv_timeout(remaining) {
                     Ok(outcome) => {
                         self.in_flight.set(false);
-                        return outcome.map_err(Error::Output);
+                        return Ok(outcome);
                     }
                     Err(RecvTimeoutError::Disconnected) => {
                         self.in_flight.set(false);
-                        return Err(unavailable(
+                        return Ok(Err(unavailable(
                             "progressive output worker stopped without a result",
-                        )
-                        .into());
+                        )));
                     }
                     Err(RecvTimeoutError::Timeout) => {
                         deadline.enforce()?;
@@ -283,15 +307,29 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
                 }
             }
         })();
-        if matches!(result, Err(Error::Deadline(_))) {
-            self.worker.mark_timed_out();
+        match waited {
+            Ok(outcome) => outcome.map_err(Error::Output),
+            Err(interrupted) => {
+                self.worker.mark_timed_out();
+                Err(interrupted.into())
+            }
         }
-        result
     }
 }
 
 fn unavailable(message: impl Into<String>) -> BoundaryError {
     BoundaryError::new(message, output_classification(), Vec::new())
+}
+
+fn spawn_failure(source: io::Error) -> BoundaryError {
+    BoundaryError::with_source(
+        "could not start progressive output worker",
+        output_classification(),
+        std::iter::once(source.to_string())
+            .chain(packetcraftr_core::error::source_chain(&source))
+            .collect(),
+        source,
+    )
 }
 
 fn worker_budget_exhausted(capacity: usize) -> BoundaryError {
@@ -348,7 +386,7 @@ mod tests {
 
     #[test]
     fn blocked_callback_outlives_its_worker_handle_but_keeps_its_permit_until_cleanup() {
-        let runtime = Runtime::new(1);
+        let runtime = Runtime::new(1).unwrap();
         let (release, wait) = mpsc::channel();
         let (started, entered) = mpsc::channel();
         let worker = Worker::<()>::new_in(&runtime, move |(): ()| {
@@ -378,10 +416,35 @@ mod tests {
     }
 
     #[test]
+    fn capacities_above_the_ceiling_are_refused_instead_of_lowered() {
+        for requested in [MAX_WORKER_CAPACITY + 1, usize::MAX] {
+            assert_eq!(
+                Runtime::new(requested).unwrap_err(),
+                CapacityError {
+                    value: requested,
+                    maximum: MAX_WORKER_CAPACITY,
+                },
+            );
+        }
+        assert_eq!(
+            Runtime::new(MAX_WORKER_CAPACITY).unwrap().capacity(),
+            MAX_WORKER_CAPACITY
+        );
+        assert_eq!(Runtime::new(0).unwrap().capacity(), 0);
+    }
+
+    #[test]
+    fn worker_spawn_failure_publishes_the_os_cause() {
+        let error = spawn_failure(io::Error::other("thread limit reached"));
+        assert_eq!(error.classification().code, "internal.progressive_output");
+        assert_eq!(error.causes(), ["thread limit reached"]);
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
     fn admission_is_finite_and_independent_between_runtimes() {
-        assert_eq!(Runtime::new(usize::MAX).capacity(), MAX_WORKER_CAPACITY);
-        assert!(Worker::<()>::new_in(&Runtime::new(0), |_| Ok(())).is_err());
-        let runtime = Runtime::new(2);
+        assert!(Worker::<()>::new_in(&Runtime::new(0).unwrap(), |_| Ok(())).is_err());
+        let runtime = Runtime::new(2).unwrap();
         let first = Worker::<()>::new_in(&runtime, |_| Ok(())).unwrap();
         let second = Worker::<()>::new_in(&runtime, |_| Ok(())).unwrap();
         let Err(error) = Worker::<()>::new_in(&runtime, |_| Ok(())) else {
@@ -391,7 +454,7 @@ mod tests {
             error.classification().code,
             "internal.progressive_output_worker_exhausted"
         );
-        let other = Worker::new_in(&Runtime::new(1), |(): ()| Ok(())).unwrap();
+        let other = Worker::new_in(&Runtime::new(1).unwrap(), |(): ()| Ok(())).unwrap();
         other
             .emit((), &Deadline::new(Duration::from_secs(1)))
             .unwrap();
@@ -401,7 +464,7 @@ mod tests {
 
     #[test]
     fn callback_failure_preserves_classification_and_stops_later_events() {
-        let runtime = Runtime::new(1);
+        let runtime = Runtime::new(1).unwrap();
         let worker = Worker::<()>::new_in(&runtime, |(): ()| {
             Err(BoundaryError::new(
                 "denied",
@@ -415,6 +478,7 @@ mod tests {
             panic!("expected callback failure")
         };
         assert_eq!(error.classification().code, "policy.fixture");
+        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
         assert!(
             worker
                 .emit((), &Deadline::new(Duration::from_secs(1)))
@@ -436,7 +500,7 @@ mod tests {
                 self.release.recv_timeout(FIXTURE_WATCHDOG).unwrap();
             }
         }
-        let runtime = Runtime::new(1);
+        let runtime = Runtime::new(1).unwrap();
         let (started, dropping) = mpsc::channel();
         let (release, wait) = mpsc::channel();
         let captured = Captured {
@@ -458,7 +522,7 @@ mod tests {
 
     #[test]
     fn cancellation_interrupts_publication_wait_without_releasing_callback_resources() {
-        let runtime = Runtime::new(1);
+        let runtime = Runtime::new(1).unwrap();
         let signal = Cancellation::default();
         let (entered, started) = mpsc::channel();
         let (release, wait) = mpsc::channel();
@@ -482,10 +546,13 @@ mod tests {
         };
         assert_eq!(error.classification().code, "io.cancelled");
         assert_eq!(runtime.snapshot().active, 1);
+        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
         assert!(worker.in_flight.get());
         assert!(Worker::<()>::new_in(&runtime, |_| Ok(())).is_err());
         drop(worker);
         release.send(()).unwrap();
         canceller.join().unwrap();
+        wait_for_cleanup(&runtime);
+        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
     }
 }

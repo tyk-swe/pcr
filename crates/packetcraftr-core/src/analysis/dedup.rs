@@ -17,87 +17,71 @@ pub enum PeerDirection {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Deduplicator {
-    client_generation: u64,
-    server_generation: u64,
-    client_delivered: Option<u32>,
-    server_delivered: Option<u32>,
-    /// Base each direction's latest SYN implied, distinguishing a
+struct Half {
+    generation: u64,
+    delivered: Option<u32>,
+    /// Base this direction's latest SYN implied, distinguishing a
     /// retransmitted handshake — which must keep the delivery edges — from
     /// tuple reuse, which must not inherit them.
-    client_syn_base: Option<u32>,
-    server_syn_base: Option<u32>,
-    client_closed: bool,
-    server_closed: bool,
+    syn_base: Option<u32>,
+    closed: bool,
+}
+
+impl Half {
+    fn restart(&mut self, syn_base: Option<u32>) {
+        if self.delivered.is_some() || self.syn_base.is_some() || self.closed {
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.delivered = None;
+        self.syn_base = syn_base;
+        self.closed = false;
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Deduplicator {
+    client: Half,
+    server: Half,
 }
 
 impl Deduplicator {
-    pub(crate) fn mark_evicted(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) {
-        let (delivered, syn_base, closed, generation) = if flow == client {
-            (
-                &mut self.client_delivered,
-                &mut self.client_syn_base,
-                &mut self.client_closed,
-                &mut self.client_generation,
-            )
-        } else {
-            (
-                &mut self.server_delivered,
-                &mut self.server_syn_base,
-                &mut self.server_closed,
-                &mut self.server_generation,
-            )
-        };
-        if delivered.is_some() || syn_base.is_some() || *closed {
-            *generation = generation.saturating_add(1);
+    fn half_mut(&mut self, direction: PeerDirection) -> &mut Half {
+        match direction {
+            PeerDirection::ClientToServer => &mut self.client,
+            PeerDirection::ServerToClient => &mut self.server,
         }
-        *delivered = None;
-        *syn_base = None;
-        *closed = false;
+    }
+
+    fn flow_half(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) -> &mut Half {
+        self.half_mut(if flow == client {
+            PeerDirection::ClientToServer
+        } else {
+            PeerDirection::ServerToClient
+        })
+    }
+
+    pub(crate) fn mark_evicted(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) {
+        self.flow_half(flow, client).restart(None);
     }
 
     pub(crate) fn mark_closed(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) {
-        let closed = if flow == client {
-            &mut self.client_closed
-        } else {
-            &mut self.server_closed
-        };
-        *closed = true;
+        self.flow_half(flow, client).closed = true;
     }
 
     pub(crate) fn observe_syn(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey, tcp: &Tcp) {
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
-            let (recorded, closed, delivered, generation) = if flow == client {
-                (
-                    &mut self.client_syn_base,
-                    &mut self.client_closed,
-                    &mut self.client_delivered,
-                    &mut self.client_generation,
-                )
-            } else {
-                (
-                    &mut self.server_syn_base,
-                    &mut self.server_closed,
-                    &mut self.server_delivered,
-                    &mut self.server_generation,
-                )
-            };
-            if *recorded != Some(first) || *closed {
-                if recorded.is_some() || delivered.is_some() || *closed {
-                    *generation = generation.saturating_add(1);
-                }
-                *recorded = Some(first);
-                *delivered = None;
-                *closed = false;
+            let half = self.flow_half(flow, client);
+            if half.syn_base != Some(first) || half.closed {
+                half.restart(Some(first));
             }
         }
     }
 
     pub(crate) fn generation(&self, direction: PeerDirection) -> u64 {
         match direction {
-            PeerDirection::ClientToServer => self.client_generation,
-            PeerDirection::ServerToClient => self.server_generation,
+            PeerDirection::ClientToServer => self.client.generation,
+            PeerDirection::ServerToClient => self.server.generation,
         }
     }
 
@@ -107,10 +91,7 @@ impl Deduplicator {
         sequence: u32,
         bytes: &Bytes,
     ) -> Option<Bytes> {
-        let delivered = match direction {
-            PeerDirection::ClientToServer => &mut self.client_delivered,
-            PeerDirection::ServerToClient => &mut self.server_delivered,
-        };
+        let delivered = &mut self.half_mut(direction).delivered;
         let end = sequence.wrapping_add(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
         let bytes = match *delivered {
             Some(edge) => {

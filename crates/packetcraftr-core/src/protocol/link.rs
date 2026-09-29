@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod arp;
+mod ether_type;
 mod ethernet;
 mod llc;
 mod vlan;

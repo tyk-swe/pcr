@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use clap::ArgAction;
+use packetcraftr_core::analysis::forwarding;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
@@ -67,14 +68,14 @@ pub(crate) struct Args {
     pub(crate) max_evidence_bytes: usize,
     /// Maximum entries in each report detail list; omitted entries are
     /// counted in `omitted`.
-    #[arg(long, default_value_t = 256)]
+    #[arg(long, default_value_t = forwarding::Limits::default().max_details)]
     pub(crate) max_details: usize,
     /// Shared conservative JSON-sized detail charge across every report list
     /// (0..=8388608). Omission never changes counters or the verdict.
-    #[arg(long, default_value_t = 4 * 1024 * 1024, value_parser = detail_bytes)]
+    #[arg(long, default_value_t = forwarding::Limits::default().max_detail_bytes, value_parser = detail_bytes)]
     pub(crate) max_detail_bytes: usize,
     /// Additional canonical-key/index scratch charge; not a process RSS cap.
-    #[arg(long, default_value_t = 128 * 1024 * 1024)]
+    #[arg(long, default_value_t = forwarding::Limits::default().max_scratch_bytes)]
     pub(crate) max_scratch_bytes: usize,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,

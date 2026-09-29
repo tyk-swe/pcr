@@ -3,7 +3,8 @@
 
 use std::time::Duration;
 
-use crate::analysis::{Constraint, Error};
+use super::Resource;
+use crate::analysis::{Constraint, Error, serial::SERIAL_HALF};
 
 const DEFAULT_MAX_FLOWS: usize = 8_192;
 const DEFAULT_MAX_BYTES_PER_FLOW: usize = 1024 * 1024;
@@ -11,10 +12,8 @@ const DEFAULT_MAX_AGGREGATE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_MAX_SEGMENTS_PER_FLOW: usize = 4_096;
 const DEFAULT_IDLE_EXPIRY: Duration = Duration::from_secs(120);
 
-const SERIAL_HALF_SPACE: usize = 1usize << 31;
-
 /// Largest per-flow window the reassembler can order segments within.
-pub const MAX_BYTES_PER_FLOW: usize = SERIAL_HALF_SPACE.saturating_sub(1);
+pub const MAX_BYTES_PER_FLOW: usize = SERIAL_HALF as usize - 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -62,6 +61,18 @@ impl Limits {
         super::super::expiry::violation(self.idle_expiry)
             .map(|(value, reason)| (Field::IdleExpiry, value, reason))
     }
+
+    pub(super) fn flow_byte_error(&self) -> Resource {
+        Resource::FlowByteLimit {
+            limit: self.max_bytes_per_flow,
+        }
+    }
+
+    pub(super) fn aggregate_byte_error(&self) -> Resource {
+        Resource::AggregateByteLimit {
+            limit: self.max_aggregate_bytes,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,5 +93,15 @@ impl Field {
             Self::MaxSegmentsPerFlow => "max_segments_per_flow",
             Self::IdleExpiry => "idle_expiry",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_flow_ceiling_is_the_largest_window_inside_the_serial_half_space() {
+        assert_eq!(MAX_BYTES_PER_FLOW, 2_147_483_647);
     }
 }

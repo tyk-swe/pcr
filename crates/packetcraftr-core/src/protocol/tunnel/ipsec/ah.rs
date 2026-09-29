@@ -10,7 +10,7 @@ use crate::{
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
-    protocol::BuiltinProtocol,
+    protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
@@ -119,7 +119,12 @@ impl LayerCodec for AhCodec {
             NAME,
             "next_header",
             &layer.next_header,
-            expected_discriminator(NAME, context, 59_u8, &layer.next_header),
+            expected_discriminator(
+                NAME,
+                context,
+                ip_protocol::NO_NEXT_HEADER,
+                &layer.next_header,
+            ),
             context.mode,
             &mut diagnostics,
         )?;

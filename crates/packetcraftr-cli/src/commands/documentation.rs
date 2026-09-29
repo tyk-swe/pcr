@@ -9,7 +9,7 @@ use std::path::Path;
 use packetcraftr_core::error::{Classification, Kind};
 
 use self::arguments::Args;
-use crate::errors::CliError;
+use crate::errors::{CliError, source_causes};
 
 pub(super) fn run(arguments: &Args) -> Result<(), CliError> {
     let completions = arguments.directory.join("completions");
@@ -23,9 +23,6 @@ pub(super) fn run(arguments: &Args) -> Result<(), CliError> {
 }
 
 fn io_error(directory: &Path, error: std::io::Error) -> CliError {
-    let causes = std::iter::once(error.to_string())
-        .chain(packetcraftr_core::error::source_chain(&error))
-        .collect();
     CliError::from_classification(
         Classification::new(
             "io.documentation",
@@ -33,9 +30,9 @@ fn io_error(directory: &Path, error: std::io::Error) -> CliError {
             Some("choose a writable documentation directory"),
         ),
         format!(
-            "cannot write generated documentation under {}: {error}",
+            "cannot write generated documentation under {}",
             directory.display()
         ),
-        causes,
+        source_causes(&error),
     )
 }

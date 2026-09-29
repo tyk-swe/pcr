@@ -8,6 +8,7 @@ use packetcraftr_netio::capture::{Limits as CaptureQueueLimits, MAX_CAPTURE_QUEU
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::Error;
+use crate::execution::limits::duration_violation;
 
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
 pub const DEFAULT_MAX_RESPONSES: usize = MAX_CAPTURE_QUEUE_FRAMES;
@@ -35,10 +36,10 @@ impl Request {
     }
 
     pub fn validate(&self) -> Result<(), Error> {
-        if self.timeout > MAX_WAIT {
+        if duration_violation(self.timeout, MAX_WAIT) {
             return Err(Error::InvalidRequest {
                 field: "timeout",
-                message: format!("must not exceed {MAX_WAIT:?}"),
+                message: format!("must be greater than zero and not exceed {MAX_WAIT:?}"),
             });
         }
         if self.max_template_packets == 0 {

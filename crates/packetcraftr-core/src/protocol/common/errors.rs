@@ -5,7 +5,7 @@ use crate::field;
 use crate::layer::{Layer, Malformed};
 use crate::protocol::BuiltinProtocol;
 
-pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
+pub(crate) const fn protocol(name: &'static str) -> crate::layer::Id {
     crate::layer::Id::new(name)
 }
 
@@ -37,14 +37,7 @@ pub(crate) fn typed_layer<'a, L: Layer + 'static>(
 ) -> Result<&'a L, crate::codec::Error> {
     layer
         .downcast_ref::<L>()
-        .ok_or_else(|| wrong_layer(name, layer))
-}
-
-fn wrong_layer(expected: &'static str, actual: &dyn Layer) -> crate::codec::Error {
-    crate::codec::Error::WrongLayer {
-        expected: protocol(expected),
-        actual: *actual.protocol_id(),
-    }
+        .ok_or_else(|| crate::codec::Error::wrong_layer(protocol(name), layer))
 }
 
 pub(crate) fn truncated(
@@ -60,10 +53,11 @@ pub(crate) fn truncated(
 }
 
 pub(crate) fn invalid(name: &'static str, message: impl Into<String>) -> crate::codec::Error {
-    crate::codec::Error::Invalid {
-        protocol: protocol(name),
-        message: message.into(),
-    }
+    crate::codec::Error::invalid(protocol(name), message)
+}
+
+pub(crate) fn unsupported(name: &'static str, message: impl Into<String>) -> crate::codec::Error {
+    crate::codec::Error::unsupported(protocol(name), message)
 }
 
 pub(crate) fn rejected(

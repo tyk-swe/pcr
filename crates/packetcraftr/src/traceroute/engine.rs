@@ -12,7 +12,7 @@ use crate::execution::Errors as _;
 use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
-use crate::probe::{Batch, check_probe_count, check_probe_duration};
+use crate::probe::{Batch, check_collection_evidence, check_probe_count, check_probe_duration};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, admit_operation, wire_limits};
@@ -23,9 +23,9 @@ use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
 use super::error::Probes;
 use super::evidence::ProbeClassifier;
-use super::plan::{build_batches, worst_case_duration};
+use super::plan::{build_batches, probe_target, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
-use crate::probe::{Transport, enforce_deadline};
+use crate::probe::enforce_deadline;
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Traces the route to the request's authorized destination one hop at a
@@ -122,6 +122,7 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<ApprovedTraceroute, Error> {
     request.validate()?;
+    validate_collection(request)?;
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
@@ -157,22 +158,28 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
     })
 }
 
+fn validate_collection(request: &Request) -> Result<(), Error> {
+    check_collection_evidence(&Probes, &request.collection, request.limits.evidence())?;
+    let hop_probes = usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX);
+    if request.collection.max_responses < hop_probes {
+        return Err(Error::InvalidLimit {
+            field: "max_responses",
+            value: u64::try_from(request.collection.max_responses).unwrap_or(u64::MAX),
+            reason: format!(
+                "must retain at least one response per probe of a hop (probes_per_hop={})",
+                request.probes_per_hop
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
     check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
-    if let (Transport::Udp, Some(base)) = (request.strategy, request.destination_port) {
-        let last_offset = total_probes.saturating_sub(1);
-        if usize::from(base)
-            .checked_add(last_offset)
-            .is_none_or(|last| last > usize::from(u16::MAX))
-        {
-            return Err(Error::InvalidPort {
-                message: format!(
-                    "base UDP port {base} plus {} unique probe(s) exceeds 65535",
-                    total_probes
-                ),
-            });
-        }
-    }
+    probe_target(
+        request,
+        u64::try_from(total_probes.saturating_sub(1)).unwrap_or(u64::MAX),
+    )?;
     check_probe_duration(
         &Probes,
         worst_case_duration(request)?,

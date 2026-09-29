@@ -96,6 +96,8 @@ fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() 
         &["--overflow-policy", "drop-newest"],
         &["--allow-public-destinations"],
         &["--allow-permissive-packets"],
+        &["--allow-source-spoofing"],
+        &["--allow-destination", "192.0.2.0/24"],
         &["--max-packets", "1"],
         &["--max-bytes", "64"],
     ] {

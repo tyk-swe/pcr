@@ -111,7 +111,7 @@ impl<C: Session> Transaction<C> {
         let context = ProcessContext {
             registry: &self.registry,
             dissector: &self.dissector,
-            prepared: &self.prepared,
+            request_count: self.request_count,
             sent: &self.sent,
             window: &self.window,
             collection: &self.collection,
@@ -119,7 +119,7 @@ impl<C: Session> Transaction<C> {
         // A duplicated ingress record aborts, so nothing downstream runs for its frame.
         let processed = self
             .captured
-            .process(frame, context)
+            .process(frame, context, workflow_matcher.as_deref_mut())
             .map_err(|duplicate| OperationError::from(duplicate.into_error()))?;
         let promoted = match workflow_matcher.as_deref_mut() {
             Some(matches_request) => self
@@ -158,12 +158,7 @@ impl<C: Session> Transaction<C> {
             let super::Event::Response(response) = event else {
                 return false;
             };
-            let request = &self
-                .prepared
-                .get(response.request_index)
-                .expect("retained response indices identify prepared requests")
-                .built()
-                .packet;
+            let request = &self.sent[response.request_index].built().packet;
             stop_predicate(response.request_index, request, &response.response)
         })
     }
@@ -202,7 +197,7 @@ mod tests {
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
     use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
-    use packetcraftr_netio::capture::{Captured, Metadata, Stats};
+    use packetcraftr_netio::capture::{Captured, Metadata, OverflowPolicy, Stats};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::transmit::{Outbound, Report};
 
@@ -436,7 +431,8 @@ mod tests {
 
     #[test]
     fn unretained_response_does_not_trigger_stop() {
-        let (transaction, sender, state) = fixture_transaction(false, 1, 0);
+        let (mut transaction, sender, state) = fixture_transaction(false, 1, 0);
+        transaction.collection.capture.overflow_policy = OverflowPolicy::DropNewest;
         let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| true;
         let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
         let mut stop_calls = 0;
@@ -460,8 +456,86 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::Response(_)))
         );
-        assert_eq!(summary.unanswered, [0]);
+        assert!(
+            summary.unanswered.is_empty(),
+            "a refused reply is not evidence of absence"
+        );
         assert_eq!(state.reads.lock().expect("read log").len(), 5);
+    }
+
+    fn unrelated_frame() -> Frame {
+        let packet = udp_packet(
+            Ipv4Addr::new(198, 51, 100, 7),
+            Ipv4Addr::new(203, 0, 113, 9),
+            7,
+            7,
+        );
+        crate::test_support::sent_packet(packet).frame().clone()
+    }
+
+    #[test]
+    fn workflow_exchange_fails_when_a_promotable_frame_was_refused_and_a_request_is_unanswered() {
+        let (mut transaction, sender, state) =
+            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
+        transaction.collection.max_unmatched_frames = 0;
+        *state.frames.lock().expect("capture frames") = VecDeque::from([unrelated_frame()]);
+        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| true;
+        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
+
+        let error = transaction
+            .execute(&sender, Some(matcher), None, &mut |_| Ok(()))
+            .expect_err("a workflow cannot tell that its reply was the refused frame");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("request 0") && message.contains("exchange.unsolicited_limit"),
+            "{message}"
+        );
+        assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn workflow_exchange_keeps_a_refused_frame_no_request_accepts_from_failing_the_run() {
+        let (mut transaction, sender, state) =
+            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
+        transaction.collection.max_unmatched_frames = 0;
+        *state.frames.lock().expect("capture frames") = VecDeque::from([unrelated_frame()]);
+        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| false;
+        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
+        let mut diagnostics = Vec::new();
+
+        let summary = transaction
+            .execute(&sender, Some(matcher), None, &mut |event| {
+                if let Event::Diagnostic(diagnostic) = event {
+                    diagnostics.push(diagnostic.code);
+                }
+                Ok(())
+            })
+            .expect("no workflow could have promoted the refused frame");
+
+        assert_eq!(summary.unanswered, [0]);
+        assert_eq!(diagnostics, ["exchange.unsolicited_limit"]);
+    }
+
+    #[test]
+    fn plain_exchange_keeps_unrelated_frame_refusal_to_a_warning() {
+        let (mut transaction, sender, state) =
+            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
+        transaction.collection.max_unmatched_frames = 0;
+        *state.frames.lock().expect("capture frames") = VecDeque::from([unrelated_frame()]);
+        let mut diagnostics = Vec::new();
+
+        let summary = transaction
+            .execute(&sender, None, None, &mut |event| {
+                if let Event::Diagnostic(diagnostic) = event {
+                    diagnostics.push(diagnostic.code);
+                }
+                Ok(())
+            })
+            .expect("no matcher can attribute a refused unrelated frame");
+
+        assert_eq!(summary.unanswered, [0]);
+        assert_eq!(diagnostics, ["exchange.unsolicited_limit"]);
     }
 
     #[test]

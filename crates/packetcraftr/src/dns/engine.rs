@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
@@ -23,11 +23,10 @@ use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::{PacketProviders, TargetProviders, TcpProviders};
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
-use crate::{Client, Sink, Stats, StatsOverflow};
-use packetcraftr_core::error::BoundaryError;
+use crate::{Client, Sink, Stats};
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::error::{Error, EvidenceFault};
+use super::error::{Attempts, Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
 use super::evidence::{
     ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
@@ -567,50 +566,4 @@ fn select_response<'a>(
         |_| (),
         check,
     )
-}
-
-pub(super) struct Attempts;
-
-impl crate::execution::Errors for Attempts {
-    type Error = Error;
-    type Step = u32;
-
-    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
-        Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        }
-    }
-
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::Authorization(source)
-    }
-
-    fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
-        Error::from(source)
-    }
-
-    fn interrupted(&self, _: u32, source: Interrupted) -> Error {
-        Error::from(source)
-    }
-
-    fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Clock { attempt, source }
-    }
-
-    fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
-        Error::Execution { attempt, source }
-    }
-
-    fn invalid_evidence(&self, attempt: u32, source: crate::evidence::Error) -> Error {
-        Error::InvalidEvidence {
-            attempt,
-            fault: EvidenceFault::Exchange(source),
-        }
-    }
-
-    fn stats_overflow(&self, attempt: u32, _: StatsOverflow) -> Error {
-        Error::StatisticsOverflow { attempt }
-    }
 }

@@ -98,6 +98,8 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use super::*;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    use crate::test_support::interface_id;
     use crate::test_support::{assigned, interface_info, v4};
 
     fn interface() -> interface::Info {
@@ -153,16 +155,7 @@ mod tests {
             available
         );
 
-        for requested in [
-            InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 8,
-            },
-            InterfaceId {
-                name: "other0".to_owned(),
-                index: 7,
-            },
-        ] {
+        for requested in [interface_id("fixture0", 8), interface_id("other0", 7)] {
             assert!(matches!(
                 find_interface(std::slice::from_ref(&available), &requested),
                 Err(route::Error::InterfaceMismatch { .. })
@@ -171,10 +164,7 @@ mod tests {
         assert!(matches!(
             find_interface(
                 std::slice::from_ref(&available),
-                &InterfaceId {
-                    name: "missing0".to_owned(),
-                    index: 99,
-                }
+                &interface_id("missing0", 99)
             ),
             Err(route::Error::InterfaceNotFound { .. })
         ));

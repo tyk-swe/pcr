@@ -3,8 +3,6 @@
 
 use crate::output::contract::ToolFormat;
 
-use packetcraftr_core::error::Kind;
-
 pub(super) mod arguments;
 mod rendering;
 
@@ -55,17 +53,10 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
-    let max_template_packets = usize::try_from(arguments.attempts).map_err(|_| {
-        CliError::new(
-            Kind::Usage,
-            "traceroute attempt count exceeds the platform size limit",
-        )
-    })?;
     let workflow = prepare_workflow(
         &arguments.route,
         arguments.policy.into_policy(),
         request.timeout,
-        max_template_packets,
         queue_limits,
     )?;
     let client = workflow.client(Runtime::Workflow);
@@ -75,20 +66,19 @@ pub(super) fn run(
         ..request
     };
     execution::run_workflow(
-        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Traceroute,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 let collector = packetcraftr::traceroute::Collector::default();
                 let report = client
                     .traceroute(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|_, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .traceroute(request.clone(), emit)
                     .map_err(CliError::classified)

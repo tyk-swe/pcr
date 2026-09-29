@@ -7,7 +7,7 @@ use crate::budget::Deadline;
 use crate::{packet::Packet, registry::Registry};
 
 use super::error::Error;
-use super::prepare::{PreparedCases, prepare_with_events};
+use super::prepare::prepare_with_events;
 use super::report::{Case, Report, Stats, Summary};
 use super::request::Request;
 
@@ -27,14 +27,11 @@ impl Campaign {
     ) -> Result<Self, Error> {
         request.validate()?;
         let mut cases = Vec::with_capacity(request.cases);
-        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
+        let stats = prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
             cases.push(case);
             Ok(())
         })?;
-        Ok(Self {
-            cases,
-            stats: campaign_stats(request, &prepared),
-        })
+        Ok(Self { cases, stats })
     }
 
     pub fn stats(&self) -> &Stats {
@@ -66,20 +63,10 @@ where
 {
     request.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
-    let prepared = prepare_with_events(request, packet, registry, &mut deadline, &mut emit)?;
+    let stats = prepare_with_events(request, packet, registry, &mut deadline, &mut emit)?;
     Ok(Summary {
         seed: request.seed,
         first_case: request.first_case,
-        diagnostics: Vec::new(),
-        stats: campaign_stats(request, &prepared),
+        stats,
     })
-}
-
-fn campaign_stats(request: &Request, prepared: &PreparedCases) -> Stats {
-    Stats {
-        cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
-        cases_built: prepared.built_case_count,
-        bytes: prepared.built_byte_count,
-        elapsed: prepared.elapsed,
-    }
 }

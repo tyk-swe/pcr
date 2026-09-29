@@ -301,7 +301,7 @@ fn an_unrecognized_extension_is_recorded_but_not_interpreted() {
     let hello = parsed_client_hello(&[extension(0x1234, &[0xff; 8])]);
     assert_eq!(hello.extensions.len(), 1);
     assert_eq!(hello.extensions[0].kind, 0x1234);
-    assert_eq!(hello.extensions[0].len, 8);
+    assert_eq!(hello.extensions[0].data.len(), 8);
 }
 
 #[test]

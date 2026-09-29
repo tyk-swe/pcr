@@ -75,3 +75,37 @@ fn export_uses_a_stable_compressed_snapshot_and_publishes_only_valid_captures() 
             .is_none()
     );
 }
+#[test]
+fn a_selected_frame_limit_that_is_zero_or_above_its_ceiling_is_a_usage_error() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/http-stream.pcap");
+    let source = source.to_str().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("selected.pcap");
+    for limit in ["0", "1000001"] {
+        let output = run(&[
+            "--output",
+            "json",
+            "export",
+            source,
+            "--stream",
+            "tcp:0",
+            "--write",
+            target.to_str().unwrap(),
+            "--max-selected-frames",
+            limit,
+        ]);
+        assert_eq!(output.status.code(), Some(2), "{limit}");
+        let error = &parse_json(&output)["error"];
+        assert_eq!(error["code"], "cli.analysis_limit", "{limit}");
+        assert_eq!(error["kind"], "cli", "{limit}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("max_selected_frames"),
+            "{error}"
+        );
+        assert!(!target.exists());
+    }
+}

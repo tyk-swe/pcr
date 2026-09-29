@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame::DEFAULT_MAX_SIZE;
 
 use super::limits::{DEFAULT_MAX_INTERFACES_PER_SECTION, Limits};
+use super::wire::WRITER_TIMESTAMP_RESOLUTION;
 
 /// Classic PCAP file configuration.
 ///
@@ -44,7 +45,7 @@ impl Default for PcapOptions {
     fn default() -> Self {
         Self {
             endianness: Endianness::Little,
-            timestamp_resolution: TimestampResolution::Decimal(9),
+            timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
             snap_len: DEFAULT_MAX_SIZE,
             max_size: DEFAULT_MAX_SIZE,
             stream_limits: Limits::default(),
@@ -98,7 +99,11 @@ pub enum Format {
 }
 
 impl Format {
-    /// The stable lowercase name, matching the serialized form.
+    /// The stable lowercase display name: `pcap` or `pcapng`.
+    ///
+    /// Consumers publish this spelling verbatim, so it must not change. The
+    /// serde form of [`Format::PcapNg`] is `pcap_ng`, a separate spelling that
+    /// makes no output commitment.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

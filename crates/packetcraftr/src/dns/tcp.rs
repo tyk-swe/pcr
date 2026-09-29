@@ -3,6 +3,7 @@
 
 //! Bounded DNS-over-TCP framing; callers authorize destinations and validate responses.
 
+use packetcraftr_netio::deadline::POLL_INTERVAL;
 use packetcraftr_netio::tcp::{self, Provider, Stream};
 use std::fmt;
 use std::io;
@@ -63,8 +64,13 @@ pub enum Category {
 #[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
-    #[error(transparent)]
-    Cancelled(#[from] Cancelled),
+    #[error("DNS-over-TCP query cancelled during {phase} after {transferred} phase byte(s)")]
+    Cancelled {
+        phase: Phase,
+        transferred: usize,
+        #[source]
+        cancelled: Cancelled,
+    },
     #[error("DNS-over-TCP system I/O is unavailable: {message}")]
     Unsupported { message: String },
     #[error("DNS-over-TCP timeout {value:?} is invalid; it must be non-zero")]
@@ -128,7 +134,7 @@ impl Error {
     #[must_use]
     pub const fn category(&self) -> Category {
         match self {
-            Self::Cancelled(_) => Category::Cancelled,
+            Self::Cancelled { .. } => Category::Cancelled,
             Self::Unsupported { .. } => Category::Unsupported,
             Self::InvalidTimeout { .. }
             | Self::EmptyQuery
@@ -158,6 +164,11 @@ impl Error {
                 phase: Phase::Write,
                 transferred,
                 ..
+            }
+            | Self::Cancelled {
+                phase: Phase::Write,
+                transferred,
+                ..
             } => *transferred,
             Self::Write { written, .. } => *written,
             Self::Timeout {
@@ -168,13 +179,16 @@ impl Error {
                 phase: Phase::ReadPrefix | Phase::ReadMessage,
                 ..
             }
+            | Self::Cancelled {
+                phase: Phase::ReadPrefix | Phase::ReadMessage,
+                ..
+            }
             | Self::Read { .. }
             | Self::IncompletePrefix { .. }
             | Self::ZeroLength
             | Self::MessageTooLarge { .. }
             | Self::IncompleteMessage { .. } => framed_query_bytes,
-            Self::Cancelled(_)
-            | Self::Unsupported { .. }
+            Self::Unsupported { .. }
             | Self::InvalidTimeout { .. }
             | Self::EmptyQuery
             | Self::QueryTooLarge { .. }
@@ -186,6 +200,10 @@ impl Error {
             }
             | Self::Connect { .. }
             | Self::ConfigureTimeout {
+                phase: Phase::Connect,
+                ..
+            }
+            | Self::Cancelled {
                 phase: Phase::Connect,
                 ..
             } => 0,
@@ -242,6 +260,8 @@ pub struct Response {
 }
 
 /// A cancelled or expired wait returns while a stalled connect keeps its worker slot until cleanup.
+/// Streams must honor the timeouts they are given: each read and write wait is at most
+/// [`POLL_INTERVAL`], and a timeout before the deadline is retried after re-checking cancellation.
 pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Error>
 where
     P: Provider<Stream: 'static> + 'static,
@@ -257,6 +277,56 @@ fn query_with_clock<P>(
 where
     P: Provider<Stream: 'static> + 'static,
 {
+    let query_frame = query_frame(&request)?;
+    let started = now();
+    let deadline = started
+        .checked_add(request.timeout)
+        .ok_or(Error::DeadlineOverflow {
+            value: request.timeout,
+        })?;
+    let (mut stream, peer_address, local_address) = connect(connector, &request, deadline, &now)?;
+
+    let mut bytes_written = 0usize;
+    write_exact(
+        &mut stream,
+        &query_frame,
+        deadline,
+        request.cancellation,
+        query_frame.len(),
+        &mut bytes_written,
+        &now,
+    )?;
+    let sent = now();
+    let sent_at = SystemTime::now();
+
+    let frame = read_frame(
+        &mut stream,
+        deadline,
+        request.cancellation,
+        request.max_message_bytes,
+        &now,
+    )?;
+    let received_at = SystemTime::now();
+    let completed = now();
+    if completed >= deadline {
+        return Err(Error::Timeout {
+            phase: Phase::ReadMessage,
+            transferred: frame.len() - LENGTH_PREFIX_BYTES,
+        });
+    }
+    Ok(Response {
+        peer_address,
+        local_address,
+        sent_at,
+        received_at,
+        elapsed: completed.duration_since(started),
+        latency: completed.duration_since(sent),
+        bytes_written,
+        frame: Bytes::from(frame),
+    })
+}
+
+fn query_frame(request: &Request<'_>) -> Result<Vec<u8>, Error> {
     let maximum = usize::from(u16::MAX);
     if request.timeout.is_zero() {
         return Err(Error::InvalidTimeout {
@@ -276,13 +346,21 @@ where
             maximum,
         });
     }
+    let mut frame = Vec::with_capacity(LENGTH_PREFIX_BYTES + request.query.len());
+    frame.extend_from_slice(&query_length.to_be_bytes());
+    frame.extend_from_slice(request.query);
+    Ok(frame)
+}
 
-    let started = now();
-    let deadline = started
-        .checked_add(request.timeout)
-        .ok_or(Error::DeadlineOverflow {
-            value: request.timeout,
-        })?;
+fn connect<P>(
+    connector: Arc<P>,
+    request: &Request<'_>,
+    deadline: Instant,
+    now: &impl Fn() -> Instant,
+) -> Result<(tcp::Connection<P::Stream>, SocketAddr, SocketAddr), Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
     let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
     let connect_deadline =
         Deadline::new(connect_timeout).with_cancellation(request.cancellation.cloned());
@@ -293,7 +371,11 @@ where
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     packetcraftr_netio::deadline::remaining(&connect_deadline).map_err(|interrupted| {
         match interrupted {
-            Interrupted::Cancelled(cancelled) => Error::Cancelled(cancelled),
+            Interrupted::Cancelled(cancelled) => Error::Cancelled {
+                phase: Phase::Connect,
+                transferred: 0,
+                cancelled,
+            },
             _ => Error::Timeout {
                 phase: Phase::Connect,
                 transferred: 0,
@@ -301,7 +383,7 @@ where
         }
     })?;
     remaining(deadline, now(), Phase::Connect, 0)?;
-    let mut stream = outcome
+    let stream = outcome
         .ok_or(Error::Timeout {
             phase: Phase::Connect,
             transferred: 0,
@@ -325,60 +407,53 @@ where
         message: "local socket inspection failed".to_owned(),
         source: Some(Source::new(source)),
     })?;
+    Ok((stream, peer_address, local_address))
+}
 
-    let expected_write =
-        LENGTH_PREFIX_BYTES
-            .checked_add(request.query.len())
-            .ok_or(Error::QueryTooLarge {
-                actual: request.query.len(),
-                maximum,
-            })?;
-    let mut query_frame = Vec::with_capacity(expected_write);
-    query_frame.extend_from_slice(&query_length.to_be_bytes());
-    query_frame.extend_from_slice(request.query);
-    let mut bytes_written = 0usize;
-    write_exact(
-        &mut stream,
-        &query_frame,
-        deadline,
-        expected_write,
-        &mut bytes_written,
-        &now,
-    )?;
-    let sent = now();
-    let sent_at = SystemTime::now();
-
-    let mut response_prefix = [0u8; LENGTH_PREFIX_BYTES];
+fn read_frame<S: Stream>(
+    stream: &mut S,
+    deadline: Instant,
+    cancellation: Option<&Cancellation>,
+    max_message_bytes: usize,
+    now: &impl Fn() -> Instant,
+) -> Result<Vec<u8>, Error> {
+    let mut prefix = [0u8; LENGTH_PREFIX_BYTES];
     let prefix_read = read_exact(
-        &mut stream,
-        &mut response_prefix,
+        stream,
+        &mut prefix,
         deadline,
+        cancellation,
         Phase::ReadPrefix,
-        &now,
+        now,
     )?;
     if prefix_read != LENGTH_PREFIX_BYTES {
         return Err(Error::IncompletePrefix {
             actual: prefix_read,
         });
     }
-    let declared = usize::from(u16::from_be_bytes(response_prefix));
+    let declared = usize::from(u16::from_be_bytes(prefix));
     if declared == 0 {
         return Err(Error::ZeroLength);
     }
-    if declared > request.max_message_bytes {
+    if declared > max_message_bytes {
         return Err(Error::MessageTooLarge {
             declared,
-            maximum: request.max_message_bytes,
+            maximum: max_message_bytes,
         });
     }
 
-    let mut message = vec![0u8; declared];
+    let total = LENGTH_PREFIX_BYTES + declared;
+    let mut frame = Vec::with_capacity(total);
+    frame.extend_from_slice(&prefix);
+    frame.resize(total, 0);
+    let (_, message) = frame.split_at_mut(LENGTH_PREFIX_BYTES);
     let message_read = read_exact(
-        &mut stream,
-        &mut message,
+        stream,
+        message,
         deadline,
+        cancellation,
         Phase::ReadMessage,
-        &now,
+        now,
     )?;
     if message_read != declared {
         return Err(Error::IncompleteMessage {
@@ -386,33 +461,7 @@ where
             actual: message_read,
         });
     }
-    let received_at = SystemTime::now();
-    let capacity = declared
-        .checked_add(LENGTH_PREFIX_BYTES)
-        .ok_or(Error::MessageTooLarge {
-            declared,
-            maximum: request.max_message_bytes,
-        })?;
-    let mut frame = Vec::with_capacity(capacity);
-    frame.extend_from_slice(&response_prefix);
-    frame.extend_from_slice(&message);
-    let completed = now();
-    if completed >= deadline {
-        return Err(Error::Timeout {
-            phase: Phase::ReadMessage,
-            transferred: declared,
-        });
-    }
-    Ok(Response {
-        peer_address,
-        local_address,
-        sent_at,
-        received_at,
-        elapsed: completed.duration_since(started),
-        latency: completed.duration_since(sent),
-        bytes_written,
-        frame: Bytes::from(frame),
-    })
+    Ok(frame)
 }
 
 fn remaining(
@@ -427,6 +476,23 @@ fn remaining(
         .ok_or(Error::Timeout { phase, transferred })
 }
 
+fn next_wait(
+    deadline: Instant,
+    cancellation: Option<&Cancellation>,
+    now: Instant,
+    phase: Phase,
+    transferred: usize,
+) -> Result<Duration, Error> {
+    if let Some(cancellation) = cancellation {
+        cancellation.check().map_err(|cancelled| Error::Cancelled {
+            phase,
+            transferred,
+            cancelled,
+        })?;
+    }
+    remaining(deadline, now, phase, transferred).map(|remaining| remaining.min(POLL_INTERVAL))
+}
+
 fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
     use packetcraftr_netio::tcp::Error as TcpError;
 
@@ -435,7 +501,13 @@ fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error
         transferred: 0,
     };
     let source = match error {
-        TcpError::Cancelled(cancelled) => return Error::Cancelled(cancelled),
+        TcpError::Cancelled(cancelled) => {
+            return Error::Cancelled {
+                phase: Phase::Connect,
+                transferred: 0,
+                cancelled,
+            };
+        }
         TcpError::Socket(source) if is_timeout(&source) => return timeout,
         TcpError::DeadlineExceeded => return timeout,
         TcpError::Socket(source) => Source::new(source),
@@ -452,12 +524,13 @@ fn write_exact<S: Stream>(
     stream: &mut S,
     mut bytes: &[u8],
     deadline: Instant,
+    cancellation: Option<&Cancellation>,
     expected: usize,
     written: &mut usize,
     now: &impl Fn() -> Instant,
 ) -> Result<(), Error> {
     while !bytes.is_empty() {
-        let timeout = remaining(deadline, now(), Phase::Write, *written)?;
+        let timeout = next_wait(deadline, cancellation, now(), Phase::Write, *written)?;
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -488,13 +561,7 @@ fn write_exact<S: Stream>(
                     source: None,
                 })?;
             }
-            Err(source) if source.kind() == io::ErrorKind::Interrupted => {}
-            Err(source) if is_timeout(&source) => {
-                return Err(Error::Timeout {
-                    phase: Phase::Write,
-                    transferred: *written,
-                });
-            }
+            Err(source) if is_retryable(&source) => {}
             Err(source) => {
                 return Err(Error::Write {
                     written: *written,
@@ -512,12 +579,13 @@ fn read_exact<S: Stream>(
     stream: &mut S,
     bytes: &mut [u8],
     deadline: Instant,
+    cancellation: Option<&Cancellation>,
     phase: Phase,
     now: &impl Fn() -> Instant,
 ) -> Result<usize, Error> {
     let mut read = 0usize;
     while read < bytes.len() {
-        let timeout = remaining(deadline, now(), phase, read)?;
+        let timeout = next_wait(deadline, cancellation, now(), phase, read)?;
         stream
             .set_read_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -539,13 +607,7 @@ fn read_exact<S: Stream>(
                     source: None,
                 })?;
             }
-            Err(source) if source.kind() == io::ErrorKind::Interrupted => {}
-            Err(source) if is_timeout(&source) => {
-                return Err(Error::Timeout {
-                    phase,
-                    transferred: read,
-                });
-            }
+            Err(source) if is_retryable(&source) => {}
             Err(source) => {
                 return Err(Error::Read {
                     phase,
@@ -557,6 +619,11 @@ fn read_exact<S: Stream>(
     }
     let _ = remaining(deadline, now(), phase, read)?;
     Ok(read)
+}
+
+/// The wait loops retry these after re-checking cancellation and the deadline.
+fn is_retryable(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Interrupted || is_timeout(error)
 }
 
 fn is_timeout(error: &io::Error) -> bool {

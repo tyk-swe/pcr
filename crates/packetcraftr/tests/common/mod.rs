@@ -3,6 +3,7 @@
 // Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
 
+pub(crate) mod clock;
 pub(crate) mod responder;
 
 use std::collections::VecDeque;
@@ -10,7 +11,7 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr::ProviderSet;
@@ -39,6 +40,10 @@ use serde_json::Value;
 
 pub(crate) const INTERFACE_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
 pub(crate) const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
+
+pub(crate) fn live() -> Deadline {
+    Deadline::new(Duration::from_secs(5))
+}
 
 pub(crate) type FakeProviders<R, I> =
     ProviderSet<R, Interfaces, I, I, ScriptedTcp, ScriptedResolver>;
@@ -94,7 +99,6 @@ impl interface::Provider for Interfaces {
 
 #[derive(Clone, Default)]
 pub(crate) struct ScriptedTcp {
-    pub(crate) loopback: bool,
     pub(crate) steps: Steps,
 }
 
@@ -104,23 +108,15 @@ impl tcp::Provider for ScriptedTcp {
     fn connect(
         &self,
         endpoint: SocketAddr,
-        deadline: &Deadline,
+        _deadline: &Deadline,
     ) -> Result<Self::Stream, tcp::Error> {
         self.steps.push(Step::Connect(endpoint));
-        if self.loopback {
-            assert!(
-                endpoint.ip().is_loopback(),
-                "fixtures connect only to loopback"
-            );
-            return tcp::SystemProvider.connect(endpoint, deadline);
-        }
         Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "fixture refusal").into())
     }
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct ScriptedResolver {
-    pub(crate) addresses: Vec<IpAddr>,
     pub(crate) steps: Steps,
 }
 
@@ -131,7 +127,7 @@ impl Resolver for ScriptedResolver {
         _limit: usize,
     ) -> Result<Vec<IpAddr>, packetcraftr::target::Error> {
         self.steps.push(Step::Resolve(hostname.to_string()));
-        Ok(self.addresses.clone())
+        Ok(Vec::new())
     }
 }
 

@@ -18,9 +18,6 @@ use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
-/// A DNS exchange puts exactly one query on the wire per attempt.
-const MAX_TEMPLATE_PACKETS: usize = 1;
-
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
     const CANCELLATION: bool = true;
@@ -71,7 +68,6 @@ pub(super) fn run(
         &arguments.route,
         arguments.policy.into_policy(),
         requests[0].timeout,
-        MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
     for request in &mut requests {
@@ -82,20 +78,19 @@ pub(super) fn run(
     // A lone question keeps the single-query contract.
     if let [request] = requests.as_slice() {
         return execution::run_workflow(
-            &mut (),
             format,
             stream,
             crate::cancellation::signal(),
             execution::Hooks {
                 command: output::contract::Command::Dns,
-                run: Box::new(|_| {
+                run: Box::new(|| {
                     let collector = packetcraftr::dns::Collector::default();
                     let report = client
                         .dns(request.clone(), collector.clone())
                         .map_err(CliError::classified)?;
                     collector.finish(report).map_err(CliError::classified)
                 }),
-                run_with_events: Box::new(|_, emit| {
+                run_with_events: Box::new(|emit| {
                     client
                         .dns(request.clone(), emit)
                         .map_err(CliError::classified)
@@ -119,20 +114,19 @@ pub(super) fn run(
         questions: requests,
     };
     execution::run_workflow(
-        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Dns,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 let collector = packetcraftr::dns::batch::Collector::default();
                 let report = client
                     .dns_batch(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|_, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .dns_batch(request.clone(), emit)
                     .map_err(CliError::classified)

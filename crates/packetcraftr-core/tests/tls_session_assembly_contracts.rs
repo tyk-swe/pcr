@@ -227,7 +227,7 @@ fn the_handshake_round_trip_is_reported_when_both_hellos_were_captured() {
 }
 
 #[test]
-fn the_last_frame_of_a_session_is_the_last_one_that_carried_handshake_bytes() {
+fn the_last_frame_of_a_session_includes_the_record_that_ends_the_handshake() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -236,7 +236,7 @@ fn the_last_frame_of_a_session_is_the_last_one_that_carried_handshake_bytes() {
         &handshake_record(&client_hello(&ClientHelloSpec::default())),
     );
     capture.client(&mut stream, &application_data(64));
-    let handshake_frames = capture.frames.len();
+    let ending_frame = capture.frames.len();
     for _ in 0..3 {
         capture.client(&mut stream, &application_data(64));
     }
@@ -244,8 +244,8 @@ fn the_last_frame_of_a_session_is_the_last_one_that_carried_handshake_bytes() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(
         sessions[0].last_frame,
-        u64::try_from(handshake_frames).expect("frame count fits"),
-        "encrypted bytes after the handshake are not part of it"
+        u64::try_from(ending_frame).expect("frame count fits"),
+        "the first encrypted record ends the handshake and still counts; later ones do not"
     );
 }
 

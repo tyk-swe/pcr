@@ -19,16 +19,17 @@ pub(super) fn protocol_line(protocol: &output::protocols::Summary) -> String {
 }
 
 pub(super) fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
-    write_stdout_line(format_args!("protocol: {}", protocol.protocol))?;
-    write_stdout_line(format_args!("aliases: [{}]", protocol.aliases.join(", ")))?;
-    write_stdout_line(format_args!("build: {}", protocol.build))?;
-    write_stdout_line(format_args!("dissect: {}", protocol.dissect))?;
+    let summary = &protocol.summary;
+    write_stdout_line(format_args!("protocol: {}", summary.protocol))?;
+    write_stdout_line(format_args!("aliases: [{}]", summary.aliases.join(", ")))?;
+    write_stdout_line(format_args!("build: {}", summary.build))?;
+    write_stdout_line(format_args!("dissect: {}", summary.dissect))?;
     write_stdout_line(format_args!(
         "exact_round_trip: {}",
-        protocol.exact_round_trip
+        summary.exact_round_trip
     ))?;
-    write_stdout_line(format_args!("matcher: {}", protocol.matcher))?;
-    write_stdout_line(format_args!("decode_only: {}", protocol.decode_only))?;
+    write_stdout_line(format_args!("matcher: {}", summary.matcher))?;
+    write_stdout_line(format_args!("decode_only: {}", summary.decode_only))?;
     write_stdout_line(format_args!("bindings:"))?;
     for binding in &protocol.bindings {
         write_stdout_line(format_args!(

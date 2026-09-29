@@ -17,7 +17,7 @@ use super::VNI_MAX;
 
 use crate::protocol::common::{
     ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
-    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    strict_or_diagnostic, truncated, typed_layer, unsupported, validate_auto_raw_discriminator,
     validate_raw_child_discriminator,
 };
 
@@ -182,10 +182,10 @@ impl LayerCodec for GeneveCodec {
         };
         let version = header[0] >> 6;
         if version != 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: format!("GENEVE version {version} is not supported"),
-            });
+            return Err(unsupported(
+                NAME,
+                format!("GENEVE version {version} is not supported"),
+            ));
         }
         let options_len = usize::from(header[0] & 0x3f).saturating_mul(4);
         let header_len = GENEVE_BASE_LEN.saturating_add(options_len);
@@ -386,7 +386,6 @@ mod tests {
         let context = LayerDecodeContext {
             parent: None,
             registry: &registry,
-            allow_trailing_padding: false,
             network: None,
             discriminator: None,
         };

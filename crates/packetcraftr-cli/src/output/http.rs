@@ -2,16 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    analysis::{Scope, ScopedFlowKey},
+    analysis::{ScopedFlowKey, analysis_complete},
     contract::Error,
     hex::compact_hex,
     provenance::Source,
     stream::StreamRecord,
 };
-use packetcraftr_core::{
-    analysis::{self as library, http as analysis, scope::Definition},
-    protocol::application::http,
-};
+use packetcraftr_core::{analysis::http as analysis, protocol::application::http};
 use serde::Serialize;
 
 published_enum! {
@@ -213,35 +210,7 @@ impl From<analysis::Summary> for Summary {
         }
     }
 }
-#[derive(Debug, Serialize)]
-pub struct Complete {
-    pub frames_read: u64,
-    pub frames_matched: u64,
-    pub summary: Summary,
-    pub scopes: Vec<Scope>,
-    pub incomplete_datagrams: usize,
-    pub source_outcomes_omitted: u64,
-    pub ip_reassembly: super::reassembly::Report,
-}
-impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Complete {
-    type Error = Error;
-    fn try_from(
-        (run, summary, scopes): (&library::Summary, analysis::Summary, Vec<Definition>),
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            frames_read: run.frames_read,
-            frames_matched: run.frames_matched,
-            summary: summary.into(),
-            scopes: scopes
-                .into_iter()
-                .map(Scope::try_from)
-                .collect::<Result<_, _>>()?,
-            incomplete_datagrams: run.incomplete_sources.len(),
-            source_outcomes_omitted: run.source_outcomes_omitted,
-            ip_reassembly: (&run.ip_reassembly).into(),
-        })
-    }
-}
+analysis_complete!(analysis::Summary);
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub messages: Vec<Message>,

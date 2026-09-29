@@ -16,26 +16,16 @@ use super::Error;
 pub(super) fn validate_bindings(
     registry: &Registry,
     packet: &Packet,
-    protocols: &[crate::layer::Id],
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
-    debug_assert_eq!(protocols.len(), packet.len());
     let mut previous_padding: Option<&Padding> = None;
     for (index, layer) in packet.iter().enumerate() {
         let Some(padding) = layer.downcast_ref::<Padding>() else {
             previous_padding = None;
             continue;
         };
-        validate_padding(
-            registry,
-            packet,
-            protocols,
-            index,
-            padding,
-            mode,
-            diagnostics,
-        )?;
+        validate_padding(registry, packet, index, padding, mode, diagnostics)?;
         // Covered lengths trim padding from the end, so a run lists the innermost boundary first.
         if let (Some(previous), Some(outside_layer)) = (previous_padding, padding.outside_layer)
             && outside_layer > previous.outside_layer.unwrap_or(0)
@@ -47,17 +37,18 @@ pub(super) fn validate_bindings(
         }
         previous_padding = Some(padding);
     }
-    validate_adjacent_bindings(registry, protocols, mode, diagnostics)
+    validate_adjacent_bindings(registry, packet, mode, diagnostics)
 }
 
 fn validate_adjacent_bindings(
     registry: &Registry,
-    protocols: &[crate::layer::Id],
+    packet: &Packet,
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let mut previous_binding = None;
-    for (index, (parent, child)) in protocols.iter().zip(protocols.iter().skip(1)).enumerate() {
+    for (index, (parent, child)) in packet.iter().zip(packet.iter().skip(1)).enumerate() {
+        let (parent, child) = (parent.protocol_id(), child.protocol_id());
         let discriminator = match previous_binding {
             Some((previous_parent, previous_child, discriminator))
                 if previous_parent == parent && previous_child == child =>
@@ -97,55 +88,37 @@ fn validate_adjacent_bindings(
 fn validate_padding(
     registry: &Registry,
     packet: &Packet,
-    protocols: &[crate::layer::Id],
     index: usize,
     padding: &Padding,
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let Some(outside_layer) = padding.outside_layer else {
-        return validate_link_padding(registry, protocols, index, mode, diagnostics);
+        return validate_link_padding(registry, packet, index, mode, diagnostics);
     };
-    let Some(outside) = packet
+    let invalid = || Error::InvalidPaddingBoundary {
+        index,
+        outside_layer,
+    };
+    let outside = packet
         .layer(outside_layer)
         .filter(|_| outside_layer < index)
-    else {
-        return Err(Error::InvalidPaddingBoundary {
-            index,
-            outside_layer,
-        });
-    };
+        .ok_or_else(invalid)?;
     if outside.is::<Padding>() || outside.is::<Malformed>() {
-        return Err(Error::InvalidPaddingBoundary {
-            index,
-            outside_layer,
-        });
+        return Err(invalid());
     }
-    let Some(outside_protocol) = protocols.get(outside_layer) else {
-        return Err(Error::InvalidPaddingBoundary {
-            index,
-            outside_layer,
-        });
-    };
     let outside_builtin = BuiltinProtocol::of(outside);
-    let child_layer = outside_layer
-        .checked_add(1)
-        .ok_or(Error::InvalidPaddingBoundary {
-            index,
-            outside_layer,
-        })?;
-    let Some(child) = packet.layer(child_layer) else {
-        return Err(Error::InvalidPaddingBoundary {
-            index,
-            outside_layer,
-        });
-    };
-    let child_is = |protocol: BuiltinProtocol| match child
-        .downcast_ref::<Malformed>()
-        .and_then(|child| child.intended_protocol.as_deref())
-    {
-        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
-        None => protocol.identifies(child),
+    let child = packet.layer(outside_layer + 1);
+    let child_is = |protocol: BuiltinProtocol| {
+        child.is_some_and(|child| {
+            match child
+                .downcast_ref::<Malformed>()
+                .and_then(|child| child.intended_protocol.as_deref())
+            {
+                Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
+                None => protocol.identifies(child),
+            }
+        })
     };
     let link_declares_length = || {
         let ether_type = outside
@@ -166,29 +139,23 @@ fn validate_padding(
         }
     };
     let has_declared_boundary = match outside_builtin {
-        Some(
-            BuiltinProtocol::Ipv4
-            | BuiltinProtocol::Ipv6
-            | BuiltinProtocol::Udp
-            | BuiltinProtocol::Arp
-            | BuiltinProtocol::Pppoe,
-        ) => true,
+        Some(BuiltinProtocol::Arp) => true,
         Some(BuiltinProtocol::Ethernet | BuiltinProtocol::Vlan | BuiltinProtocol::Vlan8021ad) => {
             link_declares_length()
         }
-        _ => false,
+        other => is_network_boundary(other),
     };
     if !has_declared_boundary {
         if mode == crate::codec::Mode::Strict {
-            return Err(Error::InvalidPaddingBoundary {
-                index,
-                outside_layer,
-            });
+            return Err(invalid());
         }
         diagnostics.push(
             Diagnostic::warning(
                 "build.unsupported_padding_boundary",
-                format!("layer {outside_protocol} has no independent wire-length boundary"),
+                format!(
+                    "layer {} has no independent wire-length boundary",
+                    outside.protocol_id()
+                ),
             )
             .at_layer(index),
         );
@@ -207,15 +174,15 @@ fn validate_padding(
 
 fn validate_link_padding(
     registry: &Registry,
-    protocols: &[crate::layer::Id],
+    packet: &Packet,
     index: usize,
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
-    let enclosed_by_link = protocols
+    let enclosed_by_link = packet
         .iter()
         .take(index)
-        .any(|protocol| registry.allows_trailing_padding(protocol.as_str()));
+        .any(|layer| registry.allows_trailing_padding(layer.protocol_id().as_str()));
     if enclosed_by_link {
         return Ok(());
     }
@@ -232,7 +199,7 @@ fn validate_link_padding(
     Ok(())
 }
 
-fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
+pub(super) fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
     matches!(
         protocol,
         Some(

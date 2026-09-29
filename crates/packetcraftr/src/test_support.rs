@@ -262,6 +262,16 @@ impl RecordingClock {
     pub(crate) fn delays(&self) -> Vec<Duration> {
         self.0.lock().expect("recording clock").delays.clone()
     }
+
+    pub(crate) fn advance(&self, by: Duration) {
+        let mut time = self.0.lock().expect("recording clock");
+        *time.instant.get_or_insert_with(std::time::Instant::now) += by;
+    }
+
+    pub(crate) fn deadline(&self, limit: Duration) -> Deadline {
+        let clock = self.clone();
+        Deadline::with_time_source(limit, move || clock.now())
+    }
 }
 
 impl Clock for RecordingClock {
@@ -418,7 +428,6 @@ pub(crate) fn decoded_packet(
     let frame = evidence_frame(timestamp, bytes);
     DecodedPacket {
         packet,
-        original: frame.bytes().clone(),
         frame,
         layout: PacketLayout::default(),
         diagnostics,

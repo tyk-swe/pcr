@@ -246,8 +246,7 @@ mod tests {
     use rtnetlink::packet_core::ErrorMessage;
 
     use super::*;
-    use crate::link::Capability;
-    use packetcraftr_core::frame::LinkType;
+    use crate::test_support::{assigned, interface_id, interface_info, v4};
 
     fn netlink_error(code: i32) -> rtnetlink::Error {
         let mut reply = ErrorMessage::default();
@@ -289,20 +288,8 @@ mod tests {
     #[test]
     fn local_address_dump_only_serves_an_off_interface_local_source() {
         let interface = interface::Info {
-            id: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: None,
-            mac_address: None,
-            addresses: vec![interface::Address {
-                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-                prefix_length: 24,
-            }],
-            flags: interface::Flags::default(),
-            mtu: Some(1_500),
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
+            addresses: vec![assigned(v4(10, 0, 0, 2), 24)],
+            ..interface_info("fixture0", 7)
         };
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
         let on_interface = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
@@ -344,10 +331,7 @@ mod tests {
     fn lookup_failures_name_an_unowned_source_or_a_vanished_hint() {
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
         let source = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 99));
-        let hint = InterfaceId {
-            name: "fixture0".to_owned(),
-            index: 9,
-        };
+        let hint = interface_id("fixture0", 9);
         assert!(matches!(
             refine_route_lookup_error(
                 destination,

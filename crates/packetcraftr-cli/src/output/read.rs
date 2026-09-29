@@ -44,6 +44,12 @@ impl TryFrom<(u64, CaptureFrame, &DecodedPacket)> for Frame {
     }
 }
 
+impl crate::output::stream::StreamRecord for Frame {
+    fn event_name(&self) -> &'static str {
+        "frame"
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Totals {
     pub frames_read: u64,

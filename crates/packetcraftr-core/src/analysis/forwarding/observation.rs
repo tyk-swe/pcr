@@ -92,9 +92,6 @@ impl Observation {
             && self.key_cells.iter().all(Option::is_some)
     }
 
-    pub fn frame(&self) -> u64 {
-        self.frame
-    }
     pub fn key_cells(&self) -> &[Option<FieldValue>] {
         &self.key_cells
     }
@@ -103,12 +100,6 @@ impl Observation {
     }
     pub fn expectations(&self) -> &[ExpectationOutcome] {
         &self.expectations
-    }
-    pub fn incomplete(&self) -> Option<Incomplete> {
-        self.incomplete
-    }
-    pub fn retained_bytes(&self) -> usize {
-        self.retained_bytes
     }
 }
 

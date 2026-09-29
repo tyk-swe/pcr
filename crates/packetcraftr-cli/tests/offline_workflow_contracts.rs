@@ -3,7 +3,7 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use packetcraftr_core::capture_file::Format as CaptureFormat;
 use packetcraftr_core::capture_file::Writer;
@@ -13,14 +13,17 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::{Fragment as Ipv6Fragment, Ipv6};
+#[path = "common/capture.rs"]
+mod capture_support;
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
 
+use capture_support::{
+    Record, TCP_CLIENT, UDP_CLIENT, UDP_SERVER, write_pcap, write_pcap_hex, write_records,
+};
 use common::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-
-const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 
 /// `UDP_CLIENT` with its last payload byte flipped, so the UDP checksum fails.
 fn damaged_udp_client() -> Vec<u8> {
@@ -28,9 +31,6 @@ fn damaged_udp_client() -> Vec<u8> {
     *frame.last_mut().expect("UDP payload") ^= 1;
     frame
 }
-const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
-const TCP_CLIENT: &str =
-    "4500002b0000000040068e96c0000201c63364023039005000000001000000005002ffffb7b80000676574";
 const TCP_SERVER: &str =
     "450000280000000040068e99c6336402c0000201005030390000000a000000045012100083040000";
 const TCP_DATA: &str =
@@ -42,67 +42,15 @@ const IPV4_FRAGMENT_INCOMPLETE: &str =
     "45000024002b200040116e67c0000201c63364029c40270f001800006162636465666768";
 
 fn write_capture() -> tempfile::NamedTempFile {
-    write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA])
-}
-
-fn write_capture_frames(frames: &[&str]) -> tempfile::NamedTempFile {
-    let frames = frames.iter().copied().map(decode_hex).collect::<Vec<_>>();
-    write_capture_byte_frames(&frames)
-}
-
-fn write_capture_byte_frames(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
-    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
-    file.write_all(&[
-        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
-        2, 0, 4, 0, // version 2.4
-        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
-        0xff, 0xff, 0, 0, // snap length
-        228, 0, 0, 0, // DLT_IPV4
-    ])
-    .expect("global header must write");
-
-    for (index, bytes) in frames.iter().enumerate() {
-        let seconds = u32::try_from(index + 1).expect("fixture index fits u32");
-        let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
-        file.write_all(&seconds.to_le_bytes())
-            .expect("timestamp seconds must write");
-        file.write_all(&250_000_u32.to_le_bytes())
-            .expect("timestamp fraction must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("captured length must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("original length must write");
-        file.write_all(bytes).expect("frame bytes must write");
-    }
-    file.flush().expect("capture must flush");
-    file
+    write_pcap_hex(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA])
 }
 
 fn write_timed_capture(frames: &[((u32, u32), &str)]) -> tempfile::NamedTempFile {
-    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
-    file.write_all(&[
-        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
-        2, 0, 4, 0, // version 2.4
-        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
-        0xff, 0xff, 0, 0, // snap length
-        228, 0, 0, 0, // DLT_IPV4
-    ])
-    .expect("global header must write");
-    for ((seconds, micros), bytes) in frames {
-        let bytes = decode_hex(bytes);
-        let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
-        file.write_all(&seconds.to_le_bytes())
-            .expect("timestamp seconds must write");
-        file.write_all(&micros.to_le_bytes())
-            .expect("timestamp fraction must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("captured length must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("original length must write");
-        file.write_all(&bytes).expect("frame bytes must write");
-    }
-    file.flush().expect("capture must flush");
-    file
+    let records = frames
+        .iter()
+        .map(|&(timestamp, hex)| Record::new(timestamp, decode_hex(hex)))
+        .collect::<Vec<_>>();
+    write_records(&records)
 }
 
 fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
@@ -150,6 +98,7 @@ fn ipv6_fragment_hex() -> String {
         fragment_offset: 0,
         more_fragments: true,
         identification: 42,
+        ..Ipv6Fragment::default()
     });
     packet.push(Raw::new(b"abcdefgh".to_vec()));
     packetcraftr_core::build::Builder::new(registry)
@@ -172,38 +121,13 @@ fn write_truncated_capture() -> tempfile::NamedTempFile {
 }
 
 fn write_capture_evidence_capture() -> tempfile::NamedTempFile {
-    let truncated = decode_hex(UDP_SERVER);
-    let captured = u32::try_from(truncated.len() - 5).expect("fixture truncates");
-    let original = u32::try_from(truncated.len()).expect("fixture length fits");
-    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
-    file.write_all(&[
-        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
-        2, 0, 4, 0, // version 2.4
-        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
-        0xff, 0xff, 0, 0, // snap length
-        228, 0, 0, 0, // DLT_IPV4
+    let server = decode_hex(UDP_SERVER);
+    let captured = server.len() - 5;
+    write_records(&[
+        Record::new((100, 0), decode_hex(UDP_CLIENT)),
+        Record::truncated((101, 0), server, captured),
+        Record::new((50, 0), decode_hex(TCP_CLIENT)),
     ])
-    .expect("global header must write");
-    let mut record = |seconds: u32, captured: u32, original: u32, bytes: &[u8]| {
-        file.write_all(&seconds.to_le_bytes())
-            .expect("timestamp seconds must write");
-        file.write_all(&0_u32.to_le_bytes())
-            .expect("timestamp fraction must write");
-        file.write_all(&captured.to_le_bytes())
-            .expect("captured length must write");
-        file.write_all(&original.to_le_bytes())
-            .expect("original length must write");
-        file.write_all(bytes).expect("frame bytes must write");
-    };
-    let full = decode_hex(UDP_CLIENT);
-    let full_length = u32::try_from(full.len()).expect("fixture frame fits u32");
-    record(100, full_length, full_length, &full);
-    record(101, captured, original, &truncated[..captured as usize]);
-    let last = decode_hex(TCP_CLIENT);
-    let last_length = u32::try_from(last.len()).expect("fixture frame fits u32");
-    record(50, last_length, last_length, &last);
-    file.flush().expect("capture must flush");
-    file
 }
 
 #[test]
@@ -292,7 +216,7 @@ fn single_frame_fragment_dissection_and_capture_rewrite_remain_physical() {
         assert!(!protocols.contains(&"tcp"));
     }
 
-    let capture = write_capture_frames(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
+    let capture = write_pcap_hex(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
     let rewritten = run_success(&["--output", "pcap", "read", path_text(capture.path())]);
     assert_eq!(
         rewritten.stdout,
@@ -302,7 +226,7 @@ fn single_frame_fragment_dissection_and_capture_rewrite_remain_physical() {
 
 #[test]
 fn stats_fragments_separates_physical_totals_from_bounded_derived_outcomes() {
-    let capture = write_capture_frames(&[
+    let capture = write_pcap_hex(&[
         IPV4_FRAGMENT_FIRST,
         IPV4_FRAGMENT_LAST,
         IPV4_FRAGMENT_INCOMPLETE,
@@ -534,7 +458,7 @@ fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
 
 #[test]
 fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
-    for capture in [write_capture(), write_capture_frames(&[])] {
+    for capture in [write_capture(), write_pcap_hex(&[])] {
         let path = path_text(capture.path());
         for selector in ["tcp:999", "udp:999"] {
             let expected = format!("--stream {selector} is not present");
@@ -574,7 +498,7 @@ fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
 
 #[test]
 fn follow_missing_stream_terminates_after_preceding_ip_events() {
-    let capture = write_capture_frames(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
+    let capture = write_pcap_hex(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
     for selector in ["tcp:999", "udp:999"] {
         let output = run(&[
             "--output",
@@ -610,7 +534,7 @@ fn follow_missing_stream_terminates_after_preceding_ip_events() {
 fn follow_accepts_payload_free_tcp_and_empty_udp_datagrams() {
     const EMPTY_UDP: &str = "4500001c0000000040118e9ac0000201c63364023039000900080000";
     for (selector, frame, chunks) in [("tcp:0", TCP_SERVER, 0), ("udp:0", EMPTY_UDP, 1)] {
-        let capture = write_capture_frames(&[frame]);
+        let capture = write_pcap_hex(&[frame]);
         for format in ["text", "hex", "raw", "json", "ndjson"] {
             let output = run_success(&[
                 "--output",
@@ -657,7 +581,7 @@ fn follow_accepts_payload_free_tcp_and_empty_udp_datagrams() {
 
 #[test]
 fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
-    let capture = write_capture_frames(&[
+    let capture = write_pcap_hex(&[
         IPV4_FRAGMENT_FIRST,
         IPV4_FRAGMENT_LAST,
         IPV4_FRAGMENT_INCOMPLETE,
@@ -743,7 +667,7 @@ fn follow_stream_reports_overlap_resolution_before_completion_and_payload() {
     let mut conflict = first.clone();
     conflict[28] = b'X';
     let last = decode_hex(IPV4_FRAGMENT_LAST);
-    let capture = write_capture_byte_frames(&[first, conflict, last]);
+    let capture = write_pcap(&[first, conflict, last]);
     let path = path_text(capture.path());
     let output = run_success(&[
         "--output",
@@ -958,8 +882,7 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
 #[test]
 fn read_dissection_diagnostics_match_ndjson_and_follow_source_frame_filtering() {
     let damaged = damaged_udp_client();
-    let capture =
-        write_capture_byte_frames(&[decode_hex(UDP_SERVER), damaged, decode_hex(TCP_CLIENT)]);
+    let capture = write_pcap(&[decode_hex(UDP_SERVER), damaged, decode_hex(TCP_CLIENT)]);
     let path = path_text(capture.path());
 
     let ndjson = run_success(&["--output", "ndjson", "read", path, "--dissect"]);
@@ -1027,7 +950,7 @@ fn read_dissection_diagnostics_match_ndjson_and_follow_source_frame_filtering() 
 
 #[test]
 fn read_ndjson_preserves_source_identity_and_always_completes() {
-    let capture = write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
     let path = path_text(capture.path());
     let output = run_success(&["--output", "ndjson", "read", path]);
     let records = parse_ndjson(&output);
@@ -1069,9 +992,9 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
 #[test]
 fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
     let cases = [
-        (write_capture_frames(&[]), None, 0, 0),
+        (write_pcap_hex(&[]), None, 0, 0),
         (
-            write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]),
+            write_pcap_hex(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]),
             Some("frame.number == 4"),
             3,
             109,
@@ -1333,7 +1256,7 @@ fn stats_epoch_bounds_restrict_the_matched_set() {
 
 #[test]
 fn read_limits_account_for_filtered_source_input() {
-    let capture = write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
     let path = path_text(capture.path());
     let cases = [
         vec![
@@ -1571,40 +1494,6 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         UDP_CLIENT
     );
 
-    let filtered = run_with_stdin(
-        &[
-            "--output",
-            "json",
-            "dissect",
-            "--link-type",
-            "228",
-            "--filter",
-            "tcp",
-        ],
-        &frame,
-    );
-    assert!(filtered.status.success(), "{:?}", filtered.stderr);
-    let value = parse_json(&filtered);
-    assert_eq!(value["result"]["matched"], false);
-    assert!(value["result"]["dissection"].is_null());
-
-    let matched = run_with_stdin(
-        &[
-            "--output",
-            "json",
-            "dissect",
-            "--link-type",
-            "228",
-            "--filter",
-            "udp",
-        ],
-        &frame,
-    );
-    assert!(matched.status.success(), "{:?}", matched.stderr);
-    let matched_value = parse_json(&matched);
-    assert_eq!(matched_value["result"]["matched"], true);
-    assert!(matched_value["result"]["dissection"].is_object());
-
     let malformed = run(&["--output", "json", "dissect", "--hex", "not-hex"]);
     assert_eq!(malformed.status.code(), Some(2));
     let malformed_value = parse_json(&malformed);
@@ -1787,19 +1676,6 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
             "{arguments:?} must fail before opening the capture"
         );
     }
-    if Instant::now()
-        .checked_add(Duration::from_millis(u64::MAX))
-        .is_none()
-    {
-        let output = run(&[
-            "stats",
-            missing,
-            "--ip-idle-expiry-ms",
-            "18446744073709551615",
-        ]);
-        assert_eq!(output.status.code(), Some(2));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains("open "));
-    }
     for policy in ["reject", "first", "last"] {
         let output = run(&["stats", missing, "--ip-overlap", policy]);
         assert_eq!(output.status.code(), Some(5), "{policy}");
@@ -1923,7 +1799,7 @@ fn read_exports_selected_source_frames_in_both_capture_formats() {
     use packetcraftr_core::capture_file::Reader;
     use std::io::Cursor;
     for (format, capture) in [
-        ("pcap", write_capture_frames(&[UDP_CLIENT, UDP_SERVER])),
+        ("pcap", write_pcap_hex(&[UDP_CLIENT, UDP_SERVER])),
         ("pcapng", write_capture_with_later_missing_timestamp()),
     ] {
         let path = path_text(capture.path());

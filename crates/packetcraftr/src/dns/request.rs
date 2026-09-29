@@ -9,16 +9,16 @@ use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRA
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::EvidenceLimits;
-use crate::execution::limits::{check_limits, duration_violation};
+use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use crate::dns::error::Error;
+use crate::dns::error::{Attempts, Error};
 use crate::dns::wire::{self, canonical_query_name};
 use crate::dns::{
     DEFAULT_MAX_NAME_POINTERS, DEFAULT_MAX_RECORDS, DEFAULT_MAX_REJECTED_RECORDS,
     DEFAULT_MAX_TXT_BYTES, DEFAULT_MAX_TXT_STRINGS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
-    MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
+    MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RECORDS,
 };
 
 /// A DNS question's exact 16-bit wire code, including unassigned codes.
@@ -290,6 +290,9 @@ impl Request {
         if self.transport != TransportMode::Tcp && self.source_port == 0 {
             return Err(Error::InvalidSourcePort);
         }
+        if self.transport != TransportMode::Udp && self.route.requires_packet_route() {
+            return Err(Error::UnsupportedTcpRoute);
+        }
         if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
             return Err(Error::InvalidLimit {
                 field: "attempts",
@@ -297,21 +300,13 @@ impl Request {
                 reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
+        if duration_violation(self.timeout, MAX_WAIT) {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: MAX_WAIT,
             });
         }
-        if let Some(rate) = self.queries_per_second
-            && (rate == 0 || rate > MAX_RATE)
-        {
-            return Err(Error::InvalidLimit {
-                field: "queries_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
-            });
-        }
+        check_rate(&Attempts, "queries_per_second", self.queries_per_second)?;
         canonical_query_name(&self.query_name).map_err(Error::Query)?;
         Ok(())
     }

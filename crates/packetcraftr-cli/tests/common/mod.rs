@@ -14,7 +14,7 @@ use packetcraftr_cli::test_support;
 // even though the definitions behind it are allowed to be dead.
 #[allow(unused_imports)]
 pub(crate) use packetcraftr_cli::test_support::{
-    SharedBuffer, TestRecord, assert_contiguous, output_schema, stream,
+    SharedBuffer, assert_contiguous, output_schema, stream,
 };
 
 pub(crate) fn schema_validator() -> &'static jsonschema::Validator {

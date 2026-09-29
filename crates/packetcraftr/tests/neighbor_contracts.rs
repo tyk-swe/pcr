@@ -4,7 +4,7 @@
 use std::{fmt, net::IpAddr, time::Duration};
 
 use packetcraftr::neighbor::{self, Error as NeighborError};
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{Error, capture};
 
 fn ipv4(value: &str) -> IpAddr {
@@ -147,6 +147,38 @@ fn neighbor_operation_and_cleanup_failures_expose_the_operation_as_a_source() {
     };
     let source = std::error::Error::source(&error).expect("the operation failure is the source");
     assert_eq!(source.to_string(), not_found().to_string());
+}
+
+#[test]
+fn neighbor_operation_and_cleanup_failures_keep_both_cause_chains() {
+    let error = NeighborError::OperationAndCleanup {
+        interface: "fixture0".to_owned(),
+        target: ipv4("192.0.2.9"),
+        operation: Box::new(NeighborError::Io {
+            interface: "fixture0".to_owned(),
+            target: ipv4("192.0.2.9"),
+            operation: "sending request",
+            source: Error::Send {
+                message: "send failed".to_owned(),
+                source: Some(Source::new(std::io::Error::other("injection refused"))),
+            },
+        }),
+        cleanup: Error::Capture {
+            message: "cleanup failed".to_owned(),
+            source: Some(Source::new(std::io::Error::other("handle busy"))),
+        },
+    };
+
+    assert_eq!(
+        error.causes(),
+        [
+            "neighbor resolution for 192.0.2.9 on fixture0 failed while sending request",
+            "packet transmission failed: send failed",
+            "injection refused",
+            "capture failed: cleanup failed",
+            "handle busy",
+        ]
+    );
 }
 
 #[test]

@@ -44,9 +44,9 @@ per-section input semantics.
 | IP state | `max_ip_reassembly_bytes` covers retained fragments, reconstruction/cascade buffers and charged metadata; per-datagram, fragment and retained-outcome limits also apply. |
 | TCP state | `max_tcp_reassembly_bytes` covers retained payload/history and charged flow/segment metadata. Per-direction byte/segment ceilings and capture-time idle expiry are independent. |
 | TLS state | `max_tls_sessions` bounds live/closed tracking slots; `max_tls_buffer_bytes` bounds logical handshake-buffer lengths and alert charges, not parsed hello summaries or allocation capacity. A direction has a 135,168-byte logical buffer ceiling. Parser and session-count limits bound retained summaries separately. Terminal paths release recorded charges. |
-| Stats | Only the selected table allocates aggregation entries in the CLI. Library `Table::All` intentionally retains all tables. `--top` caps final rows, not keys needed to compute exact counts. |
+| Stats | Only the selected table allocates aggregation entries in the CLI. Library `Table::All` intentionally retains all tables. `--top` caps final rows, not keys needed to compute exact counts. The protocols, conversations, endpoints, and ports tables keep their busiest rows by frame count, breaking ties by bytes (protocols: by name), and list them busiest first; `io` keeps its first buckets in time order. |
 | Results | JSON retains selected rows/sessions/chunks according to command limits. TLS output retention is independent of active state. NDJSON holds one prepared line per encoder, at most 16 MiB including newline. |
-| Native/progress work | Offline analysis uses no native capture queue. Live capture can additionally retain its bounded native queue. A blocked output/callback worker retains its permit and captures until cleanup actually ends. `Runtime::snapshot()` exposes active, rejected, and timed-out retained capacity. |
+| Native/progress work | Offline analysis uses no native capture queue. Live capture can additionally retain its bounded native queue. A blocked output/callback worker retains its permit and captures until cleanup actually ends. `Runtime::snapshot()` exposes active, rejected, and retained capacity from timed-out or cancelled waits. |
 
 A useful peak estimate is **input/decode + indexed metadata + IP + TCP + TLS +
 selected collector + retained results + serialization + runtime/native overhead**,
@@ -173,12 +173,13 @@ not make synchronous serialization or an arbitrary writer preemptible.
 Embedders can clone a `runtime::Runtime` and give it to multiple clients with
 `Client::with_runtime`; `Client::runtime` returns it and `Runtime::snapshot()`
 reports its retained capacity. `Client::new` creates an isolated runtime.
-Timed-out callbacks and their captured-resource destructors keep their permits
-until cleanup ends. `packetcraftr_netio::resources::native_snapshot()` reports
-the process-wide native worker pool (`resources::WORKER_CAPACITY`, 16 slots
-shared by capture reads, route queries, and TCP connects): active reservations,
-rejected admissions and retained cleanup. `tcp_connect_snapshot()` reports the
-TCP connect sub-limit of the same pool. These counts describe admission
+Callbacks whose wait timed out or was cancelled, and their captured-resource
+destructors, keep their permits until cleanup ends.
+`packetcraftr_netio::resources::native_snapshot()` reports the process-wide
+native worker pool (`resources::WORKER_CAPACITY`, 16 slots shared by capture
+reads, route queries, and TCP connects): active reservations, rejected
+admissions and retained cleanup. `tcp_connect_snapshot()` reports the TCP
+connects' own admissions within the same pool. These counts describe admission
 reservations, not all OS threads, handles, or process memory.
 
 ## TCP pending ranges

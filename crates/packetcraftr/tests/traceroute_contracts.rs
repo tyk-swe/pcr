@@ -137,6 +137,87 @@ fn a_denied_destination_arms_no_capture_and_sends_nothing() {
     assert_eq!(state.sends, 0);
 }
 
+fn narrowed_request(frames: usize, bytes: usize) -> traceroute::Request {
+    let mut request = request();
+    request.limits.max_evidence_frames = frames;
+    request.limits.max_undecoded = frames;
+    request.limits.max_evidence_bytes = bytes;
+    request
+}
+
+#[test]
+fn a_collection_wider_than_the_evidence_limits_is_refused_before_any_capture_or_send() {
+    let bytes = traceroute::Limits::default().max_evidence_bytes;
+    let frames = traceroute::Limits::default().max_evidence_frames;
+    for (request, field) in [
+        (narrowed_request(16, bytes), "capture_max_frames"),
+        (narrowed_request(frames, 1 << 20), "capture_max_bytes"),
+    ] {
+        let state = network();
+
+        let error = client(&state, Policy::default())
+            .traceroute(request, |_| Ok(()))
+            .expect_err("the collection captures more than the evidence limits retain");
+
+        assert!(
+            matches!(&error, traceroute::Error::InvalidLimit { field: named, .. } if *named == field),
+            "{error}"
+        );
+        assert_eq!(error.classification().code, "cli.traceroute_limit");
+        let state = state.lock().unwrap();
+        assert_eq!(state.armed, 0);
+        assert_eq!(state.sends, 0);
+    }
+}
+
+#[test]
+fn a_collection_matching_narrow_evidence_limits_still_traces() {
+    let state = network();
+    let mut request = narrowed_request(16, 1 << 20);
+    request.collection.capture.max_frames = 16;
+    request.collection.capture.max_bytes = 1 << 20;
+    request.collection.max_responses = 16;
+    request.collection.max_unmatched_frames = 16;
+    let collector = traceroute::Collector::default();
+
+    let report = client(&state, Policy::default())
+        .traceroute(request, collector.clone())
+        .expect("bounds that agree are not refused");
+
+    assert_eq!(
+        collector.finish(report).unwrap().termination,
+        traceroute::Termination::DestinationReached
+    );
+}
+
+#[test]
+fn a_collection_retaining_fewer_responses_than_a_hop_has_probes_is_refused_before_any_capture_or_send()
+ {
+    let state = network();
+    let mut request = request();
+    request.probes_per_hop = 2;
+    request.collection.max_responses = 1;
+
+    let error = client(&state, Policy::default())
+        .traceroute(request, |_| Ok(()))
+        .expect_err("a hop's probes could not each keep a response");
+
+    assert!(
+        matches!(
+            error,
+            traceroute::Error::InvalidLimit {
+                field: "max_responses",
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert_eq!(error.classification().code, "cli.traceroute_limit");
+    let state = state.lock().unwrap();
+    assert_eq!(state.armed, 0);
+    assert_eq!(state.sends, 0);
+}
+
 #[test]
 fn a_failing_sink_stops_the_trace_before_a_later_hop() {
     let state = network();

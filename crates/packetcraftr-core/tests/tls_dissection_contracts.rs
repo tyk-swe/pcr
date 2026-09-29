@@ -3,11 +3,13 @@
 
 mod common;
 
+use common::decoded::protocols;
 use common::registry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
+use packetcraftr_core::document;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -42,6 +44,23 @@ fn client_hello_record_with_server_name(name: &str) -> Vec<u8> {
         key_share_groups: Vec::new(),
         ..ClientHelloSpec::default()
     }))
+}
+
+fn client_hello_record_with_extensions(count: u16) -> Vec<u8> {
+    let extensions: Vec<u8> = (0..count)
+        .flat_map(|index| [&(0x2000 + index).to_be_bytes()[..], &[0, 0]].concat())
+        .collect();
+    let mut body = vec![0x03, 0x03];
+    body.extend_from_slice(&[0x11; 32]);
+    body.push(0);
+    body.extend_from_slice(&[0, 2, 0x13, 0x01]);
+    body.extend_from_slice(&[1, 0]);
+    body.extend_from_slice(&u16::try_from(extensions.len()).unwrap().to_be_bytes());
+    body.extend_from_slice(&extensions);
+    let length = u32::try_from(body.len()).unwrap().to_be_bytes();
+    let mut message = vec![1, length[1], length[2], length[3]];
+    message.extend_from_slice(&body);
+    handshake_record(&message)
 }
 
 fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::DecodedPacket {
@@ -86,14 +105,6 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
         "build(dissect(x)) must equal x on port {destination_port}"
     );
     decoded
-}
-
-fn protocols(decoded: &decode::DecodedPacket) -> Vec<&str> {
-    decoded
-        .packet
-        .iter()
-        .map(|layer| layer.protocol_id().as_str())
-        .collect()
 }
 
 fn tls_field(decoded: &decode::DecodedPacket, name: &str) -> Option<FieldValue> {
@@ -282,6 +293,91 @@ fn a_server_name_that_is_not_a_host_name_is_reported_and_left_unpublished() {
 }
 
 #[test]
+fn a_client_hello_that_fails_to_parse_is_reported_rather_than_left_blank() {
+    let decoded = dissect(CLIENT_PORT, 443, &client_hello_record_with_extensions(65));
+    assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
+    assert_eq!(
+        tls_field(&decoded, "record_count"),
+        Some(FieldValue::from(1_u16))
+    );
+    assert_eq!(tls_field(&decoded, "handshake_type"), None);
+    assert_eq!(tls_field(&decoded, "ja3"), None);
+    assert_eq!(tls_field(&decoded, "ja4"), None);
+    assert_eq!(diagnostic_codes(&decoded), vec!["tls.handshake_unparsed"]);
+    let diagnostic = &decoded.diagnostics[0];
+    assert_eq!(
+        diagnostic.severity,
+        packetcraftr_core::diagnostic::Severity::Info
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("extension count exceeds the limit of 64"),
+        "{}",
+        diagnostic.message
+    );
+
+    let at_the_limit = dissect(CLIENT_PORT, 443, &client_hello_record_with_extensions(64));
+    assert_eq!(
+        tls_field(&at_the_limit, "handshake_type"),
+        Some(FieldValue::from(1_u8))
+    );
+    assert!(tls_field(&at_the_limit, "ja3").is_some());
+    assert!(tls_field(&at_the_limit, "ja4").is_some());
+    assert!(
+        at_the_limit.diagnostics.is_empty(),
+        "{:?}",
+        diagnostic_codes(&at_the_limit)
+    );
+}
+
+#[test]
+fn a_server_hello_that_fails_to_parse_is_reported_too() {
+    let mut record = server_hello_record();
+    record.push(0);
+    let record_length = u16::from_be_bytes([record[3], record[4]]) + 1;
+    record[3..5].copy_from_slice(&record_length.to_be_bytes());
+    record[8] += 1;
+    let decoded = dissect(443, CLIENT_PORT, &record);
+    assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
+    assert_eq!(tls_field(&decoded, "handshake_type"), None);
+    assert_eq!(tls_field(&decoded, "cipher_suite"), None);
+    assert_eq!(diagnostic_codes(&decoded), vec!["tls.handshake_unparsed"]);
+    assert!(
+        decoded.diagnostics[0].message.contains("trailing bytes"),
+        "{}",
+        decoded.diagnostics[0].message
+    );
+}
+
+#[test]
+fn a_handshake_record_that_stops_short_or_is_encrypted_reports_nothing_unparsed() {
+    let record = client_hello_record();
+    let mut split = record[..5].to_vec();
+    split[3..5].copy_from_slice(&40_u16.to_be_bytes());
+    split.extend_from_slice(&record[5..45]);
+    let decoded = dissect(CLIENT_PORT, 443, &split);
+    assert_eq!(tls_field(&decoded, "handshake_type"), None);
+    assert!(
+        decoded.diagnostics.is_empty(),
+        "{:?}",
+        diagnostic_codes(&decoded)
+    );
+
+    let mut encrypted = record[..5].to_vec();
+    encrypted[3..5].copy_from_slice(&40_u16.to_be_bytes());
+    encrypted.extend_from_slice(&[0xab; 40]);
+    let decoded = dissect(CLIENT_PORT, 443, &encrypted);
+    assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
+    assert_eq!(tls_field(&decoded, "handshake_type"), None);
+    assert!(
+        decoded.diagnostics.is_empty(),
+        "{:?}",
+        diagnostic_codes(&decoded)
+    );
+}
+
+#[test]
 fn a_layer_retains_the_records_it_covered_byte_for_byte() {
     let record = client_hello_record();
     let decoded = dissect(CLIENT_PORT, 443, &record);
@@ -382,6 +478,59 @@ fn a_segment_ending_mid_record_is_incomplete_with_a_raw_tail() {
             .all(|diagnostic| diagnostic.severity == packetcraftr_core::diagnostic::Severity::Info),
         "loss on a TLS port must never raise a warning"
     );
+}
+
+#[test]
+fn an_incomplete_segment_round_trips_through_a_packet_document() {
+    let mut segment = client_hello_record();
+    segment.extend_from_slice(&application_data(18)[..7]);
+    let decoded = dissect(CLIENT_PORT, 443, &segment);
+    let recreated = document::Packet::from_packet(&decoded.packet)
+        .to_packet(&registry(), 8)
+        .expect("the document rebuilds the packet");
+    let tls = recreated.get::<Tls>().expect("a tls layer");
+    assert!(tls.incomplete);
+    assert_eq!(tls.wire(), decoded.packet.get::<Tls>().unwrap().wire());
+    let bytes = build::Builder::new(registry())
+        .build(
+            recreated,
+            codec::Context::default(),
+            build::Options::default(),
+        )
+        .expect("the recreated packet builds")
+        .bytes;
+    let original = build::Builder::new(registry())
+        .build(
+            decoded.packet.clone(),
+            codec::Context::default(),
+            build::Options::default(),
+        )
+        .expect("the dissected packet builds")
+        .bytes;
+    assert_eq!(bytes, original);
+}
+
+#[test]
+fn a_packet_document_rejects_a_non_boolean_incomplete_flag() {
+    let decoded = dissect(CLIENT_PORT, 443, &client_hello_record());
+    let mut document = document::Packet::from_packet(&decoded.packet);
+    document
+        .layers
+        .iter_mut()
+        .find(|layer| layer.protocol == "tls")
+        .expect("a tls layer")
+        .fields
+        .insert("incomplete".to_owned(), FieldValue::from("yes"));
+    assert!(matches!(
+        document.to_packet(&registry(), 8),
+        Err(document::Error::Layer {
+            source: codec::Error::Field(packetcraftr_core::field::Error::WrongType {
+                expected: "bool",
+                ..
+            }),
+            ..
+        })
+    ));
 }
 
 #[test]

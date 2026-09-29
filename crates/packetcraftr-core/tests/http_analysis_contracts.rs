@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
 use common::http::{collect, collect_events, setup};
-use common::registry;
 use common::tls_capture::{Capture, Stream};
+use common::{assert_invalid_application_limit, reader, registry};
 use packetcraftr_core::{
     analysis::{
-        self,
+        self, Constraint, Options,
         application::Limits,
         http::{Collector, Event, Status},
     },
+    error::{BoundaryError, Classified},
     protocol::{application::http::StartLine, transport::Tcp},
 };
 
@@ -332,26 +333,175 @@ fn gap_fill_overlap_near_sequence_wrap_keeps_sources() {
 }
 
 #[test]
+fn reset_payload_does_not_consume_the_source_span_limit() {
+    let mut capture = Capture::new();
+    for port in 41_000..41_008 {
+        let stream = Stream {
+            server_port: 80,
+            ..Stream::new(port)
+        };
+        let reset = capture.client_spec(&stream, Tcp::RST | Tcp::ACK);
+        capture.push(reset, b"connection refused");
+    }
+    let mut stream = Stream {
+        server_port: 80,
+        ..Stream::new(40_000)
+    };
+    capture.open(&mut stream);
+    capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.1 204 No Content\r\n\r\n");
+
+    let limits = Limits {
+        max_source_spans: 2,
+        ..Limits::default()
+    };
+    let (messages, summary) = collect(
+        &capture.frames,
+        Collector::new(limits, vec![80], 1024).unwrap(),
+    );
+    assert_eq!(messages.len(), 2);
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.status == Status::Complete)
+    );
+    let sources: Vec<_> = messages
+        .iter()
+        .map(|message| {
+            message
+                .sources
+                .frames()
+                .iter()
+                .map(|frame| frame.number)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(sources, [[12], [13]]);
+    assert_eq!(summary.complete_messages, 2);
+}
+
+#[test]
+fn a_connection_beyond_the_stream_limit_fails_the_run_after_the_tracked_one_is_delivered() {
+    let (mut capture, mut first) = setup();
+    capture.client(&mut first, b"GET / HTTP/1.1\r\n\r\n");
+    capture.server(&mut first, b"HTTP/1.1 204 No Content\r\n\r\n");
+    let mut second = Stream {
+        server_port: 80,
+        ..Stream::new(40_001)
+    };
+    capture.open(&mut second);
+
+    let limits = Limits {
+        max_streams: 1,
+        ..Limits::default()
+    };
+    let mut collector = Collector::new(limits, vec![80], 1024).unwrap();
+    let mut delivered = Vec::new();
+    let error = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &Options {
+            track_sources: true,
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            delivered.extend(
+                collector
+                    .observe(&record)
+                    .map_err(BoundaryError::from_error)?,
+            );
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, "policy.application_limit");
+    assert_eq!(
+        error.causes(),
+        ["application analysis exceeds max_streams=1"]
+    );
+    assert!(
+        matches!(
+            delivered.as_slice(),
+            [Event::Message(request), Event::Message(response)]
+                if request.status == Status::Complete && response.status == Status::Complete
+        ),
+        "{delivered:?}"
+    );
+}
+
+fn message_and_issue_statuses(events: &[Event]) -> Vec<(&'static str, Status)> {
+    events
+        .iter()
+        .map(|event| match event {
+            Event::Message(message) => ("message", message.status),
+            Event::Issue(issue) => ("issue", issue.status),
+        })
+        .collect()
+}
+
+#[test]
+fn client_reset_reports_the_open_response_as_reset() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET /big HTTP/1.1\r\n\r\n");
+    let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n".to_vec();
+    response.extend([b'x'; 100]);
+    capture.server(&mut stream, &response);
+    let reset = capture.client_spec(&stream, Tcp::RST | Tcp::ACK);
+    capture.push(reset, b"");
+
+    let (events, summary) = collect_events(&capture.frames, collector());
+    assert_eq!(
+        message_and_issue_statuses(&events),
+        [
+            ("message", Status::Complete),
+            ("issue", Status::Reset),
+            ("message", Status::Reset),
+        ]
+    );
+    let Event::Message(response) = &events[2] else {
+        unreachable!("the reset response is a message");
+    };
+    assert_eq!(response.body_bytes, 100);
+    assert_eq!(response.request, Some(1));
+    assert_eq!(summary.complete_messages, 1);
+    assert_eq!(summary.incomplete_messages, 1);
+}
+
+#[test]
+fn server_reset_reports_the_open_request_as_reset() {
+    let (mut capture, mut stream) = setup();
+    let mut request = b"POST /up HTTP/1.1\r\nContent-Length: 1000\r\n\r\n".to_vec();
+    request.extend([b'x'; 100]);
+    capture.client(&mut stream, &request);
+    let reset = capture.server_spec(&stream, Tcp::RST | Tcp::ACK);
+    capture.push(reset, b"");
+
+    let (events, summary) = collect_events(&capture.frames, collector());
+    assert_eq!(
+        message_and_issue_statuses(&events),
+        [("issue", Status::Reset), ("message", Status::Reset)]
+    );
+    assert_eq!(summary.complete_messages, 0);
+    assert_eq!(summary.incomplete_messages, 1);
+}
+
+#[test]
 fn service_ports_normalize_and_bound_distinct_values() {
-    for ports in [
-        Vec::<u16>::new(),
-        vec![0],
-        vec![80, 0],
-        (1..=257u16).collect(),
+    for (ports, value, reason) in [
+        (Vec::<u16>::new(), 0, Constraint::NonEmptyNonZeroPorts),
+        (vec![0], 0, Constraint::NonEmptyNonZeroPorts),
+        (vec![80, 0], 0, Constraint::NonEmptyNonZeroPorts),
+        (
+            (1..=257u16).collect(),
+            257,
+            Constraint::AtMost { maximum: 256 },
+        ),
     ] {
         let error = Collector::new(Limits::default(), ports, 1024)
             .err()
             .expect("invalid port list must be rejected");
-        assert!(
-            matches!(
-                error,
-                analysis::application::Error::Limit {
-                    field: "http_ports",
-                    limit: 256
-                }
-            ),
-            "{error:?}"
-        );
+        assert_invalid_application_limit(error, "http_ports", value, reason);
     }
     for ports in [
         vec![443, 80, 443, 65535],
@@ -360,4 +510,23 @@ fn service_ports_normalize_and_bound_distinct_values() {
     ] {
         assert!(Collector::new(Limits::default(), ports, 1024).is_ok());
     }
+}
+
+#[test]
+fn body_byte_limit_must_be_positive_and_within_its_ceiling() {
+    for (max_body_bytes, reason) in [
+        (0, Constraint::NonZero),
+        (
+            256 * 1024 * 1024 + 1,
+            Constraint::AtMost {
+                maximum: 256 * 1024 * 1024,
+            },
+        ),
+    ] {
+        let error = Collector::new(Limits::default(), vec![80], max_body_bytes)
+            .err()
+            .expect("invalid body limit must be rejected");
+        assert_invalid_application_limit(error, "max_http_body_bytes", max_body_bytes, reason);
+    }
+    assert!(Collector::new(Limits::default(), vec![80], 256 * 1024 * 1024).is_ok());
 }

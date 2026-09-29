@@ -17,9 +17,9 @@ use crate::correlation::nonzero_ipv4_identification;
 use crate::execution::rate_delay;
 use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
-use super::engine::Attempts;
-use super::error::Error;
+use super::error::{Attempts, Error};
 use super::request::QueryType;
+use super::tcp::LENGTH_PREFIX_BYTES;
 use super::{DEFAULT_SERVER_PORT, MAX_PROBE_OVERHEAD, Request, TransportMode};
 
 pub(super) struct OperationLimits {
@@ -110,11 +110,14 @@ pub(super) fn operation_limits(
 }
 
 fn socket_limits(packet_count: u64, query_bytes: u64) -> Result<SocketLimits, Error> {
-    let framed_query_bytes = query_bytes.checked_add(2).ok_or(Error::InvalidLimit {
-        field: "socket_bytes",
-        value: u64::MAX,
-        reason: "DNS-over-TCP framing accounting overflowed".to_owned(),
-    })?;
+    let framed_query_bytes =
+        query_bytes
+            .checked_add(LENGTH_PREFIX_BYTES as u64)
+            .ok_or(Error::InvalidLimit {
+                field: "socket_bytes",
+                value: u64::MAX,
+                reason: "DNS-over-TCP framing accounting overflowed".to_owned(),
+            })?;
     let application_bytes =
         packet_count
             .checked_mul(framed_query_bytes)
@@ -194,6 +197,11 @@ impl Probe {
         }
         packet
     }
+
+    /// Socket bytes a DNS-over-TCP query occupies, length prefix included.
+    pub(super) fn framed_query_bytes(&self) -> usize {
+        LENGTH_PREFIX_BYTES + self.query.len()
+    }
 }
 
 /// A retried query must not give an off-path spoofer a second chance at the same tuple.
@@ -224,7 +232,9 @@ fn random_u16(
         BoundaryError::with_source(
             "could not obtain system randomness for DNS identity",
             Classification::new("io.dns_entropy", Kind::Io, None),
-            Vec::new(),
+            std::iter::once(source.to_string())
+                .chain(packetcraftr_core::error::source_chain(&source))
+                .collect(),
             source,
         )
     })?;
@@ -241,6 +251,12 @@ mod tests {
         let error = random_u16(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
         assert_eq!(error.classification().code, "io.dns_entropy");
         assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn entropy_failure_publishes_the_system_cause() {
+        let error = random_u16(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert_eq!(error.causes(), [getrandom::Error::UNSUPPORTED.to_string()]);
     }
 
     #[test]

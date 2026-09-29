@@ -120,12 +120,11 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
             let IpAddr::V4(address) = assigned.address else {
                 return false;
             };
-            // Rejecting prefix_length above 30 keeps the mask shift below from overflowing.
+            // /31 and /32 have no directed broadcast address.
             if assigned.prefix_length > 30 {
                 return false;
             }
-            let host_bits = u32::BITS - u32::from(assigned.prefix_length);
-            let host_mask = u32::MAX >> (u32::BITS - host_bits);
+            let host_mask = u32::MAX >> assigned.prefix_length;
             Ipv4Addr::from(u32::from(address) | host_mask) == destination
         })
 }
@@ -237,15 +236,10 @@ fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> boo
     }
 }
 
-fn address_scope(address: IpAddr) -> u8 {
-    match address {
-        IpAddr::V4(address) if address.is_loopback() => 1,
-        IpAddr::V6(address) if address.is_loopback() => 1,
-        IpAddr::V4(address) if address.is_link_local() => 2,
-        IpAddr::V6(address) if address.is_unicast_link_local() => 2,
-        IpAddr::V4(address) if address.is_private() => 3,
-        IpAddr::V6(address) if address.is_unique_local() => 3,
-        _ => 4,
+fn address_scope(address: IpAddr) -> Scope {
+    match classify_destination(address) {
+        Scope::Multicast | Scope::Unspecified => Scope::Global,
+        scope => scope,
     }
 }
 
@@ -343,6 +337,37 @@ mod tests {
         assert_eq!(decision.destination_scope, Scope::Private);
         assert_eq!(decision.mtu, 1_400);
         assert_eq!(decision.interface, interface().id);
+    }
+
+    #[test]
+    fn fallback_source_ranks_multicast_and_unspecified_destinations_as_global() {
+        let v4_addresses = [
+            assigned(v4(127, 0, 0, 1), 8),
+            assigned(v4(192, 0, 2, 5), 24),
+        ];
+        for destination in [v4(224, 0, 0, 251), v4(0, 0, 0, 0)] {
+            assert_eq!(
+                fallback_source(&v4_addresses, destination),
+                Some(v4(192, 0, 2, 5)),
+                "{destination}"
+            );
+        }
+
+        let global = "2001:db8::5".parse::<IpAddr>().expect("IPv6 global");
+        let v6_addresses = [
+            assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
+            assigned(global, 64),
+        ];
+        for destination in [
+            "ff02::fb".parse::<IpAddr>().expect("IPv6 multicast"),
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        ] {
+            assert_eq!(
+                fallback_source(&v6_addresses, destination),
+                Some(global),
+                "{destination}"
+            );
+        }
     }
 
     #[test]

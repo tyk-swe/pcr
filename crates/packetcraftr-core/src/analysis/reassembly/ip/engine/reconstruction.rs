@@ -49,65 +49,74 @@ pub(super) fn reconstruct_bytes(
     }
 }
 
+enum RetainedHeader<'a> {
+    /// An IPv4 fragment away from offset zero arrived first, so no header exists yet.
+    Absent,
+    Established(&'a Reconstruction),
+    Incoming,
+}
+
+impl RetainedHeader<'_> {
+    fn len(&self, incoming: &Incoming) -> usize {
+        match self {
+            Self::Absent => 0,
+            Self::Established(Reconstruction::Ipv4 { first_header, .. }) => {
+                first_header.as_ref().map_or(0, Bytes::len)
+            }
+            Self::Established(Reconstruction::Ipv6 { prefix, .. }) => prefix.len(),
+            Self::Incoming => match &incoming.reconstruction {
+                IncomingReconstruction::Ipv4 { header } => header.len(),
+                IncomingReconstruction::Ipv6 { prefix, .. } => prefix.len(),
+            },
+        }
+    }
+}
+
+/// IPv4 keeps the first offset-zero header. IPv6 keeps the first prefix until the offset-zero
+/// fragment supplies its own (RFC 8200 §4.5).
+fn retained_header<'a>(
+    existing: Option<&'a DatagramState>,
+    incoming: &Incoming,
+) -> Result<RetainedHeader<'a>, Error> {
+    let Some(state) = existing else {
+        return Ok(match &incoming.reconstruction {
+            IncomingReconstruction::Ipv4 { .. } if incoming.offset != 0 => RetainedHeader::Absent,
+            _ => RetainedHeader::Incoming,
+        });
+    };
+    let provisional = match (&state.reconstruction, &incoming.reconstruction) {
+        (Reconstruction::Ipv4 { first_header, .. }, IncomingReconstruction::Ipv4 { .. }) => {
+            first_header.is_none()
+        }
+        (
+            Reconstruction::Ipv6 {
+                from_offset_zero, ..
+            },
+            IncomingReconstruction::Ipv6 { .. },
+        ) => !from_offset_zero,
+        _ => return Err(FAMILY_MISMATCH),
+    };
+    Ok(if provisional && incoming.offset == 0 {
+        RetainedHeader::Incoming
+    } else {
+        RetainedHeader::Established(&state.reconstruction)
+    })
+}
+
 pub(super) fn reconstruction_retained_bytes(
     existing: Option<&DatagramState>,
     incoming: &Incoming,
 ) -> Result<usize, Error> {
-    let established = existing.map(|state| &state.reconstruction);
-    match &incoming.reconstruction {
-        IncomingReconstruction::Ipv4 { header } => match established {
-            Some(Reconstruction::Ipv4 {
-                first_header: Some(first_header),
-                ..
-            }) => Ok(first_header.len()),
-            Some(Reconstruction::Ipv4 {
-                first_header: None, ..
-            })
-            | None => Ok(if incoming.offset == 0 {
-                header.len()
-            } else {
-                0
-            }),
-            Some(Reconstruction::Ipv6 { .. }) => Err(FAMILY_MISMATCH),
-        },
-        IncomingReconstruction::Ipv6 { prefix, .. } => match established {
-            Some(Reconstruction::Ipv6 {
-                prefix: _,
-                from_offset_zero,
-                ..
-            }) if !*from_offset_zero && incoming.offset == 0 => Ok(prefix.len()),
-            Some(Reconstruction::Ipv6 {
-                prefix: established_prefix,
-                ..
-            }) => Ok(established_prefix.len()),
-            None => Ok(prefix.len()),
-            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
-        },
-    }
+    Ok(retained_header(existing, incoming)?.len(incoming))
 }
 
 pub(super) fn reconstruction_copied_bytes(
     existing: Option<&DatagramState>,
     incoming: &Incoming,
 ) -> usize {
-    let established = existing.map(|state| &state.reconstruction);
-    match (&incoming.reconstruction, established) {
-        (
-            IncomingReconstruction::Ipv4 { header },
-            None
-            | Some(Reconstruction::Ipv4 {
-                first_header: None, ..
-            }),
-        ) if incoming.offset == 0 => header.len(),
-        (IncomingReconstruction::Ipv6 { prefix, .. }, None) => prefix.len(),
-        (
-            IncomingReconstruction::Ipv6 { prefix, .. },
-            Some(Reconstruction::Ipv6 {
-                from_offset_zero: false,
-                ..
-            }),
-        ) if incoming.offset == 0 => prefix.len(),
-        _ => 0,
+    match retained_header(existing, incoming) {
+        Ok(header @ RetainedHeader::Incoming) => header.len(incoming),
+        Ok(RetainedHeader::Absent | RetainedHeader::Established(_)) | Err(_) => 0,
     }
 }
 
@@ -116,64 +125,41 @@ pub(super) fn materialize_reconstruction(
     incoming: &Incoming,
     ecn: Ecn,
 ) -> Result<Reconstruction, Error> {
-    let established = existing.map(|state| &state.reconstruction);
-    match &incoming.reconstruction {
-        IncomingReconstruction::Ipv4 { header } => {
-            let established_first = match established {
-                Some(Reconstruction::Ipv4 { first_header, .. }) => first_header.clone(),
-                None => None,
-                Some(Reconstruction::Ipv6 { .. }) => return Err(FAMILY_MISMATCH),
-            };
-            Ok(Reconstruction::Ipv4 {
-                first_header: match established_first {
-                    Some(first_header) => Some(first_header),
-                    None if incoming.offset == 0 => Some(copy_bytes(header)?),
-                    None => None,
-                },
-                ecn,
-            })
-        }
-        IncomingReconstruction::Ipv6 {
-            prefix,
-            predecessor_next_header_offset,
-            next_header,
-        } => match established {
-            Some(Reconstruction::Ipv6 {
-                prefix: established_prefix,
-                predecessor_next_header_offset: established_predecessor,
-                next_header: established_next,
-                from_offset_zero,
-                ..
-            }) => {
-                if !from_offset_zero && incoming.offset == 0 {
-                    // RFC 8200 §4.5: the offset-zero fragment's header wins over earlier arrivals.
-                    Ok(Reconstruction::Ipv6 {
-                        prefix: copy_bytes(prefix)?,
-                        predecessor_next_header_offset: *predecessor_next_header_offset,
-                        next_header: *next_header,
-                        ecn,
-                        from_offset_zero: true,
-                    })
-                } else {
-                    Ok(Reconstruction::Ipv6 {
-                        prefix: established_prefix.clone(),
-                        predecessor_next_header_offset: *established_predecessor,
-                        next_header: *established_next,
-                        ecn,
-                        from_offset_zero: *from_offset_zero,
-                    })
-                }
+    let retained = retained_header(existing, incoming)?;
+    Ok(match (retained, &incoming.reconstruction) {
+        (RetainedHeader::Established(established), _) => {
+            let mut reconstruction = established.clone();
+            match &mut reconstruction {
+                Reconstruction::Ipv4 { ecn: merged, .. }
+                | Reconstruction::Ipv6 { ecn: merged, .. } => *merged = ecn,
             }
-            None => Ok(Reconstruction::Ipv6 {
-                prefix: copy_bytes(prefix)?,
-                predecessor_next_header_offset: *predecessor_next_header_offset,
-                next_header: *next_header,
-                ecn,
-                from_offset_zero: incoming.offset == 0,
-            }),
-            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
+            reconstruction
+        }
+        (RetainedHeader::Absent, _) => Reconstruction::Ipv4 {
+            first_header: None,
+            ecn,
         },
-    }
+        (RetainedHeader::Incoming, IncomingReconstruction::Ipv4 { header }) => {
+            Reconstruction::Ipv4 {
+                first_header: Some(copy_bytes(header)?),
+                ecn,
+            }
+        }
+        (
+            RetainedHeader::Incoming,
+            IncomingReconstruction::Ipv6 {
+                prefix,
+                predecessor_next_header_offset,
+                next_header,
+            },
+        ) => Reconstruction::Ipv6 {
+            prefix: copy_bytes(prefix)?,
+            predecessor_next_header_offset: *predecessor_next_header_offset,
+            next_header: *next_header,
+            ecn,
+            from_offset_zero: incoming.offset == 0,
+        },
+    })
 }
 
 fn copy_bytes(source: &[u8]) -> Result<Bytes, Error> {

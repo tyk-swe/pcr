@@ -1244,14 +1244,14 @@ fn fuzz_rejected_case() -> Value {
     case.built = None;
     case.decoded = None;
     case.outcome = packet_fuzz::CaseOutcome::Rejected;
-    case.error = Some(packet_fuzz::CaseFailure::new(
+    case.error = Some(packet_fuzz::CaseFailure::with_source(
         "mutated field is out of range",
         packetcraftr_core::error::Classification::new(
             "packet.field_range",
             packetcraftr_core::error::Kind::Packet,
             Some("choose a narrower mutation range"),
         ),
-        vec!["field length exceeds the declared width".to_owned()],
+        std::io::Error::other("field length exceeds the declared width"),
     ));
     report.stats.cases_generated = 1;
     report.stats.cases_built = 0;
@@ -1515,6 +1515,7 @@ fn vocabulary<T: serde::Serialize>(
 }
 
 fn frozen_vocabularies() -> Vec<Vocabulary> {
+    use packetcraftr_cli::output::capture::{Compression, Retention};
     use packetcraftr_cli::output::diagnostic::Severity;
     use packetcraftr_cli::output::dns::{
         Outcome as DnsOutcome, Section, Transport as DnsTransport,
@@ -1529,6 +1530,16 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
     use packetcraftr_cli::output::traceroute::{Completion, ResponseKind};
 
     vec![
+        vocabulary(
+            "output::capture::Retention",
+            "/$defs/captureFiles/properties/retention/enum",
+            [Retention::Stop, Retention::Ring],
+        ),
+        vocabulary(
+            "output::capture::Compression",
+            "/$defs/captureFiles/properties/compression/enum",
+            [Compression::None, Compression::Gzip, Compression::Zstd],
+        ),
         vocabulary(
             "output::diagnostic::Severity",
             "/$defs/diagnostic/properties/severity/enum",
@@ -1665,6 +1676,22 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
                 network_output::LinkMode::Auto,
                 network_output::LinkMode::Layer2,
                 network_output::LinkMode::Layer3,
+            ],
+        ),
+        vocabulary(
+            "output::protocols::FieldKind",
+            "/$defs/protocolField/properties/kind/enum",
+            [
+                protocols_output::FieldKind::Bool,
+                protocols_output::FieldKind::Unsigned,
+                protocols_output::FieldKind::Signed,
+                protocols_output::FieldKind::Text,
+                protocols_output::FieldKind::Bytes,
+                protocols_output::FieldKind::Ipv4,
+                protocols_output::FieldKind::Ipv6,
+                protocols_output::FieldKind::Mac,
+                protocols_output::FieldKind::List,
+                protocols_output::FieldKind::Object,
             ],
         ),
     ]

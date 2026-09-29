@@ -27,10 +27,10 @@ pub(crate) struct Args {
     pub(crate) stream: Option<Selector<StreamRef>>,
     /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
     /// 8080 are always inspected.
-    #[arg(long = "http-port")]
+    #[arg(long = "http-port", value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) http_ports: Vec<u16>,
     /// Maximum counted entity bytes in one message. Bodies are discarded.
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024, value_parser = clap::value_parser!(u64).range(1..=256 * 1024 * 1024))]
     pub(crate) max_http_body_bytes: u64,
     #[command(flatten)]
     pub(crate) application: ApplicationLimitsArgs,

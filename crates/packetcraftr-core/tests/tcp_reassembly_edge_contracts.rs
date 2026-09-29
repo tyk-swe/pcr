@@ -296,6 +296,95 @@ fn tcp_direct_delivery_and_retransmission_history_are_byte_exact() {
     ));
 }
 
+fn delivered_abc(port: u16, now: Instant) -> (TcpReassembler, ScopedFlowKey) {
+    let key = flow(port);
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
+    open(&mut reassembler, key.clone(), 10, now).expect("flow opens");
+    reassembler
+        .push(segment(key.clone(), 10, b"abc", false, false, false), now)
+        .expect("data delivers");
+    (reassembler, key)
+}
+
+#[test]
+fn tcp_one_byte_keep_alive_probe_is_a_retransmission_without_conflict() {
+    let now = Instant::now();
+    let (mut reassembler, key) = delivered_abc(10_005, now);
+
+    let probe = reassembler
+        .push(segment(key.clone(), 12, b"Z", false, false, false), now)
+        .expect("a keep-alive probe is classified");
+    assert!(matches!(
+        probe.as_slice(),
+        [TcpEvent::Retransmission {
+            sequence: 12,
+            bytes: 1,
+            conflicting: false,
+            ..
+        }]
+    ));
+
+    let history = reassembler
+        .push(segment(key, 10, b"abd", false, false, false), now)
+        .expect("a wider overlap is still compared with delivered bytes");
+    assert!(matches!(
+        history.as_slice(),
+        [TcpEvent::Retransmission {
+            bytes: 3,
+            conflicting: true,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn tcp_one_byte_overlap_that_is_not_a_probe_shape_stays_conflicting() {
+    let now = Instant::now();
+    let conflicting = |events: &[TcpEvent], bytes: usize| {
+        matches!(
+            events.first(),
+            Some(TcpEvent::Retransmission {
+                bytes: reported,
+                conflicting: true,
+                ..
+            }) if *reported == bytes
+        )
+    };
+
+    let (mut reassembler, key) = delivered_abc(10_105, now);
+    let below_last = reassembler
+        .push(segment(key.clone(), 11, b"Z", false, false, false), now)
+        .expect("a one-byte overlap below the last byte is classified");
+    assert!(conflicting(&below_last, 1));
+    let two_bytes = reassembler
+        .push(segment(key, 11, b"XZ", false, false, false), now)
+        .expect("a two-byte overlap is classified");
+    assert!(conflicting(&two_bytes, 2));
+
+    let (mut reassembler, key) = delivered_abc(10_205, now);
+    let fin = reassembler
+        .push(segment(key, 12, b"Z", false, true, false), now)
+        .expect("a FIN-bearing overlap is classified");
+    assert!(conflicting(&fin, 1));
+
+    let (mut reassembler, key) = delivered_abc(10_305, now);
+    let rst = reassembler
+        .push(segment(key, 12, b"Z", false, false, true), now)
+        .expect("a RST-bearing overlap is classified");
+    assert!(conflicting(&rst, 1));
+
+    let key = flow(10_405);
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
+    open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
+    reassembler
+        .push(segment(key.clone(), 100, b"a", false, false, false), now)
+        .expect("first byte delivers");
+    let syn = reassembler
+        .push(segment(key, 99, b"Z", true, false, false), now)
+        .expect("a SYN-bearing overlap of the same generation is classified");
+    assert!(conflicting(&syn, 1));
+}
+
 #[test]
 fn tcp_retransmission_ranges_report_each_actual_overlap() {
     let now = Instant::now();

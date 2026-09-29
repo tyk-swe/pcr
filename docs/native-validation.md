@@ -62,7 +62,7 @@ cargo build --locked --release -p packetcraftr-cli --all-features
 python3 scripts/test-native-isolated.py --binary target/release/packetcraftr
 ```
 
-The launcher builds the ignored `native_isolated` contract target (unless
+The launcher builds the ignored `native_isolated` test target (unless
 `--native-test-binary` names a prebuilt one) and re-executes itself in a fresh
 user/network namespace. It refuses to run any scenario unless that namespace
 differs from its parent and holds only loopback; no external destinations are

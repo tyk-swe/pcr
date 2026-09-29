@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use packetcraftr_core::frame::{self as library_frame, Frame};
 use packetcraftr_core::{decode::DecodedPacket, layout};
@@ -14,7 +14,6 @@ use super::contract::Error;
 use super::diagnostic::Diagnostic;
 use super::hex::CompactHex;
 
-const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -66,38 +65,16 @@ impl TryFrom<SystemTime> for Timestamp {
 }
 
 impl Timestamp {
-    fn from_pre_epoch_duration(duration: Duration) -> Result<Self, Error> {
-        if duration.subsec_nanos() == 0 {
-            let unix_seconds = if duration.as_secs() == MAX_SIGNED_SECONDS + 1 {
-                i64::MIN
-            } else {
-                i64::try_from(duration.as_secs())
-                    .ok()
-                    .and_then(i64::checked_neg)
-                    .ok_or(Error::TimestampOutOfRange)?
-            };
-            Ok(Self {
-                unix_seconds,
-                nanoseconds: 0,
-            })
-        } else {
-            let seconds = duration.as_secs();
-            if seconds > MAX_SIGNED_SECONDS {
-                return Err(Error::TimestampOutOfRange);
-            }
-            // A fractional instant before the epoch uses floor seconds.
-            let unix_seconds = if seconds == MAX_SIGNED_SECONDS {
-                i64::MIN
-            } else {
-                let signed_seconds = seconds as i64;
-                -(signed_seconds + 1)
-            };
-            let nanoseconds = NANOS_PER_SECOND - duration.subsec_nanos();
-            Ok(Self {
-                unix_seconds,
-                nanoseconds,
-            })
-        }
+    fn from_pre_epoch_duration(before: Duration) -> Result<Self, Error> {
+        let whole = i128::from(before.as_secs());
+        let (seconds, nanoseconds) = match before.subsec_nanos() {
+            0 => (-whole, 0),
+            nanos => (-whole - 1, NANOS_PER_SECOND - nanos),
+        };
+        Ok(Self {
+            unix_seconds: i64::try_from(seconds).map_err(|_| Error::TimestampOutOfRange)?,
+            nanoseconds,
+        })
     }
 }
 
@@ -188,8 +165,9 @@ impl From<&layout::PacketLayout> for Layout {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Wire {
+    #[serde(rename = "bytes_hex", serialize_with = "hex")]
     bytes: Bytes,
     pub length: u64,
 }
@@ -213,34 +191,19 @@ impl Wire {
     }
 }
 
-impl Serialize for Wire {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct Output<'a> {
-            bytes_hex: CompactHex<'a>,
-            length: u64,
-        }
-
-        Output {
-            bytes_hex: CompactHex(&self.bytes),
-            length: self.length,
-        }
-        .serialize(serializer)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Captured {
-    bytes: Bytes,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Timestamp>,
     pub captured_length: u32,
     pub original_length: u32,
     pub link_type: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
+    #[serde(rename = "bytes_hex", serialize_with = "hex")]
+    bytes: Bytes,
 }
 
 impl TryFrom<Frame> for Captured {
@@ -269,36 +232,8 @@ impl Captured {
     }
 }
 
-impl Serialize for Captured {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct Output<'a> {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            timestamp: Option<Timestamp>,
-            captured_length: u32,
-            original_length: u32,
-            link_type: u32,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            interface: Option<u32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            direction: Option<Direction>,
-            bytes_hex: CompactHex<'a>,
-        }
-
-        Output {
-            timestamp: self.timestamp,
-            captured_length: self.captured_length,
-            original_length: self.original_length,
-            link_type: self.link_type,
-            interface: self.interface,
-            direction: self.direction,
-            bytes_hex: CompactHex(&self.bytes),
-        }
-        .serialize(serializer)
-    }
+fn hex<S: Serializer>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error> {
+    CompactHex(bytes).serialize(serializer)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -332,7 +267,6 @@ impl TryFrom<DecodedPacket> for Decoded {
     fn try_from(decoded: DecodedPacket) -> Result<Self, Error> {
         let DecodedPacket {
             packet,
-            original: _,
             frame,
             layout,
             diagnostics,
@@ -349,7 +283,111 @@ impl TryFrom<DecodedPacket> for Decoded {
 #[cfg(test)]
 mod tests {
 
+    use packetcraftr_core::frame::{Lengths, LinkType};
+
     use super::*;
+
+    const HALF_RANGE_SECONDS: u64 = 1 << 63;
+
+    #[test]
+    fn wire_serializes_hex_bytes_before_length() {
+        let wire = Wire::from(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]));
+
+        assert_eq!(
+            serde_json::to_string(&wire).unwrap(),
+            r#"{"bytes_hex":"deadbeef","length":4}"#
+        );
+    }
+
+    #[test]
+    fn captured_serializes_every_present_field_in_published_order() {
+        let mut frame = Frame::try_with_lengths(
+            UNIX_EPOCH + Duration::new(1, 500),
+            LinkType::ETHERNET,
+            Lengths {
+                captured: 2,
+                original: 60,
+            },
+            vec![0xab, 0xcd],
+        )
+        .unwrap();
+        frame.interface = Some(3);
+        frame.direction = Some(library_frame::Direction::Inbound);
+
+        let captured = Captured::try_from(frame).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&captured).unwrap(),
+            concat!(
+                r#"{"timestamp":{"unix_seconds":1,"nanoseconds":500},"#,
+                r#""captured_length":2,"original_length":60,"link_type":1,"#,
+                r#""interface":3,"direction":"inbound","bytes_hex":"abcd"}"#
+            )
+        );
+    }
+
+    #[test]
+    fn captured_omits_absent_timestamp_interface_and_direction() {
+        let frame = Frame::without_timestamp(LinkType::ETHERNET, vec![0x45]).unwrap();
+
+        let captured = Captured::try_from(frame).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&captured).unwrap(),
+            r#"{"captured_length":1,"original_length":1,"link_type":1,"bytes_hex":"45"}"#
+        );
+    }
+
+    #[test]
+    fn pre_epoch_offsets_use_floor_seconds() {
+        for ((seconds, nanoseconds), expected) in [
+            ((0, 0), (0, 0)),
+            ((3, 0), (-3, 0)),
+            ((0, 500_000_000), (-1, 500_000_000)),
+            ((0, 1), (-1, 999_999_999)),
+            ((2, 250_000_000), (-3, 750_000_000)),
+            ((i64::MAX as u64, 0), (-i64::MAX, 0)),
+        ] {
+            let timestamp =
+                Timestamp::from_pre_epoch_duration(Duration::new(seconds, nanoseconds)).unwrap();
+            assert_eq!(
+                (timestamp.unix_seconds, timestamp.nanoseconds),
+                expected,
+                "{seconds}s {nanoseconds}ns before the epoch"
+            );
+        }
+    }
+
+    #[test]
+    fn pre_epoch_offsets_reach_the_minimum_signed_second_and_no_further() {
+        let minimum = Timestamp::from_pre_epoch_duration(Duration::new(HALF_RANGE_SECONDS, 0))
+            .expect("exactly i64::MIN seconds before the epoch is representable");
+        assert_eq!((minimum.unix_seconds, minimum.nanoseconds), (i64::MIN, 0));
+
+        let fractional_minimum =
+            Timestamp::from_pre_epoch_duration(Duration::new(i64::MAX as u64, 1))
+                .expect("a fraction past i64::MAX seconds floors to i64::MIN");
+        assert_eq!(
+            (
+                fractional_minimum.unix_seconds,
+                fractional_minimum.nanoseconds
+            ),
+            (i64::MIN, 999_999_999)
+        );
+
+        for (seconds, nanoseconds) in [
+            (HALF_RANGE_SECONDS, 1),
+            (HALF_RANGE_SECONDS + 1, 0),
+            (u64::MAX, 0),
+            (u64::MAX, 999_999_999),
+        ] {
+            assert_eq!(
+                Timestamp::from_pre_epoch_duration(Duration::new(seconds, nanoseconds)),
+                Err(Error::TimestampOutOfRange),
+                "{seconds}s {nanoseconds}ns before the epoch"
+            );
+        }
+    }
 
     #[test]
     fn timestamp_display_uses_conventional_signed_decimal_notation() {

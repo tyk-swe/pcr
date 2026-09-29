@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv4Addr;
 
 use bytes::Bytes;
 
@@ -22,7 +22,7 @@ use crate::protocol::common::{
     typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
 
-use super::envelope::is_outer_network_layer;
+use super::envelope::ipv4_endpoints;
 
 use crate::protocol::BuiltinProtocol;
 
@@ -102,7 +102,8 @@ impl LayerCodec for Ipv4Codec {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<Ipv4>(NAME, layer)?;
-        let (source, destination) = resolve_addresses(layer, context);
+        let (source, destination) =
+            ipv4_endpoints(layer, context.packet, context.index, context.build_context);
         let (options, covered_payload_len, mut diagnostics) =
             prepare_payload(layer, payload, context)?;
         let header_len = IPV4_MIN_LEN.saturating_add(options.len());
@@ -288,21 +289,6 @@ impl LayerCodec for Ipv4Codec {
     }
 }
 
-fn resolve_addresses(layer: &Ipv4, context: &LayerEncodeContext<'_>) -> (Ipv4Addr, Ipv4Addr) {
-    let inherit = is_outer_network_layer(context.packet, context.index);
-    let source = match context.build_context.source {
-        Some(IpAddr::V4(source)) if inherit && layer.source.is_unspecified() => source,
-        _ => layer.source,
-    };
-    let destination = match context.build_context.destination {
-        Some(IpAddr::V4(destination)) if inherit && layer.destination.is_unspecified() => {
-            destination
-        }
-        _ => layer.destination,
-    };
-    (source, destination)
-}
-
 fn prepare_payload(
     layer: &Ipv4,
     payload: &[u8],
@@ -316,13 +302,14 @@ fn prepare_payload(
     }
     let mut diagnostics = Vec::new();
     if layer.reserved_flag {
-        let message = "reserved IPv4 flag bit is set";
-        if context.mode == crate::codec::Mode::Strict {
-            return Err(invalid(NAME, message));
-        }
-        diagnostics.push(
-            Diagnostic::warning("build.ipv4_reserved_flag", message).at_field("reserved_flag"),
-        );
+        strict_or_diagnostic(
+            NAME,
+            "build.ipv4_reserved_flag",
+            "reserved_flag",
+            "reserved IPv4 flag bit is set",
+            context,
+            &mut diagnostics,
+        )?;
     }
     let options = pad_options_to_four_bytes(
         &layer.options,

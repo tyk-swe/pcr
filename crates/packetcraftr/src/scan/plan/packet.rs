@@ -11,6 +11,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::application::ntp::Ntp;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
@@ -102,6 +103,7 @@ pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
 const ICMP_IDENTITY_TAG: u8 = 0x43;
 
 const DNS_PORT: u16 = 53;
+const NTP_PORT: u16 = 123;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
 const GENEVE_ETHERNET: u16 = 0x6558;
@@ -135,6 +137,14 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
         packet.push(dhcp);
         return;
     }
+    if port == NTP_PORT
+        && let Some(ntp) = decode_layer(&registry, BuiltinProtocol::Ntp.as_str(), payload)
+        && ntp.layer.is::<Ntp>()
+        && ntp.consumed == payload.len()
+    {
+        packet.push_boxed(ntp.layer);
+        return;
+    }
     if port == VXLAN_PORT
         && push_typed_tunnel(
             packet,
@@ -153,11 +163,7 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     packet.push(Raw::new(payload.clone()));
 }
 
-fn decode_tunnel_header(
-    registry: &Registry,
-    protocol: &str,
-    payload: &[u8],
-) -> Option<DecodedLayer> {
+fn decode_layer(registry: &Registry, protocol: &str, payload: &[u8]) -> Option<DecodedLayer> {
     registry
         .codec(protocol)?
         .decode(
@@ -165,7 +171,6 @@ fn decode_tunnel_header(
             &LayerDecodeContext {
                 parent: None,
                 registry,
-                allow_trailing_padding: false,
                 network: None,
                 discriminator: None,
             },
@@ -205,7 +210,7 @@ fn push_typed_tunnel(
     expected_root: &str,
     payload: &[u8],
 ) -> bool {
-    let Some(header) = decode_tunnel_header(registry, protocol, payload) else {
+    let Some(header) = decode_layer(registry, protocol, payload) else {
         return false;
     };
     let inner = decode_inner(registry, link_type, &payload[header.consumed..]);
@@ -223,7 +228,7 @@ fn push_typed_tunnel(
 }
 
 fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &[u8]) -> bool {
-    let Some(header) = decode_tunnel_header(registry, "geneve", payload) else {
+    let Some(header) = decode_layer(registry, "geneve", payload) else {
         return false;
     };
     let Some(geneve) = header.layer.downcast_ref::<Geneve>() else {
@@ -396,6 +401,52 @@ mod tests {
         )
         .unwrap();
         assert!(!sent_probe_matches(&changed, &built.packet));
+    }
+
+    fn ntp_probe(payload: &[u8]) -> Probe {
+        Probe {
+            sequence: 0,
+            attempt: 1,
+            address: "192.0.2.123".parse().unwrap(),
+            endpoint: ProbeEndpoint::Udp { port: 123 },
+            udp_profile: None,
+            udp_payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    #[test]
+    fn ntp_payloads_use_the_exact_ntp_layer_under_strict_port_binding() {
+        let mut payload = vec![0x23];
+        payload.resize(40, 0);
+        payload.extend_from_slice(&0x0123_4567_89ab_cdef_u64.to_be_bytes());
+        payload.extend_from_slice(b"\x00\x01\x00\x04ext!");
+        let probe = ntp_probe(&payload);
+        let mut packet = probe.packet();
+        packet.get_mut::<Ipv4>().unwrap().source = "192.0.2.1".parse().unwrap();
+        let built = build::Builder::new(builtin::registry())
+            .build(packet, codec::Context::default(), build::Options::default())
+            .unwrap();
+        assert!(built.bytes.ends_with(&payload));
+        let ntp = built.packet.get::<Ntp>().unwrap();
+        assert_eq!(ntp.transmit_timestamp, 0x0123_4567_89ab_cdef);
+        assert_eq!(ntp.extensions, &payload[48..]);
+        assert!(sent_probe_matches(&probe, &built.packet));
+    }
+
+    #[test]
+    fn udp_123_payload_that_is_not_ntp_still_fails_strict_build() {
+        let mut payload = vec![0x13];
+        payload.resize(48, 0);
+        let probe = ntp_probe(&payload);
+        let mut packet = probe.packet();
+        packet.get_mut::<Ipv4>().unwrap().source = "192.0.2.1".parse().unwrap();
+        assert!(
+            build::Builder::new(builtin::registry())
+                .build(packet, codec::Context::default(), build::Options::default())
+                .is_err()
+        );
+        assert_eq!(probe.packet().get::<Raw>().unwrap().bytes, payload);
+        assert!(sent_probe_matches(&probe, &probe.packet()));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 //! Captured names reach the terminal only through the sanitizing writer.
 
-use std::fmt::Display;
+use std::net::SocketAddr;
 
 use crate::output::dns_read::Latency;
 
@@ -21,8 +21,8 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
         message.stream,
         message.index,
         message.status,
-        endpoint(flow.source, flow.source_port),
-        endpoint(flow.destination, flow.destination_port),
+        SocketAddr::new(flow.source, flow.source_port),
+        SocketAddr::new(flow.destination, flow.destination_port),
         frames(&message.sources),
     ))?;
     if let Some(fields) = &message.fields {
@@ -60,10 +60,6 @@ pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError>
         complete.summary.unanswered_transactions,
         complete.frames_read
     ))
-}
-
-fn endpoint(address: impl Display, port: impl Display) -> String {
-    format!("{address}:{port}")
 }
 
 fn frames(sources: &[crate::output::provenance::Source]) -> String {

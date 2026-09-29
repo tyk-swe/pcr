@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::{Cursor, Write};
-use std::process::Output;
 
 use packetcraftr_core::capture_file::Format;
 use packetcraftr_core::capture_file::Reader;
@@ -10,12 +9,15 @@ use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 
+#[path = "common/capture.rs"]
+mod capture_support;
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
 
-use common::{assert_contiguous, parse_ndjson, path_text, run};
-use process_support::{append_truncated_record, decode_hex, run_with_stdin};
+use capture_support::{UDP_CLIENT, assert_file_stdin_parity};
+use common::{assert_contiguous, parse_ndjson, run};
+use process_support::{append_truncated_record, decode_hex};
 
 const COMMANDS: [(&str, &[&str]); 5] = [
     ("read", &[]),
@@ -46,36 +48,6 @@ fn handshake_capture(format: Format) -> Vec<u8> {
         writer.flush().unwrap();
     }
     bytes
-}
-
-fn assert_file_stdin_parity(
-    input: &[u8],
-    command: &str,
-    flags: &[&str],
-    format: &str,
-    exit_code: i32,
-) -> Output {
-    let mut capture = tempfile::NamedTempFile::new().unwrap();
-    capture.write_all(input).unwrap();
-    capture.flush().unwrap();
-    let mut arguments = vec!["--output", format, command, path_text(capture.path())];
-    arguments.extend_from_slice(flags);
-    let file = run(&arguments);
-    arguments[3] = "-";
-    let stdin = run_with_stdin(&arguments, input);
-    assert_eq!(
-        file.status.code(),
-        Some(exit_code),
-        "{arguments:?}: {file:?}"
-    );
-    assert_eq!(
-        stdin.status.code(),
-        Some(exit_code),
-        "{arguments:?}: {stdin:?}"
-    );
-    assert_eq!(stdin.stdout, file.stdout, "{arguments:?}: stdout differs");
-    assert_eq!(stdin.stderr, file.stderr, "{arguments:?}: stderr differs");
-    stdin
 }
 
 #[test]
@@ -316,6 +288,13 @@ fn input_interface_limit_is_per_section_for_files_and_stdin() {
 #[test]
 fn selection_cannot_hide_unused_input_interfaces() {
     let mut writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::IPV4).unwrap();
+    let frame = Frame::new(
+        std::time::UNIX_EPOCH,
+        LinkType::IPV4,
+        decode_hex(UDP_CLIENT),
+    )
+    .unwrap();
+    writer.write_frame(&frame).unwrap();
     writer.add_interface(LinkType::IPV6).unwrap();
     let input = writer.into_inner();
     for (command, _) in COMMANDS {

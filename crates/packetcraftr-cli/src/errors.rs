@@ -47,15 +47,17 @@ impl CliError {
         )
     }
 
-    pub(crate) fn refused_option(
+    /// The message names what failed; the source's text appears only in the causes.
+    pub(crate) fn wrapping(
+        kind: Kind,
         message: impl Into<String>,
         source: &(impl std::error::Error + ?Sized),
     ) -> Self {
-        let mut error = Self::new(Kind::Usage, message);
-        error.causes = std::iter::once(source.to_string())
-            .chain(packetcraftr_core::error::source_chain(source))
-            .collect();
-        error
+        Self::from_classification(
+            Classification::new(fallback_code(kind), kind, None),
+            message,
+            source_causes(source),
+        )
     }
 
     pub(crate) fn from_classification(
@@ -140,6 +142,13 @@ impl From<output::contract::Error> for CliError {
     }
 }
 
+/// The source's text, then its distinct sources, for errors whose message omits the source.
+pub(crate) fn source_causes(source: &(impl std::error::Error + ?Sized)) -> Vec<String> {
+    std::iter::once(source.to_string())
+        .chain(packetcraftr_core::error::source_chain(source))
+        .collect()
+}
+
 const fn fallback_code(kind: Kind) -> &'static str {
     match kind {
         Kind::Usage => "cli.error",
@@ -211,6 +220,23 @@ mod tests {
                 "kind {kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn wrapping_lists_the_source_and_its_chain_without_repeating_them_in_the_message() {
+        #[derive(Debug, thiserror::Error)]
+        #[error("outer failure")]
+        struct Outer(#[source] std::io::Error);
+
+        let source = Outer(std::io::Error::other("root failure"));
+        assert_eq!(source_causes(&source), ["outer failure", "root failure"]);
+
+        let error = CliError::wrapping(Kind::Io, "write failed", &source);
+        assert_eq!(error.message, "write failed");
+        assert_eq!(error.causes, ["outer failure", "root failure"]);
+        assert_eq!(error.classification.kind, Kind::Io);
+        assert_eq!(error.classification.code, "io.runtime");
+        assert_eq!(error.exit_code(), 5);
     }
 
     #[test]

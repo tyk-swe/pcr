@@ -13,7 +13,7 @@ pub use srh::SegmentRoutingHeader;
 pub(crate) use srh::SegmentRoutingHeaderCodec;
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::Ipv6Addr;
 
 use bytes::Bytes;
 
@@ -28,11 +28,12 @@ use crate::{
 use crate::protocol::common::{
     ValueExpectation, expected_discriminator, invalid, make_layer, network_from_addresses,
     payload_without_padding, protocol, resolve_u8, resolve_u16, strict_or_diagnostic, truncated,
-    typed_layer, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    typed_layer, unsupported, validate_auto_raw_discriminator, validate_ipv6_routing_child,
     validate_raw_child_discriminator,
 };
 
-use super::envelope::{is_ipv6_extension_layer, is_outer_network_layer};
+use super::envelope::{ipv6_endpoints, is_ipv6_extension_layer};
+use super::ip_protocol;
 
 use crate::protocol::BuiltinProtocol;
 
@@ -108,24 +109,8 @@ impl LayerCodec for Ipv6Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        let expected_next = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
-        validate_auto_raw_discriminator(
-            NAME,
-            "next_header",
-            &layer.next_header,
-            context,
-            &mut diagnostics,
-        )?;
-        let (next_header, materialized_next) = resolve_u8(
-            NAME,
-            "next_header",
-            &layer.next_header,
-            expected_next,
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(NAME, u64::from(next_header), context, &mut diagnostics)?;
-        validate_ipv6_routing_child(NAME, next_header, context, &mut diagnostics)?;
+        let (next_header, materialized_next) =
+            resolve_next_header(NAME, &layer.next_header, context, &mut diagnostics)?;
         let version_flow = (6u32 << 28) | (u32::from(layer.traffic_class) << 20) | layer.flow_label;
         let mut prefix = Vec::with_capacity(IPV6_LEN);
         prefix.extend_from_slice(&version_flow.to_be_bytes());
@@ -163,11 +148,10 @@ impl LayerCodec for Ipv6Codec {
         // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
         // Payload option.
         if payload_length == 0 && input.len() > IPV6_LEN && header[6] == 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option"
-                    .to_string(),
-            });
+            return Err(unsupported(
+                NAME,
+                "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option",
+            ));
         }
         let required = IPV6_LEN
             .checked_add(payload_length)
@@ -215,15 +199,33 @@ impl LayerCodec for Ipv6Codec {
     }
 }
 
+fn resolve_next_header(
+    name: &'static str,
+    value: &WireValue<u8>,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(u8, WireValue<u8>), crate::codec::Error> {
+    let expectation = expected_discriminator(name, context, ip_protocol::NO_NEXT_HEADER, value);
+    validate_auto_raw_discriminator(name, "next_header", value, context, diagnostics)?;
+    let (next, materialized) = resolve_u8(
+        name,
+        "next_header",
+        value,
+        expectation,
+        context.mode,
+        diagnostics,
+    )?;
+    validate_raw_child_discriminator(name, u64::from(next), context, diagnostics)?;
+    validate_ipv6_routing_child(name, next, context, diagnostics)?;
+    Ok((next, materialized))
+}
+
 fn resolve_addresses(
     layer: &Ipv6,
     context: &LayerEncodeContext<'_>,
 ) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), crate::codec::Error> {
-    let inherit = is_outer_network_layer(context.packet, context.index);
-    let source = match context.build_context.source {
-        Some(IpAddr::V6(source)) if inherit && layer.source.is_unspecified() => source,
-        _ => layer.source,
-    };
+    let (source, inherited_destination) =
+        ipv6_endpoints(layer, context.packet, context.index, context.build_context);
     let routing = context
         .packet
         .iter()
@@ -258,14 +260,9 @@ fn resolve_addresses(
             &mut diagnostics,
         )?;
     }
-    let destination = match (
-        layer.destination.is_unspecified(),
-        active_segment,
-        context.build_context.destination,
-    ) {
-        (true, Some(active), _) => active,
-        (true, None, Some(IpAddr::V6(destination))) if inherit => destination,
-        _ => layer.destination,
+    let destination = match active_segment {
+        Some(active) if layer.destination.is_unspecified() => active,
+        _ => inherited_destination,
     };
     if destination.is_unspecified() && routing.is_some_and(|routing|
         matches!(routing.segments_left, WireValue::Exact(left) if usize::from(left) == routing.segments.len())) {

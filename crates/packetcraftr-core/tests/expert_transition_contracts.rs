@@ -4,6 +4,7 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -15,7 +16,7 @@ use packetcraftr_core::analysis::expert::Finding;
 use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::analysis::{StreamRef, StreamTransport};
 
-use packetcraftr_core::frame::{Frame, Lengths};
+use packetcraftr_core::capture_file::Reader;
 use packetcraftr_core::protocol::transport::{Tcp, TcpOption};
 use packetcraftr_core::registry::Registry;
 
@@ -24,11 +25,10 @@ fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
     spec
 }
 
-fn analyze_frames(
+fn analyze_capture(
     registry: Arc<Registry>,
-    frames: &[Frame],
+    mut capture: Reader<impl Read>,
 ) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary) {
-    let mut capture = reader(frames);
     let mut collector = packetcraftr_core::analysis::expert::Collector::new();
     let mut findings = Vec::new();
     let run_summary = run(
@@ -62,7 +62,7 @@ fn analyze(
             frame(&registry, timestamp, spec.clone(), payload)
         })
         .collect::<Vec<_>>();
-    analyze_frames(registry, &frames)
+    analyze_capture(registry, reader(&frames))
 }
 
 fn finding(
@@ -468,7 +468,7 @@ fn non_tcp_sweep_retires_expired_expert_generation() {
         ),
     ];
 
-    let (findings, summary) = analyze_frames(registry, &frames);
+    let (findings, summary) = analyze_capture(registry, reader(&frames));
     assert!(findings.is_empty());
     assert_eq!(
         summary.clock.max_forward_step,
@@ -532,6 +532,23 @@ fn renewed_syn_clears_stale_tuple_window_state() {
     );
 }
 
+fn capture_warning(code: &'static str, number: u64, message: &str) -> Finding {
+    Finding {
+        severity: packetcraftr_core::diagnostic::Severity::Warning,
+        code,
+        number,
+        stream: None,
+        message: message.to_owned(),
+    }
+}
+
+fn capture_findings(findings: Vec<Finding>) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter(|finding| finding.code.starts_with("capture."))
+        .collect()
+}
+
 #[test]
 fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
     let registry = registry();
@@ -545,8 +562,8 @@ fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
         9_999,
         b"first",
     );
-    let truncated = {
-        let frame = udp_frame(
+    let truncated = common::truncated(
+        &udp_frame(
             &registry,
             epoch + Duration::from_secs(11),
             SERVER,
@@ -554,19 +571,9 @@ fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
             9_999,
             1_000,
             b"second-payload",
-        );
-        let cut = frame.captured_length() - 6;
-        Frame::try_with_lengths(
-            epoch + Duration::from_secs(11),
-            frame.link_type,
-            Lengths {
-                captured: cut,
-                original: frame.captured_length(),
-            },
-            frame.bytes().slice(..cut as usize),
-        )
-        .expect("truncated fixture frame is valid")
-    };
+        ),
+        6,
+    );
     let regressed = udp_frame(
         &registry,
         epoch + Duration::from_secs(1),
@@ -576,30 +583,23 @@ fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
         9_999,
         b"third",
     );
-    let (findings, _summary) = analyze_frames(registry, &[full, truncated, regressed]);
+    let (findings, _summary) = analyze_capture(registry, reader(&[full, truncated, regressed]));
 
-    let truncated_finding = findings
-        .iter()
-        .find(|finding| finding.code == "capture.frame_truncated")
-        .expect("truncated frame produces a finding");
     assert_eq!(
-        truncated_finding.severity,
-        packetcraftr_core::diagnostic::Severity::Warning
+        capture_findings(findings),
+        vec![
+            capture_warning(
+                "capture.frame_truncated",
+                2,
+                "frame 2 captured 36 of 42 bytes",
+            ),
+            capture_warning(
+                "capture.clock_regression",
+                3,
+                "frame 3 timestamp regressed 10s below the capture's latest observed timestamp",
+            ),
+        ]
     );
-    assert_eq!(truncated_finding.number, 2);
-    assert!(truncated_finding.stream.is_none());
-    assert!(truncated_finding.message.contains("of "));
-
-    let regression_finding = findings
-        .iter()
-        .find(|finding| finding.code == "capture.clock_regression")
-        .expect("regressed timestamp produces a finding");
-    assert_eq!(
-        regression_finding.severity,
-        packetcraftr_core::diagnostic::Severity::Warning
-    );
-    assert_eq!(regression_finding.number, 3);
-    assert!(regression_finding.message.contains("10s"));
 }
 
 #[test]
@@ -618,7 +618,7 @@ fn capture_evidence_stays_silent_on_well_formed_ordered_captures() {
             b"b",
         ),
     ];
-    let (findings, _summary) = analyze_frames(registry, &frames);
+    let (findings, _summary) = analyze_capture(registry, reader(&frames));
     assert!(
         findings
             .iter()
@@ -640,8 +640,8 @@ fn capture_evidence_combines_on_one_frame() {
         9_999,
         b"high-water",
     );
-    let combined = {
-        let frame = udp_frame(
+    let combined = common::truncated(
+        &udp_frame(
             &registry,
             epoch + Duration::from_secs(2),
             SERVER,
@@ -649,38 +649,37 @@ fn capture_evidence_combines_on_one_frame() {
             9_999,
             1_000,
             b"truncated-and-late",
-        );
-        let cut = frame.captured_length() - 4;
-        Frame::try_with_lengths(
-            epoch + Duration::from_secs(2),
-            frame.link_type,
-            Lengths {
-                captured: cut,
-                original: frame.captured_length(),
-            },
-            frame.bytes().slice(..cut as usize),
-        )
-        .expect("truncated fixture frame is valid")
-    };
-    let (findings, _summary) = analyze_frames(registry, &[full, combined]);
-    let codes: Vec<_> = findings
-        .iter()
-        .filter(|finding| finding.number == 2)
-        .map(|finding| finding.code)
-        .collect();
-    assert!(codes.contains(&"capture.frame_truncated"), "{codes:?}");
-    assert!(codes.contains(&"capture.clock_regression"), "{codes:?}");
+        ),
+        4,
+    );
+    let (findings, _summary) = analyze_capture(registry, reader(&[full, combined]));
+
+    assert_eq!(
+        capture_findings(findings),
+        vec![
+            capture_warning(
+                "capture.frame_truncated",
+                2,
+                "frame 2 captured 42 of 46 bytes",
+            ),
+            capture_warning(
+                "capture.clock_regression",
+                2,
+                "frame 2 timestamp regressed 8s below the capture's latest observed timestamp",
+            ),
+        ]
+    );
 }
 
 #[test]
 fn capture_evidence_names_the_declared_interface_when_present() {
-    use packetcraftr_core::capture_file::{Reader, Writer};
+    use packetcraftr_core::capture_file::Writer;
     use std::io::Cursor;
 
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-    let truncated = {
-        let frame = udp_frame(
+    let truncated = common::truncated(
+        &udp_frame(
             &registry,
             epoch,
             CLIENT,
@@ -688,19 +687,9 @@ fn capture_evidence_names_the_declared_interface_when_present() {
             1_000,
             9_999,
             b"payload-cut-short",
-        );
-        let cut = frame.captured_length() - 4;
-        Frame::try_with_lengths(
-            epoch,
-            frame.link_type,
-            Lengths {
-                captured: cut,
-                original: frame.captured_length(),
-            },
-            frame.bytes().slice(..cut as usize),
-        )
-        .expect("truncated fixture frame is valid")
-    };
+        ),
+        4,
+    );
     let mut writer = Writer::pcapng(Vec::new()).expect("pcapng writer initializes");
     writer
         .write_frame(&truncated)
@@ -708,38 +697,28 @@ fn capture_evidence_names_the_declared_interface_when_present() {
     let mut regressed = truncated.clone();
     regressed.timestamp = Some(SystemTime::UNIX_EPOCH);
     writer.write_frame(&regressed).unwrap();
-    let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("pcapng fixture opens");
+    let capture = Reader::new(Cursor::new(writer.into_inner())).expect("pcapng fixture opens");
 
-    let mut collector = packetcraftr_core::analysis::expert::Collector::new();
-    let mut findings = Vec::new();
-    let run_summary = run(
-        &mut capture,
-        Arc::clone(&registry),
-        &Options {
-            tcp_events: true,
-            ..Options::default()
-        },
-        |record| {
-            findings.extend(collector.observe(&record));
-            Ok(())
-        },
-    )
-    .expect("expert pass succeeds");
-    let _ = collector.finish(&run_summary);
-    let finding = findings
-        .iter()
-        .find(|finding| finding.code == "capture.frame_truncated")
-        .expect("truncated frame produces a finding");
-    assert_eq!(finding.number, 1);
-    assert!(
-        finding.message.contains("on interface 0"),
-        "{:?}",
-        finding.message
+    let (findings, _summary) = analyze_capture(registry, capture);
+
+    assert_eq!(
+        capture_findings(findings),
+        vec![
+            capture_warning(
+                "capture.frame_truncated",
+                1,
+                "frame 1 captured 41 of 45 bytes on interface 0",
+            ),
+            capture_warning(
+                "capture.frame_truncated",
+                2,
+                "frame 2 captured 41 of 45 bytes on interface 0",
+            ),
+            capture_warning(
+                "capture.clock_regression",
+                2,
+                "frame 2 timestamp regressed 1s below the capture's latest observed timestamp on interface 0",
+            ),
+        ]
     );
-    let regression = findings
-        .iter()
-        .find(|finding| finding.code == "capture.clock_regression")
-        .expect("regressed frame produces a finding");
-    assert_eq!(regression.number, 2);
-    assert!(regression.message.contains("on interface 0"));
 }

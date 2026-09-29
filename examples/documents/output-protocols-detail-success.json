@@ -57,7 +57,6 @@
         {"parent": "linux_sll2", "discriminator": 2048},
         {"parent": "mpls", "discriminator": 260},
         {"parent": "ppp", "discriminator": 33},
-        {"parent": "raw_ip", "discriminator": 4},
         {"parent": "snap", "discriminator": 2048},
         {"parent": "vlan", "discriminator": 2048},
         {"parent": "vlan8021ad", "discriminator": 2048}

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Failure-path contracts for release evidence and architecture checks."""
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -15,7 +16,7 @@ from unittest import mock
 
 from validation_evidence import (
     DECODE_FIELDS, DECODE_PROFILES, EVIDENCE_VERSION, NATIVE_SCENARIOS,
-    digest, provenance, tshark_matches,
+    checksum, digest, provenance, tshark_matches,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -461,6 +462,26 @@ class EvidenceTests(unittest.TestCase):
                         side_effect=subprocess.CalledProcessError(128, 'git rev-parse')):
             with self.assertRaises(subprocess.CalledProcessError):
                 provenance(pathlib.Path('unused'))
+
+    def test_checksum_matches_rfc_1071_and_folds_valid_headers_to_zero(self):
+        self.assertEqual(checksum(bytes.fromhex('0001f203f4f5f6f7')), 0x220d)
+        self.assertEqual(checksum(b''), 0xffff)
+        header = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20, 7, 0, 64, 17, 0,
+                             bytes([192, 0, 2, 1]), bytes([198, 51, 100, 2]))
+        header = header[:10] + struct.pack('!H', checksum(header)) + header[12:]
+        self.assertEqual(checksum(header), 0)
+
+    def test_checksum_pads_odd_length_input_with_a_zero_byte(self):
+        self.assertEqual(checksum(b'\x01\x02\x03'), checksum(b'\x01\x02\x03\x00'))
+
+    def test_digest_hashes_files_larger_than_one_read_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'large'
+            data = bytes(range(256)) * 1000 + b'tail'
+            path.write_bytes(data)
+            self.assertEqual(digest(path), hashlib.sha256(data).hexdigest())
+            path.write_bytes(b'')
+            self.assertEqual(digest(path), hashlib.sha256().hexdigest())
 
 
 def fake_versions(command, **kwargs):

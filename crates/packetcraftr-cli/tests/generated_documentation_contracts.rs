@@ -88,8 +88,13 @@ fn documentation_reports_an_io_failure_for_an_unwritable_directory() {
         stderr.contains("io.documentation"),
         "stderr should carry the classification: {stderr}"
     );
-    assert!(
-        stderr.contains("caused by:"),
-        "stderr should carry the I/O cause: {stderr}"
+    let cause = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("caused by: "))
+        .unwrap_or_else(|| panic!("stderr should carry the I/O cause: {stderr}"));
+    assert_eq!(
+        stderr.matches(cause).count(),
+        1,
+        "the I/O error appears only as the cause: {stderr}"
     );
 }

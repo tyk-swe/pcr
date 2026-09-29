@@ -335,6 +335,27 @@ fn exchange_requests_validate_all_aggregate_bounds() {
     for request in invalid {
         assert!(request.validate().is_err());
     }
+    let zero_window = exchange::Request {
+        timeout: Duration::ZERO,
+        ..defaults.clone()
+    }
+    .validate()
+    .expect_err("a zero collection window");
+    assert!(matches!(
+        zero_window,
+        exchange::Error::InvalidRequest {
+            field: "timeout",
+            ..
+        }
+    ));
+    assert_eq!(zero_window.classification().code, "cli.exchange_limit");
+    assert_eq!(zero_window.classification().kind, Kind::Usage);
+    exchange::Request {
+        timeout: net::deadline::MAX_WAIT,
+        ..defaults.clone()
+    }
+    .validate()
+    .expect("the ceiling itself is accepted");
     let invalid = [
         exchange::Collection {
             max_responses: collection.capture.max_frames + 1,
@@ -468,14 +489,6 @@ fn public_errors_retain_stable_policy_and_target_classification() {
             Box::new(policy::Error::PermissiveLiveOptIn),
             "policy.permissive_live_opt_in",
             Kind::Policy,
-        ),
-        (
-            Box::new(policy::Error::UnsupportedOperation {
-                authorizer: "a fixture authorizer",
-                operation: "replay",
-            }),
-            "internal.unsupported_operation",
-            Kind::Internal,
         ),
         (
             Box::new(TargetError::AddressFamilyUnavailable { family: "IPv6" }),

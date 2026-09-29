@@ -3,12 +3,12 @@
 mod common;
 use bytes::Bytes;
 use common::{
-    CLIENT, SERVER, reader, registry,
+    CLIENT, SERVER, assert_invalid_application_limit, length_prefixed, reader, registry,
     tls_capture::{Capture, Stream},
 };
 use packetcraftr_core::{
     analysis::{
-        self,
+        self, Constraint,
         application::Limits,
         dns::{Collector, Event, Message, Status, Summary, Transaction, TransactionStatus},
     },
@@ -16,7 +16,10 @@ use packetcraftr_core::{
     field::FieldValue,
     frame::Frame,
     layer::Layer,
-    protocol::application::dns::{Dns, Question, Record, RecordValue},
+    protocol::{
+        application::dns::{Dns, Error as DnsError, Question, Record, RecordValue},
+        transport::Tcp,
+    },
     transform::{FragmentOptions, fragment},
 };
 use std::time::{Duration, UNIX_EPOCH};
@@ -85,11 +88,6 @@ fn txt_response(id: u16, name: &str, text: &[u8]) -> Vec<u8> {
     });
     dns.to_wire().unwrap().to_vec()
 }
-fn framed(wire: &[u8]) -> Vec<u8> {
-    let mut out = (wire.len() as u16).to_be_bytes().to_vec();
-    out.extend_from_slice(wire);
-    out
-}
 fn collect(
     frames: &[Frame],
     limits: Limits,
@@ -132,13 +130,13 @@ fn split_prefix_out_of_order_segments_and_coalesced_messages_have_exact_sources(
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
-    let query = framed(&message(7, false, "example.test"));
+    let query = length_prefixed(&message(7, false, "example.test"));
     capture.client(&mut stream, &query[..1]); // physical 4, first prefix byte
     let earlier = capture.client_spec(&stream, 0x10);
     stream.client_sequence += 4;
     capture.client(&mut stream, &query[5..]); // physical 5, later bytes first
     capture.push(earlier, &query[1..5]); // physical 6, fills the gap
-    let response = framed(&message(7, true, "EXAMPLE.test"));
+    let response = length_prefixed(&message(7, true, "EXAMPLE.test"));
     let mut two = response.clone();
     two.extend_from_slice(&response);
     capture.server(&mut stream, &two); // physical 7, two messages
@@ -253,7 +251,7 @@ fn suffix_overlapping_tcp_gap_fill_keeps_dns_message_sources() {
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
-    let query = framed(&message(11, false, "overlap.test"));
+    let query = length_prefixed(&message(11, false, "overlap.test"));
     let earlier = capture.client_spec(&stream, 0x10);
     stream.client_sequence += 4;
     capture.client(&mut stream, &query[4..]);
@@ -279,7 +277,7 @@ fn retransmissions_do_not_duplicate_dns_and_partial_eof_is_explicit() {
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
-    let query = framed(&message(3, false, "a.test"));
+    let query = length_prefixed(&message(3, false, "a.test"));
     let retransmit = capture.client_spec(&stream, 0x10);
     capture.client(&mut stream, &query);
     capture.push(retransmit, &query);
@@ -287,10 +285,7 @@ fn retransmissions_do_not_duplicate_dns_and_partial_eof_is_explicit() {
     let (messages, _, summary) = collect(&capture.frames, Limits::default()).unwrap();
     assert_eq!(summary.complete_messages, 1);
     assert_eq!(messages.len(), 2);
-    assert!(matches!(
-        messages[1].status,
-        Status::Incomplete | Status::Evicted
-    ));
+    assert_eq!(messages[1].status, Status::Incomplete);
     assert_eq!(messages[1].wire.as_ref(), &query[2..5]);
     assert_eq!(
         messages[0]
@@ -303,38 +298,112 @@ fn retransmissions_do_not_duplicate_dns_and_partial_eof_is_explicit() {
     );
 }
 #[test]
+fn reset_reports_a_partial_tcp_message_as_reset() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    stream.server_port = 53;
+    capture.open(&mut stream);
+    let query = length_prefixed(&message(4, false, "a.test"));
+    capture.client(&mut stream, &query[..5]);
+    let reset = capture.client_spec(&stream, Tcp::RST | Tcp::ACK);
+    capture.push(reset, b"");
+    let (messages, _, summary) = collect(&capture.frames, Limits::default()).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].status, Status::Reset);
+    assert_eq!(messages[0].wire.as_ref(), &query[2..5]);
+    assert_eq!(summary.complete_messages, 0);
+}
+#[test]
 fn malformed_length_is_bounded_and_following_message_still_decodes() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
     let mut bytes = vec![0, 0];
-    bytes.extend(framed(&message(1, false, "a.test")));
+    bytes.extend(length_prefixed(&message(1, false, "a.test")));
     capture.client(&mut stream, &bytes);
     let (messages, _, _) = collect(&capture.frames, Limits::default()).unwrap();
     assert_eq!(messages[0].status, Status::Malformed);
-    assert!(messages[0].error.is_some());
+    assert_eq!(
+        messages[0].error,
+        Some(DnsError::MessageTooShort {
+            actual: 0,
+            minimum: 12
+        })
+    );
     assert_eq!(messages[1].status, Status::Complete);
-    assert!(
-        collect(
-            &capture.frames,
+    for (limits, field, limit) in [
+        (
             Limits {
                 max_messages: 1,
                 ..Default::default()
-            }
-        )
-        .is_err()
-    );
-    assert!(
-        collect(
-            &capture.frames,
+            },
+            "max_messages",
+            1,
+        ),
+        (
             Limits {
                 max_buffer_bytes: 1,
                 ..Default::default()
-            }
-        )
-        .is_err()
+            },
+            "max_buffer_bytes",
+            1,
+        ),
+    ] {
+        let error = collect(&capture.frames, limits).expect_err("the limit is exceeded");
+        assert_limit_refusal(&error, field, limit);
+    }
+}
+
+fn assert_limit_refusal(error: &analysis::application::Error, field: &str, limit: usize) {
+    let refusal = common::sink_cause::<analysis::application::Error>(error);
+    assert!(
+        matches!(
+            refusal,
+            analysis::application::Error::Limit { field: actual, limit: value }
+                if (*actual, *value) == (field, limit)
+        ),
+        "{refusal:?}"
     );
+}
+
+#[test]
+fn emitted_messages_and_transactions_share_one_retained_byte_ceiling() {
+    let registry = registry();
+    let query = message(7, false, "a.test");
+    let response = message(7, true, "a.test");
+    let frames = vec![
+        udp_frame(&registry, UNIX_EPOCH, CLIENT, SERVER, 40000, 53, &query),
+        udp_frame(
+            &registry,
+            UNIX_EPOCH + Duration::from_secs(1),
+            SERVER,
+            CLIENT,
+            53,
+            40000,
+            &response,
+        ),
+    ];
+    let emitted = (query.len() + response.len()) * 32 + 2 * 4096;
+    let (_, transactions, _) = collect(&frames, limits_with("max_retained_bytes", 2 * emitted))
+        .expect("the combined charge fits below twice the emitted charge");
+    assert_eq!(transactions[0].status, TransactionStatus::Matched);
+    let error = collect(&frames, limits_with("max_retained_bytes", emitted))
+        .expect_err("tracking the transaction adds to the emitted charge");
+    assert_limit_refusal(&error, "max_retained_bytes", emitted);
+}
+
+#[test]
+fn a_new_udp_conversation_beyond_max_streams_is_refused() {
+    let registry = registry();
+    let query = message(3, false, "a.test");
+    let frames: Vec<_> = [40000, 40001, 40000]
+        .into_iter()
+        .map(|port| udp_frame(&registry, UNIX_EPOCH, CLIENT, SERVER, port, 53, &query))
+        .collect();
+    let error = collect(&frames, limits_with("max_streams", 1)).expect_err("two streams");
+    assert_limit_refusal(&error, "max_streams", 1);
+    assert!(collect(&frames, limits_with("max_streams", 2)).is_ok());
 }
 
 #[test]
@@ -343,8 +412,8 @@ fn a_response_can_precede_query_reassembly_without_matching_a_later_query() {
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
-    let query = framed(&message(42, false, "a.test"));
-    let response = framed(&message(42, true, "a.test"));
+    let query = length_prefixed(&message(42, false, "a.test"));
+    let response = length_prefixed(&message(42, true, "a.test"));
     capture.client(&mut stream, &query[..4]);
     capture.server(&mut stream, &response);
     capture.client(&mut stream, &query[4..]);
@@ -374,8 +443,8 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
     let mut stream = Stream::new(40000);
     stream.server_port = 53;
     capture.open(&mut stream);
-    let query = framed(&message(1, false, "a.test"));
-    let response = framed(&message(1, true, "a.test"));
+    let query = length_prefixed(&message(1, false, "a.test"));
+    let response = length_prefixed(&message(1, true, "a.test"));
     capture.client(&mut stream, &query);
     capture.server(&mut stream, &response);
     capture.reopen(&mut stream, 20_000);
@@ -462,7 +531,7 @@ fn udp_dns_evidence_does_not_retain_the_frame_allocation() {
         },
         |record| {
             if let Some(view) = record.udp {
-                let original = &view.decoded.original;
+                let original = view.decoded.frame.bytes();
                 backing = original.as_ptr() as usize..original.as_ptr() as usize + original.len();
             }
             events.extend(
@@ -532,25 +601,20 @@ fn udp_dns_evidence_does_not_retain_the_frame_allocation() {
 
 #[test]
 fn service_ports_normalize_and_bound_distinct_values() {
-    for ports in [
-        Vec::<u16>::new(),
-        vec![0],
-        vec![53, 0],
-        (1..=257u16).collect(),
+    for (ports, value, reason) in [
+        (Vec::<u16>::new(), 0, Constraint::NonEmptyNonZeroPorts),
+        (vec![0], 0, Constraint::NonEmptyNonZeroPorts),
+        (vec![53, 0], 0, Constraint::NonEmptyNonZeroPorts),
+        (
+            (1..=257u16).collect(),
+            257,
+            Constraint::AtMost { maximum: 256 },
+        ),
     ] {
         let error = Collector::new(Limits::default(), ports)
             .err()
             .expect("invalid port list must be rejected");
-        assert!(
-            matches!(
-                error,
-                analysis::application::Error::Limit {
-                    field: "dns_ports",
-                    limit: 256
-                }
-            ),
-            "{error:?}"
-        );
+        assert_invalid_application_limit(error, "dns_ports", value, reason);
     }
     for ports in [
         vec![5353, 53, 5353, 65535],
@@ -559,20 +623,55 @@ fn service_ports_normalize_and_bound_distinct_values() {
     ] {
         assert!(Collector::new(Limits::default(), ports).is_ok());
     }
-    let error = Collector::new(
-        Limits {
-            max_messages: 0,
-            ..Limits::default()
-        },
-        vec![0],
-    )
-    .err()
-    .expect("invalid limits must be rejected");
-    assert!(matches!(
-        error,
-        analysis::application::Error::Limit {
-            field: "max_messages",
-            ..
+}
+
+fn limits_with(field: &str, value: usize) -> Limits {
+    let mut limits = Limits::default();
+    match field {
+        "max_messages" => limits.max_messages = value,
+        "max_streams" => limits.max_streams = value,
+        "max_buffer_bytes" => limits.max_buffer_bytes = value,
+        "max_retained_bytes" => limits.max_retained_bytes = value,
+        "max_source_spans" => limits.max_source_spans = value,
+        _ => unreachable!("{field} is not an application limit"),
+    }
+    limits
+}
+
+#[test]
+fn application_limits_must_be_positive_and_within_their_ceilings() {
+    for (field, maximum) in [
+        ("max_messages", 100_000),
+        ("max_streams", 100_000),
+        ("max_buffer_bytes", 256 * 1024 * 1024),
+        ("max_retained_bytes", 256 * 1024 * 1024),
+        ("max_source_spans", 100_000),
+    ] {
+        for (value, reason) in [
+            (0, Constraint::NonZero),
+            (
+                maximum + 1,
+                Constraint::AtMost {
+                    maximum: maximum as u64,
+                },
+            ),
+        ] {
+            let error = Collector::new(limits_with(field, value), vec![53])
+                .err()
+                .expect("invalid limits must be rejected");
+            assert_invalid_application_limit(error, field, value as u64, reason);
         }
-    ));
+        assert!(
+            Collector::new(limits_with(field, maximum), vec![53]).is_ok(),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn invalid_limits_are_reported_before_invalid_ports() {
+    let error = Collector::new(limits_with("max_messages", 0), vec![0])
+        .err()
+        .expect("invalid limits and ports must be rejected");
+    assert_invalid_application_limit(error, "max_messages", 0, Constraint::NonZero);
 }

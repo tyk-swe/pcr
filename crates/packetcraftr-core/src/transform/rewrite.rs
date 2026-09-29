@@ -10,11 +10,10 @@ use crate::{
         headers::MAX_VLAN_DEPTH,
         headers::{EthernetHeader, IpHeader, Ipv4Header, Ipv6Header, LinkHeader},
         network::ip_protocol,
-        network_from_addresses, transport_checksum,
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{net::IpAddr, ops::Range};
+use std::net::IpAddr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -218,14 +217,7 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
     {
         return Err(Error::Unsupported(Unsupported::UpperLayerChecksum));
     }
-    let address = |ip: &[u8], range: Range<usize>| {
-        match header {
-            IpHeader::V4(_) => <[u8; 4]>::try_from(&ip[range]).map(IpAddr::from),
-            IpHeader::V6(_) => <[u8; 16]>::try_from(&ip[range]).map(IpAddr::from),
-        }
-        .expect("fixed-width IP address range")
-    };
-    let addresses = (address(ip, source), address(ip, destination));
+    let addresses = header.addresses(ip)?;
     let (protocol, start) = header.upper_layer();
     let end = header.datagram_length();
     transport(&mut ip[start..end], patch, protocol, addresses)?;
@@ -241,9 +233,9 @@ fn transport(
     segment: &mut [u8],
     patch: &HeaderRewrite,
     protocol: u8,
-    (source, destination): (IpAddr, IpAddr),
+    addresses: (IpAddr, IpAddr),
 ) -> Result<(), Error> {
-    let ipv6 = source.is_ipv6();
+    let ipv6 = addresses.0.is_ipv6();
     let ports = patch.source_port.is_some() || patch.destination_port.is_some();
     if ports && !matches!(protocol, ip_protocol::TCP | ip_protocol::UDP) {
         return Err(Error::Unsupported(Unsupported::PortEditTransport));
@@ -272,31 +264,27 @@ fn transport(
             }
             (BuiltinProtocol::Icmpv6, segment.len(), 2)
         }
-        1 | 2 | 4 | 41 | 47 | ip_protocol::NO_NEXT_HEADER | 132 => return Ok(()),
+        ip_protocol::ICMPV4
+        | ip_protocol::IGMP
+        | ip_protocol::IPV4
+        | ip_protocol::IPV6
+        | ip_protocol::GRE
+        | ip_protocol::NO_NEXT_HEADER
+        | ip_protocol::SCTP => return Ok(()),
         _ => return Err(Error::Unsupported(Unsupported::UpperLayerChecksum)),
     };
-    let checksum = checksum_offset..checksum_offset + 2;
-    let disabled_udp = protocol == ip_protocol::UDP && !ipv6 && segment[checksum.clone()] == [0, 0];
     if let Some(port) = patch.source_port {
         segment[..2].copy_from_slice(&port.to_be_bytes());
     }
     if let Some(port) = patch.destination_port {
         segment[2..4].copy_from_slice(&port.to_be_bytes());
     }
-    if disabled_udp {
-        return Ok(());
-    }
-    segment[checksum.clone()].fill(0);
-    let mut value = transport_checksum(
-        name.as_str(),
-        network_from_addresses(source, destination),
+    super::repair_checksum(
+        &mut segment[..length],
+        checksum_offset..checksum_offset + 2,
         protocol,
-        &segment[..length],
-    )
-    .map_err(Error::Checksum)?;
-    if protocol == ip_protocol::UDP && value == 0 {
-        value = 0xffff;
-    }
-    segment[checksum].copy_from_slice(&value.to_be_bytes());
+        name.as_str(),
+        addresses,
+    )?;
     Ok(())
 }

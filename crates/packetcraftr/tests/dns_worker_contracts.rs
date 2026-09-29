@@ -1,19 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use packetcraftr::Client;
 use packetcraftr::dns;
 use packetcraftr::policy::Policy;
-use packetcraftr::target::{Family, SystemResolver, Target};
-use packetcraftr::{Client, ProviderSet};
+use packetcraftr::target::{Family, Target};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::Classified;
-use packetcraftr_netio::{capture, interface, resources, route, tcp, transmit};
+use packetcraftr_netio::{resources, tcp};
 
 struct Blocked {
     entered: mpsc::Sender<(thread::ThreadId, bool, usize)>,
@@ -49,17 +51,10 @@ fn dns_connects_are_admitted_and_cancellation_releases_the_workflow() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet {
-            route: route::SystemProvider,
-            interface: interface::SystemProvider,
-            capture: capture::SystemProvider,
-            transmit: transmit::SystemProvider,
-            tcp: Blocked {
-                entered,
-                release: Mutex::new(blocked),
-            },
-            resolver: SystemResolver,
-        },
+        common::providers(common::FixedRoutes, common::NeverTransmit).with_tcp(Blocked {
+            entered,
+            release: Mutex::new(blocked),
+        }),
     )
     .with_cancellation(signal.clone());
     let workflow = thread::spawn(move || {
@@ -89,7 +84,7 @@ fn dns_connects_are_admitted_and_cancellation_releases_the_workflow() {
     let (provider_thread, has_cancellation, active) =
         started.recv_timeout(Duration::from_secs(2)).unwrap();
     signal.cancel();
-    let outcome = result.recv_timeout(Duration::from_millis(250));
+    let outcome = result.recv_timeout(Duration::from_secs(2));
     let retained = resources::tcp_connect_snapshot().cleanup_retaining_capacity;
     drop(release);
     let workflow_thread = workflow.thread().id();

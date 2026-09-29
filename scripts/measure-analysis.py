@@ -8,7 +8,6 @@ profiles when that optional tool is installed; no noisy thresholds are imposed.
 """
 import argparse
 import functools
-import hashlib
 import json
 import pathlib
 import socket
@@ -16,15 +15,9 @@ import struct
 import subprocess
 import time
 
+from validation_evidence import checksum, digest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-
-
-def checksum(data):
-    data += b'\0' * (len(data) % 2)
-    value = sum(struct.unpack(f'!{len(data)//2}H', data))
-    while value >> 16:
-        value = (value & 65535) + (value >> 16)
-    return (~value) & 65535
 
 
 def ipv4(payload, source, protocol=6, identity=0, fragment=0):
@@ -147,7 +140,7 @@ def main():
     out = options.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     binary = options.binary.resolve()
-    report = dict(binary=str(binary), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+    report = dict(binary=str(binary), binary_sha256=digest(binary),
                   version=subprocess.check_output([binary, '--version'], text=True).strip(),
                   rustc=subprocess.check_output(['rustc', '--version', '--verbose'], text=True),
                   memory_note='Peak process RSS, not a heap limit. No post-exit heap exists; in-process cleanup is tested separately.',

@@ -57,7 +57,6 @@ impl crate::execution::Step for Exchange {
 /// It runs on a kernel socket, so it is a query, not an exchange: nothing is captured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TcpQuery {
-    pub(crate) attempt: u32,
     pub(crate) endpoint: SocketAddr,
     /// Exact DNS query message without the TCP length prefix.
     pub(crate) query: Bytes,
@@ -171,10 +170,9 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P
     }
 }
 
-/// Kernel TCP cannot honor packet-oriented route overrides, so a query refuses them before I/O.
+/// Kernel TCP honors no route override: `Request::validate` refuses them before any query.
 impl<P: TcpProviders, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
     fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
-        validate_tcp_route_options(&self.send.plan)?;
         let response = super::tcp::query(
             super::tcp::Request {
                 endpoint: query.endpoint,
@@ -194,31 +192,15 @@ impl<P: TcpProviders, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
     }
 }
 
-fn validate_tcp_route_options(plan: &crate::route::Options) -> Result<(), crate::dns::tcp::Error> {
-    if plan.interface.is_some()
-        || plan.preferred_source.is_some()
-        || !matches!(plan.link_mode, packetcraftr_netio::link::Mode::Auto)
-    {
-        return Err(crate::dns::tcp::Error::Unsupported {
-            message: "kernel TCP cannot preserve packet-oriented interface, source, or link-mode overrides; use UDP-only DNS"
-                .to_owned(),
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
-
     use super::*;
     use crate::test_support::{Call, fake_client};
 
     #[test]
-    fn tcp_queries_the_client_provider_and_rejects_overrides_before_provider_io() {
+    fn tcp_queries_the_client_provider() {
         let (client, providers) = fake_client();
         let query = TcpQuery {
-            attempt: 1,
             endpoint: "127.0.0.1:53".parse().unwrap(),
             query: Bytes::from_static(b"query"),
             timeout: Duration::from_secs(1),
@@ -233,35 +215,5 @@ mod tests {
         let error = executor.query(&query).unwrap_err();
         assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
         assert_eq!(providers.calls(), [Call::Connect(query.endpoint)]);
-
-        executor.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
-        assert!(matches!(
-            executor.query(&query),
-            Err(super::super::tcp::Error::Unsupported { .. })
-        ));
-        assert_eq!(providers.calls().len(), 1, "no second connect");
-    }
-
-    #[test]
-    fn tcp_route_validation_rejects_every_packet_oriented_override() {
-        let defaults = crate::route::Options::default();
-        assert!(validate_tcp_route_options(&defaults).is_ok());
-
-        let mut source = defaults.clone();
-        source.preferred_source = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
-        assert!(validate_tcp_route_options(&source).is_err());
-
-        let mut interface = defaults.clone();
-        interface.interface = Some(crate::route::Interface::Name("fixture0".to_owned()));
-        assert!(validate_tcp_route_options(&interface).is_err());
-
-        for link_mode in [
-            packetcraftr_netio::link::Mode::Layer2,
-            packetcraftr_netio::link::Mode::Layer3,
-        ] {
-            let mut plan = defaults.clone();
-            plan.link_mode = link_mode;
-            assert!(validate_tcp_route_options(&plan).is_err());
-        }
     }
 }

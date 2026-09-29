@@ -8,14 +8,13 @@ use bytes::Bytes;
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Layer, reflect_get, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
-use crate::protocol::common::{
-    expected_discriminator, invalid, make_layer, protocol, resolve_u8, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
-};
+use crate::protocol::common::{invalid, make_layer, protocol, truncated, typed_layer};
+
+use super::resolve_next_header;
 
 use crate::protocol::BuiltinProtocol;
 
@@ -86,30 +85,17 @@ pub(crate) struct HopByHopCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DestinationOptionsCodec;
 
-fn encode_options<L>(
+fn encode_options(
     name: &'static str,
-    layer: &L,
     next_header: &WireValue<u8>,
     options: &Bytes,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
     context: &LayerEncodeContext<'_>,
-) -> Result<EncodedLayer, crate::codec::Error>
-where
-    L: Layer + Clone + 'static,
-{
-    let expectation = expected_discriminator(name, context, 59_u8, next_header);
+    materialize: impl FnOnce(WireValue<u8>, Bytes) -> Box<dyn Layer>,
+) -> Result<EncodedLayer, crate::codec::Error> {
     let mut diagnostics = Vec::new();
-    validate_auto_raw_discriminator(name, "next_header", next_header, context, &mut diagnostics)?;
-    let (next, materialized_next) = resolve_u8(
-        name,
-        "next_header",
-        next_header,
-        expectation,
-        context.mode,
-        &mut diagnostics,
-    )?;
-    validate_raw_child_discriminator(name, u64::from(next), context, &mut diagnostics)?;
-    validate_ipv6_routing_child(name, next, context, &mut diagnostics)?;
+    let (next, materialized_next) =
+        resolve_next_header(name, next_header, context, &mut diagnostics)?;
     let unpadded = options
         .len()
         .checked_add(2)
@@ -117,23 +103,15 @@ where
     let header_len = unpadded
         .checked_next_multiple_of(8)
         .ok_or_else(|| invalid(name, "option padding overflow"))?;
-    if header_len > 2_048 {
-        return Err(invalid(
-            name,
-            "options header exceeds 2048-byte secure default",
-        ));
-    }
     let hdr_ext_len = u8::try_from((header_len / 8).saturating_sub(1))
-        .map_err(|_| invalid(name, "options header length cannot be represented"))?;
+        .map_err(|_| invalid(name, "options header exceeds 2048-byte secure default"))?;
     let mut prefix = Vec::with_capacity(header_len);
     prefix.push(next);
     prefix.push(hdr_ext_len);
     prefix.extend_from_slice(options);
     prefix.resize(header_len, 0);
-    let mut materialized = layer.clone_box();
-    materialized.set_field("next_header", reflect_get(&materialized_next))?;
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
-    materialized.set_field("options", FieldValue::Bytes(padded_options))?;
+    let materialized = materialize(materialized_next, padded_options);
     Ok(EncodedLayer::header(prefix, materialized)
         .with_fields(layout(header_len))
         .with_diagnostics(diagnostics))
@@ -187,11 +165,16 @@ impl LayerCodec for HopByHopCodec {
         let layer = typed_layer::<HopByHop>(HOP_NAME, layer)?;
         encode_options(
             HOP_NAME,
-            layer,
             &layer.next_header,
             &layer.options,
             hop_layout,
             context,
+            |next_header, options| {
+                Box::new(HopByHop {
+                    next_header,
+                    options,
+                })
+            },
         )
     }
 
@@ -233,11 +216,16 @@ impl LayerCodec for DestinationOptionsCodec {
         let layer = typed_layer::<DestinationOptions>(DESTINATION_NAME, layer)?;
         encode_options(
             DESTINATION_NAME,
-            layer,
             &layer.next_header,
             &layer.options,
             destination_layout,
             context,
+            |next_header, options| {
+                Box::new(DestinationOptions {
+                    next_header,
+                    options,
+                })
+            },
         )
     }
 

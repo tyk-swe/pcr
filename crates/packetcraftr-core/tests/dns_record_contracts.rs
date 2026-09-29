@@ -75,6 +75,45 @@ fn truncated_names_report_the_bytes_they_need() {
     ));
 }
 
+#[test]
+fn messages_cut_short_report_the_field_and_extent_they_needed() {
+    let too_short = Dns::from_wire_with_limits(vec![0; 11], Limits::default()).unwrap_err();
+    assert_eq!(
+        too_short,
+        DecodeError::MessageTooShort {
+            actual: 11,
+            minimum: 12
+        }
+    );
+
+    let mut question_type = vec![0; 12];
+    question_type[5] = 1;
+    question_type.extend_from_slice(&[0, 0]);
+    let error = Dns::from_wire_with_limits(question_type, Limits::default()).unwrap_err();
+    assert_eq!(
+        error,
+        DecodeError::TruncatedField {
+            field: "question type",
+            offset: 13,
+            needed: 15
+        }
+    );
+
+    let mut rdata = vec![0; 12];
+    rdata[7] = 1;
+    record(&mut rdata, &[0], 1, 1, 0, &[192, 0, 2, 1]);
+    rdata.truncate(rdata.len() - 2);
+    let error = Dns::from_wire_with_limits(rdata, Limits::default()).unwrap_err();
+    assert_eq!(
+        error,
+        DecodeError::TruncatedField {
+            field: "RDATA",
+            offset: 23,
+            needed: 27
+        }
+    );
+}
+
 fn record(wire: &mut Vec<u8>, owner: &[u8], kind: u16, class: u16, ttl: u32, data: &[u8]) {
     wire.extend_from_slice(owner);
     wire.extend_from_slice(&kind.to_be_bytes());
@@ -427,6 +466,93 @@ fn offline_opt_version_and_section_are_wire_facts_and_names_can_be_edited() {
         .unwrap();
     let edited = Dns::try_from(built.bytes).unwrap();
     assert_eq!(edited.answers[0].owner.to_string(), "EXAMPLE.test.");
+}
+
+#[test]
+fn opt_records_encode_only_when_class_ttl_and_flags_match_their_edns_fields() {
+    let edns = dns::Edns {
+        udp_payload_size: 1232,
+        extended_response_code: 1,
+        version: 0,
+        dnssec_ok: true,
+        flags: 0x8000,
+        options: Vec::new(),
+    };
+    let encode = |record: dns::Record| {
+        let mut message = Dns::default();
+        message.additionals.push(record);
+        message.to_wire()
+    };
+    assert!(encode(dns::Record::opt(edns.clone())).is_ok());
+    let mut wrong_class = dns::Record::opt(edns.clone());
+    wrong_class.class = 512;
+    let mut wrong_ttl = dns::Record::opt(edns.clone());
+    wrong_ttl.ttl ^= 1;
+    let wrong_flag = dns::Record::opt(dns::Edns {
+        dnssec_ok: false,
+        ..edns
+    });
+    for record in [wrong_class, wrong_ttl, wrong_flag] {
+        let refused = encode(record).unwrap_err();
+        assert!(
+            matches!(
+                &refused,
+                DecodeError::Encode(codec::Error::Invalid { message, .. })
+                    if message == "OPT record class/TTL and EDNS fields disagree"
+            ),
+            "{refused:?}"
+        );
+    }
+}
+
+#[test]
+fn encoding_refuses_more_txt_strings_or_edns_options_than_decoding_accepts() {
+    let owner = Name::root();
+    let txt = |count: usize| dns::Record {
+        owner: owner.clone(),
+        class: 1,
+        ttl: 0,
+        value: RecordValue::Txt(vec![Bytes::new(); count]),
+    };
+    let opt = |count: usize| {
+        dns::Record::opt(dns::Edns {
+            udp_payload_size: 1232,
+            extended_response_code: 0,
+            version: 0,
+            dnssec_ok: false,
+            flags: 0,
+            options: vec![
+                dns::EdnsOption {
+                    code: 0,
+                    data: Bytes::new()
+                };
+                count
+            ],
+        })
+    };
+    let encode = |record: dns::Record| {
+        let mut message = Dns::default();
+        message.additionals.push(record);
+        message.to_wire()
+    };
+    for (accepted, refused, reason) in [
+        (
+            txt(dns::MAX_RECORDS),
+            txt(dns::MAX_RECORDS + 1),
+            "TXT string count exceeded",
+        ),
+        (opt(4_096), opt(4_097), "EDNS option count exceeded"),
+    ] {
+        assert!(encode(accepted).is_ok());
+        let error = encode(refused).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                DecodeError::Encode(codec::Error::Invalid { message, .. }) if message == reason
+            ),
+            "{error:?}"
+        );
+    }
 }
 
 #[test]

@@ -9,7 +9,7 @@ use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::packet::{VlanKind, VlanTag};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
-use packetcraftr_core::protocol::network::{Fragment, Ipv4, Ipv6, SegmentRoutingHeader};
+use packetcraftr_core::protocol::network::{Fragment, HopByHop, Ipv4, Ipv6, SegmentRoutingHeader};
 use packetcraftr_core::protocol::semantics::{
     enclosing_ip_path, live_destinations, outer_ip_path, outer_layers, outer_scope_len,
     transport_key, transport_keys_are_reversed, validate_segment_route, vlan_tags,
@@ -58,6 +58,13 @@ reflective_layer! {
         }
     }
     layout pub fn ipv4_impostor_layout();
+}
+
+fn single_segment_route(segment: Ipv6Addr) -> SegmentRoutingHeader {
+    SegmentRoutingHeader {
+        segments: vec![segment],
+        ..SegmentRoutingHeader::default()
+    }
 }
 
 fn ipv6_addr(value: &str) -> Ipv6Addr {
@@ -145,6 +152,25 @@ fn ipv6_segment_route_reports_active_final_and_declared_destinations() {
         .expect("an unspecified header destination may be materialized later");
     assert_eq!(route.active_index, Some(0));
     assert_eq!(route.active_destination, segments[0]);
+}
+
+#[test]
+fn segment_route_behind_extension_headers_stays_attached_to_its_ipv6_header() {
+    let segment = ipv6_addr("2001:db8::10");
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv6 {
+            destination: segment,
+            ..Ipv6::default()
+        })
+        .push(HopByHop::default())
+        .push(Fragment::default())
+        .push(single_segment_route(segment));
+
+    assert_eq!(
+        live_destinations(&packet).expect("extension headers keep the SRH attached"),
+        [IpAddr::V6(segment)]
+    );
 }
 
 #[test]
@@ -353,11 +379,50 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
             ..Fragment::default()
         });
 
+    let segment = ipv6_addr("2001:db8::1");
+    let ipv6 = Ipv6 {
+        destination: segment,
+        ..Ipv6::default()
+    };
+
+    let mut duplicate_route = Packet::new();
+    duplicate_route
+        .push(ipv6.clone())
+        .push(single_segment_route(segment))
+        .push(single_segment_route(segment));
+
+    let mut route_after_fragment = Packet::new();
+    route_after_fragment
+        .push(ipv6.clone())
+        .push(Fragment {
+            more_fragments: true,
+            ..Fragment::default()
+        })
+        .push(single_segment_route(segment));
+
+    let mut route_after_transport = Packet::new();
+    route_after_transport
+        .push(ipv6)
+        .push(Udp::default())
+        .push(single_segment_route(segment));
+
     let cases = [
         (ipv4_fragment, "the ipv4 layer is a non-atomic fragment"),
         (
             ipv6_fragment,
             "the ipv6_fragment layer is a non-atomic fragment",
+        ),
+        (
+            duplicate_route,
+            "an IPv6 extension chain contains more than one SRH",
+        ),
+        (
+            route_after_fragment,
+            "the ipv6_fragment layer is a non-atomic fragment",
+        ),
+        (
+            route_after_transport,
+            "SRH is not in a contiguous typed extension chain",
         ),
         (
             [Malformed::new(

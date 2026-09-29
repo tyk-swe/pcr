@@ -56,12 +56,19 @@ pub(super) fn json_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
 }
 
 pub(super) struct DetailBudget {
+    max_details: usize,
     remaining: usize,
 }
 
 impl DetailBudget {
-    pub(super) fn new(bytes: usize) -> Self {
-        Self { remaining: bytes }
+    pub(super) fn new(max_details: usize, bytes: usize) -> Self {
+        Self {
+            max_details,
+            remaining: bytes,
+        }
+    }
+    pub(super) fn has_slot(&self, retained: usize) -> bool {
+        retained < self.max_details
     }
     pub(super) fn reserve(&mut self, bytes: usize) -> bool {
         if let Some(remaining) = self.remaining.checked_sub(bytes) {

@@ -24,16 +24,6 @@ pub struct CollectorNeeds {
     pub track_sources: bool,
 }
 
-impl CollectorNeeds {
-    fn plan(self) -> Plan {
-        Plan {
-            ip_reassembly: self.ip_reassembly || self.tcp_stream || self.udp_stream,
-            tcp_index: self.tcp_stream,
-            udp_index: self.udp_stream,
-        }
-    }
-}
-
 /// `observe` failures cross the run as [`super::Error::Sink`]; `finish` and trailing-drain
 /// failures surface as [`Error::Collector`](super::Error::Collector) after the run.
 pub trait Collector {
@@ -127,10 +117,20 @@ impl<'a, C: Collector> Session<'a, C> {
         if selector.is_some() {
             options.stream = selector;
         }
-        options.plan = Plan::physical(requirements).union(needs.plan());
-        if options.plan.tcp_index || options.plan.udp_index || options.stream.is_some() {
-            options.plan = Plan::default();
-        }
+        let indexed = requirements.tcp_stream
+            || requirements.udp_stream
+            || needs.tcp_stream
+            || needs.udp_stream
+            || options.stream.is_some();
+        options.plan = if indexed {
+            Plan::default()
+        } else {
+            Plan {
+                ip_reassembly: needs.ip_reassembly,
+                tcp_index: false,
+                udp_index: false,
+            }
+        };
         options.tcp_events |= needs.tcp_events;
         options.track_sources |= needs.track_sources;
         Self {
@@ -807,49 +807,5 @@ mod tests {
             Err(other) => panic!("expected a collector error, got {other:?}"),
             Ok(_) => panic!("expected a collector error; the drain succeeded"),
         }
-    }
-
-    #[test]
-    fn needs_map_to_the_plan_they_read() {
-        assert_eq!(
-            CollectorNeeds::default().plan(),
-            Plan {
-                ip_reassembly: false,
-                tcp_index: false,
-                udp_index: false,
-            }
-        );
-        assert_eq!(
-            CollectorNeeds {
-                tcp_stream: true,
-                ..CollectorNeeds::default()
-            }
-            .plan(),
-            Plan {
-                ip_reassembly: true,
-                tcp_index: true,
-                udp_index: false,
-            },
-            "indexing keeps IP reconstruction for canonical numbering"
-        );
-        assert_eq!(
-            Plan::physical(Requirements {
-                udp_stream: true,
-                ..Requirements::default()
-            })
-            .union(
-                CollectorNeeds {
-                    tcp_stream: true,
-                    ..CollectorNeeds::default()
-                }
-                .plan()
-            ),
-            Plan {
-                ip_reassembly: true,
-                tcp_index: true,
-                udp_index: true,
-            },
-            "filter and collector stages union without renumbering streams"
-        );
     }
 }

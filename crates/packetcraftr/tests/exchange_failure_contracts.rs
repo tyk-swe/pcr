@@ -3,20 +3,29 @@
 
 mod common;
 
+use common::clock::VirtualClock;
 use packetcraftr::{Client, exchange, policy::Policy};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     budget::Cancellation,
+    build::Builder,
+    decode::Dissector,
     error::{BoundaryError, Classification, Classified, Kind},
     field::FieldValue,
+    frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
-    protocol::{builtin, network::Ipv4, transport::Udp},
+    protocol::{
+        builtin,
+        network::Ipv4,
+        transport::{Tcp, Udp},
+    },
     template::Template,
 };
 use packetcraftr_netio::{Error, capture, link::Mode, transmit};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Fault {
@@ -30,23 +39,29 @@ enum Fault {
     Callback,
     CallbackAndShutdown,
 }
+/// Frames the capture delivers after a transmission, computed from the transmitted bytes.
+type Script = Box<dyn Fn(&[u8]) -> Vec<Frame> + Send>;
 #[derive(Default)]
 struct State {
     ready: bool,
     sent: Vec<Vec<u8>>,
     shutdowns: usize,
     reads: usize,
+    script: Option<Script>,
+    replies: VecDeque<Frame>,
 }
 #[derive(Clone)]
 struct Io {
     fault: Fault,
     state: Arc<Mutex<State>>,
     signal: Cancellation,
+    clock: VirtualClock,
 }
 struct Capture {
     fault: Fault,
     state: Arc<Mutex<State>>,
     signal: Cancellation,
+    clock: VirtualClock,
     metadata: capture::Metadata,
 }
 fn injected() -> Error {
@@ -64,6 +79,12 @@ impl transmit::Provider for Io {
             "cancelled exchange transmitted"
         );
         state.sent.push(frame.bytes().to_vec());
+        let scripted = state
+            .script
+            .as_ref()
+            .map(|script| script(frame.bytes()))
+            .unwrap_or_default();
+        state.replies.extend(scripted);
         let count = frame.bytes().len() - usize::from(self.fault == Fault::PartialSend);
         Ok(transmit::Submission::start().complete(count, frame.bytes().clone()))
     }
@@ -82,6 +103,7 @@ impl capture::Provider for Io {
             fault: self.fault,
             state: self.state.clone(),
             signal: self.signal.clone(),
+            clock: self.clock.clone(),
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
                 link_type: packetcraftr_core::frame::LinkType::IPV4,
@@ -115,8 +137,11 @@ impl capture::Session for Capture {
         if self.fault == Fault::Receive && !state.sent.is_empty() {
             return Err(injected());
         }
+        if let Some(frame) = state.replies.pop_front() {
+            return Ok(Some(capture::Captured::new(frame, Instant::now())));
+        }
         drop(state);
-        std::thread::sleep(timeout);
+        self.clock.advance(timeout);
         Ok(None)
     }
     fn shutdown(&mut self) -> Result<(), Error> {
@@ -132,11 +157,12 @@ impl capture::Session for Capture {
     }
 }
 
-type FixtureClient = Client<common::FakeProviders<common::FixedRoutes, Io>>;
+type FixtureClient = Client<common::FakeProviders<common::FixedRoutes, Io>, VirtualClock>;
 
 fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
     let state = Arc::new(Mutex::new(State::default()));
     let signal = Cancellation::default();
+    let clock = VirtualClock::default();
     let client = Client::new(
         builtin::registry(),
         Policy::default(),
@@ -146,9 +172,11 @@ fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
                 fault,
                 state: state.clone(),
                 signal: signal.clone(),
+                clock: clock.clone(),
             },
         ),
     )
+    .with_clock(clock)
     .with_cancellation(signal);
     (client, state)
 }
@@ -174,9 +202,13 @@ fn layer3_send() -> packetcraftr::send::Options {
     options
 }
 
+/// Collection windows run on the virtual clock. Capture timestamps and send markers stay on the real
+/// monotonic clock, so only the real time a test spends before its reply arrives counts against it.
+const WINDOW: Duration = Duration::from_secs(30);
+
 fn layer3_request(template: Template) -> exchange::Request {
     exchange::Request {
-        timeout: Duration::from_secs(1),
+        timeout: WINDOW,
         ..exchange::Request::new(template, layer3_send())
     }
 }
@@ -224,7 +256,7 @@ fn an_unanswered_request_is_published_after_the_collection_window() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let observed = Arc::clone(&events);
     let mut request = layer3_request(Template::new(query_packet()));
-    request.timeout = Duration::from_millis(100);
+    request.timeout = WINDOW;
     let summary = client
         .exchange(request, move |event| {
             observed.lock().unwrap().push(event);
@@ -365,7 +397,7 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
         address_family: Family::Any,
         ports: vec![80, 81, 82],
         attempts: 1,
-        timeout: Duration::from_millis(100),
+        timeout: WINDOW,
         probes_per_second: None,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
@@ -397,4 +429,323 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
     identifications.sort_unstable();
     identifications.dedup();
     assert_eq!(identifications.len(), 3, "IPv4 identifications must differ");
+}
+
+fn wire(packet: Packet) -> Frame {
+    let built = Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .expect("fixture frame must build");
+    Frame::new(SystemTime::now(), LinkType::IPV4, built.bytes).expect("fixture frame")
+}
+
+fn transmitted(bytes: &[u8]) -> Packet {
+    Dissector::new(builtin::registry())
+        .decode(
+            Frame::new(
+                SystemTime::now(),
+                LinkType::IPV4,
+                bytes::Bytes::copy_from_slice(bytes),
+            )
+            .expect("transmitted fixture frame"),
+            Default::default(),
+        )
+        .expect("transmitted fixture must decode")
+        .packet
+}
+
+fn unrelated_frame() -> Frame {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: "198.51.100.7".parse().unwrap(),
+        destination: "203.0.113.9".parse().unwrap(),
+        ..Ipv4::default()
+    });
+    packet.push(Udp {
+        source_port: 7,
+        destination_port: 7,
+        ..Udp::default()
+    });
+    wire(packet)
+}
+
+fn udp_reply(request: &Packet) -> Frame {
+    let ip = request.get::<Ipv4>().unwrap();
+    let udp = request.get::<Udp>().unwrap();
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: ip.destination,
+        destination: ip.source,
+        ..Ipv4::default()
+    });
+    packet.push(Udp {
+        source_port: udp.destination_port,
+        destination_port: udp.source_port,
+        ..Udp::default()
+    });
+    packet.push(Raw::new(b"reply".to_vec()));
+    wire(packet)
+}
+
+fn syn_ack(request: &Packet) -> Frame {
+    let ip = request.get::<Ipv4>().unwrap();
+    let tcp = request.get::<Tcp>().unwrap();
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: ip.destination,
+        destination: ip.source,
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port: tcp.destination_port,
+        destination_port: tcp.source_port,
+        sequence: 100,
+        acknowledgment: tcp.sequence.wrapping_add(1),
+        flags: Tcp::SYN | Tcp::ACK,
+        ..Tcp::default()
+    });
+    wire(packet)
+}
+
+fn corrupted_syn_ack(request: &Packet) -> Frame {
+    let mut bytes = syn_ack(request).bytes().to_vec();
+    // The TCP checksum starts 16 bytes into the header that follows the 20-byte IPv4 header.
+    bytes[36] ^= 0xff;
+    Frame::new(SystemTime::now(), LinkType::IPV4, bytes::Bytes::from(bytes))
+        .expect("corrupted fixture frame")
+}
+
+/// The capture delivers `unrelated` frames that match no request and no reply.
+fn flood(unrelated: usize) -> Script {
+    Box::new(move |_| (0..unrelated).map(|_| unrelated_frame()).collect())
+}
+
+/// The capture delivers `unrelated` frames that match no request, then the reply.
+fn flood_then_reply(unrelated: usize, reply: fn(&Packet) -> Frame) -> Script {
+    Box::new(move |sent| {
+        let mut frames = (0..unrelated)
+            .map(|_| unrelated_frame())
+            .collect::<Vec<_>>();
+        frames.push(reply(&transmitted(sent)));
+        frames
+    })
+}
+
+fn retention(
+    max_frames: usize,
+    max_responses: usize,
+    overflow_policy: capture::OverflowPolicy,
+) -> exchange::Collection {
+    exchange::Collection {
+        capture: capture::Limits {
+            max_frames,
+            overflow_policy,
+            ..capture::Limits::default()
+        },
+        max_responses,
+        max_unmatched_frames: max_frames,
+        ..exchange::Collection::default()
+    }
+}
+
+fn collect_exchange(
+    client: &FixtureClient,
+    collection: exchange::Collection,
+) -> (
+    Result<exchange::Report, exchange::Error>,
+    Vec<exchange::Event>,
+) {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
+    let mut request = layer3_request(Template::new(query_packet()));
+    request.timeout = WINDOW;
+    request.collection = collection;
+    let result = client.exchange(request, move |event| {
+        observed.lock().unwrap().push(event);
+        Ok(())
+    });
+    let events = events.lock().unwrap().clone();
+    (result, events)
+}
+
+fn describe(events: &[exchange::Event]) -> Vec<String> {
+    events
+        .iter()
+        .map(|event| match event {
+            exchange::Event::Sent { request_index, .. } => format!("sent {request_index}"),
+            exchange::Event::Response(response) => format!("response {}", response.request_index),
+            exchange::Event::Unanswered { request_index } => {
+                format!("unanswered {request_index}")
+            }
+            exchange::Event::Unsolicited { .. } => "unsolicited".to_owned(),
+            exchange::Event::Undecoded { .. } => "undecoded".to_owned(),
+            exchange::Event::Diagnostic(diagnostic) => diagnostic.code.to_string(),
+        })
+        .collect()
+}
+
+#[test]
+fn a_reply_behind_more_unrelated_frames_than_the_frame_budget_is_still_answered() {
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood_then_reply(6, udp_reply));
+
+    let (result, events) =
+        collect_exchange(&client, retention(4, 4, capture::OverflowPolicy::Fail));
+
+    let report = result.expect("a retained reply completes the exchange");
+    assert!(report.unanswered.is_empty(), "{:?}", describe(&events));
+    let replies = events
+        .iter()
+        .filter(|event| matches!(event, exchange::Event::Response(_)))
+        .count();
+    assert_eq!(replies, 1, "{:?}", describe(&events));
+    let unrelated = events
+        .iter()
+        .filter(|event| matches!(event, exchange::Event::Unsolicited { .. }))
+        .count();
+    assert_eq!(unrelated, 3, "one frame slot is held for the pending reply");
+    let limit = events
+        .iter()
+        .find_map(|event| match event {
+            exchange::Event::Diagnostic(diagnostic)
+                if diagnostic.code == "exchange.capture_frame_limit" =>
+            {
+                Some(diagnostic.message.clone())
+            }
+            _ => None,
+        })
+        .expect("the refused unrelated frame is reported");
+    assert!(
+        limit.contains("limit 3 reached")
+            && limit.contains("4 configured")
+            && limit.contains("1 held for pending replies"),
+        "{limit}"
+    );
+}
+
+#[test]
+fn a_refused_reply_fails_the_exchange_instead_of_reporting_the_request_unanswered() {
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
+
+    let (result, events) =
+        collect_exchange(&client, retention(4, 0, capture::OverflowPolicy::Fail));
+
+    let error = result.expect_err("a refused matched reply is not an absent one");
+    assert_eq!(error.classification().code, "io.capture", "{error}");
+    let message = error.to_string();
+    assert!(
+        message.contains("request 0") && message.contains("exchange.response_limit"),
+        "{message}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, exchange::Event::Unanswered { .. })),
+        "{:?}",
+        describe(&events)
+    );
+}
+
+#[test]
+fn a_refused_reply_under_a_lossy_overflow_policy_is_not_claimed_absent() {
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
+
+    let (result, events) = collect_exchange(
+        &client,
+        retention(4, 0, capture::OverflowPolicy::DropNewest),
+    );
+
+    let report = result.expect("a lossy policy accepts incomplete evidence");
+    assert!(report.unanswered.is_empty(), "{:?}", describe(&events));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, exchange::Event::Unanswered { .. })),
+        "{:?}",
+        describe(&events)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        exchange::Event::Diagnostic(diagnostic) if diagnostic.code == "exchange.response_limit"
+    )));
+}
+
+fn scan_port_80(
+    client: &FixtureClient,
+    collection: exchange::Collection,
+) -> (
+    Result<packetcraftr::scan::Report, packetcraftr::scan::Error>,
+    Vec<packetcraftr::probe::ProbeStatus>,
+) {
+    use packetcraftr::{
+        probe::Transport,
+        scan,
+        target::{Family, Target},
+    };
+
+    let request = scan::Request {
+        max_in_flight: 1,
+        targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
+        transport: Transport::Tcp,
+        address_family: Family::Any,
+        ports: vec![80],
+        attempts: 1,
+        timeout: WINDOW,
+        probes_per_second: None,
+        udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
+        limits: scan::Limits::default(),
+        route: layer3_send().plan,
+        collection,
+    };
+    let statuses = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&statuses);
+    let result = client.scan(request, move |event| {
+        if let scan::Event::Probe { probe, .. } = event {
+            observed.lock().unwrap().push(probe.status);
+        }
+        Ok(())
+    });
+    let statuses = statuses.lock().unwrap().clone();
+    (result, statuses)
+}
+
+#[test]
+fn scan_reports_a_reply_behind_more_unrelated_frames_than_the_frame_budget_as_a_response() {
+    use packetcraftr::probe::ProbeStatus;
+
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood_then_reply(6, syn_ack));
+
+    let (result, statuses) = scan_port_80(&client, retention(4, 4, capture::OverflowPolicy::Fail));
+
+    result.expect("a scan whose reply was retained completes");
+    assert_eq!(statuses, [ProbeStatus::Response]);
+}
+
+#[test]
+fn scan_reports_a_timeout_for_a_silent_port_on_an_interface_busier_than_the_frame_budget() {
+    use packetcraftr::probe::ProbeStatus;
+
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood(6));
+
+    let (result, statuses) = scan_port_80(&client, retention(4, 4, capture::OverflowPolicy::Fail));
+
+    result.expect("frames no scan probe could match must not fail the scan");
+    assert_eq!(statuses, [ProbeStatus::Timeout]);
+}
+
+#[test]
+fn scan_reports_a_timeout_for_a_checksum_failed_reply_the_frame_budget_refused() {
+    use packetcraftr::probe::ProbeStatus;
+
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(flood_then_reply(0, corrupted_syn_ack));
+
+    let (result, statuses) = scan_port_80(&client, retention(1, 1, capture::OverflowPolicy::Fail));
+
+    result.expect("a reply no scan could accept must not fail the scan when it is refused");
+    assert_eq!(statuses, [ProbeStatus::Timeout]);
 }

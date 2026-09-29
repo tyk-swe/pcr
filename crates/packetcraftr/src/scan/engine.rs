@@ -14,7 +14,7 @@ use crate::execution::Errors as _;
 use crate::execution::publisher;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
-use crate::probe::{Batch, check_probe_count, check_probe_duration};
+use crate::probe::{Batch, check_collection_evidence, check_probe_count, check_probe_duration};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
 use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
@@ -26,7 +26,7 @@ use super::error::Probes;
 use super::evidence::ProbeClassifier;
 use super::executor::{ClientExecutor, PipelineEvent, PipelineOptions, Pipelined};
 use super::plan::packet::sent_probe_matches;
-use super::plan::{build_batches, worst_case_duration};
+use super::plan::{build_batches, probe_count, worst_case_duration};
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Probe, Report, Request};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
@@ -34,8 +34,9 @@ use crate::probe::{ProbeEndpoint, Transport, enforce_deadline};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
-    /// send and final outcome, each retained undecoded frame, and each
-    /// diagnostic to `sink`.
+    /// final outcome, each retained undecoded frame, and each diagnostic to
+    /// `sink`. When `max_in_flight` exceeds one, each probe's confirmed send
+    /// is also published as [`Event::Sent`] before its outcome.
     pub fn scan<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
         S: Sink<Event, Ack = ()>,
@@ -75,7 +76,7 @@ where
 {
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
-    let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
+    let batches = build_batches(request, &approved.addresses, &approved.endpoints);
     enforce_deadline(&Probes, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
@@ -138,12 +139,10 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
     B: Iterator<Item = Batch<Probe>>,
 {
-    let count = approved
-        .addresses
-        .len()
-        .saturating_mul(approved.endpoints.len())
-        .saturating_mul(request.attempts as usize);
-    if count.saturating_mul(std::mem::size_of::<Batch<Probe>>()) > request.limits.max_prepared_bytes
+    if approved
+        .total_probes
+        .saturating_mul(std::mem::size_of::<Batch<Probe>>())
+        > request.limits.max_prepared_bytes
     {
         return Err(Error::PipelineExecution {
             source: super::executor::limit(
@@ -166,7 +165,6 @@ where
         max_prepared_bytes: request.limits.max_prepared_bytes,
         max_evidence_frames: request.limits.max_evidence_frames,
         max_evidence_bytes: request.limits.max_evidence_bytes,
-        max_undecoded: request.limits.max_undecoded,
     };
     let result = executor.execute_pipeline(&batches, settings, &mut |event| {
         let invalid = |index| {
@@ -243,6 +241,7 @@ struct ApprovedScan {
     declared_target: String,
     addresses: Vec<IpAddr>,
     endpoints: Vec<ProbeEndpoint>,
+    total_probes: usize,
 }
 
 struct ScanPlan {
@@ -256,7 +255,11 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
     authorizer: &mut A,
     deadline: &Deadline,
 ) -> Result<ApprovedScan, Error> {
-    let ports = request.selected_ports()?;
+    let endpoints = probe_endpoints(request.transport, request.selected_ports()?);
+    // Only the serial path reuses `collection` to retain each exchange's frames.
+    if request.max_in_flight == 1 {
+        check_collection_evidence(&Probes, &request.collection, request.limits.evidence())?;
+    }
     // Implementations must authorize the declared target before DNS and every
     // answer before anything below constructs a probe; `admit_selection` owns
     // that ordering.
@@ -271,20 +274,11 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
         },
         Error::TargetSelection,
         |selected| {
-            let endpoints_per_address = if request.transport == Transport::Icmp {
-                1
-            } else {
-                ports.len()
-            };
-            let total_probes = probe_count(
-                selected.addresses.len(),
-                endpoints_per_address,
-                request.attempts,
-            )?;
+            let total_probes =
+                probe_count(selected.addresses.len(), endpoints.len(), request.attempts)?;
             check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
-            let maximum_bytes = maximum_wire_bytes(&selected.addresses, &ports, request)?;
-            let worst_case =
-                worst_case_duration(request, selected.addresses.len(), endpoints_per_address)?;
+            let maximum_bytes = maximum_wire_bytes(&selected.addresses, &endpoints, request)?;
+            let worst_case = worst_case_duration(request, total_probes)?;
             check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
             Ok(ScanPlan {
                 total_probes,
@@ -300,12 +294,12 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
         },
     )?;
 
-    let endpoints = probe_endpoints(request.transport, ports);
     Ok(ApprovedScan {
         planned_duration: plan.worst_case,
         declared_target: selected.declared,
         addresses: selected.addresses,
         endpoints,
+        total_probes: plan.total_probes,
     })
 }
 
@@ -323,24 +317,9 @@ fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> 
     }
 }
 
-fn probe_count(
-    address_count: usize,
-    endpoints_per_address: usize,
-    attempts: u32,
-) -> Result<usize, Error> {
-    address_count
-        .checked_mul(endpoints_per_address)
-        .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
-        .ok_or(Error::InvalidLimit {
-            field: "probes",
-            value: u64::MAX,
-            reason: "probe-count arithmetic overflowed".to_owned(),
-        })
-}
-
 fn maximum_wire_bytes(
     addresses: &[IpAddr],
-    ports: &[u16],
+    endpoints: &[ProbeEndpoint],
     request: &Request,
 ) -> Result<u64, Error> {
     let overflow = || Error::InvalidLimit {
@@ -348,27 +327,26 @@ fn maximum_wire_bytes(
         value: u64::MAX,
         reason: "scan payload accounting overflowed".to_owned(),
     };
-    let endpoints = if request.transport == Transport::Icmp {
-        1
-    } else {
-        ports.len() as u64
-    };
     let payload = if request.transport == Transport::Udp {
-        ports.iter().try_fold(0u64, |total, port| {
-            total
-                .checked_add(
-                    request
-                        .udp_profiles
-                        .get(port)
-                        .map_or(request.udp_payload.len(), |profile| {
-                            profile.payload_length()
-                        }) as u64,
-                )
-                .ok_or_else(overflow)
-        })?
+        endpoints
+            .iter()
+            .filter_map(|endpoint| endpoint.port())
+            .try_fold(0u64, |total, port| {
+                total
+                    .checked_add(
+                        request
+                            .udp_profiles
+                            .get(&port)
+                            .map_or(request.udp_payload.len(), |profile| {
+                                profile.payload_length()
+                            }) as u64,
+                    )
+                    .ok_or_else(overflow)
+            })?
     } else {
         0
     };
+    let endpoints = endpoints.len() as u64;
     addresses.iter().try_fold(0u64, |total, address| {
         let header = if address.is_ipv4() {
             IPV4_PROBE_BYTES

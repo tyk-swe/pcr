@@ -9,7 +9,6 @@ they do not establish that a device dropped packets. A bundle is sensitive data.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -21,20 +20,14 @@ import subprocess
 import time
 from typing import Iterable
 
+from validation_evidence import checksum, digest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("forwarding_consumer", ROOT / "examples/consumers/forwarding.py")
 CONSUMER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CONSUMER)
 MAX_OUTPUT = 32 * 1024 * 1024
 MAX_STDERR = 1024 * 1024
-
-
-def checksum(data: bytes) -> int:
-    data += b"\0" * (len(data) % 2)
-    total = sum(struct.unpack(f"!{len(data) // 2}H", data))
-    while total >> 16:
-        total = (total & 65535) + (total >> 16)
-    return (~total) & 65535
 
 
 def datagram(identity: int, payload: bytes, source_port: int = 40000) -> bytes:
@@ -83,14 +76,6 @@ def validate_capture(data: bytes) -> int:
             raise ValueError("invalid UDP checksum")
         count += 1
     return count
-
-
-def digest(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(65536), b""):
-            hasher.update(block)
-    return hasher.hexdigest()
 
 
 def create_cases(root: Path, large: bool = False) -> list[dict]:

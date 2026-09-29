@@ -89,11 +89,14 @@ pub enum FieldValue {
 }
 
 pub(crate) fn parse_mac(input: &str) -> Option<[u8; 6]> {
-    let mut parts = input.split([':', '-']);
+    let separator = input
+        .chars()
+        .find(|character| matches!(character, ':' | '-'))?;
+    let mut parts = input.split(separator);
     let mut output = [0_u8; 6];
     for byte in &mut output {
         let part = parts.next()?;
-        if part.len() != 2 {
+        if part.len() != 2 || !part.bytes().all(|digit| digit.is_ascii_hexdigit()) {
             return None;
         }
         *byte = u8::from_str_radix(part, 16).ok()?;

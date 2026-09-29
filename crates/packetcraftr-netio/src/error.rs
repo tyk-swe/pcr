@@ -248,7 +248,7 @@ impl Classified for Error {
             ),
             Self::InvalidCaptureGroup { .. } => classified_cli(
                 "cli.capture_group",
-                "select 1 to 16 distinct interfaces whose shared queue limits hold one full snapshot each",
+                "select 1 to 15 distinct interfaces whose shared queue limits hold one full snapshot each",
             ),
             Self::CaptureSourceContract { .. } | Self::CaptureGroupState => classified(
                 "internal.capture_group",

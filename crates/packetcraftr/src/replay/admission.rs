@@ -9,17 +9,23 @@ use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
 use crate::policy::{
-    Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
-    authorize_wire_sources, unsupported_operation,
+    Operation, WireLimits, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
 };
 use packetcraftr_core::error::BoundaryError;
 
 use super::evidence::network_envelope;
 
-/// Applies source policy to the final route after destination and limits
-/// authorization and before replay delay or transmission. Only replay sends
-/// captured bytes it did not build, so only replay needs it.
-pub(crate) trait FinalWire {
+/// Replay's two admission steps for one captured frame: `admit_frame` checks
+/// limits and exact bytes before route work, and `authorize_final_wire` applies
+/// source policy to the final route before delay or transmission.
+pub(crate) trait ReplayAdmission {
+    fn admit_frame(
+        &mut self,
+        limits: WireLimits,
+        frame: &Frame,
+        mode: Mode,
+    ) -> Result<(), BoundaryError>;
+
     fn authorize_final_wire(
         &mut self,
         frame: &Frame,
@@ -49,15 +55,11 @@ impl<'c> FrameAdmission<'c> {
         }
     }
 
-    fn policy(&self) -> &'c crate::policy::Policy {
-        self.policy
-    }
-
     fn authorize_frame(&mut self, frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        let trusted = authorize_wire_destinations(self.policy(), frame.link_type, frame.bytes())
+        let trusted = authorize_wire_destinations(self.policy, frame.link_type, frame.bytes())
             .map_err(wire_error)?;
         let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
@@ -135,7 +137,7 @@ impl<'c> FrameAdmission<'c> {
             ));
         }
         if crate::policy::requires_live_opt_in(rebuilt) {
-            authorize_permissive_live(self.policy(), self.allow_permissive_live)
+            authorize_permissive_live(self.policy, self.allow_permissive_live)
                 .map_err(permissive_live_error)?;
         }
         Ok(())
@@ -215,25 +217,19 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
     Ok(())
 }
 
-impl Authorizer for FrameAdmission<'_> {
-    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+impl ReplayAdmission for FrameAdmission<'_> {
+    fn admit_frame(
+        &mut self,
+        limits: WireLimits,
+        frame: &Frame,
+        mode: Mode,
+    ) -> Result<(), BoundaryError> {
         self.policy
-            .authorize(Operation::Wire(operation.limits()))
+            .authorize(Operation::Wire(limits))
             .map_err(BoundaryError::from_error)?;
-        match operation {
-            Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
-            Operation::Socket(_)
-            | Operation::Wire(_)
-            | Operation::Dns(_)
-            | Operation::Declared(_) => Err(unsupported_operation(
-                "the replay frame admission",
-                &operation,
-            )),
-        }
+        self.authorize_frame(frame, mode)
     }
-}
 
-impl FinalWire for FrameAdmission<'_> {
     fn authorize_final_wire(
         &mut self,
         frame: &Frame,
@@ -242,11 +238,13 @@ impl FinalWire for FrameAdmission<'_> {
         match self.wire_decode.take() {
             Some(decoded)
                 if decoded.frame.link_type == frame.link_type
-                    && decoded.original == *frame.bytes() =>
+                    && decoded.frame.bytes() == frame.bytes() =>
             {
-                authorize_wire_sources(self.policy(), &decoded, route).map_err(wire_error)
+                self.policy
+                    .authorize_packet_sources(&decoded.packet, route)
+                    .map_err(wire_error)
             }
-            _ => authorize_wire(self.policy(), frame.link_type, frame.bytes(), Some(route))
+            _ => authorize_wire(self.policy, frame.link_type, frame.bytes(), route)
                 .map_err(wire_error),
         }
     }
@@ -281,7 +279,6 @@ mod tests {
     use crate::route::Plan;
 
     use super::*;
-    use crate::policy::{DeclaredPackets, PermissiveLive, ReplayFrame, WireLimits};
 
     fn registry() -> Arc<Registry> {
         packetcraftr_core::protocol::builtin::registry()
@@ -301,9 +298,9 @@ mod tests {
 
     impl LayerCodec for OpaqueRawCodec {
         fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
-            static PROTOCOL: std::sync::OnceLock<packetcraftr_core::layer::Id> =
-                std::sync::OnceLock::new();
-            PROTOCOL.get_or_init(|| "raw".into())
+            const PROTOCOL: &packetcraftr_core::layer::Id =
+                &packetcraftr_core::layer::Id::new("raw");
+            PROTOCOL
         }
 
         fn encode(
@@ -684,20 +681,12 @@ mod tests {
         let mut authorizer = frame_admission(registry(), policy, false);
 
         let packet_error = authorizer
-            .authorize_operation(Operation::Replay(ReplayFrame::new(
-                WireLimits::new(2, 1),
-                &invalid_frame,
-                Mode::Layer2,
-            )))
+            .admit_frame(WireLimits::new(2, 1), &invalid_frame, Mode::Layer2)
             .expect_err("packet budget must fail first");
         assert_eq!(packet_error.classification().code, "policy.packet_limit");
 
         let byte_error = authorizer
-            .authorize_operation(Operation::Replay(ReplayFrame::new(
-                WireLimits::new(1, 3),
-                &invalid_frame,
-                Mode::Layer2,
-            )))
+            .admit_frame(WireLimits::new(1, 3), &invalid_frame, Mode::Layer2)
             .expect_err("byte budget must fail before unsupported link type");
         assert_eq!(byte_error.classification().code, "policy.byte_limit");
     }
@@ -795,34 +784,6 @@ mod tests {
         assert_eq!(
             error.classification().remediation,
             Some("set the per-operation malformed-live opt-in in addition to policy approval")
-        );
-    }
-
-    #[test]
-    fn replay_authorization_refuses_an_operation_with_no_frame() {
-        let mut authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
-
-        let error = authorizer
-            .authorize_operation(Operation::Wire(WireLimits::new(1, 1)))
-            .expect_err("a frameless replay operation cannot be authorized");
-
-        assert_eq!(error.classification().kind, Kind::Internal);
-        assert_eq!(
-            error.classification().code,
-            "internal.unsupported_operation"
-        );
-
-        let declared = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
-                WireLimits::new(1, 1),
-                &[],
-                None,
-                PermissiveLive::NotRequired,
-            )))
-            .expect_err("a declared-packet list is not an exact frame");
-        assert_eq!(
-            declared.classification().code,
-            "internal.unsupported_operation"
         );
     }
 

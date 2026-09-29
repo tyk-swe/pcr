@@ -5,7 +5,6 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
         mpsc::{self, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
@@ -24,7 +23,6 @@ type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
 #[derive(Clone)]
 pub(crate) struct ReaperClient {
     tasks: SyncSender<ReapTask>,
-    retained_tasks: Arc<AtomicUsize>,
 }
 
 struct ReaperService {
@@ -68,11 +66,6 @@ impl ReaperClient {
     }
 
     fn retain(&self, task: ReapTask) {
-        let _ = self
-            .retained_tasks
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            });
         std::mem::forget(task);
     }
 }
@@ -92,7 +85,6 @@ fn start_reaper(
     // The channel and threads match pool capacity, so every admitted worker can be reaped.
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
-    let retained_tasks = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::with_capacity(capacity);
     for _ in 0..capacity {
         match spawn(Arc::clone(&receiver)) {
@@ -109,10 +101,7 @@ fn start_reaper(
         }
     }
     Ok(ReaperService {
-        client: ReaperClient {
-            tasks,
-            retained_tasks,
-        },
+        client: ReaperClient { tasks },
         _workers: workers,
     })
 }
@@ -145,13 +134,7 @@ pub(crate) mod test_support {
         queue_capacity: usize,
     ) -> (ReaperClient, mpsc::Receiver<ReapTask>) {
         let (tasks, receiver) = mpsc::sync_channel(queue_capacity);
-        (
-            ReaperClient {
-                tasks,
-                retained_tasks: Arc::new(AtomicUsize::new(0)),
-            },
-            receiver,
-        )
+        (ReaperClient { tasks }, receiver)
     }
 
     pub(crate) fn start_with(
@@ -159,10 +142,6 @@ pub(crate) mod test_support {
         spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
     ) -> Result<ReaperClient, ReaperStartError> {
         start_reaper(capacity, spawn).map(|service| service.client)
-    }
-
-    pub(crate) fn retained_tasks(client: &ReaperClient) -> usize {
-        client.retained_tasks.load(Ordering::Relaxed)
     }
 }
 
@@ -208,21 +187,25 @@ mod tests {
     fn queue_saturation_retains_complete_task_without_panicking() {
         let (client, _receiver) = client_with_receiver(1);
         client.transfer(Box::new(|| {}));
-        client.transfer(Box::new(|| {}));
-        assert_eq!(retained_tasks(&client), 1);
+        let sentinel = Arc::new(());
+        let held = Arc::clone(&sentinel);
+        client.transfer(Box::new(move || drop(held)));
+        assert_eq!(Arc::strong_count(&sentinel), 2);
     }
 
     #[test]
     fn dead_receiver_retains_complete_task_without_panicking() {
         let (client, receiver) = client_with_receiver(1);
         drop(receiver);
-        client.transfer(Box::new(|| {}));
-        assert_eq!(retained_tasks(&client), 1);
+        let sentinel = Arc::new(());
+        let held = Arc::clone(&sentinel);
+        client.transfer(Box::new(move || drop(held)));
+        assert_eq!(Arc::strong_count(&sentinel), 2);
     }
 
     #[test]
     fn stalled_task_does_not_block_later_cleanup() {
-        let pool = Arc::new(Pool::new(2, 2));
+        let pool = Arc::new(Pool::new(2));
         let client = start_with(2, spawn_reaper_thread).expect("start test reaper");
         let first_permit = pool.admit(Class::Native).expect("first admission");
         let (first_started, first_started_receiver) = mpsc::channel();

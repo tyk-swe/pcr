@@ -3,7 +3,6 @@
 
 use crate::errors::CliError;
 use packetcraftr_core::budget::{Deadline, Interrupted};
-use packetcraftr_core::error::{Classification, Kind};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,19 +53,7 @@ pub(crate) fn check() -> Result<(), CliError> {
 }
 
 pub(crate) fn interruption_error(error: Interrupted) -> CliError {
-    match error {
-        Interrupted::Cancelled(error) => CliError::classified(error),
-        Interrupted::Exceeded(error) => CliError::from_classification(
-            Classification::new(
-                "policy.duration_limit",
-                Kind::Policy,
-                Some("reduce work or raise the finite invocation duration"),
-            ),
-            error.to_string(),
-            Vec::new(),
-        ),
-        other => CliError::new(Kind::Policy, other.to_string()),
-    }
+    CliError::classified(error)
 }
 
 pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
@@ -82,5 +69,28 @@ pub(crate) fn reader<R: std::io::Read>(
     match deadline() {
         Some(deadline) => reader.with_deadline(deadline),
         None => reader,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packetcraftr_core::budget::{Cancelled, DeadlineExceeded};
+    use packetcraftr_core::error::Classified;
+
+    #[test]
+    fn interruptions_publish_the_classification_their_library_owns() {
+        let exceeded = DeadlineExceeded {
+            actual: Duration::from_millis(2),
+            limit: Duration::from_millis(1),
+        };
+        for interrupted in [
+            Interrupted::Cancelled(Cancelled),
+            Interrupted::Exceeded(exceeded),
+        ] {
+            let error = interruption_error(interrupted);
+            assert_eq!(error.classification, interrupted.classification());
+            assert_eq!(error.message, interrupted.to_string());
+        }
     }
 }

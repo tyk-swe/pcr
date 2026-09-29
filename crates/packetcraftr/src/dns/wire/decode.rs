@@ -69,13 +69,13 @@ pub fn decode_response(
             .map(|label| bytes::Bytes::copy_from_slice(label.as_bytes())),
     )?;
     validate_message_bounds(message, limits)?;
-    let header = decode_header(message, transaction_id)?;
+    let flags = decode_header(message, transaction_id)?;
     // One owned handle serves both decodes; retention inside it is refcounted, not copied.
     let wire = bytes::Bytes::copy_from_slice(message);
     decode_question(&wire, &query_name, &expected_name, query_type, limits)?;
 
-    if header.flags & FLAG_TRUNCATED != 0 {
-        return Ok(truncated_response(header.flags));
+    if flags & FLAG_TRUNCATED != 0 {
+        return Ok(truncated_response(flags));
     }
 
     let decoded = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
@@ -88,7 +88,7 @@ pub fn decode_response(
         .as_ref()
         .map_or(0, |edns| u16::from(edns.extended_response_code))
         << 4)
-        | (header.flags & RCODE_MASK);
+        | (flags & RCODE_MASK);
     let RelevantRecords {
         answers,
         authorities,
@@ -104,26 +104,12 @@ pub fn decode_response(
         limits.max_rejected_records,
     );
     Ok(ValidatedResponse {
-        metadata: ResponseMetadata {
-            response_code,
-            edns: sections.edns,
-            authoritative: header.flags & FLAG_AUTHORITATIVE != 0,
-            truncated: false,
-            recursion_desired: header.flags & FLAG_RECURSION_DESIRED != 0,
-            recursion_available: header.flags & FLAG_RECURSION_AVAILABLE != 0,
-            authenticated_data: header.flags & FLAG_AUTHENTICATED_DATA != 0,
-            checking_disabled: header.flags & FLAG_CHECKING_DISABLED != 0,
-            rejected_record_count,
-        },
+        metadata: metadata(flags, response_code, sections.edns, rejected_record_count),
         answers,
         authorities,
         additionals,
         rejected_records,
     })
-}
-
-struct ResponseHeader {
-    flags: u16,
 }
 
 struct ResponseSections {
@@ -171,7 +157,7 @@ fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), 
     Ok(())
 }
 
-fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, Error> {
+fn decode_header(message: &[u8], transaction_id: u16) -> Result<u16, Error> {
     let actual_id = read_u16(message, 0, "transaction ID")?;
     let flags = read_u16(message, 2, "flags")?;
     if flags & FLAG_RESPONSE == 0 {
@@ -196,7 +182,7 @@ fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, 
             actual: question_count,
         });
     }
-    Ok(ResponseHeader { flags })
+    Ok(flags)
 }
 
 fn decode_question(
@@ -230,20 +216,29 @@ fn decode_question(
     Ok(())
 }
 
+fn metadata(
+    flags: u16,
+    response_code: u16,
+    edns: Option<Edns>,
+    rejected_record_count: usize,
+) -> ResponseMetadata {
+    ResponseMetadata {
+        response_code,
+        edns,
+        authoritative: flags & FLAG_AUTHORITATIVE != 0,
+        truncated: flags & FLAG_TRUNCATED != 0,
+        recursion_desired: flags & FLAG_RECURSION_DESIRED != 0,
+        recursion_available: flags & FLAG_RECURSION_AVAILABLE != 0,
+        authenticated_data: flags & FLAG_AUTHENTICATED_DATA != 0,
+        checking_disabled: flags & FLAG_CHECKING_DISABLED != 0,
+        rejected_record_count,
+    }
+}
+
 fn truncated_response(flags: u16) -> ValidatedResponse {
     // Truncation may end at any byte; never present possibly partial records as accepted.
     ValidatedResponse {
-        metadata: ResponseMetadata {
-            response_code: flags & RCODE_MASK,
-            edns: None,
-            authoritative: flags & FLAG_AUTHORITATIVE != 0,
-            truncated: true,
-            recursion_desired: flags & FLAG_RECURSION_DESIRED != 0,
-            recursion_available: flags & FLAG_RECURSION_AVAILABLE != 0,
-            authenticated_data: flags & FLAG_AUTHENTICATED_DATA != 0,
-            checking_disabled: flags & FLAG_CHECKING_DISABLED != 0,
-            rejected_record_count: 0,
-        },
+        metadata: metadata(flags, flags & RCODE_MASK, None, 0),
         answers: Vec::new(),
         authorities: Vec::new(),
         additionals: Vec::new(),

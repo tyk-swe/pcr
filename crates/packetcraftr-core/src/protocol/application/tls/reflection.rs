@@ -4,9 +4,7 @@
 use bytes::Bytes;
 
 use super::codec::NAME;
-use super::{
-    Hello, HelloExtension, HelloKind, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSIONS, Tls, hex,
-};
+use super::{Extension, Hello, HelloKind, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSIONS, Tls, hex};
 use crate::{
     field::{self, FieldKind, FieldValue},
     layer::{FieldSchema, reflective_layer},
@@ -102,7 +100,7 @@ impl Hello {
                     let FieldValue::Text(name) = value else {
                         return Err(out_of_range(tls_schema(), "server_name"));
                     };
-                    HelloExtension::server_name(name)
+                    Extension::server_name(name)
                         .map_err(|_| out_of_range(tls_schema(), "server_name"))?
                 } else if let Some(value) = e.take("alpn") {
                     let protocols = list(value, MAX_ALPN, tls_schema(), "alpn")?
@@ -121,10 +119,9 @@ impl Hello {
                             Ok(bytes)
                         })
                         .collect::<Result<Vec<_>, field::Error>>()?;
-                    HelloExtension::alpn(&protocols)
-                        .map_err(|_| out_of_range(tls_schema(), "alpn"))?
+                    Extension::alpn(&protocols).map_err(|_| out_of_range(tls_schema(), "alpn"))?
                 } else {
-                    HelloExtension {
+                    Extension {
                         kind: e.value("type", 0u16)?,
                         data: e.value("data", Bytes::new())?,
                     }

@@ -5,5 +5,7 @@ mod codec;
 mod model;
 mod reflection;
 
+use model::Kind4;
+
 pub(crate) use codec::Dhcpv4Codec;
 pub use model::{Dhcpv4, Option4, Value4};

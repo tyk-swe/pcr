@@ -104,10 +104,11 @@ pub(crate) fn prepare_live<R: LiveRequest>(
         .map_err(CliError::classified)?;
     let first =
         route::authorize_expanded_destinations(request.template(), max_template_packets, &policy)?;
+    let plan = route::options(&send.route.route)?;
     let destination = route::destination(send.route.destination, &first, &policy)?;
     request.set_send(packetcraftr::send::Options {
         destination,
-        plan: route::options(&send.route.route)?,
+        plan,
         build: core::build::Options {
             mode: send.mode.into(),
             ..core::build::Options::default()
@@ -143,8 +144,8 @@ pub(crate) fn prepare_plan(
     policy
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
-    let destination = route::destination(destination, &packet, &policy)?;
     let route = route::options(&route)?;
+    let destination = route::destination(destination, &packet, &policy)?;
     Ok(Plan {
         client: client(registry, policy, Runtime::Client),
         packet,
@@ -176,7 +177,6 @@ pub(crate) fn prepare_workflow(
     route: &RouteSelectionArgs,
     policy: packetcraftr::policy::Policy,
     timeout: Duration,
-    max_template_packets: usize,
     queue_limits: net::capture::Limits,
 ) -> Result<Workflow, CliError> {
     policy.validate().map_err(CliError::classified)?;
@@ -184,7 +184,7 @@ pub(crate) fn prepare_workflow(
     Ok(Workflow {
         policy: Arc::new(policy),
         route,
-        collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
+        collection: exchange::collection(timeout, queue_limits)?,
     })
 }
 
@@ -200,9 +200,27 @@ mod tests {
 
     const INVALID_RECIPE: &str = "ipv4(dst=192.0.2.1";
 
+    const UNRESOLVABLE_HOST_BAD_INTERFACE: &[&str] = &[
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=9000)",
+        "--destination",
+        "host.invalid",
+        "--allow-hostname-resolution",
+        "--interface",
+        "0",
+    ];
+
     fn live_arguments(command: &str) -> (SendArgs, TemplateArgs) {
-        let cli = Cli::try_parse_from(["packetcraftr", command, "--packet", INVALID_RECIPE])
-            .expect("arguments parse");
+        live_arguments_with(command, &["--packet", INVALID_RECIPE])
+    }
+
+    fn live_arguments_with(command: &str, options: &[&str]) -> (SendArgs, TemplateArgs) {
+        let cli = Cli::try_parse_from(
+            ["packetcraftr", command]
+                .into_iter()
+                .chain(options.iter().copied()),
+        )
+        .expect("arguments parse");
         match cli.command {
             CommandLine::Send(arguments) => (arguments.send, arguments.template),
             CommandLine::Exchange(arguments) => (arguments.send, arguments.template),
@@ -260,6 +278,55 @@ mod tests {
         let message = error_message(prepare_live(send, template, request));
         assert!(message.contains("timeout"), "{message}");
         assert_ne!(message, recipe_error());
+    }
+
+    #[test]
+    fn live_commands_reject_the_interface_before_resolving_the_destination() {
+        for command in ["send", "exchange"] {
+            let (send, template) = live_arguments_with(command, UNRESOLVABLE_HOST_BAD_INTERFACE);
+            let message = match command {
+                "send" => error_message(prepare_live(send, template, send_request())),
+                _ => error_message(prepare_live(send, template, exchange_request())),
+            };
+            assert_eq!(message, "--interface index must be non-zero", "{command}");
+        }
+    }
+
+    fn plan_error(options: &[&str]) -> CliError {
+        let cli = Cli::try_parse_from(
+            ["packetcraftr", "plan"]
+                .into_iter()
+                .chain(options.iter().copied()),
+        )
+        .expect("arguments parse");
+        let CommandLine::Plan(arguments) = cli.command else {
+            panic!("plan command");
+        };
+        match prepare_plan(arguments.route, arguments.policy.into_policy()) {
+            Ok(_) => panic!("preparation must fail"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn plan_rejects_the_interface_before_resolving_the_destination() {
+        let error = plan_error(UNRESOLVABLE_HOST_BAD_INTERFACE);
+        assert_eq!(error.message, "--interface index must be non-zero");
+        assert_eq!(error.exit_code(), 2);
+    }
+
+    #[test]
+    fn plan_denies_the_destination_before_the_interface() {
+        let error = plan_error(&[
+            "--packet",
+            "ipv4(dst=10.0.0.2)/udp(dport=9000)",
+            "--allow-destination",
+            "192.0.2.0/24",
+            "--interface",
+            "0",
+        ]);
+        assert_eq!(error.classification.code, "policy.destination_not_allowed");
+        assert_eq!(error.exit_code(), 6);
     }
 
     #[test]

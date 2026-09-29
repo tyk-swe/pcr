@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use super::*;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::deadline::POLL_INTERVAL;
 
 #[track_caller]
 fn assert_same_error(actual: &Error, expected: &Error) {
@@ -69,6 +70,19 @@ struct ScriptedState {
     write_submissions: Vec<usize>,
     read_error: Option<io::ErrorKind>,
     write_error: Option<io::ErrorKind>,
+    read_stalls_at_end: bool,
+    write_window: Option<usize>,
+    cancel_on_stall: Option<Cancellation>,
+}
+
+impl ScriptedState {
+    fn stall(&mut self, timeout: Duration) -> io::Error {
+        self.now += timeout;
+        if let Some(signal) = &self.cancel_on_stall {
+            signal.cancel();
+        }
+        io::Error::from(io::ErrorKind::WouldBlock)
+    }
 }
 
 impl ScriptedStream {
@@ -89,6 +103,9 @@ impl ScriptedStream {
                 write_submissions: Vec::new(),
                 read_error: None,
                 write_error: None,
+                read_stalls_at_end: false,
+                write_window: None,
+                cancel_on_stall: None,
             })),
             peer: ENDPOINT,
         }
@@ -132,7 +149,15 @@ impl Read for ScriptedStream {
         let mut state = self.state.lock().unwrap();
         let limit = state.read_chunks.pop_front().unwrap_or(bytes.len());
         let length = bytes.len().min(limit);
-        state.input.read(&mut bytes[..length])
+        let count = state.input.read(&mut bytes[..length])?;
+        if count == 0 && state.read_stalls_at_end {
+            let timeout = *state
+                .read_timeouts
+                .last()
+                .expect("a bounded read sets its timeout first");
+            return Err(state.stall(timeout));
+        }
+        Ok(count)
     }
 }
 
@@ -150,10 +175,21 @@ impl Write for ScriptedStream {
             state.write_interrupts -= 1;
             return Err(io::Error::from(io::ErrorKind::Interrupted));
         }
+        let room = state.write_window.map_or(usize::MAX, |window| {
+            window.saturating_sub(state.output.len())
+        });
+        if room == 0 {
+            let timeout = *state
+                .write_timeouts
+                .last()
+                .expect("a bounded write sets its timeout first");
+            return Err(state.stall(timeout));
+        }
         state.write_submissions.push(bytes.len());
         let length = bytes
             .len()
-            .min(state.write_chunks.pop_front().unwrap_or(bytes.len()));
+            .min(state.write_chunks.pop_front().unwrap_or(bytes.len()))
+            .min(room);
         state.output.extend_from_slice(&bytes[..length]);
         Ok(length)
     }
@@ -198,7 +234,8 @@ fn connector(input: Vec<u8>) -> ScriptedConnector {
     }
 }
 
-const SCRIPTED_TIMEOUT: Duration = Duration::from_millis(50);
+const SCRIPTED_TIMEOUT: Duration = Duration::from_millis(10);
+const _: () = assert!(SCRIPTED_TIMEOUT.as_millis() < POLL_INTERVAL.as_millis());
 
 fn request(query: &[u8]) -> Request<'_> {
     Request {
@@ -219,31 +256,167 @@ fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
     assert!(provider.stream.state.lock().unwrap().output.is_empty());
 }
 
+/// A silent peer per waiting phase: `(phase, response bytes, write window, phase bytes transferred)`.
+fn stalled_peers() -> [(Phase, Vec<u8>, Option<usize>, usize); 4] {
+    [
+        (Phase::Write, Vec::new(), Some(0), 0),
+        (Phase::Write, Vec::new(), Some(2), 2),
+        (Phase::ReadPrefix, Vec::new(), None, 0),
+        (Phase::ReadMessage, vec![0, 4, 1, 2], None, 2),
+    ]
+}
+
+fn stalled_peer(phase: Phase, input: Vec<u8>, window: Option<usize>) -> ScriptedConnector {
+    let provider = connector(input);
+    {
+        let mut state = provider.stream.state.lock().unwrap();
+        state.write_window = window;
+        state.read_stalls_at_end = phase != Phase::Write;
+    }
+    provider
+}
+
 #[test]
-fn provider_read_and_write_timeouts_preserve_phase_and_query_progress() {
-    for phase in [Phase::Write, Phase::ReadPrefix] {
-        let provider = connector(vec![0, 1, 1]);
-        {
-            let mut state = provider.stream.state.lock().unwrap();
-            match phase {
-                Phase::Write => state.write_error = Some(io::ErrorKind::TimedOut),
-                Phase::ReadPrefix => state.read_error = Some(io::ErrorKind::WouldBlock),
-                _ => unreachable!(),
-            }
-        }
-        let error = query(request(b"q"), Arc::new(provider.clone())).unwrap_err();
-        assert_same_error(
-            &error,
-            &Error::Timeout {
-                phase,
-                transferred: 0,
-            },
-        );
+fn stalled_socket_waits_are_sliced_until_the_deadline_and_preserve_query_progress() {
+    for (phase, input, window, transferred) in stalled_peers() {
+        let provider = stalled_peer(phase, input, window);
+        let started = provider.stream.state.lock().unwrap().now;
+
+        let error = query_with_connector(request(b"q"), &provider).unwrap_err();
+
+        assert_same_error(&error, &Error::Timeout { phase, transferred });
         assert_eq!(
             error.query_bytes_written(3),
-            if phase == Phase::Write { 0 } else { 3 }
+            if phase == Phase::Write {
+                transferred
+            } else {
+                3
+            }
         );
+        let state = provider.stream.state.lock().unwrap();
+        let timeouts = if phase == Phase::Write {
+            &state.write_timeouts
+        } else {
+            &state.read_timeouts
+        };
+        assert!(timeouts.iter().all(|timeout| *timeout <= POLL_INTERVAL));
+        assert_eq!(state.now - started, Duration::from_secs(1));
     }
+}
+
+#[test]
+fn a_socket_timeout_with_budget_left_is_retried_rather_than_reported() {
+    let provider = connector(vec![0, 1, 1]);
+    {
+        let mut state = provider.stream.state.lock().unwrap();
+        state.write_error = Some(io::ErrorKind::TimedOut);
+        state.read_error = Some(io::ErrorKind::WouldBlock);
+    }
+
+    let response = query_with_connector(request(b"q"), &provider).unwrap();
+
+    assert_eq!(response.frame.as_ref(), [0, 1, 1]);
+    assert_eq!(response.bytes_written, 3);
+    let state = provider.stream.state.lock().unwrap();
+    assert_eq!(state.write_timeouts.len(), 2);
+    assert!(state.read_timeouts.len() >= 2);
+}
+
+#[test]
+fn socket_failures_keep_their_phase_progress_and_source() {
+    let provider = connector(Vec::new());
+    provider.stream.state.lock().unwrap().write_error = Some(io::ErrorKind::BrokenPipe);
+    assert!(matches!(
+        query_with_connector(request(b"q"), &provider),
+        Err(Error::Write {
+            written: 0,
+            expected: 3,
+            source: Some(_),
+            ..
+        })
+    ));
+
+    let provider = connector(Vec::new());
+    provider.stream.state.lock().unwrap().read_error = Some(io::ErrorKind::ConnectionReset);
+    assert!(matches!(
+        query_with_connector(request(b"q"), &provider),
+        Err(Error::Read {
+            phase: Phase::ReadPrefix,
+            source: Some(_),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn cancellation_interrupts_a_stalled_socket_wait_within_one_poll_interval() {
+    for (phase, input, window, transferred) in stalled_peers() {
+        let signal = Cancellation::default();
+        let provider = stalled_peer(phase, input, window);
+        let started = {
+            let mut state = provider.stream.state.lock().unwrap();
+            state.cancel_on_stall = Some(signal.clone());
+            state.now
+        };
+
+        let error = query_with_connector(
+            Request {
+                timeout: Duration::from_secs(3600),
+                cancellation: Some(&signal),
+                ..request(b"q")
+            },
+            &provider,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                Error::Cancelled { phase: cancelled_in, transferred: progress, .. }
+                    if cancelled_in == phase && progress == transferred
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.category(), Category::Cancelled);
+        assert_eq!(
+            error.query_bytes_written(3),
+            if phase == Phase::Write {
+                transferred
+            } else {
+                3
+            }
+        );
+        let state = provider.stream.state.lock().unwrap();
+        assert!(state.now - started <= POLL_INTERVAL);
+    }
+}
+
+#[test]
+fn cancellation_before_connect_completes_has_written_no_query_bytes() {
+    let signal = Cancellation::default();
+    signal.cancel();
+    let provider = connector(vec![0, 1, 1]);
+
+    let error = query_with_connector(
+        Request {
+            cancellation: Some(&signal),
+            ..request(b"q")
+        },
+        &provider,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        Error::Cancelled {
+            phase: Phase::Connect,
+            transferred: 0,
+            ..
+        }
+    ));
+    assert_eq!(error.category(), Category::Cancelled);
+    assert_eq!(error.query_bytes_written(3), 0);
+    assert!(provider.stream.state.lock().unwrap().output.is_empty());
 }
 
 #[test]
@@ -283,7 +456,7 @@ fn partial_and_interrupted_io_preserves_exact_frames() {
             .read_timeouts
             .iter()
             .chain(&state.write_timeouts)
-            .all(|timeout| *timeout <= Duration::from_secs(1))
+            .all(|timeout| *timeout <= POLL_INTERVAL)
     );
 }
 

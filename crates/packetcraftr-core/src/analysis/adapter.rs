@@ -59,8 +59,6 @@ fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
         .filter(|fragment| fragment.fragment_offset != 0 || fragment.more_fragments)
 }
 
-/// The transport walk and the fragment walk must agree on the encapsulation
-/// path or the same conversation would land in two scopes.
 fn tunnel_identifier(
     layer: &dyn Layer,
     ethernet: Option<([u8; 6], [u8; 6])>,
@@ -102,49 +100,68 @@ fn tunnel_identifier(
     }
 }
 
-pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
-    struct Network {
-        source: IpAddr,
-        destination: IpAddr,
-        path_index: usize,
+struct IpHop {
+    source: IpAddr,
+    destination: IpAddr,
+    path_index: usize,
+}
+
+/// The transport walk and the fragment walk build the encapsulation path
+/// here; they must agree on it or the same conversation would land in two
+/// scopes.
+#[derive(Default)]
+struct PathBuilder {
+    path: Vec<EncapsulationIdentifier>,
+    ethernet: Option<([u8; 6], [u8; 6])>,
+}
+
+impl PathBuilder {
+    fn visit(&mut self, layer: &dyn Layer) -> Option<IpHop> {
+        if let Some(link) = layer.downcast_ref::<Ethernet>() {
+            self.ethernet = Some(ordered(link.source, link.destination));
+        }
+        let (source, destination) = if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
+            (IpAddr::V4(ipv4.source), IpAddr::V4(ipv4.destination))
+        } else if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
+            (IpAddr::V6(ipv6.source), IpAddr::V6(ipv6.destination))
+        } else {
+            if let Some(identifier) = tunnel_identifier(layer, self.ethernet) {
+                self.path.push(identifier);
+            }
+            return None;
+        };
+        let (first, second) = ordered(source, destination);
+        let path_index = self.path.len();
+        self.path
+            .push(EncapsulationIdentifier::Network { first, second });
+        Some(IpHop {
+            source,
+            destination,
+            path_index,
+        })
     }
 
-    let mut network: Option<Network> = None;
-    let mut path = Vec::new();
-    let mut ethernet = None;
+    fn without(&self, excluded: usize) -> Vec<EncapsulationIdentifier> {
+        self.path
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != excluded)
+            .map(|(_, identifier)| *identifier)
+            .collect()
+    }
+}
+
+pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
+    let mut network: Option<IpHop> = None;
+    let mut path = PathBuilder::default();
     let mut found = Transports {
         tcp: None,
         udp: None,
         outermost: None,
     };
     for (index, layer) in packet.iter().enumerate() {
-        if let Some(link) = layer.downcast_ref::<Ethernet>() {
-            ethernet = Some(ordered(link.source, link.destination));
-        }
-        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
-            let source = IpAddr::V4(ipv4.source);
-            let destination = IpAddr::V4(ipv4.destination);
-            let (first, second) = ordered(source, destination);
-            let path_index = path.len();
-            path.push(EncapsulationIdentifier::Network { first, second });
-            network = Some(Network {
-                source,
-                destination,
-                path_index,
-            });
-        } else if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
-            let source = IpAddr::V6(ipv6.source);
-            let destination = IpAddr::V6(ipv6.destination);
-            let (first, second) = ordered(source, destination);
-            let path_index = path.len();
-            path.push(EncapsulationIdentifier::Network { first, second });
-            network = Some(Network {
-                source,
-                destination,
-                path_index,
-            });
-        } else if let Some(identifier) = tunnel_identifier(layer, ethernet) {
-            path.push(identifier);
+        if let Some(hop) = path.visit(layer) {
+            network = Some(hop);
         } else if let Some(tcp) = layer.downcast_ref::<Tcp>() {
             if let Some(network) = &network {
                 found.outermost.get_or_insert(index);
@@ -158,7 +175,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                     index,
                     flow,
                     layer: tcp,
-                    encapsulation: path_without(&path, network.path_index),
+                    encapsulation: path.without(network.path_index),
                 });
             }
         } else if let Some(udp) = layer.downcast_ref::<Udp>()
@@ -174,7 +191,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
             found.udp = Some(UdpTransport {
                 index,
                 flow,
-                encapsulation: path_without(&path, network.path_index),
+                encapsulation: path.without(network.path_index),
             });
         }
     }
@@ -189,37 +206,11 @@ fn ordered<T: Ord>(first: T, second: T) -> (T, T) {
     }
 }
 
-fn path_without(path: &[EncapsulationIdentifier], excluded: usize) -> Vec<EncapsulationIdentifier> {
-    path.iter()
-        .enumerate()
-        .filter(|(index, _)| *index != excluded)
-        .map(|(_, identifier)| *identifier)
-        .collect()
-}
+pub(crate) type ScopeBase<'a> = Option<(&'a DecodedPacket, ScopeId)>;
 
 pub(crate) fn ip_fragments(
     decoded: &DecodedPacket,
-    scopes: &mut Interner,
-) -> Result<IpFragments, ScopeError> {
-    ip_fragments_with_scope(decoded, None, &[], scopes)
-}
-
-pub(crate) fn ip_fragments_in_scope(
-    decoded: &DecodedPacket,
-    source: &DecodedPacket,
-    base_scope: ScopeId,
-    scopes: &mut Interner,
-) -> Result<IpFragments, ScopeError> {
-    let replayed = replayed_ipv6_encapsulation(source);
-    ip_fragments_with_scope(decoded, Some(base_scope), &replayed, scopes)
-}
-
-pub(crate) type ScopeBase<'a> = Option<(&'a DecodedPacket, ScopeId)>;
-
-fn ip_fragments_with_scope(
-    decoded: &DecodedPacket,
-    base_scope: Option<ScopeId>,
-    replayed: &[EncapsulationIdentifier],
+    base: ScopeBase<'_>,
     scopes: &mut Interner,
 ) -> Result<IpFragments, ScopeError> {
     struct Ipv6Network<'a> {
@@ -228,37 +219,30 @@ fn ip_fragments_with_scope(
         path_index: usize,
     }
 
-    let mut path = Vec::new();
-    let mut ethernet = None;
+    let mut path = PathBuilder::default();
     let mut ipv6_network: Option<Ipv6Network<'_>> = None;
     let mut atomic = Vec::new();
     let mut non_atomic = None;
 
     for (index, layer) in decoded.packet.iter().enumerate() {
-        if let Some(link) = layer.downcast_ref::<Ethernet>() {
-            ethernet = Some(ordered(link.source, link.destination));
-        }
-        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
-            let source = IpAddr::V4(ipv4.source);
-            let destination = IpAddr::V4(ipv4.destination);
-            let (first, second) = ordered(source, destination);
-            let path_index = path.len();
-            path.push(EncapsulationIdentifier::Network { first, second });
+        if let Some(hop) = path.visit(layer) {
+            if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
+                ipv6_network = Some(Ipv6Network {
+                    layer: ipv6,
+                    layer_index: index,
+                    path_index: hop.path_index,
+                });
+                continue;
+            }
             ipv6_network = None;
             let Some(ipv4) = ipv4_fragment(layer) else {
                 continue;
             };
-            let scope = fragment_scope(
-                decoded,
-                base_scope,
-                replayed,
-                path_without(&path, path_index),
-                scopes,
-            )?;
+            let scope = scope_for(decoded, base, path.without(hop.path_index), scopes)?;
             let Some(layout) = decoded.layout.layer(index) else {
                 continue;
             };
-            let header = checked_slice(&decoded.original, layout.range.start, layout.range.end)
+            let header = checked_slice(decoded.frame.bytes(), layout.range.start, layout.range.end)
                 .unwrap_or_default();
             let total_length = ipv4
                 .total_length
@@ -270,7 +254,7 @@ fn ip_fragments_with_scope(
             let payload_length = total_length.saturating_sub(header_length);
             let payload_end = layout.range.end.checked_add(payload_length);
             let payload = payload_end
-                .and_then(|end| checked_slice(&decoded.original, layout.range.end, end))
+                .and_then(|end| checked_slice(decoded.frame.bytes(), layout.range.end, end))
                 .unwrap_or_default();
             let protocol = ipv4.protocol.exact().copied().unwrap_or_default();
             non_atomic = Some(ReassemblyFragment::Ipv4(Ipv4Fragment {
@@ -289,20 +273,6 @@ fn ip_fragments_with_scope(
             break;
         }
 
-        if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
-            let source = IpAddr::V6(ipv6.source);
-            let destination = IpAddr::V6(ipv6.destination);
-            let (first, second) = ordered(source, destination);
-            let path_index = path.len();
-            path.push(EncapsulationIdentifier::Network { first, second });
-            ipv6_network = Some(Ipv6Network {
-                layer: ipv6,
-                layer_index: index,
-                path_index,
-            });
-            continue;
-        }
-
         if layer.is::<Ipv6FragmentHeader>() {
             let Some(fragment) = ipv6_fragment(layer) else {
                 atomic.push(IpFamily::Ipv6);
@@ -311,13 +281,7 @@ fn ip_fragments_with_scope(
             let Some(network) = &ipv6_network else {
                 continue;
             };
-            let scope = fragment_scope(
-                decoded,
-                base_scope,
-                replayed,
-                path_without(&path, network.path_index),
-                scopes,
-            )?;
+            let scope = scope_for(decoded, base, path.without(network.path_index), scopes)?;
             let (Some(ipv6_layout), Some(fragment_layout)) = (
                 decoded.layout.layer(network.layer_index),
                 decoded.layout.layer(index),
@@ -325,9 +289,12 @@ fn ip_fragments_with_scope(
                 continue;
             };
             let prefix_start = ipv6_layout.range.start;
-            let prefix =
-                checked_slice(&decoded.original, prefix_start, fragment_layout.range.start)
-                    .unwrap_or_default();
+            let prefix = checked_slice(
+                decoded.frame.bytes(),
+                prefix_start,
+                fragment_layout.range.start,
+            )
+            .unwrap_or_default();
             let predecessor_next_header_offset = index
                 .checked_sub(1)
                 .and_then(|previous| decoded.layout.layer(previous))
@@ -350,7 +317,9 @@ fn ip_fragments_with_scope(
                 .checked_add(40)
                 .and_then(|base| base.checked_add(payload_length));
             let payload = datagram_end
-                .and_then(|end| checked_slice(&decoded.original, fragment_layout.range.end, end))
+                .and_then(|end| {
+                    checked_slice(decoded.frame.bytes(), fragment_layout.range.end, end)
+                })
                 .unwrap_or_default();
             non_atomic = Some(ReassemblyFragment::Ipv6(Ipv6Fragment {
                 key: Ipv6DatagramKey {
@@ -368,26 +337,9 @@ fn ip_fragments_with_scope(
             }));
             break;
         }
-
-        if let Some(identifier) = tunnel_identifier(layer, ethernet) {
-            path.push(identifier);
-        }
     }
 
     Ok(IpFragments { atomic, non_atomic })
-}
-
-fn fragment_scope(
-    decoded: &DecodedPacket,
-    base_scope: Option<ScopeId>,
-    replayed: &[EncapsulationIdentifier],
-    encapsulation: Vec<EncapsulationIdentifier>,
-    scopes: &mut Interner,
-) -> Result<ScopeId, ScopeError> {
-    match base_scope {
-        Some(base_scope) => scopes.replace_suffix(base_scope, replayed, &encapsulation),
-        None => scopes.intern(decoded.frame.interface, encapsulation),
-    }
 }
 
 /// Excludes padding identified at or above TCP (such as link padding), but
@@ -413,10 +365,10 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
             end = end.max(layout.range.end);
         }
     }
-    let start = start.min(decoded.original.len());
-    let end = end.min(decoded.original.len());
+    let start = start.min(decoded.frame.bytes().len());
+    let end = end.min(decoded.frame.bytes().len());
     if end > start {
-        checked_slice(&decoded.original, start, end).unwrap_or_default()
+        checked_slice(decoded.frame.bytes(), start, end).unwrap_or_default()
     } else {
         Bytes::new()
     }
@@ -431,7 +383,7 @@ pub(crate) fn tcp_segment(
     if transport_hidden_by_fragment(decoded, transport.index, ip_protocol::TCP) {
         return Ok(None);
     }
-    let scope = transport_scope(decoded, base, transport.encapsulation, scopes)?;
+    let scope = scope_for(decoded, base, transport.encapsulation, scopes)?;
     Ok(Some(Segment {
         flow: ScopedFlowKey {
             scope,
@@ -454,14 +406,14 @@ pub(crate) fn udp_flow(
     if transport_hidden_by_fragment(decoded, transport.index, ip_protocol::UDP) {
         return Ok(None);
     }
-    let scope = transport_scope(decoded, base, transport.encapsulation, scopes)?;
+    let scope = scope_for(decoded, base, transport.encapsulation, scopes)?;
     Ok(Some(ScopedFlowKey {
         scope,
         flow: transport.flow,
     }))
 }
 
-fn transport_scope(
+fn scope_for(
     decoded: &DecodedPacket,
     base: ScopeBase<'_>,
     encapsulation: Vec<EncapsulationIdentifier>,
@@ -519,7 +471,7 @@ fn ipv6_fragment_transport_protocol(
     let payload = decoded
         .layout
         .layer(fragment_index)
-        .and_then(|layout| decoded.original.get(layout.range.end..payload_end))?;
+        .and_then(|layout| decoded.frame.bytes().get(layout.range.end..payload_end))?;
     // A further Fragment header ends the walk: its protocol is the answer,
     // because the bytes behind it may belong to another fragment.
     let mut chain =

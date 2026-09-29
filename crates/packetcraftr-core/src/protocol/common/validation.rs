@@ -9,7 +9,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, child_is_opaque, invalid, protocol};
+use super::errors::{binding_protocol, child_is_opaque, invalid, protocol, unsupported};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &'static str,
@@ -26,10 +26,7 @@ pub(crate) fn validate_ipv6_routing_child(
     }
     let message = "IPv6 routing headers must use the typed SRH layer; routing type 0 and unsupported generic routing headers are prohibited";
     if context.mode == crate::codec::Mode::Strict {
-        return Err(crate::codec::Error::Unsupported {
-            protocol: protocol(name),
-            message: message.to_owned(),
-        });
+        return Err(unsupported(name, message));
     }
     diagnostics.push(
         Diagnostic::warning("build.untyped_ipv6_routing_header", message).at_field("next_header"),
@@ -83,9 +80,6 @@ pub(crate) fn validate_raw_child_discriminator(
             "discriminator {discriminator} selects registered layer {bound}, but that layer is absent"
         ),
     };
-    if context.mode == crate::codec::Mode::Strict {
-        return Err(invalid(parent, message));
-    }
     let code = if context
         .child
         .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
@@ -94,8 +88,7 @@ pub(crate) fn validate_raw_child_discriminator(
     } else {
         "build.discriminator_child_mismatch"
     };
-    diagnostics.push(Diagnostic::warning(code, message).at_field("discriminator"));
-    Ok(())
+    strict_or_diagnostic(parent, code, "discriminator", message, context, diagnostics)
 }
 
 pub(crate) fn validate_typed_child_discriminator(
@@ -147,11 +140,14 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     let message = format!(
         "Auto {field} cannot infer wire intent from Raw; supply an explicit unknown discriminator"
     );
-    if context.mode == crate::codec::Mode::Strict {
-        return Err(invalid(name, message));
-    }
-    diagnostics.push(Diagnostic::warning("build.auto_raw_discriminator", message).at_field(field));
-    Ok(())
+    strict_or_diagnostic(
+        name,
+        "build.auto_raw_discriminator",
+        field,
+        message,
+        context,
+        diagnostics,
+    )
 }
 
 pub(crate) fn strict_or_diagnostic(
@@ -185,16 +181,22 @@ pub(crate) fn strict_or_diagnostic_error(
     Ok(())
 }
 
+pub(crate) fn zero_pad_to_four_bytes(options: &[u8]) -> Vec<u8> {
+    let mut padded = options.to_vec();
+    let padding = 4_usize.saturating_sub(padded.len() % 4) % 4;
+    padded.resize(padded.len().saturating_add(padding), 0);
+    padded
+}
+
 pub(crate) fn pad_options_to_four_bytes(
     options: &[u8],
     code: &'static str,
     protocol_label: &'static str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<u8> {
-    let mut padded = options.to_vec();
-    let padding = 4_usize.saturating_sub(padded.len() % 4) % 4;
+    let padded = zero_pad_to_four_bytes(options);
+    let padding = padded.len().saturating_sub(options.len());
     if padding != 0 {
-        padded.resize(padded.len().saturating_add(padding), 0);
         diagnostics.push(
             Diagnostic::warning(
                 code,
@@ -211,14 +213,5 @@ pub(crate) fn ensure_encode_budget(
     contribution: usize,
     context: &LayerEncodeContext<'_>,
 ) -> Result<(), crate::codec::Error> {
-    if contribution > context.remaining_packet_bytes {
-        return Err(invalid(
-            name,
-            format!(
-                "layer contributes {contribution} bytes but only {} remain in the packet-size budget",
-                context.remaining_packet_bytes
-            ),
-        ));
-    }
-    Ok(())
+    context.ensure_room(protocol(name), contribution)
 }

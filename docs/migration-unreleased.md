@@ -50,11 +50,33 @@ Codes follow the failure's own classification:
   `read --field`, `capture`, `replay`, and `rewrite`. It previously reported
   `packet.error` (exit 3) or `cli.filter` (exit 2) depending on the command;
   update scripts that match either code for this case.
+- An analysis limit that no capture could satisfy is a usage failure.
+  `http` and `dns-read` report a zero or above-ceiling
+  `--max-application-messages`, `--max-application-streams`,
+  `--max-application-buffer-bytes`, `--max-application-retained-bytes`, or
+  `--max-application-source-spans` (ceilings 100,000, 100,000, 256 MiB, 256 MiB,
+  and 100,000), and more than 256 distinct service ports counting the built-in
+  ones, as `cli.analysis_limit` (exit 2, published kind `cli`, for example
+  `invalid analysis limit max_messages=0: must be non-zero`) instead of
+  `policy.application_limit` (exit 6). `--http-port 0`, `--dns-port 0`, and
+  `--max-http-body-bytes` outside `1..=268435456` never reach analysis:
+  argument parsing rejects them with `cli.error` (exit 2) naming the flag.
+  `export --max-selected-frames` of 0 or above 1,000,000 moves from
+  `policy.export_limit` (exit 6) to `cli.analysis_limit` the same way.
+  `policy.application_limit` and `policy.export_limit` remain for a valid limit
+  that a capture reaches. In Rust, `application::Limits::validate`,
+  `analysis::http::Collector::new`, and `analysis::dns::Collector::new` return
+  `application::Error::Analysis(analysis::Error::InvalidLimit { .. })` where
+  they returned `application::Error::Limit`, and `analysis::export::plan` and
+  `Selection::validate` return
+  `export::Error::Analysis(analysis::Error::InvalidLimit { .. })` where they
+  returned `export::Error::Limit` for `max_selected_frames`.
 
-Errors keep typed sources instead of display strings, and a message no longer
-repeats its source's text: the source appears in `Classified::causes()` (and
-the published `causes`). Code that searched `to_string()` for a source's text
-reads `causes()`, `error::source_chain`, or `error::render` (one joined line):
+Errors keep typed sources instead of display strings, and a library error's
+message no longer repeats its source's text: the source appears in
+`Classified::causes()` (and the published `causes`). Code that searched
+`to_string()` for a source's text reads `causes()`, `error::source_chain`, or
+`error::render` (one joined line):
 
 ```rust
 // Before
@@ -76,6 +98,22 @@ failures report the carried error's own message, without a `scan:` or
 and `policy::Error` no longer implements `Clone`, `PartialEq`, or `Eq`; compare
 with `matches!`.
 
+The CLI applies the same rule where it used to embed the operating-system error
+in a published `message`. Failed input opens and reads (`open PATH failed`,
+`read packet input failed`), staged output writes (the stage, inspect, sync, and
+publish steps behind `export`, `merge`, `rewrite`, and `follow --write`),
+`follow` payload writes, generated documentation, `capture --write` file I/O
+(`capture file PATH`), and NDJSON encode and write failures now name only what
+failed, and the operating-system error appears once in `causes` (after
+`caused by:` in human output), as the first entry except for an NDJSON stdout
+write failure, whose `causes` list `write NDJSON output failed` first and the
+operating-system error second. A stdout write failure in `text`,
+`hex`, `raw`, and `json` output (a closed pipe or full disk) reads
+`write stdout failed` and reports `io.stdout` with its remediation, where it
+reported `io.runtime` with the error in the message. Scripts that searched
+`message` for the operating-system error read `causes` instead; other codes,
+kinds, remediations, and exit codes are unchanged.
+
 `packetcraftr_core::error::Kind::Cli` is renamed `Kind::Usage`; replace every
 `Kind::Cli` match arm and constructor. `Kind::Usage.as_str()` and its serde
 name are `"usage"`. Classification codes keep their frozen strings (for example
@@ -92,6 +130,21 @@ packet-semantics validation keep the original error as `Some`, so
 recovers the typed cause. Native interface-snapshot validation likewise keeps
 its original `route::Error` as a shared `packetcraftr_core::error::Source`.
 Classification codes are unchanged.
+
+Display filters reject an unquoted word that is neither separated bytes nor
+quoted text as a value on a byte, MAC, or byte-sliced field: an unseparated hex
+run (`raw.bytes contains deadbeef`, `ethernet.source[0:2] == c000`), a
+separated word with a short or empty group (`c0:0`, `47:45:`), or one that
+mixes `:` and `-` (`aa:bb-cc`). The failure is a `cli.filter` usage error that
+names the word and advises two-digit groups with separators (`c0:00`) or, on
+byte fields, quoting the word. Before, on byte fields these words compiled into
+an ASCII text comparison that matched only frames carrying those literal
+characters, never the intended bytes, and on MAC fields they failed as an
+incompatible literal, so a filter that relied on one must now say which it
+means. `filter::Error` (already
+`#[non_exhaustive]`) gains `UnquotedByteWord { offset, path, literal }` for the
+rejection; every other incompatible literal keeps `IncompatibleLiteral` and its
+remediation.
 
 ## Named packet fields and DNS messages
 
@@ -173,6 +226,40 @@ form. Nested paths such as `tcp.options[0].mss` work in filters, projection,
 templates, and fuzz targets. Code that read `options.as_ref()` iterates the
 option variants instead.
 
+## IPv6 reserved bits
+
+RFC 8200 and RFC 8754 have receivers ignore an IPv6 Fragment header's reserved
+byte and 2-bit Res field and a Segment Routing header's flags byte, so those
+bits no longer make the layer `Malformed`. Decoding keeps them and reports
+`decode.ipv6_fragment_reserved` or `decode.srh_flags`, and such fragments are
+counted and reassembled. Strict builds refuse non-zero bits; permissive builds
+write them and report `build.ipv6_fragment_reserved` or `build.srh_flags`. Live
+authorization and response matching still refuse a Segment Routing header with
+non-zero flags.
+
+Every IPv6 Fragment layer, including one whose reserved fields are zero, now
+publishes `reserved` and `reserved_bits` beside its other fields, so decoded
+packets and their layouts grow two entries per fragment: `dissect`,
+`read --dissect`, and `capture --dissect` output, and the field list of
+`protocols ipv6_fragment` (`next_header`, `reserved`, `fragment_offset`,
+`reserved_bits`, `more_fragments`, `identification`). Layout entries follow the
+same order, so those after `next_header` change position. `read --field`
+selects the new fields as `ipv6_fragment.reserved` and
+`ipv6_fragment.reserved_bits`, where they failed with `cli.projection_field`.
+Consumers that pin the exact field set of an `ipv6_fragment` layer must accept
+the two additions; the `packetcraftr.packet/v2` and output/v6 shapes are
+unchanged.
+
+`packetcraftr_core::protocol::network::Fragment` gains `pub reserved: u8` (the
+byte after Next Header) and `pub reserved_bits: u8` (the 2-bit Res field,
+`0..=3`). Struct literals that name every field add `..Fragment::default()` (or
+`reserved: 0, reserved_bits: 0`), and exhaustive destructuring patterns add
+`..`; code that starts from `Fragment::default()` or uses struct update syntax is
+unaffected. A `reserved_bits` above 3 fails to build in both modes.
+`SegmentRoutingHeader.flags` keeps its shape: non-zero flags now decode with
+`decode.srh_flags` and build permissively with `build.srh_flags`, and strict
+builds still refuse them.
+
 ## DNS transport selection
 
 Replace `dns::Request::tcp_fallback` with `transport: dns::TransportMode`:
@@ -211,10 +298,14 @@ Low-level callers replace `dns::tcp::exchange(request)` with
 `dns::tcp::query(request, Arc::clone(&provider))`. The provider and its stream
 must be `'static`, because the admitted native worker owns its `Arc<P>` until
 the connect call and cleanup finish. Set `dns::tcp::Request::cancellation` to
-`Some(&signal)` to interrupt the connect wait, or `None` when there is no
-signal (the client passes its own). `dns::tcp::Error::Cancelled` and
-`dns::tcp::Category::Cancelled` identify cancellation (`io.cancelled`); such
-failures have written no query bytes.
+`Some(&signal)` to interrupt the connect, write, and read waits (the write and
+read waits re-check it every 25 ms), or `None` when there is no signal (the
+client passes its own). `dns::tcp::Error::Cancelled { phase, transferred,
+cancelled }` and `dns::tcp::Category::Cancelled` identify cancellation
+(`io.cancelled`); match `Error::Cancelled { .. }`. `phase` names the interrupted
+wait (`Phase::Connect`, `Write`, `ReadPrefix`, or `ReadMessage`) and
+`transferred` the bytes already moved in it, so a query cancelled after it was
+sent reports the query bytes it wrote in its statistics.
 
 ## Opt-in EDNS requests
 
@@ -306,14 +397,15 @@ packet/v2 field contract.
 `Tls::try_from(Hello)` builds complete ClientHello and ServerHello fixture
 records. The `hello` object in recipes exposes record and legacy versions,
 random, session ID, cipher suites, compression methods, and ordered
-`{type, data}` extensions. `HelloExtension::server_name` and
-`HelloExtension::alpn` build the common bodies, and recipes also accept
+`{type, data}` extensions. `Extension::server_name` and
+`Extension::alpn` build the common bodies, and recipes also accept
 `{server_name="example.test"}` and `{alpn=["h2"]}`. Extension bodies stay
 authoritative, including unrecognized extensions; edits rederive lengths and
 fingerprints, and paths such as `hello.cipher_suites[0]` or
 `hello.extensions[0].data` work in templates and fuzz targets. Decoded TLS
-extension models now retain `data`, and ServerHello models retain their echoed
-`session_id`.
+extension models now retain `data` in place of `len`, so `Extension` literals
+have only `kind` and `data` and `extension.len` becomes `extension.data.len()`.
+ServerHello models retain their echoed `session_id`.
 
 ## Live capture
 
@@ -332,6 +424,14 @@ statistics. Rotated files are PCAPNG, use uncompressed byte thresholds, and
 finalize compression per file. Explicit ring retention reuses operation-owned
 handles and reports retired files; neither source count nor rotation increases
 the configured operation budget.
+
+`output::capture::Event` is removed; capture NDJSON frames are
+`output::read::Frame` records with unchanged JSON. Callers of
+`Event::try_from_frame(source_frame, frame)`, or of its tuple form
+`Event::try_from((source_frame, frame))` or `try_from((source_frame, frame,
+&decoded))`, use `output::read::Frame::try_from` with the same tuple. The result
+implements `StreamRecord` with event name `frame` and serializes to the same
+JSON.
 
 `--capture-buffer-bytes`, `--timestamp-source`, and `--timestamp-precision` set
 native driver options per interface before activation, independent of the
@@ -353,8 +453,10 @@ CIDRs, and exclusions) in `targets`, replacing the single `target`, and gains
 `scan::Limits` gains `max_targets` and `max_prepared_bytes`. `max_in_flight`
 alone selects how a scan runs: one runs each probe as its own exchange, and up
 to `scan::MAX_IN_FLIGHT` overlap their response windows over one capture group.
-Raw scan NDJSON adds `probe_sent`, and failures may carry `error.scan` with the
-confirmed pending wire.
+Raw scan NDJSON adds `probe_sent` when `max_in_flight` exceeds one, and
+failures then may carry `error.scan` with the confirmed pending wire; a serial
+scan publishes no `probe_sent` events, only final `probe` events beside its
+`undecoded`, `diagnostic`, and `complete` records.
 
 `scan::Report` (the former `Summary`) and `scan::connect::Stats` gain `rtt`:
 confirmed sends, verdicts received inside their round, `lost = sent - received`,
@@ -369,6 +471,9 @@ reports application validation independently of reachability. UDP profile
 documents use the independent version `packetcraftr.udp-profiles/v1`, ship with
 a schema and example, and load through
 `scan::profile::compile(packetcraftr_core::document::udp_profiles::parse(&bytes)?)?`.
+A profiles document whose `any` or `dns` response carries an unknown field, such
+as `checks` or `min_length`, is refused as `invalid UDP profiles`, as the
+published schema requires.
 
 ## TCP connect scanning
 
@@ -383,10 +488,10 @@ numeric endpoints and finite `SocketLimits`.
 Netio's `tcp::start_connect` returns a pollable `PendingConnect`: cancellation
 or drop cancels unstarted calls, while admitted calls keep their process-wide
 resource lease until worker and socket cleanup finish. At most
-`tcp::MAX_PENDING_CONNECTIONS` (16) calls or connections retain admission, and
-they share the native worker pool with capture and route work, so fewer are
-admitted while that work holds slots. The workflow caps `Request::max_in_flight`
-accordingly and rejects UDP and ICMP.
+`tcp::MAX_PENDING_CONNECTIONS` (16, equal to `resources::WORKER_CAPACITY`) calls
+or connections retain admission, and they share the native worker pool with
+capture and route work, so fewer are admitted while that work holds slots. The
+workflow caps `Request::max_in_flight` accordingly and rejects UDP and ICMP.
 
 ## Offline analysis options and results
 
@@ -416,6 +521,27 @@ sets share a provenance allocator bounded by `Limits::max_provenance_bytes`, and
 `LayerDecodeContext::parent` identifies the enclosing protocol so DNS can tell
 UDP messages from TCP length-prefixed ones.
 
+`http` and `dns-read` end a message that a TCP reset cuts off with status
+`reset`. A reset evicts both directions before it closes them, and each eviction
+used to publish its own `evicted` issue and leave the partial message `evicted`,
+so one reset produced two `evicted` issues, a `reset` issue, and an `evicted`
+message. It now produces one `reset` issue, on the resetting flow at the reset
+frame, and the open message in each direction ends `reset`. Consumers that
+counted `issues` or matched `evicted` for reset connections see that change. A
+segment that carries RST also adds no source span, because a reset's payload is
+discarded before reassembly, so it no longer counts against
+`--max-application-source-spans`.
+
+`dns-read` and `analysis::dns::Collector` charge emitted messages and
+transaction tracking against one cumulative `max_retained_bytes` ceiling
+(`--max-application-retained-bytes`) where the two were counted separately, so a
+capture that stayed under the limit on each count can now stop with
+`policy.application_limit`; raise the limit if one does. The `--http-port` and
+`--dns-port` value name is `<PORT>` in help and usage errors, and
+`--max-application-retained-bytes` help and its `--resource-diagnostics` scope
+call the decoded-object charge a flat multiplier that DNS name compression can
+exceed.
+
 ## Offline epoch bounds
 
 `read`, `stats`, `expert`, `follow`, `tls`, `dns-read`, `http`, `export`, and
@@ -437,6 +563,30 @@ physical frames still advance IP reconstruction and stream indexing whether or
 not they are kept, and timestamp-less frames are skipped before that stateful
 processing. All frames consume read budgets, and `analysis::Summary::bytes_read`
 reports the complete captured-byte input count.
+
+## Capture files
+
+`read --normalize`, `rewrite`, and `merge` refuse a capture that declares a
+frame check sequence, because the PCAPNG they write cannot record it and readers
+would take the FCS bytes for payload. A capture declares one through a PCAPNG
+`if_fcslen` option whose value is not a single zero byte (a malformed length
+counts as declared), or a classic PCAP network word with the
+FCS-length-present flag (bit 26) and a nonzero FCS length (bits 28-31). All three
+name the same reason, `declared frame check sequence`: `read --normalize` and
+`rewrite` fail with `packet.capture_transform_metadata`, `merge` with
+`packet.capture_merge_metadata`, exit 3. `read --normalize` used to exit 0 and
+write frames that still ended in the FCS bytes under an interface with no FCS
+declaration. In the other direction, a classic network word that sets only
+reserved bits, or an FCS length without the present flag, is no longer refused
+by `rewrite` and `merge`; those bits are dropped, as libpcap ignores them. In
+Rust, `capture_file::Reader::refuse_declared_fcs` reports the declaration.
+
+A PCAPNG interface description or packet block with a malformed option list
+reports the structural error (a truncated option, a non-zero end-of-options
+length, or non-zero bytes after the end marker) even when an earlier
+`if_tsresol`, `if_tsoffset`, or `epb_flags` option also has an invalid length or
+repeats; that value error used to be reported first. Which captures are accepted
+is unchanged.
 
 ## Header rewriting, DHCP, and protocol discovery
 
@@ -469,7 +619,8 @@ other opt-ins. Denials surface as `policy::Error::DestinationNotAllowed`
 (`policy.destination_not_allowed`), and malformed entries or an oversized list
 classify as `cli.live_target`. The CLI exposes the list as repeatable
 `--allow-destination ADDRESS[/PREFIX]` on every destination-bearing live
-command.
+command; `fuzz` takes it only with `--live`, and an offline run rejects it with
+a usage error naming `--live` where it used to accept and ignore it.
 
 ## Send packet sets
 
@@ -519,10 +670,12 @@ Repetition (`repeat > 1`) needs a rewindable capture: only
 complete capture before live work, including compressed inputs. Repetition
 shares source-frame, transmitted-byte, time, and policy budgets.
 `FrameEvidence::pass` is one-based and `source_index` stays relative to the
-input. `replay::Report` (the former `Summary`) adds `passes_completed` and
-`interfaces_used`; the aggregate requested interface is optional, and each sent
-frame keeps its actual output route. Replay also gains `Timing::BitRate` (CLI
-`--bps`), published in output/v6 as `{"bit_rate": BITS_PER_SECOND}`.
+input. `FrameEvidence::source_interface_id` is removed because it always equaled
+`frame.interface`; read `evidence.frame.interface`. `replay::Report` (the former
+`Summary`) adds `passes_completed` and `interfaces_used`; the aggregate
+requested interface is optional, and each sent frame keeps its actual output
+route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in output/v6
+as `{"bit_rate": BITS_PER_SECOND}`.
 
 ## Resource and output hardening
 
@@ -530,8 +683,10 @@ Native admission stays process-wide: one worker pool of
 `resources::WORKER_CAPACITY` slots admits capture reads, route queries, and TCP
 connects. `native_snapshot()` (the `native_process` row) covers all of them and
 is supported in every build profile, and `tcp_connect_snapshot()`
-(`tcp_connect_process`) reports the TCP sub-limit. A client can share callback
-admission through `client.with_runtime(runtime.clone())` and inspect it with
+(`tcp_connect_process`) counts the TCP connects' own admissions against that
+same capacity: its `capacity` is the whole pool's, and a connect is refused only
+when the pool as a whole is full. A client can share callback admission through
+`client.with_runtime(runtime.clone())` and inspect it with
 `client.runtime().snapshot()`.
 
 `--resource-diagnostics` opts into an optional `resources` envelope member that
@@ -564,7 +719,10 @@ exhaustive matches.
 of `&[u8]`. Custom codecs can retain ranges with `input.slice(..)` instead of
 copying them, and callers holding borrowed bytes wrap them once with
 `Bytes::copy_from_slice` or `Bytes::from`. `LayerDecodeContext` gains a
-`parent` field naming the enclosing protocol.
+`parent` field naming the enclosing protocol and drops `allow_trailing_padding`:
+delete it from struct literals and stop reading it in codecs. Link padding is
+decided by the registry (`registry::Builder::allow_trailing_padding`,
+`Registry::allows_trailing_padding`) and the decode session.
 
 `Layer::as_any` and `Layer::as_any_mut` are removed. `dyn Layer` upcasts to
 `dyn Any`, and its inherent `is`, `downcast_ref`, and `downcast_mut` replace the
@@ -574,7 +732,12 @@ methods; `clone_box` stays because `Clone` is not object safe.
 `reflective_layer!`, `layer::ReflectiveField`, `layer::Refusal`, and
 `layer::{reflect_get, reflect_set, reflect_set_bounded}` are now documented API
 for declaring custom layers, and `protocol::transport_tuple_reversed` is
-documented as well.
+documented as well. The macro now builds its schema as a `static`, so the
+`protocol:` expression must be a constant expression: `Id::new("name")`, a
+`const` item, or a `const fn` call. A `protocol:` expression that ran arbitrary
+runtime code compiled before and is now rejected, so hoist it into a `const Id`.
+Field metadata, including `children:` values, already had to be constant, so
+nothing else changes.
 
 `BuiltinProtocol::of(layer)` and `BuiltinProtocol::identifies(layer)` decide by
 the layer's concrete type, not by the protocol name in its schema. A custom
@@ -590,7 +753,11 @@ the built-in layer and read its field, so `layer.field(semantics::DESTINATION)`
 on an Ethernet layer becomes
 `layer.downcast_ref::<Ethernet>().map(|ethernet| ethernet.destination)`.
 `protocol::semantics::Error` messages now read "destination cannot be
-determined because ..."; match on the variant, not the text.
+determined because ..."; match on the variant, not the text. Its
+`LayerIndexOutOfRange` and `SegmentCountUnrepresentable` variants are removed
+because no reachable code path produces them, so delete any match arms or constructions
+that name them. The enum is `#[non_exhaustive]`, so existing wildcard arms keep
+compiling, and every variant classifies as `packet.semantics`.
 
 Wire APIs return their protocol's own error: `Dns::try_from` returns
 `dns::Error` (`Dns::from_wire` returned `codec::Error`), and an encoding failure
@@ -601,6 +768,11 @@ is `dns::Error::Encode` with the codec error as its source. Code that matched
 `tls::Outcome::Malformed` carries the new `tls::Error` instead of
 `codec::Error`, and its `Invalid` message displays exactly as the former
 `codec::Error::Invalid` did.
+
+`decode::DecodedPacket::original` is removed because it always held the same
+bytes as the frame. Replace `decoded.original` with `decoded.frame.bytes()` (a
+`&Bytes`; clone it if you need an owned copy), and drop the `original` field
+from any hand-built `DecodedPacket { .. }` literal or destructuring pattern.
 
 ## Live-policy vocabulary out of core
 
@@ -666,6 +838,13 @@ limit types, plus `capture_file::Limits`, `compression::Limits`, `dhcp::Limits`,
 - `policy::WireLimits` and `policy::SocketLimits` (formerly `WireBudget` and
   `SocketBudget`) are the ceilings an operation declares for policy to
   authorize, while `policy::CaptureBudget` keeps the running allowance.
+- `runtime::Runtime::new(capacity)` returns `Result<Runtime,
+  runtime::CapacityError>`. A capacity above `runtime::MAX_WORKER_CAPACITY` (8),
+  which used to be lowered to 8 without notice, is refused with
+  `cli.worker_capacity` (`Kind::Usage`); handle or unwrap the result, and pass a
+  capacity no greater than the maximum or use `Runtime::default()` for the
+  maximum. Capacity 0 is still accepted and refuses every publication, and
+  `runtime::Error` is unchanged.
 
 ## Core error convention
 
@@ -682,6 +861,12 @@ refusal (for example a `dns::Error` from a codec) and displays as "invalid
 `<protocol>` layer"; `source()` downcasts to the original error, and
 `codec::Error::rejected(protocol, error)` builds one. The renamed error types
 are in [Renamed and removed paths](#renamed-and-removed-paths).
+
+`fuzz::Error` (`#[non_exhaustive]`) gains `ValueItems { items, limit }` and
+`ValueNesting { limit }` for a base-packet list or object above `max_list_items`
+and for value nesting above the limit; both were previously reported as
+`ValueTooLarge`. Callers that matched `ValueTooLarge` to detect those failures
+also match the new variants; all three classify as `policy.fuzz_resource_limit`.
 
 ## Provider contracts
 
@@ -788,6 +973,14 @@ Layer 2 send may resolve a neighbor, `Client::send` needs a capture provider
 too: a capture fake for Layer 3 sends only can implement `arm_capture` as
 unreachable, and a fake that scripts resolution answers the ARP or NDP request
 through the capture session armed for it.
+
+`link::MAX_VLAN_TAGS` (8) is `packetcraftr::neighbor::MAX_VLAN_TAGS`, because
+only neighbor discovery replays a packet's VLAN stack. Route planning applies
+the cap only to a plan that resolves a neighbor: a Layer 2 packet with more than
+8 VLAN headers plans when its destination MAC is explicit or a broadcast or
+multicast address, where it failed with `InvalidNeighborVlan`, and an unreadable
+stack (priority above 7 or VLAN id above 4095) is refused before the route
+provider is consulted.
 
 ## Client model
 
@@ -908,6 +1101,11 @@ and the capture, decode, and retention bounds become the reusable
 that scan, traceroute, DNS, and fuzz requests reuse. `Collector::observe` is
 gone: the collector is a `Sink<Event>`, so clone it and pass one clone.
 `options.validate()` becomes `request.validate()` and `collection.validate()`.
+The terminal `exchange::Report` (the former `Summary`) is `Report { unanswered,
+stats }`: its `diagnostics` field is removed, so drop it from any `Report` you
+build or destructure. It was always empty, and diagnostics still arrive as
+`Event::Diagnostic` events and, through `exchange::Collector`, in
+`Aggregate::diagnostics`.
 
 **Scan and traceroute.** The request carries the route and collection bounds
 that the `ExchangeExecutor` held before: `route: route::Options` (the executor's
@@ -920,7 +1118,18 @@ holds the `scan::PipelineFailure` with the pending evidence. Each workflow now
 reports its own error enum whose variants are the former `probe::ErrorKind`s,
 so `matches!(error, scan::Error::InvalidLimit { .. })` replaces
 `matches!(error.kind, ErrorKind::InvalidLimit { .. })`. Codes, messages,
-remediations, probe-sequence coordinates, and causes are unchanged.
+remediations, probe-sequence coordinates, and causes are unchanged, with two
+exceptions. A traceroute UDP port range that overflows 65535 reports
+`base UDP port B plus probe N exceeds 65535`, where N is the last probe's
+zero-based offset (the probe count minus one), instead of `plus K unique
+probe(s)`; it is still `cli.traceroute_limit`. And a serial scan or a
+traceroute checks its `collection` before any capture or send: a `collection`
+that captures more frames or bytes than `max_evidence_frames` or
+`max_evidence_bytes` retain is `cli.scan_limit` or `cli.traceroute_limit`, where
+it used to fail after transmission with `internal.scan_evidence` or
+`internal.traceroute_evidence`, and a traceroute `collection.max_responses`
+below `probes_per_hop` is `cli.traceroute_limit` up front, where it failed at
+the executor with `cli.traceroute_executor`.
 
 **Replay** takes `Sink<replay::Event, Ack = ()>` with `Event::Frame(FrameEvidence)`
 in place of the `FnMut(FrameEvidence) -> Result<(), replay::Error>` callback,
@@ -932,7 +1141,15 @@ source stops the replay as `Error::Cancelled` or `Error::DurationLimit` rather
 than as an output failure. `replay::Error` adds `IncoherentEvents`
 (`internal.replay_event_coherence`). Only replay checked the final wire through
 the authorizer, and it now does so internally, so
-`policy::Authorizer::authorize_final_wire` is removed.
+`policy::Authorizer::authorize_final_wire` is removed. Replay frame admission is
+internal to the crate: `policy::Operation::Replay`, `policy::ReplayFrame`, the
+`UnsupportedOperation` error (`packetcraftr::Error::UnsupportedOperation` in
+beta.3), and `policy::Operation::shape()`, which only labeled that error, are
+removed, and the client's policy admits each replay frame itself. The
+`internal.unsupported_operation` code is no longer published. `Client::replay`
+is unchanged; drop any `Replay` arm from an exhaustive match on
+`policy::Operation` and any `UnsupportedOperation` arm from a match on the
+error. There is no public replacement.
 
 **Capture** is `client.capture(capture::Request::new(group_request, window), sink)`
 with an optional `.with_selector(|number, frame| Ok(keep))`. The client's
@@ -975,7 +1192,15 @@ transmitted case's `case.built` and `case.decoded` are the packet actually sent
 on its route. `campaign` holds core's preparation statistics (cases generated
 and built, built bytes, preparation time), while `stats` holds the live
 traffic, including pacing delays. Codes and the published output are unchanged;
-the CLI derives the four published outcomes from the two sources.
+the CLI derives the four published outcomes from the two sources. An executor
+result that contradicts its own statistics fails as `Error::InvalidEvidence`
+with the shared evidence wording, such as
+`successful exchange statistics do not account for every fuzz probe` or
+`successful exchange reported N sent bytes for M exact frame bytes`, in place of
+the bespoke fuzz messages. Case validation no longer tests the invocation
+deadline between its checks, so such a result found after the deadline expired
+is `InvalidEvidence` where it was `Error::DurationLimit`; the recorder still
+enforces the deadline once a case's evidence is recorded.
 
 ## CLI library API
 
@@ -1053,6 +1278,16 @@ contract has no spelling for (a future variant of a `non_exhaustive` enum) fails
 with `contract::Error::Unpublished` (`internal.error`), except an error
 coordinate, which is omitted like other optional error metadata.
 
+`output::protocols::Detail` embeds a flattened `summary: Summary` instead of
+repeating its seven fields: `detail.protocol`, `.aliases`, `.build`,
+`.dissect`, `.exact_round_trip`, `.matcher`, and `.decode_only` become
+`detail.summary.<field>`. The JSON is unchanged, and the summary keys are still
+flattened at the top level. `FilterField::for_protocol` and
+`FilterField::from_binding` are removed; use
+`FilterField::try_from((path, binding))`, which returns
+`Err(contract::Error::Unpublished)` for a binding variant the contract has no
+spelling for instead of omitting it from `filter_fields`.
+
 ## Renamed and removed paths
 
 Each table maps a 0.5.0-beta.3 name to its final name, by crate. Names are
@@ -1104,6 +1339,8 @@ for a row are in the sections above.
 | `budget::Cancellation::POLL_INTERVAL` | `packetcraftr_netio::deadline::POLL_INTERVAL` |
 | `Deadline::bounded_timeout`, `Deadline::for_wait` | `packetcraftr::deadline::DeadlineExt` methods (import the trait) |
 | `document::PACKET_DOCUMENT_SCHEMA_V1` | `document::PACKET_DOCUMENT_SCHEMA_V2` |
+| `fuzz::Summary.diagnostics`, `fuzz::Report.diagnostics` | removed, so `Summary` is `{ seed, first_case, stats }` and `Report` is `{ seed, first_case, cases, stats }`; the field was always empty, and per-case diagnostics are `Case::diagnostics` |
+| `fuzz::CaseFailure::new(message, classification, causes)` | `fuzz::CaseFailure::with_source(message, classification, source_error)`; `causes()` is then the source chain |
 
 ### packetcraftr-netio
 
@@ -1132,7 +1369,7 @@ for a row are in the sections above.
 | `SystemFault` (`Some(Arc::new(error))`) | `packetcraftr_core::error::Source` (`Some(Source::new(error))`) |
 | `neighbor::{Error, Request, Resolution, Options}` | `packetcraftr::neighbor::{Error, Request, Resolution, Options}` |
 | `neighbor::{Resolver, ActiveResolver, SystemResolver}` | removed; the `Client` resolves over its own providers |
-| `link::MAX_VLAN_TAGS` | `packetcraftr::route::MAX_VLAN_TAGS` |
+| `link::MAX_VLAN_TAGS` | `packetcraftr::neighbor::MAX_VLAN_TAGS` |
 | `link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag}` |
 
 ### packetcraftr
@@ -1168,6 +1405,7 @@ for a row are in the sections above.
 | `dns::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` | `dns::wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` |
 | `dns::{Name, Record, RecordValue, Edns, EdnsOption}` | `packetcraftr_core::protocol::application::dns::{Name, Record, RecordValue, Edns, EdnsOption}` |
 | `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `dns::response_code_name(code)` |
+| `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS, MAX_NAME_POINTERS}` | `packetcraftr_core::protocol::application::dns::{MAX_MESSAGE_BYTES, MAX_RECORDS, MAX_NAME_POINTERS}` (values unchanged: 65535, 4096, 128); `dns::MessageLimits::default().max_message_bytes` gives the default message-size limit |
 | `dns::tcp::exchange(request)` | `dns::tcp::query(request, Arc::clone(&provider))` |
 | `dns::tcp::SocketFault` | `packetcraftr_core::error::Source` |
 | `dns::Request.tcp_fallback`, `dns::DEFAULT_TCP_FALLBACK` | `dns::Request.transport: dns::TransportMode`; the constant is removed |
@@ -1175,11 +1413,14 @@ for a row are in the sections above.
 | `scan::MAX_DURATION`, `traceroute::MAX_DURATION`, `dns::MAX_DURATION`, `fuzz::MAX_DURATION`, `replay::MAX_REPLAY_DURATION`, `exchange::MAX_EXCHANGE_TIMEOUT` | `packetcraftr_netio::deadline::MAX_WAIT` (core's offline `fuzz::MAX_DURATION` is unchanged) |
 | `policy::{WireBudget, SocketBudget, BudgetOverflow}` | `policy::{WireLimits, SocketLimits, LimitOverflow}` (classified `policy.budget_overflow`) |
 | `dns::Error::BudgetOverflow` | `dns::Error::LimitOverflow` |
-| `policy::Operation::Budgeted(limits)` | `policy::Operation::Wire(limits)`; `Operation::shape()` reports `"wire"` |
-| `budget()` on `Operation`, `DnsOperation`, `DeclaredPackets`, and `ReplayFrame` | `limits()` |
-| `replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `policy::{Operation, ReplayFrame, WireLimits}` |
+| `policy::Operation::Budgeted(limits)` | `policy::Operation::Wire(limits)` |
+| `budget()` on `Operation`, `DnsOperation`, and `DeclaredPackets` | `limits()` |
+| `replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `policy::{Operation, WireLimits}`; `Authorizer` and `ReplayFrame` are removed |
+| `policy::Operation::Replay(frame)`, `policy::ReplayFrame` | removed; replay frame admission is internal, so the client's policy admits each replay frame itself |
+| `policy::Operation::shape()` | removed; callers that logged or compared its labels (`"budgeted"`, `"dns"`, `"declared-packet"`, and `"replay"` in beta.3) match on `Operation::{Wire, Dns, Declared}` directly, and on `Socket`, which is new |
+| `replay::FrameEvidence.source_interface_id` | `evidence.frame.interface` |
 | `Policy::authorize` returning `packetcraftr::Error` | returns `policy::Error` |
-| `packetcraftr::Error::{UnsupportedOperation, Wire(decode_error), PermissiveLiveOptInRequired}` | `policy::Error::{UnsupportedOperation, UndecodableWire { source }, PermissiveLiveOptIn}`, reached through `packetcraftr::Error::Policy` |
+| `packetcraftr::Error::{UnsupportedOperation, Wire(decode_error), PermissiveLiveOptInRequired}` | `policy::Error::{UndecodableWire { source }, PermissiveLiveOptIn}`, reached through `packetcraftr::Error::Policy`; `UnsupportedOperation` is removed |
 | `Err(packetcraftr::Error::Policy(policy::Error::PacketLimit { .. }))` | `Err(policy::Error::PacketLimit { .. })` |
 | `packetcraftr::Error::{ExchangeOutput, ExchangeOutputAndCaptureShutdown, OperationAndCaptureShutdown, InvalidExchangeEvents, HeterogeneousExchangeRoute, InvalidExchangeOption}` | `exchange::Error::{Output, OutputAndCaptureShutdown, OperationAndCaptureShutdown, IncoherentEvents, HeterogeneousRoute, InvalidRequest}` |
 | `fuzz::{RunInput, LiveOptions, LiveLimits}` | `fuzz::Request { campaign, packet, .. }`; `timeout`, `cases_per_second`, `destination`, `max_evidence_frames`, and `max_evidence_bytes` are its fields, and `allow_malformed_live` is `allow_permissive_live` |
@@ -1202,7 +1443,7 @@ for a row are in the sections above.
 
 ## Unreleased-only changes
 
-Some `[Unreleased]` changelog bullets rename or reshape items that were added
+Some `[Unreleased]` changes rename, reshape, or prune items that were added
 after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
 
 - CLI output modules named after their commands (`output::dns_read`,
@@ -1235,3 +1476,30 @@ after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
   `pipeline_capacity`, `execute_pipeline`), and the short-lived `scan::Batch`
   alias of `probe::Batch<scan::Probe>` (beta.3's own `scan::Batch` is in the
   packetcraftr table).
+- The `transform` field-edit types. `FieldAssignment::value` is a `u64`, so
+  build `FieldAssignment { field, value: n }` instead of
+  `value: FieldValue::Unsigned(n)`; a non-unsigned value is no longer
+  representable. `InvalidInput` has no `EditValueNotUnsigned`,
+  `TruncatedIpv4Source`, `TruncatedIpv4Destination`, `TruncatedIpv6Source`, or
+  `TruncatedIpv6Destination` variant, because none was reachable, so drop any
+  arm that names them. `FieldEdit`, `FieldEdits::new`, and `FieldEdits::is_empty`
+  are no longer public; compile edits with `FieldEdits::compile`, which takes
+  the assignments, the checksum mode, and the registry.
+  `protocol::headers::IpHeader::addresses` reads a walked header's source and
+  destination.
+- Public items pruned from types added after beta.3. `analysis::dns::Transport`
+  and `output::dns_read::Transport` are gone: DNS messages and transactions use
+  `analysis::StreamTransport` and `output::analysis::StreamTransport`, which
+  serialize as before (`"tcp"`, `"udp"`). `analysis::Plan::union` is removed;
+  combine `filter::Requirements` with the new `Requirements::union` and build one
+  plan with `Plan::physical`. `FrameRecord::project` and
+  `FrameRecord::scope_definitions` are removed: project through
+  `Projection::values` over `record.physical_context()`, and look a scope up with
+  `scope_definition(id)`. `forwarding::Observation` has no `frame()`,
+  `incomplete()`, or `retained_bytes()` getter. `scan::profile::UdpProfile` no
+  longer implements `Serialize` or `Deserialize` and has no `config()`; build it
+  from a `document::udp_profiles::Config` with `UdpProfile::new(config)`.
+- `dns::EvidenceFault::TcpQueryLengthOverflow`, a variant of the client model's
+  DNS evidence fault that could never occur, because a framed DNS-over-TCP query
+  length cannot overflow. `EvidenceFault` is `#[non_exhaustive]`, but delete any
+  reference to the variant; it has no replacement.

@@ -25,16 +25,12 @@ pub enum Error {
         "destination cannot be determined because unknown protocol {protocol} carries route-bearing field {field}"
     )]
     UnknownProtocolRouteField { protocol: Id, field: &'static str },
-    #[error("IP layer index is outside the packet")]
-    LayerIndexOutOfRange,
     #[error("an IPv6 extension chain contains more than one SRH")]
     DuplicateSegmentRoutingHeader,
     #[error("IPv6 SRH is not in a contiguous typed extension chain")]
     DetachedSegmentRoutingHeader,
     #[error("SRH requires 1..=127 IPv6 segments")]
     SegmentCount,
-    #[error("SRH segment count cannot be represented")]
-    SegmentCountUnrepresentable,
     #[error("SRH last_entry {last_entry} does not match segment-list index {expected}")]
     SegmentLastEntry { last_entry: u8, expected: u8 },
     #[error("SRH segments_left {segments_left} exceeds last_entry {last_entry} plus one")]

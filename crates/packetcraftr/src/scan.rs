@@ -9,9 +9,11 @@ pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_ATTEMPTS: u32 = 32;
 pub const MAX_IN_FLIGHT: usize = 1_024;
 pub const MAX_PROBES: usize = 100_000;
-pub const MAX_RATE: u32 = 1_000_000;
+pub(crate) const MAX_PREPARED_BYTES: usize = 256 * 1024 * 1024;
+pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 /// Maximum UDP payload accepted for either IP family, before final MTU checks.
-pub const MAX_UDP_PAYLOAD_BYTES: usize = 65_507;
+pub const MAX_UDP_PAYLOAD_BYTES: usize =
+    packetcraftr_core::document::udp_profiles::MAX_PAYLOAD_BYTES;
 
 // Header allowance for every generated scan probe: Ethernet plus IP and TCP
 // without options, with the IPv4 allowance including minimum Ethernet padding.

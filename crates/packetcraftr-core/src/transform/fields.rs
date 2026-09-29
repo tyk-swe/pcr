@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::decode::{self, DecodedPacket, Dissector};
-use crate::field::FieldValue;
 use crate::frame::Frame;
 use crate::layout::{ByteRange, PacketLayout};
 use crate::protocol::{BuiltinProtocol, checksum, headers::IpHeader};
@@ -29,8 +28,8 @@ pub enum ChecksumMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldAssignment {
     pub field: String,
-    /// New fixed-width value; only [`FieldValue::Unsigned`] is editable.
-    pub value: FieldValue,
+    /// New fixed-width unsigned value.
+    pub value: u64,
 }
 
 impl std::str::FromStr for FieldAssignment {
@@ -49,6 +48,9 @@ impl std::str::FromStr for FieldAssignment {
             return Err(Error::Invalid(InvalidInput::AssignmentPathSpace));
         }
         let value = if let Some(hex) = value.strip_prefix("0x") {
+            if !hex.bytes().all(|digit| digit.is_ascii_hexdigit()) {
+                return Err(Error::Invalid(InvalidInput::AssignmentValueNotUnsigned));
+            }
             u64::from_str_radix(hex, 16)
         } else {
             value.parse()
@@ -56,7 +58,7 @@ impl std::str::FromStr for FieldAssignment {
         .map_err(|_| Error::Invalid(InvalidInput::AssignmentValueNotUnsigned))?;
         Ok(Self {
             field: field.to_owned(),
-            value: FieldValue::Unsigned(value),
+            value,
         })
     }
 }
@@ -72,10 +74,7 @@ impl<'de> Deserialize<'de> for FieldAssignment {
         }
         match Repr::deserialize(deserializer)? {
             Repr::Text(text) => text.parse().map_err(serde::de::Error::custom),
-            Repr::Object { field, value } => Ok(Self {
-                field,
-                value: FieldValue::Unsigned(value),
-            }),
+            Repr::Object { field, value } => Ok(Self { field, value }),
         }
     }
 }
@@ -117,8 +116,7 @@ const EDITABLE: &[(&str, &str, usize)] = &[
 ];
 
 #[derive(Clone, Debug)]
-pub struct FieldEdit {
-    requested: String,
+struct FieldEdit {
     canonical: String,
     protocol: crate::layer::Id,
     /// 1-based layer occurrence, outermost first.
@@ -129,15 +127,7 @@ pub struct FieldEdit {
 }
 
 impl FieldEdit {
-    pub fn requested(&self) -> &str {
-        &self.requested
-    }
-
-    pub fn canonical(&self) -> &str {
-        &self.canonical
-    }
-
-    pub fn compile(assignment: &FieldAssignment, registry: &Registry) -> Result<Self, Error> {
+    fn compile(assignment: &FieldAssignment, registry: &Registry) -> Result<Self, Error> {
         let (head, tail) = assignment
             .field
             .split_once('.')
@@ -172,9 +162,6 @@ impl FieldEdit {
         let declared = path
             .schema(schema)
             .ok_or(Error::Invalid(InvalidInput::EditUnknownField))?;
-        let FieldValue::Unsigned(value) = assignment.value else {
-            return Err(Error::Invalid(InvalidInput::EditValueNotUnsigned));
-        };
         if declared.kind != crate::field::FieldKind::Unsigned {
             return Err(Error::Invalid(InvalidInput::EditFieldNotUnsigned));
         }
@@ -183,17 +170,16 @@ impl FieldEdit {
         }) else {
             return Err(Error::Unsupported(Unsupported::EditField));
         };
-        if width < 8 && value >= 1_u64 << (width * 8) {
+        if width < 8 && assignment.value >= 1_u64 << (width * 8) {
             return Err(Error::Invalid(InvalidInput::EditValueWidth));
         }
         Ok(Self {
             canonical: format!("{}#{occurrence}.{}", protocol.as_str(), declared.name),
-            requested: assignment.field.clone(),
             protocol,
             occurrence,
             field: declared.name,
             width,
-            value,
+            value: assignment.value,
         })
     }
 
@@ -246,7 +232,15 @@ pub struct FieldEdits {
 }
 
 impl FieldEdits {
-    pub fn new(edits: Vec<FieldEdit>, checksums: ChecksumMode) -> Result<Self, Error> {
+    pub fn compile(
+        assignments: &[FieldAssignment],
+        checksums: ChecksumMode,
+        registry: &Registry,
+    ) -> Result<Self, Error> {
+        let edits = assignments
+            .iter()
+            .map(|assignment| FieldEdit::compile(assignment, registry))
+            .collect::<Result<Vec<_>, _>>()?;
         if edits.len() > MAX_FIELD_ASSIGNMENTS {
             return Err(Error::Limit {
                 field: Limit::FieldAssignments,
@@ -260,22 +254,6 @@ impl FieldEdits {
             }
         }
         Ok(Self { edits, checksums })
-    }
-
-    pub fn compile(
-        assignments: &[FieldAssignment],
-        checksums: ChecksumMode,
-        registry: &Registry,
-    ) -> Result<Self, Error> {
-        let edits = assignments
-            .iter()
-            .map(|assignment| FieldEdit::compile(assignment, registry))
-            .collect::<Result<Vec<_>, _>>()?;
-        Self::new(edits, checksums)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.edits.is_empty()
     }
 
     /// Patches `frame` in place over a clone of its original bytes.
@@ -481,15 +459,6 @@ fn transport_span(
     Ok(ByteRange::new(start, end))
 }
 
-fn ensure_transport_computable(
-    layout: &PacketLayout,
-    network: usize,
-    bytes: &[u8],
-) -> Result<(), Error> {
-    let (start, header) = walk_network(layout, network, bytes)?;
-    super::ensure_checksum_coverage(&bytes[start..], &header)
-}
-
 #[derive(Clone, Copy, Debug)]
 enum Repair {
     Ipv4Header(usize),
@@ -547,72 +516,31 @@ fn repair_transport(
     let layout = &decoded.layout;
     let layer = &layout.layers[transport];
     let network = enclosing_network(decoded, transport)?;
-    ensure_transport_computable(layout, network, bytes)?;
+    let (network_start, header) = walk_network(layout, network, bytes)?;
+    super::ensure_checksum_coverage(&bytes[network_start..], &header)?;
     let span = transport_span(decoded, transport, bytes)?;
     let checksum_range = checksum_field_range(layout, transport)?;
     if checksum_range.end > span.end || checksum_range.start < span.start {
         return Err(Error::Invalid(InvalidInput::TransportChecksumPlacement));
     }
-    let ipv6 = builtin(decoded, network) == Some(BuiltinProtocol::Ipv6);
     let udp = builtin(decoded, transport) == Some(BuiltinProtocol::Udp);
     let old = read_uint(bytes, checksum_range)?;
-    if udp && !ipv6 && old == 0 {
-        // An IPv4 UDP checksum of zero stays disabled.
-        return Ok(None);
-    }
-    let net = layout.layers[network].range;
-    let (source, destination) = if ipv6 {
-        let mut source = [0_u8; 16];
-        let mut destination = [0_u8; 16];
-        source.copy_from_slice(
-            bytes
-                .get(net.start + 8..net.start + 24)
-                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv6Source))?,
-        );
-        destination.copy_from_slice(
-            bytes
-                .get(net.start + 24..net.start + 40)
-                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv6Destination))?,
-        );
-        (
-            std::net::IpAddr::from(source),
-            std::net::IpAddr::from(destination),
-        )
-    } else {
-        let mut source = [0_u8; 4];
-        let mut destination = [0_u8; 4];
-        source.copy_from_slice(
-            bytes
-                .get(net.start + 12..net.start + 16)
-                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv4Source))?,
-        );
-        destination.copy_from_slice(
-            bytes
-                .get(net.start + 16..net.start + 20)
-                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv4Destination))?,
-        );
-        (
-            std::net::IpAddr::from(source),
-            std::net::IpAddr::from(destination),
-        )
-    };
     let (protocol, name) = if udp {
         (crate::protocol::network::ip_protocol::UDP, "udp")
     } else {
         (crate::protocol::network::ip_protocol::TCP, "tcp")
     };
-    bytes[checksum_range.start..checksum_range.end].fill(0);
-    let mut value = crate::protocol::transport_checksum(
-        name,
-        crate::protocol::network_from_addresses(source, destination),
+    let addresses = header.addresses(&bytes[network_start..])?;
+    let Some(value) = super::repair_checksum(
+        &mut bytes[span.start..span.end],
+        checksum_range.start - span.start..checksum_range.end - span.start,
         protocol,
-        &bytes[span.start..span.end],
-    )
-    .map_err(Error::Checksum)?;
-    if udp && value == 0 {
-        value = 0xffff;
-    }
-    bytes[checksum_range.start..checksum_range.end].copy_from_slice(&value.to_be_bytes());
+        name,
+        addresses,
+    )?
+    else {
+        return Ok(None);
+    };
     Ok((u64::from(value) != old).then(|| FieldChange {
         field: format!(
             "{}#{}.checksum",

@@ -130,12 +130,10 @@ fn prepare_live(
         ..packetcraftr::fuzz::Request::new(request.clone(), core::packet::Packet::new())
     };
     live.validate().map_err(CliError::classified)?;
-    // Each case is one probe.
     let workflow = prepare_workflow(
         &arguments.route,
         arguments.policy.clone().into_policy(),
         arguments.timeout.timeout(),
-        1,
         queue_limits,
     )?;
     Ok(Some(PreparedLive {
@@ -159,11 +157,6 @@ fn execute_and_render(
     }
 }
 
-struct OfflineSession {
-    packet: core::packet::Packet,
-    registry: Arc<core::registry::Registry>,
-}
-
 fn execute_offline(
     request: core::fuzz::Request,
     packet: core::packet::Packet,
@@ -172,20 +165,18 @@ fn execute_offline(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
-    let mut session = OfflineSession { packet, registry };
     execution::run_workflow(
-        &mut session,
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Fuzz,
-            run: Box::new(|session| {
+            run: Box::new(|| {
                 let mut cases = Vec::new();
                 let summary = core::fuzz::run_observed(
                     &request,
-                    session.packet.clone(),
-                    Arc::clone(&session.registry),
+                    packet.clone(),
+                    Arc::clone(&registry),
                     |case, _| {
                         crate::cancellation::check().map_err(|error| {
                             core::fuzz::Error::Output {
@@ -199,14 +190,9 @@ fn execute_offline(
                 .map_err(CliError::classified)?;
                 Ok(core::fuzz::Report::from_summary(summary, cases))
             }),
-            run_with_events: Box::new(|session, emit| {
-                publish_offline(
-                    &request,
-                    session.packet.clone(),
-                    Arc::clone(&session.registry),
-                    emit,
-                )
-                .map_err(CliError::classified)
+            run_with_events: Box::new(|emit| {
+                publish_offline(&request, packet.clone(), Arc::clone(&registry), emit)
+                    .map_err(CliError::classified)
             }),
             on_event: |case, stream| {
                 let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
@@ -241,20 +227,19 @@ fn execute_live(
         ..request
     };
     execution::run_workflow(
-        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Fuzz,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 let collector = packetcraftr::fuzz::Collector::default();
                 let report = client
                     .fuzz(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 Ok(collector.finish(report))
             }),
-            run_with_events: Box::new(|_, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .fuzz(request.clone(), emit)
                     .map_err(CliError::classified)

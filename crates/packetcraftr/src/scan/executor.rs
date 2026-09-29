@@ -37,7 +37,6 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_prepared_bytes: usize,
     pub(crate) max_evidence_frames: usize,
     pub(crate) max_evidence_bytes: usize,
-    pub(crate) max_undecoded: usize,
 }
 
 #[derive(Clone, Debug)]

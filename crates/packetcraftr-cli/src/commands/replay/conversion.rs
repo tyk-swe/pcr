@@ -7,32 +7,26 @@ use super::arguments::{Args, Timing};
 use crate::errors::CliError;
 
 pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, CliError> {
-    let timing = if let Some(rate) = arguments.bps {
-        if matches!(arguments.timing, Timing::Immediate) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--bps cannot be combined with --timing immediate",
-            ));
-        }
-        packetcraftr::replay::Timing::BitRate(rate)
+    use packetcraftr::replay::Timing::{BitRate, FixedRate, Scaled};
+
+    let explicit = if let Some(rate) = arguments.bps {
+        Some(("--bps", BitRate(rate)))
     } else if let Some(rate) = arguments.rate {
-        if matches!(arguments.timing, Timing::Immediate) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--rate cannot be combined with --timing immediate",
-            ));
-        }
-        packetcraftr::replay::Timing::FixedRate(rate)
-    } else if let Some(speed) = arguments.speed {
-        if matches!(arguments.timing, Timing::Immediate) {
-            return Err(CliError::new(
-                Kind::Usage,
-                "--speed cannot be combined with --timing immediate",
-            ));
-        }
-        packetcraftr::replay::Timing::Scaled(1.0 / speed)
+        Some(("--rate", FixedRate(rate)))
     } else {
-        arguments.timing.into()
+        arguments
+            .speed
+            .map(|speed| ("--speed", Scaled(1.0 / speed)))
+    };
+    let timing = match explicit {
+        Some((flag, _)) if matches!(arguments.timing, Timing::Immediate) => {
+            return Err(CliError::new(
+                Kind::Usage,
+                format!("{flag} cannot be combined with --timing immediate"),
+            ));
+        }
+        Some((_, timing)) => timing,
+        None => arguments.timing.into(),
     };
     timing.validate().map_err(CliError::classified)?;
     Ok(timing)
@@ -87,12 +81,33 @@ mod tests {
     }
 
     #[test]
-    fn timing_rejects_immediate_overrides_and_invalid_numeric_values() {
+    fn timing_rejects_immediate_overrides_naming_the_flag() {
+        for (extra, message) in [
+            (
+                &["--timing", "immediate", "--bps", "8000000"][..],
+                "--bps cannot be combined with --timing immediate",
+            ),
+            (
+                &["--timing", "immediate", "--rate", "20"][..],
+                "--rate cannot be combined with --timing immediate",
+            ),
+            (
+                &["--timing", "immediate", "--speed", "2"][..],
+                "--speed cannot be combined with --timing immediate",
+            ),
+        ] {
+            let error = timing(&arguments(extra)).expect_err("immediate override must fail");
+            assert_eq!(error.message, message, "{extra:?}");
+            assert_eq!(error.exit_code(), 2, "{extra:?}");
+        }
+    }
+
+    #[test]
+    fn timing_rejects_invalid_numeric_values() {
         for extra in [
-            &["--timing", "immediate", "--bps", "8000000"][..],
-            &["--timing", "immediate", "--rate", "20"][..],
-            &["--timing", "immediate", "--speed", "2"][..],
             &["--rate", "0"][..],
+            &["--rate", "5000000000"][..],
+            &["--rate", "1e-300"][..],
             &["--speed", "0"][..],
         ] {
             assert!(timing(&arguments(extra)).is_err(), "{extra:?}");

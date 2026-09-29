@@ -3,149 +3,21 @@
 
 mod common;
 
-use common::pcap::{frame_at, pcap_bytes};
+use common::pcap::{
+    block, enhanced_packet_block, frame_at, interface_block, obsolete_packet_block, pcap_bytes,
+    put_u32, section_header, simple_packet_block,
+};
 use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::capture_file::{
-    Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader, ReaderLimits,
-    TimestampResolution, Writer,
+    Endianness, Error, Format, Interface, Limits, PcapNgOption, PcapNgOptions, PcapOptions, Reader,
+    ReaderLimits, TimestampResolution, Writer,
 };
 use packetcraftr_core::frame::{Direction, LinkType};
 
-fn push_u16(bytes: &mut Vec<u8>, endianness: Endianness, value: u16) {
-    let encoded = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    };
-    bytes.extend_from_slice(&encoded);
-}
-
-fn push_u32(bytes: &mut Vec<u8>, endianness: Endianness, value: u32) {
-    let encoded = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    };
-    bytes.extend_from_slice(&encoded);
-}
-
-fn push_i64(bytes: &mut Vec<u8>, endianness: Endianness, value: i64) {
-    let encoded = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    };
-    bytes.extend_from_slice(&encoded);
-}
-
-fn section_header(
-    endianness: Endianness,
-    major: u16,
-    minor: u16,
-    section_length: i64,
-    options: &[u8],
-) -> Vec<u8> {
-    assert!(options.len().is_multiple_of(4));
-    let length = u32::try_from(28 + options.len()).expect("small fixture block");
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, 0x0a0d_0d0a);
-    push_u32(&mut bytes, endianness, length);
-    push_u32(&mut bytes, endianness, 0x1a2b_3c4d);
-    push_u16(&mut bytes, endianness, major);
-    push_u16(&mut bytes, endianness, minor);
-    push_i64(&mut bytes, endianness, section_length);
-    bytes.extend_from_slice(options);
-    push_u32(&mut bytes, endianness, length);
-    bytes
-}
-
-fn interface_block(endianness: Endianness, link_type: u16, snap_len: u32) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, 1);
-    push_u32(&mut bytes, endianness, 20);
-    push_u16(&mut bytes, endianness, link_type);
-    push_u16(&mut bytes, endianness, 0);
-    push_u32(&mut bytes, endianness, snap_len);
-    push_u32(&mut bytes, endianness, 20);
-    bytes
-}
-
-fn enhanced_packet_block(
-    endianness: Endianness,
-    interface: u32,
-    ticks: u64,
-    original_length: u32,
-    payload: &[u8],
-    options: &[u8],
-) -> Vec<u8> {
-    assert!(options.len().is_multiple_of(4));
-    let padded = (payload.len() + 3) & !3;
-    let length = u32::try_from(32 + padded + options.len()).expect("small fixture block");
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, 6);
-    push_u32(&mut bytes, endianness, length);
-    push_u32(&mut bytes, endianness, interface);
-    let high = u32::try_from(ticks >> 32).expect("shifted timestamp half fits u32");
-    let low = u32::try_from(ticks & u64::from(u32::MAX)).expect("masked timestamp half fits u32");
-    push_u32(&mut bytes, endianness, high);
-    push_u32(&mut bytes, endianness, low);
-    push_u32(
-        &mut bytes,
-        endianness,
-        u32::try_from(payload.len()).expect("small payload"),
-    );
-    push_u32(&mut bytes, endianness, original_length);
-    bytes.extend_from_slice(payload);
-    bytes.resize(bytes.len() + padded - payload.len(), 0);
-    bytes.extend_from_slice(options);
-    push_u32(&mut bytes, endianness, length);
-    bytes
-}
-
-fn obsolete_packet_block(endianness: Endianness, payload: &[u8]) -> Vec<u8> {
-    let padded = (payload.len() + 3) & !3;
-    let length = u32::try_from(32 + padded).expect("small fixture block");
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, 2);
-    push_u32(&mut bytes, endianness, length);
-    push_u16(&mut bytes, endianness, 0);
-    push_u16(&mut bytes, endianness, 0);
-    push_u32(&mut bytes, endianness, 0);
-    push_u32(&mut bytes, endianness, 1_500_000);
-    push_u32(
-        &mut bytes,
-        endianness,
-        u32::try_from(payload.len()).expect("small payload"),
-    );
-    push_u32(
-        &mut bytes,
-        endianness,
-        u32::try_from(payload.len()).expect("small payload"),
-    );
-    bytes.extend_from_slice(payload);
-    bytes.resize(bytes.len() + padded - payload.len(), 0);
-    push_u32(&mut bytes, endianness, length);
-    bytes
-}
-
-fn simple_packet_block(endianness: Endianness, original_length: u32, captured: &[u8]) -> Vec<u8> {
-    let padded = (captured.len() + 3) & !3;
-    let length = u32::try_from(16 + padded).expect("small fixture block");
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, 3);
-    push_u32(&mut bytes, endianness, length);
-    push_u32(&mut bytes, endianness, original_length);
-    bytes.extend_from_slice(captured);
-    bytes.resize(bytes.len() + padded - captured.len(), 0);
-    push_u32(&mut bytes, endianness, length);
-    bytes
-}
-
 fn empty_metadata_block(endianness: Endianness, block_type: u32) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    push_u32(&mut bytes, endianness, block_type);
-    push_u32(&mut bytes, endianness, 12);
-    push_u32(&mut bytes, endianness, 12);
-    bytes
+    block(endianness, block_type, &[])
 }
 
 fn pcapng_stream(endianness: Endianness, blocks: &[Vec<u8>]) -> Vec<u8> {
@@ -497,6 +369,35 @@ fn pcapng_interface_selection_and_declarations_enforce_contracts() {
 }
 
 #[test]
+fn invalid_interface_options_fail_before_an_interface_block_is_written() {
+    let description = Interface {
+        link_type: LinkType::ETHERNET,
+        snap_len: 128,
+        timestamp_resolution: TimestampResolution::Decimal(9),
+        timestamp_offset: 0,
+    };
+    for (code, length) in [(0, 0), (9, 1), (14, 8), (2, usize::from(u16::MAX) + 1)] {
+        let mut writer = Writer::pcapng(Vec::new()).unwrap();
+        let before = writer.get_ref().clone();
+        let option = PcapNgOption {
+            code,
+            value: vec![6; length].into(),
+        };
+        assert!(
+            matches!(
+                writer.add_interface_description_with_options(description.clone(), &[option]),
+                Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    ..
+                })
+            ),
+            "option {code} of {length} bytes"
+        );
+        assert_eq!(writer.get_ref(), &before);
+    }
+}
+
+#[test]
 fn classic_reader_rejects_header_and_record_corruption_then_stays_finished() {
     assert!(matches!(
         Reader::new(Cursor::new(Vec::<u8>::new())),
@@ -579,6 +480,33 @@ fn classic_reader_rejects_header_and_record_corruption_then_stays_finished() {
 }
 
 #[test]
+fn classic_reader_fails_closed_on_truncated_records_and_declared_size_limits() {
+    let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3, 4]);
+    let capture = pcap_bytes(PcapOptions::default(), &[frame]);
+
+    let mut truncated = capture.clone();
+    truncated.pop();
+    let error = Reader::new(Cursor::new(truncated))
+        .expect("global header remains valid")
+        .next_frame()
+        .expect_err("short payload must fail");
+    assert!(matches!(error, Error::Truncated { .. }));
+
+    let mut reader = Reader::with_limits(
+        Cursor::new(capture),
+        ReaderLimits {
+            max_size: 3,
+            ..ReaderLimits::default()
+        },
+    )
+    .expect("global header remains within the limit");
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::SizeLimitExceeded { limit: 3, .. })
+    ));
+}
+
+#[test]
 fn reader_accessors_and_microsecond_precision_work_with_chunked_input() {
     let timestamp = SystemTime::UNIX_EPOCH + Duration::new(9, 123_456_000);
     let bytes = pcap_bytes(
@@ -609,8 +537,8 @@ fn pcapng_reader_supports_obsolete_simple_and_multiple_sections() {
     let first = pcapng_stream(
         little,
         &[
-            interface_block(little, 1, 64),
-            obsolete_packet_block(little, b"old"),
+            interface_block(little, 1, 64, &[]),
+            obsolete_packet_block(little, 0, 1_500_000, b"old", &[]),
             simple_packet_block(little, 6, b"abcdef"),
         ],
     );
@@ -622,6 +550,7 @@ fn pcapng_reader_supports_obsolete_simple_and_multiple_sections() {
                 big,
                 u16::try_from(LinkType::IPV4.0).expect("IPv4 link type fits the interface field"),
                 64,
+                &[],
             ),
             enhanced_packet_block(big, 0, 2_000_000, 2, b"ip", &[]),
         ],
@@ -662,7 +591,7 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
         endianness,
         &[
             empty_metadata_block(endianness, 0xfeed_beef),
-            interface_block(endianness, 1, 64),
+            interface_block(endianness, 1, 64, &[]),
             enhanced_packet_block(endianness, 0, 0, 1, b"x", &[]),
         ],
     );
@@ -692,23 +621,26 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
         Err(Error::MetadataByteLimit { limit: 11 })
     ));
 
-    for options in [
-        ReaderLimits {
-            max_interfaces_per_section: 0,
-            ..ReaderLimits::default()
-        },
-        ReaderLimits {
-            max_total_interfaces: 0,
-            ..ReaderLimits::default()
-        },
-    ] {
-        let mut reader = Reader::with_limits(Cursor::new(bytes.clone()), options)
-            .expect("section header itself fits");
-        assert!(matches!(
-            reader.next_frame(),
-            Err(Error::InterfaceLimit { limit: 0 } | Error::TotalInterfaceLimit { limit: 0 })
-        ));
-    }
+    let section_limit = ReaderLimits {
+        max_interfaces_per_section: 0,
+        ..ReaderLimits::default()
+    };
+    let mut reader = Reader::with_limits(Cursor::new(bytes.clone()), section_limit)
+        .expect("section header itself fits");
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::InterfaceLimit { limit: 0 })
+    ));
+    let total_limit = ReaderLimits {
+        max_total_interfaces: 0,
+        ..ReaderLimits::default()
+    };
+    let mut reader =
+        Reader::with_limits(Cursor::new(bytes), total_limit).expect("section header itself fits");
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::TotalInterfaceLimit { limit: 0 })
+    ));
 }
 
 #[test]
@@ -758,8 +690,8 @@ fn pcapng_structural_corruption_fails_closed() {
     ));
 
     let mut invalid_block = section_header(endianness, 1, 0, -1, &[]);
-    push_u32(&mut invalid_block, endianness, 99);
-    push_u32(&mut invalid_block, endianness, 14);
+    put_u32(&mut invalid_block, endianness, 99);
+    put_u32(&mut invalid_block, endianness, 14);
     let mut reader = Reader::new(Cursor::new(invalid_block)).expect("section opens");
     assert!(matches!(
         reader.next_frame(),
@@ -798,7 +730,7 @@ fn finite_sections_detect_early_end_boundary_crossing_and_remainders() {
     ));
 
     let mut crossing = section_header(endianness, 1, 0, 12, &[]);
-    crossing.extend_from_slice(&interface_block(endianness, 1, 64));
+    crossing.extend_from_slice(&interface_block(endianness, 1, 64, &[]));
     let mut reader = Reader::new(Cursor::new(crossing)).expect("section opens");
     assert!(matches!(
         reader.next_frame(),
@@ -837,7 +769,7 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
     let bytes = pcapng_stream(
         endianness,
         &[
-            interface_block(endianness, 1, 64),
+            interface_block(endianness, 1, 64, &[]),
             enhanced_packet_block(endianness, 0, 0, 1, b"x", &bad_end_option),
         ],
     );
@@ -851,7 +783,7 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
     let bytes = pcapng_stream(
         endianness,
         &[
-            interface_block(endianness, 1, 64),
+            interface_block(endianness, 1, 64, &[]),
             enhanced_packet_block(endianness, 0, 0, 1, b"x", &duplicate_flags),
         ],
     );
@@ -864,7 +796,7 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
     let malformed_simple = simple_packet_block(endianness, 8, b"abcd");
     let bytes = pcapng_stream(
         endianness,
-        &[interface_block(endianness, 1, 64), malformed_simple],
+        &[interface_block(endianness, 1, 64, &[]), malformed_simple],
     );
     let mut reader = Reader::new(Cursor::new(bytes)).expect("section opens");
     assert!(matches!(

@@ -6,7 +6,7 @@ use packetcraftr_core::{
     expression,
     layer::Layer,
     protocol::{
-        application::tls::{Hello, HelloExtension, HelloKind, Tls},
+        application::tls::{Extension, Hello, HelloKind, Tls},
         builtin,
     },
     template::Template,
@@ -20,17 +20,17 @@ fn typed_hellos_derive_lengths_and_fingerprints_and_preserve_unknown_extensions(
             session_id: Bytes::from_static(b"fixture"),
             ..Default::default()
         };
-        hello.extensions.push(HelloExtension {
+        hello.extensions.push(Extension {
             kind: 0xaaaa,
             data: Bytes::from_static(b"opaque"),
         });
         if kind == HelloKind::Client {
             hello
                 .extensions
-                .push(HelloExtension::server_name("example.test").unwrap());
+                .push(Extension::server_name("example.test").unwrap());
             hello
                 .extensions
-                .push(HelloExtension::alpn(&[Bytes::from_static(b"h2")]).unwrap());
+                .push(Extension::alpn(&[Bytes::from_static(b"h2")]).unwrap());
         }
         let layer = Tls::try_from(hello.clone()).unwrap();
         let decoded = Tls::try_from(layer.wire().as_ref()).unwrap();
@@ -82,28 +82,41 @@ fn oversized_fields_invalid_extensions_and_failed_edits_are_rejected_atomically(
             .is_err()
     );
     assert_eq!(layer, original);
-    for hello in [
-        Hello {
-            session_id: Bytes::from(vec![0; 33]),
-            ..Default::default()
-        },
-        Hello {
-            cipher_suites: vec![],
-            ..Default::default()
-        },
-        Hello {
-            kind: HelloKind::Server,
-            cipher_suites: vec![1, 2],
-            ..Default::default()
-        },
-        Hello {
-            extensions: vec![HelloExtension {
-                kind: 16,
-                data: Bytes::from_static(&[0]),
-            }],
-            ..Default::default()
-        },
+    for (hello, refusal) in [
+        (
+            Hello {
+                session_id: Bytes::from(vec![0; 33]),
+                ..Default::default()
+            },
+            "protocol or resource bound",
+        ),
+        (
+            Hello {
+                cipher_suites: vec![],
+                ..Default::default()
+            },
+            "protocol or resource bound",
+        ),
+        (
+            Hello {
+                kind: HelloKind::Server,
+                cipher_suites: vec![1, 2],
+                ..Default::default()
+            },
+            "ServerHello selects one cipher and compression method",
+        ),
+        (
+            Hello {
+                extensions: vec![Extension {
+                    kind: 16,
+                    data: Bytes::from_static(&[0]),
+                }],
+                ..Default::default()
+            },
+            "hello fields contain an invalid handshake",
+        ),
     ] {
-        assert!(Tls::try_from(hello).is_err());
+        let error = Tls::try_from(hello).unwrap_err().to_string();
+        assert!(error.contains(refusal), "{refusal:?} not in {error:?}");
     }
 }

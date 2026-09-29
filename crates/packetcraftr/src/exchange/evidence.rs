@@ -58,9 +58,8 @@ impl Observed {
         }
     }
 
-    pub(crate) fn finish(mut self, report: Report) -> Result<Aggregate, Error> {
+    pub(crate) fn finish(self, report: Report) -> Result<Aggregate, Error> {
         self.validate(&report)?;
-        self.diagnostics.extend(report.diagnostics);
         Ok(Aggregate {
             sent: self.sent.into_iter().map(|(_, sent)| sent).collect(),
             responses: self.responses,

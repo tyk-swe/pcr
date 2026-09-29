@@ -14,6 +14,7 @@ use crate::errors::CliError;
 pub(crate) enum InputKind {
     Recipe,
     Frame,
+    Payload,
     Capture,
 }
 
@@ -22,6 +23,7 @@ impl InputKind {
         match self {
             Self::Recipe => "packet",
             Self::Frame => "frame",
+            Self::Payload => "UDP payload",
             Self::Capture => "capture",
         }
     }
@@ -30,6 +32,7 @@ impl InputKind {
         match self {
             Self::Recipe => "--packet, --packet-file, or redirect non-empty stdin",
             Self::Frame => "--hex, --file, or redirect non-empty stdin",
+            Self::Payload => "--udp-payload-hex or --udp-payload-file",
             Self::Capture => "a capture path, or use - with redirected capture stdin",
         }
     }
@@ -40,13 +43,14 @@ impl InputKind {
                 "provide --packet, --packet-file, or pipe a non-empty packet recipe to stdin"
             }
             Self::Frame => "provide --hex, --file, or pipe non-empty frame bytes to stdin",
+            Self::Payload => "provide --udp-payload-hex or --udp-payload-file",
             Self::Capture => "provide a capture path or pipe PCAP/PCAPNG bytes with - as the path",
         }
     }
 
     fn oversized_error(self, actual: usize, limit: usize) -> CliError {
         match self {
-            Self::Recipe | Self::Capture => CliError::new(
+            Self::Recipe | Self::Payload | Self::Capture => CliError::new(
                 Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),
@@ -85,11 +89,7 @@ pub(crate) fn read_bounded_file(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_bounded_file_allow_empty(path, max_bytes, kind)?;
-    if bytes.is_empty() {
-        return Err(missing_input_error(kind));
-    }
-    Ok(bytes)
+    require_non_empty(read_bounded_file_allow_empty(path, max_bytes, kind)?, kind)
 }
 
 pub(crate) fn read_bounded_file_allow_empty(
@@ -101,20 +101,22 @@ pub(crate) fn read_bounded_file_allow_empty(
 }
 
 pub(super) fn open_file(path: &Path) -> Result<File, CliError> {
-    File::open(path).map_err(|source| {
-        CliError::caused(
-            Kind::Io,
-            &FileIo {
-                operation: "open",
-                path: path.to_owned(),
-                source,
-            },
-        )
-    })
+    File::open(path).map_err(|source| file_io_error("open", path, source))
+}
+
+fn file_io_error(operation: &'static str, path: &Path, source: io::Error) -> CliError {
+    CliError::caused(
+        Kind::Io,
+        &FileIo {
+            operation,
+            path: path.to_owned(),
+            source,
+        },
+    )
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("{operation} {} failed: {source}", .path.display())]
+#[error("{operation} {} failed", .path.display())]
 struct FileIo {
     operation: &'static str,
     path: PathBuf,
@@ -123,7 +125,7 @@ struct FileIo {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("read {label} input failed: {source}")]
+#[error("read {label} input failed")]
 struct InputRead {
     label: &'static str,
     #[source]
@@ -134,26 +136,8 @@ pub(crate) fn read_bounded_json_document(
     path: &Path,
     max_bytes: usize,
 ) -> Result<Vec<u8>, CliError> {
-    let document_io = |operation: &'static str| {
-        move |source: io::Error| {
-            CliError::caused(
-                Kind::Io,
-                &FileIo {
-                    operation,
-                    path: path.to_owned(),
-                    source,
-                },
-            )
-        }
-    };
-    let file = File::open(path).map_err(document_io("open"))?;
-    let read_limit = u64::try_from(max_bytes)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    let mut bytes = Vec::new();
-    file.take(read_limit)
-        .read_to_end(&mut bytes)
-        .map_err(document_io("read"))?;
+    let bytes = read_capped(open_file(path)?, max_bytes)
+        .map_err(|source| file_io_error("read", path, source))?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
             Kind::Usage,
@@ -170,7 +154,10 @@ pub(crate) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Ve
 }
 
 fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
-    let bytes = read_bounded_allow_empty(reader, max_bytes, kind)?;
+    require_non_empty(read_bounded_allow_empty(reader, max_bytes, kind)?, kind)
+}
+
+fn require_non_empty(bytes: Vec<u8>, kind: InputKind) -> Result<Vec<u8>, CliError> {
     if bytes.is_empty() {
         return Err(missing_input_error(kind));
     }
@@ -182,25 +169,28 @@ fn read_bounded_allow_empty(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
+    let bytes = read_capped(reader, max_bytes).map_err(|source| {
+        CliError::caused(
+            Kind::Io,
+            &InputRead {
+                label: kind.label(),
+                source,
+            },
+        )
+    })?;
+    if bytes.len() > max_bytes {
+        return Err(kind.oversized_error(bytes.len(), max_bytes));
+    }
+    Ok(bytes)
+}
+
+/// Reads at most `max_bytes + 1` bytes, so a caller can tell a full read from an oversized one.
+fn read_capped(reader: impl Read, max_bytes: usize) -> io::Result<Vec<u8>> {
     let read_limit = u64::try_from(max_bytes)
         .unwrap_or(u64::MAX)
         .saturating_add(1);
     let mut bytes = Vec::new();
-    reader
-        .take(read_limit)
-        .read_to_end(&mut bytes)
-        .map_err(|source| {
-            CliError::caused(
-                Kind::Io,
-                &InputRead {
-                    label: kind.label(),
-                    source,
-                },
-            )
-        })?;
-    if bytes.len() > max_bytes {
-        return Err(kind.oversized_error(bytes.len(), max_bytes));
-    }
+    reader.take(read_limit).read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
@@ -239,6 +229,16 @@ mod tests {
             Vec::<u8>::new(),
         );
 
+        let oversized_payload =
+            read_bounded_allow_empty(Cursor::new(b"abcde"), 4, InputKind::Payload)
+                .expect_err("the UDP payload limit is a usage error");
+        assert_eq!(oversized_payload.exit_code(), 2);
+        assert_eq!(oversized_payload.classification.code, "cli.error");
+        assert_eq!(
+            oversized_payload.message,
+            "UDP payload input exceeds 4 byte limit"
+        );
+
         let oversized_frame = read_bounded_allow_empty(Cursor::new(b"abcde"), 4, InputKind::Frame)
             .expect_err("the decode byte budget is enforced while reading");
         assert_eq!(oversized_frame.exit_code(), 6);
@@ -269,19 +269,13 @@ mod tests {
             }
         }
 
-        for kind in [InputKind::Recipe, InputKind::Frame] {
+        for kind in [InputKind::Recipe, InputKind::Frame, InputKind::Payload] {
             let required = read_bounded(BrokenReader { delivered: false }, 64, kind)
                 .expect_err("a broken reader must fail");
             assert_eq!(required.exit_code(), 5, "{kind:?}");
-            assert!(
-                required.message.starts_with("read "),
-                "{}",
-                required.message
-            );
-            assert!(
-                required.message.to_lowercase().contains("broken pipe"),
-                "{}",
-                required.message
+            assert_eq!(
+                required.message,
+                format!("read {} input failed", kind.label())
             );
             assert!(
                 matches!(&required.causes[..], [cause] if cause.to_lowercase().contains("broken pipe")),
@@ -298,6 +292,35 @@ mod tests {
                 optional.message
             );
         }
+    }
+
+    #[test]
+    fn json_documents_accept_the_exact_limit_and_refuse_oversized_or_missing_files() {
+        let directory = tempfile::tempdir().expect("temporary directory must open");
+        let document = directory.path().join("document.json");
+        std::fs::write(&document, b"abcd").expect("fixture document must write");
+
+        assert_eq!(
+            read_bounded_json_document(&document, 4).expect("exact limit is accepted"),
+            b"abcd",
+        );
+
+        let oversized = read_bounded_json_document(&document, 3).expect_err("limit is enforced");
+        assert_eq!(oversized.exit_code(), 2);
+        assert_eq!(
+            oversized.message,
+            format!("document {} exceeds 3 byte limit", document.display())
+        );
+
+        let missing = directory.path().join("missing.json");
+        let missing_error =
+            read_bounded_json_document(&missing, 4).expect_err("a missing document must fail");
+        assert_eq!(missing_error.exit_code(), 5);
+        assert_eq!(
+            missing_error.message,
+            format!("open {} failed", missing.display())
+        );
+        assert_eq!(missing_error.causes.len(), 1, "{:?}", missing_error.causes);
     }
 
     #[test]

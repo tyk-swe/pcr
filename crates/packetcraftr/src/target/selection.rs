@@ -52,9 +52,14 @@ impl Network {
     pub fn prefix(&self) -> u8 {
         self.prefix
     }
+    /// An IPv4-mapped IPv6 address also matches through its embedded IPv4
+    /// address, because a dual-stack socket connects to that IPv4 host.
     pub fn contains(&self, address: IpAddr) -> bool {
-        address.is_ipv4() == self.address.is_ipv4()
-            && Self::new(address, self.prefix).is_ok_and(|network| network == *self)
+        let matches = |address: IpAddr| {
+            address.is_ipv4() == self.address.is_ipv4()
+                && Self::new(address, self.prefix).is_ok_and(|network| network == *self)
+        };
+        matches(address) || matches(address.to_canonical())
     }
     pub fn cardinality(&self, maximum: usize) -> Result<usize, SelectionError> {
         let bits = if self.address.is_ipv4() { 32u32 } else { 128 };
@@ -284,6 +289,41 @@ mod tests {
         assert!("192.0.2.0/+24".parse::<Network>().is_err());
         assert!("192.0.2.0/".parse::<Network>().is_err());
         assert!(!network.contains("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn an_ipv4_network_contains_the_mapped_spelling_of_its_addresses() {
+        let network: Network = "10.0.0.0/24".parse().unwrap();
+        assert!(network.contains("::ffff:10.0.0.9".parse().unwrap()));
+        assert!(!network.contains("::ffff:10.0.1.9".parse().unwrap()));
+        assert!(!network.contains("::10.0.0.9".parse().unwrap()));
+
+        let mapped: Network = "::ffff:0:0/96".parse().unwrap();
+        assert!(mapped.contains("::ffff:1.2.3.4".parse().unwrap()));
+        assert!(!mapped.contains("2001:db8::1".parse().unwrap()));
+
+        let ipv6: Network = "2001:db8::/32".parse().unwrap();
+        assert!(ipv6.contains("2001:db8::1".parse().unwrap()));
+        assert!(!ipv6.contains("::ffff:10.0.0.9".parse().unwrap()));
+    }
+
+    #[test]
+    fn an_exclusion_covers_the_mapped_spelling_of_an_excluded_ipv4_address() {
+        for entry in ["10.0.0.5", "10.0.0.5/32", "10.0.0.4/30"] {
+            let selection = Selection {
+                include: vec![Specification::Network("10.0.0.0/30".parse().unwrap())],
+                exclude: vec![entry.parse().unwrap()],
+            };
+            assert!(selection.excludes("10.0.0.5".parse().unwrap()), "{entry}");
+            assert!(
+                selection.excludes("::ffff:10.0.0.5".parse().unwrap()),
+                "{entry}"
+            );
+            assert!(
+                !selection.excludes("::ffff:10.0.1.5".parse().unwrap()),
+                "{entry}"
+            );
+        }
     }
 
     #[test]

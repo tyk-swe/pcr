@@ -14,16 +14,9 @@ import sys
 import threading
 import uuid
 
-from validation_evidence import NATIVE_SCENARIOS, ROOT, digest, provenance, validate_native
+from validation_evidence import NATIVE_SCENARIOS, ROOT, checksum, digest, provenance, validate_native
 
 SCENARIOS = tuple(name for name in NATIVE_SCENARIOS if name != 'loopback_exchange')
-
-
-def checksum(data):
-    if len(data) % 2: data += b'\0'
-    total = sum(struct.unpack(f'!{len(data) // 2}H', data))
-    while total >> 16: total = (total & 0xffff) + (total >> 16)
-    return (~total) & 0xffff
 
 
 def exchange(binary, report):

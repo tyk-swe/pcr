@@ -6,8 +6,10 @@
   "error": {
     "code": "policy.application_limit",
     "kind": "policy",
-    "message": "application analysis exceeds max_http_body_bytes=268435456",
-    "causes": [],
+    "message": "analysis consumer failed at frame 6",
+    "causes": [
+      "application analysis exceeds max_messages=1"
+    ],
     "remediation": "raise a finite application-analysis limit or narrow the capture"
   },
   "diagnostics": []

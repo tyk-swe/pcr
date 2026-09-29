@@ -18,6 +18,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::contract::Command;
 use super::envelope::{Envelope, Error, Published, Stats};
+use crate::errors::source_causes;
 
 pub trait StreamRecord: Serialize {
     fn event_name(&self) -> &'static str;
@@ -127,9 +128,9 @@ impl StreamEncoder {
                 .and_then(|()| writer.flush())
                 .map_err(|source| {
                     BoundaryError::with_source(
-                        format!("write NDJSON output failed: {source}"),
+                        "write NDJSON output failed",
                         Classification::new("io.stdout", Kind::Io, None),
-                        Vec::new(),
+                        source_causes(&source),
                         source,
                     )
                 })
@@ -417,7 +418,7 @@ fn serialize_line_with_limit(
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum EncodeError {
-    #[error("NDJSON {phase} exceeded the operation publication deadline: {source}")]
+    #[error("NDJSON {phase} exceeded the operation publication deadline")]
     Deadline {
         phase: &'static str,
         #[source]
@@ -439,13 +440,13 @@ pub enum EncodeError {
     Poisoned,
     #[error("NDJSON sequence overflowed")]
     SequenceOverflow,
-    #[error("NDJSON record at sequence {sequence} failed to serialize: {source}")]
+    #[error("NDJSON record at sequence {sequence} failed to serialize")]
     Serialize {
         sequence: u64,
         #[source]
         source: serde_json::Error,
     },
-    #[error("NDJSON stream is incomplete: record at sequence {sequence} failed to write: {source}")]
+    #[error("NDJSON stream is incomplete: record at sequence {sequence} failed to write")]
     Write {
         sequence: u64,
         #[source]

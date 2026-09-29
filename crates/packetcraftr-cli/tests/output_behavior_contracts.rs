@@ -21,6 +21,7 @@ use packetcraftr_cli::output::interfaces;
 use packetcraftr_cli::output::protocols::Binding;
 use packetcraftr_cli::output::protocols::Detail;
 use packetcraftr_cli::output::protocols::Field;
+use packetcraftr_cli::output::protocols::FieldKind;
 use packetcraftr_cli::output::protocols::Summary;
 use packetcraftr_cli::output::stream::StreamEncoder;
 use packetcraftr_core::diagnostic::Diagnostic;
@@ -85,7 +86,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     let diagnostic = Diagnostic::error("packet.bad", "bad packet")
         .at_layer(2)
         .at_field("checksum");
-    let client_stats = packetcraftr::Stats {
+    let stats = packetcraftr::Stats {
         packets_attempted: 3,
         packets_completed: 2,
         bytes: 99,
@@ -99,10 +100,8 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
             receiver_dropped_frames: 1,
         },
     };
-    let stats = client_stats;
     let value = serde_json::to_value(
-        Envelope::success(Command::Send, json!({"sent": true}), vec![diagnostic])
-            .with_stats(stats.clone()),
+        Envelope::success(Command::Send, json!({"sent": true}), vec![diagnostic]).with_stats(stats),
     )
     .expect("aggregate serializes");
     assert_eq!(value["status"], "success");
@@ -274,12 +273,13 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
         PacketFieldKind::Ipv6,
         PacketFieldKind::Mac,
         PacketFieldKind::List,
+        PacketFieldKind::Object,
     ];
     let expected = [
-        "bool", "unsigned", "signed", "text", "bytes", "ipv4", "ipv6", "mac", "list",
+        "bool", "unsigned", "signed", "text", "bytes", "ipv4", "ipv6", "mac", "list", "object",
     ];
     for (kind, expected) in packet_kinds.into_iter().zip(expected) {
-        let output = kind;
+        let output = FieldKind::try_from(kind).expect("published kind");
         assert_eq!(output.as_str(), expected);
         assert_eq!(
             serde_json::to_value(output).expect("kind serializes"),
@@ -319,7 +319,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     let protocol = BuiltinProtocol::ALL[0];
     let detail =
         Detail::try_from((registry.as_ref(), protocol)).expect("built-in fields are published");
-    assert_eq!(detail.protocol, summaries[0].protocol);
+    assert_eq!(detail.summary, summaries[0]);
     assert_eq!(
         detail.fields,
         registry

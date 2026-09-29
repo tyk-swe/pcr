@@ -29,7 +29,7 @@
 //! # Ok::<(), packetcraftr_core::protocol::headers::Error>(())
 //! ```
 
-use std::fmt;
+use std::net::IpAddr;
 use std::ops::Range;
 
 use crate::error::{Classification, Classified, Kind};
@@ -95,11 +95,7 @@ impl Header {
     }
 }
 
-impl fmt::Display for Header {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+display_via_as_str!(Header);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -324,6 +320,33 @@ impl IpHeader {
             Self::V6(header) => header.upper_layer(),
         }
     }
+
+    /// Source and destination addresses in `ip`, the bytes this header was
+    /// walked from.
+    pub fn addresses(&self, ip: &[u8]) -> Result<(IpAddr, IpAddr), Error> {
+        fn read<const N: usize>(
+            ip: &[u8],
+            range: Range<usize>,
+            header: Header,
+        ) -> Result<IpAddr, Error>
+        where
+            IpAddr: From<[u8; N]>,
+        {
+            let mut octets = [0; N];
+            octets.copy_from_slice(ip.get(range).ok_or(Error::Truncated(header))?);
+            Ok(IpAddr::from(octets))
+        }
+        match self {
+            Self::V4(_) => Ok((
+                read::<4>(ip, Ipv4Header::SOURCE, Header::Ipv4)?,
+                read::<4>(ip, Ipv4Header::DESTINATION, Header::Ipv4)?,
+            )),
+            Self::V6(_) => Ok((
+                read::<16>(ip, Ipv6Header::SOURCE, Header::Ipv6)?,
+                read::<16>(ip, Ipv6Header::DESTINATION, Header::Ipv6)?,
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -520,12 +543,8 @@ impl Ipv6Header {
     fn walk_chain(datagram: &[u8], payload_length: usize, next_header: u8) -> Result<Self, Error> {
         let mut extensions = Vec::new();
         let mut chain = Ipv6ExtensionChain::new(datagram, Self::LENGTH, next_header);
-        while chain.at_header() {
-            let extension = match chain.next() {
-                Some(extension) => extension?,
-                None => break,
-            };
-            extensions.push(extension);
+        for extension in &mut chain {
+            extensions.push(extension?);
         }
         let (upper_layer, upper_layer_offset) = chain.position();
         Ok(Self {
@@ -634,7 +653,7 @@ pub struct Ipv6ExtensionChain<'a> {
     protocol: u8,
     offset: usize,
     limit: usize,
-    remaining: usize,
+    taken: usize,
     done: bool,
 }
 
@@ -647,7 +666,7 @@ impl<'a> Ipv6ExtensionChain<'a> {
             protocol: next_header,
             offset,
             limit: MAX_IPV6_EXTENSIONS,
-            remaining: MAX_IPV6_EXTENSIONS,
+            taken: 0,
             done: false,
         }
     }
@@ -664,13 +683,7 @@ impl<'a> Ipv6ExtensionChain<'a> {
     /// caller keeps the slice's own bound rather than the generic one.
     pub(crate) fn with_ceiling(mut self, ceiling: usize) -> Self {
         self.limit = ceiling;
-        self.remaining = ceiling;
         self
-    }
-
-    fn at_header(&self) -> bool {
-        !self.done
-            && (self.protocol == ip_protocol::FRAGMENT || is_walkable_ipv6_extension(self.protocol))
     }
 }
 
@@ -678,10 +691,13 @@ impl Iterator for Ipv6ExtensionChain<'_> {
     type Item = Result<Ipv6Extension, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.at_header() {
+        if self.done
+            || !(self.protocol == ip_protocol::FRAGMENT
+                || is_walkable_ipv6_extension(self.protocol))
+        {
             return None;
         }
-        if self.remaining == 0 {
+        if self.taken >= self.limit {
             self.done = true;
             return Some(Err(Error::Depth {
                 header: Header::Ipv6Extension,
@@ -716,7 +732,7 @@ impl Iterator for Ipv6ExtensionChain<'_> {
         })();
         match step {
             Ok(extension) => {
-                self.remaining -= 1;
+                self.taken += 1;
                 self.offset += extension.length;
                 self.protocol = extension.next_header;
                 self.done = extension.fragment_offset().is_some_and(|units| units != 0);
@@ -894,6 +910,49 @@ mod tests {
         ));
         assert_eq!(IpHeader::walk(&[]), Err(Error::Truncated(Header::Ip)));
         assert_eq!(IpHeader::walk(&[0x50]), Err(Error::UnknownIpVersion(5)));
+    }
+
+    #[test]
+    fn addresses_read_the_source_and_destination_of_either_family() {
+        let ip = ipv4(&[], 8);
+        assert_eq!(
+            IpHeader::walk(&ip).unwrap().addresses(&ip),
+            Ok((
+                "192.0.2.1".parse::<IpAddr>().unwrap(),
+                "198.51.100.2".parse().unwrap()
+            ))
+        );
+        let mut ip = ipv6(ip_protocol::UDP, &[], 8);
+        ip[Ipv6Header::DESTINATION].copy_from_slice(
+            &"2001:db8::2"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
+        );
+        assert_eq!(
+            IpHeader::walk(&ip).unwrap().addresses(&ip),
+            Ok((
+                "2001:db8::".parse::<IpAddr>().unwrap(),
+                "2001:db8::2".parse().unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn addresses_check_the_slice_they_are_given() {
+        let ip = ipv4(&[], 8);
+        let header = IpHeader::walk(&ip).unwrap();
+        assert_eq!(
+            header.addresses(&ip[..Ipv4Header::SOURCE.start]),
+            Err(Error::Truncated(Header::Ipv4))
+        );
+        let ip = ipv6(ip_protocol::UDP, &[], 8);
+        let header = IpHeader::walk(&ip).unwrap();
+        assert_eq!(header.addresses(&[]), Err(Error::Truncated(Header::Ipv6)));
+        assert_eq!(
+            header.addresses(&ip[..Ipv6Header::SOURCE.start]),
+            Err(Error::Truncated(Header::Ipv6))
+        );
     }
 
     #[test]

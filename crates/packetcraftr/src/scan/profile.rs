@@ -16,7 +16,7 @@ use packetcraftr_core::{
         transport::Udp,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 mod document;
 pub use document::compile;
@@ -64,13 +64,6 @@ impl Classified for Error {
             | Self::MappedPorts => Classification::new("cli.error", Kind::Usage, None),
         }
     }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Document(source) => source.causes(),
-            error => packetcraftr_core::error::source_chain(error),
-        }
-    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -94,16 +87,6 @@ impl Evidence {
             Status::Unchecked => 2,
             Status::Confirmed => 3,
         }
-    }
-}
-impl Serialize for UdpProfile {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.config.serialize(serializer)
-    }
-}
-impl<'de> Deserialize<'de> for UdpProfile {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Self::new(Config::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
 }
 impl UdpProfile {
@@ -189,7 +172,7 @@ impl UdpProfile {
             payload,
             charge,
         };
-        if matches!(profile.config.response, ResponseCheck::Dns) {
+        if matches!(profile.config.response, ResponseCheck::Dns {}) {
             let query = Dns::try_from(profile.payload(0))
                 .map_err(|_| Error::Invalid("DNS response validation needs a valid DNS request"))?;
             if query.response || query.questions.is_empty() {
@@ -205,9 +188,6 @@ impl UdpProfile {
     }
     pub fn name(&self) -> &str {
         &self.config.name
-    }
-    pub fn config(&self) -> &Config {
-        &self.config
     }
     pub fn storage_bytes(&self) -> usize {
         self.charge
@@ -257,11 +237,11 @@ impl UdpProfile {
     }
     pub fn evaluate(&self, query: &[u8], response: &[u8]) -> Evidence {
         match &self.config.response {
-            ResponseCheck::Any => self.evidence(
+            ResponseCheck::Any {} => self.evidence(
                 Status::Unchecked,
                 "UDP reply observed; no application checks configured",
             ),
-            ResponseCheck::Dns => {
+            ResponseCheck::Dns {} => {
                 let (Ok(query), Ok(response)) = (
                     Dns::try_from(Bytes::copy_from_slice(query)),
                     Dns::try_from(Bytes::copy_from_slice(response)),
@@ -362,7 +342,8 @@ fn udp_payload(request: &Packet, response: &DecodedPacket) -> Option<Bytes> {
     }
     let start = response.layout.layer(index)?.range.end;
     let end = start.checked_add(usize::from(length) - 8)?;
-    (end <= response.original.len()).then(|| response.original.slice(start..end))
+    let bytes = response.frame.bytes();
+    (end <= bytes.len()).then(|| bytes.slice(start..end))
 }
 #[cfg(test)]
 mod tests {
@@ -374,7 +355,7 @@ mod tests {
             request: Payload::Bytes {
                 data: Bytes::from_static(b"probe"),
             },
-            response: ResponseCheck::Any,
+            response: ResponseCheck::Any {},
         })
     }
 

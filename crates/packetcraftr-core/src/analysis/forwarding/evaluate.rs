@@ -48,7 +48,7 @@ pub fn verify_with_limits(
     cancellation: Option<&Cancellation>,
     deadline: Option<&Deadline>,
 ) -> Result<Report, Error> {
-    let cancelled = |cancellation: Option<&Cancellation>| -> Result<(), Error> {
+    let check = || -> Result<(), Error> {
         if let Some(cancellation) = cancellation {
             cancellation.check()?;
         }
@@ -57,11 +57,14 @@ pub fn verify_with_limits(
         }
         Ok(())
     };
-    cancelled(cancellation)?;
-    rules.validate_observations(Side::Ingress, &ingress, || cancelled(cancellation))?;
-    rules.validate_observations(Side::Egress, &egress, || cancelled(cancellation))?;
-    let max_details = limits.max_details;
-    let mut detail_budget = DetailBudget::new(limits.max_detail_bytes);
+    check()?;
+    rules.validate_observations(Side::Ingress, &ingress, check)?;
+    rules.validate_observations(Side::Egress, &egress, check)?;
+    let mut sink = ViolationSink {
+        items: Vec::new(),
+        omitted: 0,
+        budget: DetailBudget::new(limits.max_details, limits.max_detail_bytes),
+    };
     let mut scratch_budget = ScratchBudget::new(limits.max_scratch_bytes);
     scratch_budget.reserve(
         ingress
@@ -71,25 +74,21 @@ pub fn verify_with_limits(
             .saturating_mul(192),
     )?;
     let sides = Sided {
-        ingress: census(&ingress.observations, ingress.frames_read, || {
-            cancelled(cancellation)
-        })?,
-        egress: census(&egress.observations, egress.frames_read, || {
-            cancelled(cancellation)
-        })?,
+        ingress: census(&ingress.observations, ingress.frames_read, check)?,
+        egress: census(&egress.observations, egress.frames_read, check)?,
     };
     let ingress = ingress.observations;
     let egress = egress.observations;
-    let ingress_index = index(&ingress, &mut scratch_budget, || cancelled(cancellation))?;
-    let egress_index = index(&egress, &mut scratch_budget, || cancelled(cancellation))?;
-    let ingress_rank = ranks(&ingress, || cancelled(cancellation))?;
-    let egress_rank = ranks(&egress, || cancelled(cancellation))?;
+    let ingress_index = index(&ingress, &mut scratch_budget, check)?;
+    let egress_index = index(&egress, &mut scratch_budget, check)?;
+    let ingress_rank = ranks(&ingress, check)?;
+    let egress_rank = ranks(&egress, check)?;
 
     let mut summary = Summary::default();
     // Compute order over every unique pair, before retaining bounded details.
     let mut pair_orders = vec![None; ingress.len()];
     for (key, members) in &ingress_index {
-        cancelled(cancellation)?;
+        check()?;
         if let [member] = members.as_slice()
             && let Some(egress_members) = egress_index.get(key)
             && let [egress_member] = egress_members.as_slice()
@@ -113,13 +112,12 @@ pub fn verify_with_limits(
 
     let mut omitted = Omissions::default();
     let mut matches: Vec<Match> = Vec::new();
-    let mut violations: Vec<Violation> = Vec::new();
     let mut unmatched: Sided<Vec<Evidence>> = Sided::default();
     let mut ambiguous: Vec<AmbiguousGroup> = Vec::new();
 
     let keys: BTreeSet<&Vec<u8>> = ingress_index.keys().chain(egress_index.keys()).collect();
     for key in keys {
-        cancelled(cancellation)?;
+        check()?;
         let ingress_members = ingress_index.get(key).map_or(&[][..], Vec::as_slice);
         let egress_members = egress_index.get(key).map_or(&[][..], Vec::as_slice);
         match (ingress_members.len(), egress_members.len()) {
@@ -133,31 +131,19 @@ pub fn verify_with_limits(
                     ingress_rank[ingress_members[0]],
                     egress_rank[egress_members[0]],
                     &mut summary,
-                    &mut ViolationSink {
-                        violations: &mut violations,
-                        omitted: &mut omitted.violations,
-                        max_details,
-                        budget: &mut detail_budget,
-                    },
+                    &mut sink,
                 );
                 pair.reordered = reordered[ingress_members[0]];
-                push_bounded(
-                    &mut matches,
-                    &mut omitted.matches,
-                    max_details,
-                    &mut detail_budget,
-                    pair,
-                );
+                push_bounded(&mut matches, &mut omitted.matches, &mut sink.budget, pair);
             }
             (ingress_count, 0) => {
                 summary.ingress_only += ingress_count as u64;
                 for member in ingress_members {
-                    cancelled(cancellation)?;
+                    check()?;
                     push_bounded(
                         &mut unmatched.ingress,
                         &mut omitted.unmatched_ingress,
-                        max_details,
-                        &mut detail_budget,
+                        &mut sink.budget,
                         Evidence::from(&ingress[*member]),
                     );
                 }
@@ -165,24 +151,13 @@ pub fn verify_with_limits(
             (0, egress_count) => {
                 summary.egress_only += egress_count as u64;
                 for member in egress_members {
-                    cancelled(cancellation)?;
+                    check()?;
                     let observation = &egress[*member];
-                    record_egress_expectations(
-                        rules,
-                        observation,
-                        &mut summary,
-                        &mut ViolationSink {
-                            violations: &mut violations,
-                            omitted: &mut omitted.violations,
-                            max_details,
-                            budget: &mut detail_budget,
-                        },
-                    );
+                    record_egress_expectations(rules, observation, &mut summary, &mut sink);
                     push_bounded(
                         &mut unmatched.egress,
                         &mut omitted.unmatched_egress,
-                        max_details,
-                        &mut detail_budget,
+                        &mut sink.budget,
                         Evidence::from(observation),
                     );
                 }
@@ -191,32 +166,21 @@ pub fn verify_with_limits(
                 summary.ambiguous_groups += 1;
                 summary.ambiguous_observations += (ingress_count + egress_count) as u64;
                 for member in egress_members {
-                    cancelled(cancellation)?;
-                    record_egress_expectations(
-                        rules,
-                        &egress[*member],
-                        &mut summary,
-                        &mut ViolationSink {
-                            violations: &mut violations,
-                            omitted: &mut omitted.violations,
-                            max_details,
-                            budget: &mut detail_budget,
-                        },
-                    );
+                    check()?;
+                    record_egress_expectations(rules, &egress[*member], &mut summary, &mut sink);
                 }
-                if ambiguous.len() < max_details
-                    && detail_budget.reserve(1024usize.saturating_add(key.len()))
+                if sink.budget.has_slot(ambiguous.len())
+                    && sink.budget.reserve(1024usize.saturating_add(key.len()))
                 {
                     let mut members =
                         |members: &[usize], pool: &[Observation]| -> Result<Vec<Evidence>, Error> {
                             let mut kept = Vec::new();
                             for member in members {
-                                cancelled(cancellation)?;
+                                check()?;
                                 push_bounded(
                                     &mut kept,
                                     &mut omitted.group_members,
-                                    max_details,
-                                    &mut detail_budget,
+                                    &mut sink.budget,
                                     Evidence::from(&pool[*member]),
                                 );
                             }
@@ -231,12 +195,12 @@ pub fn verify_with_limits(
                         ingress_indistinguishable: indistinguishable(
                             ingress_members,
                             &ingress,
-                            || cancelled(cancellation),
+                            check,
                         )?,
                         egress_indistinguishable: indistinguishable(
                             egress_members,
                             &egress,
-                            || cancelled(cancellation),
+                            check,
                         )?,
                     });
                 } else {
@@ -250,19 +214,9 @@ pub fn verify_with_limits(
     // Expectation violations on unkeyed egress observations are still
     // attributable evidence: the observation itself failed the declared rule.
     for observation in &egress {
-        cancelled(cancellation)?;
+        check()?;
         if !observation.is_keyed() {
-            record_egress_expectations(
-                rules,
-                observation,
-                &mut summary,
-                &mut ViolationSink {
-                    violations: &mut violations,
-                    omitted: &mut omitted.violations,
-                    max_details,
-                    budget: &mut detail_budget,
-                },
-            );
+            record_egress_expectations(rules, observation, &mut summary, &mut sink);
         }
     }
 
@@ -274,12 +228,11 @@ pub fn verify_with_limits(
         (&egress, &mut unkeyed.egress, &mut omitted.unkeyed_egress),
     ] {
         for observation in observations.iter().filter(|o| !o.is_keyed()) {
-            cancelled(cancellation)?;
+            check()?;
             push_bounded(
                 list,
                 omitted_count,
-                max_details,
-                &mut detail_budget,
+                &mut sink.budget,
                 UnkeyedObservation {
                     evidence: Evidence::from(observation),
                     key: observation.key_cells.clone(),
@@ -288,7 +241,8 @@ pub fn verify_with_limits(
         }
     }
 
-    cancelled(cancellation)?;
+    check()?;
+    omitted.violations = sink.omitted;
     Ok(Report {
         verdict: verdict(&sides, &summary),
         rules: RequestedRules::from_rules(rules),
@@ -296,7 +250,7 @@ pub fn verify_with_limits(
         sides,
         summary,
         matches,
-        violations,
+        violations: sink.items,
         unmatched,
         unkeyed,
         ambiguous,
@@ -383,14 +337,13 @@ fn indistinguishable(
     Ok(true)
 }
 
-struct ViolationSink<'a> {
-    violations: &'a mut Vec<Violation>,
-    omitted: &'a mut u64,
-    max_details: usize,
-    budget: &'a mut DetailBudget,
+struct ViolationSink {
+    items: Vec<Violation>,
+    omitted: u64,
+    budget: DetailBudget,
 }
 
-impl ViolationSink<'_> {
+impl ViolationSink {
     fn record(
         &mut self,
         outcome: Outcome,
@@ -401,16 +354,15 @@ impl ViolationSink<'_> {
             Outcome::Violated => {
                 summary.checks_evaluated += 1;
                 summary.checks_violated += 1;
-                if self.violations.len() < self.max_details {
+                if self.budget.has_slot(self.items.len()) {
                     push_bounded(
-                        self.violations,
-                        self.omitted,
-                        self.max_details,
-                        self.budget,
+                        &mut self.items,
+                        &mut self.omitted,
+                        &mut self.budget,
                         violation(),
                     );
                 } else {
-                    *self.omitted += 1;
+                    self.omitted += 1;
                 }
             }
             Outcome::Satisfied => {
@@ -429,7 +381,7 @@ fn evaluate_pair(
     ingress_order: u64,
     egress_order: u64,
     summary: &mut Summary,
-    sink: &mut ViolationSink<'_>,
+    sink: &mut ViolationSink,
 ) -> Match {
     let mut checks = Vec::with_capacity(rules.preserve.len() + rules.expectations.len());
     for (index, (kind, field)) in rules.preservation_specs().enumerate() {
@@ -508,7 +460,7 @@ fn record_egress_expectations(
     rules: &Rules,
     egress: &Observation,
     summary: &mut Summary,
-    sink: &mut ViolationSink<'_>,
+    sink: &mut ViolationSink,
 ) {
     for (expectation, stored) in rules.expectations.iter().zip(&egress.expectations) {
         let kind = expectation.kind();
@@ -574,11 +526,10 @@ fn evaluate_expectation(
 fn push_bounded<T: DetailCharge>(
     list: &mut Vec<T>,
     omitted: &mut u64,
-    max: usize,
     budget: &mut DetailBudget,
     item: T,
 ) {
-    if list.len() < max && budget.reserve(item.detail_charge()) {
+    if budget.has_slot(list.len()) && budget.reserve(item.detail_charge()) {
         list.push(item);
     } else {
         *omitted += 1;

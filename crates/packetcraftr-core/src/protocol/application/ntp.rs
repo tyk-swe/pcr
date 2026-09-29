@@ -248,9 +248,7 @@ impl LayerCodec for NtpCodec {
             .first_chunk::<NTP_HEADER_LEN>()
             .is_some_and(|header| is_supported(header[0] >> 3 & 0x07, header[0] & 0x07));
         if !supported {
-            let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-            raw.fields = Raw::layout(input.len());
-            return Ok(raw);
+            return Ok(Raw::decoded(input));
         }
         let header: &[u8; NTP_HEADER_LEN] = input
             .first_chunk::<NTP_HEADER_LEN>()
@@ -307,7 +305,6 @@ mod tests {
         LayerDecodeContext {
             parent: None,
             registry,
-            allow_trailing_padding: false,
             network: None,
             discriminator: None,
         }

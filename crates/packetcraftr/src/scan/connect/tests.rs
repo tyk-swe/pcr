@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Classified as _;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::{Classification, Error, Limits, Request};
-use super::{Aggregate, Collector};
+use super::{Aggregate, Collector, Outcome};
 use crate::probe::Transport;
 use crate::test_support::FakeProviders;
 use crate::{Client, ProviderSet};
@@ -44,9 +45,17 @@ fn collect<T: Provider<Stream: 'static> + Send + Sync + 'static>(
     collector.finish(report)
 }
 
+#[derive(Clone, Copy)]
+enum Fault {
+    PeerQuery(io::ErrorKind),
+    LocalQuery(io::ErrorKind),
+    OtherPeer,
+}
+
 struct Socket {
     peer: SocketAddr,
     closed: Arc<AtomicUsize>,
+    fault: Option<Fault>,
 }
 impl Drop for Socket {
     fn drop(&mut self) {
@@ -68,10 +77,17 @@ impl Write for Socket {
 }
 impl tcp::Stream for Socket {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
-        Ok(self.peer)
+        match self.fault {
+            Some(Fault::PeerQuery(kind)) => Err(kind.into()),
+            Some(Fault::OtherPeer) => Ok("192.0.2.99:1".parse().unwrap()),
+            _ => Ok(self.peer),
+        }
     }
     fn local_addr(&self) -> io::Result<SocketAddr> {
-        Ok("127.0.0.1:40000".parse().unwrap())
+        match self.fault {
+            Some(Fault::LocalQuery(kind)) => Err(kind.into()),
+            _ => Ok("127.0.0.1:40000".parse().unwrap()),
+        }
     }
     fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
         Ok(())
@@ -97,6 +113,7 @@ impl Provider for Concurrent {
         Ok(Socket {
             peer: endpoint,
             closed: Arc::clone(&self.closed),
+            fault: None,
         })
     }
 }
@@ -153,6 +170,7 @@ impl Provider for Verdicts {
             0 => Ok(Socket {
                 peer: endpoint,
                 closed: Arc::clone(&self.closed),
+                fault: None,
             }),
             1 => Err(io::Error::new(io::ErrorKind::ConnectionRefused, "scripted refusal").into()),
             _ => Err(io::Error::new(io::ErrorKind::TimedOut, "scripted silence").into()),
@@ -211,4 +229,109 @@ fn connect_scan_reports_rtt_statistics_across_verdicts() {
         ]
     );
     assert_eq!(closed.load(Ordering::SeqCst), 2);
+}
+
+struct Faulty {
+    port: u16,
+    fault: Fault,
+    closed: Arc<AtomicUsize>,
+}
+impl Provider for Faulty {
+    type Stream = Socket;
+    fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> Result<Socket, tcp::Error> {
+        Ok(Socket {
+            peer: endpoint,
+            closed: Arc::clone(&self.closed),
+            fault: (endpoint.port() == self.port).then_some(self.fault),
+        })
+    }
+}
+
+fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
+    let request = Request {
+        targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
+        transport: Transport::Tcp,
+        udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
+        address_family: crate::target::Family::Any,
+        ports: vec![80, 81, 82],
+        attempts: 1,
+        timeout: Duration::from_secs(5),
+        probes_per_second: None,
+        max_in_flight: 1,
+        limits: Limits::default(),
+        route: Default::default(),
+        collection: Default::default(),
+    };
+    let closed = Arc::new(AtomicUsize::new(0));
+    let client = client(Faulty {
+        port: 81,
+        fault,
+        closed: Arc::clone(&closed),
+    });
+    let result = collect(&client, request);
+    (result, closed.load(Ordering::SeqCst))
+}
+
+fn assert_open_without_local_address(fault: Fault) {
+    let (result, closed) = scan_with_fault(fault);
+    let report = result.expect("a reset after the handshake must not abort the scan");
+    assert_eq!(closed, 3);
+    assert_eq!(report.report.stats.connections_succeeded, 3);
+    let probes: Vec<_> = report
+        .endpoints
+        .iter()
+        .map(|endpoint| {
+            assert_eq!(endpoint.classification, Classification::Open);
+            let [probe] = endpoint.probes.as_slice() else {
+                panic!("one probe per endpoint");
+            };
+            (
+                probe.sequence,
+                probe.connect_succeeded,
+                probe.outcome,
+                probe.local.is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        probes,
+        [
+            (0, Some(true), Outcome::Connected, true),
+            (1, Some(true), Outcome::Connected, false),
+            (2, Some(true), Outcome::Connected, true),
+        ]
+    );
+}
+
+#[test]
+fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_peer_query() {
+    assert_open_without_local_address(Fault::PeerQuery(io::ErrorKind::NotConnected));
+}
+
+#[test]
+fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_local_query() {
+    assert_open_without_local_address(Fault::LocalQuery(io::ErrorKind::NotConnected));
+}
+
+#[test]
+fn connect_scan_fails_on_endpoint_query_errors_other_than_a_reset_connection() {
+    for fault in [
+        Fault::PeerQuery(io::ErrorKind::PermissionDenied),
+        Fault::LocalQuery(io::ErrorKind::PermissionDenied),
+    ] {
+        let (result, _) = scan_with_fault(fault);
+        let error = result.unwrap_err();
+        assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+        assert_eq!(error.classification().code, "io.tcp_connect_evidence");
+    }
+}
+
+#[test]
+fn connect_scan_fails_when_the_provider_reports_another_peer_endpoint() {
+    let (result, _) = scan_with_fault(Fault::OtherPeer);
+    assert!(matches!(
+        result.unwrap_err(),
+        Error::InvalidEvidence { sequence: 1, .. }
+    ));
 }

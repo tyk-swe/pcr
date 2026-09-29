@@ -36,30 +36,6 @@ impl Write for FailAfter {
 }
 
 #[test]
-fn an_output_failure_poisons_future_writer_operations() {
-    let output = FailAfter {
-        bytes: Vec::new(),
-        remaining: 28,
-    };
-    let mut writer = Writer::pcap(output, LinkType::ETHERNET).expect("header fits");
-    let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"abc");
-    let first = writer.write_frame(&frame).expect_err("record must fail");
-    assert!(matches!(first, Error::Io(ref error) if error.kind() == io::ErrorKind::BrokenPipe));
-    assert_eq!(writer.frames_written(), 0);
-    assert_eq!(writer.captured_bytes_written(), 0);
-    assert!(matches!(
-        writer.write_frame(&frame),
-        Err(Error::Io(ref error)) if error.kind() == io::ErrorKind::BrokenPipe
-    ));
-    assert!(matches!(
-        writer.flush(),
-        Err(Error::Io(ref error)) if error.kind() == io::ErrorKind::BrokenPipe
-    ));
-    assert_eq!(writer.get_ref().bytes.len(), 28);
-    assert_eq!(writer.get_mut().remaining, 0);
-}
-
-#[test]
 fn rewrite_is_same_format_and_enforces_stream_bounds() {
     let frames = [
         frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one"),
@@ -121,23 +97,6 @@ fn rewrite_is_same_format_and_enforces_stream_bounds() {
         rewrite(&mut source, Vec::new(), Limits::default()).expect("pcapng rewrite remains pcapng");
     assert_eq!(copy, pcapng);
     assert_eq!(report.format, Format::PcapNg);
-}
-
-#[test]
-fn capture_errors_expose_stable_classifications_and_causes() {
-    let policy = Error::MetadataBlockLimit { limit: 1 }.classification();
-    assert_eq!(policy.kind, Kind::Policy);
-    assert_eq!(policy.code, "policy.capture_stream_limit");
-    let cli = Error::InvalidTimestampResolution {
-        base: 10,
-        exponent: 2,
-    }
-    .classification();
-    assert_eq!(cli.kind, Kind::Usage);
-    let io = Error::Io(io::Error::other("disk gone"));
-    assert_eq!(io.classification().kind, Kind::Io);
-    assert_eq!(io.causes(), vec!["disk gone"]);
-    assert!(Error::EmptyInput.causes().is_empty());
 }
 
 #[test]

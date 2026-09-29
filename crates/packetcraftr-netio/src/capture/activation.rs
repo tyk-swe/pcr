@@ -3,13 +3,16 @@
 
 use std::sync::{
     Arc,
-    mpsc::{self, RecvTimeoutError},
+    mpsc::{self, Receiver, RecvTimeoutError},
 };
 
-use packetcraftr_core::{budget::Deadline, error::Source};
+use packetcraftr_core::{
+    budget::{Deadline, Interrupted},
+    error::Source,
+};
 
 use super::{
-    Limits, Session,
+    ARMING, Limits, Session, admit,
     live::{NativeCaptureParts, NativeCaptureSession, Started},
 };
 use crate::{
@@ -20,8 +23,6 @@ use crate::{
         reaper::{ReaperClient, ReaperStartError, shared_reaper, wait_until_finished},
     },
 };
-
-const OPERATION: &str = "arming capture";
 
 pub(super) fn open(
     limits: Limits,
@@ -46,7 +47,7 @@ fn open_with(
 ) -> Result<Box<dyn Session>, Error> {
     // Native activation spends wall time even when the caller's clock is frozen.
     let deadline = crate::deadline::detach(caller)
-        .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
+        .map_err(|interrupted| Error::interrupted(interrupted, ARMING))?;
     // Both fallible cleanup-service steps happen before any native call.
     let reaper = reaper().map_err(|error| Error::Capture {
         message: "native capture cleanup is unavailable".to_owned(),
@@ -65,12 +66,10 @@ fn open_with(
     let task = permit
         .spawn(move || {
             let activated = (|| {
-                crate::deadline::remaining(&worker_deadline)
-                    .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
+                admit(&worker_deadline, ARMING)?;
                 let parts = activate();
                 // A late native error must not mask interruption.
-                crate::deadline::remaining(&worker_deadline)
-                    .map_err(|interrupted| Error::interrupted(interrupted, OPERATION))?;
+                admit(&worker_deadline, ARMING)?;
                 parts
             })();
             match activated {
@@ -90,18 +89,7 @@ fn open_with(
             source: Some(Source::new(error)),
         })?;
 
-    // The channel signals the handoff, not cancellation, so the wait is sliced.
-    let outcome = loop {
-        match crate::deadline::remaining(&deadline) {
-            Err(interrupted) => break Err(interrupted),
-            Ok(remaining) => match claim.recv_timeout(remaining.min(POLL_INTERVAL)) {
-                Ok(outcome) => break Ok(Some(outcome)),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break Ok(None),
-            },
-        }
-    };
-    match outcome {
+    match await_handoff(&claim, &deadline) {
         Err(interrupted) => {
             drop(claim);
             permit.retention_marker().mark_retained();
@@ -109,30 +97,41 @@ fn open_with(
                 let _permit = permit;
                 wait_until_finished(task, POLL_INTERVAL, || {});
             }));
-            Err(Error::interrupted(interrupted, OPERATION))
+            Err(Error::interrupted(interrupted, ARMING))
         }
-        Ok(Some(Ok(started))) => {
+        Ok(Ok(started)) => {
             let retention = permit.retention_marker();
             let session = NativeCaptureSession::attach(started, task, permit, reaper.clone());
             if let Err(interrupted) = crate::deadline::remaining(&deadline) {
                 retention.mark_retained();
                 reaper.transfer(Box::new(move || drop(session)));
-                return Err(Error::interrupted(interrupted, OPERATION));
+                return Err(Error::interrupted(interrupted, ARMING));
             }
             Ok(Box::new(session))
         }
         // Interruption still wins over a failure that arrived at the same moment.
-        Ok(failed) => {
-            if let Err(interrupted) = crate::deadline::remaining(&deadline) {
-                return Err(Error::interrupted(interrupted, OPERATION));
-            }
-            match failed {
-                Some(Err(error)) => Err(error),
-                None => Err(Error::Capture {
+        Ok(Err(error)) => {
+            admit(&deadline, ARMING)?;
+            Err(error)
+        }
+    }
+}
+
+fn await_handoff(
+    claim: &Receiver<Result<Started, Error>>,
+    deadline: &Deadline,
+) -> Result<Result<Started, Error>, Interrupted> {
+    // The channel signals the handoff, not cancellation, so the wait is sliced.
+    loop {
+        let remaining = crate::deadline::remaining(deadline)?;
+        match claim.recv_timeout(remaining.min(POLL_INTERVAL)) {
+            Ok(outcome) => return Ok(outcome),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                return Ok(Err(Error::Capture {
                     message: "native capture activation worker panicked".to_owned(),
                     source: None,
-                }),
-                Some(Ok(_)) => unreachable!("the session handoff is matched above"),
+                }));
             }
         }
     }
@@ -267,7 +266,7 @@ mod tests {
 
     #[test]
     fn interrupted_activation_retains_admission_until_the_late_handle_closes() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, cleanup) = client_with_receiver(1);
         let worker_reaper = reaper.clone();
         let worker_pool = Arc::clone(&pool);
@@ -335,7 +334,7 @@ mod tests {
                 base
             }
         };
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, _cleanup) = client_with_receiver(1);
         let result = open_with(
             Limits::default(),
@@ -360,7 +359,7 @@ mod tests {
 
     #[test]
     fn activation_cannot_start_without_admission() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, _cleanup) = client_with_receiver(1);
         let _occupied = pool.admit(Class::Native).unwrap();
         let result = open_with(
@@ -376,7 +375,7 @@ mod tests {
 
     #[test]
     fn reaper_start_failure_does_not_start_an_unmanaged_activation() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let reaper_error = match start_with(1, |_| {
             Err(std::io::Error::other("injected capture reaper failure"))
         }) {
@@ -397,7 +396,7 @@ mod tests {
 
     #[test]
     fn an_armed_source_holds_one_pool_slot_from_activation_through_its_reader() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (reaper, _cleanup) = client_with_receiver(1);
         let (reading, read_started) = mpsc::channel();
         let (release, released) = mpsc::channel();

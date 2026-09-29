@@ -44,7 +44,7 @@ pub(super) fn read(
             .map_err(|source| CliError::caused(Kind::Usage, &source));
     }
     if let Some(path) = path {
-        return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Frame)
+        return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Payload)
             .map(Bytes::from);
     }
     Ok(Bytes::new())

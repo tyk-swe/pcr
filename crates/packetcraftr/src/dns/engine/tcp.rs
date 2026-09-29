@@ -16,14 +16,14 @@ use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 use crate::target::{Family, Target, resolve_selected};
 
-use super::super::error::{Error, EvidenceFault};
+use super::super::error::{Attempts, Error, EvidenceFault};
 use super::super::evidence::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
 use super::super::executor::{Exchange, TcpEvidence, TcpQuerier, TcpQuery};
 use super::super::plan::Probe;
 use super::super::{Event, Outcome};
-use super::{Attempts, Retries};
+use super::Retries;
 
 impl<A, E, C, F> Retries<'_, A, E, C, F>
 where
@@ -53,15 +53,7 @@ where
         if requested.is_zero() {
             return Ok(expired_before_connection(probe));
         }
-        let framed_query_bytes =
-            probe
-                .query
-                .len()
-                .checked_add(2)
-                .ok_or(Error::InvalidEvidence {
-                    attempt: probe.attempt,
-                    fault: EvidenceFault::TcpQueryLengthOverflow,
-                })?;
+        let framed_query_bytes = probe.framed_query_bytes();
         let max_message_bytes = self.request.limits.message.max_message_bytes;
         let (attempt, grant) = self.execution.step(
             probe.attempt,
@@ -69,7 +61,6 @@ where
             &mut *self.executor,
             |executor, grant| {
                 let query = TcpQuery {
-                    attempt: probe.attempt,
                     endpoint: SocketAddr::new(probe.server_address, probe.server_port),
                     query: probe.query.clone(),
                     timeout: grant.timeout,
@@ -109,7 +100,7 @@ where
             }
             Err(error) => error,
         };
-        if let TcpError::Cancelled(cancelled) = error {
+        if let TcpError::Cancelled { cancelled, .. } = error {
             return Err(Error::Cancelled(cancelled));
         }
         match error.category() {

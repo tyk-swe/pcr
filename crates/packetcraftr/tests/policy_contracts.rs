@@ -9,9 +9,13 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use std::time::Duration;
 
 use packetcraftr::Client;
 use packetcraftr::policy;
+use packetcraftr::probe::Transport;
+use packetcraftr::scan;
+use packetcraftr::target::Family;
 use packetcraftr::target::Hostname;
 use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
@@ -29,9 +33,7 @@ use packetcraftr_netio::{
     transmit,
 };
 
-fn live() -> Deadline {
-    Deadline::new(std::time::Duration::from_secs(5))
-}
+use common::live;
 
 struct CountingResolver {
     calls: AtomicUsize,
@@ -138,24 +140,57 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         addresses: vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))],
     };
     let route_calls = Arc::new(AtomicUsize::new(0));
-    let policy = policy::Policy {
-        allow_hostname_resolution: true,
-        ..policy::Policy::default()
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        policy::Policy {
+            allow_hostname_resolution: true,
+            ..policy::Policy::default()
+        },
+        common::providers(
+            CountingRoutes {
+                calls: Arc::clone(&route_calls),
+            },
+            NeverTransmit,
+        )
+        .with_resolver(resolver),
+    );
+    let request = scan::Request {
+        max_in_flight: 1,
+        targets: Target::from_str("example.test")
+            .expect("hostname must parse")
+            .into(),
+        transport: Transport::Tcp,
+        udp_payload: Default::default(),
+        udp_profiles: Default::default(),
+        address_family: Family::Any,
+        ports: vec![80],
+        attempts: 1,
+        timeout: Duration::from_millis(20),
+        probes_per_second: None,
+        limits: Default::default(),
+        route: Default::default(),
+        collection: Default::default(),
     };
+
+    let error = client
+        .scan(request, scan::Collector::default())
+        .expect_err("public resolved address must be denied");
+
+    assert_eq!(code(&error), "policy.public_destination");
+    assert!(error.causes()[0].contains("denies public destination 8.8.8.8"));
+    assert_eq!(client.providers().resolver.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_public_planned_destination_is_denied_before_route_lookup() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
     let client = client(
         CountingRoutes {
             calls: Arc::clone(&route_calls),
         },
-        policy.clone(),
+        policy::Policy::default(),
     );
-    let target = Target::from_str("example.test").expect("hostname must parse");
-
-    let error = policy
-        .resolve_target(&target, &resolver)
-        .expect_err("public resolved address must be denied");
-    assert!(error.to_string().contains("denies public destination"));
-    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
-
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![1_u8]));
     let error = client
@@ -452,6 +487,30 @@ fn destination_constraints_enforce_family_and_subnet_boundaries() {
             .authorize_destination("2001:db8::1".parse().unwrap())
             .is_err()
     );
+}
+
+#[test]
+fn an_ipv4_allowlist_entry_authorizes_the_mapped_spelling_of_its_host() {
+    let mapped: IpAddr = "::ffff:10.0.0.5".parse().unwrap();
+    let other_mapped: IpAddr = "::ffff:10.0.0.6".parse().unwrap();
+    let compatible: IpAddr = "::10.0.0.5".parse().unwrap();
+
+    for entry in ["10.0.0.5", "10.0.0.5/32", "10.0.0.0/24"] {
+        let policy = constrained_policy(&[entry]);
+        policy
+            .authorize_destination(mapped)
+            .unwrap_or_else(|error| panic!("{entry} must allow {mapped}: {error}"));
+        assert!(
+            policy.authorize_destination(compatible).is_err(),
+            "{entry} must not allow the IPv4-compatible spelling"
+        );
+    }
+    for entry in ["10.0.0.5", "10.0.0.5/32"] {
+        let error = constrained_policy(&[entry])
+            .authorize_destination(other_mapped)
+            .expect_err("a different mapped host stays outside the entry");
+        assert_eq!(code(&error), "policy.destination_not_allowed");
+    }
 }
 
 #[test]

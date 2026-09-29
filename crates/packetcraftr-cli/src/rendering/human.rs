@@ -8,6 +8,7 @@ use std::io::{self, Write};
 
 use packetcraftr_core::budget::Interrupted;
 
+use super::stdout::stdout_error;
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
     terminal_safe,
@@ -119,9 +120,7 @@ impl HumanWriteError {
     fn into_cli_error(self) -> CliError {
         match self {
             Self::Interrupted(interrupted) => crate::invocation::interruption_error(interrupted),
-            Self::Write(source) => {
-                CliError::new(Kind::Io, format!("write stdout failed: {source}"))
-            }
+            Self::Write(source) => stdout_error("write stdout failed", source),
         }
     }
 }
@@ -136,18 +135,6 @@ pub(crate) fn write_stdout_line_with_interrupt(
 pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = style_summary_line(&terminal_safe(&arguments.to_string()));
     write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
-}
-
-/// Every other stdout line goes through terminal sanitization; this one
-/// holds only hex digits by construction, so it is written unstyled and
-/// byte-exact.
-pub(crate) fn write_hex_line(bytes: &[u8]) -> Result<(), CliError> {
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_fmt(format_args!("{}", crate::output::hex::CompactHex(bytes)))
-        .and_then(|()| stdout.write_all(b"\n"))
-        .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
 }
 
 pub(crate) fn emit_stdout_document(message: &str) -> Result<(), CliError> {

@@ -172,7 +172,6 @@ impl TryFrom<packet_fuzz::Report> for Published<Report> {
             seed,
             first_case,
             cases,
-            diagnostics,
             stats,
         } = result;
         let cases = cases
@@ -181,7 +180,7 @@ impl TryFrom<packet_fuzz::Report> for Published<Report> {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self::new(
             report(seed, first_case, Mode::Offline, totals, cases),
-            diagnostics,
+            Vec::new(),
         )
         .with_stats(&stats))
     }
@@ -364,7 +363,7 @@ impl TryFrom<packet_fuzz::Summary> for Published<Event> {
         let totals = Totals::try_from(&summary.stats)?;
         Ok(Self::new(
             complete(summary.seed, summary.first_case, Mode::Offline, totals),
-            summary.diagnostics,
+            Vec::new(),
         )
         .with_stats(&summary.stats))
     }

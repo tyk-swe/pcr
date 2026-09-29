@@ -13,8 +13,7 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    expected_discriminator, invalid, make_layer, protocol, resolve_u16, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    invalid, make_layer, protocol, resolve_u16_discriminator, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -112,25 +111,10 @@ impl LayerCodec for LinuxSllCodec {
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll>(SLL_NAME, layer)?;
         let mut diagnostics = Vec::new();
-        let expectation = expected_discriminator(SLL_NAME, context, 0_u16, &layer.protocol);
-        validate_auto_raw_discriminator(
+        let (protocol_value, materialized_protocol) = resolve_u16_discriminator(
             SLL_NAME,
             "protocol",
             &layer.protocol,
-            context,
-            &mut diagnostics,
-        )?;
-        let (protocol_value, materialized_protocol) = resolve_u16(
-            SLL_NAME,
-            "protocol",
-            &layer.protocol,
-            expectation,
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(
-            SLL_NAME,
-            u64::from(protocol_value),
             context,
             &mut diagnostics,
         )?;
@@ -198,25 +182,10 @@ impl LayerCodec for LinuxSll2Codec {
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll2>(SLL2_NAME, layer)?;
         let mut diagnostics = Vec::new();
-        let expectation = expected_discriminator(SLL2_NAME, context, 0_u16, &layer.protocol);
-        validate_auto_raw_discriminator(
+        let (protocol_value, materialized_protocol) = resolve_u16_discriminator(
             SLL2_NAME,
             "protocol",
             &layer.protocol,
-            context,
-            &mut diagnostics,
-        )?;
-        let (protocol_value, materialized_protocol) = resolve_u16(
-            SLL2_NAME,
-            "protocol",
-            &layer.protocol,
-            expectation,
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(
-            SLL2_NAME,
-            u64::from(protocol_value),
             context,
             &mut diagnostics,
         )?;

@@ -15,7 +15,7 @@ use crate::{
 
 use crate::protocol::common::{
     ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_fixed,
-    truncated, typed_layer,
+    strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -194,12 +194,14 @@ fn validate_port(
     if port != 0 {
         return Ok(());
     }
-    let message = format!("{} must not be zero", field.replace('_', " "));
-    if context.mode == crate::codec::Mode::Strict {
-        return Err(invalid(NAME, message));
-    }
-    diagnostics.push(Diagnostic::warning("build.sctp_zero_port", message).at_field(field));
-    Ok(())
+    strict_or_diagnostic(
+        NAME,
+        "build.sctp_zero_port",
+        field,
+        format!("{} must not be zero", field.replace('_', " ")),
+        context,
+        diagnostics,
+    )
 }
 
 fn warn_zero_port(diagnostics: &mut Vec<Diagnostic>, field: &'static str, which: &'static str) {
@@ -267,26 +269,27 @@ fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), Str
         }
 
         chunk_count = chunk_count.saturating_add(1);
-        if matches!(chunk_type, 1 | 2 | 14) {
-            unbundleable = Some(chunk_type);
-        }
+        unbundleable = unbundleable_chunk(chunk_type).or(unbundleable);
         cursor = cursor.saturating_add(padded_len);
     }
 
     if chunk_count > 1
-        && let Some(chunk_type) = unbundleable
+        && let Some(name) = unbundleable
     {
-        let name = match chunk_type {
-            1 => "INIT",
-            2 => "INIT ACK",
-            14 => "SHUTDOWN COMPLETE",
-            _ => unreachable!("unbundleable chunk type was checked above"),
-        };
         return Err(format!(
             "{name} chunk must not be bundled with other chunks"
         ));
     }
     Ok(())
+}
+
+fn unbundleable_chunk(chunk_type: u8) -> Option<&'static str> {
+    match chunk_type {
+        1 => Some("INIT"),
+        2 => Some("INIT ACK"),
+        14 => Some("SHUTDOWN COMPLETE"),
+        _ => None,
+    }
 }
 
 const fn crc32c_table() -> [u32; 256] {

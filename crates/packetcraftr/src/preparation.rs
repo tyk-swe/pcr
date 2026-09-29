@@ -294,7 +294,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     fn authorize_built(&self, built: &BuiltPacket, plan: &route::Plan) -> Result<(), Error> {
         let policy = &self.client.policy;
         policy.authorize_built_packet(built, self.options.allow_permissive_live)?;
-        crate::policy::authorize_wire(policy, plan.wire_link_type()?, &built.bytes, Some(plan))?;
+        crate::policy::authorize_wire(policy, plan.wire_link_type()?, &built.bytes, plan)?;
         Ok(())
     }
 

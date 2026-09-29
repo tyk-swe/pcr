@@ -138,7 +138,7 @@ fn truncated_and_out_of_scope_wire_decodes_as_terminal_raw() {
         let ntp_offset = 20 + 8;
         assert_eq!(
             raw.bytes.as_ref(),
-            &decoded.original[ntp_offset..],
+            &decoded.frame.bytes()[ntp_offset..],
             "unsupported or truncated NTP payload stays raw"
         );
         assert!(decoded.packet.get::<Ntp>().is_none());

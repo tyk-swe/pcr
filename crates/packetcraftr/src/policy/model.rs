@@ -26,6 +26,8 @@ pub struct Policy {
     pub max_resolved_addresses: usize,
 }
 
+pub const DEFAULT_MAX_PACKETS_PER_OPERATION: u64 = 10_000;
+pub const DEFAULT_MAX_BYTES_PER_OPERATION: u64 = 256 * 1024 * 1024;
 pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
 pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
 
@@ -38,9 +40,13 @@ pub enum DestinationConstraint {
 }
 
 impl DestinationConstraint {
+    /// An IPv4-mapped IPv6 address also matches an IPv4 entry through its
+    /// embedded address, exactly as [`Network::contains`] does.
+    ///
+    /// [`Network::contains`]: crate::target::Network::contains
     pub fn contains(&self, address: IpAddr) -> bool {
         match *self {
-            Self::Exact(expected) => expected == address,
+            Self::Exact(expected) => expected == address || expected == address.to_canonical(),
             Self::Network(network) => network.contains(address),
         }
     }
@@ -94,8 +100,8 @@ impl Default for Policy {
             allow_permissive_packets: false,
             allow_source_spoofing: false,
             allowed_destinations: Vec::new(),
-            max_packets_per_operation: 10_000,
-            max_bytes_per_operation: 256 * 1024 * 1024,
+            max_packets_per_operation: DEFAULT_MAX_PACKETS_PER_OPERATION,
+            max_bytes_per_operation: DEFAULT_MAX_BYTES_PER_OPERATION,
             max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
         }
     }
@@ -154,11 +160,6 @@ pub enum Error {
     TrafficUnitLimit { actual: u64, limit: u64 },
     #[error("operation wire/application byte count {actual} exceeds policy limit {limit}")]
     TrafficByteLimit { actual: u64, limit: u64 },
-    #[error("{authorizer} does not authorize {operation} operations")]
-    UnsupportedOperation {
-        authorizer: &'static str,
-        operation: &'static str,
-    },
 }
 
 const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
@@ -197,13 +198,6 @@ impl Classified for Error {
             | Self::UndecodableWire { .. } => {
                 return INVALID_PACKET_SEMANTICS;
             }
-            Self::UnsupportedOperation { .. } => {
-                return Classification::new(
-                    "internal.unsupported_operation",
-                    Kind::Internal,
-                    Some("route this operation through the authorizer built for its workflow"),
-                );
-            }
             Self::HostnameResolution { .. } => (
                 "policy.hostname_resolution",
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",
@@ -230,11 +224,11 @@ impl Classified for Error {
             ),
             Self::TrafficUnitLimit { .. } => (
                 "policy.traffic_unit_limit",
-                "reduce DNS attempts or deliberately raise the packet/socket traffic-unit budget",
+                "reduce the connections, messages, or DNS attempts, or deliberately raise the packet/socket traffic-unit budget",
             ),
             Self::TrafficByteLimit { .. } => (
                 "policy.traffic_byte_limit",
-                "reduce DNS attempts or query bytes, or deliberately raise the wire/application byte budget",
+                "reduce the application or query bytes, or deliberately raise the wire/application byte budget",
             ),
         };
         let kind = match self {
@@ -342,6 +336,50 @@ mod tests {
         let signed_prefix = "192.0.2.0/+24";
         assert!(signed_prefix.parse::<DestinationConstraint>().is_err());
         assert!(signed_prefix.parse::<crate::target::Network>().is_err());
+    }
+
+    #[test]
+    fn default_policy_carries_the_named_operation_ceilings() {
+        let policy = Policy::default();
+        assert_eq!(
+            (
+                policy.max_packets_per_operation,
+                policy.max_bytes_per_operation
+            ),
+            (
+                DEFAULT_MAX_PACKETS_PER_OPERATION,
+                DEFAULT_MAX_BYTES_PER_OPERATION
+            ),
+        );
+    }
+
+    #[test]
+    fn socket_traffic_limit_remediation_names_socket_work() {
+        use crate::policy::{Operation, SocketLimits, SocketOperation};
+
+        let policy = Policy {
+            max_packets_per_operation: 2,
+            max_bytes_per_operation: 8,
+            ..Policy::default()
+        };
+        let endpoints = [std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, 80))];
+        let refuse = |limits| {
+            let operation = SocketOperation::new(&endpoints, limits).expect("limits fit");
+            policy
+                .authorize(Operation::Socket(operation))
+                .expect_err("socket limits exceed the policy")
+                .classification()
+        };
+
+        let units = refuse(SocketLimits::new(3, 0, 0));
+        assert_eq!(units.code, "policy.traffic_unit_limit");
+        let remediation = units.remediation.expect("traffic-unit remediation");
+        assert!(remediation.contains("connections"), "{remediation}");
+
+        let bytes = refuse(SocketLimits::new(1, 0, 9));
+        assert_eq!(bytes.code, "policy.traffic_byte_limit");
+        let remediation = bytes.remediation.expect("traffic-byte remediation");
+        assert!(!remediation.contains("DNS"), "{remediation}");
     }
 
     #[test]

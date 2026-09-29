@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    FrameRecord,
+    Constraint, FrameRecord,
     provenance::SourceSet,
     reassembly::tcp::{Event as TcpEvent, ScopedFlowKey},
     scope::Definition,
@@ -93,15 +93,57 @@ impl Limits {
             ),
             ("max_source_spans", self.max_source_spans, 100_000),
         ] {
-            if value == 0 || value > maximum {
-                return Err(Error::Limit {
-                    field,
-                    limit: maximum,
-                });
-            }
+            super::error::check_ceiling(field, value as u64, maximum as u64)?;
         }
         Ok(())
     }
+
+    /// Conservative expansion charge for one decoded object, counted against
+    /// `max_retained_bytes`; name compression can expand past it.
+    pub(crate) const fn decoded_charge(bytes: usize) -> usize {
+        bytes.saturating_mul(32).saturating_add(4096)
+    }
+
+    /// Refuses a new stream once `tracked` streams already fill the limit.
+    pub(crate) fn check_streams(&self, tracked: usize) -> Result<(), Error> {
+        refuse_if(tracked >= self.max_streams, "max_streams", self.max_streams)
+    }
+
+    /// Refuses a new message once `seen` messages already fill the limit.
+    pub(crate) fn check_messages(&self, seen: usize) -> Result<(), Error> {
+        refuse_if(seen >= self.max_messages, "max_messages", self.max_messages)
+    }
+
+    pub(crate) fn check_buffer(&self, bytes: usize) -> Result<(), Error> {
+        refuse_if(
+            bytes > self.max_buffer_bytes,
+            "max_buffer_bytes",
+            self.max_buffer_bytes,
+        )
+    }
+
+    pub(crate) fn check_source_spans(&self, spans: usize) -> Result<(), Error> {
+        refuse_if(
+            spans > self.max_source_spans,
+            "max_source_spans",
+            self.max_source_spans,
+        )
+    }
+
+    pub(crate) fn check_retained(&self, total: usize) -> Result<(), Error> {
+        refuse_if(
+            total > self.max_retained_bytes,
+            "max_retained_bytes",
+            self.max_retained_bytes,
+        )
+    }
+}
+
+fn refuse_if(exceeded: bool, field: &'static str, limit: usize) -> Result<(), Error> {
+    if exceeded {
+        return Err(Error::Limit { field, limit });
+    }
+    Ok(())
 }
 
 pub(crate) const MAX_SERVICE_PORTS: usize = 256;
@@ -113,13 +155,24 @@ pub(crate) fn normalize_ports(
     let mut ports: Vec<u16> = ports.into_iter().collect();
     ports.sort_unstable();
     ports.dedup();
-    if ports.is_empty() || ports.len() > MAX_SERVICE_PORTS || ports.contains(&0) {
-        return Err(Error::Limit {
-            field,
-            limit: MAX_SERVICE_PORTS,
-        });
+    let (value, reason) = if ports.first().is_none_or(|port| *port == 0) {
+        (0, Constraint::NonEmptyNonZeroPorts)
+    } else if ports.len() > MAX_SERVICE_PORTS {
+        (
+            ports.len() as u64,
+            Constraint::AtMost {
+                maximum: MAX_SERVICE_PORTS as u64,
+            },
+        )
+    } else {
+        return Ok(ports);
+    };
+    Err(super::Error::InvalidLimit {
+        field,
+        value,
+        reason,
     }
-    Ok(ports)
+    .into())
 }
 
 #[derive(Clone, Debug)]
@@ -158,6 +211,13 @@ struct Span {
     number: u64,
     sources: SourceSet,
 }
+/// A payload span awaiting insertion; `after` is the index of the frame's
+/// reassembly event it must follow, or `None` to precede them all.
+struct Incoming {
+    flow: ScopedFlowKey,
+    span: Span,
+    after: Option<usize>,
+}
 
 pub(crate) struct TcpSources {
     ports: Vec<u16>,
@@ -186,99 +246,120 @@ impl TcpSources {
     }
     pub(crate) fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, Error> {
         let mut output = Vec::new();
-        let mut incoming = None;
-        let mut insert_after = None;
-        if let Some(view) = record.tcp
-            && let Some(conversation) = view.conversation
-        {
-            let flow = conversation.flow;
-            if self.ports.contains(&flow.flow.source_port)
-                || self.ports.contains(&flow.flow.destination_port)
-            {
-                if !self.generations.contains_key(&conversation.index)
-                    && self.generations.len() >= self.limits.max_streams
-                {
-                    return Err(Error::Limit {
-                        field: "max_streams",
-                        limit: self.limits.max_streams,
-                    });
-                }
-                self.generations.entry(conversation.index).or_insert(0);
-                self.streams.insert(flow.clone(), conversation.index);
-                let last_stream_eviction = record.tcp_events.iter().rposition(|event| {
-                    matches!(event, TcpEvent::Evicted { flow: expired, .. }
-                        if self.streams.get(expired) == Some(&conversation.index))
-                });
-                if let Some(scope) = record.scope_definition(flow.scope) {
-                    self.scopes
-                        .entry(scope.id.get())
-                        .or_insert_with(|| scope.clone());
-                }
-                let syn = view.header.flags & Tcp::SYN != 0;
-                let initial_syn = syn && view.header.flags & Tcp::ACK == 0;
-                // Reassembly can prove tuple reuse from sequence state even
-                // when this collector sees only the new connection's SYN-ACK.
-                let reassembly_reused = syn && last_stream_eviction.is_some();
-                let observed_reused = initial_syn
-                    && (self
-                        .syns
-                        .get(flow)
-                        .is_some_and(|sequence| *sequence != view.header.sequence)
-                        || (self.closed.contains(flow) && self.closed.contains(&flow.reverse())));
-                if reassembly_reused || observed_reused {
-                    self.reset_stream(conversation.index);
-                    if !reassembly_reused {
-                        output.push(Event::Evicted {
-                            flow: flow.clone(),
-                            stream: conversation.index,
-                        });
-                    }
-                }
-                if initial_syn {
-                    self.syns.insert(flow.clone(), view.header.sequence);
-                    self.closed.remove(flow);
-                }
-                if !view.payload.is_empty() {
-                    let sources = record
-                        .tcp_sources()
-                        .ok_or(Error::Sources {
-                            number: record.number,
-                        })?
-                        .clone();
-                    incoming = Some((
-                        flow.clone(),
-                        Span {
-                            sequence: view
-                                .header
-                                .sequence
-                                .wrapping_add(u32::from(view.header.flags & Tcp::SYN != 0)),
-                            length: u32::try_from(view.payload.len()).map_err(|_| {
-                                Error::Sources {
-                                    number: record.number,
-                                }
-                            })?,
-                            number: record.number,
-                            sources,
-                        },
-                    ));
-                    insert_after = last_stream_eviction;
-                }
-            }
+        let mut incoming = self.admit(record, &mut output)?;
+        if let Some(incoming) = incoming.take_if(|incoming| incoming.after.is_none()) {
+            self.insert(incoming.flow, incoming.span)?;
         }
-        if insert_after.is_none()
-            && let Some((flow, span)) = incoming.take()
-        {
-            self.insert(flow, span)?;
-        }
+        // A reset evicts both directions before it closes them, and that close
+        // already ends whatever the evictions would have.
+        let resets: Vec<&ScopedFlowKey> = record
+            .tcp_events
+            .iter()
+            .filter_map(|event| match event {
+                TcpEvent::Closed { flow, reset: true } if self.streams.contains_key(flow) => {
+                    Some(flow)
+                }
+                _ => None,
+            })
+            .collect();
         for (index, event) in record.tcp_events.iter().enumerate() {
-            self.event(event, record.number, &mut output)?;
-            if insert_after == Some(index)
-                && let Some((flow, span)) = incoming.take()
-            {
-                self.insert(flow, span)?;
+            match event {
+                TcpEvent::Evicted { flow, .. }
+                    if resets
+                        .iter()
+                        .any(|reset| *reset == flow || reset.reverse() == *flow) =>
+                {
+                    self.forget_spans(flow);
+                }
+                _ => self.event(event, record.number, &mut output)?,
+            }
+            if let Some(incoming) = incoming.take_if(|incoming| incoming.after == Some(index)) {
+                self.insert(incoming.flow, incoming.span)?;
             }
         }
         Ok(output)
+    }
+    fn admit(
+        &mut self,
+        record: &FrameRecord<'_>,
+        output: &mut Vec<Event>,
+    ) -> Result<Option<Incoming>, Error> {
+        let Some(view) = record.tcp else {
+            return Ok(None);
+        };
+        let Some(conversation) = view.conversation else {
+            return Ok(None);
+        };
+        let flow = conversation.flow;
+        if !self.ports.contains(&flow.flow.source_port)
+            && !self.ports.contains(&flow.flow.destination_port)
+        {
+            return Ok(None);
+        }
+        if !self.generations.contains_key(&conversation.index) {
+            self.limits.check_streams(self.generations.len())?;
+        }
+        self.generations.entry(conversation.index).or_insert(0);
+        self.streams.insert(flow.clone(), conversation.index);
+        let last_stream_eviction = record.tcp_events.iter().rposition(|event| {
+            matches!(event, TcpEvent::Evicted { flow: expired, .. }
+                if self.streams.get(expired) == Some(&conversation.index))
+        });
+        if let Some(scope) = record.scope_definition(flow.scope) {
+            self.scopes
+                .entry(scope.id.get())
+                .or_insert_with(|| scope.clone());
+        }
+        let syn = view.header.flags & Tcp::SYN != 0;
+        let initial_syn = syn && view.header.flags & Tcp::ACK == 0;
+        // Reassembly can prove tuple reuse from sequence state even
+        // when this collector sees only the new connection's SYN-ACK.
+        let reassembly_reused = syn && last_stream_eviction.is_some();
+        let observed_reused = initial_syn
+            && (self
+                .syns
+                .get(flow)
+                .is_some_and(|sequence| *sequence != view.header.sequence)
+                || (self.closed.contains(flow) && self.closed.contains(&flow.reverse())));
+        if reassembly_reused || observed_reused {
+            self.reset_stream(conversation.index);
+            if !reassembly_reused {
+                output.push(Event::Evicted {
+                    flow: flow.clone(),
+                    stream: conversation.index,
+                });
+            }
+        }
+        if initial_syn {
+            self.syns.insert(flow.clone(), view.header.sequence);
+            self.closed.remove(flow);
+        }
+        // The pipeline drops a reset's payload before reassembly, so no
+        // delivery would ever consume this span.
+        if view.payload.is_empty() || view.header.flags & Tcp::RST != 0 {
+            return Ok(None);
+        }
+        let sources = record
+            .tcp_sources()
+            .ok_or(Error::Sources {
+                number: record.number,
+            })?
+            .clone();
+        Ok(Some(Incoming {
+            flow: flow.clone(),
+            span: Span {
+                sequence: view
+                    .header
+                    .sequence
+                    .wrapping_add(u32::from(view.header.flags & Tcp::SYN != 0)),
+                length: u32::try_from(view.payload.len()).map_err(|_| Error::Sources {
+                    number: record.number,
+                })?,
+                number: record.number,
+                sources,
+            },
+            after: last_stream_eviction,
+        }))
     }
     pub(crate) fn trailing(
         &mut self,
@@ -300,10 +381,13 @@ impl TcpSources {
             .map(|(flow, _)| flow.clone())
             .collect();
         for flow in flows {
-            if let Some(spans) = self.spans.remove(&flow) {
-                self.span_count -= spans.len();
-            }
+            self.forget_spans(&flow);
             self.closed.remove(&flow);
+        }
+    }
+    fn forget_spans(&mut self, flow: &ScopedFlowKey) {
+        if let Some(spans) = self.spans.remove(flow) {
+            self.span_count -= spans.len();
         }
     }
     fn insert(&mut self, flow: ScopedFlowKey, span: Span) -> Result<(), Error> {
@@ -316,12 +400,8 @@ impl TcpSources {
                     .collect();
             }
         }
-        if self.span_count.saturating_add(pieces.len()) > self.limits.max_source_spans {
-            return Err(Error::Limit {
-                field: "max_source_spans",
-                limit: self.limits.max_source_spans,
-            });
-        }
+        self.limits
+            .check_source_spans(self.span_count.saturating_add(pieces.len()))?;
         self.span_count += pieces.len();
         self.spans.entry(flow).or_default().extend(pieces);
         Ok(())
@@ -411,9 +491,7 @@ impl TcpSources {
                 });
             }
             TcpEvent::Evicted { .. } => {
-                if let Some(spans) = self.spans.remove(flow) {
-                    self.span_count -= spans.len();
-                }
+                self.forget_spans(flow);
                 output.push(Event::Evicted {
                     flow: flow.clone(),
                     stream,
@@ -441,12 +519,8 @@ impl TcpSources {
                 remaining.push(span);
             }
         }
-        if self.span_count.saturating_add(remaining.len()) > self.limits.max_source_spans {
-            return Err(Error::Limit {
-                field: "max_source_spans",
-                limit: self.limits.max_source_spans,
-            });
-        }
+        self.limits
+            .check_source_spans(self.span_count.saturating_add(remaining.len()))?;
         self.span_count += remaining.len();
         if !remaining.is_empty() {
             self.spans.insert(flow.clone(), remaining);
@@ -481,4 +555,54 @@ fn subtract(span: Span, sequence: u32, length: u32) -> Vec<Span> {
         });
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIMITS: Limits = Limits {
+        max_messages: 2,
+        max_streams: 3,
+        max_buffer_bytes: 5,
+        max_retained_bytes: 7,
+        max_source_spans: 11,
+    };
+
+    fn assert_limit(result: Result<(), Error>, field: &str, limit: usize) {
+        match result {
+            Err(Error::Limit {
+                field: actual,
+                limit: actual_limit,
+            }) => assert_eq!((actual, actual_limit), (field, limit)),
+            other => panic!("expected a {field} limit refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn streams_and_messages_are_refused_once_the_limit_is_filled() {
+        assert!(LIMITS.check_streams(2).is_ok());
+        assert_limit(LIMITS.check_streams(3), "max_streams", 3);
+        assert!(LIMITS.check_messages(1).is_ok());
+        assert_limit(LIMITS.check_messages(2), "max_messages", 2);
+        assert_limit(LIMITS.check_messages(usize::MAX), "max_messages", 2);
+    }
+
+    #[test]
+    fn buffer_spans_and_retained_are_refused_only_above_the_limit() {
+        assert!(LIMITS.check_buffer(5).is_ok());
+        assert_limit(LIMITS.check_buffer(6), "max_buffer_bytes", 5);
+        assert!(LIMITS.check_source_spans(11).is_ok());
+        assert_limit(LIMITS.check_source_spans(12), "max_source_spans", 11);
+        assert!(LIMITS.check_retained(7).is_ok());
+        assert_limit(LIMITS.check_retained(8), "max_retained_bytes", 7);
+        assert_limit(LIMITS.check_retained(usize::MAX), "max_retained_bytes", 7);
+    }
+
+    #[test]
+    fn decoded_charge_adds_the_fixed_expansion_and_saturates() {
+        assert_eq!(Limits::decoded_charge(0), 4096);
+        assert_eq!(Limits::decoded_charge(10), 10 * 32 + 4096);
+        assert_eq!(Limits::decoded_charge(usize::MAX), usize::MAX);
+    }
 }

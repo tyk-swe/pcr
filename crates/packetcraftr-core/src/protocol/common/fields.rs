@@ -15,6 +15,7 @@ use crate::{
 use crate::protocol::BuiltinProtocol;
 
 use super::errors::{binding_protocol, invalid};
+use super::validation::{validate_auto_raw_discriminator, validate_raw_child_discriminator};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ValueExpectation<T> {
@@ -66,6 +67,26 @@ pub(crate) fn resolve_u16(
         diagnostics,
         u16::from_be_bytes,
     )
+}
+
+pub(crate) fn resolve_u16_discriminator(
+    name: &'static str,
+    field: &'static str,
+    value: &WireValue<u16>,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(u16, WireValue<u16>), crate::codec::Error> {
+    validate_auto_raw_discriminator(name, field, value, context, diagnostics)?;
+    let (resolved, materialized) = resolve_u16(
+        name,
+        field,
+        value,
+        expected_discriminator(name, context, 0_u16, value),
+        context.mode,
+        diagnostics,
+    )?;
+    validate_raw_child_discriminator(name, u64::from(resolved), context, diagnostics)?;
+    Ok((resolved, materialized))
 }
 
 pub(crate) fn resolve_fixed<T, const N: usize>(
@@ -222,7 +243,7 @@ where
     layer.set_field_path(&path, value)
 }
 
-fn reject_aliased_duplicates(
+pub(crate) fn reject_aliased_duplicates(
     schema: &'static crate::layer::Schema,
     fields: &BTreeMap<String, FieldValue>,
 ) -> Result<(), crate::codec::Error> {

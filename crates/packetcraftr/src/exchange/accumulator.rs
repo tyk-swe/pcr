@@ -14,7 +14,6 @@ use packetcraftr_netio::capture::RecordIdentity;
 
 use super::{Collection, Window};
 use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
-use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy)]
 pub(super) struct UnsolicitedFreshness {
@@ -25,6 +24,13 @@ pub(super) struct UnsolicitedFreshness {
 pub(super) struct UnsolicitedEvidence {
     pub(super) decoded: DecodedPacket,
     pub(super) freshness: Option<UnsolicitedFreshness>,
+}
+
+/// A fresh frame that a limit refused to retain, handed back so a workflow matcher can judge it.
+pub(super) struct RefusedCandidate {
+    pub(super) decoded: DecodedPacket,
+    pub(super) freshness: UnsolicitedFreshness,
+    pub(super) limit: &'static str,
 }
 
 pub(crate) type WorkflowResponseMatcher<'a> =
@@ -38,6 +44,11 @@ pub(crate) struct Accumulator {
     pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
     pub(super) response_count: usize,
+    /// Requests that have no retained response yet.
+    pending_requests: usize,
+    /// The first limit that refused a reply uniquely attributed to the request, by correlation
+    /// or by the workflow matcher.
+    pub(super) refused_replies: Vec<Option<&'static str>>,
     pub(super) retained_unmatched: usize,
     pub(super) correlation_deadline_expired: bool,
     pub(super) retained_record_identities: HashSet<RecordIdentity>,
@@ -47,7 +58,7 @@ pub(crate) struct Accumulator {
 pub(crate) struct ProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
-    pub(crate) prepared: &'a [PreparedPacket],
+    pub(crate) request_count: usize,
     pub(crate) sent: &'a [Arc<crate::evidence::SentPacket>],
     pub(crate) window: &'a Window,
     pub(crate) collection: &'a Collection,
@@ -82,6 +93,8 @@ impl Accumulator {
             evidence_budget: RetentionBudget::default(),
             response_counts: vec![0; requests],
             response_count: 0,
+            pending_requests: requests,
+            refused_replies: vec![None; requests],
             retained_unmatched: 0,
             correlation_deadline_expired: false,
             retained_record_identities: HashSet::new(),
@@ -100,17 +113,21 @@ impl Accumulator {
         self.pending_events.drain(..)
     }
 
+    /// `held_back` frame slots stay free for later matched replies. A refusal carries the
+    /// diagnostic code that names the limit.
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,
+        held_back: usize,
         collection: &Collection,
-    ) -> bool {
+    ) -> Result<(), &'static str> {
+        let effective_frames = collection.capture.max_frames.saturating_sub(held_back);
         let error = match self.evidence_budget.reserve(
             additional,
-            collection.capture.max_frames,
+            effective_frames,
             collection.capture.max_bytes,
         ) {
-            Ok(()) => return true,
+            Ok(()) => return Ok(()),
             Err(error) => error,
         };
         let (code, message) = match error {
@@ -118,11 +135,18 @@ impl Accumulator {
                 "exchange.capture_frame_limit",
                 "retained capture frame accounting overflowed; frame was not retained".to_owned(),
             ),
-            RetentionError::FrameLimit => (
+            RetentionError::FrameLimit if held_back == 0 => (
                 "exchange.capture_frame_limit",
                 format!(
                     "aggregate retained capture frame limit {} reached; later frames were not retained",
                     collection.capture.max_frames
+                ),
+            ),
+            RetentionError::FrameLimit => (
+                "exchange.capture_frame_limit",
+                format!(
+                    "aggregate retained capture frame limit {effective_frames} reached ({max_frames} configured, {held_back} held for pending replies); later frames were not retained",
+                    max_frames = collection.capture.max_frames
                 ),
             ),
             RetentionError::ByteCountOverflow => (
@@ -139,7 +163,49 @@ impl Accumulator {
         };
         self.diagnostics
             .push_once(Diagnostic::warning(code, message));
-        false
+        Err(code)
+    }
+
+    /// Frame slots that unrelated frames must leave for the requests still awaiting a reply.
+    fn held_back_for_replies(&self, collection: &Collection) -> usize {
+        self.pending_requests
+            .min(collection.max_responses.saturating_sub(self.response_count))
+    }
+
+    pub(super) fn record_response(&mut self, request_index: usize) {
+        if self.response_counts[request_index] == 0 {
+            self.pending_requests -= 1;
+        }
+        self.response_counts[request_index] += 1;
+        self.response_count += 1;
+    }
+
+    pub(super) fn refuse_reply(&mut self, request_index: usize, limit: &'static str) {
+        self.refused_replies[request_index].get_or_insert(limit);
+    }
+
+    /// A refused reply is not evidence of absence, so its request is not listed.
+    pub(super) fn unanswered(&self, sent: usize) -> Vec<usize> {
+        self.response_counts
+            .iter()
+            .zip(&self.refused_replies)
+            .take(sent)
+            .enumerate()
+            .filter_map(|(index, (count, refused))| {
+                (*count == 0 && refused.is_none()).then_some(index)
+            })
+            .collect()
+    }
+
+    pub(super) fn first_refused_reply(&self, sent: usize) -> Option<(usize, &'static str)> {
+        self.response_counts
+            .iter()
+            .zip(&self.refused_replies)
+            .take(sent)
+            .enumerate()
+            .find_map(|(index, (count, refused))| {
+                refused.filter(|_| *count == 0).map(|limit| (index, limit))
+            })
     }
 
     /// Both retention paths share the diagnostic code for `push_once` deduplication.
@@ -148,38 +214,44 @@ impl Accumulator {
         identity: RecordIdentity,
         frame_bytes: usize,
         collection: &Collection,
-    ) -> bool {
+    ) -> Result<(), &'static str> {
         if self.retained_unmatched >= collection.max_unmatched_frames {
+            let code = "exchange.unsolicited_limit";
             self.diagnostics.push_once(Diagnostic::warning(
-                "exchange.unsolicited_limit",
+                code,
                 format!(
                     "unsolicited/undecoded frame limit {} reached; later frames were not retained",
                     collection.max_unmatched_frames
                 ),
             ));
-            return false;
+            return Err(code);
         }
-        if !self.reserve_decoded_evidence(frame_bytes, collection) {
-            return false;
-        }
+        let held_back = self.held_back_for_replies(collection);
+        self.reserve_decoded_evidence(frame_bytes, held_back, collection)?;
         self.mark_record_retained(identity);
-        // The early return above keeps `retained_unmatched` under the ceiling, so no overflow.
-        {
-            self.retained_unmatched += 1;
-        }
-        true
+        self.retained_unmatched += 1;
+        Ok(())
     }
 
+    /// A refused frame is returned only when it was fresh enough for a workflow to promote.
     pub(super) fn retain_unsolicited(
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
         collection: &Collection,
-        freshness: Option<super::accumulator::UnsolicitedFreshness>,
-    ) {
-        if self.reserve_unattributed(identity, decoded.original.len(), collection) {
-            self.unsolicited
-                .push(UnsolicitedEvidence { decoded, freshness });
+        freshness: Option<UnsolicitedFreshness>,
+    ) -> Option<RefusedCandidate> {
+        match self.reserve_unattributed(identity, decoded.frame.bytes().len(), collection) {
+            Ok(()) => {
+                self.unsolicited
+                    .push(UnsolicitedEvidence { decoded, freshness });
+                None
+            }
+            Err(limit) => freshness.map(|freshness| RefusedCandidate {
+                decoded,
+                freshness,
+                limit,
+            }),
         }
     }
 
@@ -189,7 +261,10 @@ impl Accumulator {
         frame: Frame,
         collection: &Collection,
     ) {
-        if self.reserve_unattributed(identity, frame.bytes().len(), collection) {
+        if self
+            .reserve_unattributed(identity, frame.bytes().len(), collection)
+            .is_ok()
+        {
             self.pending_events.push(super::Event::Undecoded { frame });
         }
     }

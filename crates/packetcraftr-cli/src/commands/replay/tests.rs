@@ -86,7 +86,7 @@ impl net::transmit::Provider for ConfirmingTransmit {
 }
 
 fn client(max_packets: u64) -> packetcraftr::Client<impl packetcraftr::PacketProviders> {
-    crate::system::fixture::transmitting(
+    crate::commands::test_support::transmitting(
         packetcraftr_core::protocol::builtin::registry(),
         packetcraftr::policy::Policy {
             allow_permissive_packets: true,

@@ -5,6 +5,7 @@ use bytes::Bytes;
 use packetcraftr_core::{
     document::{Format, payload, recipe},
     error::{Classified, Kind},
+    expression,
     field::FieldValue,
     packet::DEFAULT_MAX_LAYERS,
     packet::Packet,
@@ -74,6 +75,99 @@ fn unrecognized_text_reports_the_expression_failure_with_the_document_failure_as
         Some("could not parse YAML packet document")
     );
     assert!(causes.len() >= 2, "{causes:?}");
+}
+
+fn syntax_error(source: &str) -> (usize, String) {
+    match expression::parse(source, &builtin::registry(), expression::Limits::default()) {
+        Err(expression::Error::Syntax { offset, message }) => (offset, message),
+        other => panic!("{source}: expected a syntax error, got {other:?}"),
+    }
+}
+
+#[test]
+fn expression_syntax_errors_point_into_the_whole_expression() {
+    for (marked, message) in [
+        ("ethernet()/|/ipv4", "empty layer"),
+        ("ethernet()/ |(ttl=1)", "missing protocol name"),
+        (
+            "ethernet()/ipv4|(ttl=1) x",
+            "layer arguments must end with ')'",
+        ),
+        (
+            "ethernet()/ipv4(ttl=1, |flags)",
+            "expected field=value, got  flags",
+        ),
+        ("ethernet()/ipv4(ttl=1, |=2)", "empty field name"),
+        ("ethernet()/ipv4(ttl=|)", "missing field value"),
+        ("ethernet()/ipv4(ttl= |)", "missing field value"),
+        ("ethernet()/  ipv4( ttl = |)", "missing field value"),
+        (
+            "ethernet()/ipv4(label=\"\u{e9}\", ttl=|)",
+            "missing field value",
+        ),
+        ("ethernet()/ipv4(ttl=[1, |])", "missing field value"),
+        ("ethernet()/ipv4(options={a=|})", "missing field value"),
+        (
+            "ethernet()/raw(payload=|bytes(\"a\") x)",
+            "unterminated byte literal",
+        ),
+        (
+            "ethernet()/raw(payload=hex(|\"abc\"))",
+            "hex literal requires pairs of hexadecimal digits",
+        ),
+        ("ethernet()/ipv4(options=|[1] x)", "unterminated list"),
+        ("ethernet()/ipv4(options=|{a=1} x)", "unterminated object"),
+        (
+            "ethernet()/ipv4(ttl=1,  options =  |[1] x)",
+            "unterminated list",
+        ),
+        (
+            "ethernet()/ipv4(options={a=1, |b})",
+            "expected object field=value",
+        ),
+        (
+            "ethernet()/ipv4(options={a=1, |bad name=2})",
+            "invalid object field name",
+        ),
+        (
+            "ethernet()/ipv4(options={a=1, |a=2})",
+            "duplicate object field a",
+        ),
+        (
+            "ethernet()/ipv4(ttl=|0xzz)",
+            "invalid hexadecimal integer 0xzz",
+        ),
+        (
+            "ethernet()/ipv4(label=|\"abc\" x)",
+            "unterminated quoted string",
+        ),
+        (
+            "ethernet()/ipv4(label=\"a\\|q\")",
+            "unsupported escape `\\q`",
+        ),
+        (
+            "ethernet()/ipv4(label=\"a|\"\"b\")",
+            "unescaped quote in quoted string",
+        ),
+        ("tcp(a=[1|), b=(2])", "unexpected ')'"),
+        ("ethernet()/tcp(a=[1|), b=(2])", "unexpected ')'"),
+    ] {
+        let expected = marked.find('|').expect("every case marks its offset");
+        let source = marked.replacen('|', "", 1);
+        let (offset, actual) = syntax_error(&source);
+        assert_eq!(offset, expected, "{source}: {actual}");
+        assert_eq!(actual, message, "{source}");
+    }
+}
+
+#[test]
+fn a_bare_value_reports_syntax_errors_against_the_text_it_was_given() {
+    let error = expression::parse_value("  [1, ]", expression::Limits::default())
+        .expect_err("empty list element");
+    assert!(
+        matches!(error, expression::Error::Syntax { offset: 6, .. }),
+        "{error:?}"
+    );
 }
 
 fn target(selector: &str) -> payload::Target {

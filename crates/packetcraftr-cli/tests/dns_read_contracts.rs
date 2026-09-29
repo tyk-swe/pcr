@@ -5,6 +5,12 @@ use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 use packetcraftr_core::capture_file::{Format, Writer};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::Packet;
+use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::builtin;
+use packetcraftr_core::protocol::network::Ipv6;
+use packetcraftr_core::protocol::transport::Udp;
+use packetcraftr_core::{build, codec};
 
 #[test]
 fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
@@ -192,6 +198,37 @@ fn ndjson_budget_shares_the_charge_across_event_kinds() {
     );
 }
 
+#[test]
+fn text_output_brackets_ipv6_endpoints() {
+    let mut packet = Packet::new();
+    packet.push(Ipv6 {
+        source: "2001:db8::1".parse().unwrap(),
+        destination: "2001:db8::2".parse().unwrap(),
+        ..Ipv6::default()
+    });
+    packet.push(Udp {
+        source_port: 53,
+        destination_port: 49152,
+        ..Udp::default()
+    });
+    packet.push(Dns::try_from(vec![0x12, 0x34, 0x81, 0x80, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap());
+    let built = build::Builder::new(builtin::registry())
+        .build(packet, codec::Context::default(), build::Options::default())
+        .unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let mut writer = Writer::new(file.reopen().unwrap(), Format::Pcap, LinkType::IPV6).unwrap();
+    writer
+        .write_frame(&Frame::new(std::time::UNIX_EPOCH, LinkType::IPV6, built.bytes).unwrap())
+        .unwrap();
+    writer.into_inner().sync_all().unwrap();
+    let output = run_success(&["dns-read", file.path().to_str().unwrap()]);
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains(" [2001:db8::1]:53 -> [2001:db8::2]:49152 frames=1\n"),
+        "{text:?}"
+    );
+}
+
 fn hostile_dns_capture() -> tempfile::NamedTempFile {
     let label: &[u8] = b"ev\x1b[31mil\xe2\x80\xae";
     let txt: &[u8] = b"x\x1b]0;owned\x07\x1b[2Jy";
@@ -248,8 +285,46 @@ fn captured_dns_names_and_record_text_render_without_terminal_escapes() {
         assert!(text.contains("ev\\027[31mil"), "{arguments:?}: {text:?}");
         assert!(text.contains("dns answer:"), "{arguments:?}: {text:?}");
     }
-    // The machine document keeps the exact name for consumers that escape
-    // for their own medium.
+    // The machine document keeps the exact name, in DNS presentation form,
+    // and the raw label bytes in `wire_hex`.
     let document = parse_json(&run_success(&["--output", "json", "dns-read", path]));
-    assert_eq!(document["result"]["summary"]["complete_messages"], 1);
+    let message = &document["result"]["messages"][0];
+    let name = "ev\\027[31mil\\226\\128\\174.test.";
+    assert_eq!(
+        message["fields"]["questions"]["value"][0]["value"]["name"]["value"],
+        name
+    );
+    assert_eq!(
+        message["fields"]["answers"]["value"][0]["value"]["owner"]["value"],
+        name
+    );
+    assert!(
+        message["wire_hex"]
+            .as_str()
+            .unwrap()
+            .contains("65761b5b33316d696ce280ae")
+    );
+}
+
+#[test]
+fn zero_application_message_limit_is_a_usage_error() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/dns-response.pcap");
+    let path = path.to_str().unwrap();
+    let output = run(&[
+        "--output",
+        "json",
+        "dns-read",
+        path,
+        "--max-application-messages",
+        "0",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let error = &parse_json(&output)["error"];
+    assert_eq!(error["code"], "cli.analysis_limit");
+    assert_eq!(error["kind"], "cli");
+    assert!(
+        error["message"].as_str().unwrap().contains("max_messages"),
+        "{error}"
+    );
 }

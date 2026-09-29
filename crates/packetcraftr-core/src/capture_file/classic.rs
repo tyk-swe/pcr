@@ -4,5 +4,7 @@
 mod decode;
 mod encode;
 
-pub(in crate::capture_file) use decode::{read_next_pcap_record, read_pcap_header};
+pub(in crate::capture_file) use decode::{
+    PcapState, pcap_layout, read_next_pcap_record, read_pcap_header,
+};
 pub(in crate::capture_file) use encode::{write_pcap_frame, write_pcap_header};

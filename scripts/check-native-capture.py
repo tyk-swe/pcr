@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 import platform
 
+from validation_evidence import digest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("regression", ROOT / "scripts/forwarding-regression.py")
 REGRESSION = importlib.util.module_from_spec(SPEC)
@@ -67,7 +69,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(mode=0o700, exist_ok=False)
     binary = args.binary.resolve(strict=True)
-    report = {"platform": platform.platform(), "binary_sha256": REGRESSION.digest(binary),
+    report = {"platform": platform.platform(), "binary_sha256": digest(binary),
               "authorization": "operator-confirmed isolated loopback", "interface": args.interface,
               "traffic_generated": False, "scenarios": [], "cancellation": {
                   "status": "not_exercised",
@@ -95,7 +97,7 @@ def main():
             code, elapsed = REGRESSION.run_bounded(argv, stdout, stderr, seconds=10)
             row = terminal(stdout)
             scenario.update(exit_code=code, elapsed_seconds=elapsed,
-                            output_sha256=REGRESSION.digest(stdout))
+                            output_sha256=digest(stdout))
             if name == "filter-error":
                 if code == 0 or row.get("status") != "error" or not row.get("error", {}).get("code"):
                     raise ValueError("invalid filter did not produce a typed failure")

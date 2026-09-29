@@ -5,10 +5,12 @@ use std::io::{Cursor, Write};
 use std::process::Output;
 use std::time::{Duration, UNIX_EPOCH};
 
+use bytes::Bytes;
 use packetcraftr_core::capture_file::Endianness;
 use packetcraftr_core::capture_file::Format;
 use packetcraftr_core::capture_file::Interface;
 use packetcraftr_core::capture_file::MetadataBlockKind;
+use packetcraftr_core::capture_file::PcapNgOption;
 use packetcraftr_core::capture_file::PcapNgOptions;
 use packetcraftr_core::capture_file::PcapOptions;
 use packetcraftr_core::capture_file::Reader;
@@ -19,11 +21,14 @@ use packetcraftr_core::frame::Direction;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::{Lengths, LinkType};
 
+#[path = "common/capture.rs"]
+mod capture_support;
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
 
-use common::{path_text, run};
+use capture_support::assert_file_stdin_parity;
+use common::run;
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
 
 const FIRST_FRAGMENT: &str =
@@ -48,28 +53,9 @@ fn capture(format: Format, frames: &[Frame]) -> Vec<u8> {
 }
 
 fn normalize(input: &[u8], flags: &[&str], expected_code: i32) -> Output {
-    let mut file = tempfile::NamedTempFile::new().unwrap();
-    file.write_all(input).unwrap();
-    let mut arguments = vec![
-        "--output",
-        "pcapng",
-        "read",
-        path_text(file.path()),
-        "--normalize",
-    ];
+    let mut arguments = vec!["--normalize"];
     arguments.extend_from_slice(flags);
-    let file_output = run(&arguments);
-    arguments[3] = "-";
-    let output = run_with_stdin(&arguments, input);
-    assert_eq!(
-        output.status.code(),
-        Some(expected_code),
-        "{arguments:?}: {output:?}"
-    );
-    assert_eq!(file_output.status.code(), output.status.code());
-    assert_eq!(file_output.stdout, output.stdout);
-    assert_eq!(file_output.stderr, output.stderr);
-    output
+    assert_file_stdin_parity(input, "read", &arguments, "pcapng", expected_code)
 }
 
 fn read_frames(bytes: &[u8]) -> (Vec<Frame>, Vec<Interface>) {
@@ -333,6 +319,72 @@ fn normalization_fails_on_a_truncated_input_trailer_after_preserving_prior_frame
     assert!(String::from_utf8_lossy(&output.stderr).contains("truncated"));
 }
 
+fn classic_with_network_word(network: u32) -> Vec<u8> {
+    let mut classic = capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]);
+    classic[20..24].copy_from_slice(&network.to_le_bytes());
+    classic
+}
+
+fn pcapng_with_fcs_length(value: &'static [u8]) -> Vec<u8> {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer
+        .add_interface_description_with_options(
+            Interface {
+                link_type: LinkType::IPV4,
+                snap_len: 65535,
+                timestamp_resolution: TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
+            },
+            &[PcapNgOption {
+                code: 13,
+                value: Bytes::from_static(value),
+            }],
+        )
+        .unwrap();
+    writer.write_frame(&frame(FIRST_FRAGMENT)).unwrap();
+    writer.into_inner()
+}
+
+#[test]
+fn normalization_refuses_input_that_declares_a_frame_check_sequence() {
+    // Bit 26 marks the FCS length as present and bits 28..=31 count its 16-bit words.
+    let classic = classic_with_network_word(0x2400_0000 | LinkType::IPV4.0);
+    let pcapng = pcapng_with_fcs_length(&[32]);
+    for input in [classic, pcapng] {
+        for flags in [&[][..], &["--filter", "frame.number == 99"][..]] {
+            let output = normalize(&input, flags, 3);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("packet.capture_transform_metadata"),
+                "{stderr}"
+            );
+            assert!(
+                stderr.contains("cannot retain declared frame check sequence"),
+                "{stderr}"
+            );
+            if !output.stdout.is_empty() {
+                assert!(read_frames(&output.stdout).0.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn normalization_accepts_input_that_declares_no_frame_check_sequence() {
+    let inputs = [
+        pcapng_with_fcs_length(&[0]),
+        classic_with_network_word(0x0400_0000 | LinkType::IPV4.0),
+        classic_with_network_word(0x5000_0000 | LinkType::IPV4.0),
+        classic_with_network_word(0x000f_0000 | LinkType::IPV4.0),
+    ];
+    for input in inputs {
+        let output = normalize(&input, &[], 0);
+        let (frames, interfaces) = read_frames(&output.stdout);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(interfaces.len(), 1);
+    }
+}
+
 #[test]
 fn normalization_rejects_timestamps_not_representable_in_capture_time() {
     for resolution in [
@@ -372,7 +424,7 @@ fn normalized_stdout_failure_exits_with_an_io_error() {
             "--output",
             "pcapng",
             "read",
-            path_text(file.path()),
+            common::path_text(file.path()),
             "--normalize",
         ])
         .stdout(

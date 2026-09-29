@@ -6,8 +6,10 @@
   "error": {
     "code": "policy.application_limit",
     "kind": "policy",
-    "message": "application analysis exceeds max_messages=100000",
-    "causes": [],
+    "message": "analysis consumer failed at frame 1",
+    "causes": [
+      "application analysis exceeds max_retained_bytes=1024"
+    ],
     "remediation": "raise a finite application-analysis limit or narrow the capture"
   },
   "diagnostics": []

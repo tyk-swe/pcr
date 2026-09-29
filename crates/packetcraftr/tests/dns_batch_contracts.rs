@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
 
+use std::cell::Cell;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::thread;
 use std::time::Duration;
 
 use packetcraftr::dns::{self, batch};
@@ -14,10 +16,14 @@ use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_netio::tcp;
 
+use common::clock::VirtualClock;
 use common::{Step, Steps};
 
 #[derive(Clone, Default)]
-struct SilentTcp(Steps);
+struct SilentTcp {
+    steps: Steps,
+    cancel_on_read: Option<Cancellation>,
+}
 
 impl tcp::Provider for SilentTcp {
     type Stream = SilentStream;
@@ -27,15 +33,27 @@ impl tcp::Provider for SilentTcp {
         endpoint: SocketAddr,
         _deadline: &Deadline,
     ) -> Result<SilentStream, tcp::Error> {
-        self.0.push(Step::Connect(endpoint));
-        Ok(SilentStream(endpoint))
+        self.steps.push(Step::Connect(endpoint));
+        Ok(SilentStream {
+            endpoint,
+            read_timeout: Cell::new(None),
+            cancel_on_read: self.cancel_on_read.clone(),
+        })
     }
 }
 
-struct SilentStream(SocketAddr);
+struct SilentStream {
+    endpoint: SocketAddr,
+    read_timeout: Cell<Option<Duration>>,
+    cancel_on_read: Option<Cancellation>,
+}
 
 impl io::Read for SilentStream {
     fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        if let Some(signal) = &self.cancel_on_read {
+            signal.cancel();
+        }
+        thread::sleep(self.read_timeout.get().unwrap_or_default());
         Err(io::ErrorKind::TimedOut.into())
     }
 }
@@ -52,14 +70,15 @@ impl io::Write for SilentStream {
 
 impl tcp::Stream for SilentStream {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
-        Ok(self.0)
+        Ok(self.endpoint)
     }
 
     fn local_addr(&self) -> io::Result<SocketAddr> {
         Ok(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50_000))
     }
 
-    fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.read_timeout.set(timeout);
         Ok(())
     }
 
@@ -78,22 +97,23 @@ type Providers = ProviderSet<
 >;
 
 fn client(policy: Policy) -> (Client<Providers>, Steps) {
-    let base = common::providers(common::FixedRoutes, common::NeverTransmit);
+    client_with(policy, None)
+}
+
+fn client_with(policy: Policy, cancel_on_read: Option<Cancellation>) -> (Client<Providers>, Steps) {
     let steps = Steps::default();
+    let providers = common::providers(common::FixedRoutes, common::NeverTransmit)
+        .with_tcp(SilentTcp {
+            steps: steps.clone(),
+            cancel_on_read,
+        })
+        .with_resolver(common::ScriptedResolver {
+            steps: steps.clone(),
+        });
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         policy,
-        ProviderSet {
-            route: base.route,
-            interface: base.interface,
-            capture: base.capture,
-            transmit: base.transmit,
-            tcp: SilentTcp(steps.clone()),
-            resolver: common::ScriptedResolver {
-                steps: steps.clone(),
-                ..base.resolver
-            },
-        },
+        providers,
     );
     (client, steps)
 }
@@ -119,7 +139,7 @@ fn request(name: &str) -> dns::Request {
         edns: None,
         transport: dns::TransportMode::Tcp,
         attempts: 1,
-        timeout: Duration::from_secs(1),
+        timeout: Duration::from_millis(200),
         queries_per_second: None,
         limits: dns::Limits::default(),
         route: Default::default(),
@@ -284,6 +304,28 @@ fn batch_cancellation_during_retry_wait_retains_confirmed_traffic() {
 }
 
 #[test]
+fn batch_cancellation_while_awaiting_a_response_retains_the_written_query() {
+    let first = request("first.test");
+    let expected_bytes = framed_query_bytes(&first);
+    let signal = Cancellation::default();
+    let (client, steps) = client_with(Policy::default(), Some(signal.clone()));
+    let report = client
+        .with_cancellation(signal)
+        .dns_batch(
+            batch([first, request("never.test")]),
+            batch::Collector::default(),
+        )
+        .unwrap();
+    assert_eq!(report.status_counts(), (0, 1, 1));
+    assert!(matches!(
+        report.questions[0].error,
+        Some(dns::Error::Cancelled(_))
+    ));
+    assert_eq!(report.stats.bytes, expected_bytes);
+    assert_eq!(connects(&steps), 1);
+}
+
+#[test]
 fn a_pre_cancelled_batch_leaves_every_question_unattempted() {
     let signal = Cancellation::default();
     signal.cancel();
@@ -324,31 +366,13 @@ fn batch_rejects_mixed_server_identity_before_authorization() {
     }
 }
 
-#[derive(Clone, Default)]
-struct RecordingClock(std::sync::Arc<std::sync::Mutex<Vec<Duration>>>);
-
-impl RecordingClock {
-    fn delays(&self) -> Vec<Duration> {
-        self.0.lock().unwrap().clone()
-    }
-}
-
-impl packetcraftr::clock::Clock for RecordingClock {
-    type Error = std::convert::Infallible;
-
-    fn sleep(&self, delay: Duration, _: &Deadline) -> Result<(), Self::Error> {
-        self.0.lock().unwrap().push(delay);
-        Ok(())
-    }
-}
-
 #[test]
 fn rate_intervals_are_shared_across_single_attempt_questions() {
     let mut questions = [request("a"), request("b"), request("c")];
     for question in &mut questions {
         question.queries_per_second = Some(2);
     }
-    let clock = RecordingClock::default();
+    let clock = VirtualClock::default();
     let (client, steps) = client(Policy::default());
     let report = client
         .with_clock(clock.clone())
@@ -369,7 +393,7 @@ fn the_shared_deadline_can_prevent_an_interquestion_wait() {
         question.limits.max_duration = Duration::from_millis(500);
     }
     let expected_bytes = framed_query_bytes(&questions[0]);
-    let clock = RecordingClock::default();
+    let clock = VirtualClock::default();
     let (client, steps) = client(Policy::default());
     let report = client
         .with_clock(clock.clone())

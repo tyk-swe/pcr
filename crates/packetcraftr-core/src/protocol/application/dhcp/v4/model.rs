@@ -96,6 +96,34 @@ pub enum Value4 {
     Overload(u8),
     Raw(Bytes),
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Kind4 {
+    MessageType,
+    Overload,
+    Address,
+    Addresses,
+    Seconds,
+    Number,
+    Codes,
+    Text,
+    ClientIdentifier,
+}
+impl Kind4 {
+    pub(super) fn of(code: u8) -> Option<Self> {
+        Some(match code {
+            53 => Self::MessageType,
+            52 => Self::Overload,
+            1 | 16 | 28 | 32 | 50 | 54 => Self::Address,
+            3..=11 | 41 | 42 | 44 | 45 | 48 | 49 | 65 | 68..=76 => Self::Addresses,
+            24 | 35 | 38 | 51 | 58 | 59 => Self::Seconds,
+            13 | 22 | 26 | 57 => Self::Number,
+            55 => Self::Codes,
+            12 | 14 | 15 | 17 | 18 | 40 | 56 | 60 | 64 | 66 | 67 => Self::Text,
+            61 => Self::ClientIdentifier,
+            _ => return None,
+        })
+    }
+}
 impl Option4 {
     pub fn message_type(value: u8) -> Self {
         Self {

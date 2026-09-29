@@ -16,19 +16,19 @@ use packetcraftr_netio::{
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, Mode as LinkMode},
     route::{Decision, Error as RouteError, Scope, SelectionReason},
-    transmit::Submission,
+    transmit::{Report as IoSendReport, Submission},
 };
 
-use super::admission::FinalWire;
+use super::admission::ReplayAdmission;
 use super::engine::run;
 use super::error::Error;
-use super::evidence::{FrameEvidence, Transmission, network_envelope, validate_transmission};
+use super::evidence::{FrameEvidence, network_envelope, validate_transmission};
 use super::executor::{Executor, map_route_error};
 use super::plan::link_mode;
 use super::report::Report;
 use super::request::{Limits, Options, Parts, Request, Selector, Source, Timing};
 use crate::clock::Clock;
-use crate::policy::{Authorizer, Operation};
+use crate::policy::WireLimits;
 use crate::route::{Interface, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
 use packetcraftr_core::error::BoundaryError;
@@ -42,15 +42,15 @@ struct RecordingAuthorizer {
     deny_final_wire: bool,
 }
 
-impl Authorizer for RecordingAuthorizer {
-    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+impl ReplayAdmission for RecordingAuthorizer {
+    fn admit_frame(
+        &mut self,
+        limits: WireLimits,
+        _frame: &Frame,
+        _mode: LinkMode,
+    ) -> Result<(), BoundaryError> {
         self.calls += 1;
-        let limits = operation.limits();
         self.limits.push((limits.packets(), limits.wire_bytes()));
-        assert!(
-            matches!(operation, Operation::Replay(_)),
-            "replay must submit an exact frame, got {operation:?}"
-        );
         if self.deny {
             Err(BoundaryError::new(
                 "denied by test policy",
@@ -61,9 +61,7 @@ impl Authorizer for RecordingAuthorizer {
             Ok(())
         }
     }
-}
 
-impl FinalWire for RecordingAuthorizer {
     fn authorize_final_wire(
         &mut self,
         _frame: &Frame,
@@ -87,7 +85,6 @@ struct RecordingTransmitter {
     validation_calls: usize,
     transmission_calls: usize,
     partial: bool,
-    different_interface: bool,
     resolves_to: Option<InterfaceId>,
 }
 
@@ -112,30 +109,18 @@ impl Executor for RecordingTransmitter {
 
     fn transmit(
         &mut self,
-        route: &MaterializedRoute,
+        _route: &MaterializedRoute,
         frame: &Frame,
-    ) -> Result<Transmission, LiveIoError> {
+    ) -> Result<IoSendReport, LiveIoError> {
         self.transmission_calls += 1;
-        let interface = &route.plan.decision.interface;
-        let reported_interface = if self.different_interface {
-            InterfaceId {
-                name: "other0".to_owned(),
-                index: interface.index + 1,
-            }
-        } else {
-            interface.clone()
-        };
-        Ok(Transmission {
-            interface: reported_interface,
-            report: Submission::start().complete(
-                if self.partial {
-                    frame.bytes().len().saturating_sub(1)
-                } else {
-                    frame.bytes().len()
-                },
-                frame.bytes().clone(),
-            ),
-        })
+        Ok(Submission::start().complete(
+            if self.partial {
+                frame.bytes().len().saturating_sub(1)
+            } else {
+                frame.bytes().len()
+            },
+            frame.bytes().clone(),
+        ))
     }
 }
 
@@ -373,6 +358,34 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
             timing.validate(),
             Err(Error::InvalidTiming { .. })
         ));
+    }
+}
+
+#[test]
+fn replay_refuses_a_fixed_rate_it_cannot_schedule_before_transmitting_any_frame() {
+    let frames = [(Duration::ZERO, &[1_u8][..]), (Duration::ZERO, &[2_u8][..])];
+    for rate in [1e10, 1e300, f64::MIN_POSITIVE, 1e-300] {
+        let mut authorizer = RecordingAuthorizer::default();
+        let mut transmitter = RecordingTransmitter::default();
+        let error = replay(
+            capture_reader(LinkType::ETHERNET, &frames),
+            &replay_options(Timing::FixedRate(rate)),
+            AllFrames,
+            &mut authorizer,
+            &mut transmitter,
+            &mut RecordingClock::default(),
+            |_, _| Ok(()),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::InvalidTiming { mode: "fixed_rate", value } if value == rate
+            ),
+            "{rate}: {error:?}"
+        );
+        assert_eq!(authorizer.calls, 0, "{rate}");
+        assert_eq!(transmitter.transmission_calls, 0, "{rate}");
     }
 }
 
@@ -808,36 +821,27 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     );
 }
 
+struct StartupCost {
+    clock: RecordingClock,
+    cost: Duration,
+}
+
+impl Selector for StartupCost {
+    fn select(&mut self, _source_index: u64, _frame: &Frame) -> Result<bool, Error> {
+        Ok(true)
+    }
+
+    fn interface(&mut self, source_index: u64, _frame: &Frame) -> Result<Interface, Error> {
+        if source_index == 0 {
+            self.clock.advance(self.cost);
+        }
+        Ok(Interface::Id(test_interface()))
+    }
+}
+
 #[test]
 fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
-    use crate::clock::Clock;
-    use std::sync::{Arc, Mutex};
-    use std::time::Instant;
-    #[derive(Clone)]
-    struct VirtualClock {
-        now: Arc<Mutex<Instant>>,
-        waits: Arc<Mutex<Vec<Duration>>>,
-    }
-    impl Clock for VirtualClock {
-        type Error = std::convert::Infallible;
-        fn now(&self) -> Instant {
-            *self.now.lock().unwrap()
-        }
-        fn sleep(
-            &self,
-            delay: Duration,
-            _deadline: &packetcraftr_core::budget::Deadline,
-        ) -> Result<(), Self::Error> {
-            self.waits.lock().unwrap().push(delay);
-            *self.now.lock().unwrap() += delay;
-            Ok(())
-        }
-    }
-    let now = Arc::new(Mutex::new(Instant::now()));
-    let mut clock = VirtualClock {
-        now: Arc::clone(&now),
-        waits: Arc::default(),
-    };
+    let mut clock = RecordingClock::default();
     let reader = capture_reader(
         LinkType::ETHERNET,
         &[
@@ -848,6 +852,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
         ],
     );
     let mut overhead = [700, 2500, 0, 0].into_iter();
+    let observer = clock.clone();
     let summary = replay(
         reader,
         &replay_options(Timing::Original),
@@ -856,7 +861,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
         &mut RecordingTransmitter::default(),
         &mut clock,
         |_, _| {
-            *now.lock().unwrap() += Duration::from_millis(overhead.next().unwrap());
+            observer.advance(Duration::from_millis(overhead.next().unwrap()));
             Ok(())
         },
     )
@@ -864,7 +869,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
     assert_eq!(summary.frames_transmitted, 4);
     assert_eq!(summary.scheduled_duration, Duration::from_secs(3));
     assert_eq!(
-        *clock.waits.lock().unwrap(),
+        clock.delays(),
         [
             Duration::ZERO,
             Duration::from_millis(300),
@@ -872,6 +877,184 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
             Duration::ZERO
         ]
     );
+}
+
+#[test]
+fn replay_paces_from_the_first_transmitted_frame_not_from_the_start_of_the_run() {
+    let millis = Duration::from_millis;
+    for timing in [
+        Timing::Original,
+        Timing::FixedRate(1000.0),
+        Timing::BitRate(8000),
+    ] {
+        let mut clock = RecordingClock::default();
+        let reader = capture_reader(
+            LinkType::ETHERNET,
+            &[
+                (Duration::ZERO, &[1]),
+                (millis(1), &[2]),
+                (millis(2), &[3]),
+                (millis(3), &[4]),
+            ],
+        );
+        let summary = replay(
+            reader,
+            &replay_options(timing),
+            StartupCost {
+                clock: clock.clone(),
+                cost: millis(5),
+            },
+            &mut RecordingAuthorizer::default(),
+            &mut RecordingTransmitter::default(),
+            &mut clock,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            clock.delays(),
+            [Duration::ZERO, millis(1), millis(1), millis(1)],
+            "{timing:?}"
+        );
+        assert_eq!(summary.scheduled_duration, millis(3), "{timing:?}");
+    }
+}
+
+#[test]
+fn repeated_original_replay_paces_each_pass_from_its_first_transmitted_frame() {
+    let millis = Duration::from_millis;
+    let mut clock = RecordingClock::default();
+    let mut options = replay_options(Timing::Original);
+    options.repeat = 2;
+    options.inter_pass_delay = millis(3);
+    let summary = replay_seekable(
+        capture_reader(
+            LinkType::ETHERNET,
+            &[(Duration::ZERO, &[1]), (millis(10), &[2])],
+        ),
+        &options,
+        StartupCost {
+            clock: clock.clone(),
+            cost: millis(5),
+        },
+        &mut RecordingAuthorizer::default(),
+        &mut RecordingTransmitter::default(),
+        &mut clock,
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        clock.delays(),
+        [
+            Duration::ZERO,
+            millis(10),
+            millis(3),
+            Duration::ZERO,
+            millis(10)
+        ]
+    );
+    assert_eq!(summary.scheduled_duration, millis(23));
+}
+
+fn replay_after_setup(
+    max_duration: Duration,
+) -> (
+    Result<Report, Error>,
+    RecordingAuthorizer,
+    RecordingTransmitter,
+) {
+    let millis = Duration::from_millis;
+    let clock = RecordingClock::default();
+    let mut options = replay_options(Timing::Original);
+    options.limits.max_duration = max_duration;
+    let mut authorizer = RecordingAuthorizer::default();
+    let mut transmitter = RecordingTransmitter::default();
+    let result = run(
+        Parts {
+            source: Source::stream(capture_reader(
+                LinkType::ETHERNET,
+                &[
+                    (Duration::ZERO, &[1]),
+                    (millis(1), &[2]),
+                    (millis(2), &[3]),
+                    (millis(3), &[4]),
+                ],
+            )),
+            selector: StartupCost {
+                clock: clock.clone(),
+                cost: millis(5),
+            },
+            options,
+        },
+        &mut authorizer,
+        &mut transmitter,
+        &mut clock.clone(),
+        clock.deadline(max_duration),
+        |_, _| Ok(()),
+    );
+    (result, authorizer, transmitter)
+}
+
+#[test]
+fn replay_counts_setup_against_the_duration_limit_before_authorizing_a_frame_it_cannot_fit() {
+    let millis = Duration::from_millis;
+    let (result, authorizer, transmitter) = replay_after_setup(millis(6));
+    let error = result.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::DurationLimit { source_index: 2, actual, limit }
+                if actual == millis(7) && limit == millis(6)
+        ),
+        "{error:?}"
+    );
+    assert_eq!(transmitter.transmission_calls, 2);
+    assert_eq!(authorizer.calls, 2);
+}
+
+#[test]
+fn replay_completes_when_setup_and_schedule_exactly_fill_the_duration_limit() {
+    let millis = Duration::from_millis;
+    let (result, _, transmitter) = replay_after_setup(millis(8));
+    let report = result.unwrap();
+    assert_eq!(report.scheduled_duration, millis(3));
+    assert_eq!(transmitter.transmission_calls, 4);
+}
+
+#[test]
+fn replay_publishes_no_evidence_for_a_short_transmit_report() {
+    let mut transmitter = RecordingTransmitter {
+        partial: true,
+        ..RecordingTransmitter::default()
+    };
+    let mut emitted = Vec::new();
+    let error = replay(
+        capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1, 2])]),
+        &replay_options(Timing::Immediate),
+        AllFrames,
+        &mut RecordingAuthorizer::default(),
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |evidence, _| {
+            emitted.push(evidence);
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::Transmission {
+                source_index: 0,
+                source: LiveIoError::PartialSend {
+                    expected: 2,
+                    actual: 1
+                }
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(emitted.is_empty());
+    assert_eq!(transmitter.transmission_calls, 1);
 }
 
 struct MappedInterfaces;

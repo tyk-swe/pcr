@@ -61,25 +61,14 @@ pub(crate) fn authorize_wire_destinations(
     Ok(decoded)
 }
 
-pub(crate) fn authorize_wire_sources(
-    policy: &Policy,
-    decoded: &packetcraftr_core::decode::DecodedPacket,
-    route: &crate::route::Plan,
-) -> Result<(), Error> {
-    policy.authorize_packet_sources(&decoded.packet, route)
-}
-
 pub(crate) fn authorize_wire(
     policy: &Policy,
     link_type: LinkType,
     bytes: &Bytes,
-    route: Option<&crate::route::Plan>,
+    route: &crate::route::Plan,
 ) -> Result<(), Error> {
     let decoded = authorize_wire_destinations(policy, link_type, bytes)?;
-    if let Some(route) = route {
-        authorize_wire_sources(policy, &decoded, route)?;
-    }
-    Ok(())
+    policy.authorize_packet_sources(&decoded.packet, route)
 }
 
 impl Policy {

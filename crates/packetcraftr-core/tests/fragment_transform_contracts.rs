@@ -12,7 +12,7 @@ use packetcraftr_core::{
         network::{DestinationOptions, HopByHop, Ipv4, Ipv6},
         transport::Udp,
     },
-    transform::{FragmentOptions, fragment},
+    transform::{Error, FragmentOptions, InvalidInput, Limit, Unsupported, fragment},
 };
 use std::{io::Cursor, time::UNIX_EPOCH};
 
@@ -90,7 +90,7 @@ fn both_families_reassemble_exact_transport_bytes_in_reverse_capture_order() {
                 &Default::default(),
                 |record| {
                     if let Some(datagram) = record.derived() {
-                        rebuilt = Some(datagram.decoded.original.clone());
+                        rebuilt = Some(datagram.decoded.frame.bytes().clone());
                     }
                     Ok(())
                 },
@@ -101,6 +101,22 @@ fn both_families_reassemble_exact_transport_bytes_in_reverse_capture_order() {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum Refusal {
+    Invalid(InvalidInput),
+    Unsupported(Unsupported),
+    Limit(Limit, usize),
+}
+
+fn refusal(frame: &Frame, options: FragmentOptions) -> Refusal {
+    match fragment(frame, options).expect_err("fragmenting is refused") {
+        Error::Invalid(reason) => Refusal::Invalid(reason),
+        Error::Unsupported(reason) => Refusal::Unsupported(reason),
+        Error::Limit { field, limit } => Refusal::Limit(field, limit),
+        other => panic!("unexpected refusal: {other:?}"),
+    }
+}
+
 #[test]
 fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
     let original = complete(false, false);
@@ -108,71 +124,115 @@ fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
         fragment(&original, Default::default()).unwrap(),
         vec![original.clone()]
     );
-    for options in [
-        FragmentOptions {
-            mtu: 20,
-            ..Default::default()
-        },
-        FragmentOptions {
-            mtu: 128,
-            max_fragments: 1,
-            ..Default::default()
-        },
-        FragmentOptions {
-            mtu: 128,
-            max_output_bytes: 127,
-            ..Default::default()
-        },
-    ] {
-        assert!(fragment(&original, options).is_err());
-    }
     let mut bytes = original.bytes().to_vec();
     bytes[6] = 0x40;
     bytes[10..12].fill(0);
     let checksum = packetcraftr_core::protocol::checksum(&bytes[..20]);
     bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
     let df = Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap();
-    assert!(
-        fragment(
-            &df,
-            FragmentOptions {
-                mtu: 128,
-                ..Default::default()
-            }
-        )
-        .is_err()
-    );
     let v6 = complete(true, true);
-    assert!(
-        fragment(
-            &v6,
+    let mtu_128 = FragmentOptions {
+        mtu: 128,
+        ..Default::default()
+    };
+    let once = fragment(&original, mtu_128).unwrap();
+    for (frame, options, expected) in [
+        (
+            &original,
             FragmentOptions {
-                mtu: 128,
+                mtu: 19,
                 ..Default::default()
-            }
-        )
-        .is_err()
-    );
-    assert!(
-        fragment(
+            },
+            Refusal::Invalid(InvalidInput::MtuBelowIpv4Header),
+        ),
+        (
+            &original,
+            FragmentOptions {
+                mtu: 20,
+                ..Default::default()
+            },
+            Refusal::Invalid(InvalidInput::MtuFragmentPayload),
+        ),
+        (
+            &original,
+            FragmentOptions {
+                max_fragments: 1,
+                ..mtu_128
+            },
+            Refusal::Limit(Limit::MaxFragments, 1),
+        ),
+        (
+            &original,
+            FragmentOptions {
+                max_output_bytes: 127,
+                ..mtu_128
+            },
+            Refusal::Limit(Limit::MaxOutputBytes, 127),
+        ),
+        (
+            &df,
+            mtu_128,
+            Refusal::Unsupported(Unsupported::DontFragment),
+        ),
+        (
+            &v6,
+            mtu_128,
+            Refusal::Invalid(InvalidInput::Ipv6Identification),
+        ),
+        (
             &v6,
             FragmentOptions {
                 mtu: 64,
                 identification: Some(1),
                 ..Default::default()
-            }
+            },
+            Refusal::Invalid(InvalidInput::Ipv6FirstFragment),
+        ),
+        (
+            &once[0],
+            Default::default(),
+            Refusal::Unsupported(Unsupported::AlreadyFragmented),
+        ),
+    ] {
+        assert_eq!(refusal(frame, options), expected, "{options:?}");
+    }
+}
+
+#[test]
+fn max_fragments_outside_its_range_names_the_range_or_the_ceiling() {
+    use packetcraftr_core::error::{Classified, Kind};
+    let original = complete(false, false);
+    for (max_fragments, message) in [
+        (0, "packet transform requires max_fragments in 1..=8192"),
+        (8193, "packet transform exceeds max_fragments=8192"),
+    ] {
+        let error = fragment(
+            &original,
+            FragmentOptions {
+                mtu: 128,
+                max_fragments,
+                ..Default::default()
+            },
         )
-        .is_err()
-    );
-    let once = fragment(
-        &original,
-        FragmentOptions {
-            mtu: 128,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert!(fragment(&once[0], Default::default()).is_err());
+        .expect_err("max_fragments outside 1..=8192");
+        assert_eq!(error.to_string(), message);
+        let classification = error.classification();
+        assert_eq!(classification.code, "policy.transform_limit");
+        assert_eq!(classification.kind, Kind::Policy);
+    }
+    for max_fragments in [1, 8192] {
+        assert!(
+            fragment(
+                &original,
+                FragmentOptions {
+                    mtu: 1500,
+                    max_fragments,
+                    ..Default::default()
+                },
+            )
+            .is_ok()
+        );
+    }
 }
 
 #[test]

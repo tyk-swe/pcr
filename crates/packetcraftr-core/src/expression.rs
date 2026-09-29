@@ -127,10 +127,10 @@ pub fn parse(input: &str, registry: &Registry, limits: Limits) -> Result<Packet,
     }
     limits.validate()?;
     // Bound layers while scanning so delimiters cannot amplify a small byte budget.
-    let segments = split_top_level_bounded(input, '/', Some(limits.max_layers))?;
+    let segments = split_top_level_bounded(0, input, '/', Some(limits.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
-    for (layer_index, segment) in segments.into_iter().enumerate() {
-        let (name, fields) = parse_layer(segment, layer_index, limits.max_nesting)?;
+    for (layer_index, (base, segment)) in segments.into_iter().enumerate() {
+        let (name, fields) = parse_layer(base, segment, layer_index, limits.max_nesting)?;
         let codec = registry
             .codec_named(&name)
             .ok_or_else(|| Error::UnknownProtocol {
@@ -163,18 +163,19 @@ pub fn parse_value(input: &str, limits: Limits) -> Result<FieldValue, Error> {
         });
     }
     limits.validate()?;
-    parse_value_bounded(input.trim(), 0, limits.max_nesting)
+    parse_value_bounded(0, input, 0, limits.max_nesting)
 }
 
 fn parse_layer(
+    base: usize,
     segment: &str,
     layer: usize,
     max_nesting: usize,
 ) -> Result<(String, BTreeMap<String, FieldValue>), Error> {
-    let segment = segment.trim();
+    let (base, segment) = trim_at(base, segment);
     if segment.is_empty() {
         return Err(Error::Syntax {
-            offset: 0,
+            offset: base,
             message: "empty layer".to_owned(),
         });
     }
@@ -183,14 +184,14 @@ fn parse_layer(
     };
     if !segment.ends_with(')') {
         return Err(Error::Syntax {
-            offset: open,
+            offset: base.saturating_add(open),
             message: "layer arguments must end with ')'".to_owned(),
         });
     }
     let name = segment[..open].trim().to_ascii_lowercase();
     if name.is_empty() {
         return Err(Error::Syntax {
-            offset: 0,
+            offset: base,
             message: "missing protocol name".to_owned(),
         });
     }
@@ -199,21 +200,25 @@ fn parse_layer(
     if arguments.trim().is_empty() {
         return Ok((name, fields));
     }
-    for argument in split_top_level_bounded(arguments, ',', None)? {
-        let Some((field, raw_value)) = split_assignment(argument)? else {
+    let arguments_base = base.saturating_add(open).saturating_add(1);
+    for (argument_base, argument) in split_top_level_bounded(arguments_base, arguments, ',', None)?
+    {
+        let Some((field, (value_base, raw_value))) = split_assignment(argument_base, argument)
+        else {
             return Err(Error::Syntax {
-                offset: 0,
+                offset: trim_at(argument_base, argument).0,
                 message: format!("expected field=value, got {argument}"),
             });
         };
-        let field = field.trim().to_ascii_lowercase();
+        let (field_base, field) = trim_at(argument_base, field);
+        let field = field.to_ascii_lowercase();
         if field.is_empty() {
             return Err(Error::Syntax {
-                offset: 0,
+                offset: field_base,
                 message: "empty field name".to_owned(),
             });
         }
-        let value = parse_value_bounded(raw_value.trim(), 0, max_nesting)?;
+        let value = parse_value_bounded(value_base, raw_value, 0, max_nesting)?;
         if fields.insert(field.clone(), value).is_some() {
             return Err(Error::DuplicateField { layer, field });
         }
@@ -221,108 +226,154 @@ fn parse_layer(
     Ok((name, fields))
 }
 
-fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<FieldValue, Error> {
+fn parse_value_bounded(
+    base: usize,
+    input: &str,
+    depth: usize,
+    max_nesting: usize,
+) -> Result<FieldValue, Error> {
+    let (base, input) = trim_at(base, input);
     if input.is_empty() {
         return Err(Error::Syntax {
-            offset: 0,
+            offset: base,
             message: "missing field value".to_owned(),
         });
     }
     for (prefix, hexadecimal) in [("hex(", true), ("bytes(", false)] {
         if let Some(body) = input.strip_prefix(prefix) {
-            let body = body.strip_suffix(')').ok_or_else(|| Error::Syntax {
-                offset: 0,
-                message: "unterminated byte literal".to_owned(),
-            })?;
-            let text = parse_quoted(body.trim())?;
-            if !hexadecimal {
-                return Ok(FieldValue::Bytes(text.into()));
-            }
-            if text.len() % 2 != 0 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(Error::Syntax {
-                    offset: 0,
-                    message: "hex literal requires pairs of hexadecimal digits".to_owned(),
-                });
-            }
-            let mut bytes = Vec::with_capacity(text.len() / 2);
-            for offset in (0..text.len()).step_by(2) {
-                bytes.push(
-                    u8::from_str_radix(&text[offset..offset + 2], 16).map_err(|_| {
-                        Error::Syntax {
-                            offset,
-                            message: "invalid hex byte".to_owned(),
-                        }
-                    })?,
-                );
-            }
-            return Ok(FieldValue::Bytes(bytes.into()));
+            return parse_byte_literal(base, prefix.len(), body, hexadecimal);
         }
     }
     if input.starts_with('"') {
-        return parse_quoted(input).map(FieldValue::Text);
+        return parse_quoted(base, input).map(FieldValue::Text);
     }
     if input.starts_with('{') {
-        if depth >= max_nesting {
-            return Err(Error::NestingLimit { limit: max_nesting });
-        }
-        if !input.ends_with('}') {
-            return Err(Error::Syntax {
-                offset: 0,
-                message: "unterminated object".to_owned(),
-            });
-        }
-        let body = &input[1..input.len() - 1];
-        let mut values = BTreeMap::new();
-        if !body.trim().is_empty() {
-            for entry in split_top_level_bounded(body, ',', None)? {
-                let Some((name, value)) = split_assignment(entry)? else {
-                    return Err(Error::Syntax {
-                        offset: 0,
-                        message: "expected object field=value".to_owned(),
-                    });
-                };
-                let name = name.trim();
-                if name.is_empty()
-                    || !name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                {
-                    return Err(Error::Syntax {
-                        offset: 0,
-                        message: "invalid object field name".to_owned(),
-                    });
-                }
-                let value = parse_value_bounded(value.trim(), depth + 1, max_nesting)?;
-                if values.insert(name.to_owned(), value).is_some() {
-                    return Err(Error::Syntax {
-                        offset: 0,
-                        message: format!("duplicate object field {name}"),
-                    });
-                }
-            }
-        }
-        return Ok(FieldValue::Object(values));
+        return parse_object(base, input, depth, max_nesting);
     }
     if input.starts_with('[') {
-        if depth >= max_nesting {
-            return Err(Error::NestingLimit { limit: max_nesting });
-        }
-        if !input.ends_with(']') {
+        return parse_list(base, input, depth, max_nesting);
+    }
+    parse_scalar(base, input)
+}
+
+fn parse_byte_literal(
+    base: usize,
+    prefix_len: usize,
+    body: &str,
+    hexadecimal: bool,
+) -> Result<FieldValue, Error> {
+    let body = body.strip_suffix(')').ok_or_else(|| Error::Syntax {
+        offset: base,
+        message: "unterminated byte literal".to_owned(),
+    })?;
+    let (text_base, quoted) = trim_at(base.saturating_add(prefix_len), body);
+    let text = parse_quoted(text_base, quoted)?;
+    if !hexadecimal {
+        return Ok(FieldValue::Bytes(text.into()));
+    }
+    let bytes = decode_hex_pairs(&text).ok_or_else(|| Error::Syntax {
+        offset: text_base,
+        message: "hex literal requires pairs of hexadecimal digits".to_owned(),
+    })?;
+    Ok(FieldValue::Bytes(bytes.into()))
+}
+
+fn decode_hex_pairs(text: &str) -> Option<Vec<u8>> {
+    let (pairs, remainder) = text.as_bytes().as_chunks::<2>();
+    if !remainder.is_empty() {
+        return None;
+    }
+    let digit = |byte: u8| {
+        char::from(byte)
+            .to_digit(16)
+            .and_then(|value| u8::try_from(value).ok())
+    };
+    let mut bytes = Vec::with_capacity(pairs.len());
+    for &[high, low] in pairs {
+        bytes.push((digit(high)? << 4) | digit(low)?);
+    }
+    Some(bytes)
+}
+
+fn parse_object(
+    base: usize,
+    input: &str,
+    depth: usize,
+    max_nesting: usize,
+) -> Result<FieldValue, Error> {
+    let body = enclosed_body(base, input, '}', "unterminated object", depth, max_nesting)?;
+    let mut values = BTreeMap::new();
+    if body.trim().is_empty() {
+        return Ok(FieldValue::Object(values));
+    }
+    for (entry_base, entry) in split_top_level_bounded(base.saturating_add(1), body, ',', None)? {
+        let Some((name, (value_base, value))) = split_assignment(entry_base, entry) else {
             return Err(Error::Syntax {
-                offset: 0,
-                message: "unterminated list".to_owned(),
+                offset: trim_at(entry_base, entry).0,
+                message: "expected object field=value".to_owned(),
+            });
+        };
+        let (name_base, name) = trim_at(entry_base, name);
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(Error::Syntax {
+                offset: name_base,
+                message: "invalid object field name".to_owned(),
             });
         }
-        let body = &input[1..input.len().saturating_sub(1)];
-        if body.trim().is_empty() {
-            return Ok(FieldValue::List(Vec::new()));
+        let value = parse_value_bounded(value_base, value, depth.saturating_add(1), max_nesting)?;
+        if values.insert(name.to_owned(), value).is_some() {
+            return Err(Error::Syntax {
+                offset: name_base,
+                message: format!("duplicate object field {name}"),
+            });
         }
-        let values = split_top_level_bounded(body, ',', None)?
-            .into_iter()
-            .map(|value| parse_value_bounded(value.trim(), depth.saturating_add(1), max_nesting))
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok(FieldValue::List(values));
     }
+    Ok(FieldValue::Object(values))
+}
+
+fn parse_list(
+    base: usize,
+    input: &str,
+    depth: usize,
+    max_nesting: usize,
+) -> Result<FieldValue, Error> {
+    let body = enclosed_body(base, input, ']', "unterminated list", depth, max_nesting)?;
+    if body.trim().is_empty() {
+        return Ok(FieldValue::List(Vec::new()));
+    }
+    let values = split_top_level_bounded(base.saturating_add(1), body, ',', None)?
+        .into_iter()
+        .map(|(value_base, value)| {
+            parse_value_bounded(value_base, value, depth.saturating_add(1), max_nesting)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(FieldValue::List(values))
+}
+
+/// Checks the nesting budget, then strips the opening delimiter (already known
+/// to be one ASCII byte) and `close` from `input`.
+fn enclosed_body<'a>(
+    base: usize,
+    input: &'a str,
+    close: char,
+    unterminated: &str,
+    depth: usize,
+    max_nesting: usize,
+) -> Result<&'a str, Error> {
+    if depth >= max_nesting {
+        return Err(Error::NestingLimit { limit: max_nesting });
+    }
+    input[1..].strip_suffix(close).ok_or_else(|| Error::Syntax {
+        offset: base,
+        message: unterminated.to_owned(),
+    })
+}
+
+fn parse_scalar(base: usize, input: &str) -> Result<FieldValue, Error> {
     if input.eq_ignore_ascii_case("true") {
         return Ok(FieldValue::Bool(true));
     }
@@ -335,11 +386,15 @@ fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<
     if let Ok(value) = Ipv6Addr::from_str(input) {
         return Ok(FieldValue::Ipv6(value));
     }
-    if let Some(value) = strip_hex_prefix(input) {
-        let parsed = u64::from_str_radix(value, 16).map_err(|_| Error::Syntax {
-            offset: 0,
+    if let Some(digits) = strip_hex_prefix(input) {
+        let invalid = || Error::Syntax {
+            offset: base,
             message: format!("invalid hexadecimal integer {input}"),
-        })?;
+        };
+        if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(invalid());
+        }
+        let parsed = u64::from_str_radix(digits, 16).map_err(|_| invalid())?;
         return Ok(FieldValue::Unsigned(parsed));
     }
     if let Ok(value) = input.parse::<u64>() {
@@ -354,10 +409,10 @@ fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<
     Ok(FieldValue::Text(input.to_owned()))
 }
 
-fn parse_quoted(input: &str) -> Result<String, Error> {
+fn parse_quoted(base: usize, input: &str) -> Result<String, Error> {
     if input.len() < 2 || !input.starts_with('"') || !input.ends_with('"') {
         return Err(Error::Syntax {
-            offset: 0,
+            offset: base,
             message: "unterminated quoted string".to_owned(),
         });
     }
@@ -373,7 +428,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
                 '\\' => '\\',
                 other => {
                     return Err(Error::Syntax {
-                        offset: offset.saturating_add(1),
+                        offset: base.saturating_add(offset).saturating_add(1),
                         message: format!("unsupported escape `\\{other}`"),
                     });
                 }
@@ -383,7 +438,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
             escaped = true;
         } else if character == '"' {
             return Err(Error::Syntax {
-                offset: offset.saturating_add(1),
+                offset: base.saturating_add(offset).saturating_add(1),
                 message: "unescaped quote in quoted string".to_owned(),
             });
         } else {
@@ -392,37 +447,37 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
     }
     if escaped {
         return Err(Error::Syntax {
-            offset: input.len().saturating_sub(1),
+            offset: base.saturating_add(input.len().saturating_sub(1)),
             message: "trailing escape".to_owned(),
         });
     }
     Ok(output)
 }
 
-fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, Error> {
-    let mut scanner = TopLevelScanner::merging_brackets(input);
-    loop {
-        match scanner.next_top_level() {
-            Ok(Some((offset, '='))) => {
-                return Ok(Some((&input[..offset], &input[offset.saturating_add(1)..])));
-            }
-            Ok(Some(_)) => {}
-            Ok(None) | Err(ScanFailure::Unterminated) => return Ok(None),
-            Err(ScanFailure::Unbalanced { offset, .. }) => {
-                return Err(Error::Syntax {
-                    offset,
-                    message: "unbalanced delimiter".to_owned(),
-                });
-            }
+type Assignment<'a> = (&'a str, (usize, &'a str));
+
+/// Callers pass elements that `split_top_level_bounded` already balance-checked,
+/// so the scan cannot fail.
+fn split_assignment(base: usize, input: &str) -> Option<Assignment<'_>> {
+    let mut scanner = TopLevelScanner::new(input);
+    while let Ok(Some((offset, character))) = scanner.next_top_level() {
+        if character == '=' {
+            let value = offset.saturating_add(1);
+            return Some((
+                &input[..offset],
+                (base.saturating_add(value), &input[value..]),
+            ));
         }
     }
+    None
 }
 
 fn split_top_level_bounded(
+    base: usize,
     input: &str,
     delimiter: char,
     maximum_parts: Option<usize>,
-) -> Result<Vec<&str>, Error> {
+) -> Result<Vec<(usize, &str)>, Error> {
     let mut result = Vec::new();
     let mut start = 0usize;
     let mut scanner = TopLevelScanner::new(input);
@@ -430,13 +485,13 @@ fn split_top_level_bounded(
         Ok(next) => next,
         Err(ScanFailure::Unbalanced { offset, character }) => {
             return Err(Error::Syntax {
-                offset,
+                offset: base.saturating_add(offset),
                 message: format!("unexpected '{character}'"),
             });
         }
         Err(ScanFailure::Unterminated) => {
             return Err(Error::Syntax {
-                offset: input.len(),
+                offset: base.saturating_add(input.len()),
                 message: "unterminated quote or delimiter".to_owned(),
             });
         }
@@ -449,14 +504,20 @@ fn split_top_level_bounded(
         {
             return Err(Error::LayerLimit { limit: maximum });
         }
-        result.push(&input[start..offset]);
+        result.push((base.saturating_add(start), &input[start..offset]));
         start = offset.saturating_add(character.len_utf8());
     }
     if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
         return Err(Error::LayerLimit { limit: maximum });
     }
-    result.push(&input[start..]);
+    result.push((base.saturating_add(start), &input[start..]));
     Ok(result)
+}
+
+fn trim_at(base: usize, text: &str) -> (usize, &str) {
+    let trimmed = text.trim_start();
+    let leading = text.len().saturating_sub(trimmed.len());
+    (base.saturating_add(leading), trimmed.trim_end())
 }
 
 struct TopLevelScanner<'a> {
@@ -466,7 +527,6 @@ struct TopLevelScanner<'a> {
     paren_depth: usize,
     list_depth: usize,
     object_depth: usize,
-    merge_brackets: bool,
 }
 
 impl<'a> TopLevelScanner<'a> {
@@ -478,14 +538,6 @@ impl<'a> TopLevelScanner<'a> {
             paren_depth: 0,
             list_depth: 0,
             object_depth: 0,
-            merge_brackets: false,
-        }
-    }
-
-    fn merging_brackets(input: &'a str) -> Self {
-        Self {
-            merge_brackets: true,
-            ..Self::new(input)
         }
     }
 
@@ -522,23 +574,12 @@ impl<'a> TopLevelScanner<'a> {
                     };
                     self.paren_depth = depth;
                 }
-                '[' => {
-                    if self.merge_brackets {
-                        self.paren_depth = self.paren_depth.saturating_add(1);
-                    } else {
-                        self.list_depth = self.list_depth.saturating_add(1);
-                    }
-                }
+                '[' => self.list_depth = self.list_depth.saturating_add(1),
                 ']' => {
-                    let depth = if self.merge_brackets {
-                        &mut self.paren_depth
-                    } else {
-                        &mut self.list_depth
-                    };
-                    let Some(remaining) = depth.checked_sub(1) else {
+                    let Some(depth) = self.list_depth.checked_sub(1) else {
                         return Err(unbalanced(character));
                     };
-                    *depth = remaining;
+                    self.list_depth = depth;
                 }
                 _ if self.paren_depth == 0 && self.list_depth == 0 && self.object_depth == 0 => {
                     return Ok(Some((offset, character)));
@@ -601,7 +642,7 @@ mod tests {
 
         for (source, expected) in cases {
             assert_eq!(
-                parse_value_bounded(source, 0, 8).unwrap(),
+                parse_value_bounded(0, source, 0, 8).unwrap(),
                 expected,
                 "{source}"
             );
@@ -611,7 +652,7 @@ mod tests {
     #[test]
     fn quoted_values_decode_supported_escapes_and_reject_ambiguous_strings() {
         assert_eq!(
-            parse_quoted(r#""line\nreturn\rindent\tquote\"slash\\""#).unwrap(),
+            parse_quoted(0, r#""line\nreturn\rindent\tquote\"slash\\""#).unwrap(),
             "line\nreturn\rindent\tquote\"slash\\"
         );
 
@@ -621,19 +662,23 @@ mod tests {
             (r#""a"b""#, "unescaped quote in quoted string"),
             (r#""tail\""#, "trailing escape"),
         ] {
-            let error = parse_quoted(source).expect_err(source);
+            let error = parse_quoted(0, source).expect_err(source);
             assert!(error.to_string().contains(expected), "{source}: {error}");
         }
+        assert!(matches!(
+            parse_quoted(10, r#""tail\""#),
+            Err(Error::Syntax { offset: 16, .. })
+        ));
     }
 
     #[test]
     fn byte_literals_require_an_opening_quote() {
         assert_eq!(
-            parse_value_bounded(r#"bytes("abc")"#, 0, 8).unwrap(),
+            parse_value_bounded(0, r#"bytes("abc")"#, 0, 8).unwrap(),
             FieldValue::Bytes(bytes::Bytes::from_static(b"abc"))
         );
         for source in [r#"bytes(abc")"#, r#"hex(x0a")"#, r#"bytes(a")"#] {
-            let error = parse_value_bounded(source, 0, 8).expect_err(source);
+            let error = parse_value_bounded(0, source, 0, 8).expect_err(source);
             assert!(
                 error.to_string().contains("unterminated quoted string"),
                 "{source}: {error}"
@@ -642,25 +687,58 @@ mod tests {
     }
 
     #[test]
+    fn hex_literals_decode_digit_pairs_of_either_case() {
+        for (source, expected) in [
+            (r#"hex("")"#, &[][..]),
+            (r#"hex("0aFf")"#, &[0x0a, 0xff]),
+            (r#" hex( "00Ab12" ) "#, &[0x00, 0xab, 0x12]),
+        ] {
+            assert_eq!(
+                parse_value_bounded(0, source, 0, 8).unwrap(),
+                FieldValue::Bytes(bytes::Bytes::copy_from_slice(expected)),
+                "{source}"
+            );
+        }
+        for source in [
+            r#"hex("0")"#,
+            r#"hex("+1")"#,
+            r#"hex("0g")"#,
+            "hex(\"\u{e9}\")",
+        ] {
+            let error = parse_value_bounded(0, source, 0, 8).expect_err(source);
+            assert!(
+                matches!(&error, Error::Syntax { offset: 4, message }
+                    if message == "hex literal requires pairs of hexadecimal digits"),
+                "{source}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
     fn top_level_splitting_ignores_nested_and_quoted_delimiters() {
         assert_eq!(
-            split_top_level_bounded(r#"alpha(value="x/y")/beta(values=[1,2])"#, '/', None).unwrap(),
-            [r#"alpha(value="x/y")"#, "beta(values=[1,2])"]
+            split_top_level_bounded(0, r#"alpha(value="x/y")/beta(values=[1,2])"#, '/', None)
+                .unwrap(),
+            [(0, r#"alpha(value="x/y")"#), (19, "beta(values=[1,2])")]
         );
         assert_eq!(
-            split_top_level_bounded(r#"a="x=y",b=[1,2]"#, ',', None).unwrap(),
-            [r#"a="x=y""#, "b=[1,2]"]
+            split_top_level_bounded(10, r#"a="x=y",b=[1,2]"#, ',', None).unwrap(),
+            [(10, r#"a="x=y""#), (18, "b=[1,2]")]
         );
         assert!(matches!(
-            split_top_level_bounded("a/b", '/', Some(1)),
+            split_top_level_bounded(0, "a/b", '/', Some(1)),
             Err(Error::LayerLimit { limit: 1 })
         ));
         assert!(matches!(
-            split_top_level_bounded("a]", '/', None),
+            split_top_level_bounded(0, "a]", '/', None),
             Err(Error::Syntax { offset: 1, .. })
         ));
         assert!(matches!(
-            split_top_level_bounded("a([", '/', None),
+            split_top_level_bounded(10, "a]", '/', None),
+            Err(Error::Syntax { offset: 11, .. })
+        ));
+        assert!(matches!(
+            split_top_level_bounded(0, "a([", '/', None),
             Err(Error::Syntax { offset: 3, .. })
         ));
     }
@@ -668,6 +746,7 @@ mod tests {
     #[test]
     fn layer_arguments_reject_duplicates_missing_values_and_unbalanced_delimiters() {
         let (name, fields) = parse_layer(
+            0,
             r#"TCP(source_port=1, options=[1, [2, 3]], label="a,b")"#,
             4,
             8,
@@ -676,7 +755,7 @@ mod tests {
         assert_eq!(name, "tcp");
         assert_eq!(fields.len(), 3);
 
-        let duplicate = parse_layer("tcp(source_port=1,SOURCE_PORT=2)", 4, 8).unwrap_err();
+        let duplicate = parse_layer(0, "tcp(source_port=1,SOURCE_PORT=2)", 4, 8).unwrap_err();
         assert!(matches!(
             duplicate,
             Error::DuplicateField {
@@ -694,7 +773,7 @@ mod tests {
             ("tcp(field=)", "missing field value"),
             ("tcp(field=[1,2)", "unterminated quote or delimiter"),
         ] {
-            let error = parse_layer(source, 0, 8).expect_err(source);
+            let error = parse_layer(0, source, 0, 8).expect_err(source);
             assert!(error.to_string().contains(expected), "{source}: {error}");
         }
     }
@@ -756,24 +835,43 @@ mod tests {
     #[test]
     fn recursive_list_limit_is_checked_before_descending() {
         assert_eq!(
-            parse_value_bounded("[]", 0, 1).unwrap(),
+            parse_value_bounded(0, "[]", 0, 1).unwrap(),
             FieldValue::List(Vec::new())
         );
         assert!(matches!(
-            parse_value_bounded("[]", 0, 0),
+            parse_value_bounded(0, "[]", 0, 0),
             Err(Error::NestingLimit { limit: 0 })
         ));
         assert!(matches!(
-            parse_value_bounded("[[1]]", 0, 1),
+            parse_value_bounded(0, "[[1]]", 0, 1),
             Err(Error::NestingLimit { limit: 1 })
         ));
         assert!(matches!(
-            parse_value_bounded("[1", 0, 8),
+            parse_value_bounded(0, "[1", 0, 8),
             Err(Error::Syntax { .. })
         ));
-        assert!(matches!(
-            parse_value_bounded("0xgg", 0, 8),
-            Err(Error::Syntax { .. })
-        ));
+    }
+
+    #[test]
+    fn hexadecimal_integers_take_bare_hex_digits_only() {
+        assert_eq!(
+            parse_value_bounded(0, "0x40", 0, 8).unwrap(),
+            FieldValue::Unsigned(64)
+        );
+        for source in [
+            "0x",
+            "0xgg",
+            "0x+40",
+            "0x-40",
+            "0x1_0",
+            "0x10000000000000000",
+        ] {
+            let error = parse_value_bounded(0, source, 0, 8).expect_err(source);
+            assert!(
+                matches!(&error, Error::Syntax { offset: 0, message }
+                    if message == &format!("invalid hexadecimal integer {source}")),
+                "{source}: {error:?}"
+            );
+        }
     }
 }

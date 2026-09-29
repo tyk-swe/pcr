@@ -176,11 +176,7 @@ fn collect(
     let mut options = prepared.options();
     let mut requirements = rules.requirements();
     if let Some(filter) = filter {
-        let next = filter.requirements();
-        requirements.stream_index |= next.stream_index;
-        requirements.tcp_stream |= next.tcp_stream;
-        requirements.udp_stream |= next.udp_stream;
-        requirements.timestamp |= next.timestamp;
+        requirements = requirements.union(filter.requirements());
     }
     options.plan = analysis::Plan::physical(requirements);
     let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);

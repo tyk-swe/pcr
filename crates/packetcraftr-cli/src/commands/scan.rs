@@ -61,14 +61,8 @@ pub(super) fn run(
         ));
     }
     if arguments.connect && !arguments.route.supports_kernel_tcp() {
-        return Err(CliError::from_classification(
-            packetcraftr_core::error::Classification::new(
-                "capability.scan_tcp_route",
-                packetcraftr_core::error::Kind::Capability,
-                Some("omit packet interface/source/link overrides for ordinary TCP"),
-            ),
-            "TCP connect uses kernel route and source selection",
-            Vec::new(),
+        return Err(CliError::classified(
+            packetcraftr::scan::Error::UnsupportedTcpRoute,
         ));
     }
     let Args {
@@ -142,13 +136,7 @@ pub(super) fn run(
     if connect {
         return connect::run(&request, policy, format, stream);
     }
-    let workflow = prepare_workflow(
-        &route,
-        policy.into_policy(),
-        request.timeout,
-        MAX_TEMPLATE_PACKETS,
-        queue_limits,
-    )?;
+    let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
     let client = workflow.client(Runtime::Workflow);
     let request = packetcraftr::scan::Request {
         route: workflow.route,
@@ -156,20 +144,19 @@ pub(super) fn run(
         ..request
     };
     execution::run_workflow(
-        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Scan,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 let collector = packetcraftr::scan::Collector::default();
                 let report = client
                     .scan(request.clone(), collector.clone())
                     .map_err(rendering::scan_error)?;
                 collector.finish(report).map_err(rendering::scan_error)
             }),
-            run_with_events: Box::new(|_, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .scan(request.clone(), emit)
                     .map_err(rendering::scan_error)
@@ -188,5 +175,3 @@ pub(super) fn run(
         },
     )
 }
-
-const MAX_TEMPLATE_PACKETS: usize = 1;

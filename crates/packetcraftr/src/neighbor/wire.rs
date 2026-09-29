@@ -12,5 +12,5 @@ pub(super) use reply::match_neighbor_response;
 pub(super) use request::build_request_frame;
 
 pub(super) fn is_unicast_mac(address: MacAddress) -> bool {
-    address.0 != [0; 6] && address.0 != [0xff; 6] && address.0[0] & 1 == 0
+    address.0 != [0; 6] && address.0[0] & 1 == 0
 }

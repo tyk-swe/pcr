@@ -25,7 +25,9 @@ pub(crate) struct Coverage {
 pub(crate) fn run(data: &[u8]) -> Coverage {
     let config = |index: usize, fallback: u8| data.get(index).copied().unwrap_or(fallback);
     let idle_expiry = if config(4, 4) == u8::MAX {
-        Duration::MAX
+        // `Reassembler::new` rejects an expiry the monotonic clock cannot add
+        // to the present, so "never expires" is a decade rather than `Duration::MAX`.
+        Duration::from_secs(10 * 365 * 24 * 60 * 60)
     } else {
         Duration::from_millis(u64::from(config(4, 4) % 16).saturating_add(1))
     };

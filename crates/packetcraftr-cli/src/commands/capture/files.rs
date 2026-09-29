@@ -15,6 +15,7 @@ use packetcraftr_core::{
 use std::{
     fs::File,
     io::{self, Seek, Write},
+    mem,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -95,7 +96,7 @@ pub(super) enum Error {
     Invalid(&'static str),
     #[error("capture output already exists: {}",.0.display())]
     Exists(PathBuf),
-    #[error("capture file {}: {source}",.path.display())]
+    #[error("capture file {}",.path.display())]
     Io {
         path: PathBuf,
         #[source]
@@ -157,6 +158,19 @@ impl<W: Write> Write for Counted<W> {
 struct Slot {
     handle: File,
     report: FileReport,
+}
+fn fresh_report(path: String, slot: usize, generation: u64) -> FileReport {
+    FileReport {
+        path,
+        slot: slot as u32,
+        generation,
+        frames: 0,
+        capture_bytes: 0,
+        encoded_bytes: None,
+        first_source_frame: None,
+        last_source_frame: None,
+        finalized: false,
+    }
 }
 struct Active {
     failed: bool,
@@ -260,7 +274,7 @@ impl Files {
             .rotate_after
             .is_some_and(|interval| elapsed.saturating_sub(active.opened_at) >= interval);
         if active.writer.frames_written() > 0 && (size_boundary || time_boundary) {
-            self.finish_active()?;
+            self.finish()?;
             let slot = if self.slots.len() < self.options.max_files {
                 self.slots.len()
             } else if self.options.retention == Retention::Ring {
@@ -297,6 +311,7 @@ impl Files {
         }
     }
     fn open(&mut self, slot: usize, elapsed: Duration) -> Result<(), Error> {
+        let generation = self.generation.checked_add(1).ok_or(Error::Counters)?;
         if slot == self.slots.len() {
             let path = self.options.slot_path(slot)?;
             let temporary =
@@ -312,17 +327,7 @@ impl Files {
                 })?;
             self.slots.push(Slot {
                 handle,
-                report: FileReport {
-                    path: path.display().to_string(),
-                    slot: slot as u32,
-                    generation: 0,
-                    frames: 0,
-                    capture_bytes: 0,
-                    encoded_bytes: None,
-                    first_source_frame: None,
-                    last_source_frame: None,
-                    finalized: false,
-                },
+                report: fresh_report(path.display().to_string(), slot, generation),
             });
         } else {
             let previous = &self.slots[slot].report;
@@ -344,19 +349,10 @@ impl Files {
                 path: PathBuf::from(&file.report.path),
                 source,
             })?;
+            file.report = fresh_report(mem::take(&mut file.report.path), slot, generation);
         }
-        self.generation = self
-            .generation
-            .checked_add(1)
-            .ok_or(Error::Invalid("capture generation counter overflow"))?;
+        self.generation = generation;
         let file = &mut self.slots[slot];
-        file.report.generation = self.generation;
-        file.report.frames = 0;
-        file.report.capture_bytes = 0;
-        file.report.encoded_bytes = None;
-        file.report.first_source_frame = None;
-        file.report.last_source_frame = None;
-        file.report.finalized = false;
         let handle = file.handle.try_clone().map_err(|source| Error::Io {
             path: PathBuf::from(&file.report.path),
             source,
@@ -379,20 +375,9 @@ impl Files {
             slot,
             opened_at: elapsed,
         });
-        if let Some(limit) = self.options.rotate_bytes
-            && self.header_bytes > limit
-        {
-            return Err(Error::FrameTooLarge {
-                required: self.header_bytes,
-                limit,
-            });
-        }
         Ok(())
     }
     pub(super) fn finish(&mut self) -> Result<(), Error> {
-        self.finish_active()
-    }
-    fn finish_active(&mut self) -> Result<(), Error> {
         let Some(active) = self.active.take() else {
             return Ok(());
         };
@@ -434,12 +419,7 @@ impl Files {
         files.sort_by_key(|file| file.generation);
         FilesReport {
             retention: self.options.retention,
-            compression: match self.options.compression {
-                Compression::None => "none",
-                Compression::Gzip => "gzip",
-                Compression::Zstd => "zstd",
-            }
-            .to_owned(),
+            compression: self.options.compression.format().into(),
             rotate_bytes: self.options.rotate_bytes,
             rotate_interval_ms: self
                 .options
@@ -458,7 +438,7 @@ impl Files {
 }
 impl Drop for Files {
     fn drop(&mut self) {
-        let _ = self.finish_active();
+        let _ = self.finish();
     }
 }
 
@@ -630,6 +610,22 @@ mod tests {
             .expect_err("elapsed time regressed");
         assert_eq!(error.classification().code, "internal.capture_files");
         assert_eq!(error.classification().kind, Kind::Internal);
+    }
+    #[test]
+    fn io_failures_state_the_operating_system_error_only_as_the_cause() {
+        let error = Error::Io {
+            path: PathBuf::from("trace.pcapng"),
+            source: io::Error::other("disk on fire"),
+        };
+        assert_eq!(error.to_string(), "capture file trace.pcapng");
+        assert_eq!(
+            std::error::Error::source(&error).unwrap().to_string(),
+            "disk on fire"
+        );
+        assert_eq!(
+            packetcraftr_core::error::source_chain(&error),
+            ["disk on fire"]
+        );
     }
     #[test]
     fn preexisting_files_and_impossible_metadata_budgets_are_never_overwritten() {

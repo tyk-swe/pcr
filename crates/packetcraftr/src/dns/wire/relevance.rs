@@ -6,6 +6,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::dns::{CLASS_IN, TYPE_OPT};
 use crate::dns::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
 
+const TYPE_NS: u16 = 2;
+const TYPE_CNAME: u16 = 5;
+const TYPE_SOA: u16 = 6;
+const TYPE_DS: u16 = 43;
+const TYPE_RRSIG: u16 = 46;
+const TYPE_NSEC: u16 = 47;
+const TYPE_NSEC3: u16 = 50;
+
 pub(super) struct RelevantRecords {
     pub(super) answers: Vec<Record>,
     pub(super) authorities: Vec<Record>,
@@ -31,22 +39,32 @@ pub(super) fn filter_relevant_records(
         &accepted_authorities,
     );
     let accepted_additionals = accepted_additionals(&references, &additionals);
-    let rejected = audit_rejected_records(
-        &answers,
+    let mut audit = RejectionAudit::new(rejected_limit);
+    let answers = audit.retain(
+        Section::Answer,
+        answers,
         &accepted_answers,
-        &authorities,
+        "record owner/type is unrelated to the validated question or CNAME chain",
+    );
+    let authorities = audit.retain(
+        Section::Authority,
+        authorities,
         &accepted_authorities,
-        &additionals,
+        "authority is not an IN-class SOA/NS/DS/NSEC/NSEC3 record (or its RRSIG) for the validated question's zone",
+    );
+    let additionals = audit.retain(
+        Section::Additional,
+        additionals,
         &accepted_additionals,
-        rejected_limit,
+        "additional record is not IN-class address glue referenced by accepted data",
     );
 
     RelevantRecords {
-        answers: retain_accepted(answers, &accepted_answers),
-        authorities: retain_accepted(authorities, &accepted_authorities),
-        additionals: retain_accepted(additionals, &accepted_additionals),
-        rejected_records: rejected.records,
-        rejected_record_count: rejected.count,
+        answers,
+        authorities,
+        additionals,
+        rejected_records: audit.records,
+        rejected_record_count: audit.count,
     }
 }
 
@@ -81,7 +99,9 @@ fn accepted_answers(
             };
             let keep = matches!(record.value, RecordValue::Cname(_))
                 || query_type == QueryType::ANY
-                || record.value.type_code() == query_type.code();
+                || record.value.type_code() == query_type.code()
+                || rrsig_covered_type(&record.value)
+                    .is_some_and(|covered| covered == TYPE_CNAME || covered == query_type.code());
             if let Some(slot) = accepted.get_mut(index) {
                 *slot = keep;
             }
@@ -114,14 +134,59 @@ fn accepted_authorities(relevant_names: &[Name], authorities: &[Record]) -> Vec<
             }
         }
     }
-    authorities
+    let keys: Vec<_> = authorities
         .iter()
-        .map(|record| {
+        .map(|record| canonical(&record.owner))
+        .collect();
+    let apexes: HashSet<&[Vec<u8>]> = authorities
+        .iter()
+        .zip(&keys)
+        .filter(|(record, key)| {
             record.class == CLASS_IN
-                && ancestors.contains(&canonical(&record.owner))
+                && ancestors.contains(*key)
                 && matches!(record.value, RecordValue::Ns(_) | RecordValue::Soa { .. })
         })
+        .map(|(_, key)| key.as_slice())
+        .collect();
+    let below_apex = |key: &[Vec<u8>]| {
+        (0..=key.len()).any(|start| {
+            key.get(start..)
+                .is_some_and(|suffix| apexes.contains(suffix))
+        })
+    };
+    authorities
+        .iter()
+        .zip(&keys)
+        .map(|(record, key)| {
+            record.class == CLASS_IN
+                && match rrsig_covered_type(&record.value)
+                    .unwrap_or_else(|| record.value.type_code())
+                {
+                    TYPE_NS | TYPE_SOA | TYPE_DS => ancestors.contains(key),
+                    TYPE_NSEC => ancestors.contains(key) || below_apex(key),
+                    TYPE_NSEC3 => {
+                        ancestors.contains(key)
+                            || key
+                                .split_first()
+                                .is_some_and(|(_, parent)| ancestors.contains(parent))
+                    }
+                    _ => false,
+                }
+        })
         .collect()
+}
+
+// Core decodes RRSIG, DS, NSEC and NSEC3 as `Unknown`; an RRSIG's covered type leads its RDATA.
+fn rrsig_covered_type(value: &RecordValue) -> Option<u16> {
+    match value {
+        RecordValue::Unknown {
+            type_code: TYPE_RRSIG,
+            rdata,
+        } => rdata
+            .first_chunk::<2>()
+            .map(|covered| u16::from_be_bytes(*covered)),
+        _ => None,
+    }
 }
 
 fn referenced_names(
@@ -158,6 +223,41 @@ struct RejectionAudit {
 }
 
 impl RejectionAudit {
+    fn new(limit: usize) -> Self {
+        Self {
+            records: Vec::new(),
+            count: 0,
+            limit,
+        }
+    }
+
+    fn retain(
+        &mut self,
+        section: Section,
+        records: Vec<Record>,
+        accepted: &[bool],
+        default_reason: &str,
+    ) -> Vec<Record> {
+        let mut kept = Vec::new();
+        for (index, (record, accepted)) in records
+            .into_iter()
+            .zip(accepted.iter().copied())
+            .enumerate()
+        {
+            if accepted {
+                kept.push(record);
+            } else {
+                self.reject(
+                    section,
+                    index,
+                    &record,
+                    rejection_reason(&record, default_reason),
+                );
+            }
+        }
+        kept
+    }
+
     fn reject(&mut self, section: Section, index: usize, record: &Record, reason: &str) {
         self.count = self.count.saturating_add(1);
         if self.records.len() < self.limit {
@@ -170,82 +270,6 @@ impl RejectionAudit {
             });
         }
     }
-}
-
-fn audit_rejected_records(
-    answers: &[Record],
-    accepted_answers: &[bool],
-    authorities: &[Record],
-    accepted_authorities: &[bool],
-    additionals: &[Record],
-    accepted_additionals: &[bool],
-    limit: usize,
-) -> RejectionAudit {
-    let mut audit = RejectionAudit {
-        records: Vec::new(),
-        count: 0,
-        limit,
-    };
-    for (index, (record, accepted)) in answers
-        .iter()
-        .zip(accepted_answers.iter().copied())
-        .enumerate()
-    {
-        if !accepted {
-            audit.reject(
-                Section::Answer,
-                index,
-                record,
-                rejection_reason(
-                    record,
-                    "record owner/type is unrelated to the validated question or CNAME chain",
-                ),
-            );
-        }
-    }
-    for (index, (record, accepted)) in authorities
-        .iter()
-        .zip(accepted_authorities.iter().copied())
-        .enumerate()
-    {
-        if !accepted {
-            audit.reject(
-                Section::Authority,
-                index,
-                record,
-                rejection_reason(
-                    record,
-                    "authority is not an IN-class SOA/NS ancestor of the validated question",
-                ),
-            );
-        }
-    }
-    for (index, (record, accepted)) in additionals
-        .iter()
-        .zip(accepted_additionals.iter().copied())
-        .enumerate()
-    {
-        if !accepted {
-            audit.reject(
-                Section::Additional,
-                index,
-                record,
-                rejection_reason(
-                    record,
-                    "additional record is not IN-class address glue referenced by accepted data",
-                ),
-            );
-        }
-    }
-    audit
-}
-
-fn retain_accepted(records: Vec<Record>, accepted: &[bool]) -> Vec<Record> {
-    records
-        .into_iter()
-        .zip(accepted.iter().copied())
-        .filter_map(|(record, accepted)| accepted.then_some(record))
-        .collect()
 }
 
 fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
@@ -322,5 +346,301 @@ mod tests {
         let one = Name::from_labels([Bytes::from_static(b"a.b")]).unwrap();
         let two = Name::from_labels([Bytes::from_static(b"a"), Bytes::from_static(b"b")]).unwrap();
         assert_ne!(canonical(&one), canonical(&two));
+    }
+
+    fn record(owner: &str, value: RecordValue) -> Record {
+        Record {
+            owner: owner.parse().unwrap(),
+            class: CLASS_IN,
+            ttl: 1,
+            value,
+        }
+    }
+
+    fn unknown(type_code: u16, rdata: &[u8]) -> RecordValue {
+        RecordValue::Unknown {
+            type_code,
+            rdata: bytes::Bytes::copy_from_slice(rdata),
+        }
+    }
+
+    fn rrsig(covered: u16) -> RecordValue {
+        let mut rdata = covered.to_be_bytes().to_vec();
+        rdata.extend_from_slice(&[13, 2, 0, 0, 1, 44]);
+        unknown(46, &rdata)
+    }
+
+    fn soa() -> RecordValue {
+        RecordValue::Soa {
+            primary_name_server: "ns.example.test".parse().unwrap(),
+            responsible_mailbox: "hostmaster.example.test".parse().unwrap(),
+            serial: 1,
+            refresh: 1,
+            retry: 1,
+            expire: 1,
+            minimum: 1,
+        }
+    }
+
+    fn a() -> RecordValue {
+        RecordValue::A("192.0.2.1".parse().unwrap())
+    }
+
+    fn filter(
+        query_name: &str,
+        query_type: QueryType,
+        answers: Vec<Record>,
+        authorities: Vec<Record>,
+    ) -> RelevantRecords {
+        filter_relevant_records(
+            &query_name.parse().unwrap(),
+            query_type,
+            answers,
+            authorities,
+            Vec::new(),
+            16,
+        )
+    }
+
+    fn kept(records: &[Record]) -> Vec<(String, u16)> {
+        records
+            .iter()
+            .map(|record| (record.owner.to_string(), record.value.type_code()))
+            .collect()
+    }
+
+    fn owned(expected: &[(&str, u16)]) -> Vec<(String, u16)> {
+        expected
+            .iter()
+            .map(|(owner, type_code)| ((*owner).to_owned(), *type_code))
+            .collect()
+    }
+
+    #[test]
+    fn rejected_records_are_audited_by_section_and_bounded_by_the_limit() {
+        let mut other_class = record("www.example.test", a());
+        other_class.class = 3;
+        let answers = vec![
+            record(
+                "www.example.test",
+                RecordValue::Cname("edge.example.test".parse().unwrap()),
+            ),
+            record("other.test", a()),
+            record("edge.example.test", a()),
+            other_class,
+        ];
+        let authorities = vec![
+            record(
+                "example.test",
+                RecordValue::Ns("ns.example.test".parse().unwrap()),
+            ),
+            record("other.test", soa()),
+            record("example.test", soa()),
+        ];
+        let additionals = vec![
+            record("ns.example.test", a()),
+            record("stray.test", a()),
+            record("ns.example.test", unknown(41, &[])),
+            record("ns.example.test", RecordValue::Txt(Vec::new())),
+        ];
+        let filter = |limit| {
+            filter_relevant_records(
+                &"www.example.test".parse().unwrap(),
+                QueryType::A,
+                answers.clone(),
+                authorities.clone(),
+                additionals.clone(),
+                limit,
+            )
+        };
+        let rejected = |section, index, owner: &str, type_code, reason: &str| RejectedRecord {
+            section,
+            index,
+            owner: owner.to_owned(),
+            type_code,
+            reason: reason.to_owned(),
+        };
+        let unrelated = "record owner/type is unrelated to the validated question or CNAME chain";
+        let not_in_zone = "authority is not an IN-class SOA/NS/DS/NSEC/NSEC3 record (or its RRSIG) for the validated question's zone";
+        let not_glue = "additional record is not IN-class address glue referenced by accepted data";
+        let all = [
+            rejected(Section::Answer, 1, "other.test.", 1, unrelated),
+            rejected(
+                Section::Answer,
+                3,
+                "www.example.test.",
+                1,
+                "record class is not IN",
+            ),
+            rejected(Section::Authority, 1, "other.test.", 6, not_in_zone),
+            rejected(Section::Additional, 1, "stray.test.", 1, not_glue),
+            rejected(
+                Section::Additional,
+                2,
+                "ns.example.test.",
+                41,
+                "EDNS OPT metadata is not accepted as question data",
+            ),
+            rejected(Section::Additional, 3, "ns.example.test.", 16, not_glue),
+        ];
+
+        let unbounded = filter(16);
+        assert_eq!(
+            kept(&unbounded.answers),
+            owned(&[("www.example.test.", 5), ("edge.example.test.", 1)])
+        );
+        assert_eq!(
+            kept(&unbounded.authorities),
+            owned(&[("example.test.", 2), ("example.test.", 6)])
+        );
+        assert_eq!(
+            kept(&unbounded.additionals),
+            owned(&[("ns.example.test.", 1)])
+        );
+        assert_eq!(unbounded.rejected_record_count, 6);
+        assert_eq!(unbounded.rejected_records, all);
+
+        let bounded = filter(4);
+        assert_eq!(bounded.rejected_record_count, 6);
+        assert_eq!(bounded.rejected_records, all[..4]);
+        assert_eq!(kept(&bounded.answers), kept(&unbounded.answers));
+        assert_eq!(kept(&bounded.authorities), kept(&unbounded.authorities));
+        assert_eq!(kept(&bounded.additionals), kept(&unbounded.additionals));
+
+        let unlisted = filter(0);
+        assert_eq!(unlisted.rejected_record_count, 6);
+        assert!(unlisted.rejected_records.is_empty());
+    }
+
+    #[test]
+    fn rrsig_covering_the_query_type_at_the_question_owner_is_kept() {
+        let answers = vec![
+            record("example.test", a()),
+            record("example.test", rrsig(1)),
+            record("example.test", rrsig(16)),
+            record("other.test", rrsig(1)),
+            record("example.test", unknown(46, &[0])),
+        ];
+        let relevant = filter("EXAMPLE.test", QueryType::A, answers, Vec::new());
+        assert_eq!(
+            kept(&relevant.answers),
+            owned(&[("example.test.", 1), ("example.test.", 46)])
+        );
+        assert_eq!(relevant.rejected_record_count, 3);
+        assert!(
+            relevant
+                .rejected_records
+                .iter()
+                .all(|rejected| rejected.type_code == 46 && rejected.reason.contains("unrelated"))
+        );
+    }
+
+    #[test]
+    fn rrsig_over_a_cname_chain_owner_is_kept_for_the_cname_and_the_query_type() {
+        let answers = vec![
+            record(
+                "www.example.test",
+                RecordValue::Cname("edge.example.test".parse().unwrap()),
+            ),
+            record("www.example.test", rrsig(5)),
+            record("edge.example.test", a()),
+            record("edge.example.test", rrsig(1)),
+            record("edge.example.test", rrsig(28)),
+        ];
+        let relevant = filter("www.example.test", QueryType::A, answers, Vec::new());
+        assert_eq!(
+            kept(&relevant.answers),
+            owned(&[
+                ("www.example.test.", 5),
+                ("www.example.test.", 46),
+                ("edge.example.test.", 1),
+                ("edge.example.test.", 46),
+            ])
+        );
+        assert_eq!(relevant.rejected_record_count, 1);
+    }
+
+    #[test]
+    fn negative_answer_proofs_below_the_soa_apex_are_kept() {
+        let authorities = vec![
+            record("example.test", soa()),
+            record("example.test", rrsig(6)),
+            record(
+                "0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.example.test",
+                unknown(50, &[1, 0, 0, 0]),
+            ),
+            record("0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.example.test", rrsig(50)),
+            record("a.example.test", unknown(47, &[0])),
+            record("a.example.test", rrsig(47)),
+            record("example.test", unknown(43, &[0, 1, 13, 2])),
+            record("example.test", rrsig(43)),
+        ];
+        let relevant = filter(
+            "missing.example.test",
+            QueryType::A,
+            Vec::new(),
+            authorities,
+        );
+        assert_eq!(relevant.authorities.len(), 8);
+        assert_eq!(relevant.rejected_record_count, 0);
+    }
+
+    #[test]
+    fn referral_denial_of_ds_under_an_ancestor_is_kept() {
+        let authorities = vec![
+            record(
+                "child.example.test",
+                RecordValue::Ns("ns.child.example.test".parse().unwrap()),
+            ),
+            record("child.example.test", unknown(47, &[0])),
+            record("child.example.test", rrsig(47)),
+            record("child.example.test", rrsig(43)),
+            record(
+                "vd3hi0q5a1nmfj0rnmc6a5d1k0n5b4ec.example.test",
+                unknown(50, &[1, 1, 0, 0]),
+            ),
+            record("vd3hi0q5a1nmfj0rnmc6a5d1k0n5b4ec.example.test", rrsig(50)),
+        ];
+        let relevant = filter(
+            "www.child.example.test",
+            QueryType::A,
+            Vec::new(),
+            authorities,
+        );
+        assert_eq!(relevant.authorities.len(), 6);
+        assert_eq!(relevant.rejected_record_count, 0);
+    }
+
+    #[test]
+    fn unrelated_dnssec_authority_records_are_still_rejected() {
+        let mut other_class = record("example.test", unknown(47, &[0]));
+        other_class.class = 3;
+        let authorities = vec![
+            record("example.test", soa()),
+            record("other.test", unknown(47, &[0])),
+            record("hash.other.test", unknown(50, &[1, 0, 0, 0])),
+            record("other.test", unknown(43, &[0, 1, 13, 2])),
+            record("other.test", rrsig(6)),
+            record("example.test", rrsig(1)),
+            record("example.test", unknown(46, &[0])),
+            record("example.test", unknown(48, &[1, 1, 3, 13])),
+            other_class,
+        ];
+        let relevant = filter(
+            "missing.example.test",
+            QueryType::A,
+            Vec::new(),
+            authorities,
+        );
+        assert_eq!(kept(&relevant.authorities), owned(&[("example.test.", 6)]));
+        assert_eq!(relevant.rejected_record_count, 8);
+        let reasons = relevant
+            .rejected_records
+            .iter()
+            .map(|rejected| rejected.reason.as_str())
+            .collect::<Vec<_>>();
+        let not_in_zone = "authority is not an IN-class SOA/NS/DS/NSEC/NSEC3 record (or its RRSIG) for the validated question's zone";
+        assert_eq!(reasons[..7], [not_in_zone; 7]);
+        assert_eq!(reasons[7], "record class is not IN");
     }
 }

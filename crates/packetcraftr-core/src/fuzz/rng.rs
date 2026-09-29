@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{CASE_DOMAIN, SPLITMIX_INCREMENT};
+const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
+const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
 pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
     let mut random =
@@ -31,9 +32,7 @@ impl SplitMix64 {
         while output.len() < length {
             let bytes = self.next_u64().to_le_bytes();
             let remaining = length - output.len();
-            {
-                output.extend_from_slice(&bytes[..remaining.min(bytes.len())]);
-            }
+            output.extend_from_slice(&bytes[..remaining.min(bytes.len())]);
         }
         output
     }

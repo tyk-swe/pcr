@@ -24,7 +24,7 @@ use packetcraftr_core::error::{BoundaryError, Kind};
 
 use self::arguments::Args;
 use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
-use crate::errors::CliError;
+use crate::errors::{CliError, source_causes};
 use crate::filtering;
 use crate::input::open_capture_file;
 use crate::output::{self, contract::ExchangeFormat, stream::EncodeError};
@@ -189,7 +189,7 @@ impl From<routing::Error> for CliError {
             }
             _ => return Self::classified(error),
         };
-        Self::refused_option(message, &error)
+        Self::wrapping(Kind::Usage, message, &error)
     }
 }
 
@@ -379,10 +379,7 @@ fn output_failure(
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> BoundaryError {
     let classification = CliError::new(Kind::Io, message).classification;
-    let causes = std::iter::once(source.to_string())
-        .chain(packetcraftr_core::error::source_chain(&source))
-        .collect();
-    BoundaryError::with_source(message, classification, causes, source)
+    BoundaryError::with_source(message, classification, source_causes(&source), source)
 }
 
 fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, BoundaryError> {
@@ -477,7 +474,7 @@ fn render_capture_record<W: Write>(
 ) -> Result<(), BoundaryError> {
     writer
         .write_source_frame(
-            evidence.source_interface_id,
+            evidence.frame.interface,
             evidence.capture_interface,
             evidence.frame,
         )

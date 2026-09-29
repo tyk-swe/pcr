@@ -29,7 +29,7 @@ pub(crate) const CAPACITY: usize = crate::resources::WORKER_CAPACITY;
 static SHARED: OnceLock<Arc<Pool>> = OnceLock::new();
 
 pub(crate) fn shared() -> &'static Arc<Pool> {
-    SHARED.get_or_init(|| Arc::new(Pool::new(CAPACITY, crate::tcp::MAX_PENDING_CONNECTIONS)))
+    SHARED.get_or_init(|| Arc::new(Pool::new(CAPACITY)))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,6 @@ pub(crate) struct Exhausted {
 
 pub(crate) struct Pool {
     capacity: usize,
-    tcp_limit: usize,
     state: Mutex<State>,
 }
 
@@ -94,10 +93,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Pool {
-    pub(crate) fn new(capacity: usize, tcp_limit: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            tcp_limit,
             state: Mutex::new(State::default()),
         }
     }
@@ -112,7 +110,7 @@ impl Pool {
     }
 
     pub(crate) fn tcp_snapshot(&self) -> NativeSnapshot {
-        Self::sample(self.tcp_limit, lock(&self.state).tcp)
+        Self::sample(self.capacity, lock(&self.state).tcp)
     }
 
     fn sample(capacity: usize, counters: Counters) -> NativeSnapshot {
@@ -127,23 +125,18 @@ impl Pool {
 
     pub(crate) fn admit(self: &Arc<Self>, class: Class) -> Result<Permit, Exhausted> {
         let mut state = lock(&self.state);
-        let limit = match class {
-            Class::Native => None,
-            Class::TcpConnect => Some(self.tcp_limit),
-        };
-        let refused = if state.all.active >= self.capacity {
-            Some(self.capacity)
-        } else {
-            limit.filter(|limit| state.tcp.active >= *limit)
-        };
+        let refused = state.all.active >= self.capacity;
         for counters in state.counters(class) {
-            match refused {
-                Some(_) => counters.rejected = counters.rejected.saturating_add(1),
-                None => counters.active += 1,
+            if refused {
+                counters.rejected = counters.rejected.saturating_add(1);
+            } else {
+                counters.active += 1;
             }
         }
-        if let Some(capacity) = refused {
-            return Err(Exhausted { capacity });
+        if refused {
+            return Err(Exhausted {
+                capacity: self.capacity,
+            });
         }
         Ok(Permit(Arc::new(Grant(
             RetentionMarker {
@@ -442,7 +435,7 @@ mod tests {
 
     #[test]
     fn the_pool_refuses_work_past_capacity_until_a_slot_returns() {
-        let pool = Arc::new(Pool::new(2, 1));
+        let pool = Arc::new(Pool::new(2));
         let first = gated(&pool, Class::Native);
         let second = gated(&pool, Class::TcpConnect);
         assert_eq!(
@@ -462,28 +455,42 @@ mod tests {
     }
 
     #[test]
-    fn tcp_connects_are_a_sub_limit_of_the_pool() {
-        let pool = Arc::new(Pool::new(3, 1));
+    fn tcp_admissions_are_counted_apart_from_other_native_work() {
+        let pool = Arc::new(Pool::new(3));
         let tcp = pool.admit(Class::TcpConnect).unwrap();
+        let native = pool.admit(Class::Native).unwrap();
+        let second_tcp = pool.admit(Class::TcpConnect).unwrap();
         assert_eq!(
             pool.admit(Class::TcpConnect).map(drop),
-            Err(Exhausted { capacity: 1 })
+            Err(Exhausted { capacity: 3 })
         );
-        let native = pool.admit(Class::Native).unwrap();
-        assert_eq!(pool.snapshot().active, 2);
-        assert_eq!(pool.snapshot().rejected_admissions, 1);
+        let snapshot = pool.snapshot();
+        assert_eq!((snapshot.active, snapshot.rejected_admissions), (3, 1));
         let tcp_snapshot = pool.tcp_snapshot();
-        assert_eq!(tcp_snapshot.capacity, 1);
-        assert_eq!(tcp_snapshot.active, 1);
-        assert_eq!(tcp_snapshot.rejected_admissions, 1);
-        drop((tcp, native));
+        assert_eq!(
+            (
+                tcp_snapshot.capacity,
+                tcp_snapshot.active,
+                tcp_snapshot.rejected_admissions
+            ),
+            (3, 2, 1)
+        );
+
+        assert_eq!(
+            pool.admit(Class::Native).map(drop),
+            Err(Exhausted { capacity: 3 })
+        );
+        assert_eq!(pool.snapshot().rejected_admissions, 2);
+        assert_eq!(pool.tcp_snapshot().rejected_admissions, 1);
+
+        drop((tcp, native, second_tcp));
         assert_eq!(pool.snapshot().active, 0);
         assert_eq!(pool.tcp_snapshot().active, 0);
     }
 
     #[test]
     fn retained_permits_explain_rejection_and_release_only_on_cleanup() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let permit = pool.admit(Class::Native).unwrap();
         let marker = permit.retention_marker();
         marker.mark_retained();
@@ -502,7 +509,7 @@ mod tests {
 
     #[test]
     fn a_wait_ends_at_the_callers_deadline_and_the_work_keeps_its_slot() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let (permit, task, release) = gated(&pool, Class::Native);
         drop(permit);
         let started = Instant::now();
@@ -535,7 +542,7 @@ mod tests {
 
     #[test]
     fn threads_are_reused_and_never_outnumber_the_pool() {
-        let pool = Arc::new(Pool::new(2, 2));
+        let pool = Arc::new(Pool::new(2));
         for round in 0..8 {
             let permit = pool.admit(Class::Native).unwrap();
             let task = permit.spawn(move || round * 2).unwrap();
@@ -555,7 +562,7 @@ mod tests {
 
     #[test]
     fn a_panicking_job_is_reported_and_its_slot_returns() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let permit = pool.admit(Class::Native).unwrap();
         let task = permit
             .spawn(|| panic!("injected pooled job panic"))
@@ -569,7 +576,7 @@ mod tests {
 
     #[test]
     fn a_clone_held_by_a_resource_keeps_the_slot_after_the_work_ends() {
-        let pool = Arc::new(Pool::new(1, 1));
+        let pool = Arc::new(Pool::new(1));
         let permit = pool.admit(Class::TcpConnect).unwrap();
         let resource = permit.clone();
         let mut task = permit.spawn(move || resource).unwrap();

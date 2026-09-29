@@ -42,41 +42,33 @@ impl TcpFlowState {
     }
 }
 
-pub(super) fn pending_memory_charge(
-    pending_storage_charge: usize,
-    segment_count: usize,
-) -> Option<usize> {
-    segment_count
-        .checked_mul(PENDING_SEGMENT_METADATA_CHARGE)
-        .and_then(|metadata| pending_storage_charge.checked_add(metadata))
-}
-
 pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
     state.pending_bytes.checked_add(state.emitted_history.len())
 }
 
-pub(super) fn buffer_memory_charge_parts(
+pub(super) fn memory_charge_parts(
     pending_storage_charge: usize,
     segment_count: usize,
     history_capacity: usize,
+    flow_state: bool,
 ) -> Option<usize> {
-    pending_memory_charge(pending_storage_charge, segment_count)?.checked_add(history_capacity)
-}
-
-pub(super) fn flow_memory_charge_parts(
-    pending_storage_charge: usize,
-    segment_count: usize,
-    history_capacity: usize,
-) -> Option<usize> {
-    buffer_memory_charge_parts(pending_storage_charge, segment_count, history_capacity)
-        .and_then(|charge| charge.checked_add(TCP_FLOW_STATE_METADATA_CHARGE))
+    let buffers = segment_count
+        .checked_mul(PENDING_SEGMENT_METADATA_CHARGE)
+        .and_then(|metadata| pending_storage_charge.checked_add(metadata))
+        .and_then(|charge| charge.checked_add(history_capacity))?;
+    if flow_state {
+        buffers.checked_add(TCP_FLOW_STATE_METADATA_CHARGE)
+    } else {
+        Some(buffers)
+    }
 }
 
 pub(super) fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
-    flow_memory_charge_parts(
+    memory_charge_parts(
         state.pages.len().checked_mul(PAGE_CHARGE)?,
         state.pending.len(),
         state.emitted_history.capacity(),
+        true,
     )
 }
 

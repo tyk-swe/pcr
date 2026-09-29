@@ -234,7 +234,6 @@ mod tests {
             .iter()
             .map(|kind| Extension {
                 kind: *kind,
-                len: 0,
                 data: Bytes::new(),
             })
             .collect()

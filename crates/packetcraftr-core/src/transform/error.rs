@@ -13,6 +13,12 @@ pub enum Error {
     Unsupported(Unsupported),
     #[error("packet transform exceeds {field}={limit}")]
     Limit { field: Limit, limit: usize },
+    #[error("packet transform requires {field} in {min}..={max}")]
+    LimitRange {
+        field: Limit,
+        min: usize,
+        max: usize,
+    },
     #[error(transparent)]
     Frame(#[from] crate::frame::Error),
     #[error(transparent)]
@@ -34,7 +40,7 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("inspect the documented transform boundaries"),
             ),
-            Self::Limit { .. } => Classification::new(
+            Self::Limit { .. } | Self::LimitRange { .. } => Classification::new(
                 "policy.transform_limit",
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
@@ -67,7 +73,6 @@ pub enum InvalidInput {
     EditUnknownProtocol,
     EditPath,
     EditUnknownField,
-    EditValueNotUnsigned,
     EditFieldNotUnsigned,
     EditValueWidth,
     DuplicateEdit,
@@ -80,10 +85,6 @@ pub enum InvalidInput {
     UdpLengthExceedsPayload,
     Ipv4ChecksumPlacement,
     TransportChecksumPlacement,
-    TruncatedIpv6Source,
-    TruncatedIpv6Destination,
-    TruncatedIpv4Source,
-    TruncatedIpv4Destination,
     FieldRangeCaptured,
     FieldRangeWidth,
     FragmentTruncatedCapture,
@@ -121,8 +122,9 @@ impl InvalidInput {
             Self::EditUnknownProtocol => "field edit names an unknown protocol",
             Self::EditPath => "invalid field edit path",
             Self::EditUnknownField => "field edit names an unknown field",
-            Self::EditValueNotUnsigned => "field edits require an unsigned value",
-            Self::EditFieldNotUnsigned => "field edit value is not unsigned",
+            Self::EditFieldNotUnsigned => {
+                "field edit targets a field that is not an unsigned integer"
+            }
             Self::EditValueWidth => "field edit value exceeds the field width",
             Self::DuplicateEdit => "duplicate field edit",
             Self::EditTruncatedCapture => "cannot edit a truncated capture",
@@ -134,10 +136,6 @@ impl InvalidInput {
             Self::UdpLengthExceedsPayload => "UDP length exceeds its IP payload",
             Self::Ipv4ChecksumPlacement => "IPv4 checksum field is outside its header",
             Self::TransportChecksumPlacement => "transport checksum field is outside its segment",
-            Self::TruncatedIpv6Source => "truncated IPv6 source",
-            Self::TruncatedIpv6Destination => "truncated IPv6 destination",
-            Self::TruncatedIpv4Source => "truncated IPv4 source",
-            Self::TruncatedIpv4Destination => "truncated IPv4 destination",
             Self::FieldRangeCaptured => "field range exceeds captured bytes",
             Self::FieldRangeWidth => "field range exceeds eight bytes",
             Self::FragmentTruncatedCapture => "capture is truncated",
@@ -262,3 +260,16 @@ impl Limit {
 }
 
 display_via_as_str!(Limit);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_field_kind_refusal_blames_the_field_not_the_value() {
+        assert_eq!(
+            InvalidInput::EditFieldNotUnsigned.to_string(),
+            "field edit targets a field that is not an unsigned integer"
+        );
+    }
+}

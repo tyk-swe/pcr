@@ -10,14 +10,18 @@ mod rewrite;
 pub mod rules;
 pub use error::{Error, InvalidInput, Limit, Unsupported};
 pub use fields::{
-    ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEdit, FieldEditOutcome,
-    FieldEdits, MAX_FIELD_ASSIGNMENTS,
+    ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEditOutcome, FieldEdits,
+    MAX_FIELD_ASSIGNMENTS,
 };
 pub use fragment::{FragmentOptions, fragment, fragment_link_type};
 pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 
+use std::net::IpAddr;
+use std::ops::Range;
+
 use crate::protocol::headers::IpHeader;
 use crate::protocol::network::ip_protocol;
+use crate::protocol::{network_from_addresses, transport_checksum};
 
 fn ensure_checksum_coverage(ip: &[u8], header: &IpHeader) -> Result<(), Error> {
     const LOOSE_SOURCE_ROUTE: u8 = 131;
@@ -48,4 +52,33 @@ fn ensure_checksum_coverage(ip: &[u8], header: &IpHeader) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// Recomputes the checksum at `field` over `segment`, the exact covered bytes,
+/// and returns the value written. An IPv4 UDP checksum of zero stays disabled
+/// and returns `None`.
+fn repair_checksum(
+    segment: &mut [u8],
+    field: Range<usize>,
+    protocol: u8,
+    name: &'static str,
+    (source, destination): (IpAddr, IpAddr),
+) -> Result<Option<u16>, Error> {
+    let udp = protocol == ip_protocol::UDP;
+    if udp && source.is_ipv4() && segment[field.clone()] == [0, 0] {
+        return Ok(None);
+    }
+    segment[field.clone()].fill(0);
+    let mut value = transport_checksum(
+        name,
+        network_from_addresses(source, destination),
+        protocol,
+        segment,
+    )
+    .map_err(Error::Checksum)?;
+    if udp && value == 0 {
+        value = 0xffff;
+    }
+    segment[field].copy_from_slice(&value.to_be_bytes());
+    Ok(Some(value))
 }

@@ -14,7 +14,8 @@ use crate::{Client, Sink};
 
 impl<P: PacketProviders, K: Clock> Client<P, K> {
     /// Runs one capture-ready exchange and publishes each event when final.
-    /// Every packet is admitted before neighbor discovery or capture starts.
+    /// The sink's runtime worker and every packet are admitted before neighbor discovery or
+    /// capture starts.
     /// A sink may finish after this method returns and holds a runtime worker permit until then.
     pub fn exchange<S>(&self, request: Request, sink: S) -> Result<Report, Error>
     where
@@ -24,7 +25,6 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         // Post-window events get one more finite allowance; they cannot fall inside the window.
         let finalization_limit = request.timeout;
         let mut finalization: Option<Deadline> = None;
-        let prepared = self.prepare_exchange(request)?;
         let mut publish =
             crate::execution::publisher(&self.runtime, sink, exchange_deadline_error, |source| {
                 source
@@ -32,6 +32,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             .map_err(|source| Error::Output {
                 source: Box::new(source),
             })?;
+        let prepared = self.prepare_exchange(request)?;
         let transaction = self.arm_capture(prepared)?;
         transaction.execute(self.providers.transmit(), None, None, &mut |event| {
             let deadline = if collection.check().is_ok() {

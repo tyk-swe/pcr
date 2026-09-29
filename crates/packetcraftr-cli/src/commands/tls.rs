@@ -136,7 +136,8 @@ fn buffer_floor_error(value: usize) -> CliError {
 
 fn sni_pattern(pattern: &str) -> Result<SniPattern, CliError> {
     pattern.parse().map_err(|error: analysis::Error| {
-        CliError::refused_option(
+        CliError::wrapping(
+            Kind::Usage,
             format!(
                 "invalid --sni '{pattern}': '*' is supported only at the start, \
                  the end, or both"

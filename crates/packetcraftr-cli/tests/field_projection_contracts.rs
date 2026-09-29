@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod common;
-use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+use std::io::Write;
+
+use common::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
+use serde_json::Value;
 const IP: &str = "45000014000000004001f6e7c0000201c6336402";
 
 #[test]
@@ -178,4 +181,62 @@ fn projection_byte_limit_counts_the_rendered_json_payload() {
     assert_eq!(records[0]["event"], "error");
     assert_eq!(records[0]["sequence"], 0);
     assert_eq!(records[0]["error"]["code"], "policy.projection_limit");
+}
+
+fn read_rows(path: &str, fields: &[&str], filter: Option<&str>) -> Vec<Value> {
+    let mut args = vec!["--output", "json", "read", path];
+    for field in fields {
+        args.extend(["--field", field]);
+    }
+    if let Some(filter) = filter {
+        args.extend(["--filter", filter]);
+    }
+    let report = parse_json(&run_success(&args));
+    assert_eq!(report["result"]["frames_read"], 3, "{args:?}");
+    report["result"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["values"].clone())
+        .collect()
+}
+
+#[test]
+fn read_projection_evaluates_the_physical_frame_with_or_without_stream_fields() {
+    let packet = format!(
+        "ipv4(src=192.0.2.1,dst=192.0.2.2)/tcp(sport=40000,dport=80)/raw(text={})",
+        "x".repeat(1200)
+    );
+    let fragments = run_success(&[
+        "--output", "pcap", "fragment", "--mtu", "576", "--packet", &packet,
+    ]);
+    let mut capture = tempfile::NamedTempFile::new().unwrap();
+    capture.write_all(&fragments.stdout).unwrap();
+    let path = path_text(capture.path());
+    let plain = ["frame.number", "tcp.dstport"];
+    let streamed = ["frame.number", "tcp.dstport", "tcp.stream"];
+
+    for filter in ["tcp.dstport == 80", "tcp.dstport == 80 && tcp.stream == 0"] {
+        assert_eq!(read_rows(path, &plain, Some(filter)), Vec::<Value>::new());
+        assert_eq!(
+            read_rows(path, &streamed, Some(filter)),
+            Vec::<Value>::new()
+        );
+    }
+    assert_eq!(
+        read_rows(path, &plain, None),
+        [
+            serde_json::json!([1, null]),
+            serde_json::json!([2, null]),
+            serde_json::json!([3, null])
+        ]
+    );
+    assert_eq!(
+        read_rows(path, &streamed, None),
+        [
+            serde_json::json!([1, null, null]),
+            serde_json::json!([2, null, null]),
+            serde_json::json!([3, null, null])
+        ]
+    );
 }

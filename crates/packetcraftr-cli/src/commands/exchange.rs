@@ -73,20 +73,19 @@ pub(super) fn run(
     request.collection.decode.limits.max_packet_size = limits.snap_length;
     let Prepared { request, client } = prepare_live(send, template, request)?;
     execution::run_workflow(
-        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Exchange,
-            run: Box::new(|_| {
+            run: Box::new(|| {
                 let collector = packetcraftr::exchange::Collector::default();
                 let report = client
                     .exchange(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|_, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .exchange(request.clone(), emit)
                     .map_err(CliError::classified)

@@ -75,6 +75,13 @@ fn fuzz_failures_retain_stable_boundary_classifications() {
             Kind::Policy,
         ),
         (
+            fuzz::Error::ValueNesting {
+                limit: fuzz::MAX_VALUE_NESTING,
+            },
+            "policy.fuzz_resource_limit",
+            Kind::Policy,
+        ),
+        (
             fuzz::Error::DurationLimit {
                 actual: Duration::from_secs(11),
                 limit: Duration::from_secs(10),
@@ -92,6 +99,26 @@ fn fuzz_failures_retain_stable_boundary_classifications() {
         assert!(error.causes().is_empty());
         assert!(!error.to_string().is_empty());
     }
+}
+
+#[test]
+fn fuzz_value_failures_remediate_only_the_limit_they_can_change() {
+    let remediation = |error: fuzz::Error| {
+        error
+            .classification()
+            .remediation
+            .expect("value limits carry remediation")
+    };
+
+    let items = remediation(fuzz::Error::ValueItems { items: 5, limit: 4 });
+    assert!(items.contains("max_list_items"), "{items}");
+    assert!(!items.contains("nesting"), "{items}");
+
+    let nesting = remediation(fuzz::Error::ValueNesting {
+        limit: fuzz::MAX_VALUE_NESTING,
+    });
+    assert!(nesting.contains("nesting"), "{nesting}");
+    assert!(!nesting.contains("max_list_items"), "{nesting}");
 }
 
 #[test]

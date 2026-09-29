@@ -102,8 +102,16 @@ fn idle_expiry_is_delivered_before_a_failing_fragment_push() {
     );
 
     assert!(
-        result.is_err(),
-        "the second fragment must exceed its byte limit"
+        matches!(
+            result,
+            Err(packetcraftr_core::analysis::Error::IpReassembly {
+                number: 2,
+                source: packetcraftr_core::analysis::reassembly::ip::Error::Resource(
+                    Resource::DatagramByteLimit { limit: 8 }
+                )
+            })
+        ),
+        "the second fragment must exceed its byte limit: {result:?}"
     );
     assert!(matches!(
         events.as_slice(),

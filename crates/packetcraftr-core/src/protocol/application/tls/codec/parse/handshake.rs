@@ -165,7 +165,6 @@ fn next_extension<'a>(
     Ok((
         Extension {
             kind,
-            len,
             data: Bytes::copy_from_slice(body),
         },
         body,

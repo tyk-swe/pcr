@@ -3,7 +3,7 @@
 
 use crate::{
     tcp::{ConnectOutcome, Connection, Error, MAX_PENDING_CONNECTIONS, Provider},
-    workers::{self, Class, RetentionMarker, Task},
+    workers::{self, Class, Task},
 };
 use packetcraftr_core::budget::{Cancelled, Deadline};
 use std::{
@@ -26,14 +26,14 @@ enum Progress {
     Failed,
 }
 
-pub(super) struct Pending<S> {
+/// Pollable bounded connect. Dropping it cancels unstarted work.
+pub struct PendingConnect<S> {
     task: Task<ConnectOutcome<S>>,
     cancel: Arc<Mutex<CancelState>>,
-    retention: RetentionMarker,
     progress: Progress,
 }
-impl<S> Pending<S> {
-    pub(super) fn cancel(&mut self) -> bool {
+impl<S> PendingConnect<S> {
+    pub fn cancel(&mut self) -> bool {
         let mut state = self
             .cancel
             .lock()
@@ -42,7 +42,7 @@ impl<S> Pending<S> {
         state.attempted
     }
 
-    pub(super) fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, Error> {
+    pub fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, Error> {
         match self.progress {
             Progress::Complete => return Err(Error::Completed),
             Progress::Failed => return Err(Error::Worker),
@@ -61,26 +61,27 @@ impl<S> Pending<S> {
         }
     }
 
-    pub(super) fn wait(&mut self, deadline: &Deadline) -> Result<Option<ConnectOutcome<S>>, Error> {
+    /// Returns `None` if `deadline` expires or is cancelled while work is pending.
+    pub fn wait(&mut self, deadline: &Deadline) -> Result<Option<ConnectOutcome<S>>, Error> {
         self.task.wait_ready(deadline);
         self.poll()
     }
 }
-impl<S> Drop for Pending<S> {
+impl<S> Drop for PendingConnect<S> {
     fn drop(&mut self) {
         self.cancel();
         if self.progress == Progress::Running {
-            self.retention.mark_retained();
+            self.task.retention_marker().mark_retained();
         }
         // A running worker keeps its permit through provider cleanup.
     }
 }
 
-pub(super) fn start<P>(
+pub fn start_connect<P>(
     provider: Arc<P>,
     endpoint: SocketAddr,
     caller: &Deadline,
-) -> Result<Pending<P::Stream>, Error>
+) -> Result<PendingConnect<P::Stream>, Error>
 where
     P: Provider + 'static,
     P::Stream: 'static,
@@ -130,8 +131,7 @@ where
             }
         })
         .map_err(Error::Spawn)?;
-    Ok(Pending {
-        retention: task.retention_marker(),
+    Ok(PendingConnect {
         task,
         cancel,
         progress: Progress::Running,

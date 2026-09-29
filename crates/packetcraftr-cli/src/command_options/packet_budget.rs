@@ -21,7 +21,7 @@ impl PacketBudgetArgs {
     pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
             max_layers: Count @ Operation,
-            max_packet_size: Count @ Operation,
+            max_packet_size: Bytes @ Operation,
         ]);
     }
 

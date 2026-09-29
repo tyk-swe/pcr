@@ -208,7 +208,6 @@ mod tests {
         let decode_context = LayerDecodeContext {
             parent: None,
             registry: &registry,
-            allow_trailing_padding: false,
             network: None,
             discriminator: None,
         };

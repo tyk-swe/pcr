@@ -33,7 +33,9 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1_000)]
     pub(crate) interval_ms: u64,
     /// Maximum rows kept for the protocols, conversations, endpoints, ports,
-    /// and io tables. The fragments table stays bounded by --max-ip-outcomes
+    /// and io tables. Every table but io keeps its busiest rows by frame count,
+    /// breaking ties by bytes (protocols: by name); io keeps its first buckets
+    /// in time order. The fragments table stays bounded by --max-ip-outcomes
     /// instead, because its accounting is capture-global. This caps final rows,
     /// not the number of keys required for exact aggregation.
     #[arg(long, value_name = "N")]

@@ -48,7 +48,7 @@ fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_wor
         let (release, wait) = mpsc::channel();
         let (dropped, writer_dropped) = mpsc::channel();
         let writes = Arc::new(AtomicUsize::new(0));
-        let runtime = Runtime::new(1);
+        let runtime = Runtime::new(1).unwrap();
         let stream = StreamEncoder::new_bounded(
             Command::Read,
             BlockedWriter {
@@ -101,7 +101,7 @@ fn bounded_output_keeps_sequences_contiguous_and_writes_one_terminal() {
     let stream = StreamEncoder::new_bounded(
         Command::Read,
         output.clone(),
-        &Runtime::new(1),
+        &Runtime::new(1).unwrap(),
         Duration::from_secs(1),
     )
     .unwrap();
@@ -196,6 +196,28 @@ impl Write for FailAfter {
             Ok(())
         }
     }
+}
+
+#[test]
+fn bounded_write_failure_states_the_sink_error_once_in_causes() {
+    let stream = StreamEncoder::new_bounded(
+        Command::Read,
+        FailAfter {
+            remaining: 0,
+            fail_flush: false,
+        },
+        &Runtime::new(1).unwrap(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let error = stream.emit_data(TestRecord(()), Vec::new()).unwrap_err();
+
+    assert!(matches!(error, EncodeError::Write { sequence: 0, .. }));
+    assert_eq!(
+        error.causes(),
+        ["write NDJSON output failed", "injected byte failure"]
+    );
 }
 
 #[test]
@@ -359,6 +381,38 @@ fn serialization_that_spends_the_budget_is_not_published_and_can_report_an_error
 }
 
 #[test]
+fn encode_failures_state_their_source_only_as_the_first_cause() {
+    let failures = [
+        EncodeError::Deadline {
+            phase: "serialization",
+            source: packetcraftr_core::budget::DeadlineExceeded {
+                actual: Duration::from_secs(2),
+                limit: Duration::from_secs(1),
+            },
+        },
+        EncodeError::Serialize {
+            sequence: 4,
+            source: serde_json::Error::io(io::Error::other("encoder refused")),
+        },
+        EncodeError::Write {
+            sequence: 3,
+            source: io::Error::other("sink closed"),
+        },
+    ];
+    for failure in failures {
+        let source = std::error::Error::source(&failure)
+            .expect("the failure wraps its source")
+            .to_string();
+        let message = failure.to_string();
+        assert!(
+            !message.contains(&source),
+            "the message repeats its source: {message}"
+        );
+        assert_eq!(failure.causes().first(), Some(&source), "{message}");
+    }
+}
+
+#[test]
 fn an_operation_deadline_bounds_waiting_for_the_encoder_lock() {
     let owner = StreamEncoder::new(Command::Read, io::sink());
     let publisher = owner
@@ -405,7 +459,7 @@ impl Write for Blocked {
 }
 #[test]
 fn writer_wait_uses_remaining_operation_budget_and_retains_cleanup_capacity() {
-    let runtime = Runtime::new(1);
+    let runtime = Runtime::new(1).unwrap();
     let (entered, waiting) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let expired = Arc::new(AtomicBool::new(false));
@@ -466,7 +520,7 @@ impl Write for WaitingWriter {
 }
 #[test]
 fn extended_wait_accepts_a_slow_writer_and_cleanup_uses_its_own_ceiling() {
-    let runtime = Runtime::new(1);
+    let runtime = Runtime::new(1).unwrap();
     let (entered, waiting) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let stream = StreamEncoder::new_bounded(

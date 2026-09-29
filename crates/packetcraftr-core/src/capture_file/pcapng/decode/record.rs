@@ -8,7 +8,6 @@ use super::PcapNgState;
 use super::framing::{FramedBlock, packet_block_kind};
 use crate::capture_file::pcapng::{
     interface::parse_interface_description,
-    options::parse_options,
     packet::{parse_enhanced_packet, parse_obsolete_packet, parse_simple_packet},
 };
 use crate::capture_file::{
@@ -34,8 +33,8 @@ pub(super) fn decode(
             decode_interface(block.body, block.raw, state, all_interfaces, limits)
         }
         block_type => match packet_block_kind(block_type) {
-            Some(kind) => decode_packet(kind, block.body, block.raw, state, limits),
-            None => decode_metadata(block_type, block.body, block.raw, state),
+            Some(kind) => decode_packet(kind, block.body, block.raw, state, all_interfaces, limits),
+            None => decode_metadata(block_type, block.body, block.raw, state, all_interfaces),
         },
     }
 }
@@ -43,18 +42,15 @@ pub(super) fn decode(
 fn decode_interface(
     body: &[u8],
     raw: Bytes,
-    state: &mut PcapNgState,
+    state: &PcapNgState,
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
-    let description = parse_interface_description(body, state.endianness)?;
-    let option_bytes = body.get(8..).ok_or(Error::InvalidData {
-        format: Format::PcapNg,
-        reason: "interface description block is shorter than 8 bytes",
-    })?;
-    let parsed_options = parse_options(option_bytes, state.endianness, "pcapng interface options")?;
-    let local_id = u32::try_from(state.interfaces.len()).map_err(|_| Error::InterfaceLimit {
-        limit: limits.max_interfaces_per_section,
+    let (description, options) = parse_interface_description(body, state.endianness)?;
+    let local_id = u32::try_from(state.section_interfaces(all_interfaces).len()).map_err(|_| {
+        Error::InterfaceLimit {
+            limit: limits.max_interfaces_per_section,
+        }
     })?;
     let global_id = state.add_interface(all_interfaces, description.clone(), limits)?;
     Ok(record(
@@ -63,7 +59,7 @@ fn decode_interface(
             local_id,
             global_id,
             interface: description,
-            options: parsed_options,
+            options,
         }),
         None,
         raw,
@@ -75,6 +71,7 @@ fn decode_packet(
     body: &[u8],
     raw: Bytes,
     state: &mut PcapNgState,
+    all_interfaces: &[Interface],
     limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
     let parse = match kind {
@@ -86,18 +83,17 @@ fn decode_packet(
     let parsed = parse(
         body,
         state.endianness,
-        &state.interfaces,
+        state.section_interfaces(all_interfaces),
         state.interface_base,
         limits.max_size,
     )?;
-    let parsed_options = parse_options(parsed.options, state.endianness, "pcapng packet options")?;
     state.reset_metadata();
     Ok(record(
         RecordKind::Packet {
             block: kind,
             section: Some(state.section_index),
             interface_id: Some(parsed.interface_id),
-            options: parsed_options,
+            options: parsed.options,
         },
         Some(parsed.frame),
         raw,
@@ -109,6 +105,7 @@ fn decode_metadata(
     body: &[u8],
     raw: Bytes,
     state: &PcapNgState,
+    all_interfaces: &[Interface],
 ) -> Result<CaptureRecord, Error> {
     let section = state.section_index;
     let kind = match block_type {
@@ -121,10 +118,11 @@ fn decode_metadata(
                 });
             }
             let interface_id = decode_u32(state.endianness, body)?;
-            if interface_id as usize >= state.interfaces.len() {
+            let available = state.section_interfaces(all_interfaces).len();
+            if interface_id as usize >= available {
                 return Err(Error::UndefinedInterface {
                     interface: interface_id,
-                    available: state.interfaces.len(),
+                    available,
                 });
             }
             MetadataBlockKind::InterfaceStatistics {

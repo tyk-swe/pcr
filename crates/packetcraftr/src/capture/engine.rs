@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use packetcraftr_netio::capture::Session as _;
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::capture::{self as native, Group, Session as _};
 
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
@@ -11,9 +12,10 @@ use crate::providers::CaptureProviders;
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
-use super::error::{failure, interrupted_or};
+use super::error::{failure, failure_after_cleanup, interrupted_or};
 use super::evidence::{evidence_loss, finish_stats, replace_sources};
 use super::executor::Armed;
+use super::request::SelectFrame;
 use super::{Cause, Control, Error, Event, Report, Request, StopReason};
 
 const READ_SLICE: Duration = Duration::from_millis(50);
@@ -53,23 +55,45 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
         let Armed {
             mut group,
             mut report,
-            mut primary,
+            primary,
         } = self.arm_capture_group(&group_request, window, &deadline, report)?;
-        let mut source_frame = None;
         replace_sources(&mut report, &group.snapshot());
-        if primary.is_none() {
-            match publish(Event::Started {
-                sources: report.sources.clone(),
-            }) {
-                Ok(Control::Continue) => {}
-                Ok(Control::StopBefore | Control::StopAfter) => report.stop = StopReason::Sink,
-                Err(cause) => primary = Some(cause),
-            }
+        let failed = match primary {
+            Some(cause) => Some((cause, None)),
+            None => self
+                .pump_frames(
+                    &mut group,
+                    &mut report,
+                    &deadline,
+                    &mut select,
+                    &mut publish,
+                    started,
+                )
+                .err(),
+        };
+        self.close(group, report, failed, started)
+    }
+
+    /// A failure carries the one-based position of the frame that caused it, if any.
+    fn pump_frames<C: native::Session>(
+        &self,
+        group: &mut Group<C>,
+        report: &mut Report,
+        deadline: &Deadline,
+        select: &mut Option<SelectFrame>,
+        publish: &mut impl FnMut(Event) -> Result<Control, Cause>,
+        started: Instant,
+    ) -> Result<(), (Cause, Option<u64>)> {
+        match publish(Event::Started {
+            sources: report.sources.clone(),
+        }) {
+            Ok(Control::Continue) => {}
+            Ok(Control::StopBefore | Control::StopAfter) => report.stop = StopReason::Sink,
+            Err(cause) => return Err((cause, None)),
         }
-        while primary.is_none() && report.stop != StopReason::Sink {
+        while report.stop != StopReason::Sink {
             if let Err(cancelled) = deadline.check_cancelled() {
-                primary = Some(Cause::Cancelled(cancelled));
-                break;
+                return Err((Cause::Cancelled(cancelled), None));
             }
             if report.budget.is_exhausted() {
                 report.stop = StopReason::FrameBudget;
@@ -83,28 +107,25 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
                 Ok(Some(record)) => record,
                 Ok(None) => continue,
                 Err(error) => {
-                    source_frame = report.frames_delivered.checked_add(1);
-                    primary = Some(interrupted_or(&deadline, Cause::Native(error)));
-                    break;
+                    return Err((
+                        interrupted_or(deadline, Cause::Native(error)),
+                        report.frames_delivered.checked_add(1),
+                    ));
                 }
             };
             let Some(number) = report.frames_delivered.checked_add(1) else {
-                primary = Some(Cause::Statistics);
-                break;
+                return Err((Cause::Statistics, None));
             };
             report.frames_delivered = number;
-            source_frame = Some(number);
             if deadline.check().is_err() {
                 report.sources[record.source].late_frames += 1;
                 report.stop = StopReason::Window;
-                source_frame = None;
                 break;
             }
             let mut frame = record.frame;
             frame.interface = Some(record.source as u32);
             if let Err(error) = report.budget.account(u64::from(frame.captured_length())) {
-                primary = Some(Cause::Budget(error));
-                break;
+                return Err((Cause::Budget(error), Some(number)));
             }
             report.sources[record.source].admitted_frames += 1;
             match select
@@ -112,64 +133,56 @@ impl<P: CaptureProviders, K: Clock> Client<P, K> {
                 .map_or(Ok(true), |select| select(number, &frame))
             {
                 Ok(true) => {}
-                Ok(false) => {
-                    source_frame = None;
-                    continue;
-                }
-                Err(error) => {
-                    primary = Some(Cause::Consumer(error));
-                    break;
-                }
+                Ok(false) => continue,
+                Err(error) => return Err((Cause::Consumer(error), Some(number))),
             }
             report.sources[record.source].matched_frames += 1;
-            match publish(Event::Frame {
+            let control = publish(Event::Frame {
                 source_frame: number,
                 source: record.source,
                 elapsed: self.now().saturating_duration_since(started),
                 frame,
-            }) {
-                Ok(control) => {
-                    if control != Control::StopBefore {
-                        report.sources[record.source].emitted_frames += 1;
-                    }
-                    if control != Control::Continue {
-                        report.stop = StopReason::Sink;
-                    }
-                    source_frame = None;
-                }
-                Err(cause) => {
-                    primary = Some(cause);
-                    break;
-                }
+            })
+            .map_err(|cause| (cause, Some(number)))?;
+            if control != Control::StopBefore {
+                report.sources[record.source].emitted_frames += 1;
+            }
+            if control != Control::Continue {
+                report.stop = StopReason::Sink;
             }
         }
+        Ok(())
+    }
+
+    fn close<C: native::Session>(
+        &self,
+        mut group: Group<C>,
+        mut report: Report,
+        mut failed: Option<(Cause, Option<u64>)>,
+        started: Instant,
+    ) -> Result<Report, Error> {
         let mut cleanup = Vec::new();
         if let Err(error) = group.shutdown() {
-            if primary.is_none() {
-                primary = Some(Cause::Native(error));
-                source_frame = None;
+            if failed.is_none() {
+                failed = Some((Cause::Native(error), None));
             } else {
                 cleanup.push(error);
             }
         }
         replace_sources(&mut report, &group.snapshot());
         let elapsed = self.now().saturating_duration_since(started);
-        if !finish_stats(&mut report, elapsed) && primary.is_none() {
-            primary = Some(Cause::Statistics);
+        if !finish_stats(&mut report, elapsed) && failed.is_none() {
+            failed = Some((Cause::Statistics, None));
         }
-        if primary.is_none() {
-            primary = evidence_loss(&mut report);
+        if failed.is_none() {
+            failed = evidence_loss(&mut report).map(|cause| (cause, None));
         }
-        if let Some(cause) = primary {
-            report.stop = StopReason::Failure;
-            Err(Error {
-                cause: Box::new(cause),
-                report: Box::new(report),
-                cleanup,
-                source_frame,
-            })
-        } else {
-            Ok(report)
+        match failed {
+            Some((cause, source_frame)) => {
+                report.stop = StopReason::Failure;
+                Err(failure_after_cleanup(cause, report, source_frame, cleanup))
+            }
+            None => Ok(report),
         }
     }
 }

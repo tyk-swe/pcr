@@ -11,16 +11,18 @@ use crate::{
         DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
         NetworkEnvelope,
     },
+    diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, expected_discriminator, invalid, make_layer, protocol, resolve_u8, truncated,
-    typed_layer, validate_auto_raw_discriminator, validate_ipv6_routing_child,
-    validate_raw_child_discriminator, wrong_type,
+    ValueExpectation, invalid, make_layer, protocol, resolve_u8, strict_or_diagnostic, truncated,
+    typed_layer, unsupported, wrong_type,
 };
+
+use super::resolve_next_header;
 
 use crate::protocol::BuiltinProtocol;
 
@@ -84,29 +86,20 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         if layer.segments.is_empty() || layer.segments.len() > 127 {
             return Err(invalid(NAME, "SRH requires 1..=127 segments"));
         }
-        if layer.flags != 0 {
-            return Err(invalid(NAME, "unsupported SRH flags must be zero"));
-        }
         let expected_last = layer.segments.len().saturating_sub(1) as u8;
         let mut diagnostics = Vec::new();
-        let expectation = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
-        validate_auto_raw_discriminator(
-            NAME,
-            "next_header",
-            &layer.next_header,
-            context,
-            &mut diagnostics,
-        )?;
-        let (next, materialized_next) = resolve_u8(
-            NAME,
-            "next_header",
-            &layer.next_header,
-            expectation,
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(NAME, u64::from(next), context, &mut diagnostics)?;
-        validate_ipv6_routing_child(NAME, next, context, &mut diagnostics)?;
+        if layer.flags != 0 {
+            strict_or_diagnostic(
+                NAME,
+                "build.srh_flags",
+                "flags",
+                "SRH flags must be zero on transmission",
+                context,
+                &mut diagnostics,
+            )?;
+        }
+        let (next, materialized_next) =
+            resolve_next_header(NAME, &layer.next_header, context, &mut diagnostics)?;
         let (segments_left, materialized_left) = resolve_u8(
             NAME,
             "segments_left",
@@ -116,16 +109,16 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             &mut diagnostics,
         )?;
         if u16::from(segments_left) > u16::from(expected_last).saturating_add(1) {
-            let message = format!(
-                "segments_left is {segments_left}, exceeding last_entry {expected_last} plus one"
-            );
-            if context.mode == crate::codec::Mode::Strict {
-                return Err(invalid(NAME, message));
-            }
-            diagnostics.push(
-                crate::diagnostic::Diagnostic::warning("build.srh_segments_left", message)
-                    .at_field("segments_left"),
-            );
+            strict_or_diagnostic(
+                NAME,
+                "build.srh_segments_left",
+                "segments_left",
+                format!(
+                    "segments_left is {segments_left}, exceeding last_entry {expected_last} plus one"
+                ),
+                context,
+                &mut diagnostics,
+            )?;
         }
         let (last_entry, materialized_last) = resolve_u8(
             NAME,
@@ -139,7 +132,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         let hdr_ext_len = u8::try_from((header_len / 8).saturating_sub(1))
             .map_err(|_| invalid(NAME, "SRH length cannot be represented"))?;
         let mut prefix = Vec::with_capacity(header_len);
-        prefix.extend_from_slice(&[next, hdr_ext_len, 4, segments_left, last_entry, 0]);
+        prefix.extend_from_slice(&[next, hdr_ext_len, 4, segments_left, last_entry, layer.flags]);
         prefix.extend_from_slice(&layer.tag.to_be_bytes());
         for segment in layer.segments.iter().rev() {
             prefix.extend_from_slice(&segment.octets());
@@ -166,16 +159,13 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             return Err(truncated(NAME, 8, input.len()));
         };
         if header[2] == 0 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: "IPv6 routing type 0 is prohibited".to_owned(),
-            });
+            return Err(unsupported(NAME, "IPv6 routing type 0 is prohibited"));
         }
         if header[2] != 4 {
-            return Err(crate::codec::Error::Unsupported {
-                protocol: protocol(NAME),
-                message: format!("unsupported routing type {}", header[2]),
-            });
+            return Err(unsupported(
+                NAME,
+                format!("unsupported routing type {}", header[2]),
+            ));
         }
         let header_len = usize::from(header[1])
             .saturating_add(1)
@@ -194,8 +184,11 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         {
             return Err(invalid(NAME, "Last Entry or Segments Left is inconsistent"));
         }
+        let mut diagnostics = Vec::new();
         if header[5] != 0 {
-            return Err(invalid(NAME, "unsupported flags are non-zero"));
+            diagnostics.push(
+                Diagnostic::warning("decode.srh_flags", "SRH flags are non-zero").at_field("flags"),
+            );
         }
         let segment_bytes = input
             .get(8..segments_end)
@@ -230,7 +223,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             payload_len: input.len().saturating_sub(header_len),
             next: vec![Discriminator(u64::from(header[0]))],
             fields: srh_layout(segments_end, header_len),
-            diagnostics: Vec::new(),
+            diagnostics,
             stop: input.len() == header_len,
             network,
         })

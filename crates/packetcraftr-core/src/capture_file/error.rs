@@ -122,7 +122,10 @@ pub enum Error {
     TransformMetadata(&'static str),
     #[error("capture transformation changed frame {number} identity or time")]
     TransformIdentity { number: u64 },
-    #[error("capture merge requires 1..={maximum} sources with names of at most 4096 bytes")]
+    #[error(
+        "capture merge requires 1..={maximum} sources with names of at most {} bytes",
+        super::merge::MAX_SOURCE_NAME_BYTES
+    )]
     MergeSources { maximum: usize },
     #[error("merge source {input}, frame {frame} failed")]
     MergeSource {
@@ -212,7 +215,8 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("use a timestamped frame with generated capture writers"),
             ),
-            Self::SizeLimitExceeded { .. }
+            Self::AllocationFailed { .. }
+            | Self::SizeLimitExceeded { .. }
             | Self::InterfaceLimit { .. }
             | Self::TotalInterfaceLimit { .. }
             | Self::MetadataBlockLimit { .. }
@@ -235,7 +239,9 @@ impl Classified for Error {
 
     fn context(&self) -> Option<Coordinate> {
         match self {
-            Self::Predicate { number, .. } => Some(Coordinate::SourceFrame(*number)),
+            Self::Predicate { number, .. }
+            | Self::Transform { number, .. }
+            | Self::TransformIdentity { number } => Some(Coordinate::SourceFrame(*number)),
             Self::MergeSource { source, .. } => source.context(),
             _ => None,
         }
@@ -251,3 +257,45 @@ impl Classified for Error {
 }
 
 crate::budget::deadline_error_conversions!(Error);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failure() -> BoundaryError {
+        BoundaryError::new(
+            "mapper failed",
+            Classification::new("fixture.policy", Kind::Policy, None),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn frame_failures_report_their_source_frame() {
+        for error in [
+            Error::Predicate {
+                number: 7,
+                source: failure(),
+            },
+            Error::Transform {
+                number: 7,
+                source: failure(),
+            },
+            Error::TransformIdentity { number: 7 },
+        ] {
+            assert_eq!(error.context(), Some(Coordinate::SourceFrame(7)));
+        }
+        assert_eq!(Error::EmptyInput.context(), None);
+    }
+
+    #[test]
+    fn allocation_failure_is_a_stream_limit() {
+        let classification = Error::AllocationFailed {
+            kind: "pcapng block",
+            requested: 1 << 40,
+        }
+        .classification();
+        assert_eq!(classification.code, "policy.capture_stream_limit");
+        assert_eq!(classification.kind, Kind::Policy);
+    }
+}

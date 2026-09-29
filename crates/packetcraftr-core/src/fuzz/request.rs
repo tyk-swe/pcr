@@ -190,11 +190,12 @@ impl Request {
                 reason: Constraint::AtMostMaxStrategies,
             });
         }
-        if self.strategies.iter().enumerate().any(|(index, strategy)| {
-            self.strategies
-                .get(..index)
-                .is_some_and(|earlier| earlier.contains(strategy))
-        }) {
+        if self
+            .strategies
+            .iter()
+            .enumerate()
+            .any(|(index, strategy)| self.strategies[..index].contains(strategy))
+        {
             return Err(Error::InvalidStrategies);
         }
         let final_case_offset =

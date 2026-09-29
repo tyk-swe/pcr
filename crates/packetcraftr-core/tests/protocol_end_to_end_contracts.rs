@@ -12,17 +12,17 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::diagnostic::{
-    CHECKSUM_FAILURE_CODES, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM, IGMP_CHECKSUM,
-    IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM,
+    CHECKSUM_FAILURE_CODES, Diagnostic, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM,
+    IGMP_CHECKSUM, IPV4_CHECKSUM, SCTP_CHECKSUM, Severity, TCP_CHECKSUM, UDP_CHECKSUM,
 };
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
-use packetcraftr_core::protocol::application::dns::{self, Dns};
+use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
 use packetcraftr_core::protocol::network::{
-    DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, SegmentRoutingHeader,
+    DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, SegmentRoutingHeader,
 };
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, TcpOption, Udp};
 use packetcraftr_core::protocol::tunnel::{
@@ -627,6 +627,58 @@ fn ipv6_option_headers_keep_a_raw_next_header_raw() {
 }
 
 #[test]
+fn ipv6_option_headers_build_up_to_the_extension_length_field_limit() {
+    let build = |options: usize, hop_by_hop: bool| {
+        let mut packet = Packet::new();
+        packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+        let options = Bytes::from(vec![1_u8; options]);
+        if hop_by_hop {
+            packet.push(HopByHop {
+                options,
+                ..HopByHop::default()
+            });
+        } else {
+            packet.push(DestinationOptions {
+                options,
+                ..DestinationOptions::default()
+            });
+        }
+        build::Builder::new(rooted_registry("ipv6")).build(
+            packet,
+            codec::Context::default(),
+            build::Options::default(),
+        )
+    };
+
+    for hop_by_hop in [true, false] {
+        let built = build(2_046, hop_by_hop).expect("the largest header fits Hdr Ext Len");
+        assert_eq!(built.bytes[41], u8::MAX, "hop_by_hop={hop_by_hop}");
+        assert_eq!(built.bytes.len(), 40 + 2_048, "hop_by_hop={hop_by_hop}");
+
+        let refused = build(2_047, hop_by_hop).expect_err("padding past 2048 bytes is refused");
+        assert!(
+            packetcraftr_core::error::source_chain(&refused)
+                .iter()
+                .any(|cause| cause.contains("options header exceeds 2048-byte secure default")),
+            "hop_by_hop={hop_by_hop}: {refused:?}"
+        );
+
+        let padded = build(3, hop_by_hop).expect("a short header pads to eight bytes");
+        assert_eq!(
+            padded
+                .packet
+                .iter()
+                .nth(1)
+                .and_then(|layer| layer.field("options")),
+            Some(packetcraftr_core::field::FieldValue::Bytes(
+                Bytes::from_static(&[1, 1, 1, 0, 0, 0])
+            )),
+            "hop_by_hop={hop_by_hop}"
+        );
+    }
+}
+
+#[test]
 fn coverage_paddings_build_only_in_innermost_first_order() {
     let packet = |paddings: [Padding; 2]| {
         let mut packet = Packet::new();
@@ -727,6 +779,194 @@ fn ipv4_options_the_decoder_refuses_are_not_built_strictly() {
     build::Builder::new(rooted_registry("ipv4"))
         .build(routed, codec::Context::default(), build::Options::default())
         .expect("a walkable source route still builds strictly");
+}
+
+fn ipv4_options_under_transport(protocol: &str, options: &[u8]) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        options: Bytes::copy_from_slice(options),
+        ..ipv4([192, 0, 2, 1], [192, 0, 2, 2])
+    });
+    if protocol == "udp" {
+        packet.push(Udp {
+            destination_port: 4000,
+            ..known_udp()
+        });
+        packet.push(Raw::new(b"PCR".to_vec()));
+    } else {
+        packet.push(known_tcp());
+    }
+    packet
+}
+
+fn transport_checksum(built: &build::BuiltPacket, protocol: &str) -> Option<u16> {
+    let checksum = if protocol == "udp" {
+        &built.packet.get::<Udp>()?.checksum
+    } else {
+        &built.packet.get::<Tcp>()?.checksum
+    };
+    checksum.exact().copied()
+}
+
+fn permissive_options() -> build::Options {
+    build::Options {
+        mode: codec::Mode::Permissive,
+        ..build::Options::default()
+    }
+}
+
+/// The transport checksum of a permissive build falls back to the IPv4 header
+/// destination when the options cannot be walked for a source route.
+#[test]
+fn ipv4_options_the_decoder_refuses_still_build_permissively_under_transports() {
+    let builder = build::Builder::new(registry());
+    for protocol in ["udp", "tcp"] {
+        let plain = builder
+            .build(
+                ipv4_options_under_transport(protocol, &[]),
+                codec::Context::default(),
+                build::Options::default(),
+            )
+            .expect("the same packet without options builds");
+        for options in [
+            &[0x44, 0x01, 0x00, 0x00][..],
+            &[0x07],
+            &[0x83, 0x07, 0x04, 0xc6],
+            &[0x89, 0x07, 0x04, 0xc6],
+        ] {
+            assert!(
+                builder
+                    .build(
+                        ipv4_options_under_transport(protocol, options),
+                        codec::Context::default(),
+                        build::Options::default()
+                    )
+                    .is_err(),
+                "{protocol} {options:02x?} strict"
+            );
+            let built = builder
+                .build(
+                    ipv4_options_under_transport(protocol, options),
+                    codec::Context::default(),
+                    permissive_options(),
+                )
+                .unwrap_or_else(|error| panic!("{protocol} {options:02x?} permissive: {error}"));
+            assert!(
+                built
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "build.ipv4_options"),
+                "{protocol} {options:02x?}: {:?}",
+                built.diagnostics
+            );
+            assert!(transport_checksum(&plain, protocol).is_some());
+            assert_eq!(
+                transport_checksum(&built, protocol),
+                transport_checksum(&plain, protocol),
+                "{protocol} {options:02x?} pseudo-header uses the header destination"
+            );
+        }
+    }
+}
+
+/// The encoder writes zero-padded options, so the transport checksum follows
+/// the source route those padded bytes name, as a decoder reads it back, in
+/// both modes.
+#[test]
+fn truncated_ipv4_source_routes_are_checksummed_from_their_padded_options() {
+    let builder = build::Builder::new(registry());
+    for protocol in ["udp", "tcp"] {
+        for option in [0x83, 0x89] {
+            for present in [5, 6] {
+                let route = [option, 7, 4, 198, 51, 100, 1];
+                let truncated = &route[..present];
+                let mut padded = truncated.to_vec();
+                padded.resize(8, 0);
+                let explicit = builder
+                    .build(
+                        ipv4_options_under_transport(protocol, &padded),
+                        codec::Context::default(),
+                        build::Options::default(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("{protocol} {truncated:02x?} padded strict: {error}")
+                    });
+
+                for (mode, options) in [
+                    ("strict", build::Options::default()),
+                    ("permissive", permissive_options()),
+                ] {
+                    let label = format!("{protocol} {truncated:02x?} {mode}");
+                    let built = builder
+                        .build(
+                            ipv4_options_under_transport(protocol, truncated),
+                            codec::Context::default(),
+                            options,
+                        )
+                        .unwrap_or_else(|error| panic!("{label}: {error}"));
+
+                    assert_eq!(built.bytes, explicit.bytes, "{label}");
+                    assert!(transport_checksum(&built, protocol).is_some(), "{label}");
+                    let codes = built
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.code)
+                        .collect::<Vec<_>>();
+                    assert!(codes.contains(&"build.ipv4_options_padded"), "{label}");
+                    assert!(!codes.contains(&"build.ipv4_options"), "{label}: {codes:?}");
+                }
+            }
+        }
+    }
+}
+
+/// Options past the header limit cannot be built in either mode, so both
+/// report the same failure.
+#[test]
+fn over_long_ipv4_options_fail_alike_in_both_modes_under_transports() {
+    fn failure(
+        protocol: &str,
+        length: usize,
+        options: build::Options,
+    ) -> (usize, String, Vec<String>) {
+        let error = build::Builder::new(registry())
+            .build(
+                ipv4_options_under_transport(protocol, &vec![1; length]),
+                codec::Context::default(),
+                options,
+            )
+            .expect_err("options past 40 bytes cannot be built");
+        let build::Error::Codec {
+            index,
+            protocol,
+            source,
+        } = &error
+        else {
+            panic!("{protocol}: {error}");
+        };
+        let mut chain = Vec::new();
+        let mut cause: Option<&dyn std::error::Error> = Some(source);
+        while let Some(error) = cause {
+            chain.push(error.to_string());
+            cause = error.source();
+        }
+        (*index, protocol.as_str().to_owned(), chain)
+    }
+
+    for protocol in ["udp", "tcp"] {
+        for length in [41, 44] {
+            let strict = failure(protocol, length, build::Options::default());
+            assert!(
+                strict.2.last().is_some_and(|last| last.contains("40-byte")),
+                "{protocol} {length}: {strict:?}"
+            );
+            assert_eq!(
+                strict,
+                failure(protocol, length, permissive_options()),
+                "{protocol} {length}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -968,57 +1208,6 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     packet.push(dns.clone());
     let (_, decoded) = round_trip(packet, "ipv4");
     assert_eq!(decoded.packet.get::<Dns>().map(|dns| dns.id), Some(0x1234));
-
-    assert!(matches!(
-        Dns::try_from(vec![0; 11]),
-        Err(dns::Error::MessageTooShort {
-            actual: 11,
-            minimum: 12,
-        })
-    ));
-    let mut truncated_name = vec![0; 12];
-    truncated_name[4..6].copy_from_slice(&1_u16.to_be_bytes());
-    truncated_name.extend_from_slice(&[3, b'w', b'w']);
-    assert!(matches!(
-        Dns::try_from(truncated_name),
-        Err(dns::Error::TruncatedLabel { end: 16, .. })
-    ));
-    let mut truncated_question_type = vec![0; 12];
-    truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
-    truncated_question_type.extend_from_slice(&[0, 0]);
-    assert!(matches!(
-        Dns::try_from(truncated_question_type),
-        Err(dns::Error::TruncatedField { needed: 15, .. })
-    ));
-    let mut truncated_rdata = vec![0; 12];
-    truncated_rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
-    truncated_rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
-    assert!(matches!(
-        Dns::try_from(truncated_rdata),
-        Err(dns::Error::TruncatedField { needed: 27, .. })
-    ));
-    let mut too_many = vec![0; 12];
-    too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
-    let record_cap = Dns::try_from(too_many).expect_err("record count above the cap");
-    assert!(
-        matches!(
-            record_cap,
-            dns::Error::QuestionLimit {
-                actual: 65,
-                limit: 64
-            }
-        ),
-        "{record_cap:?}"
-    );
-    let mut pointer_loop = vec![0; 18];
-    pointer_loop[4..6].copy_from_slice(&1_u16.to_be_bytes());
-    pointer_loop[12] = 0xc0;
-    pointer_loop[13] = 12;
-    let looped = Dns::try_from(pointer_loop).expect_err("self-referential name pointer");
-    assert!(
-        matches!(looped, dns::Error::SelfPointer { .. }),
-        "{looped:?}"
-    );
 
     for (root, bytes) in [
         ("ethernet", vec![0; 13]),
@@ -1381,7 +1570,14 @@ fn icmp_body_views_construct_and_decode_verbatim() {
     let mut packet = Packet::new();
     packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
     packet.push_boxed(layer);
-    let (built, _) = round_trip(packet, "ipv4");
+    let (_, decoded) = round_trip(packet, "ipv4");
+    let unreachable = decoded
+        .packet
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == "icmpv4")
+        .expect("decoded ICMPv4 layer");
+    assert_eq!(unreachable.field("mtu"), Some(FieldValue::Unsigned(1400)));
+
     let icmpv6 = registry.codec_named("icmpv6").expect("ICMPv6 codec");
     let mut fields = std::collections::BTreeMap::new();
     fields.insert("type".to_owned(), FieldValue::Unsigned(2));
@@ -1391,7 +1587,17 @@ fn icmp_body_views_construct_and_decode_verbatim() {
         layer.field("body"),
         Some(FieldValue::Bytes(Bytes::from_static(&[0, 0, 0x05, 0x00])))
     );
-    assert!(built.bytes.len() >= 20 + 8);
+
+    let mut packet = Packet::new();
+    packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+    packet.push_boxed(layer);
+    let (_, decoded) = round_trip(packet, "ipv6");
+    let too_big = decoded
+        .packet
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == "icmpv6")
+        .expect("decoded ICMPv6 layer");
+    assert_eq!(too_big.field("mtu"), Some(FieldValue::Unsigned(1280)));
 }
 
 #[test]
@@ -1418,6 +1624,139 @@ fn pseudo_header_failures_name_the_calling_protocol() {
             "{protocol}: {error}: {causes:?}"
         );
     }
+}
+
+fn build_in_context(
+    root: &'static str,
+    packet: Packet,
+    context: codec::Context,
+) -> (build::BuiltPacket, decode::DecodedPacket) {
+    let registry = rooted_registry(root);
+    let built = build::Builder::new(Arc::clone(&registry))
+        .build(packet, context, build::Options::default())
+        .unwrap_or_else(|error| panic!("{root} build: {error}"));
+    let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
+        .unwrap_or_else(|error| panic!("{root} decode: {error}"));
+    (built, decoded)
+}
+
+fn has_valid_udp_checksum(decoded: &decode::DecodedPacket) -> bool {
+    decoded.packet.get::<Udp>().is_some()
+        && decoded
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
+}
+
+#[test]
+fn only_the_outermost_ip_layer_takes_unspecified_addresses_from_the_build_context() {
+    let source4 = Ipv4Addr::new(192, 0, 2, 1);
+    let destination4 = Ipv4Addr::new(192, 0, 2, 2);
+    let context4 = codec::Context {
+        source: Some(source4.into()),
+        destination: Some(destination4.into()),
+    };
+    let source6: Ipv6Addr = "2001:db8::a".parse().unwrap();
+    let destination6: Ipv6Addr = "2001:db8::b".parse().unwrap();
+    let context6 = codec::Context {
+        source: Some(source6.into()),
+        destination: Some(destination6.into()),
+    };
+    let udp = || Udp {
+        source_port: 5000,
+        destination_port: 5001,
+        ..Udp::default()
+    };
+    let ipv4_addresses = |built: &build::BuiltPacket| -> Vec<(Ipv4Addr, Ipv4Addr)> {
+        built
+            .packet
+            .iter()
+            .filter_map(|layer| layer.downcast_ref::<Ipv4>())
+            .map(|layer| (layer.source, layer.destination))
+            .collect()
+    };
+    let ipv6_addresses = |built: &build::BuiltPacket| -> Vec<(Ipv6Addr, Ipv6Addr)> {
+        built
+            .packet
+            .iter()
+            .filter_map(|layer| layer.downcast_ref::<Ipv6>())
+            .map(|layer| (layer.source, layer.destination))
+            .collect()
+    };
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4::default());
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv4", packet, context4.clone());
+    assert_eq!(ipv4_addresses(&built), [(source4, destination4)]);
+    assert!(has_valid_udp_checksum(&decoded));
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4::default());
+    packet.push(Ipv4::default());
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv4", packet, context4.clone());
+    assert_eq!(
+        ipv4_addresses(&built),
+        [
+            (source4, destination4),
+            (Ipv4Addr::UNSPECIFIED, Ipv4Addr::UNSPECIFIED)
+        ]
+    );
+    assert!(has_valid_udp_checksum(&decoded));
+
+    let mut packet = Packet::new();
+    packet.push(Ipv6::default());
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv6", packet, context6.clone());
+    assert_eq!(ipv6_addresses(&built), [(source6, destination6)]);
+    assert!(has_valid_udp_checksum(&decoded));
+
+    let mut packet = Packet::new();
+    packet.push(Ipv6::default());
+    packet.push(Ipv6::default());
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv6", packet, context6.clone());
+    assert_eq!(
+        ipv6_addresses(&built),
+        [
+            (source6, destination6),
+            (Ipv6Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED)
+        ]
+    );
+    assert!(has_valid_udp_checksum(&decoded));
+
+    let mut packet = Packet::new();
+    packet.push(Ipv6::default());
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv6", packet, context4);
+    assert_eq!(
+        ipv6_addresses(&built),
+        [(Ipv6Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED)],
+        "an IPv4 build context is not inherited by an IPv6 layer"
+    );
+    assert!(has_valid_udp_checksum(&decoded));
+
+    let mut packet = Packet::new();
+    packet.push(Ipv6::default());
+    packet.push(SegmentRoutingHeader {
+        segments: vec!["2001:db8::2".parse().unwrap(), destination6],
+        ..SegmentRoutingHeader::default()
+    });
+    packet.push(udp());
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let (built, decoded) = build_in_context("ipv6", packet, context6);
+    assert_eq!(
+        ipv6_addresses(&built),
+        [(source6, "2001:db8::2".parse().unwrap())],
+        "the active SRH segment takes precedence over the inherited destination"
+    );
+    assert!(has_valid_udp_checksum(&decoded));
 }
 
 #[test]
@@ -1453,12 +1792,7 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
             .is_err()
     );
     let (_, decoded) = round_trip(packet, "ipv6");
-    assert!(
-        decoded
-            .diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
-    );
+    assert!(has_valid_udp_checksum(&decoded));
     let path = packetcraftr_core::protocol::semantics::outer_ip_path(&decoded.packet)
         .unwrap()
         .unwrap();
@@ -1470,4 +1804,444 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
         path.final_destination,
         "2001:db8::30".parse::<std::net::IpAddr>().unwrap()
     );
+}
+
+fn ipv6_bytes(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
+    rebuild(registry, packet, codec::Mode::Strict)
+        .expect("IPv6 fixture builds")
+        .bytes
+        .to_vec()
+}
+
+fn rebuild(
+    registry: &Arc<Registry>,
+    packet: Packet,
+    mode: codec::Mode,
+) -> Result<build::BuiltPacket, build::Error> {
+    build::Builder::new(Arc::clone(registry)).build(
+        packet,
+        codec::Context::default(),
+        build::Options {
+            mode,
+            ..build::Options::default()
+        },
+    )
+}
+
+fn warning_fields(diagnostics: &[Diagnostic], code: &str) -> Vec<Option<&'static str>> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == code)
+        .map(|diagnostic| diagnostic.field)
+        .collect()
+}
+
+#[test]
+fn ipv6_fragment_bits_ignored_on_receipt_decode_with_a_warning() {
+    let registry = rooted_registry("ipv6");
+    let mut packet = Packet::new();
+    packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+    packet.push(Fragment {
+        next_header: WireValue::Exact(17),
+        more_fragments: true,
+        identification: 7,
+        ..Fragment::default()
+    });
+    packet.push(Raw::new(vec![0; 8]));
+    let mut bytes = ipv6_bytes(&registry, packet);
+    bytes[41] = 0x5a;
+    bytes[43] |= 0b100;
+
+    let decoded = decode_from_root(&registry, bytes.clone(), decode::Options::default())
+        .expect("a fragment with ignored bits set decodes");
+
+    assert!(decoded.packet.get::<Malformed>().is_none());
+    let fragment = decoded.packet.get::<Fragment>().expect("fragment layer");
+    assert_eq!(fragment.reserved, 0x5a);
+    assert_eq!(fragment.reserved_bits, 0b10);
+    assert!(fragment.more_fragments);
+    assert_eq!(fragment.identification, 7);
+    assert_eq!(
+        warning_fields(&decoded.diagnostics, "decode.ipv6_fragment_reserved"),
+        [Some("reserved"), Some("reserved_bits")]
+    );
+
+    assert!(rebuild(&registry, decoded.packet.clone(), codec::Mode::Strict).is_err());
+    let rebuilt = rebuild(&registry, decoded.packet, codec::Mode::Permissive)
+        .expect("permissive mode keeps the ignored bits");
+    assert_eq!(rebuilt.bytes.as_ref(), bytes);
+    assert_eq!(
+        warning_fields(&rebuilt.diagnostics, "build.ipv6_fragment_reserved"),
+        [Some("reserved"), Some("reserved_bits")]
+    );
+}
+
+#[test]
+fn srh_flags_ignored_on_receipt_decode_with_a_warning() {
+    let registry = rooted_registry("ipv6");
+    let mut packet = Packet::new();
+    packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+    packet.push(SegmentRoutingHeader {
+        segments: vec![
+            "2001:db8::2".parse().expect("segment"),
+            "2001:db8::99".parse().expect("segment"),
+        ],
+        ..SegmentRoutingHeader::default()
+    });
+    packet.push(Udp {
+        source_port: 5_000,
+        destination_port: 5_001,
+        ..Udp::default()
+    });
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let mut bytes = ipv6_bytes(&registry, packet);
+    bytes[45] = 0x80;
+
+    let decoded = decode_from_root(&registry, bytes.clone(), decode::Options::default())
+        .expect("an SRH with flags set decodes");
+
+    assert!(decoded.packet.get::<Malformed>().is_none());
+    let srh = decoded.packet.get::<SegmentRoutingHeader>().expect("SRH");
+    assert_eq!(srh.flags, 0x80);
+    assert_eq!(
+        warning_fields(&decoded.diagnostics, "decode.srh_flags"),
+        [Some("flags")]
+    );
+
+    assert!(rebuild(&registry, decoded.packet.clone(), codec::Mode::Strict).is_err());
+    let rebuilt = rebuild(&registry, decoded.packet, codec::Mode::Permissive)
+        .expect("permissive mode keeps the SRH flags");
+    assert_eq!(rebuilt.bytes.as_ref(), bytes);
+    assert_eq!(
+        warning_fields(&rebuilt.diagnostics, "build.srh_flags"),
+        [Some("flags")]
+    );
+}
+
+#[test]
+fn ipv6_fragment_reserved_bits_beyond_two_bits_never_build() {
+    let registry = rooted_registry("ipv6");
+    let packet = |reserved_bits| {
+        let mut packet = Packet::new();
+        packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+        packet.push(Fragment {
+            next_header: WireValue::Exact(17),
+            reserved_bits,
+            more_fragments: true,
+            ..Fragment::default()
+        });
+        packet.push(Raw::new(vec![0; 8]));
+        packet
+    };
+
+    rebuild(&registry, packet(3), codec::Mode::Permissive).expect("two bits fit");
+    for mode in [codec::Mode::Strict, codec::Mode::Permissive] {
+        assert!(rebuild(&registry, packet(4), mode).is_err(), "{mode:?}");
+    }
+}
+
+fn sctp_packet(sctp: Sctp, chunks: &[u8]) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    packet.push(sctp);
+    packet.push(Raw::new(chunks.to_vec()));
+    packet
+}
+
+#[test]
+fn strict_build_rejects_and_permissive_build_warns_with_the_same_message() {
+    struct Case {
+        label: &'static str,
+        packet: Packet,
+        protocol: &'static str,
+        code: &'static str,
+        field: Option<&'static str>,
+        message: &'static str,
+    }
+
+    let addresses = || ipv4([192, 0, 2, 1], [192, 0, 2, 2]);
+    let mut cases = Vec::new();
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        reserved_flag: true,
+        ..addresses()
+    });
+    packet.push(Icmpv4::default());
+    cases.push(Case {
+        label: "IPv4 reserved flag",
+        packet,
+        protocol: "ipv4",
+        code: "build.ipv4_reserved_flag",
+        field: Some("reserved_flag"),
+        message: "reserved IPv4 flag bit is set",
+    });
+
+    let mut packet = Packet::new();
+    packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+    packet.push(SegmentRoutingHeader {
+        segments: vec!["2001:db8::2".parse().unwrap()],
+        segments_left: WireValue::Exact(3),
+        ..SegmentRoutingHeader::default()
+    });
+    packet.push(Icmpv6::default());
+    cases.push(Case {
+        label: "SRH segments left",
+        packet,
+        protocol: "ipv6_srh",
+        code: "build.srh_segments_left",
+        field: Some("segments_left"),
+        message: "segments_left is 3, exceeding last_entry 0 plus one",
+    });
+
+    let mut packet = Packet::new();
+    packet.push(addresses());
+    packet.push(Tcp {
+        reserved_bits: 1,
+        ..known_tcp()
+    });
+    cases.push(Case {
+        label: "TCP reserved bits",
+        packet,
+        protocol: "tcp",
+        code: "build.tcp_reserved_bits",
+        field: Some("reserved_bits"),
+        message: "reserved TCP header bits are non-zero",
+    });
+
+    let init = [1, 0, 0, 4];
+    cases.push(Case {
+        label: "SCTP zero source port",
+        packet: sctp_packet(
+            Sctp {
+                source_port: 0,
+                ..Sctp::default()
+            },
+            &init,
+        ),
+        protocol: "sctp",
+        code: "build.sctp_zero_port",
+        field: Some("source_port"),
+        message: "source port must not be zero",
+    });
+    cases.push(Case {
+        label: "SCTP zero destination port",
+        packet: sctp_packet(
+            Sctp {
+                destination_port: 0,
+                ..Sctp::default()
+            },
+            &init,
+        ),
+        protocol: "sctp",
+        code: "build.sctp_zero_port",
+        field: Some("destination_port"),
+        message: "destination port must not be zero",
+    });
+
+    for (label, chunks, message) in [
+        (
+            "INIT bundled after DATA",
+            [0, 0, 0, 4, 1, 0, 0, 4],
+            "INIT chunk must not be bundled with other chunks",
+        ),
+        (
+            "INIT ACK bundled before DATA",
+            [2, 0, 0, 4, 0, 0, 0, 4],
+            "INIT ACK chunk must not be bundled with other chunks",
+        ),
+        (
+            "the last unbundleable chunk names the error",
+            [1, 0, 0, 4, 14, 0, 0, 4],
+            "SHUTDOWN COMPLETE chunk must not be bundled with other chunks",
+        ),
+    ] {
+        cases.push(Case {
+            label,
+            packet: sctp_packet(Sctp::default(), &chunks),
+            protocol: "sctp",
+            code: "build.sctp_chunks",
+            field: None,
+            message,
+        });
+    }
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        protocol: WireValue::Auto,
+        ..addresses()
+    });
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    cases.push(Case {
+        label: "Auto discriminator over Raw",
+        packet,
+        protocol: "ipv4",
+        code: "build.auto_raw_discriminator",
+        field: Some("protocol"),
+        message: "Auto protocol cannot infer wire intent from Raw; supply an explicit unknown discriminator",
+    });
+
+    for (label, protocol, field, message, parent) in [
+        (
+            "GRE Auto discriminator over Raw",
+            "gre",
+            "protocol_type",
+            "Auto protocol_type cannot infer wire intent from Raw; supply an explicit unknown discriminator",
+            Box::new(Gre::default()) as Box<dyn Layer>,
+        ),
+        (
+            "PPP Auto discriminator over Raw",
+            "ppp",
+            "protocol",
+            "Auto protocol cannot infer wire intent from Raw; supply an explicit unknown discriminator",
+            Box::new(Ppp::default()),
+        ),
+        (
+            "Linux cooked v1 Auto discriminator over Raw",
+            "linux_sll",
+            "protocol",
+            "Auto protocol cannot infer wire intent from Raw; supply an explicit unknown discriminator",
+            Box::new(LinuxSll::default()),
+        ),
+        (
+            "Linux cooked v2 Auto discriminator over Raw",
+            "linux_sll2",
+            "protocol",
+            "Auto protocol cannot infer wire intent from Raw; supply an explicit unknown discriminator",
+            Box::new(LinuxSll2::default()),
+        ),
+    ] {
+        let mut packet = Packet::new();
+        packet.push_boxed(parent);
+        packet.push(Raw::new(vec![1, 2, 3, 4]));
+        cases.push(Case {
+            label,
+            packet,
+            protocol,
+            code: "build.auto_raw_discriminator",
+            field: Some(field),
+            message,
+        });
+    }
+
+    for (label, protocol, message, parent) in [
+        (
+            "GRE Raw child for a registered discriminator",
+            "gre",
+            "discriminator 2048 selects registered layer ipv4, but that layer is absent",
+            Box::new(Gre {
+                protocol_type: WireValue::Exact(0x0800),
+                ..Gre::default()
+            }) as Box<dyn Layer>,
+        ),
+        (
+            "PPP Raw child for a registered discriminator",
+            "ppp",
+            "discriminator 33 selects registered layer ipv4, but that layer is absent",
+            Box::new(Ppp {
+                protocol: WireValue::Exact(0x0021),
+            }),
+        ),
+        (
+            "Linux cooked v1 Raw child for a registered discriminator",
+            "linux_sll",
+            "discriminator 2048 selects registered layer ipv4, but that layer is absent",
+            Box::new(LinuxSll {
+                protocol: WireValue::Exact(0x0800),
+                ..LinuxSll::default()
+            }),
+        ),
+        (
+            "Linux cooked v2 Raw child for a registered discriminator",
+            "linux_sll2",
+            "discriminator 2048 selects registered layer ipv4, but that layer is absent",
+            Box::new(LinuxSll2 {
+                protocol: WireValue::Exact(0x0800),
+                ..LinuxSll2::default()
+            }),
+        ),
+    ] {
+        let mut packet = Packet::new();
+        packet.push_boxed(parent);
+        packet.push(Raw::new(vec![1, 2, 3, 4]));
+        cases.push(Case {
+            label,
+            packet,
+            protocol,
+            code: "build.raw_typed_discriminator",
+            field: Some("discriminator"),
+            message,
+        });
+    }
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        protocol: WireValue::Exact(6),
+        ..addresses()
+    });
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    cases.push(Case {
+        label: "Raw child for a registered discriminator",
+        packet,
+        protocol: "ipv4",
+        code: "build.raw_typed_discriminator",
+        field: Some("discriminator"),
+        message: "discriminator 6 selects registered layer tcp, but that layer is absent",
+    });
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        protocol: WireValue::Exact(6),
+        ..addresses()
+    });
+    cases.push(Case {
+        label: "missing child for a registered discriminator",
+        packet,
+        protocol: "ipv4",
+        code: "build.discriminator_child_mismatch",
+        field: Some("discriminator"),
+        message: "discriminator 6 selects registered layer tcp, but that layer is absent",
+    });
+
+    let mut packet = Packet::new();
+    packet.push(BsdNull {
+        family: 99,
+        ..BsdNull::default()
+    });
+    packet.push(addresses());
+    packet.push(Icmpv4::default());
+    cases.push(Case {
+        label: "BSD family that does not select the child",
+        packet,
+        protocol: "bsd_null",
+        code: "build.capture_family_binding",
+        field: Some("family"),
+        message: "address family 99 does not select child ipv4",
+    });
+
+    let registry = registry();
+    for case in cases {
+        let label = case.label;
+        match rebuild(&registry, case.packet.clone(), codec::Mode::Strict) {
+            Err(build::Error::Codec {
+                source: codec::Error::Invalid { protocol, message },
+                ..
+            }) => {
+                assert_eq!(protocol.as_str(), case.protocol, "{label}");
+                assert_eq!(message, case.message, "{label}");
+            }
+            other => panic!("{label}: strict build should reject, got {other:?}"),
+        }
+
+        let built = rebuild(&registry, case.packet, codec::Mode::Permissive)
+            .unwrap_or_else(|error| panic!("{label}: permissive build failed: {error}"));
+        let diagnostic = built
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == case.code)
+            .unwrap_or_else(|| panic!("{label}: missing {} in {:?}", case.code, built.diagnostics));
+        assert_eq!(diagnostic.severity, Severity::Warning, "{label}");
+        assert_eq!(diagnostic.field, case.field, "{label}");
+        assert_eq!(diagnostic.message, case.message, "{label}");
+    }
 }

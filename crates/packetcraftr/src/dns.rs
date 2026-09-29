@@ -15,10 +15,7 @@ pub const DEFAULT_MAX_TXT_BYTES: usize = 16_384;
 pub const DEFAULT_MAX_REJECTED_RECORDS: usize = 128;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 32;
 pub const MAX_ATTEMPTS: u32 = 32;
-pub const MAX_MESSAGE_BYTES: usize = u16::MAX as usize;
-pub const MAX_RECORDS: usize = 4_096;
-pub const MAX_NAME_POINTERS: usize = 128;
-pub const MAX_RATE: u32 = 1_000_000;
+pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
     EvidenceDiagnosticDescriptor::new("dns.evidence_limit", "dns.undecoded_limit", "DNS");
@@ -64,4 +61,6 @@ pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, Request, Transp
 pub use plan::{Probe, unpredictable_source_port, unpredictable_transaction_id};
 pub use reverse::reverse_name;
 
-use packetcraftr_core::protocol::application::dns::{Edns, Name, Record, RecordValue};
+use packetcraftr_core::protocol::application::dns::{
+    Edns, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RECORDS, Name, Record, RecordValue,
+};

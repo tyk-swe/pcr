@@ -59,8 +59,9 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// Tallies one finding into the totals, per-severity counters and per-code counts.
     // u64 finding counters cannot reach u64::MAX from a bounded frame count
-    fn count(&mut self, finding: &Finding) {
+    pub fn record(&mut self, finding: &Finding) {
         self.findings += 1;
         match finding.severity {
             Severity::Error => self.errors += 1,
@@ -94,7 +95,7 @@ impl Collector {
         }
 
         for finding in &findings {
-            self.summary.count(finding);
+            self.summary.record(finding);
         }
         findings
     }
@@ -107,7 +108,7 @@ impl Collector {
             summary.frames_read,
         );
         for finding in &findings {
-            self.summary.count(finding);
+            self.summary.record(finding);
         }
         (findings, self.summary)
     }

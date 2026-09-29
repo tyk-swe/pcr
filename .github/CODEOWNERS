@@ -1,31 +1,47 @@
 # Safety-sensitive and serialized-contract review routing.
 
 # Native adapters and live I/O seams.
+/crates/packetcraftr-netio/build.rs @tyk-swe
+/crates/packetcraftr-netio/Cargo.toml @tyk-swe
+/crates/packetcraftr-netio/src/platform.rs @tyk-swe
 /crates/packetcraftr-netio/src/platform/** @tyk-swe
 /crates/packetcraftr-netio/src/transmit.rs @tyk-swe
+/crates/packetcraftr-netio/src/transmit/** @tyk-swe
 /crates/packetcraftr-netio/src/tcp.rs @tyk-swe
+/crates/packetcraftr-netio/src/tcp/** @tyk-swe
 /crates/packetcraftr-netio/src/capture.rs @tyk-swe
+/crates/packetcraftr-netio/src/capture/** @tyk-swe
+/crates/packetcraftr-netio/src/route.rs @tyk-swe
 /crates/packetcraftr-netio/src/route/** @tyk-swe
 /crates/packetcraftr-netio/src/interface.rs @tyk-swe
+/crates/packetcraftr-netio/src/interface/** @tyk-swe
+/crates/packetcraftr-netio/src/workers.rs @tyk-swe
+/crates/packetcraftr-netio/src/workers/** @tyk-swe
 
+/crates/packetcraftr/src/exchange.rs @tyk-swe
 /crates/packetcraftr/src/exchange/** @tyk-swe
+/crates/packetcraftr/src/policy.rs @tyk-swe
 /crates/packetcraftr/src/policy/** @tyk-swe
 /crates/packetcraftr/src/preparation.rs @tyk-swe
 /crates/packetcraftr/src/preparation/** @tyk-swe
-
-/crates/packetcraftr-core/src/protocol/matcher/** @tyk-swe
+/crates/packetcraftr/src/probe.rs @tyk-swe
 /crates/packetcraftr/src/probe/** @tyk-swe
 
+/crates/packetcraftr-cli/src/output.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-cli/src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/document.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/document/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/field.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/field/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/layout.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/protocol.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/protocol/**/*.rs @tyk-swe @rkdxodud-tyk
 
-/crates/packetcraftr-core/src/protocol/builtin/registry.rs @tyk-swe
+/crates/packetcraftr-core/src/protocol/matcher.rs @tyk-swe
+/crates/packetcraftr-core/src/protocol/matcher/** @tyk-swe
+/crates/packetcraftr-core/src/protocol/builtin/assembly.rs @tyk-swe
 
 # Workspace-wide dependency, feature, lint, and profile policy.
 /Cargo.toml @tyk-swe

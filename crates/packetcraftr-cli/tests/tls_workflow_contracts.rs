@@ -446,7 +446,7 @@ fn the_retention_ceiling_reports_what_it_left_out() {
     assert_eq!(records.len(), 4);
     assert_eq!(records[3]["result"]["sessions_omitted"], 0);
 
-    let rendered = text(&run_success(&["tls", path, "--max-tls-sessions", "2"]));
+    let rendered = text(&run_success(&["tls", path, "--max-output-sessions", "2"]));
     let lines = rendered.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 4, "{rendered}");
     for sni in ["api.example.test", "files.example.test", "www.example.test"] {

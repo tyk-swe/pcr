@@ -30,26 +30,35 @@ pub enum Timing {
 }
 
 impl Timing {
-    pub fn validate(&self) -> Result<(), Error> {
-        match *self {
-            Self::BitRate(0) => Err(Error::InvalidTiming {
-                mode: "bit_rate",
-                value: 0.0,
-            }),
-            Self::Scaled(value) if !value.is_finite() || value <= 0.0 => {
-                Err(Error::InvalidTiming {
-                    mode: "scaled",
-                    value,
-                })
-            }
-            Self::FixedRate(value) if !value.is_finite() || value <= 0.0 => {
-                Err(Error::InvalidTiming {
-                    mode: "fixed_rate",
-                    value,
-                })
-            }
-            _ => Ok(()),
+    pub(super) const fn mode(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Scaled(_) => "scaled",
+            Self::FixedRate(_) => "fixed_rate",
+            Self::BitRate(_) => "bit_rate",
+            Self::Immediate => "immediate",
         }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        let value = match *self {
+            Self::BitRate(0) => 0.0,
+            Self::Scaled(value) if !value.is_finite() || value <= 0.0 => value,
+            Self::FixedRate(rate) if Self::fixed_rate_period(rate).is_none() => rate,
+            _ => return Ok(()),
+        };
+        Err(Error::InvalidTiming {
+            mode: self.mode(),
+            value,
+        })
+    }
+
+    /// The gap between frames at `rate`, or `None` when it is not positive,
+    /// rounds to zero nanoseconds, or does not fit a `Duration`.
+    pub(super) fn fixed_rate_period(rate: f64) -> Option<Duration> {
+        Duration::try_from_secs_f64(1.0 / rate)
+            .ok()
+            .filter(|period| !period.is_zero())
     }
 }
 
@@ -146,13 +155,10 @@ impl Options {
                 reason: "must be within 1..=1024",
             });
         }
-        if self
-            .inter_pass_delay
-            .checked_mul(self.repeat - 1)
-            .is_none_or(|delay| delay > self.limits.max_duration)
-        {
+        let total_pause = self.inter_pass_delay.saturating_mul(self.repeat - 1);
+        if total_pause > self.limits.max_duration {
             return Err(Error::InvalidDuration {
-                value: self.inter_pass_delay,
+                value: total_pause,
                 maximum: self.limits.max_duration,
             });
         }
@@ -287,4 +293,80 @@ pub(super) fn validate<R>(source: &Source<R>, options: &Options) -> Result<(), E
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{Error, Limits, LinkMode, Options, Timing};
+
+    fn options(repeat: u32, inter_pass_delay: Duration) -> Options {
+        Options {
+            repeat,
+            inter_pass_delay,
+            link_mode: LinkMode::Auto,
+            timing: Timing::Immediate,
+            limits: Limits::default(),
+            allow_permissive_live: false,
+        }
+    }
+
+    #[test]
+    fn a_timing_mode_is_its_serialized_variant_name() {
+        for timing in [
+            Timing::Original,
+            Timing::Scaled(2.0),
+            Timing::FixedRate(2.0),
+            Timing::BitRate(1),
+            Timing::Immediate,
+        ] {
+            let serialized = serde_json::to_value(timing).expect("timing serializes");
+            let name = serialized
+                .as_str()
+                .or_else(|| serialized.as_object()?.keys().next().map(String::as_str));
+            assert_eq!(name, Some(timing.mode()), "{serialized}");
+        }
+    }
+
+    #[test]
+    fn inter_pass_pause_beyond_the_duration_limit_reports_the_total_pause() {
+        let error = options(10, Duration::from_secs(600))
+            .validate()
+            .expect_err("nine 600 s pauses exceed the one hour limit");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidDuration { value, maximum }
+                    if value == Duration::from_secs(5400) && maximum == Duration::from_secs(3600)
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "replay duration 5400s is invalid; maximum is 3600s"
+        );
+    }
+
+    #[test]
+    fn inter_pass_pause_equal_to_the_duration_limit_is_accepted() {
+        options(7, Duration::from_secs(600))
+            .validate()
+            .expect("six 600 s pauses fit the one hour limit");
+    }
+
+    #[test]
+    fn overflowing_inter_pass_pause_is_rejected_with_a_saturated_total() {
+        let error = options(3, Duration::MAX)
+            .validate()
+            .expect_err("the total pause overflows Duration");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidDuration { value, maximum }
+                    if value == Duration::MAX && maximum == Duration::from_secs(3600)
+            ),
+            "{error:?}"
+        );
+    }
 }

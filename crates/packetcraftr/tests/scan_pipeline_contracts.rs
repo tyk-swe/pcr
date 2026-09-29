@@ -232,6 +232,30 @@ fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
     assert_eq!(winner(2), 1);
 }
 
+#[test]
+fn pipelined_and_serial_scans_stop_at_the_undecoded_limit_with_one_diagnostic() {
+    let observe = |max_in_flight| {
+        let mut request = request();
+        request.max_in_flight = max_in_flight;
+        request.ports = vec![80, 81, 82, 83, 84];
+        request.limits.max_undecoded = 2;
+        request.collection.decode.limits.max_packet_size = 39;
+
+        let aggregate = execute(&request, Arc::new(Mutex::new(State::default())))
+            .expect("undecodable replies are evidence, not a failure");
+
+        let warnings = aggregate
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "scan.undecoded_limit")
+            .count();
+        (aggregate.undecoded.len(), warnings)
+    };
+
+    assert_eq!(observe(1), (2, 1));
+    assert_eq!(observe(2), (2, 1));
+}
+
 #[derive(Clone)]
 struct SteppingClock(Arc<Mutex<Instant>>);
 

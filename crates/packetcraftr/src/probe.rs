@@ -11,7 +11,7 @@ pub use crate::correlation::Transport;
 pub use model::{ProbeEndpoint, ProbeStatus};
 pub(crate) use runner::{Batch, Evidence};
 
-pub(crate) use limits::{check_probe_count, check_probe_duration};
+pub(crate) use limits::{check_collection_evidence, check_probe_count, check_probe_duration};
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;

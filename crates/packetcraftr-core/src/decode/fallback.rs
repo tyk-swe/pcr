@@ -47,7 +47,7 @@ pub(super) fn append_raw(
 pub(super) fn append_malformed(
     packet: &mut Packet,
     layouts: &mut Vec<LayerLayout>,
-    intended: Option<crate::layer::Id>,
+    intended: crate::layer::Id,
     bytes: Bytes,
     reason: String,
     absolute_offset: usize,
@@ -55,7 +55,7 @@ pub(super) fn append_malformed(
     let index = packet.len();
     let end = absolute_offset.saturating_add(bytes.len());
     packet.push(Malformed::new(
-        intended.map(|id| id.as_str().to_owned()),
+        Some(intended.as_str().to_owned()),
         bytes,
         reason,
     ));
@@ -92,31 +92,13 @@ pub(super) fn slice_original(original: &Bytes, offset: usize, length: usize) -> 
         .unwrap_or_default()
 }
 
-pub(super) fn append_missing_required_layer(
-    packet: &mut Packet,
-    layouts: &mut Vec<LayerLayout>,
-    intended: crate::layer::Id,
-    absolute_offset: usize,
-) {
-    append_malformed(
-        packet,
-        layouts,
-        Some(intended),
-        Bytes::new(),
-        "required child header is absent".to_owned(),
-        absolute_offset,
-    );
-}
-
 pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
-    let original = frame.bytes().clone();
     let mut packet = Packet::new();
     let mut layouts = Vec::with_capacity(1);
-    append_raw(&mut packet, &mut layouts, original.clone(), 0);
+    append_raw(&mut packet, &mut layouts, frame.bytes().clone(), 0);
     packet.set_encoded_payload_lengths(vec![Some(0)]);
     DecodedPacket {
         packet,
-        original,
         frame,
         layout: PacketLayout::new(layouts),
         diagnostics: vec![diagnostic],

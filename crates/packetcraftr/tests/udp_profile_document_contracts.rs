@@ -141,3 +141,20 @@ fn syntax_refusals_name_the_parser_reason_once() {
         Err(Error::Document(udp_profiles::Error::DocumentSize { .. }))
     ));
 }
+
+#[test]
+fn response_checks_without_fields_refuse_unknown_fields() {
+    for response in [
+        json!({"type": "any", "min_length": 4}),
+        json!({"type": "any", "checks": []}),
+        json!({"type": "dns", "checks": [{"offset": 0, "data": "50435202"}]}),
+    ] {
+        let mut document = sample();
+        document["profiles"][0]["profile"]["response"] = response.clone();
+        let error = parse(&document).expect_err(&response.to_string());
+        assert!(
+            matches!(error, Error::Document(udp_profiles::Error::Syntax(_))),
+            "{response}: {error:?}"
+        );
+    }
+}

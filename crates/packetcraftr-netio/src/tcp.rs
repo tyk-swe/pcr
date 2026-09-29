@@ -6,11 +6,11 @@ mod error;
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 
+pub use connect::{PendingConnect, start_connect};
 pub use error::Error;
 
 /// Process-wide connections that may hold a worker or an open socket at once.
@@ -64,35 +64,6 @@ pub struct ConnectOutcome<S> {
     pub completed_at: std::time::SystemTime,
     pub elapsed: Duration,
     pub result: Result<Connection<S>, Error>,
-}
-/// Pollable bounded connect. Dropping it cancels unstarted work.
-pub struct PendingConnect<S> {
-    inner: connect::Pending<S>,
-}
-impl<S> PendingConnect<S> {
-    pub fn cancel(&mut self) -> bool {
-        self.inner.cancel()
-    }
-
-    pub fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, Error> {
-        self.inner.poll()
-    }
-
-    /// Returns `None` if `deadline` expires or is cancelled while work is pending.
-    pub fn wait(&mut self, deadline: &Deadline) -> Result<Option<ConnectOutcome<S>>, Error> {
-        self.inner.wait(deadline)
-    }
-}
-pub fn start_connect<P>(
-    provider: Arc<P>,
-    endpoint: SocketAddr,
-    deadline: &Deadline,
-) -> Result<PendingConnect<P::Stream>, Error>
-where
-    P: Provider + 'static,
-    P::Stream: 'static,
-{
-    connect::start(provider, endpoint, deadline).map(|inner| PendingConnect { inner })
 }
 
 pub trait Stream: Read + Write + Send {

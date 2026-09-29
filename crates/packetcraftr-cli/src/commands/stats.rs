@@ -98,34 +98,57 @@ fn cap_table(
         rows.truncate(limit);
         omitted_diagnostic(code, subject, omitted, "--top")
     }
+    /// Stable, so equal volumes keep the collector's key order.
+    fn busiest_first<T>(rows: &mut [T], volume: impl Fn(&T) -> (u64, u64)) {
+        rows.sort_by_key(|row| std::cmp::Reverse(volume(row)));
+    }
     let Some(limit) = top else {
         return Vec::new();
     };
     match table {
-        Table::Conversations => cap(
-            &mut report.conversations,
-            limit,
-            "stats.conversations_omitted",
-            "conversation row(s)",
-        ),
-        Table::Endpoints => cap(
-            &mut report.endpoints,
-            limit,
-            "stats.endpoints_omitted",
-            "endpoint row(s)",
-        ),
+        Table::Conversations => {
+            busiest_first(&mut report.conversations, |row| {
+                (
+                    row.frames_a_to_b.saturating_add(row.frames_b_to_a),
+                    row.bytes_a_to_b.saturating_add(row.bytes_b_to_a),
+                )
+            });
+            cap(
+                &mut report.conversations,
+                limit,
+                "stats.conversations_omitted",
+                "conversation row(s)",
+            )
+        }
+        Table::Endpoints => {
+            busiest_first(&mut report.endpoints, |row| {
+                (
+                    row.tx_frames.saturating_add(row.rx_frames),
+                    row.tx_bytes.saturating_add(row.rx_bytes),
+                )
+            });
+            cap(
+                &mut report.endpoints,
+                limit,
+                "stats.endpoints_omitted",
+                "endpoint row(s)",
+            )
+        }
         Table::Protocols => cap(
             &mut report.protocols,
             limit,
             "stats.protocols_omitted",
             "protocol row(s)",
         ),
-        Table::Ports => cap(
-            &mut report.ports,
-            limit,
-            "stats.ports_omitted",
-            "port row(s)",
-        ),
+        Table::Ports => {
+            busiest_first(&mut report.ports, |row| (row.frames, row.bytes));
+            cap(
+                &mut report.ports,
+                limit,
+                "stats.ports_omitted",
+                "port row(s)",
+            )
+        }
         Table::Io => cap(&mut report.io, limit, "stats.io_omitted", "io bucket(s)"),
         Table::Fragments => Vec::new(),
     }

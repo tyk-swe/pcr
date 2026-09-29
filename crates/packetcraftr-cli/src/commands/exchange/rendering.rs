@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::capture_file::Format;
+use packetcraftr_core::diagnostic::Diagnostic;
 
 use crate::output;
 
@@ -11,10 +12,6 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<(), CliError> {
-    let mut diagnostics = result.diagnostics.clone();
-    for sent in &result.sent {
-        diagnostics.extend(sent.built().diagnostics.iter().cloned());
-    }
     write_stdout_line(format_args!(
         "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
         result.sent.len(),
@@ -24,7 +21,17 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<
         result.undecoded.len(),
         result.stats.bytes
     ))?;
-    render_diagnostics_text(&diagnostics)
+    render_diagnostics_text(&text_diagnostics(result))
+}
+
+fn text_diagnostics(result: &packetcraftr::exchange::Aggregate) -> Vec<Diagnostic> {
+    let mut diagnostics = result.diagnostics.clone();
+    for sent in &result.sent {
+        for diagnostic in &sent.built().diagnostics {
+            packetcraftr_core::diagnostic::push_once(&mut diagnostics, diagnostic.clone());
+        }
+    }
+    diagnostics
 }
 
 pub(super) fn render_capture(
@@ -79,9 +86,11 @@ pub(super) fn render_complete(
 mod tests {
     use std::time::UNIX_EPOCH;
 
+    use packetcraftr_core::diagnostic::Diagnostic;
     use packetcraftr_core::frame::{Frame, LinkType};
 
-    use super::stable_timestamp_order;
+    use super::{stable_timestamp_order, text_diagnostics};
+    use crate::test_support::sent_packet_with;
 
     #[test]
     fn equal_timestamps_keep_source_tie_order() {
@@ -94,6 +103,37 @@ mod tests {
                 .filter_map(|frame| frame.bytes().first().copied())
                 .collect::<Vec<_>>(),
             [1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn text_diagnostics_collapse_repeated_build_diagnostics_by_code() {
+        let aggregate = packetcraftr::exchange::Aggregate {
+            sent: [
+                vec![
+                    Diagnostic::warning("build.unbound_layers", "from a build"),
+                    Diagnostic::info("build.fixture", "fixture note"),
+                ],
+                vec![Diagnostic::warning("build.unbound_layers", "from a build")],
+                vec![Diagnostic::warning("build.unbound_layers", "from a build")],
+            ]
+            .into_iter()
+            .map(sent_packet_with)
+            .collect(),
+            responses: Vec::new(),
+            unanswered: Vec::new(),
+            unsolicited: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: vec![Diagnostic::warning("exchange.fixture", "from the run")],
+            stats: packetcraftr::Stats::default(),
+        };
+
+        assert_eq!(
+            text_diagnostics(&aggregate)
+                .iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect::<Vec<_>>(),
+            ["exchange.fixture", "build.unbound_layers", "build.fixture"]
         );
     }
 }

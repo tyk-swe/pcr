@@ -17,7 +17,7 @@ pub enum Error {
     #[error(transparent)]
     TargetSelection(SelectionError),
     #[error(transparent)]
-    Cancelled(Cancelled),
+    Cancelled(#[from] Cancelled),
     #[error("invalid scan limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -67,6 +67,8 @@ pub enum Error {
     #[error("scan events are incoherent: {message}")]
     IncoherentEvents { message: String },
 }
+
+crate::deadline::deadline_error_conversions!(Error);
 
 impl Error {
     pub(super) fn family(family: Family) -> Self {
@@ -174,18 +176,11 @@ impl crate::execution::Errors for Probes {
     }
 
     fn duration_limit(&self, _sequence: u64, source: DeadlineExceeded) -> Error {
-        Error::DurationLimit {
-            actual: source.actual,
-            limit: source.limit,
-        }
+        source.into()
     }
 
-    fn interrupted(&self, sequence: u64, source: Interrupted) -> Error {
-        match source {
-            Interrupted::Exceeded(source) => self.duration_limit(sequence, source),
-            Interrupted::Cancelled(source) => Error::Cancelled(source),
-            _ => Error::Cancelled(Cancelled),
-        }
+    fn interrupted(&self, _sequence: u64, source: Interrupted) -> Error {
+        source.into()
     }
 
     fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {

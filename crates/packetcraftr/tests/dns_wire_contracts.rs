@@ -809,6 +809,122 @@ fn relevance_filter_follows_cname_authority_and_glue_references() {
 }
 
 #[test]
+fn dnssec_records_decode_as_unknown_rdata_and_survive_relevance_filtering() {
+    fn at(owner: &str, type_code: u16, rdata: Vec<u8>) -> WireRecord {
+        WireRecord {
+            owner: name(owner),
+            ..record(type_code, rdata)
+        }
+    }
+    fn rrsig(covered: u16) -> Vec<u8> {
+        let mut rdata = covered.to_be_bytes().to_vec();
+        rdata.extend_from_slice(&[13, 3]);
+        for value in [300_u32, 1_770_000_000, 1_769_000_000] {
+            rdata.extend_from_slice(&value.to_be_bytes());
+        }
+        rdata.extend_from_slice(&12_345_u16.to_be_bytes());
+        rdata.extend_from_slice(&name("example.test."));
+        rdata.extend_from_slice(&[0xab; 64]);
+        rdata
+    }
+
+    let mut soa = name("ns.example.test.");
+    soa.extend_from_slice(&name("hostmaster.example.test."));
+    for value in [1_u32, 2, 3, 4, 5] {
+        soa.extend_from_slice(&value.to_be_bytes());
+    }
+    let mut ds = 12_345_u16.to_be_bytes().to_vec();
+    ds.extend_from_slice(&[13, 2]);
+    ds.extend_from_slice(&[0xcd; 32]);
+    let mut nsec = name("b.example.test.");
+    nsec.extend_from_slice(&[0, 6, 0x40, 0, 0, 0, 0, 0x03]);
+    let mut nsec3 = vec![1, 0, 0, 10, 4, 0xaa, 0xbb, 0xcc, 0xdd, 20];
+    nsec3.extend_from_slice(&[0xef; 20]);
+    nsec3.extend_from_slice(&[0, 6, 0x40, 0, 0, 0, 0, 0x02]);
+    let hash = "0p9mhaveqvm6t7vbl5lop2u3t2rp3tom";
+
+    let answers = [
+        record(1, vec![192, 0, 2, 1]),
+        record(46, rrsig(1)),
+        record(46, rrsig(16)),
+    ];
+    let authorities = [
+        at("example.test.", 6, soa),
+        at("example.test.", 46, rrsig(6)),
+        at("a.example.test.", 47, nsec),
+        at("a.example.test.", 46, rrsig(47)),
+        at(&format!("{hash}.example.test."), 50, nsec3.clone()),
+        at(&format!("{hash}.example.test."), 46, rrsig(50)),
+        at("example.test.", 43, ds),
+        at("example.test.", 46, rrsig(43)),
+        at("other.test.", 47, vec![0]),
+        at(&format!("{hash}.other.test."), 50, nsec3),
+        at("example.test.", 46, rrsig(1)),
+    ];
+    let message = response(
+        "www.example.test.",
+        QueryType::A,
+        RESPONSE | AUTHORITATIVE,
+        &answers,
+        &authorities,
+        &[],
+    );
+    let decoded = decode(&message, "www.example.test", QueryType::A);
+
+    let types = |records: &[Record]| {
+        records
+            .iter()
+            .map(|record| record.value.type_code())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(types(&decoded.answers), [1, 46]);
+    assert_eq!(types(&decoded.authorities), [6, 46, 47, 46, 50, 46, 43, 46]);
+    let kept = decoded
+        .answers
+        .iter()
+        .skip(1)
+        .zip(&answers[1..])
+        .chain(decoded.authorities.iter().zip(&authorities).skip(1));
+    for (decoded, wire) in kept {
+        assert_eq!(
+            decoded.value,
+            RecordValue::Unknown {
+                type_code: wire.type_code,
+                rdata: Bytes::from(wire.rdata.clone()),
+            }
+        );
+    }
+
+    let rejected = decoded
+        .rejected_records
+        .iter()
+        .map(|rejected| {
+            (
+                rejected.section,
+                rejected.index,
+                rejected.owner.as_str(),
+                rejected.type_code,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(decoded.metadata.rejected_record_count, 4);
+    assert_eq!(
+        rejected,
+        [
+            (Section::Answer, 2, "www.example.test.", 46),
+            (Section::Authority, 8, "other.test.", 47),
+            (
+                Section::Authority,
+                9,
+                "0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.other.test.",
+                50
+            ),
+            (Section::Authority, 10, "example.test.", 46),
+        ]
+    );
+}
+
+#[test]
 fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
     let base = response(
         "example.test.",
@@ -920,9 +1036,18 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
     ));
 
     for (question, expected) in [
-        (vec![0xc0, 0x0c], "loop"),
-        (vec![0xc0, 0xff], "out_of_bounds"),
-        (vec![0x40, 0], "reserved"),
+        (vec![0xc0, 0x0c], DecodeError::SelfPointer { offset: 12 }),
+        (
+            vec![0xc0, 0xff],
+            DecodeError::PointerOutOfBounds {
+                pointer: 255,
+                length: 18,
+            },
+        ),
+        (
+            vec![0x40, 0],
+            DecodeError::ReservedLabelLength { offset: 12 },
+        ),
     ] {
         let mut malformed = Vec::new();
         malformed.extend_from_slice(&ID.to_be_bytes());
@@ -932,16 +1057,15 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         malformed.extend_from_slice(&question);
         malformed.extend_from_slice(&QueryType::A.code().to_be_bytes());
         malformed.extend_from_slice(&1_u16.to_be_bytes());
-        assert!(
+        assert_eq!(
             dns::wire::decode_response(
                 &malformed,
                 "example.test",
                 QueryType::A,
                 ID,
                 Limits::default()
-            )
-            .is_err(),
-            "{expected}"
+            ),
+            Err(wire::Error::Decode(expected))
         );
     }
 }

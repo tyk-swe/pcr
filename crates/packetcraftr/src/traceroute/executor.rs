@@ -20,13 +20,6 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
-        if self.collection.max_responses < batch.probes.len() {
-            return Err(EXECUTOR_FAULT.invalid(format!(
-                "max_responses={} is smaller than traceroute hop batch size {}",
-                self.collection.max_responses,
-                batch.probes.len()
-            )));
-        }
 
         let varying_field = match first.target.transport() {
             Transport::Udp => "destination_port",

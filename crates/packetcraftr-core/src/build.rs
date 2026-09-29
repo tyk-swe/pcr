@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use crate::codec::{Context, LayerEncodeContext, Mode};
-use crate::layer::Id;
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::packet::Packet;
 use crate::registry::Registry;
@@ -43,9 +42,8 @@ impl Builder {
         context: Context,
         options: Options,
     ) -> Result<BuiltPacket, Error> {
-        let mut diagnostics = Vec::new();
-        let protocols = self.validate_packet(&packet, &options, &mut diagnostics)?;
-        let encoding = self.encode_layers(&packet, protocols, &context, &options, diagnostics)?;
+        let diagnostics = self.validate_packet(&packet, &options)?;
+        let encoding = self.encode_layers(&packet, &context, &options, diagnostics)?;
         Self::finalize(encoding, options.mode)
     }
 
@@ -53,8 +51,7 @@ impl Builder {
         &self,
         packet: &Packet,
         options: &Options,
-        diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
-    ) -> Result<Vec<Id>, Error> {
+    ) -> Result<Vec<crate::diagnostic::Diagnostic>, Error> {
         if packet.is_empty() {
             return Err(Error::EmptyPacket);
         }
@@ -82,21 +79,14 @@ impl Builder {
                     source,
                 })?;
         }
-        let protocols: Vec<_> = packet.iter().map(|layer| *layer.protocol_id()).collect();
-        validation::validate_bindings(
-            &self.registry,
-            packet,
-            &protocols,
-            options.mode,
-            diagnostics,
-        )?;
-        Ok(protocols)
+        let mut diagnostics = Vec::new();
+        validation::validate_bindings(&self.registry, packet, options.mode, &mut diagnostics)?;
+        Ok(diagnostics)
     }
 
     fn encode_layers(
         &self,
         packet: &Packet,
-        protocols: Vec<Id>,
         context: &Context,
         options: &Options,
         mut diagnostics: Vec<crate::diagnostic::Diagnostic>,
@@ -106,7 +96,8 @@ impl Builder {
         let mut layers = Vec::with_capacity(packet.len());
         let mut payload_lengths = Vec::with_capacity(packet.len());
 
-        for (index, (layer, protocol)) in packet.iter().zip(protocols).enumerate().rev() {
+        for (index, layer) in packet.iter().enumerate().rev() {
+            let protocol = *layer.protocol_id();
             let codec = self
                 .registry
                 .codec(protocol.as_str())

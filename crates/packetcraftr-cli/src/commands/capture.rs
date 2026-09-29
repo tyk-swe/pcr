@@ -30,8 +30,8 @@ use self::files::Files;
 use crate::command_options::Compression;
 use crate::output;
 use crate::rendering::{render_frame_text, write_hex_line};
-use packetcraftr::capture::{self as workflow, Control, Event};
-use packetcraftr::policy::CaptureBudget;
+use packetcraftr::capture::{self as workflow, Control, Event, Source};
+use packetcraftr::policy::{CaptureBudget, Policy};
 use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
 use packetcraftr_core::{
     self as core,
@@ -88,6 +88,103 @@ pub(super) fn run(
             "capture accepts at most 256 interface selectors before deduplication",
         ));
     }
+    let compression = validate_output(&args, format)?;
+    let limits = args.limits.into_limits();
+    limits.validate().map_err(CliError::classified)?;
+    let native = net::capture::NativeSettings {
+        buffer_size: args.capture_buffer_bytes,
+        timestamp_source: args.timestamp_source.map(Into::into),
+        timestamp_precision: args.timestamp_precision.map(Into::into),
+    };
+    native.validate(&limits).map_err(CliError::classified)?;
+    let registry = args.decode.registry()?;
+    let projector = crate::rendering::Projector::prepare(
+        &args.fields,
+        args.max_projection_bytes,
+        &registry,
+        Command::Capture,
+        format.as_format(),
+    )?;
+    if projector
+        .as_ref()
+        .is_some_and(|projector| projector.projection.requirements().stream_index)
+    {
+        return Err(CliError::new(
+            Kind::Usage,
+            "capture --field cannot select stream indices; save the capture and use read --field",
+        ));
+    }
+    let decoding = Decoding::prepare(
+        args.dissect,
+        projector.is_some(),
+        args.filter.as_deref(),
+        &registry,
+        limits.snap_length,
+    )?;
+    // `Decoding` evaluates the same filter itself so a frame is decoded at most once.
+    let selector = if decoding.is_none() {
+        filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
+    } else {
+        None
+    };
+    let policy = args.budgets.into_policy();
+    let files = args
+        .write
+        .map(|path| {
+            files::Files::new(
+                files::Options {
+                    path,
+                    compression,
+                    rotate_bytes: args.rotate_bytes,
+                    rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
+                    max_files: args.rotate_files,
+                    retention: args.retention.into(),
+                },
+                file_limits(&policy),
+            )
+        })
+        .transpose()
+        .map_err(CliError::classified)?;
+    let mut seen = HashSet::new();
+    let mut interfaces = Vec::new();
+    for source in args.interface {
+        let interface = resolve(source.get()?)?;
+        if seen.insert(interface.index) {
+            interfaces.push(interface);
+        }
+    }
+    if format == CaptureFormat::Pcap && interfaces.len() != 1 {
+        return Err(CliError::new(
+            Kind::Usage,
+            "multiple interfaces require PCAPNG capture output",
+        ));
+    }
+    let request = workflow::Request::new(
+        net::capture::GroupRequest {
+            interfaces,
+            limits,
+            filter: args.capture_filter,
+            promiscuous: args.promiscuous,
+            native,
+        },
+        timeout,
+    );
+    drive(
+        &client(registry, policy, Runtime::Capture),
+        request,
+        Output {
+            format,
+            compression,
+            selector,
+            decoding,
+            projector,
+            files,
+            stream,
+        },
+    )
+}
+
+fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, CliError> {
     let compression = if args.write.is_some() {
         if !matches!(
             format,
@@ -132,107 +229,7 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    let limits = args.limits.into_limits();
-    limits.validate().map_err(CliError::classified)?;
-    let native = net::capture::NativeSettings {
-        buffer_size: args.capture_buffer_bytes,
-        timestamp_source: args.timestamp_source.map(Into::into),
-        timestamp_precision: args.timestamp_precision.map(Into::into),
-    };
-    native.validate(&limits).map_err(CliError::classified)?;
-    let registry = args.decode.registry()?;
-    let projector = if args.fields.is_empty() {
-        None
-    } else {
-        crate::rendering::Projector::prepare(
-            &args.fields,
-            args.max_projection_bytes,
-            &registry,
-            Command::Capture,
-            format.as_format(),
-        )?
-    };
-    if projector
-        .as_ref()
-        .is_some_and(|projector| projector.projection.requirements().stream_index)
-    {
-        return Err(CliError::new(
-            Kind::Usage,
-            "capture --field cannot select stream indices; save the capture and use read --field",
-        ));
-    }
-    let decoding = Decoding::prepare(
-        args.dissect,
-        projector.is_some(),
-        args.filter.as_deref(),
-        &registry,
-        limits.snap_length,
-    )?;
-    // `Decoding` evaluates the same filter itself so a frame is decoded at most once.
-    let selector = if decoding.is_none() {
-        filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
-    } else {
-        None
-    };
-    let policy = args.budgets.into_policy();
-    let budget = CaptureBudget::new(&policy);
-    let files = args
-        .write
-        .map(|path| {
-            files::Files::new(
-                files::Options {
-                    path,
-                    compression,
-                    rotate_bytes: args.rotate_bytes,
-                    rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
-                    max_files: args.rotate_files,
-                    retention: args.retention.into(),
-                },
-                capture_file::Limits {
-                    max_frames: budget.max_frames(),
-                    max_bytes: budget.max_bytes(),
-                },
-            )
-        })
-        .transpose()
-        .map_err(CliError::classified)?;
-    let mut seen = HashSet::new();
-    let mut interfaces = Vec::new();
-    for source in args.interface {
-        let interface = resolve(source.get()?)?;
-        if seen.insert(interface.index) {
-            interfaces.push(interface);
-        }
-    }
-    if format == CaptureFormat::Pcap && interfaces.len() != 1 {
-        return Err(CliError::new(
-            Kind::Usage,
-            "multiple interfaces require PCAPNG capture output",
-        ));
-    }
-    let request = workflow::Request::new(
-        net::capture::GroupRequest {
-            interfaces,
-            limits,
-            filter: args.capture_filter,
-            promiscuous: args.promiscuous,
-            native,
-        },
-        timeout,
-    );
-    drive(
-        &client(registry, policy, Runtime::Capture),
-        request,
-        Output {
-            format,
-            compression,
-            selector,
-            decoding,
-            projector,
-            files,
-            stream,
-        },
-    )
+    Ok(compression)
 }
 
 /// Selection decodes a kept frame once and parks it so emission republishes
@@ -298,6 +295,107 @@ struct Destinations {
     files: Option<Files>,
     writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     projector: Option<crate::rendering::Projector>,
+    format: CaptureFormat,
+    compression: Compression,
+    limits: capture_file::Limits,
+    stream: StreamEncoder,
+}
+
+impl Destinations {
+    fn start(&mut self, sources: Vec<Source>) -> Result<(), BoundaryError> {
+        if let Some(files) = &mut self.files {
+            files
+                .initialize(sources)
+                .map_err(BoundaryError::from_error)?;
+        } else if matches!(self.format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
+            let destination = compression::Output::new(io::stdout(), self.compression.format())
+                .map_err(BoundaryError::from_error)?;
+            self.writer = Some(
+                writer::initialize(
+                    destination,
+                    if self.format == CaptureFormat::Pcap {
+                        capture_file::Format::Pcap
+                    } else {
+                        capture_file::Format::PcapNg
+                    },
+                    &sources,
+                    self.limits,
+                )
+                .map_err(BoundaryError::from_error)?,
+            );
+        }
+        Ok(())
+    }
+
+    fn frame(
+        &mut self,
+        decoding: Option<&Mutex<Decoding>>,
+        source_frame: u64,
+        elapsed: Duration,
+        frame: Frame,
+    ) -> Result<Control, BoundaryError> {
+        let control = if let Some(files) = &mut self.files {
+            files
+                .write(&frame, source_frame, elapsed)
+                .map_err(BoundaryError::from_error)?
+        } else {
+            Control::Continue
+        };
+        if control == Control::StopBefore {
+            return Ok(control);
+        }
+        let mut decoding = decoding.map(lock);
+        emit_frame(
+            decoding.as_deref_mut(),
+            self.projector.as_mut(),
+            &self.stream,
+            self.format,
+            &mut self.writer,
+            source_frame,
+            frame,
+        )
+        .map_err(CliError::into_boundary_error)?;
+        Ok(control)
+    }
+
+    /// Finalizes every initialized destination even when capture or a consumer
+    /// failed; finalization failures chain behind `error`.
+    fn finish(
+        &mut self,
+        mut error: Option<CliError>,
+    ) -> (Option<CliError>, Option<output::capture::Files>) {
+        let file_finish = self
+            .files
+            .as_mut()
+            .map(Files::finish)
+            .transpose()
+            .map_err(CliError::classified);
+        let binary_finish = self
+            .writer
+            .take()
+            .map(|writer| writer.into_inner().finish())
+            .transpose()
+            .map_err(CliError::classified);
+        let files = self.files.as_ref().map(Files::report);
+        for failure in [file_finish.err(), binary_finish.err()]
+            .into_iter()
+            .flatten()
+        {
+            error = Some(match error.take() {
+                Some(primary) => primary.with_secondary("output finalization", failure),
+                None => failure,
+            });
+        }
+        (error, files)
+    }
+}
+
+fn file_limits(policy: &Policy) -> capture_file::Limits {
+    let budget = CaptureBudget::new(policy);
+    capture_file::Limits {
+        max_frames: budget.max_frames(),
+        max_bytes: budget.max_bytes(),
+    }
 }
 
 fn drive<P: packetcraftr::CaptureProviders>(
@@ -305,11 +403,6 @@ fn drive<P: packetcraftr::CaptureProviders>(
     request: workflow::Request,
     rendering: Output<'_>,
 ) -> Result<(), CliError> {
-    let budget = CaptureBudget::new(client.policy());
-    let limits = capture_file::Limits {
-        max_frames: budget.max_frames(),
-        max_bytes: budget.max_bytes(),
-    };
     let Output {
         format,
         compression,
@@ -326,6 +419,10 @@ fn drive<P: packetcraftr::CaptureProviders>(
         files,
         writer: None,
         projector,
+        format,
+        compression,
+        limits: file_limits(client.policy()),
+        stream: stream.clone(),
     }));
     let request = match (&decoding, selector) {
         (Some(decoding), _) => {
@@ -345,89 +442,23 @@ fn drive<P: packetcraftr::CaptureProviders>(
     };
     let sink = {
         let destinations = Arc::clone(&destinations);
-        let stream = stream.clone();
         move |event| {
             let mut destinations = lock(&destinations);
-            let Destinations {
-                files,
-                writer,
-                projector,
-            } = &mut *destinations;
             match event {
                 Event::Started { sources } => {
-                    if let Some(files) = files {
-                        files
-                            .initialize(sources)
-                            .map_err(BoundaryError::from_error)?;
-                    } else if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
-                        let destination =
-                            compression::Output::new(io::stdout(), compression.format())
-                                .map_err(BoundaryError::from_error)?;
-                        *writer = Some(
-                            writer::initialize(
-                                destination,
-                                if format == CaptureFormat::Pcap {
-                                    capture_file::Format::Pcap
-                                } else {
-                                    capture_file::Format::PcapNg
-                                },
-                                &sources,
-                                limits,
-                            )
-                            .map_err(BoundaryError::from_error)?,
-                        );
-                    }
-                    Ok(Control::Continue)
+                    destinations.start(sources).map(|()| Control::Continue)
                 }
                 Event::Frame {
                     source_frame,
                     elapsed,
                     frame,
                     ..
-                } => {
-                    let control = if let Some(files) = files {
-                        files
-                            .write(&frame, source_frame, elapsed)
-                            .map_err(BoundaryError::from_error)?
-                    } else {
-                        Control::Continue
-                    };
-                    if control == Control::StopBefore {
-                        return Ok(control);
-                    }
-                    let mut decoding = decoding.as_deref().map(lock);
-                    emit_frame(
-                        decoding.as_deref_mut(),
-                        projector.as_mut(),
-                        &stream,
-                        format,
-                        writer,
-                        source_frame,
-                        frame,
-                    )
-                    .map_err(CliError::into_boundary_error)?;
-                    Ok(control)
-                }
+                } => destinations.frame(decoding.as_deref(), source_frame, elapsed, frame),
             }
         }
     };
     let result = client.capture(request, sink);
-    let mut destinations = lock(&destinations);
-    // Finalize every initialized destination even when capture or a consumer failed.
-    let file_finish = destinations
-        .files
-        .as_mut()
-        .map(Files::finish)
-        .transpose()
-        .map_err(CliError::classified);
-    let binary_finish = destinations
-        .writer
-        .take()
-        .map(|writer| writer.into_inner().finish())
-        .transpose()
-        .map_err(CliError::classified);
-    let files = destinations.files.as_ref().map(Files::report);
-    let (report, mut error) = match result {
+    let (report, error) = match result {
         Ok(report) => (report, None),
         Err(error) => {
             let cli = CliError::from_classification(
@@ -439,15 +470,8 @@ fn drive<P: packetcraftr::CaptureProviders>(
             (*error.report, Some(cli))
         }
     };
-    for failure in [file_finish.err(), binary_finish.err()]
-        .into_iter()
-        .flatten()
-    {
-        error = Some(match error.take() {
-            Some(primary) => primary.with_secondary("output finalization", failure),
-            None => failure,
-        });
-    }
+    let mut destinations = lock(&destinations);
+    let (error, files) = destinations.finish(error);
 
     let snapshot = output::capture::Snapshot::from((&report, files));
     if let Some(error) = error {
@@ -485,13 +509,7 @@ fn emit_frame(
             let values = projector
                 .projection
                 .values(
-                    &core::filter::Context {
-                        decoded: &decoded,
-                        derived: &[],
-                        number: source_frame,
-                        tcp_stream: None,
-                        udp_stream: None,
-                    },
+                    &core::filter::Context::frame(&decoded, source_frame),
                     projector.remaining(),
                 )
                 .map_err(CliError::classified)?;
@@ -505,11 +523,9 @@ fn emit_frame(
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 render_frame_text(source_frame, &frame, Some(&stack))
             }
-            CaptureFormat::Ndjson => {
-                output::capture::Event::try_from((source_frame, frame, &decoded))
-                    .map_err(CliError::classified)
-                    .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into))
-            }
+            CaptureFormat::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
+                .map_err(CliError::classified)
+                .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
             CaptureFormat::Json
             | CaptureFormat::Hex
             | CaptureFormat::Pcap
@@ -529,14 +545,14 @@ fn emit_frame(
         CaptureFormat::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| write_hex_line(frame.bytes())),
-        CaptureFormat::Ndjson => output::capture::Event::try_from((source_frame, frame))
+        CaptureFormat::Ndjson => output::read::Frame::try_from((source_frame, frame))
             .map_err(CliError::classified)
-            .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),
+            .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
         CaptureFormat::Json => Ok(()),
-        CaptureFormat::Pcap | CaptureFormat::PcapNg => writer
-            .as_mut()
-            .expect("writer initialized before frames")
-            .write_frame(&frame)
-            .map_err(CliError::classified),
+        CaptureFormat::Pcap | CaptureFormat::PcapNg => writer::write_frame(
+            writer.as_mut().expect("writer initialized before frames"),
+            frame,
+        )
+        .map_err(CliError::classified),
     }
 }

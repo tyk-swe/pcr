@@ -15,6 +15,7 @@ use packetcraftr_netio::route::{Decision, Provider};
 use super::error::Error;
 use super::intent::{
     arp_link_macs, extract_neighbor_vlan_tags, outer_ethernet_macs, packet_has_link_layer_intent,
+    reject_oversized_discovery_stack,
 };
 use super::model::{Options, Plan, is_ipv4_broadcast};
 
@@ -27,8 +28,15 @@ pub fn plan<P: Provider>(
     deadline: &Deadline,
 ) -> Result<Plan, Error> {
     let intent = PacketIntent::from_packet(packet, destination, options)?;
-    let route = lookup_route(&intent, options, provider, deadline)?;
-    validate_route_contract(&route, options)?;
+    let requested = requested_interface(options)?;
+    let route = lookup_route(
+        &intent,
+        requested,
+        options.preferred_source,
+        provider,
+        deadline,
+    )?;
+    validate_route_contract(&route, requested, options.preferred_source)?;
     let mode = select_link_mode(&intent, &route, options.link_mode)?;
     let sources = select_sources(&intent, &route)?;
     let ipv4_broadcast = is_ipv4_broadcast(&route, intent.lookup_destination);
@@ -41,7 +49,7 @@ pub fn plan<P: Provider>(
         ipv4_broadcast,
     )?;
 
-    Ok(Plan {
+    let plan = Plan {
         neighbor_target: if mode == Mode::Layer2 && !ipv4_broadcast {
             intent
                 .lookup_destination
@@ -51,7 +59,7 @@ pub fn plan<P: Provider>(
         },
         destination_mac: link.destination_mac,
         source_mac: link.source_mac,
-        neighbor_vlan_tags: link.neighbor_vlan_tags,
+        neighbor_vlan_tags: intent.neighbor_vlan_tags,
         synthesized_ethernet: link.synthesized_ethernet,
         decision: route,
         mode,
@@ -60,7 +68,12 @@ pub fn plan<P: Provider>(
         visited_destinations: intent.visited_destinations,
         packet_source: sources.packet,
         neighbor_source: sources.neighbor,
-    })
+    };
+    if plan.needs_neighbor_resolution() {
+        reject_oversized_discovery_stack(&plan.neighbor_vlan_tags)?;
+    }
+
+    Ok(plan)
 }
 
 /// Constructing this value performs every validation that must precede
@@ -73,6 +86,7 @@ struct PacketIntent {
     lookup_destination: Option<IpAddr>,
     final_destination: Option<IpAddr>,
     visited_destinations: Vec<IpAddr>,
+    neighbor_vlan_tags: Vec<VlanTag>,
 }
 
 impl PacketIntent {
@@ -119,16 +133,16 @@ impl PacketIntent {
         let packet_destination = ip_path
             .as_ref()
             .map(|path| path.header_destination)
-            .filter(|destination| !destination.is_unspecified());
+            .and_then(specified);
         let final_destination = ip_path
             .as_ref()
             .map(|path| path.final_destination)
-            .filter(|destination| !destination.is_unspecified())
+            .and_then(specified)
             .or(destination);
         let lookup_destination = ip_path
             .as_ref()
             .map(|path| path.active_destination)
-            .filter(|destination| !destination.is_unspecified())
+            .and_then(specified)
             .or(packet_destination)
             .or(final_destination);
 
@@ -145,15 +159,12 @@ impl PacketIntent {
             return Err(Error::MissingDestination);
         }
 
-        let explicit_source = ip_path
-            .as_ref()
-            .map(|path| path.source)
-            .filter(|source| !source.is_unspecified());
+        let explicit_source = ip_path.as_ref().map(|path| path.source).and_then(specified);
         let mut visited_destinations = ip_path
             .map(|path| {
                 path.visited_destinations
                     .into_iter()
-                    .filter(|destination| !destination.is_unspecified())
+                    .filter_map(specified)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -163,6 +174,8 @@ impl PacketIntent {
             visited_destinations.push(final_destination);
         }
 
+        let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
+
         Ok(Self {
             has_link_layer,
             has_ip,
@@ -171,8 +184,13 @@ impl PacketIntent {
             lookup_destination,
             final_destination,
             visited_destinations,
+            neighbor_vlan_tags,
         })
     }
+}
+
+fn specified(address: IpAddr) -> Option<IpAddr> {
+    (!address.is_unspecified()).then_some(address)
 }
 
 fn reject_offline_link_header(packet: &Packet) -> Result<(), Error> {
@@ -208,19 +226,14 @@ fn requested_interface(options: &Options) -> Result<Option<&InterfaceId>, Error>
 
 fn lookup_route<P: Provider>(
     intent: &PacketIntent,
-    options: &Options,
+    requested: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
     provider: &P,
     deadline: &Deadline,
 ) -> Result<Decision, Error> {
-    let requested = requested_interface(options)?;
     Ok(match intent.lookup_destination {
         Some(lookup_destination) => provider
-            .lookup_with_preferences(
-                lookup_destination,
-                requested,
-                options.preferred_source,
-                deadline,
-            )
+            .lookup_with_preferences(lookup_destination, requested, preferred_source, deadline)
             .map_err(|source| Error::RouteLookup {
                 destination: lookup_destination,
                 failure: source.classification(),
@@ -242,8 +255,12 @@ fn lookup_route<P: Provider>(
     })
 }
 
-fn validate_route_contract(route: &Decision, options: &Options) -> Result<(), Error> {
-    if let Some(requested) = requested_interface(options)?
+fn validate_route_contract(
+    route: &Decision,
+    requested: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
+) -> Result<(), Error> {
+    if let Some(requested) = requested
         && route.interface != *requested
     {
         return Err(Error::InterfaceMismatch {
@@ -253,7 +270,7 @@ fn validate_route_contract(route: &Decision, options: &Options) -> Result<(), Er
             selected_index: route.interface.index,
         });
     }
-    if let Some(requested) = options.preferred_source
+    if let Some(requested) = preferred_source
         && route.selected_source != Some(requested)
         && route.preferred_source != Some(requested)
     {
@@ -328,7 +345,6 @@ fn select_sources(intent: &PacketIntent, route: &Decision) -> Result<SelectedSou
 struct SelectedLink {
     destination_mac: Option<MacAddress>,
     source_mac: Option<MacAddress>,
-    neighbor_vlan_tags: Vec<VlanTag>,
     synthesized_ethernet: bool,
 }
 
@@ -344,29 +360,27 @@ fn select_link(
     let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
     let destination_mac = explicit_destination_mac
         .or(arp_destination_mac)
-        .or_else(|| ipv4_broadcast.then_some(MacAddress([0xff; 6])))
+        .or_else(|| ipv4_broadcast.then_some(MacAddress::BROADCAST))
         .or_else(|| {
             intent
                 .lookup_destination
                 .and_then(MacAddress::for_ip_multicast)
         });
     if mode == Mode::Layer2 && destination_mac.is_none() {
-        let Some(lookup_destination) = intent.lookup_destination else {
+        if intent.lookup_destination.is_none() {
             return Err(Error::MissingLayer2DestinationMac);
-        };
-        if neighbor_source.is_none() && !lookup_destination.is_multicast() {
+        }
+        if neighbor_source.is_none() {
             return Err(Error::MissingNeighborSource {
                 interface: route.interface.name.clone(),
             });
         }
     }
     let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
-    let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
 
     Ok(SelectedLink {
         destination_mac,
         source_mac,
-        neighbor_vlan_tags,
         synthesized_ethernet: mode == Mode::Layer2
             && !semantics::outer_layers(packet)
                 .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),

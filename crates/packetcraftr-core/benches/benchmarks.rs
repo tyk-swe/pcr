@@ -15,7 +15,9 @@ use packetcraftr_core::analysis::reassembly::ip::{
     Reassembler as IpReassembler,
 };
 use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
-use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
+use packetcraftr_core::analysis::reassembly::tcp::{
+    Event, FlowKey, Reassembler, ScopedFlowKey, Segment,
+};
 use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
 use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
@@ -285,19 +287,27 @@ fn bench_tcp_reassembly(c: &mut Criterion) {
     };
 
     let payload = Bytes::from_static(&[0x42; 256]);
-    let segments: Vec<_> = (0_u32..10)
-        .map(|i| Segment {
+    let mut segments = vec![Segment {
+        flow: flow.clone(),
+        sequence: 1_000,
+        syn: true,
+        fin: false,
+        rst: false,
+        payload: Bytes::new(),
+    }];
+    segments.extend((0_u32..10).map(|i| {
+        Segment {
             flow: flow.clone(),
             sequence: i
                 .checked_mul(256)
-                .and_then(|offset| 1_000_u32.checked_add(offset))
+                .and_then(|offset| 1_001_u32.checked_add(offset))
                 .expect("ten fixed-size benchmark segments fit a TCP sequence"),
-            syn: i == 0,
+            syn: false,
             fin: false,
             rst: false,
             payload: payload.clone(),
-        })
-        .collect();
+        }
+    }));
 
     c.bench_function("tcp_reassembly_10_segments", |b| {
         b.iter(|| {
@@ -308,10 +318,23 @@ fn bench_tcp_reassembly(c: &mut Criterion) {
             };
             let mut reassembler = Reassembler::new(limits).unwrap();
             let now = Instant::now();
+            let mut delivered = 0_usize;
             for seg in &segments {
                 let events = reassembler.push(black_box(seg.clone()), now).expect("push");
+                for event in &events {
+                    match event {
+                        Event::Data { bytes, .. } => {
+                            delivered = delivered.saturating_add(bytes.len());
+                        }
+                        Event::Retransmission { .. } => {
+                            panic!("in-order segments must not retransmit");
+                        }
+                        _ => {}
+                    }
+                }
                 black_box(events);
             }
+            assert_eq!(delivered, 2_560);
         });
     });
 }

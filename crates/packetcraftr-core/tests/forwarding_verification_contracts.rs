@@ -3,7 +3,6 @@
 
 mod common;
 
-use std::error::Error as _;
 use std::net::Ipv4Addr;
 use std::slice::from_ref;
 use std::time::{Duration, UNIX_EPOCH};
@@ -61,18 +60,7 @@ fn truncated_frame(timestamp: u64, payload: &[u8]) -> Frame {
         (53_000, 9_000),
         payload,
     );
-    let keep = full.captured_length() - 2;
-    let bytes = full.bytes()[..keep as usize].to_vec();
-    Frame::try_with_lengths(
-        UNIX_EPOCH + Duration::from_secs(timestamp),
-        LinkType::IPV4,
-        Lengths {
-            captured: keep,
-            original: full.original_length(),
-        },
-        bytes,
-    )
-    .expect("truncated fixture is valid")
+    common::truncated(&full, 2)
 }
 
 fn short_record(timestamp: u64, payload: &[u8]) -> Frame {
@@ -621,11 +609,7 @@ fn the_evidence_budget_fails_loudly_instead_of_evicting() {
             .map_err(BoundaryError::from_error)
     })
     .expect_err("the retained-evidence bound fails the run");
-    let budgeted = error
-        .source()
-        .and_then(|boundary| boundary.source())
-        .and_then(|source| source.downcast_ref::<forwarding::Error>())
-        .expect("the sink error retains the budget refusal as its source");
+    let budgeted = common::sink_cause::<forwarding::Error>(&error);
     assert!(
         matches!(budgeted, forwarding::Error::EvidenceBudget { .. }),
         "{budgeted:?}"
@@ -703,6 +687,10 @@ fn capture_local_fields_cannot_name_identity() {
         "frame.time_epoch",
         "tcp.stream",
         "udp.stream",
+        "Frame.number",
+        "FRAME.time_epoch",
+        "TCP.stream",
+        "Udp.stream",
     ] {
         let error = forwarding::Rules::compile(
             &[field.to_owned()],

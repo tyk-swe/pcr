@@ -15,5 +15,5 @@ pub use interface::Interface;
 pub(crate) use interface::ResolvedInterface;
 pub use materialize::Materialized;
 pub(crate) use materialize::materialize;
-pub use model::{MAX_VLAN_TAGS, Options, Plan};
+pub use model::{Options, Plan};
 pub use planner::plan;

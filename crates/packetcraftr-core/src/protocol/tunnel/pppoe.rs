@@ -14,9 +14,8 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    ValueExpectation, ensure_encode_budget, invalid, make_layer, payload_without_padding, protocol,
+    resolve_u16, resolve_u16_discriminator, strict_or_diagnostic, truncated, typed_layer,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -317,24 +316,10 @@ impl LayerCodec for PppCodec {
         ensure_encode_budget(PPP_NAME, PPP_LEN, context)?;
 
         let mut diagnostics = Vec::new();
-        validate_auto_raw_discriminator(
+        let (protocol_number, materialized_protocol) = resolve_u16_discriminator(
             PPP_NAME,
             "protocol",
             &layer.protocol,
-            context,
-            &mut diagnostics,
-        )?;
-        let (protocol_number, materialized_protocol) = resolve_u16(
-            PPP_NAME,
-            "protocol",
-            &layer.protocol,
-            expected_discriminator(PPP_NAME, context, 0_u16, &layer.protocol),
-            context.mode,
-            &mut diagnostics,
-        )?;
-        validate_raw_child_discriminator(
-            PPP_NAME,
-            u64::from(protocol_number),
             context,
             &mut diagnostics,
         )?;

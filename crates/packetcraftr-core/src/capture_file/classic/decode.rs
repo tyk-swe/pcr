@@ -10,20 +10,65 @@ use crate::frame::{Frame, Lengths, LinkType};
 
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, Format, TimestampPrecision, TimestampResolution};
-use crate::capture_file::header::PcapHeader;
-use crate::capture_file::reader::ReaderState;
+use crate::capture_file::header::{Interface, PcapHeader};
 use crate::capture_file::record::{CaptureRecord, PacketBlockKind, RecordKind};
 use crate::capture_file::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
     read_exact_or_eof, read_exact_vec, validate_declared_lengths,
 };
 
+use super::encode;
+
+pub(in crate::capture_file) struct PcapState {
+    endianness: Endianness,
+    precision: TimestampPrecision,
+    snap_len: u32,
+    link_type: LinkType,
+}
+
+impl PcapState {
+    pub(in crate::capture_file) fn endianness(&self) -> Endianness {
+        self.endianness
+    }
+
+    pub(in crate::capture_file) fn interface(&self) -> Interface {
+        Interface {
+            link_type: self.link_type,
+            snap_len: self.snap_len,
+            timestamp_resolution: self.timestamp_resolution(),
+            timestamp_offset: 0,
+        }
+    }
+
+    fn timestamp_resolution(&self) -> TimestampResolution {
+        match self.precision {
+            TimestampPrecision::Microseconds => TimestampResolution::Decimal(6),
+            TimestampPrecision::Nanoseconds => TimestampResolution::Decimal(9),
+        }
+    }
+}
+
+pub(in crate::capture_file) fn pcap_layout(
+    magic: [u8; 4],
+) -> Option<(Endianness, TimestampPrecision)> {
+    [Endianness::Little, Endianness::Big]
+        .into_iter()
+        .flat_map(|endianness| {
+            [
+                TimestampPrecision::Microseconds,
+                TimestampPrecision::Nanoseconds,
+            ]
+            .map(|precision| (endianness, precision))
+        })
+        .find(|&(endianness, precision)| encode::magic(endianness, precision) == magic)
+}
+
 pub(in crate::capture_file) fn read_pcap_header<R: Read>(
     reader: &mut R,
     magic: [u8; 4],
     endianness: Endianness,
     precision: TimestampPrecision,
-) -> Result<(ReaderState, PcapHeader), Error> {
+) -> Result<(PcapState, PcapHeader), Error> {
     let mut remaining = [0_u8; PCAP_GLOBAL_HEADER_LEN - 4];
     read_exact_counted(reader, &mut remaining, "pcap global header")?;
     let major = decode_u16(endianness, &remaining[0..2])?;
@@ -48,34 +93,33 @@ pub(in crate::capture_file) fn read_pcap_header<R: Read>(
     let mut raw = Vec::with_capacity(PCAP_GLOBAL_HEADER_LEN);
     raw.extend_from_slice(&magic);
     raw.extend_from_slice(&remaining);
-    Ok((
-        ReaderState::Pcap {
-            endianness,
-            precision,
-            snap_len,
-            link_type,
-        },
-        PcapHeader {
-            endianness,
-            timestamp_resolution: match precision {
-                TimestampPrecision::Microseconds => TimestampResolution::Decimal(6),
-                TimestampPrecision::Nanoseconds => TimestampResolution::Decimal(9),
-            },
-            snap_len,
-            network: network_word,
-            raw: Bytes::from(raw),
-        },
-    ))
+    let state = PcapState {
+        endianness,
+        precision,
+        snap_len,
+        link_type,
+    };
+    let header = PcapHeader {
+        endianness,
+        timestamp_resolution: state.timestamp_resolution(),
+        snap_len,
+        network: network_word,
+        raw: Bytes::from(raw),
+    };
+    Ok((state, header))
 }
 
 pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
     reader: &mut R,
-    endianness: Endianness,
-    precision: TimestampPrecision,
-    snap_len: u32,
-    link_type: LinkType,
+    state: &PcapState,
     max_size: usize,
 ) -> Result<Option<CaptureRecord>, Error> {
+    let PcapState {
+        endianness,
+        precision,
+        snap_len,
+        link_type,
+    } = *state;
     let mut header = [0_u8; PCAP_RECORD_HEADER_LEN];
     if !read_exact_or_eof(reader, &mut header, "pcap packet header")? {
         return Ok(None);

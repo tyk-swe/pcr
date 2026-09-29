@@ -1,6 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#[path = "common/capture.rs"]
+mod capture_support;
 mod common;
+#[path = "common/process.rs"]
+mod process_support;
+
+use capture_support::{ethernet_frame, write_pcapng};
 use common::{parse_json, parse_ndjson, path_text, run, run_success};
 
 fn examples() -> std::path::PathBuf {
@@ -43,44 +49,17 @@ fn field_range(
 }
 
 fn tcp_capture(path: &std::path::Path, count: usize) {
-    use packetcraftr_core::{
-        build::Builder,
-        capture_file,
-        frame::{Frame, LinkType},
-        layer::Raw,
-        packet::Packet,
-        protocol::{builtin, link::Ethernet, network::Ipv4, transport::Tcp},
-    };
-    let mut packet = Packet::new();
-    packet.push(Ethernet::default());
-    packet.push(Ipv4 {
-        source: "192.0.2.1".parse().unwrap(),
-        destination: "198.51.100.2".parse().unwrap(),
-        ..Default::default()
-    });
-    packet.push(Tcp {
+    use packetcraftr_core::{frame::LinkType, protocol::transport::Tcp};
+    let tcp = Tcp {
         source_port: 40000,
         destination_port: 80,
         ..Default::default()
-    });
-    packet.push(Raw::new(vec![0x51; 24]));
-    let built = Builder::new(builtin::registry())
-        .build(packet, Default::default(), Default::default())
-        .unwrap();
-    let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap();
-    let mut writer = capture_file::Writer::pcapng(Vec::new()).unwrap();
-    writer
-        .add_interface_description(capture_file::Interface {
-            link_type: LinkType::ETHERNET,
-            snap_len: 65535,
-            timestamp_resolution: capture_file::TimestampResolution::Decimal(6),
-            timestamp_offset: 0,
-        })
-        .unwrap();
-    for _ in 0..count {
-        writer.write_frame(&frame).unwrap();
-    }
-    std::fs::write(path, writer.into_inner()).unwrap();
+    };
+    write_pcapng(
+        path,
+        LinkType::ETHERNET,
+        &vec![ethernet_frame(tcp, 24); count],
+    );
 }
 
 #[test]
@@ -235,39 +214,53 @@ fn preserve_mode_retains_checksum_bytes_and_conflicts_are_explicit() {
             "the requested sequence edit still lands"
         );
     }
-    for arguments in [
-        vec![
-            "rewrite",
-            path_text(&source),
-            "--set",
-            "ipv4.ttl=63",
-            "--rules-file",
-            "examples/documents/rewrite-lab-host.json",
-            "--write",
-            "x",
-        ],
-        vec![
-            "rewrite",
-            path_text(&source),
-            "--source-ip",
-            "192.0.2.9",
-            "--checksum-mode",
-            "preserve",
-            "--write",
-            "x",
-        ],
-        vec![
-            "rewrite",
-            path_text(&source),
-            "--source-ip",
-            "192.0.2.9",
-            "--dry-run",
-            "--write",
-            "x",
-        ],
+    let rules_file = examples().join("documents/rewrite-lab-host.json");
+    let rejected = directory.path().join("rejected.pcapng");
+    for (arguments, fragment) in [
+        (
+            vec![
+                "rewrite",
+                path_text(&source),
+                "--set",
+                "ipv4.ttl=63",
+                "--rules-file",
+                path_text(&rules_file),
+                "--write",
+                path_text(&rejected),
+            ],
+            "conflicts with direct edits",
+        ),
+        (
+            vec![
+                "rewrite",
+                path_text(&source),
+                "--source-ip",
+                "192.0.2.9",
+                "--checksum-mode",
+                "preserve",
+                "--write",
+                path_text(&rejected),
+            ],
+            "--checksum-mode requires field assignments",
+        ),
+        (
+            vec![
+                "rewrite",
+                path_text(&source),
+                "--source-ip",
+                "192.0.2.9",
+                "--dry-run",
+                "--write",
+                path_text(&rejected),
+            ],
+            "cannot preview header rewrites",
+        ),
     ] {
         let output = run(&arguments);
-        assert!(!output.status.success(), "{arguments:?} must fail");
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(fragment), "{arguments:?}: {stderr}");
+        assert!(!rejected.exists(), "{arguments:?} must publish nothing");
     }
 }
 
@@ -405,6 +398,32 @@ fn a_failing_edit_publishes_nothing() {
     for (source, edited) in before.iter().zip(&after) {
         assert_eq!(source.bytes().len(), edited.bytes().len());
     }
+}
+
+#[test]
+fn a_failing_edit_reports_the_source_frame_it_failed_at() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("mixed.pcapng");
+    let mut mixed = frames(&examples().join("captures/http-stream.pcap"));
+    mixed.truncate(2);
+    mixed.extend(frames(&examples().join("captures/dns-response.pcap")));
+    write_pcapng(&source, mixed[0].link_type, &mixed);
+    let target = directory.path().join("failed.pcapng");
+    let output = run(&[
+        "--output",
+        "json",
+        "rewrite",
+        path_text(&source),
+        "--set",
+        "tcp.sequence=1",
+        "--write",
+        path_text(&target),
+    ]);
+    assert!(!output.status.success());
+    let report = parse_json(&output);
+    assert_eq!(report["error"]["code"], "packet.transform_unsupported");
+    assert_eq!(report["error"]["context"]["source_frame"], 3);
+    assert!(!target.exists());
 }
 
 #[test]

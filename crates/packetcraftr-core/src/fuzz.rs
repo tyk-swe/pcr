@@ -25,8 +25,6 @@ pub const DEFAULT_MAX_TOTAL_BYTES: usize = MAX_TOTAL_BYTES;
 pub const MAX_PACKET_BYTES: usize = crate::packet::DEFAULT_MAX_PACKET_SIZE;
 /// This must not exceed [`MAX_DOCUMENT_NESTING`](crate::document::MAX_DOCUMENT_NESTING).
 pub const MAX_VALUE_NESTING: usize = 64;
-const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
-const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
 mod decode;
 mod error;

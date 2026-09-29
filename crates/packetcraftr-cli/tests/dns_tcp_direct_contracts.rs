@@ -187,3 +187,59 @@ fn batch_text_reports_counters_only_in_the_batch_total() {
         .unwrap_or_else(|| panic!("batch total line missing: {stdout}"));
     assert!(total.ends_with(&format!(" bytes={bytes}")), "{total}");
 }
+
+#[test]
+fn batch_text_prints_each_question_before_its_own_report() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let server = std::thread::spawn(move || answer_tcp_queries(listener, 3));
+    let output = run_success(&[
+        "--output",
+        "text",
+        "dns",
+        "127.0.0.1",
+        "first.example.test",
+        "second.example.test",
+        "third.example.test",
+        "--tcp",
+        "--port",
+        &port,
+        "--timeout-ms",
+        "1500",
+    ]);
+    server.join().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let order = stdout
+        .lines()
+        .filter_map(|line| {
+            let field = |key: &str| line.split(' ').find_map(|part| part.strip_prefix(key));
+            if line.starts_with("question=") {
+                field("name=").map(|name| format!("question {name}"))
+            } else if line.starts_with("server=") {
+                field("query=").map(|name| format!("report {name}"))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        order,
+        [
+            "question first.example.test",
+            "report first.example.test.",
+            "question second.example.test",
+            "report second.example.test.",
+            "question third.example.test",
+            "report third.example.test.",
+        ],
+        "{stdout}"
+    );
+    assert!(stdout.contains("question=3/3 "), "{stdout}");
+    assert!(
+        stdout
+            .lines()
+            .last()
+            .is_some_and(|line| line.starts_with("dns batch questions=3 ")),
+        "{stdout}"
+    );
+}

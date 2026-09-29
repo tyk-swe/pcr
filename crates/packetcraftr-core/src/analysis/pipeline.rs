@@ -11,15 +11,14 @@ use std::time::{Duration, SystemTime};
 use crate::budget::Deadline;
 use crate::capture_file::Reader;
 use crate::decode::{DecodedPacket, Dissector};
-use crate::filter::{Context as FilterContext, DerivedPacket as FilterDerivedPacket};
 use crate::registry::Registry;
 
 use crate::analysis::adapter::{
-    TcpTransport, UdpTransport, ip_fragments, ip_fragments_in_scope, replayed_ip_prefix_layers,
-    tcp_segment, transports, udp_flow,
+    ScopeBase, TcpTransport, UdpTransport, ip_fragments, replayed_ip_prefix_layers, tcp_segment,
+    transports, udp_flow,
 };
 use crate::analysis::conversation_index::StreamIndex;
-use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey, Resource as IpResource};
+use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey};
 use crate::analysis::reassembly::tcp::Event as TcpEvent;
 use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES};
 use crate::analysis::{Error, StreamTransport};
@@ -161,7 +160,6 @@ where
     let stage = FrameStage {
         decoder: &decoder,
         deadline: &deadline,
-        max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
     };
 
     let mut input = limits.capture_budget()?;
@@ -226,23 +224,13 @@ where
             layer: elected.transport.index,
             conversation: None,
         });
-        let scope_base = |derived_index: Option<usize>| {
-            derived_index.and_then(|index| {
-                derived.get(index).map(|derived_datagram| {
-                    (
-                        derived_source(&decoded, &derived, index),
-                        derived_datagram.scope,
-                    )
-                })
-            })
-        };
 
         // Assign stream IDs before filtering to keep them stable across runs.
         let segment = match tcp.filter(|_| options.plan.tcp_index || options.tcp_events) {
             Some(elected) => tcp_segment(
                 elected.decoded,
                 elected.transport,
-                scope_base(elected.derived_index),
+                elected.base,
                 &mut scopes,
             )
             .map_err(|source| Error::Scope { number, source })?,
@@ -259,7 +247,7 @@ where
             Some(elected) => udp_flow(
                 elected.decoded,
                 elected.transport,
-                scope_base(elected.derived_index),
+                elected.base,
                 &mut scopes,
             )
             .map_err(|source| Error::Scope { number, source })?,
@@ -271,56 +259,7 @@ where
                 flow,
             });
         }
-        if let Some(bounds) = options.time_bounds
-            && !bounds.contains(Some(timestamp))
-        {
-            continue;
-        }
-        if let Some(selected) = options.stream {
-            let conversation = match selected.transport {
-                StreamTransport::Tcp => tcp_view.and_then(|view| view.conversation),
-                StreamTransport::Udp => udp_view.and_then(|view| view.conversation),
-            };
-            if conversation.is_none_or(|stream| stream.index != selected.index) {
-                continue;
-            }
-        }
-        if let Some(filter) = options.filter {
-            let filter_derived = derived
-                .iter()
-                .map(|derived| FilterDerivedPacket {
-                    decoded: &derived.decoded,
-                    replayed_prefix_layers: derived.replayed_prefix_layers,
-                })
-                .collect::<Vec<_>>();
-            if !filter
-                .matches(&FilterContext {
-                    decoded: &decoded,
-                    derived: &filter_derived,
-                    number,
-                    tcp_stream: tcp_view
-                        .and_then(|view| view.conversation)
-                        .map(|stream| stream.index),
-                    udp_stream: udp_view
-                        .and_then(|view| view.conversation)
-                        .map(|stream| stream.index),
-                })
-                .map_err(|source| Error::Filter { number, source })?
-            {
-                continue;
-            }
-        }
-        frames_matched = frames_matched.saturating_add(1);
-
-        let tcp_events = reassembly_dispatch.dispatch(
-            tcp_view.map(|view| view.header),
-            segment.as_ref(),
-            timestamp,
-            number,
-        )?;
-
-        enforce_deadline(&deadline)?;
-        sink(FrameRecord {
+        let mut record = FrameRecord {
             number,
             timestamp,
             decoded: &decoded,
@@ -329,10 +268,42 @@ where
             physical_sources: physical_sources.as_ref(),
             tcp: tcp_view,
             udp: udp_view,
-            tcp_events: &tcp_events,
+            tcp_events: &[],
             clock_regression,
-        })
-        .map_err(|source| Error::Sink { number, source })?;
+        };
+        if let Some(bounds) = options.time_bounds
+            && !bounds.contains(Some(timestamp))
+        {
+            continue;
+        }
+        if let Some(selected) = options.stream {
+            let conversation = match selected.transport {
+                StreamTransport::Tcp => record.tcp.and_then(|view| view.conversation),
+                StreamTransport::Udp => record.udp.and_then(|view| view.conversation),
+            };
+            if conversation.is_none_or(|stream| stream.index != selected.index) {
+                continue;
+            }
+        }
+        if let Some(filter) = options.filter
+            && !record
+                .matches(filter)
+                .map_err(|source| Error::Filter { number, source })?
+        {
+            continue;
+        }
+        frames_matched = frames_matched.saturating_add(1);
+
+        let tcp_events = reassembly_dispatch.dispatch(
+            record.tcp.map(|view| view.header),
+            segment.as_ref(),
+            timestamp,
+            number,
+        )?;
+
+        enforce_deadline(&deadline)?;
+        record.tcp_events = &tcp_events;
+        sink(record).map_err(|source| Error::Sink { number, source })?;
     }
 
     enforce_deadline(&deadline)?;
@@ -369,7 +340,6 @@ where
 struct FrameStage<'a> {
     decoder: &'a Dissector,
     deadline: &'a Deadline,
-    max_ip_reassembly_bytes: usize,
 }
 
 struct PhysicalFrame<'a> {
@@ -413,7 +383,7 @@ where
         tracker.retire(|key| ip_dispatch.contains_datagram(key));
     }
     let fragments =
-        ip_fragments(decoded, scopes).map_err(|source| Error::Scope { number, source })?;
+        ip_fragments(decoded, None, scopes).map_err(|source| Error::Scope { number, source })?;
     if let (Some(tracker), Some(sources)) = (provenance.as_mut(), physical_sources) {
         tracker.remember(&fragments, sources)?;
     }
@@ -440,15 +410,18 @@ where
             number,
             budget.max_layers,
             budget.budget_reduced,
-            stage.max_ip_reassembly_bytes,
+            ip_dispatch,
         )?;
         next_derived.sources = sources;
         let next_derived_memory_charge = ip_dispatch
             .charge_derived_memory(derived_memory_charge, budget.charge)
             .map_err(|source| Error::IpReassembly { number, source })?;
-        let fragments =
-            ip_fragments_in_scope(&next_derived.decoded, source, next_derived.scope, scopes)
-                .map_err(|source| Error::Scope { number, source })?;
+        let fragments = ip_fragments(
+            &next_derived.decoded,
+            Some((source, next_derived.scope)),
+            scopes,
+        )
+        .map_err(|source| Error::Scope { number, source })?;
         if let (Some(tracker), Some(sources)) = (provenance.as_mut(), next_derived.sources.as_ref())
         {
             tracker.remember(&fragments, sources)?;
@@ -465,7 +438,7 @@ where
 }
 
 struct ElectedTransport<'a, T> {
-    derived_index: Option<usize>,
+    base: ScopeBase<'a>,
     decoded: &'a DecodedPacket,
     transport: T,
 }
@@ -486,37 +459,28 @@ fn elect_transport_views<'a>(
     let physical = std::iter::once((None, decoded));
     let cascade = derived
         .iter()
-        .enumerate()
-        .map(|(index, datagram)| (Some(index), &datagram.decoded));
-    for (derived_index, view) in physical.chain(cascade) {
+        .map(|datagram| (Some(datagram.scope), &datagram.decoded));
+    let mut previous = decoded;
+    for (scope, view) in physical.chain(cascade) {
+        let base = scope.map(|scope| (previous, scope));
         let found = transports(&view.packet);
         if let Some(transport) = found.tcp {
             views.tcp = Some(ElectedTransport {
-                derived_index,
+                base,
                 decoded: view,
                 transport,
             });
         }
         if let Some(transport) = found.udp {
             views.udp = Some(ElectedTransport {
-                derived_index,
+                base,
                 decoded: view,
                 transport,
             });
         }
+        previous = view;
     }
     views
-}
-
-fn derived_source<'a>(
-    physical: &'a DecodedPacket,
-    derived: &'a [DerivedDatagram],
-    index: usize,
-) -> &'a DecodedPacket {
-    index
-        .checked_sub(1)
-        .and_then(|index| derived.get(index))
-        .map_or(physical, |derived| &derived.decoded)
 }
 
 fn decode_derived(
@@ -526,7 +490,7 @@ fn decode_derived(
     number: u64,
     max_layers: usize,
     budget_reduced: bool,
-    memory_limit: usize,
+    ip_dispatch: &IpDispatch,
 ) -> Result<DerivedDatagram, Error> {
     let (scope, link_type) = match &datagram.key {
         DatagramKey::Ipv4(key) => (key.scope, LinkType::IPV4),
@@ -556,10 +520,7 @@ fn decode_derived(
             {
                 Error::IpReassembly {
                     number,
-                    source: IpResource::AggregateMemoryLimit {
-                        limit: memory_limit,
-                    }
-                    .into(),
+                    source: ip_dispatch.aggregate_memory_error(),
                 }
             } else {
                 Error::DerivedDecode { number, source }
@@ -602,6 +563,7 @@ mod tests {
     use super::*;
     use crate::analysis::provenance::{IncompleteSources, SourceFrame, Tracker};
     use crate::analysis::reassembly::ip::OverlapPolicy;
+    use crate::analysis::scope::EncapsulationIdentifier;
     use crate::build::{Builder, Options as BuildOptions};
     use crate::codec::Context as BuildContext;
     use crate::field::WireValue;
@@ -662,7 +624,6 @@ mod tests {
         scopes: Interner,
         provenance: Option<Tracker>,
         max_frame_bytes: usize,
-        max_ip_reassembly_bytes: usize,
     }
 
     impl Rig {
@@ -679,7 +640,6 @@ mod tests {
                         .expect("tracker"),
                 ),
                 max_frame_bytes: limits.max_frame_bytes,
-                max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
             }
         }
 
@@ -713,7 +673,6 @@ mod tests {
             let stage = FrameStage {
                 decoder: &self.decoder,
                 deadline: &self.deadline,
-                max_ip_reassembly_bytes: self.max_ip_reassembly_bytes,
             };
             advance_ip_reassembly(
                 &mut self.dispatch,
@@ -813,5 +772,53 @@ mod tests {
             0,
             "the pipeline flush path is not what retired the datagrams here"
         );
+    }
+
+    #[test]
+    fn elected_transport_scopes_from_the_view_that_carried_its_datagram() {
+        let registry = builtin::registry();
+        let decoder = Dissector::new(Arc::clone(&registry));
+        let decode = |frame| {
+            decoder
+                .decode(frame, crate::decode::Options::default())
+                .expect("fixture decodes")
+        };
+        let mut scopes = Interner::new();
+        let mut derive = |decoded, key| DerivedDatagram {
+            sources: None,
+            decoded,
+            scope: scopes
+                .intern(None, vec![EncapsulationIdentifier::Gre { key: Some(key) }])
+                .expect("scope fits"),
+            fragment_count: 1,
+            unique_bytes: 0,
+            payload_bytes: 0,
+            replayed_prefix_layers: 0,
+        };
+        let physical = decode(fragment_frame(&registry, 0, 1));
+        let cascade = [
+            derive(decode(fragment_frame(&registry, 0, 2)), 1),
+            derive(decode(datagram_frame(&registry, 0)), 2),
+        ];
+
+        let udp = elect_transport_views(&physical, &cascade)
+            .udp
+            .expect("the innermost datagram carries UDP");
+        let (source, scope) = udp.base.expect("a derived view has a scope base");
+        assert!(std::ptr::eq(source, &cascade[0].decoded));
+        assert_eq!(scope, cascade[1].scope);
+
+        let udp = elect_transport_views(&physical, &cascade[1..])
+            .udp
+            .expect("the first derived datagram carries UDP");
+        let (source, scope) = udp.base.expect("a derived view has a scope base");
+        assert!(std::ptr::eq(source, &physical));
+        assert_eq!(scope, cascade[1].scope);
+
+        let carried = decode(datagram_frame(&registry, 0));
+        let udp = elect_transport_views(&carried, &[])
+            .udp
+            .expect("the physical frame carries UDP");
+        assert!(udp.base.is_none());
     }
 }

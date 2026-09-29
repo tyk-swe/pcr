@@ -40,9 +40,10 @@ route overrides. Hostname lookup requires the existing policy opt-in.
 The complete plan is authorized before active discovery; capture is shared per
 interface and ready before sends. One pacing schedule, operation deadline and
 evidence budget apply across every window. --max-prepared-bytes bounds charged
-plans and active packet descriptions. Executors lacking window support reject it.
-NDJSON publishes probe_sent receipts before final probe events. Failures retain
-confirmed pending transmissions in error.scan.
+plans and active packet descriptions.
+With a window above one, NDJSON publishes probe_sent receipts before final probe
+events and failures retain confirmed pending transmissions in error.scan; a
+window of one publishes final probe events only.
 
 --udp-profiles reads a bounded packetcraftr.udp-profiles/v1 document. Profiles
 select a typed DNS query or explicit hexadecimal bytes per port, with DNS identity
@@ -126,7 +127,7 @@ pub(crate) struct Args {
     #[arg(long = "exclude", value_name = "IP_OR_CIDR")]
     pub(crate) exclusions: Vec<packetcraftr::target::Network>,
     /// Maximum distinct selected addresses across all targets.
-    #[arg(long, default_value_t = 1024)]
+    #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_targets)]
     pub(crate) max_targets: usize,
     /// TCP SYN, UDP, or ICMP echo probes.
     #[arg(long, value_enum, default_value_t = Transport::Tcp)]
@@ -167,7 +168,7 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) udp_profiles: Option<std::path::PathBuf>,
     /// Maximum charged plans and in-flight packet descriptions.
-    #[arg(long, default_value_t = 64 * 1024 * 1024)]
+    #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_prepared_bytes)]
     pub(crate) max_prepared_bytes: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,

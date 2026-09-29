@@ -124,15 +124,6 @@ impl FrameRecord<'_> {
         }
     }
 
-    /// Projects physical and newly reconstructed fields using scoped stream indexes.
-    pub fn project(
-        &self,
-        projection: &crate::filter::Projection,
-        max_bytes: usize,
-    ) -> Result<Vec<Option<crate::field::FieldValue>>, crate::filter::Error> {
-        self.with_filter_context(|context| projection.values(context, max_bytes))
-    }
-
     /// Evaluates a filter against this physical record and its reconstructed children.
     pub fn matches(&self, filter: &crate::filter::Filter) -> Result<bool, crate::filter::Error> {
         self.with_filter_context(|context| filter.matches(context))
@@ -163,11 +154,6 @@ impl FrameRecord<'_> {
     /// Resolves a run-local scope into its capture interface and tunnel path.
     pub fn scope_definition(&self, id: ScopeId) -> Option<&crate::analysis::scope::Definition> {
         self.scopes.definition(id)
-    }
-
-    /// Capture-global scope definitions observed through this frame.
-    pub fn scope_definitions(&self) -> &[crate::analysis::scope::Definition] {
-        self.scopes.definitions()
     }
 
     /// Innermost completed network-layer view attached to this physical

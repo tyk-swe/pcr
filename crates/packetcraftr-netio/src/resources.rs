@@ -22,7 +22,7 @@ pub fn native_snapshot() -> NativeSnapshot {
     crate::workers::shared().snapshot()
 }
 
-/// Inspect the ordinary-TCP sub-limit of the worker pool.
+/// Inspect the ordinary TCP connects' share of the worker pool; `capacity` is the whole pool's.
 #[must_use]
 pub fn tcp_connect_snapshot() -> NativeSnapshot {
     crate::workers::shared().tcp_snapshot()

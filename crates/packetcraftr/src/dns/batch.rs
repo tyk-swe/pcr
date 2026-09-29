@@ -13,7 +13,8 @@ use crate::target::{ResolveTarget, approve_operation};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
-use super::engine::{Attempts, PreparedOperation};
+use super::engine::PreparedOperation;
+use super::error::Attempts;
 use super::executor::{Exchange, TcpQuerier};
 use super::plan::batch_limits;
 use super::report::Observed;

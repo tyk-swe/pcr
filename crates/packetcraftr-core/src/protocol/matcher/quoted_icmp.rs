@@ -33,6 +33,18 @@ pub enum QuotedTransport {
     Icmp,
 }
 
+impl QuotedTransport {
+    pub(super) fn of(protocol: BuiltinProtocol) -> Option<Self> {
+        match protocol {
+            BuiltinProtocol::Tcp => Some(Self::Tcp),
+            BuiltinProtocol::Udp => Some(Self::Udp),
+            BuiltinProtocol::Sctp => Some(Self::Sctp),
+            BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6 => Some(Self::Icmp),
+            _ => None,
+        }
+    }
+}
+
 /// Classifies `response` as an ICMP error about `request`.
 pub fn quoted_icmp_error(
     request: &Packet,
@@ -41,13 +53,7 @@ pub fn quoted_icmp_error(
 ) -> Option<IcmpErrorKind> {
     let transport = request
         .iter()
-        .find_map(|layer| match BuiltinProtocol::of(layer) {
-            Some(BuiltinProtocol::Tcp) => Some(QuotedTransport::Tcp),
-            Some(BuiltinProtocol::Udp) => Some(QuotedTransport::Udp),
-            Some(BuiltinProtocol::Sctp) => Some(QuotedTransport::Sctp),
-            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6) => Some(QuotedTransport::Icmp),
-            _ => None,
-        })?;
+        .find_map(|layer| BuiltinProtocol::of(layer).and_then(QuotedTransport::of))?;
     if transport != expected_transport {
         return None;
     }
@@ -103,27 +109,12 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
     if icmp_index <= outer_network_index {
         return None;
     }
-    let nested_start = outer_network_index.checked_add(1)?;
-    let nested_len = icmp_index.checked_sub(nested_start)?;
     let directly_nested = response
         .iter()
-        .skip(nested_start)
-        .take(nested_len)
-        .all(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
-    if !directly_nested {
-        return None;
-    }
-    let enclosing_network_index = response
-        .iter()
-        .enumerate()
         .take(icmp_index)
-        .rev()
-        .find_map(|(index, layer)| {
-            BuiltinProtocol::of(layer)
-                .is_some_and(BuiltinProtocol::is_ip)
-                .then_some(index)
-        })?;
-    if enclosing_network_index != outer_network_index
+        .skip(outer_network_index.saturating_add(1))
+        .all(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
+    if !directly_nested
         || !matches!(
             (outer_network_protocol, icmp_protocol),
             (BuiltinProtocol::Ipv4, BuiltinProtocol::Icmpv4)
@@ -148,92 +139,91 @@ fn quoted_probe_matches(
         return false;
     }
     match transport {
-        QuotedTransport::Tcp | QuotedTransport::Udp | QuotedTransport::Sctp => {
-            let (protocol, protocol_number) = match transport {
-                QuotedTransport::Tcp => (BuiltinProtocol::Tcp, ip_protocol::TCP),
-                QuotedTransport::Udp => (BuiltinProtocol::Udp, ip_protocol::UDP),
-                QuotedTransport::Sctp => (BuiltinProtocol::Sctp, 132),
-                QuotedTransport::Icmp => unreachable!("ICMP uses the other match arm"),
-            };
-            if quoted.protocol != protocol_number {
-                return false;
-            }
-            let Some((layer_index, layer)) = request
-                .iter()
-                .enumerate()
-                .find(|(_, layer)| BuiltinProtocol::of(*layer) == Some(protocol))
-            else {
-                return false;
-            };
-            let Some(key) = semantics::transport_key(layer) else {
-                return false;
-            };
-            let source_port = key.source_port.to_be_bytes();
-            let destination_port = key.destination_port.to_be_bytes();
-            if quoted.payload.get(..4)
-                != Some(
-                    &[
-                        source_port[0],
-                        source_port[1],
-                        destination_port[0],
-                        destination_port[1],
-                    ][..],
-                )
-            {
-                return false;
-            }
-            match transport {
-                QuotedTransport::Tcp => {
-                    let Some(tcp) = layer.downcast_ref::<Tcp>() else {
-                        return false;
-                    };
+        QuotedTransport::Tcp => {
+            quoted_l4_layer(request, &quoted, BuiltinProtocol::Tcp, ip_protocol::TCP)
+                .and_then(|(_, layer)| layer.downcast_ref::<Tcp>())
+                .is_some_and(|tcp| {
                     quoted.payload.get(4..8) == Some(&tcp.sequence.to_be_bytes()[..])
-                }
-                QuotedTransport::Sctp => {
-                    let Some(sctp) = layer.downcast_ref::<Sctp>() else {
-                        return false;
-                    };
-                    quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
-                        && quoted_sctp_init_matches(sctp, request, layer_index, quoted.payload)
-                }
-                QuotedTransport::Udp => true,
-                QuotedTransport::Icmp => unreachable!("ICMP uses the other match arm"),
-            }
+                })
         }
-        QuotedTransport::Icmp => {
-            let (protocol_number, protocol) = if network.source.is_ipv4() {
-                (1, BuiltinProtocol::Icmpv4)
-            } else {
-                (58, BuiltinProtocol::Icmpv6)
-            };
-            if quoted.protocol != protocol_number {
-                return false;
-            }
-            let Some(layer) = request
-                .iter()
-                .find(|layer| BuiltinProtocol::of(*layer) == Some(protocol))
+        QuotedTransport::Udp => {
+            quoted_l4_layer(request, &quoted, BuiltinProtocol::Udp, ip_protocol::UDP).is_some()
+        }
+        QuotedTransport::Sctp => {
+            let Some((index, layer)) =
+                quoted_l4_layer(request, &quoted, BuiltinProtocol::Sctp, ip_protocol::SCTP)
             else {
                 return false;
             };
-            let Some(IcmpMessage {
-                icmp_type,
-                code,
-                body,
-            }) = IcmpMessage::of(layer)
-            else {
+            let Some(sctp) = layer.downcast_ref::<Sctp>() else {
                 return false;
             };
-            let Some(quoted_echo) = quoted.payload.first_chunk::<8>() else {
-                return false;
-            };
-            let Some(body_identity) = body.first_chunk::<4>() else {
-                return false;
-            };
-            quoted_echo[0] == icmp_type
-                && quoted_echo[1] == code
-                && quoted_echo[4..8] == body_identity[..]
+            quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
+                && quoted_sctp_init_matches(sctp, request, index, quoted.payload)
         }
+        QuotedTransport::Icmp => quoted_icmp_matches(request, network, &quoted),
     }
+}
+
+fn quoted_l4_layer<'a>(
+    request: &'a Packet,
+    quoted: &QuotedProbe<'_>,
+    protocol: BuiltinProtocol,
+    protocol_number: u8,
+) -> Option<(usize, &'a dyn Layer)> {
+    if quoted.protocol != protocol_number {
+        return None;
+    }
+    let (layer_index, layer) = request
+        .iter()
+        .enumerate()
+        .find(|(_, layer)| BuiltinProtocol::of(*layer) == Some(protocol))?;
+    let key = semantics::transport_key(layer)?;
+    let source_port = key.source_port.to_be_bytes();
+    let destination_port = key.destination_port.to_be_bytes();
+    let ports = [
+        source_port[0],
+        source_port[1],
+        destination_port[0],
+        destination_port[1],
+    ];
+    (quoted.payload.get(..4) == Some(&ports[..])).then_some((layer_index, layer))
+}
+
+fn quoted_icmp_matches(
+    request: &Packet,
+    network: NetworkEnvelope,
+    quoted: &QuotedProbe<'_>,
+) -> bool {
+    let (protocol_number, protocol) = if network.source.is_ipv4() {
+        (ip_protocol::ICMPV4, BuiltinProtocol::Icmpv4)
+    } else {
+        (ip_protocol::ICMPV6, BuiltinProtocol::Icmpv6)
+    };
+    if quoted.protocol != protocol_number {
+        return false;
+    }
+    let Some(layer) = request
+        .iter()
+        .find(|layer| BuiltinProtocol::of(*layer) == Some(protocol))
+    else {
+        return false;
+    };
+    let Some(IcmpMessage {
+        icmp_type,
+        code,
+        body,
+    }) = IcmpMessage::of(layer)
+    else {
+        return false;
+    };
+    let Some(quoted_echo) = quoted.payload.first_chunk::<8>() else {
+        return false;
+    };
+    let Some(body_identity) = body.first_chunk::<4>() else {
+        return false;
+    };
+    quoted_echo[0] == icmp_type && quoted_echo[1] == code && quoted_echo[4..8] == body_identity[..]
 }
 
 fn quoted_sctp_init_matches(

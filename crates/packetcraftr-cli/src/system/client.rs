@@ -32,11 +32,12 @@ impl Runtime {
 }
 
 pub(crate) fn runtime(runtime: Runtime) -> packetcraftr::runtime::Runtime {
-    let capacity = match runtime {
-        Runtime::OutputWriter => 1,
-        _ => packetcraftr::runtime::MAX_WORKER_CAPACITY,
+    let instance = match runtime {
+        Runtime::OutputWriter => {
+            packetcraftr::runtime::Runtime::new(1).expect("a capacity of one is within the ceiling")
+        }
+        _ => packetcraftr::runtime::Runtime::default(),
     };
-    let instance = packetcraftr::runtime::Runtime::new(capacity);
     crate::resources::register_runtime(runtime.name(), &instance);
     instance
 }

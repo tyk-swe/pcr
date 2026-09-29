@@ -14,12 +14,12 @@ import struct
 import subprocess
 import tempfile
 from validation_evidence import (
-    DECODE_FIELDS, TSHARK_VERSION, digest, provenance, tshark_matches, validate_decoder,
+    DECODE_FIELDS, TSHARK_VERSION, checksum, digest, provenance, tshark_matches, validate_decoder,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 helpers = runpy.run_path(str(ROOT / 'scripts/measure-analysis.py'))
-checksum, ipv4, packets = [helpers[key] for key in ['checksum', 'ipv4', 'packets']]
+ipv4, packets = [helpers[key] for key in ['ipv4', 'packets']]
 
 
 def curated():

@@ -15,6 +15,8 @@ pub const MAX_NAME_POINTERS: usize = 128;
 pub const MAX_LABEL_LEN: usize = 63;
 /// The largest expanded name, in wire octets including each length byte (RFC 1035 §2.3.4).
 pub const MAX_NAME_LEN: usize = 255;
+const MAX_QUESTIONS: usize = 64;
+const MAX_EDNS_OPTIONS: usize = 4_096;
 
 /// Each is at most its `MAX_*` constant, and a message may carry at most 64 questions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,21 +28,34 @@ pub struct Limits {
     pub max_txt_bytes: usize,
 }
 impl Limits {
+    const CEILING: Self = Self {
+        max_message_bytes: MAX_MESSAGE_BYTES,
+        max_records: MAX_RECORDS,
+        max_name_pointers: MAX_NAME_POINTERS,
+        max_txt_strings: MAX_RECORDS,
+        max_txt_bytes: MAX_MESSAGE_BYTES,
+    };
+
     pub fn validate(&self) -> Result<(), Error> {
+        let ceiling = Self::CEILING;
         for (field, value, maximum) in [
             (
                 "max_message_bytes",
                 self.max_message_bytes,
-                MAX_MESSAGE_BYTES,
+                ceiling.max_message_bytes,
             ),
-            ("max_records", self.max_records, MAX_RECORDS),
+            ("max_records", self.max_records, ceiling.max_records),
             (
                 "max_name_pointers",
                 self.max_name_pointers,
-                MAX_NAME_POINTERS,
+                ceiling.max_name_pointers,
             ),
-            ("max_txt_strings", self.max_txt_strings, MAX_RECORDS),
-            ("max_txt_bytes", self.max_txt_bytes, MAX_MESSAGE_BYTES),
+            (
+                "max_txt_strings",
+                self.max_txt_strings,
+                ceiling.max_txt_strings,
+            ),
+            ("max_txt_bytes", self.max_txt_bytes, ceiling.max_txt_bytes),
         ] {
             if value > maximum {
                 return Err(Error::InvalidLimit {

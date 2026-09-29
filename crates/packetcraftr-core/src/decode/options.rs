@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::frame::Frame;
-use bytes::Bytes;
 
 use crate::diagnostic::Diagnostic;
 use crate::layout::PacketLayout;
@@ -16,7 +15,7 @@ pub struct Options {
 #[derive(Clone, Debug)]
 pub struct DecodedPacket {
     pub packet: Packet,
-    pub original: Bytes,
+    /// Owns the exact input bytes; read them through `Frame::bytes`.
     pub frame: Frame,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,

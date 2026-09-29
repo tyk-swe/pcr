@@ -3,11 +3,11 @@
 
 mod common;
 
-use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use common::clock::VirtualClock;
 use packetcraftr::clock::Clock;
 use packetcraftr::{Client, send};
 use packetcraftr_core::budget::Deadline;
@@ -52,35 +52,6 @@ impl capture::Provider for RecordingSender {
         _deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         unreachable!("Layer 3 sends never resolve neighbors")
-    }
-}
-
-#[derive(Clone)]
-struct RecordingClock {
-    now: Arc<Mutex<Instant>>,
-    delays: Arc<Mutex<Vec<Duration>>>,
-}
-
-impl Default for RecordingClock {
-    fn default() -> Self {
-        Self {
-            now: Arc::new(Mutex::new(Instant::now())),
-            delays: Arc::default(),
-        }
-    }
-}
-
-impl Clock for RecordingClock {
-    type Error = Infallible;
-
-    fn now(&self) -> Instant {
-        *self.now.lock().expect("clock lock")
-    }
-
-    fn sleep(&self, delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
-        *self.now.lock().expect("clock lock") += delay;
-        self.delays.lock().expect("delays lock").push(delay);
-        Ok(())
     }
 }
 
@@ -135,16 +106,16 @@ fn request(template: Template, repeat: u32, rate: Option<u32>) -> send::Request 
 fn client_with(
     sender: RecordingSender,
     policy: packetcraftr::policy::Policy,
-) -> Client<Fakes, RecordingClock> {
+) -> Client<Fakes, VirtualClock> {
     Client::new(
         builtin::registry(),
         policy,
         common::providers(common::FixedRoutes, sender),
     )
-    .with_clock(RecordingClock::default())
+    .with_clock(VirtualClock::default())
 }
 
-fn client(sender: RecordingSender) -> Client<Fakes, RecordingClock> {
+fn client(sender: RecordingSender) -> Client<Fakes, VirtualClock> {
     client_with(sender, packetcraftr::policy::Policy::default())
 }
 
@@ -196,19 +167,15 @@ fn set_send_repeats_the_expansion_in_order_under_one_budget() {
 #[test]
 fn pacing_places_a_fixed_delay_between_transmission_starts() {
     let template = Template::new(packet(64));
-    let clock = RecordingClock::default();
+    let clock = VirtualClock::default();
     let started = clock.now();
-    let delays = Arc::clone(&clock.delays);
-    let client = client(RecordingSender::default()).with_clock(clock);
+    let client = client(RecordingSender::default()).with_clock(clock.clone());
     let (_, sink) = observer();
     let report = client
         .send(request(template, 4, Some(2)), sink)
         .expect("set send succeeds");
 
-    assert_eq!(
-        *delays.lock().expect("delays lock"),
-        [Duration::from_millis(500); 3]
-    );
+    assert_eq!(clock.delays(), [Duration::from_millis(500); 3]);
     assert_eq!(report.stats.elapsed, Duration::from_millis(1_500));
     assert!(started.elapsed() < Duration::from_millis(1_500));
 }

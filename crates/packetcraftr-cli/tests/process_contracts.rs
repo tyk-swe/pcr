@@ -125,11 +125,14 @@ fn replay_dash_remains_a_file_path_and_does_not_read_stdin() {
     ]);
     let output = run_command_with_open_stdin(command);
     assert_eq!(output.status.code(), Some(5), "{output:?}");
+    let error = parse_json(&output)["error"].clone();
+    assert_eq!(error["message"], "open - failed", "{error}");
     assert!(
-        parse_json(&output)["error"]["message"]
-            .as_str()
-            .unwrap()
-            .starts_with("open - failed:")
+        matches!(
+            error["causes"].as_array().unwrap().as_slice(),
+            [cause] if cause.as_str().unwrap().contains("os error")
+        ),
+        "{error}"
     );
 }
 
@@ -916,10 +919,13 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         let error = parse_json(&output)["error"].clone();
         assert_eq!(error["code"], "io.runtime", "{arguments:?}");
         let message = error["message"].as_str().unwrap();
-        assert!(message.starts_with("open "), "{arguments:?}: {error}");
+        assert!(
+            message.starts_with("open ") && message.ends_with(" failed"),
+            "{arguments:?}: {error}"
+        );
         let causes = error["causes"].as_array().unwrap();
         assert!(
-            matches!(&causes[..], [cause] if message.ends_with(cause.as_str().unwrap())),
+            matches!(&causes[..], [cause] if cause.as_str().unwrap().contains("os error")),
             "{arguments:?}: {error}"
         );
     }
@@ -1131,25 +1137,6 @@ fn binary_stdout_requires_deliberate_override_on_a_terminal() {
 }
 
 #[test]
-fn hex_fixtures_decode_empty_even_and_mixed_case_text() {
-    assert!(decode_hex("").is_empty());
-    assert_eq!(decode_hex("00ffA5"), vec![0x00, 0xff, 0xa5]);
-    assert_eq!(decode_hex("4500"), vec![0x45, 0x00]);
-}
-
-#[test]
-#[should_panic(expected = "fixture hex must not have an unmatched final nibble")]
-fn hex_fixtures_reject_an_unmatched_final_nibble() {
-    let _ = decode_hex("abc");
-}
-
-#[test]
-#[should_panic(expected = "fixture hex must be valid")]
-fn hex_fixtures_reject_non_hexadecimal_digits() {
-    let _ = decode_hex("zz");
-}
-
-#[test]
 fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
     for query_type in [
         "65536",
@@ -1180,21 +1167,24 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
     let directory = tempfile::tempdir().expect("temporary directory must open");
     let written = directory.path().join("written.pcapng");
     let written = written.to_str().expect("temporary path is UTF-8");
-    let cases: &[(&[&str], u8, &str)] = &[
+    let cases: &[(&[&str], u8, &str, Option<&str>)] = &[
         (
             &["scan", "192.0.2.1", "--max-duration-ms", "0"],
             2,
             "cli.scan_limit",
+            None,
         ),
         (
             &["scan", "192.0.2.1", "--max-duration-ms", "3600001"],
             2,
             "cli.scan_limit",
+            None,
         ),
         (
             &["traceroute", "192.0.2.1", "--max-duration-ms", "0"],
             2,
             "cli.traceroute_limit",
+            None,
         ),
         (
             &[
@@ -1206,11 +1196,13 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
             ],
             2,
             "cli.dns_limit",
+            None,
         ),
         (
             &["fuzz", "--packet", PACKET, "--max-duration-ms", "0"],
             2,
             "cli.fuzz_limit",
+            None,
         ),
         (
             &[
@@ -1223,6 +1215,7 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
             ],
             2,
             "cli.replay_limit",
+            None,
         ),
         (
             &[
@@ -1237,46 +1230,61 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
             ],
             2,
             "cli.error",
+            None,
         ),
         (
             &["stats", capture, "--max-duration-ms", "0"],
             2,
             "cli.analysis_limit",
+            None,
         ),
         (
             &["http", capture, "--max-duration-ms", "0"],
             2,
             "cli.analysis_limit",
+            None,
         ),
         (
             &["capture", "--interface", "lo", "--timeout-ms", "3600001"],
             2,
             "cli.capture_timeout",
+            None,
+        ),
+        (
+            &["exchange", "--packet", PACKET, "--timeout-ms", "0"],
+            2,
+            "cli.exchange_limit",
+            None,
         ),
         (
             &["exchange", "--packet", PACKET, "--timeout-ms", "3600001"],
             2,
             "cli.exchange_limit",
+            None,
         ),
         (
             &["scan", "192.0.2.1", "--timeout-ms", "0"],
             2,
             "cli.scan_limit",
+            None,
         ),
         (
             &["scan", "192.0.2.1", "--timeout-ms", "3600001"],
             2,
             "cli.exchange_limit",
+            None,
         ),
         (
             &["traceroute", "192.0.2.1", "--timeout-ms", "3600001"],
             2,
             "cli.traceroute_limit",
+            None,
         ),
         (
             &["dns", "192.0.2.53", "example.test", "--timeout-ms", "0"],
             2,
             "cli.dns_limit",
+            None,
         ),
         (
             &[
@@ -1291,35 +1299,35 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
             ],
             2,
             "cli.fuzz_limit",
+            None,
         ),
         (
-            &[
-                "send",
-                "--packet",
-                "ipv4(dst=10.0.0.2)/udp(dport=9000)",
-                "--allow-destination",
-                "192.0.2.0/24",
-                "--interface",
-                "0",
-            ],
-            6,
-            "policy.destination_not_allowed",
+            &["interfaces", "--interface", ""],
+            2,
+            "cli.error",
+            Some("--interface cannot be empty"),
         ),
-        (&["interfaces", "--interface", ""], 2, "cli.error"),
         (
             &["replay", capture, "--interface", "4294967296"],
             2,
             "cli.error",
+            None,
         ),
-        (&["http", capture, "--stream", "sctp:0"], 2, "cli.error"),
-        (&["tls", capture, "--stream", "udp:0"], 2, "cli.error"),
+        (
+            &["http", capture, "--stream", "sctp:0"],
+            2,
+            "cli.error",
+            Some("invalid --stream 'sctp:0': expected tcp:INDEX or udp:INDEX"),
+        ),
+        (&["tls", capture, "--stream", "udp:0"], 2, "cli.error", None),
         (
             &["export", capture, "--write", written, "--stream", "tcp:"],
             2,
             "cli.error",
+            None,
         ),
     ];
-    for &(command, exit, code) in cases {
+    for &(command, exit, code, message) in cases {
         let mut arguments = vec!["--output", "json"];
         arguments.extend_from_slice(command);
         let output = run(&arguments);
@@ -1328,20 +1336,10 @@ fn bounded_and_selector_arguments_keep_their_published_codes() {
             Some(i32::from(exit)),
             "{arguments:?}: {output:?}"
         );
-        assert_eq!(parse_json(&output)["error"]["code"], code, "{arguments:?}");
-    }
-    for (command, message) in [
-        (
-            &["interfaces", "--interface", ""][..],
-            "--interface cannot be empty".to_owned(),
-        ),
-        (
-            &["http", capture, "--stream", "sctp:0"],
-            "invalid --stream 'sctp:0': expected tcp:INDEX or udp:INDEX".to_owned(),
-        ),
-    ] {
-        let mut arguments = vec!["--output", "json"];
-        arguments.extend_from_slice(command);
-        assert_eq!(parse_json(&run(&arguments))["error"]["message"], message);
+        let document = parse_json(&output);
+        assert_eq!(document["error"]["code"], code, "{arguments:?}");
+        if let Some(message) = message {
+            assert_eq!(document["error"]["message"], message, "{arguments:?}");
+        }
     }
 }

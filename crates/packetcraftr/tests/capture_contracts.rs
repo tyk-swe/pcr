@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
+
+use common::{Interfaces, clock::VirtualClock};
 use packetcraftr::{
     Client, ProviderSet,
     capture::{Cause, Control, Event, Request, StopReason},
@@ -18,12 +21,11 @@ use packetcraftr_netio::{
 };
 use std::{
     collections::VecDeque,
-    convert::Infallible,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant, UNIX_EPOCH},
+    time::{Duration, UNIX_EPOCH},
 };
 
 type Tick = Arc<dyn Fn() + Send + Sync>;
@@ -121,7 +123,7 @@ impl native::Provider for Provider {
     }
 }
 
-type Fixture = ProviderSet<(), net::interface::SystemProvider, Provider, (), (), ()>;
+type Fixture = ProviderSet<(), Interfaces, Provider, (), (), ()>;
 
 fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
     Client::new(
@@ -131,7 +133,7 @@ fn client(provider: Provider, frames: u64, bytes: u64) -> Client<Fixture> {
             max_bytes_per_operation: bytes,
             ..Default::default()
         },
-        ProviderSet::capture(net::interface::SystemProvider, provider),
+        ProviderSet::capture(Interfaces::default(), provider),
     )
 }
 
@@ -339,35 +341,12 @@ fn an_arming_failure_reports_every_admitted_source_after_its_shutdown() {
     assert!(error.cleanup.is_empty());
 }
 
-#[derive(Clone)]
-struct ManualClock(Arc<Mutex<Instant>>);
-
-impl ManualClock {
-    fn advance(&self, by: Duration) {
-        let mut now = self.0.lock().unwrap();
-        *now += by;
-    }
-}
-
-impl Clock for ManualClock {
-    type Error = Infallible;
-
-    fn now(&self) -> Instant {
-        *self.0.lock().unwrap()
-    }
-
-    fn sleep(&self, delay: Duration, _deadline: &Deadline) -> Result<(), Infallible> {
-        self.advance(delay);
-        Ok(())
-    }
-}
-
 #[test]
 fn the_window_closes_on_the_client_clock_and_cancellation_stops_every_source() {
     // Every read takes 300 ms on the client's clock, so a one-second window
     // publishes three frames and counts the fourth, read after it closed, as
     // late.
-    let clock = ManualClock(Arc::new(Mutex::new(Instant::now())));
+    let clock = VirtualClock::default();
     let mut provider = Provider::new(8);
     provider.tick = Some(Arc::new({
         let clock = clock.clone();

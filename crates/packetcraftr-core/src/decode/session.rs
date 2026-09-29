@@ -14,9 +14,7 @@ use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::registry::Discriminator;
 
 use super::error::Error;
-use super::fallback::{
-    append_malformed, append_missing_required_layer, append_padding, append_raw, slice_original,
-};
+use super::fallback::{append_malformed, append_padding, append_raw, slice_original};
 use super::options::DecodedPacket;
 use super::traversal::TraversalScope;
 
@@ -48,7 +46,6 @@ pub(super) struct DecodeSession<'registry> {
     registry: &'registry crate::registry::Registry,
     root: crate::layer::Id,
     frame: Frame,
-    original: Bytes,
     options: super::options::Options,
     packet: Packet,
     layouts: Vec<LayerLayout>,
@@ -64,13 +61,11 @@ impl<'registry> DecodeSession<'registry> {
         root: crate::layer::Id,
         options: super::options::Options,
     ) -> Self {
-        let original = frame.bytes().clone();
         let traversal = TraversalScope::new(registry, &root);
         Self {
             registry,
             root,
             frame,
-            original,
             options,
             packet: Packet::new(),
             layouts: Vec::new(),
@@ -84,7 +79,7 @@ impl<'registry> DecodeSession<'registry> {
         let mut cursor = DecodeCursor {
             protocol: self.root,
             discriminator: None,
-            bytes: 0..self.original.len(),
+            bytes: 0..self.frame.bytes().len(),
         };
         loop {
             self.ensure_layer_capacity()?;
@@ -93,7 +88,7 @@ impl<'registry> DecodeSession<'registry> {
                 break;
             };
             let allow_link_padding = self.traversal.allows_current_link_padding();
-            let decoded = match self.decode_layer(codec.as_ref(), &cursor, allow_link_padding) {
+            let decoded = match self.decode_layer(codec.as_ref(), &cursor) {
                 Ok(decoded) => decoded,
                 Err(source) => {
                     self.preserve_malformed_layer(&cursor, crate::error::render(&source));
@@ -125,16 +120,14 @@ impl<'registry> DecodeSession<'registry> {
         &self,
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
-        allow_link_padding: bool,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         // validate_layer checks cursor ranges; slicing shares the buffer instead of copying
-        let input = self.original.slice(cursor.bytes.clone());
+        let input = self.frame.bytes().slice(cursor.bytes.clone());
         codec.decode(
             input,
             &LayerDecodeContext {
                 parent: self.packet.iter().last().map(|layer| *layer.protocol_id()),
                 registry: self.registry,
-                allow_trailing_padding: allow_link_padding,
                 network: self.traversal.network(),
                 discriminator: cursor.discriminator,
             },
@@ -147,20 +140,12 @@ impl<'registry> DecodeSession<'registry> {
                 protocol: cursor.protocol,
             });
         }
-        let index = self.packet.len();
-        append_raw(
-            &mut self.packet,
-            &mut self.layouts,
-            slice_original(&self.original, cursor.bytes.start, cursor.bytes.len()),
-            cursor.bytes.start,
-        );
-        self.diagnostics.push(
-            Diagnostic::warning(
-                "decode.missing_codec",
-                format!("no codec registered for {}", cursor.protocol),
-            )
-            .at_layer(index),
-        );
+        let diagnostic = Diagnostic::warning(
+            "decode.missing_codec",
+            format!("no codec registered for {}", cursor.protocol),
+        )
+        .at_layer(self.packet.len());
+        self.preserve_raw(cursor.bytes.start, cursor.bytes.len(), diagnostic);
         Ok(())
     }
 
@@ -169,8 +154,8 @@ impl<'registry> DecodeSession<'registry> {
         append_malformed(
             &mut self.packet,
             &mut self.layouts,
-            Some(cursor.protocol),
-            slice_original(&self.original, cursor.bytes.start, cursor.bytes.len()),
+            cursor.protocol,
+            slice_original(self.frame.bytes(), cursor.bytes.start, cursor.bytes.len()),
             message.clone(),
             cursor.bytes.start,
         );
@@ -257,7 +242,7 @@ impl<'registry> DecodeSession<'registry> {
         let byte_count = cursor.bytes.end.saturating_sub(layer.payload_end);
         self.trailing.push(TrailingBytes {
             offset: layer.payload_end,
-            bytes: slice_original(&self.original, layer.payload_end, byte_count),
+            bytes: slice_original(self.frame.bytes(), layer.payload_end, byte_count),
             outside_layer: self.packet.len(),
         });
         let message = format!(
@@ -360,7 +345,14 @@ impl<'registry> DecodeSession<'registry> {
         };
         self.ensure_layer_capacity()?;
         let message = format!("{parent} discriminator requires {required}, but no bytes remain");
-        append_missing_required_layer(&mut self.packet, &mut self.layouts, required, offset);
+        append_malformed(
+            &mut self.packet,
+            &mut self.layouts,
+            required,
+            Bytes::new(),
+            "required child header is absent".to_owned(),
+            offset,
+        );
         self.diagnostics.push(
             Diagnostic::error("decode.missing_required_child", message).at_layer(parent_index),
         );
@@ -375,21 +367,14 @@ impl<'registry> DecodeSession<'registry> {
         payload_len: usize,
     ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
-        append_raw(
-            &mut self.packet,
-            &mut self.layouts,
-            slice_original(&self.original, offset, payload_len),
-            offset,
-        );
-        self.diagnostics.push(
-            Diagnostic::warning(
-                "decode.terminal_payload",
-                format!(
-                    "codec for {protocol} stopped with {payload_len} unconsumed payload byte(s); preserved as Raw"
-                ),
-            )
-            .at_layer(parent_index),
-        );
+        let diagnostic = Diagnostic::warning(
+            "decode.terminal_payload",
+            format!(
+                "codec for {protocol} stopped with {payload_len} unconsumed payload byte(s); preserved as Raw"
+            ),
+        )
+        .at_layer(parent_index);
+        self.preserve_raw(offset, payload_len, diagnostic);
         Ok(())
     }
 
@@ -401,20 +386,23 @@ impl<'registry> DecodeSession<'registry> {
         payload_len: usize,
     ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
+        let diagnostic = Diagnostic::warning(
+            "decode.unknown_binding",
+            format!("unknown child discriminator after {parent}"),
+        )
+        .at_layer(parent_index);
+        self.preserve_raw(offset, payload_len, diagnostic);
+        Ok(())
+    }
+
+    fn preserve_raw(&mut self, offset: usize, len: usize, diagnostic: Diagnostic) {
         append_raw(
             &mut self.packet,
             &mut self.layouts,
-            slice_original(&self.original, offset, payload_len),
+            slice_original(self.frame.bytes(), offset, len),
             offset,
         );
-        self.diagnostics.push(
-            Diagnostic::warning(
-                "decode.unknown_binding",
-                format!("unknown child discriminator after {parent}"),
-            )
-            .at_layer(parent_index),
-        );
-        Ok(())
+        self.diagnostics.push(diagnostic);
     }
 
     fn finish(mut self) -> Result<DecodedPacket, Error> {
@@ -434,13 +422,12 @@ impl<'registry> DecodeSession<'registry> {
         let encoded_payload_lengths = self
             .layouts
             .iter()
-            .map(|layout| self.original.len().checked_sub(layout.range.end))
+            .map(|layout| self.frame.bytes().len().checked_sub(layout.range.end))
             .collect();
         self.packet
             .set_encoded_payload_lengths(encoded_payload_lengths);
         Ok(DecodedPacket {
             packet: self.packet,
-            original: self.original,
             frame: self.frame,
             layout: PacketLayout::new(self.layouts),
             diagnostics: self.diagnostics,

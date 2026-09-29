@@ -30,6 +30,13 @@ impl Raw {
     pub fn layout(length: usize) -> Vec<crate::layout::FieldLayout> {
         raw_layout(length)
     }
+
+    pub(crate) fn decoded(input: Bytes) -> DecodedLayer {
+        let length = input.len();
+        let mut decoded = DecodedLayer::terminal(Box::new(Self::new(input)), length);
+        decoded.fields = raw_layout(length);
+        decoded
+    }
 }
 
 reflective_layer! {
@@ -101,7 +108,7 @@ reflective_layer! {
             }
         }
     }
-    layout pub(crate) fn padding_layout(length: usize);
+    layout fn padding_layout(length: usize);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,7 +158,7 @@ reflective_layer! {
             reflect: reason
         }
     }
-    layout pub(crate) fn malformed_layout(length: usize);
+    layout fn malformed_layout(length: usize);
 }
 
 /// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
@@ -167,25 +174,21 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
         })
         .collect::<String>();
     if compact.len() % 2 != 0 {
-        return Err(crate::codec::Error::Invalid {
+        return Err(crate::codec::Error::invalid(
             protocol,
-            message: "hex value must contain an even number of digits".to_owned(),
-        });
+            "hex value must contain an even number of digits",
+        ));
     }
-    let digits = compact.as_bytes();
-    let mut bytes = Vec::with_capacity(digits.len() / 2);
-    let mut offset = 0_usize;
-    while let Some(pair) = digits.get(offset..).and_then(<[u8]>::first_chunk::<2>) {
-        let high = hex_nibble(pair[0]).ok_or_else(|| crate::codec::Error::Invalid {
-            protocol,
-            message: format!("invalid hex at byte {offset}"),
-        })?;
-        let low = hex_nibble(pair[1]).ok_or_else(|| crate::codec::Error::Invalid {
-            protocol,
-            message: format!("invalid hex at byte {}", offset.saturating_add(1)),
-        })?;
+    let pairs = compact.as_bytes().as_chunks::<2>().0;
+    let mut bytes = Vec::with_capacity(pairs.len());
+    for (index, &[high, low]) in pairs.iter().enumerate() {
+        let (Some(high), Some(low)) = (hex_nibble(high), hex_nibble(low)) else {
+            return Err(crate::codec::Error::invalid(
+                protocol,
+                format!("invalid hex at byte {index}"),
+            ));
+        };
         bytes.push((high << 4) | low);
-        offset = offset.saturating_add(2);
     }
     Ok(Bytes::from(bytes))
 }
@@ -213,8 +216,10 @@ impl LayerCodec for RawCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Raw>(Raw::ID, layer)?;
-        ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
+        let layer = layer
+            .downcast_ref::<Raw>()
+            .ok_or_else(|| crate::codec::Error::wrong_layer(Raw::ID, layer))?;
+        context.ensure_room(Raw::ID, layer.bytes.len())?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(raw_layout(layer.bytes.len())),
@@ -226,9 +231,7 @@ impl LayerCodec for RawCodec {
         input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-        decoded.fields = raw_layout(input.len());
-        Ok(decoded)
+        Ok(Raw::decoded(input))
     }
 
     fn make_layer(
@@ -256,8 +259,10 @@ impl LayerCodec for MalformedCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Malformed>(Malformed::ID, layer)?;
-        ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
+        let layer = layer
+            .downcast_ref::<Malformed>()
+            .ok_or_else(|| crate::codec::Error::wrong_layer(Malformed::ID, layer))?;
+        context.ensure_room(Malformed::ID, layer.bytes.len())?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(malformed_layout(layer.bytes.len()))
@@ -307,8 +312,10 @@ impl LayerCodec for PaddingCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Padding>(Padding::ID, layer)?;
-        ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
+        let layer = layer
+            .downcast_ref::<Padding>()
+            .ok_or_else(|| crate::codec::Error::wrong_layer(Padding::ID, layer))?;
+        context.ensure_room(Padding::ID, layer.bytes.len())?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
                 .with_fields(padding_layout(layer.bytes.len())),
@@ -342,14 +349,20 @@ fn raw_fields(
     let derived = match normalized.remove("hex") {
         Some(value) => {
             let FieldValue::Text(value) = value else {
-                return Err(invalid(name, "hex must be a quoted hexadecimal string"));
+                return Err(crate::codec::Error::invalid(
+                    name,
+                    "hex must be a quoted hexadecimal string",
+                ));
             };
             Some(FieldValue::Bytes(parse_hex(&value)?))
         }
         None => match normalized.remove("text") {
             Some(value) => {
                 let FieldValue::Text(value) = value else {
-                    return Err(invalid(name, "text must be a quoted string"));
+                    return Err(crate::codec::Error::invalid(
+                        name,
+                        "text must be a quoted string",
+                    ));
                 };
                 Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
             }
@@ -359,7 +372,10 @@ fn raw_fields(
     if let Some(value) = derived
         && normalized.insert("bytes".to_string(), value).is_some()
     {
-        return Err(invalid(name, "bytes cannot be combined with hex or text"));
+        return Err(crate::codec::Error::invalid(
+            name,
+            "bytes cannot be combined with hex or text",
+        ));
     }
     Ok(normalized)
 }
@@ -374,47 +390,96 @@ fn with_fields<L: Layer>(
     Ok(Box::new(layer))
 }
 
-fn typed_layer<L: Layer>(expected: Id, layer: &dyn Layer) -> Result<&L, crate::codec::Error> {
-    layer
-        .downcast_ref::<L>()
-        .ok_or_else(|| crate::codec::Error::WrongLayer {
-            expected,
-            actual: *layer.protocol_id(),
-        })
-}
-
-fn ensure_encode_budget(
-    protocol: Id,
-    contribution: usize,
-    context: &LayerEncodeContext<'_>,
-) -> Result<(), crate::codec::Error> {
-    if contribution > context.remaining_packet_bytes {
-        return Err(invalid(
-            protocol,
-            format!(
-                "layer contributes {contribution} bytes but only {} remain in the packet-size budget",
-                context.remaining_packet_bytes
-            ),
-        ));
-    }
-    Ok(())
-}
-
-fn invalid(protocol: Id, message: impl Into<String>) -> crate::codec::Error {
-    crate::codec::Error::Invalid {
-        protocol,
-        message: message.into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::{Context, Error, Mode};
     use crate::layout::ByteRange;
+    use crate::packet::Packet;
+    use crate::registry::Registry;
+
+    fn encode(
+        codec: &dyn LayerCodec,
+        layer: &dyn Layer,
+        remaining_packet_bytes: usize,
+    ) -> Result<EncodedLayer, Error> {
+        let registry = Registry::default();
+        let packet = Packet::new();
+        let build_context = Context::default();
+        let context = LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode: Mode::Strict,
+            registry: &registry,
+            child: None,
+            remaining_packet_bytes,
+        };
+        codec.encode(layer, &[], &context)
+    }
+
+    #[test]
+    fn opaque_layers_over_the_packet_size_budget_are_refused() {
+        let cases: [(&dyn LayerCodec, Box<dyn Layer>, Id); 3] = [
+            (&RawCodec, Box::new(Raw::new(vec![0; 4])), Raw::ID),
+            (
+                &PaddingCodec,
+                Box::new(Padding::new(vec![0; 4])),
+                Padding::ID,
+            ),
+            (
+                &MalformedCodec,
+                Box::new(Malformed::new(None, vec![0; 4], "test")),
+                Malformed::ID,
+            ),
+        ];
+        for (codec, layer, protocol) in cases {
+            assert!(encode(codec, layer.as_ref(), 4).is_ok(), "{protocol}");
+            assert_eq!(
+                encode(codec, layer.as_ref(), 3).err(),
+                Some(Error::Invalid {
+                    protocol,
+                    message:
+                        "layer contributes 4 bytes but only 3 remain in the packet-size budget"
+                            .to_owned(),
+                }),
+                "{protocol}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_opaque_codec_refuses_a_layer_of_another_protocol() {
+        assert_eq!(
+            encode(&RawCodec, &Padding::default(), 16).err(),
+            Some(Error::WrongLayer {
+                expected: Raw::ID,
+                actual: Padding::ID,
+            })
+        );
+    }
 
     #[test]
     fn opaque_layouts_cover_the_whole_input() {
         assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
         assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
+    }
+
+    #[test]
+    fn parse_hex_names_the_byte_holding_an_invalid_digit() {
+        for (input, expected) in [
+            ("zz", "invalid hex at byte 0"),
+            ("aa bb zz", "invalid hex at byte 2"),
+            ("0x0a:0z", "invalid hex at byte 1"),
+            ("0a 0z", "invalid hex at byte 1"),
+            ("0a z0", "invalid hex at byte 1"),
+        ] {
+            match parse_hex(input) {
+                Err(crate::codec::Error::Invalid { message, .. }) => {
+                    assert_eq!(message, expected, "{input}");
+                }
+                other => panic!("{input}: expected an invalid hex error, got {other:?}"),
+            }
+        }
     }
 }

@@ -142,6 +142,39 @@ fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
 }
 
 #[test]
+fn live_request_bounds_the_timeout_and_the_case_rate() {
+    let valid = request(packet_fuzz::Request::default());
+
+    let error = Request {
+        timeout: Duration::ZERO,
+        ..valid.clone()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::InvalidTimeout { maximum, .. } if maximum == packetcraftr_netio::deadline::MAX_WAIT),
+        "{error:?}"
+    );
+
+    let error = Request {
+        cases_per_second: Some(0),
+        ..valid
+    }
+    .validate()
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "cases_per_second",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn aggregate_live_fuzz_validates_case_count_before_collecting() {
     let request = request(packet_fuzz::Request {
         cases: usize::MAX,
@@ -473,6 +506,121 @@ fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication
     assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
+#[derive(Clone, Copy)]
+enum ResponseFault {
+    None,
+    MissingTimestamp,
+    AfterTimeout,
+}
+
+/// Executes the case, then spends the campaign budget and/or cancels it while
+/// answering with a response carrying `fault`.
+struct InterruptingExecutor {
+    fault: ResponseFault,
+    now: Arc<std::sync::Mutex<std::time::Instant>>,
+    expire: bool,
+    signal: Option<Cancellation>,
+}
+
+impl Executor<CaseStep> for InterruptingExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
+        let mut execution = RebuildingExecutor.execute(case)?;
+        let mut response = crate::test_support::decoded_packet(
+            case.packet.clone(),
+            std::time::UNIX_EPOCH,
+            execution.sent.wire_bytes(),
+            Vec::new(),
+        );
+        let mut latency = Duration::from_millis(1);
+        match self.fault {
+            ResponseFault::None => {}
+            ResponseFault::MissingTimestamp => response.frame.timestamp = None,
+            ResponseFault::AfterTimeout => latency = case.timeout + Duration::from_millis(1),
+        }
+        execution.responses.push(crate::exchange::Response {
+            request_index: 0,
+            response,
+            latency,
+        });
+        if self.expire {
+            *self.now.lock().unwrap() += Duration::from_secs(3600);
+        }
+        if let Some(signal) = &self.signal {
+            signal.cancel();
+        }
+        Ok(execution)
+    }
+}
+
+fn run_interrupted_case(
+    fault: ResponseFault,
+    expire: bool,
+    cancel: bool,
+) -> (Error, Arc<std::sync::atomic::AtomicUsize>) {
+    let request = quick(bit_flip(2));
+    let baseline = std::time::Instant::now();
+    let now = Arc::new(std::sync::Mutex::new(baseline));
+    let clock = Arc::clone(&now);
+    let signal = Cancellation::default();
+    let mut deadline =
+        Deadline::with_time_source(request.campaign.limits.max_duration, move || {
+            *clock.lock().unwrap()
+        })
+        .with_cancellation(Some(signal.clone()));
+    let mut executor = InterruptingExecutor {
+        fault,
+        now,
+        expire,
+        signal: cancel.then_some(signal),
+    };
+    let published = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&published);
+
+    let error = run(
+        &request,
+        &mut AllowAll,
+        packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+        &mut deadline,
+        move |_, _| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        },
+    )
+    .expect_err("the interrupted case must stop the campaign");
+    (error, published)
+}
+
+#[test]
+fn live_invalid_case_evidence_is_reported_ahead_of_an_interruption_during_the_case() {
+    for fault in [ResponseFault::MissingTimestamp, ResponseFault::AfterTimeout] {
+        for (expire, cancel) in [(true, false), (false, true), (true, true)] {
+            let (error, published) = run_interrupted_case(fault, expire, cancel);
+
+            assert!(
+                matches!(error, Error::InvalidEvidence { case_index: 0, .. }),
+                "expire={expire} cancel={cancel}: {error:?}"
+            );
+            assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[test]
+fn live_valid_case_evidence_defers_to_an_interruption_during_the_case() {
+    for (expire, cancel) in [(true, false), (false, true), (true, true)] {
+        let (error, published) = run_interrupted_case(ResponseFault::None, expire, cancel);
+
+        if cancel {
+            assert!(matches!(error, Error::Cancelled(_)), "{error:?}");
+        } else {
+            assert!(matches!(error, Error::DurationLimit { .. }), "{error:?}");
+        }
+        assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+}
+
 struct ThreeFrameExecutor;
 
 impl Executor<CaseStep> for ThreeFrameExecutor {
@@ -704,6 +852,41 @@ fn live_fuzz_rejects_substituted_authorized_case() {
 
     assert_eq!(error.classification().code, "internal.fuzz_evidence");
     assert!(error.to_string().contains("substituted bytes"));
+}
+
+struct TamperingExecutor(fn(&mut CaseEvidence));
+
+impl Executor<CaseStep> for TamperingExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
+        let mut execution = RebuildingExecutor.execute(case)?;
+        (self.0)(&mut execution);
+        Ok(execution)
+    }
+}
+
+#[test]
+fn live_fuzz_rejects_statistics_that_do_not_account_for_the_one_sent_case() {
+    let tampers: [fn(&mut CaseEvidence); 4] = [
+        |execution| execution.stats.packets_attempted = 2,
+        |execution| execution.stats.packets_completed = 0,
+        |execution| execution.stats.bytes += 1,
+        |execution| execution.stats.capture.dropped_bytes = 1,
+    ];
+    for tamper in tampers {
+        let error = collect(
+            &quick(bit_flip(1)),
+            &mut AllowAll,
+            &mut TamperingExecutor(tamper),
+            &mut NoopClock,
+        )
+        .expect_err("inconsistent statistics must be rejected");
+
+        assert!(matches!(
+            error,
+            Error::InvalidEvidence { case_index: 0, .. }
+        ));
+        assert_eq!(error.classification().code, "internal.fuzz_evidence");
+    }
 }
 
 #[test]

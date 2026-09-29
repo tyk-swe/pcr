@@ -41,12 +41,11 @@ impl CaptureQueue {
         &self,
         state: MutexGuard<'a, CaptureState>,
         timeout: Duration,
-    ) -> (MutexGuard<'a, CaptureState>, bool) {
-        let (state, result) = self
-            .changed
+    ) -> MutexGuard<'a, CaptureState> {
+        self.changed
             .wait_timeout(state, timeout)
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (state, result.timed_out())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
     }
 
     pub(super) fn set_ready(&self) {
@@ -146,10 +145,10 @@ impl CaptureQueue {
             }
             let bytes = dropped.frame.bytes().len();
             retained_frames = retained_frames.saturating_sub(1);
-            eviction.retained_bytes =
-                eviction.retained_bytes.checked_sub(bytes).ok_or_else(|| {
-                    accounting_error("native capture queue byte accounting underflowed")
-                })?;
+            eviction.retained_bytes = eviction
+                .retained_bytes
+                .checked_sub(bytes)
+                .ok_or_else(|| accounting_error(QUEUED_BYTES_UNDERFLOW))?;
             eviction.frames = eviction.frames.saturating_add(1);
             eviction.bytes = eviction.bytes.checked_add(bytes).ok_or_else(|| {
                 accounting_error("native capture dropped-byte accounting overflowed")
@@ -224,9 +223,24 @@ pub(super) struct CaptureState {
     pub(super) error_observed: bool,
     pub(super) error: Option<Error>,
     pub(super) queue: VecDeque<Captured>,
-    pub(super) queued_bytes: usize,
+    queued_bytes: usize,
     pub(super) statistics: Stats,
 }
+
+impl CaptureState {
+    pub(super) fn pop_front(&mut self) -> Result<Option<Captured>, Error> {
+        let Some(front) = self.queue.front() else {
+            return Ok(None);
+        };
+        self.queued_bytes = self
+            .queued_bytes
+            .checked_sub(front.frame.bytes().len())
+            .ok_or_else(|| accounting_error(QUEUED_BYTES_UNDERFLOW))?;
+        Ok(self.queue.pop_front())
+    }
+}
+
+const QUEUED_BYTES_UNDERFLOW: &str = "native capture queue byte accounting underflowed";
 
 fn accounting_error(message: &str) -> Error {
     Error::InvalidCaptureStatistics {
@@ -355,7 +369,7 @@ mod tests {
     fn queue_state_transitions_are_monotonic_and_preserve_the_first_error() {
         let queue = queue(OverflowPolicy::Fail, 1, 1);
         let state = queue.lock();
-        let (state, _) = queue.wait_timeout(state, Duration::ZERO);
+        let state = queue.wait_timeout(state, Duration::ZERO);
         assert!(!state.ready);
         assert!(!state.closed);
         assert!(state.error.is_none());
@@ -380,6 +394,35 @@ mod tests {
             state.error.as_ref(),
             Some(Error::Capture { message, .. }) if message == "first failure"
         ));
+    }
+
+    #[test]
+    fn pop_front_releases_the_frame_bytes_and_reports_an_empty_queue() {
+        let queue = queue(OverflowPolicy::Fail, 2, 8);
+        queue.enqueue(captured(&[1, 1])).expect("first frame");
+        queue.enqueue(captured(&[2, 2, 2])).expect("second frame");
+
+        let mut state = queue.lock();
+        let first = state.pop_front().expect("accounted").expect("queued frame");
+        assert_eq!(first.frame.bytes().to_vec(), [1, 1]);
+        assert_eq!(state.queued_bytes, 3);
+        let second = state.pop_front().expect("accounted").expect("queued frame");
+        assert_eq!(second.frame.bytes().to_vec(), [2, 2, 2]);
+        assert_eq!(state.queued_bytes, 0);
+        assert!(state.pop_front().expect("empty queue").is_none());
+    }
+
+    #[test]
+    fn pop_front_rejects_underflowing_accounting_and_keeps_the_frame_queued() {
+        let mut state = CaptureState::default();
+        state.queue.push_back(captured(&[1, 2, 3]));
+
+        assert!(matches!(
+            state.pop_front(),
+            Err(Error::InvalidCaptureStatistics { .. })
+        ));
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.queued_bytes, 0);
     }
 
     #[test]

@@ -13,31 +13,41 @@ pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Erro
     Ok(())
 }
 
+// The longest IPv6 text is 45 bytes and the longest MAC spelling is 17, so a
+// longer run of [hex : .] is never an IPv6 or MAC operand. The scan stops one
+// byte past the bound, which is enough to tell.
+const MAX_NUMERIC_RUN: usize = 45;
+
 // indices stay below bytes.len() and every str slice boundary is an ASCII byte
 fn has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;
     let mut ethernet_operand = false;
+    let mut portrange_operand = false;
     while offset < bytes.len() {
         if bytes[offset] == b'\\' {
             return true;
         }
         if bytes[offset].is_ascii_hexdigit() || bytes[offset] == b':' {
+            let limit = bytes.len().min(offset + MAX_NUMERIC_RUN + 1);
             let mut end = offset + 1;
-            while end < bytes.len()
+            while end < limit
                 && (bytes[end].is_ascii_hexdigit() || matches!(bytes[end], b':' | b'.'))
             {
                 end += 1;
             }
             let atom = &source[offset..end];
-            if atom.parse::<std::net::Ipv6Addr>().is_ok() {
+            let may_be_address = end - offset <= MAX_NUMERIC_RUN;
+            if may_be_address && atom.parse::<std::net::Ipv6Addr>().is_ok() {
                 ethernet_operand = false;
+                portrange_operand = false;
                 offset = end;
                 continue;
             }
-            if is_numeric_mac(atom) {
+            if may_be_address && is_numeric_mac(atom) {
                 let allow_ethernet_mac = ethernet_operand;
                 ethernet_operand = false;
+                portrange_operand = false;
                 if !is_numeric_bpf_atom(atom, allow_ethernet_mac) {
                     return true;
                 }
@@ -55,6 +65,10 @@ fn has_symbolic_operand(source: &str) -> bool {
                 offset += 1;
             }
             let atom = &source[start..offset];
+            if std::mem::take(&mut portrange_operand) && is_numeric_port_range(atom) {
+                continue;
+            }
+            portrange_operand = atom == "portrange";
             if atom == "ether" {
                 ethernet_operand = true;
                 continue;
@@ -72,6 +86,19 @@ fn has_symbolic_operand(source: &str) -> bool {
         offset += 1;
     }
     false
+}
+
+fn is_numeric_port_range(atom: &str) -> bool {
+    atom.split_once('-')
+        .is_some_and(|(first, last)| is_port_number(first) && is_port_number(last))
+}
+
+fn is_port_number(text: &str) -> bool {
+    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(digits) => u16::from_str_radix(digits, 16),
+        None => text.parse::<u16>(),
+    }
+    .is_ok()
 }
 
 fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
@@ -157,17 +184,25 @@ fn is_bpf_keyword(atom: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
+    use crate::capture::MAX_FILTER_BYTES;
 
     #[test]
     fn validator_accepts_only_numeric_operands() {
         let accepted = [
             "arp and ether dst 01:02:03:04:05:06",
             "ip6 and dst host 2001:db8::1",
+            "ip6 host ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255",
             "tcp dst port 443",
             "ip net 192.0.2.0/24",
             "ether host 0011.2233.4455",
             "ip proto 0x11",
+            "portrange 6000-6010",
+            "udp portrange 6000-6010",
+            "tcp portrange 0x10-0x20",
+            "portrange 6000 - 6010",
         ];
         let rejected = [
             "host example.com",
@@ -175,6 +210,10 @@ mod tests {
             "gateway router-1",
             "host 0011.2233.4455",
             r"ip host \resolver-name",
+            "portrange 80-http",
+            "portrange 1-2 host 3-4",
+            "portrange 1-70000",
+            "host 1-2",
         ];
 
         for filter in accepted {
@@ -182,6 +221,21 @@ mod tests {
         }
         for filter in rejected {
             assert!(has_symbolic_operand(filter), "{filter}");
+        }
+    }
+
+    #[test]
+    fn validator_stays_fast_on_filters_at_the_length_limit() {
+        for filter in [
+            ":".repeat(MAX_FILTER_BYTES),
+            "1:".repeat(MAX_FILTER_BYTES / 2),
+        ] {
+            let started = Instant::now();
+            let symbolic = has_symbolic_operand(&filter);
+            let elapsed = started.elapsed();
+
+            assert!(!symbolic);
+            assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
         }
     }
 

@@ -119,6 +119,18 @@ impl Observation {
 }
 
 pub(crate) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]) -> bool {
+    shape_matches(packet, expected, 0)
+}
+
+/// Like [`packet_shape_matches`], with exactly one more layer of any kind after `expected`.
+pub(crate) fn packet_shape_with_payload_matches(
+    packet: &Packet,
+    expected: &[BuiltinProtocol],
+) -> bool {
+    shape_matches(packet, expected, 1)
+}
+
+fn shape_matches(packet: &Packet, expected: &[BuiltinProtocol], trailing: usize) -> bool {
     let mut layers = packet.iter().peekable();
     if layers
         .peek()
@@ -130,7 +142,7 @@ pub(crate) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]
         layers
             .next()
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(*expected))
-    }) && layers.next().is_none()
+    }) && layers.count() == trailing
 }
 
 pub(crate) fn observe(

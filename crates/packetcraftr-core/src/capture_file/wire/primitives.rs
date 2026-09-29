@@ -119,7 +119,10 @@ pub(in crate::capture_file) fn read_exact_vec<R: Read>(
     buffer.clear();
     buffer
         .try_reserve_exact(length)
-        .map_err(|_| Error::Io(io::ErrorKind::OutOfMemory.into()))?;
+        .map_err(|_| Error::AllocationFailed {
+            kind: context,
+            requested: length,
+        })?;
     let actual = reader
         .take(length as u64)
         .read_to_end(buffer)
@@ -138,7 +141,10 @@ pub(in crate::capture_file) fn read_exact_vec<R: Read>(
 pub(in crate::capture_file) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let mut copy = Vec::new();
     copy.try_reserve_exact(bytes.len())
-        .map_err(|_| Error::Io(io::ErrorKind::OutOfMemory.into()))?;
+        .map_err(|_| Error::AllocationFailed {
+            kind: "pcapng packet data",
+            requested: bytes.len(),
+        })?;
     copy.extend_from_slice(bytes);
     Ok(copy)
 }
@@ -237,3 +243,22 @@ macro_rules! write_int {
 write_int!(write_u16, u16);
 write_int!(write_u32, u32);
 write_int!(write_i64, i64);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unreservable_reads_fail_as_allocation_failures_with_their_size() {
+        let mut buffer = Vec::new();
+        let error =
+            read_exact_vec(&mut io::empty(), &mut buffer, usize::MAX, "pcap record").unwrap_err();
+        assert!(matches!(
+            error,
+            Error::AllocationFailed {
+                kind: "pcap record",
+                requested: usize::MAX,
+            }
+        ));
+    }
+}

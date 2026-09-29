@@ -20,7 +20,7 @@ use crate::{
     layer::{Layer, Raw},
     protocol::{
         BuiltinProtocol,
-        common::{ensure_encode_budget, invalid, typed_layer},
+        common::{ensure_encode_budget, invalid, typed_layer, wrong_type},
     },
     registry::Discriminator,
 };
@@ -36,6 +36,7 @@ pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 /// segment; the ceiling keeps per-frame work linear in the segment length.
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 
+pub(crate) const HANDSHAKE_UNPARSED: &str = "tls.handshake_unparsed";
 pub(crate) const RECORD_CONTINUES: &str = "tls.record_continues";
 pub(crate) const RECORD_UNPARSED: &str = "tls.record_unparsed";
 pub(crate) const RECORDS_CAPPED: &str = "tls.records_capped";
@@ -165,8 +166,21 @@ impl Tls {
         for record in records.iter().take_while(|record| record.is_handshake()) {
             stream.extend_from_slice(&record.body);
         }
-        let Outcome::Complete { value, consumed } = parse_handshake(&stream) else {
-            return;
+        let (value, consumed) = match parse_handshake(&stream) {
+            Outcome::Complete { value, consumed } => (value, consumed),
+            Outcome::NeedMore { .. } => return,
+            Outcome::Malformed(error) => {
+                if matches!(
+                    stream.first(),
+                    Some(&(HANDSHAKE_CLIENT_HELLO | HANDSHAKE_SERVER_HELLO))
+                ) {
+                    diagnostics.push(Diagnostic::info(
+                        HANDSHAKE_UNPARSED,
+                        format!("the hello message does not parse: {error}"),
+                    ));
+                }
+                return;
+            }
         };
         let editable = consumed == stream.len() && records.iter().all(Record::is_handshake);
         match value {
@@ -319,7 +333,7 @@ impl LayerCodec for TlsCodec {
             diagnostics,
         }) = dissection
         else {
-            return raw_segment(input.clone());
+            return Ok(Raw::decoded(input));
         };
         Ok(DecodedLayer {
             layer: Box::new(layer),
@@ -350,16 +364,17 @@ impl LayerCodec for TlsCodec {
             if name == "wire" || layer.field(name).as_ref() == Some(value) {
                 continue;
             }
+            if name == "incomplete" {
+                let FieldValue::Bool(incomplete) = value else {
+                    return Err(wrong_type(tls_schema(), name, "bool").into());
+                };
+                layer.incomplete = *incomplete;
+                continue;
+            }
             crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
         }
         Ok(Box::new(layer))
     }
-}
-
-fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
-    let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-    decoded.fields = Raw::layout(input.len());
-    Ok(decoded)
 }
 
 #[cfg(test)]

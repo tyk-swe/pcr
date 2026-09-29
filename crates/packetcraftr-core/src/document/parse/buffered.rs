@@ -16,6 +16,8 @@ use super::budget::{
 };
 use super::seed::{BoundedString, FieldValueSeed, Tag};
 
+const MAX_ADDRESS_TEXT_BYTES: usize = 45;
+
 pub(super) enum Buffered {
     Bool(bool),
     Unsigned(u64),
@@ -121,6 +123,17 @@ impl<'de> DeserializeSeed<'de> for BufferedSeed<'_, '_> {
     }
 }
 
+impl BufferedSeed<'_, '_> {
+    /// String tags are text, IPv4 or IPv6, so the width cap never drops below an IPv6 address.
+    fn check_string_width<E: de::Error>(&self, value: &str) -> Result<(), E> {
+        let limits = self.budget.limits;
+        if value.len() > limits.max_text_bytes.max(MAX_ADDRESS_TEXT_BYTES) {
+            return Err(self.budget.exceeded(Limit::TextBytes));
+        }
+        Ok(())
+    }
+}
+
 impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
     type Value = Buffered;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -170,17 +183,12 @@ impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
         Ok(u64::try_from(value).map_or(Buffered::Signed(value), Buffered::Unsigned))
     }
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Buffered, E> {
-        // String tags are text, IPv4 or IPv6, and an IPv6 address is at most 45 bytes.
-        if value.len() > self.budget.limits.max_text_bytes.max(45) {
-            return Err(self.budget.exceeded(Limit::TextBytes));
-        }
+        self.check_string_width(value)?;
         self.budget.charge_temporary(value.len())?;
         Ok(Buffered::Text(value.to_owned()))
     }
     fn visit_string<E: de::Error>(self, value: String) -> Result<Buffered, E> {
-        if value.len() > self.budget.limits.max_text_bytes.max(45) {
-            return Err(self.budget.exceeded(Limit::TextBytes));
-        }
+        self.check_string_width(&value)?;
         self.budget.charge_temporary(value.capacity())?;
         Ok(Buffered::Text(value))
     }

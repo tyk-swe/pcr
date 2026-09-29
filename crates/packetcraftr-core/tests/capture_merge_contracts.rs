@@ -102,45 +102,104 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
         Err(capture_file::Error::MergeSource { source, .. })
             if matches!(*source, capture_file::Error::TimestampUnavailable { .. })
     ));
-    for limits in [
-        MergeLimits {
-            streams: capture_file::Limits {
-                max_frames: 1,
-                max_bytes: 100,
+    let mut sources = [source("a", &[(1, 1, 0), (2, 2, 1)])];
+    let mut output = Writer::pcapng(Vec::new()).unwrap();
+    let frame_limit = MergeLimits {
+        streams: capture_file::Limits {
+            max_frames: 1,
+            max_bytes: 100,
+        },
+        ..Default::default()
+    };
+    assert!(matches!(
+        capture_file::merge(&mut sources, &mut output, frame_limit),
+        Err(capture_file::Error::FrameLimitExceeded {
+            actual: 2,
+            limit: 1
+        })
+    ));
+    let mut sources = [source("a", &[(1, 1, 0), (2, 2, 1)])];
+    let mut output = Writer::pcapng(Vec::new()).unwrap();
+    let interface_limit = MergeLimits {
+        max_interfaces: 1,
+        ..Default::default()
+    };
+    assert!(matches!(
+        capture_file::merge(&mut sources, &mut output, interface_limit),
+        Err(capture_file::Error::TotalInterfaceLimit { limit: 1 })
+    ));
+}
+
+fn one_frame() -> Frame {
+    Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![1]).unwrap()
+}
+
+fn classic_capture(network: u32) -> Vec<u8> {
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    writer.write_frame(&one_frame()).unwrap();
+    let mut bytes = writer.into_inner();
+    bytes[20..24].copy_from_slice(&network.to_le_bytes());
+    bytes
+}
+
+fn pcapng_capture(fcs_length: &'static [u8]) -> Vec<u8> {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer
+        .add_interface_description_with_options(
+            capture_file::Interface {
+                link_type: LinkType::ETHERNET,
+                snap_len: 65535,
+                timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
             },
-            ..Default::default()
-        },
-        MergeLimits {
-            max_interfaces: 1,
-            ..Default::default()
-        },
-    ] {
-        let mut sources = [source("a", &[(1, 1, 0), (2, 2, 1)])];
-        let mut output = Writer::pcapng(Vec::new()).unwrap();
-        assert!(capture_file::merge(&mut sources, &mut output, limits).is_err());
-    }
+            &[capture_file::PcapNgOption {
+                code: 13,
+                value: fcs_length.into(),
+            }],
+        )
+        .unwrap();
+    writer.write_frame(&one_frame()).unwrap();
+    writer.into_inner()
 }
 
 #[test]
-fn invalid_interface_options_fail_before_an_interface_block_is_written() {
-    let mut writer = Writer::pcapng(Vec::new()).unwrap();
-    let before = writer.get_ref().clone();
-    let description = capture_file::Interface {
-        link_type: LinkType::ETHERNET,
-        snap_len: 128,
-        timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
-        timestamp_offset: 0,
-    };
-    assert!(
-        writer
-            .add_interface_description_with_options(
-                description,
-                &[capture_file::PcapNgOption {
-                    code: 9,
-                    value: vec![6].into()
-                }]
-            )
-            .is_err()
-    );
-    assert_eq!(writer.get_ref(), &before);
+fn map_and_merge_refuse_only_a_declared_fcs_with_one_reason_for_both_formats() {
+    let reason = "declared frame check sequence";
+    let ethernet = LinkType::ETHERNET.0;
+    for (input, declared) in [
+        (classic_capture(0x2400_0000 | ethernet), true),
+        (classic_capture(0x0400_0000 | ethernet), false),
+        (classic_capture(0x5000_0000 | ethernet), false),
+        (pcapng_capture(&[16]), true),
+        (pcapng_capture(&[0]), false),
+    ] {
+        let mut reader = Reader::new(Cursor::new(input.clone())).unwrap();
+        let mut output = Writer::pcapng(Vec::new()).unwrap();
+        let mapped = capture_file::map_frames(
+            &mut reader,
+            &mut output,
+            Default::default(),
+            0,
+            |_, frame| Ok(frame.clone()),
+        );
+        let mut sources = [MergeSource {
+            name: "fixture".to_owned(),
+            reader: Reader::new(Cursor::new(input)).unwrap(),
+        }];
+        let mut output = Writer::pcapng(Vec::new()).unwrap();
+        let merged = capture_file::merge(&mut sources, &mut output, Default::default());
+        if declared {
+            assert!(matches!(
+                mapped,
+                Err(capture_file::Error::TransformMetadata(actual)) if actual == reason
+            ));
+            assert!(matches!(
+                merged,
+                Err(capture_file::Error::MergeMetadata { input: 0, field }) if field == reason
+            ));
+        } else {
+            assert_eq!(mapped.unwrap().frames_read, 1);
+            assert_eq!(merged.unwrap().frames, 1);
+        }
+    }
 }

@@ -87,13 +87,7 @@ impl DirectionFiles {
             .file
             .as_file_mut()
             .write_all(&chunk.bytes)
-            .map_err(|source| {
-                let mut error = CliError::new(Kind::Io, format!("write follow payload: {source}"));
-                error.causes = std::iter::once(source.to_string())
-                    .chain(packetcraftr_core::error::source_chain(&source))
-                    .collect();
-                error
-            })?;
+            .map_err(|source| CliError::wrapping(Kind::Io, "write follow payload", &source))?;
         staged.bytes = staged
             .bytes
             .saturating_add(u64::try_from(chunk.bytes.len()).unwrap_or(u64::MAX));

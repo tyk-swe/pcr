@@ -26,8 +26,7 @@
             "type": [
               "string",
               "null"
-            ],
-            "maxLength": 8192
+            ]
           },
           "assign": {
             "type": "array",
@@ -37,7 +36,6 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 8192,
                   "description": "<protocol>[#occurrence].<field>=<value>, decimal or 0x hexadecimal"
                 },
                 {

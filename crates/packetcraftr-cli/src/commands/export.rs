@@ -57,10 +57,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     };
     selection.validate().map_err(CliError::classified)?;
     let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
-    let limits = capture_file::Limits {
-        max_frames: args.limits.capture.max_frames,
-        max_bytes: args.limits.capture.max_bytes,
-    };
+    let limits = args.limits.capture.stream_limits();
     let mut source = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
     let mut reader =
         crate::input::snapshot_capture(&mut source, args.limits.capture.reader, limits)?;

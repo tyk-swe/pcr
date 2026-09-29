@@ -15,26 +15,25 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    let mut client: Client = client(
+    let client: Client = client(
         packetcraftr_core::protocol::builtin::registry(),
         policy,
         Runtime::ScanConnect,
     );
     crate::commands::execution::run_workflow(
-        &mut client,
         format,
         stream,
         crate::cancellation::signal(),
         crate::commands::execution::Hooks {
             command: output::contract::Command::Scan,
-            run: Box::new(|client| {
+            run: Box::new(|| {
                 let collector = connect::Collector::default();
                 let report = client
                     .scan_connect(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
                 collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|client, emit| {
+            run_with_events: Box::new(|emit| {
                 client
                     .scan_connect(request.clone(), emit)
                     .map_err(CliError::classified)

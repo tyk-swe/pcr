@@ -1,10 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+
+mod common;
+
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
-    field::{FieldValue, WireValue},
-    frame::{Frame, Lengths, LinkType},
+    field::WireValue,
+    frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
     protocol::{
@@ -181,6 +184,35 @@ fn layer_range(frame: &Frame, protocol: &str, field: &str) -> (usize, usize) {
     (found.range.start, found.range.end)
 }
 
+fn assert_field_patched(
+    original: &Frame,
+    outcome: &FieldEditOutcome,
+    assignment: &str,
+    expected: u64,
+) {
+    let (field, _) = assignment.split_once('=').unwrap();
+    let (protocol, name) = field.split_once('.').unwrap();
+    let target = layer_range(original, protocol, name);
+    let width = target.1 - target.0;
+    assert_eq!(
+        outcome.frame.bytes()[target.0..target.1],
+        expected.to_be_bytes()[8 - width..],
+        "{field}: patched bytes"
+    );
+    let qualified = format!("{protocol}#1.{name}");
+    let requested = outcome
+        .changes
+        .iter()
+        .find(|change| change.origin == ChangeOrigin::Requested && change.field == qualified)
+        .unwrap_or_else(|| panic!("no requested change for {qualified}"));
+    assert_eq!(requested.new, expected, "{field}: requested change value");
+    assert_eq!(
+        (requested.range.start, requested.range.end),
+        target,
+        "{field}: requested change range"
+    );
+}
+
 #[test]
 fn each_supported_field_changes_only_its_bytes_and_covering_checksums() {
     for (ipv6, tcp, ethernet) in [
@@ -197,12 +229,14 @@ fn each_supported_field_changes_only_its_bytes_and_covering_checksums() {
         } else {
             "ipv4.ttl=33"
         };
-        let transport = if tcp {
-            "tcp.sequence=99"
+        let (transport, transport_value) = if tcp {
+            ("tcp.sequence=99", 99)
         } else {
-            "udp.destination_port=5353"
+            ("udp.destination_port=5353", 5353)
         };
         let outcome = apply(&original, &[network, transport], ChecksumMode::Repair).unwrap();
+        assert_field_patched(&original, &outcome, network, 33);
+        assert_field_patched(&original, &outcome, transport, transport_value);
         assert_eq!(outcome.frame.bytes().len(), original.bytes().len());
         assert_eq!(outcome.frame.timestamp, original.timestamp);
         let mut allowed: Vec<(usize, usize)> = vec![
@@ -261,17 +295,18 @@ fn each_supported_field_changes_only_its_bytes_and_covering_checksums() {
 
 #[test]
 fn every_editable_field_patches_only_its_layout_range() {
-    for (tcp, assignments) in [
-        (true, vec!["tcp.acknowledgment=4242"]),
-        (true, vec!["tcp.source_port=1818"]),
-        (true, vec!["tcp.destination_port=1919"]),
-        (false, vec!["udp.source_port=1818"]),
-        (false, vec!["udp.destination_port=1919"]),
+    for (tcp, assignment, expected) in [
+        (true, "tcp.acknowledgment=4242", 4242),
+        (true, "tcp.source_port=1818", 1818),
+        (true, "tcp.destination_port=1919", 1919),
+        (false, "udp.source_port=1818", 1818),
+        (false, "udp.destination_port=1919", 1919),
     ] {
-        let field = assignments[0].split('=').next().unwrap();
+        let field = assignment.split('=').next().unwrap();
         let (protocol, name) = field.split_once('.').unwrap();
         let original = frame(false, tcp, false, false);
-        let outcome = apply(&original, &assignments, ChecksumMode::Repair).unwrap();
+        let outcome = apply(&original, &[assignment], ChecksumMode::Repair).unwrap();
+        assert_field_patched(&original, &outcome, assignment, expected);
         let target = layer_range(&original, protocol, name);
         let checksum = layer_range(&original, protocol, "checksum");
         for (offset, (before, after)) in original
@@ -480,9 +515,7 @@ fn assignments_are_atomic_and_overlap_rejected() {
 #[test]
 fn invalid_fields_values_and_occurrences_are_rejected() {
     for assignment in [
-        "ipv4.source=1",     // fixed-width but read-only shape
         "tcp.checksum=1",    // outside the supported set
-        "ethernet.source=1", // not unsigned width-limited
         "dns.questions=1",   // nested/variable structure
         "ipv4.ttl=256",      // exceeds width
         "ipv4.ttl=x",        // not a number
@@ -496,27 +529,57 @@ fn invalid_fields_values_and_occurrences_are_rejected() {
             "{assignment} should be rejected"
         );
     }
-    let registry = builtin::registry();
-    let text = FieldAssignment {
-        field: "ipv4.ttl".to_owned(),
-        value: FieldValue::Text("sixty-four".to_owned()),
-    };
-    assert!(FieldEdits::compile(&[text], ChecksumMode::Repair, &registry).is_err());
+}
+
+#[test]
+fn a_non_unsigned_field_is_refused_by_kind() {
+    for assignment in ["ipv4.source=1", "ethernet.source=1"] {
+        let error = edits(&[assignment], ChecksumMode::Repair).expect_err(assignment);
+        assert!(
+            matches!(
+                error,
+                transform::Error::Invalid(transform::InvalidInput::EditFieldNotUnsigned)
+            ),
+            "{assignment}: {error}"
+        );
+    }
+}
+
+#[test]
+fn hexadecimal_assignment_values_require_hexadecimal_digits() {
+    for (text, value) in [("ipv4.ttl=0x40", 0x40), ("ipv4.ttl=64", 64)] {
+        let expected = FieldAssignment {
+            field: "ipv4.ttl".to_owned(),
+            value,
+        };
+        assert_eq!(text.parse::<FieldAssignment>().unwrap(), expected, "{text}");
+        assert_eq!(
+            serde_json::from_value::<FieldAssignment>(serde_json::json!(text)).unwrap(),
+            expected,
+            "{text} as JSON"
+        );
+    }
+    for refused in ["ipv4.ttl=0x+40", "ipv4.ttl=0x-40", "ipv4.ttl=0x"] {
+        assert!(
+            matches!(
+                refused.parse::<FieldAssignment>(),
+                Err(transform::Error::Invalid(
+                    transform::InvalidInput::AssignmentValueNotUnsigned
+                ))
+            ),
+            "{refused} should be rejected"
+        );
+        assert!(
+            serde_json::from_value::<FieldAssignment>(serde_json::json!(refused)).is_err(),
+            "{refused} as JSON should be rejected"
+        );
+    }
 }
 
 #[test]
 fn truncated_fragmented_and_protected_frames_are_rejected() {
     let original = frame(false, false, true, false);
-    let truncated = Frame::try_with_lengths(
-        UNIX_EPOCH,
-        original.link_type,
-        Lengths {
-            captured: 40,
-            original: original.original_length(),
-        },
-        original.bytes().slice(..40),
-    )
-    .unwrap();
+    let truncated = common::truncated(&original, original.bytes().len() - 40);
     assert!(apply(&truncated, &["ipv4.ttl=1"], ChecksumMode::Repair).is_err());
     // First fragment: the IPv4 header checksum can be repaired, but transport
     // checksums cannot cover a partial datagram.

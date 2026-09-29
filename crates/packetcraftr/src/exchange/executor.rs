@@ -3,6 +3,7 @@
 
 //! The single owner of state after an exchange capture has been armed.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use packetcraftr_core::{decode::Dissector, registry::Registry};
@@ -96,11 +97,11 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) cancellation: Option<packetcraftr_core::budget::Cancellation>,
     pub(super) window: Window,
     pub(super) collection: Collection,
-    pub(super) prepared: Vec<PreparedPacket>,
+    pending: VecDeque<PreparedPacket>,
+    pub(super) request_count: usize,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
     pub(super) sent: Vec<Arc<crate::evidence::SentPacket>>,
-    pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
     pub(super) captured: Accumulator,
     pub(super) correlation_stopped: bool,
@@ -116,11 +117,11 @@ impl<C: Session> Transaction<C> {
             cancellation: prepared.cancellation,
             window: prepared.window,
             collection: prepared.collection,
-            prepared: prepared.packets,
+            pending: prepared.packets.into(),
+            request_count,
             packet_count: prepared.packet_count,
             total_bytes: prepared.total_bytes,
             sent: Vec::with_capacity(request_count),
-            completed_sends: 0,
             captured: Accumulator::new(request_count),
             correlation_stopped: false,
         }
@@ -188,7 +189,7 @@ impl<C: Session> Transaction<C> {
         T: transmit::Provider + ?Sized,
         F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        for send_index in 0..self.prepared.len() {
+        while let Some(packet) = self.pending.pop_front() {
             if self.drain(
                 DrainPolicy::Enforced,
                 workflow_matcher,
@@ -199,13 +200,13 @@ impl<C: Session> Transaction<C> {
                 return Ok(ProcessOutcome::StopCapture);
             }
             self.ensure_send_deadline()?;
-            self.send_one(transmit, send_index, emit)?;
+            self.send_one(transmit, packet, emit)?;
             self.ensure_send_deadline()?;
 
-            let policy = if send_index.saturating_add(1) < self.prepared.len() {
-                DrainPolicy::Enforced
-            } else {
+            let policy = if self.pending.is_empty() {
                 DrainPolicy::BestEffort
+            } else {
+                DrainPolicy::Enforced
             };
             let outcome = self.drain(policy, workflow_matcher, stop_predicate, emit)?;
             if outcome == ProcessOutcome::StopCapture {
@@ -221,30 +222,23 @@ impl<C: Session> Transaction<C> {
     fn send_one<T, F>(
         &mut self,
         transmit: &T,
-        send_index: usize,
+        packet: PreparedPacket,
         emit: &mut F,
     ) -> Result<(), OperationError>
     where
         T: transmit::Provider + ?Sized,
         F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        // `send_index` is produced by `0..self.prepared.len()` in `send_requests`, the only caller
-        let sent = Arc::new(self.prepared[send_index].clone().transmit(transmit, || {
+        let sent = Arc::new(packet.transmit(transmit, || {
             if let Some(signal) = &self.cancellation {
                 signal.check().map_err(LiveIoError::from)?;
             }
             Ok::<(), OperationError>(())
         })?);
-        self.completed_sends =
-            self.completed_sends
-                .checked_add(1)
-                .ok_or(LiveIoError::InvalidSendReport {
-                    bytes_sent: usize::MAX,
-                    wire_bytes: usize::MAX,
-                })?;
+        let request_index = self.sent.len();
         self.sent.push(Arc::clone(&sent));
         emit(Event::Sent {
-            request_index: send_index,
+            request_index,
             sent,
         })
         .map_err(OperationError::output)?;
@@ -285,16 +279,10 @@ impl<C: Session> Transaction<C> {
         let capture_statistics = self.capture.inner.stats();
         capture_statistics.validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
+        let unanswered = self.captured.unanswered(self.sent.len());
+        self.apply_refusal_policy()?;
         self.publish_diagnostics(emit)
             .map_err(OperationError::into_error)?;
-        let unanswered = self
-            .captured
-            .response_counts
-            .iter()
-            .take(self.sent.len())
-            .enumerate()
-            .filter_map(|(index, count)| (*count == 0).then_some(index))
-            .collect::<Vec<_>>();
         for request_index in &unanswered {
             emit(super::Event::Unanswered {
                 request_index: *request_index,
@@ -303,23 +291,42 @@ impl<C: Session> Transaction<C> {
                 source: Box::new(source),
             })?;
         }
-        let stopped_before_all_sends = self.sent.len() < self.prepared.len();
+        let completed = u64::try_from(self.sent.len()).unwrap_or(u64::MAX);
+        let stopped_before_all_sends = self.sent.len() < self.request_count;
         let (packets_attempted, bytes) = if stopped_before_all_sends {
-            (self.completed_sends, sent_bytes(&self.sent))
+            (completed, sent_bytes(&self.sent))
         } else {
             (self.packet_count, self.total_bytes)
         };
         Ok(Report {
             unanswered,
-            diagnostics: Vec::new(),
             stats: Stats {
                 packets_attempted,
-                packets_completed: self.completed_sends,
+                packets_completed: completed,
                 bytes,
                 elapsed: self.window.elapsed(),
                 capture: capture_statistics,
             },
         })
+    }
+
+    /// A limit that refused a reply matched to a request, by correlation or by the workflow's
+    /// matcher, must not read as that request's absence. A lossy overflow policy accepts the
+    /// warning diagnostics instead.
+    fn apply_refusal_policy(&self) -> Result<(), Error> {
+        if self.collection.capture.overflow_policy != OverflowPolicy::Fail {
+            return Ok(());
+        }
+        let Some((index, limit)) = self.captured.first_refused_reply(self.sent.len()) else {
+            return Ok(());
+        };
+        Err(LiveIoError::Capture {
+            message: format!(
+                "the reply matched to request {index} was refused by {limit}; raise the exchange limits or select a lossy capture overflow policy to accept incomplete evidence"
+            ),
+            source: None,
+        }
+        .into())
     }
 
     fn apply_capture_loss_policy(&mut self, statistics: capture::Stats) -> Result<(), Error> {

@@ -6,7 +6,9 @@ use bytes::Bytes;
 use common::packets::{build, dissect, ipv4};
 use packetcraftr_core::{
     build::Builder,
-    document, expression,
+    document,
+    error::render,
+    expression,
     field::FieldValue,
     filter,
     layer::Layer,
@@ -15,6 +17,8 @@ use packetcraftr_core::{
     protocol::transport::{SackBlock, Tcp, TcpOption},
     template::Template,
 };
+
+const OPTIONS_OUT_OF_RANGE: &str = "field options on layer tcp is outside the allowed range";
 
 fn reencode(packet: Packet) -> Bytes {
     Builder::new(builtin::registry())
@@ -184,25 +188,40 @@ fn tcp_option_fields_filter_project_and_expand() {
 #[test]
 fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
     let registry = builtin::registry();
-    for recipe in [
-        "tcp(options=[{kind=0,data=hex(\"aa\")}])",
-        "tcp(options=[{kind=1,data=hex(\"aa\")}])",
-        "tcp(options=[{trailing=hex(\"aa\")},{kind=1}])",
-        "tcp(options=[{kind=2,window_scale=7}])",
-        "tcp(options=[{kind=3,mss=1460}])",
-        "tcp(options=[{kind=8,tsval=1}])",
+    let prefix = "ipv4(source=192.0.2.1,destination=198.51.100.2)/";
+    for (options, refusal) in [
+        ("[{kind=0,data=hex(\"aa\")}]", OPTIONS_OUT_OF_RANGE),
+        ("[{kind=1,data=hex(\"aa\")}]", OPTIONS_OUT_OF_RANGE),
+        ("[{trailing=hex(\"aa\")},{kind=1}]", OPTIONS_OUT_OF_RANGE),
+        (
+            "[{kind=2,window_scale=7}]",
+            "required field options.mss is absent",
+        ),
+        (
+            "[{kind=3,mss=1460}]",
+            "required field options.window_scale is absent",
+        ),
+        (
+            "[{kind=8,tsval=1}]",
+            "required field options.tsecr is absent",
+        ),
         // Forty-one bytes of options exceed the TCP data-offset limit.
-        "ipv4(source=192.0.2.1,destination=198.51.100.2)/tcp(options=hex(\"020405b401010101010101010101010101010101010101010101010101010101010101010101010101\"))",
-        // A SACK list longer than the 31 blocks the length byte can address.
-        "tcp(options=[{kind=5,sack=[{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2}]}])",
+        (
+            "hex(\"020405b401010101010101010101010101010101010101010101010101010101010101010101010101\")",
+            OPTIONS_OUT_OF_RANGE,
+        ),
+        // Five SACK blocks need 42 option bytes.
+        (
+            "[{kind=5,sack=[{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2},{left_edge=1,right_edge=2}]}]",
+            OPTIONS_OUT_OF_RANGE,
+        ),
     ] {
-        let rejected = match expression::parse(recipe, &registry, Default::default()) {
-            Err(_) => true,
-            Ok(packet) => Builder::new(registry.clone())
-                .build(packet, Default::default(), Default::default())
-                .is_err(),
+        let recipe = format!("{prefix}tcp(options={options})");
+        let Err(error) = expression::parse(&recipe, &registry, Default::default()) else {
+            panic!("{recipe} must be refused while parsing");
         };
-        assert!(rejected, "{recipe} must be rejected");
+        let rendered = render(&error);
+        assert!(rendered.contains(refusal), "{recipe}: {rendered}");
     }
     let largest = expression::parse(
         "ipv4(source=192.0.2.1,destination=198.51.100.2)/tcp(options=hex(\"020405b4010101010101010101010101010101010101010101010101010101010101010101010101\"))",
@@ -228,6 +247,54 @@ fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
             TcpOption::WindowScale(7)
         ]
     );
+}
+
+#[test]
+fn tcp_codec_names_the_check_that_refuses_typed_options() {
+    let registry = builtin::registry();
+    let raw = |kind| TcpOption::Raw {
+        kind,
+        data: Bytes::from_static(&[0xaa]),
+    };
+    let block = SackBlock {
+        left_edge: 1,
+        right_edge: 2,
+    };
+    for (options, refusal) in [
+        (
+            vec![raw(0)],
+            "raw option data cannot use the single-byte kinds 0 or 1",
+        ),
+        (
+            vec![raw(1)],
+            "raw option data cannot use the single-byte kinds 0 or 1",
+        ),
+        (
+            vec![
+                TcpOption::Trailing(Bytes::from_static(&[0xaa])),
+                TcpOption::Nop,
+            ],
+            "only trailing bytes may follow the end of the option list",
+        ),
+        (
+            vec![TcpOption::Sack(vec![block; 5])],
+            "options exceed the 40-byte TCP limit",
+        ),
+    ] {
+        let mut packet = Packet::new();
+        packet.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
+        packet.push(Tcp {
+            options: options.clone(),
+            ..Tcp::default()
+        });
+        let Err(error) =
+            Builder::new(registry.clone()).build(packet, Default::default(), Default::default())
+        else {
+            panic!("{options:?} must be refused while building");
+        };
+        let rendered = render(&error);
+        assert!(rendered.contains(refusal), "{options:?}: {rendered}");
+    }
 }
 
 #[test]

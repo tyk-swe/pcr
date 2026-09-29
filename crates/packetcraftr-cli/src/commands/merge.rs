@@ -33,10 +33,15 @@ impl super::Spec for Args {
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.limits.validate()?;
-    if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {
+    if args.paths.len() > capture_file::MAX_MERGE_SOURCES
+        || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1
+    {
         return Err(CliError::new(
             Kind::Usage,
-            "merge accepts at most 64 captures and one stdin source",
+            format!(
+                "merge accepts at most {} captures and one stdin source",
+                capture_file::MAX_MERGE_SOURCES
+            ),
         ));
     }
     let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
@@ -61,10 +66,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
             max_interfaces: capture_file::DEFAULT_MAX_TOTAL_INTERFACES,
-            stream_limits: capture_file::Limits {
-                max_frames: args.limits.max_frames,
-                max_bytes: args.limits.max_bytes,
-            },
+            stream_limits: args.limits.stream_limits(),
             ..Default::default()
         },
     )
@@ -73,10 +75,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         &mut sources,
         &mut writer,
         capture_file::MergeLimits {
-            streams: capture_file::Limits {
-                max_frames: args.limits.max_frames,
-                max_bytes: args.limits.max_bytes,
-            },
+            streams: args.limits.stream_limits(),
             ..Default::default()
         },
     )

@@ -437,6 +437,35 @@ fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_rea
     assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
 }
 #[test]
+fn a_full_group_leaves_a_worker_slot_for_the_route_worker() {
+    let (ceiling, capacity) = (capture::MAX_SOURCES, net::resources::WORKER_CAPACITY);
+    assert!(
+        ceiling < capacity,
+        "{ceiling} sources fill a pool of {capacity}"
+    );
+}
+
+#[test]
+fn the_source_ceiling_admits_a_full_group_and_names_itself_when_exceeded() {
+    let sized = |count: usize| {
+        let mut request = request(count);
+        request.limits.max_frames = count;
+        request.limits.max_bytes = count * request.limits.snap_length;
+        request
+    };
+    Group::<Session>::new(&sized(capture::MAX_SOURCES)).expect("a full group is valid");
+
+    let error = Group::<Session>::new(&sized(capture::MAX_SOURCES + 1))
+        .err()
+        .expect("one source over the ceiling is refused");
+    assert_eq!(error.classification().code, "cli.capture_group");
+    let ceiling = capture::MAX_SOURCES.to_string();
+    assert!(error.to_string().contains(&ceiling), "{error}");
+    let remediation = error.classification().remediation.expect("a remediation");
+    assert!(remediation.contains(&ceiling), "{remediation}");
+}
+
+#[test]
 fn group_waits_classify_like_single_session_waits() {
     let frozen = Instant::now();
     let fixed = |limit| Deadline::with_time_source(limit, move || frozen);

@@ -1,25 +1,28 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
 use std::convert::Infallible;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
 
-use packetcraftr::neighbor::Error as NeighborError;
+use packetcraftr::neighbor::{Error as NeighborError, MAX_VLAN_TAGS};
 use packetcraftr::route::{Error as RouteError, Options, Plan, plan as plan_route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::{Id as LayerId, Raw};
 use packetcraftr_core::packet::{MacAddress, Packet};
-use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
+use packetcraftr_core::protocol::{
+    link::{Ethernet, Vlan},
+    network::Ipv4,
+};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::{Capability, Mode};
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 
-fn live() -> Deadline {
-    Deadline::new(std::time::Duration::from_secs(5))
-}
+use common::live;
 
 struct Routes(Decision);
 
@@ -417,6 +420,126 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
     ));
     assert!(error.source().is_none());
     assert!(error.causes().is_empty());
+    assert_eq!(error.classification().code, "packet.plan");
+
+    for vlan in [
+        Vlan {
+            priority: 8,
+            ..Vlan::default()
+        },
+        Vlan {
+            vlan_id: 4096,
+            ..Vlan::default()
+        },
+    ] {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(vlan);
+        packet.push(Ipv4 {
+            destination: "192.0.2.1".parse().unwrap(),
+            ..Ipv4::default()
+        });
+        let error = plan_route(&packet, None, &Options::default(), &NoIo, &live()).unwrap_err();
+        assert!(matches!(error, RouteError::InvalidNeighborVlan { .. }));
+        assert!(matches!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<SemanticsError>()
+                .unwrap(),
+            SemanticsError::Field { .. }
+        ));
+        assert_eq!(error.classification().code, "packet.plan");
+    }
+}
+
+fn vlan_stacked_packet(
+    ethernet_destination: [u8; 6],
+    destination: Ipv4Addr,
+    tags: usize,
+) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(Ethernet {
+        destination: ethernet_destination,
+        ..Ethernet::default()
+    });
+    for vlan_id in 1..=tags {
+        packet.push(Vlan {
+            vlan_id: u16::try_from(vlan_id).unwrap(),
+            ..Vlan::default()
+        });
+    }
+    packet.push(Ipv4 {
+        source: Ipv4Addr::new(10, 0, 0, 2),
+        destination,
+        ..Ipv4::default()
+    });
+    packet.push(Raw::new(vec![1_u8]));
+    packet
+}
+
+#[test]
+fn route_planning_caps_the_vlan_stack_only_when_neighbor_discovery_would_carry_it() {
+    let options = Options {
+        link_mode: Mode::Layer2,
+        ..Options::default()
+    };
+    let provider = Routes(decision(Capability::Layer2AndLayer3));
+    let unicast = Ipv4Addr::new(10, 0, 0, 9);
+    let over_cap = MAX_VLAN_TAGS + 1;
+
+    let addressed = plan_route(
+        &vlan_stacked_packet([0x02, 0, 0, 0, 0, 9], unicast, over_cap),
+        None,
+        &options,
+        &provider,
+        &live(),
+    )
+    .expect("an explicit destination MAC never triggers discovery");
+    assert!(!addressed.needs_neighbor_resolution());
+    assert_eq!(addressed.neighbor_vlan_tags.len(), over_cap);
+    assert_eq!(addressed.neighbor_vlan_tags[0].vlan_id, 1);
+    assert_eq!(addressed.neighbor_vlan_tags[over_cap - 1].vlan_id, 9);
+
+    let multicast = plan_route(
+        &vlan_stacked_packet([0; 6], Ipv4Addr::new(224, 0, 0, 1), over_cap),
+        None,
+        &options,
+        &provider,
+        &live(),
+    )
+    .expect("a multicast destination never triggers discovery");
+    assert!(!multicast.needs_neighbor_resolution());
+    assert_eq!(multicast.neighbor_vlan_tags.len(), over_cap);
+
+    let at_cap = plan_route(
+        &vlan_stacked_packet([0; 6], unicast, MAX_VLAN_TAGS),
+        None,
+        &options,
+        &provider,
+        &live(),
+    )
+    .expect("a stack at the discovery cap plans");
+    assert!(at_cap.needs_neighbor_resolution());
+    assert_eq!(at_cap.neighbor_vlan_tags.len(), MAX_VLAN_TAGS);
+
+    let error = plan_route(
+        &vlan_stacked_packet([0; 6], unicast, over_cap),
+        None,
+        &options,
+        &provider,
+        &live(),
+    )
+    .expect_err("discovery cannot carry more than the capped VLAN stack");
+    assert!(matches!(
+        error,
+        RouteError::InvalidNeighborVlan { source: None, .. }
+    ));
+    assert_eq!(
+        error.to_string(),
+        "packet carries an invalid neighbor-discovery VLAN stack: \
+         more than 8 VLAN headers are not supported"
+    );
     assert_eq!(error.classification().code, "packet.plan");
 }
 

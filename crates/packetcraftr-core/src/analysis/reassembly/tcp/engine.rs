@@ -31,54 +31,43 @@ impl Reassembler {
             return Ok(Vec::new());
         }
         let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
-        let (changes_generation, aggregate_bytes, aggregate_memory_charge) = {
-            let existing = self.flows.get(&segment.flow);
-            let changes_generation = (segment.syn || existing.is_none())
-                && existing.is_none_or(|state| state.base_sequence != first_payload_sequence);
-            if changes_generation
-                && self
-                    .flows
-                    .len()
-                    .saturating_sub(usize::from(existing.is_some()))
-                    >= self.limits.max_flows
-            {
-                return Err(Resource::FlowLimit {
-                    limit: self.limits.max_flows,
-                }
-                .into());
+        let existing = self.flows.get(&segment.flow);
+        let changes_generation = (segment.syn || existing.is_none())
+            && existing.is_none_or(|state| state.base_sequence != first_payload_sequence);
+        if changes_generation
+            && self
+                .flows
+                .len()
+                .saturating_sub(usize::from(existing.is_some()))
+                >= self.limits.max_flows
+        {
+            return Err(Resource::FlowLimit {
+                limit: self.limits.max_flows,
             }
+            .into());
+        }
 
-            let (aggregate_bytes, aggregate_memory_charge) = if changes_generation {
-                self.plan_replacement_accounting(existing)?
-            } else {
-                (self.aggregate_bytes, self.aggregate_memory_charge)
-            };
-            (changes_generation, aggregate_bytes, aggregate_memory_charge)
+        let (aggregate_bytes, aggregate_memory_charge) = self.aggregates_without(existing)?;
+        let empty = TcpFlowState::new(
+            first_payload_sequence,
+            now,
+            now.checked_add(self.limits.idle_expiry),
+        );
+        let state = if changes_generation {
+            &empty
+        } else {
+            existing.expect("an unchanged generation has an established flow")
         };
-
-        let plan = {
-            let empty = TcpFlowState::new(
-                first_payload_sequence,
-                now,
-                now.checked_add(self.limits.idle_expiry),
-            );
-            let state = if changes_generation {
-                &empty
-            } else {
-                self.flows
-                    .get(&segment.flow)
-                    .expect("an unchanged generation has an established flow")
-            };
-            plan_push(
-                &self.limits,
-                state,
-                !changes_generation,
-                aggregate_bytes,
-                aggregate_memory_charge,
-                self.aggregate_memory_charge,
-                &segment,
-            )?
-        };
+        // `existing` stays allocated while the plan is built, so the transient peak starts from the
+        // full aggregate charge.
+        let plan = plan_push(
+            &self.limits,
+            state,
+            aggregate_bytes,
+            aggregate_memory_charge,
+            self.aggregate_memory_charge,
+            &segment,
+        )?;
 
         Ok(commit_push(self, segment, now, changes_generation, plan))
     }
@@ -126,32 +115,20 @@ impl Reassembler {
         self.aggregate_memory_charge
     }
 
-    fn plan_replacement_accounting(
-        &self,
-        existing: Option<&TcpFlowState>,
-    ) -> Result<(usize, usize), Error> {
-        let accounting_error = || Resource::AggregateByteLimit {
-            limit: self.limits.max_aggregate_bytes,
-        };
-        let old_retained_bytes = existing
-            .map_or(Some(0), retained_bytes)
-            .ok_or_else(accounting_error)?;
+    fn aggregates_without(&self, existing: Option<&TcpFlowState>) -> Result<(usize, usize), Error> {
+        let error = || self.limits.aggregate_byte_error();
+        let old_retained_bytes = existing.map_or(Some(0), retained_bytes).ok_or_else(error)?;
         let old_memory_charge = existing
             .map_or(Some(0), flow_memory_charge)
-            .ok_or_else(accounting_error)?;
+            .ok_or_else(error)?;
         let aggregate_bytes = self
             .aggregate_bytes
             .checked_sub(old_retained_bytes)
-            .ok_or_else(accounting_error)?;
+            .ok_or_else(error)?;
         let aggregate_memory_charge = self
             .aggregate_memory_charge
             .checked_sub(old_memory_charge)
-            .ok_or_else(accounting_error)?;
-        if aggregate_bytes > self.limits.max_aggregate_bytes
-            || aggregate_memory_charge > self.limits.max_aggregate_bytes
-        {
-            return Err(accounting_error().into());
-        }
+            .ok_or_else(error)?;
         Ok((aggregate_bytes, aggregate_memory_charge))
     }
 

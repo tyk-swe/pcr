@@ -85,25 +85,10 @@ impl std::error::Error for ChainSnapshot {
 }
 
 #[derive(Debug)]
-struct SharedIo(Arc<dyn std::error::Error + Send + Sync>);
-
-impl fmt::Display for SharedIo {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl std::error::Error for SharedIo {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
-    }
-}
-
-#[derive(Debug)]
 struct OutputFailure {
     kind: io::ErrorKind,
     raw_os_error: Option<i32>,
-    source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    source: Option<Arc<ChainSnapshot>>,
 }
 
 impl OutputFailure {
@@ -111,7 +96,7 @@ impl OutputFailure {
         let error = if let Some(code) = self.raw_os_error {
             io::Error::from_raw_os_error(code)
         } else if let Some(source) = &self.source {
-            io::Error::new(self.kind, SharedIo(Arc::clone(source)))
+            io::Error::new(self.kind, Arc::clone(source))
         } else {
             self.kind.into()
         };
@@ -497,26 +482,11 @@ impl<W: Write> Writer<W> {
         self.ensure_output_available()?;
         match operation(&mut self.inner) {
             Err(Error::Io(error)) => {
-                let (kind, raw_os_error) = (error.kind(), error.raw_os_error());
                 // An `io::Error` payload cannot be cloned; the sticky state keeps a chain snapshot.
-                let (source, error) = match error.into_inner() {
-                    Some(payload) => {
-                        let snapshot: Arc<dyn std::error::Error + Send + Sync> =
-                            ChainSnapshot::of(&*payload);
-                        (Some(snapshot), io::Error::new(kind, payload))
-                    }
-                    None => (
-                        None,
-                        match raw_os_error {
-                            Some(code) => io::Error::from_raw_os_error(code),
-                            None => kind.into(),
-                        },
-                    ),
-                };
                 self.output_failure = Some(OutputFailure {
-                    kind,
-                    raw_os_error,
-                    source,
+                    kind: error.kind(),
+                    raw_os_error: error.raw_os_error(),
+                    source: error.get_ref().map(|payload| ChainSnapshot::of(payload)),
                 });
                 Err(Error::Io(error))
             }
@@ -711,6 +681,76 @@ mod tests {
                 assert_eq!(interfaces[1].link_type, LinkType::ETHERNET);
             }
             assert!(writer.output_failure.is_some());
+        }
+    }
+
+    #[derive(Debug)]
+    struct Layered(io::Error);
+
+    impl fmt::Display for Layered {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("outer")
+        }
+    }
+
+    impl std::error::Error for Layered {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    struct Failing(Option<fn() -> io::Error>);
+
+    impl Write for Failing {
+        fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+            match self.0 {
+                Some(failure) => Err(failure()),
+                None => Ok(input.len()),
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn describe(error: &io::Error) -> (io::ErrorKind, Option<i32>, Vec<String>) {
+        let mut chain = vec![error.to_string()];
+        let mut next = std::error::Error::source(error);
+        while let Some(source) = next {
+            chain.push(source.to_string());
+            next = source.source();
+        }
+        (error.kind(), error.raw_os_error(), chain)
+    }
+
+    #[test]
+    fn later_operations_repeat_the_output_failure_kind_os_code_and_message_chain() {
+        let failures: [fn() -> io::Error; 3] = [
+            || {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    Layered(io::Error::other("inner")),
+                )
+            },
+            || io::Error::from_raw_os_error(28),
+            || io::ErrorKind::BrokenPipe.into(),
+        ];
+        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![1]).unwrap();
+        for failure in failures {
+            let expected = describe(&failure());
+            let mut writer = Writer::pcap(Failing(None), LinkType::ETHERNET).unwrap();
+            writer.get_mut().0 = Some(failure);
+            for result in [
+                writer.write_frame(&frame).map(|_| ()),
+                writer.write_frame(&frame).map(|_| ()),
+                writer.flush(),
+            ] {
+                let Err(Error::Io(error)) = result else {
+                    panic!("output failure expected");
+                };
+                assert_eq!(describe(&error), expected);
+            }
         }
     }
 

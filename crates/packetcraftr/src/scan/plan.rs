@@ -60,23 +60,27 @@ impl Batch<Probe> {
     }
 }
 
+pub(super) fn probe_count(
+    address_count: usize,
+    endpoints_per_address: usize,
+    attempts: u32,
+) -> Result<usize, Error> {
+    address_count
+        .checked_mul(endpoints_per_address)
+        .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
+        .ok_or(Error::InvalidLimit {
+            field: "probes",
+            value: u64::MAX,
+            reason: "probe-count arithmetic overflowed".to_owned(),
+        })
+}
+
 pub(super) fn build_batches<'a>(
     request: &'a Request,
     addresses: &'a [IpAddr],
     endpoints: &'a [ProbeEndpoint],
-) -> Result<impl Iterator<Item = Batch<Probe>> + 'a, Error> {
-    // Validate the complete sequence space before yielding any external effect.
+) -> impl Iterator<Item = Batch<Probe>> + 'a {
     addresses
-        .len()
-        .checked_mul(request.attempts as usize)
-        .and_then(|count| count.checked_mul(endpoints.len()))
-        .and_then(|count| u64::try_from(count).ok())
-        .ok_or(Error::InvalidLimit {
-            field: "probes",
-            value: u64::MAX,
-            reason: "probe sequence overflowed".to_owned(),
-        })?;
-    Ok(addresses
         .iter()
         .flat_map(move |address| {
             (1..=request.attempts).flat_map(move |attempt| {
@@ -104,22 +108,17 @@ pub(super) fn build_batches<'a>(
                 },
                 request.timeout,
             )
-        }))
+        })
 }
 
 pub(super) fn worst_case_duration(
     request: &Request,
-    address_count: usize,
-    endpoints_per_address: usize,
+    batch_count: usize,
 ) -> Result<Duration, Error> {
     let overflow = || Error::DurationLimit {
         actual: Duration::MAX,
         limit: request.limits.max_duration,
     };
-    let batch_count = address_count
-        .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
-        .and_then(|count| count.checked_mul(endpoints_per_address))
-        .ok_or_else(&overflow)?;
     let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
     let windows = if request.max_in_flight == 1 {
         batch_count_u32
@@ -161,26 +160,22 @@ mod tests {
             route: crate::route::Options::default(),
             collection: crate::exchange::Collection::default(),
         };
-        for (addresses, endpoints, expected) in [
-            (0, 1, Duration::ZERO),
-            (1, 0, Duration::ZERO),
-            (1, 1, request.timeout),
-            (1, 3, Duration::from_nanos(669_666_668)),
+        for (batches, expected) in [
+            (0, Duration::ZERO),
+            (1, request.timeout),
+            (3, Duration::from_nanos(669_666_668)),
         ] {
             assert_eq!(
-                worst_case_duration(&request, addresses, endpoints).expect("bounded duration"),
+                worst_case_duration(&request, batches).expect("bounded duration"),
                 expected
             );
         }
 
         request.probes_per_second = Some(0);
-        assert_eq!(worst_case_duration(&request, 0, 1).unwrap(), Duration::ZERO);
-        assert_eq!(
-            worst_case_duration(&request, 1, 1).unwrap(),
-            request.timeout
-        );
+        assert_eq!(worst_case_duration(&request, 0).unwrap(), Duration::ZERO);
+        assert_eq!(worst_case_duration(&request, 1).unwrap(), request.timeout);
         assert!(matches!(
-            worst_case_duration(&request, 1, 2),
+            worst_case_duration(&request, 2),
             Err(Error::InvalidLimit {
                 field: "probes_per_second",
                 ..
@@ -188,9 +183,9 @@ mod tests {
         ));
 
         request.timeout = Duration::MAX;
-        for (addresses, endpoints) in [(usize::MAX, 2), (1, 2)] {
+        for batches in [usize::MAX, 2] {
             assert!(matches!(
-                worst_case_duration(&request, addresses, endpoints),
+                worst_case_duration(&request, batches),
                 Err(Error::DurationLimit {
                     actual: Duration::MAX,
                     ..

@@ -553,7 +553,16 @@ fn time_bounds_skipped_frames_still_count_against_read_limits() {
         },
         |_| Ok(()),
     );
-    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(Error::Capture {
+            number: 3,
+            source: packetcraftr_core::capture_file::Error::FrameLimitExceeded {
+                actual: 3,
+                limit: 2
+            }
+        })
+    ));
 }
 
 #[test]
@@ -660,7 +669,13 @@ fn physical_plan_skips_unrequested_indexes_without_renumbering_requested_streams
     )
     .unwrap();
     options.plan = packetcraftr_core::analysis::Plan::physical(filter.requirements());
-    assert!(run(&mut reader(&frames), registry.clone(), &options, |_| Ok(())).is_err());
+    assert!(matches!(
+        run(&mut reader(&frames), registry.clone(), &options, |_| Ok(())),
+        Err(Error::StreamLimit {
+            number: 2,
+            limit: 1
+        })
+    ));
     options.limits.max_flows = 2;
     let mut indexes = Vec::new();
     run(&mut reader(&frames), registry, &options, |record| {

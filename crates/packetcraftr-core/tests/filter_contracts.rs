@@ -5,6 +5,7 @@ mod common;
 
 use common::decoded::{context, ipv6_tcp, tunnelled};
 use common::registry;
+use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr_core::decode;
 use packetcraftr_core::filter::{Error, Filter, Limits};
@@ -141,6 +142,85 @@ fn contains_searches_byte_text_and_mac_haystacks() {
 }
 
 #[test]
+fn unquoted_hex_words_on_byte_fields_are_compile_errors_not_ascii_needles() {
+    let registry = registry();
+    for source in [
+        "raw.bytes contains 160301ff",
+        "raw.bytes contains deadbeef",
+        "raw.bytes contains DEADBEEF",
+        "raw.bytes == ff",
+        "raw.bytes > deadbeef",
+        "raw.bytes in {47:45:54, deadbeef}",
+        "ethernet.source[0:2] == c000",
+        "ethernet.source[1] == ff",
+        "eth.src contains deadbeef",
+        "eth.src == c0ffee",
+        "raw.bytes contains 47:45:5",
+        "raw.bytes contains 47:45:",
+        "raw.bytes == aa:bb-cc",
+        "ethernet.source[0:2] == c0:0",
+        "eth.src contains c0:0",
+    ] {
+        let error = Filter::compile(source, &registry, Limits::default())
+            .expect_err("an unquoted hex-looking word on a byte field must not compile");
+        assert!(
+            matches!(error, Error::UnquotedByteWord { .. }),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn unquoted_byte_word_errors_name_the_word_instead_of_a_type_mismatch() {
+    let registry = registry();
+    for (source, word) in [
+        ("raw.bytes contains deadbeef", "deadbeef"),
+        ("raw.bytes contains 47:45:5", "47:45:5"),
+        ("ethernet.source[0:2] == c0:0", "c0:0"),
+    ] {
+        let message = Filter::compile(source, &registry, Limits::default())
+            .expect_err("an unquoted hex-looking word on a byte field must not compile")
+            .to_string();
+        assert!(message.contains(word), "{source}: {message}");
+        assert!(
+            !message.contains("cannot be compared"),
+            "{source}: {message}"
+        );
+    }
+}
+
+#[test]
+fn byte_fields_still_take_separated_bytes_quoted_text_and_non_hex_words() {
+    assert_filters(
+        &tunnelled(),
+        &[
+            ("raw.bytes contains 47:45:54", true),
+            ("raw.bytes contains 47-45-54", true),
+            ("raw.bytes contains \"160301ff\"", false),
+            ("raw.bytes contains \"GET\"", true),
+            ("raw.bytes contains GET", true),
+            ("raw.bytes contains HTTP", true),
+            ("raw.bytes contains 2026-09-29", false),
+            ("raw.bytes == GET", false),
+            ("raw.bytes in {GET, 47:45:54}", false),
+            ("ethernet.source[0:2] == 06:07", true),
+            ("ethernet.source[0:2] == \"c000\"", false),
+            ("ethernet.source[1] == 0x07", true),
+            ("eth.src contains 07:08", true),
+        ],
+    );
+}
+
+#[test]
+fn text_fields_keep_taking_hex_looking_words() {
+    let registry = registry();
+    for source in ["tls.sni == deadbeef", "tls.sni contains cafe"] {
+        Filter::compile(source, &registry, Limits::default())
+            .unwrap_or_else(|error| panic!("{source} must compile: {error}"));
+    }
+}
+
+#[test]
 fn layer_occurrences_select_one_layer_of_a_tunnelled_stack() {
     assert_filters(
         &tunnelled(),
@@ -207,6 +287,16 @@ fn frame_and_stream_facts_are_reserved_and_read_from_the_caller() {
             ("udp.stream == 2", false),
         ],
     );
+    assert_filters(
+        &decoded,
+        &[
+            ("Frame.number == 7", true),
+            ("FRAME.len > 0", true),
+            ("TCP.stream == 2", true),
+            ("Udp.stream == 3", true),
+            ("UDP.stream == 2", false),
+        ],
+    );
 
     let udp_only = Filter::compile("udp.stream == 3", &registry(), Limits::default())
         .expect("stream filter compiles");
@@ -228,16 +318,43 @@ fn frame_and_stream_facts_are_reserved_and_read_from_the_caller() {
 }
 
 #[test]
+fn time_epoch_floors_instants_before_the_epoch() {
+    let mut decoded = tunnelled();
+    decoded.frame.timestamp = Some(UNIX_EPOCH - Duration::new(1, 500_000_000));
+    assert_filters(
+        &decoded,
+        &[
+            ("frame.time_epoch == -2", true),
+            ("frame.time_epoch == -1", false),
+            ("frame.time_epoch < 0", true),
+        ],
+    );
+}
+
+#[test]
 fn impossible_paths_slices_and_literals_are_compile_errors() {
     assert_rejected(&[
         ("ipv4.unknown == 1", "unknown"),
         ("nosuchproto", "unknown"),
+        ("dns.answers[0].bogus == 1", "unknown"),
+        ("dns.answers[0].nme == \"x\"", "unknown"),
         ("ipv4.source == 7", "cannot be compared"),
         ("ipv4.source > 192.0.2.0/24", "prefix"),
         ("tcp.srcport contains \"x\"", "cannot be compared"),
         ("udp.dstport[0] == 1", "cannot be sliced"),
         ("frame.len[0] == 1", "cannot be sliced"),
         ("ethernet.source[3:1] == 00", "precedes start"),
+    ]);
+}
+
+#[test]
+fn syntax_errors_name_the_pasted_character_not_its_first_byte() {
+    assert_rejected(&[
+        (
+            "tls.sni == \u{201c}example\u{201d}",
+            "unexpected character `\u{201c}`",
+        ),
+        ("tls.sni == \"a\\\u{e9}\"", "unsupported escape `\\\u{e9}`"),
     ]);
 }
 

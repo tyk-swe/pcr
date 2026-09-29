@@ -11,11 +11,8 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::ethernet::{link_payload_selection, link_type_expectation, validate_link_length_form};
-use crate::protocol::common::{
-    invalid, make_layer, payload_without_padding, protocol, resolve_u16, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator,
-};
+use super::ether_type::{link_payload_selection, resolve_ether_type};
+use crate::protocol::common::{invalid, make_layer, protocol, truncated, typed_layer};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -122,33 +119,8 @@ where
             "VLAN priority or identifier is outside its wire range",
         ));
     }
-    let covered_payload = payload_without_padding(name, payload, context)?;
-    let expectation =
-        link_type_expectation(name, context, fields.ether_type, covered_payload.len())?;
-    let mut diagnostics = Vec::new();
-    validate_auto_raw_discriminator(
-        name,
-        "ether_type",
-        fields.ether_type,
-        context,
-        &mut diagnostics,
-    )?;
-    let (ether_type, materialized_type) = resolve_u16(
-        name,
-        "ether_type",
-        fields.ether_type,
-        expectation,
-        context.mode,
-        &mut diagnostics,
-    )?;
-    validate_link_length_form(
-        name,
-        ether_type,
-        covered_payload.len(),
-        context,
-        &mut diagnostics,
-    )?;
-    validate_raw_child_discriminator(name, u64::from(ether_type), context, &mut diagnostics)?;
+    let (ether_type, materialized_type, diagnostics) =
+        resolve_ether_type(name, fields.ether_type, payload, context)?;
     let tci = (u16::from(fields.priority) << 13)
         | (if fields.drop_eligible { 1 << 12 } else { 0 })
         | (fields.vlan_id & 0x0fff);

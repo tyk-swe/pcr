@@ -8,13 +8,14 @@ use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRA
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use crate::execution::limits::EvidenceLimits;
-use crate::execution::limits::{check_limits, duration_violation};
+use crate::execution::limits::{check_limits, check_rate, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
 use super::Error;
+use super::error::Probes;
 use crate::probe::Transport;
-use crate::traceroute::{DEFAULT_MAX_UNDECODED_FRAMES, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE};
+use crate::traceroute::{DEFAULT_MAX_UNDECODED_FRAMES, MAX_PROBES, MAX_PROBES_PER_HOP};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -128,21 +129,13 @@ impl Request {
                 ),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_WAIT {
+        if duration_violation(self.timeout, MAX_WAIT) {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: MAX_WAIT,
             });
         }
-        if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_RATE)
-        {
-            return Err(Error::InvalidLimit {
-                field: "probes_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
-            });
-        }
+        check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
         match (self.strategy, self.destination_port) {
             (Transport::Udp | Transport::Tcp, None) => {
                 return Err(Error::InvalidPort {

@@ -182,6 +182,7 @@ fn vxlan_inner_ipv6_extension_udp_fragment_frames(
             fragment_offset: offset,
             more_fragments: more,
             identification: 84,
+            ..Ipv6Fragment::default()
         });
         packet.push(Raw::new(payload.to_vec()));
         Frame::new(timestamp, LinkType::IPV4, build(registry, packet))
@@ -250,6 +251,7 @@ fn vxlan_inner_ipv6_extension_tcp_fragment_frames_nonzero_first(
             fragment_offset: offset,
             more_fragments: more,
             identification: 85,
+            ..Ipv6Fragment::default()
         });
         packet.push(Raw::new(payload.to_vec()));
         Frame::new(timestamp, LinkType::IPV4, build(registry, packet))

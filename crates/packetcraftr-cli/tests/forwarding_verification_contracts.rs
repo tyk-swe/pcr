@@ -1,28 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#[path = "common/capture.rs"]
+mod capture_support;
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
 
-use std::io::Write;
-
+use capture_support::{
+    Record, TCP_CLIENT, UDP_CLIENT, UDP_SERVER, write_pcap, write_pcap_hex, write_records,
+};
 use common::{parse_json, parse_ndjson, path_text, run, run_success};
 use process_support::{decode_hex, run_with_stdin};
 
-/// 192.0.2.1:12345 → 198.51.100.2:9 UDP carrying "hello", TTL 64.
-const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 /// `UDP_CLIENT` forwarded: TTL decremented to 63 with the checksum updated.
 const UDP_CLIENT_FORWARDED: &str =
     "45000021000000003f118f95c0000201c633640230390009000d9f8868656c6c6f";
-const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
-const TCP_CLIENT: &str =
-    "4500002b0000000040068e96c0000201c63364023039005000000001000000005002ffffb7b80000676574";
-
-fn write_capture(frames: &[&str]) -> tempfile::NamedTempFile {
-    let frames = frames.iter().copied().map(decode_hex).collect::<Vec<_>>();
-    write_capture_bytes(&frames)
-}
 
 fn ipv4_fragments(whole: &[u8]) -> Vec<Vec<u8>> {
     let mut fragments = Vec::new();
@@ -48,53 +41,13 @@ fn ipv4_fragments(whole: &[u8]) -> Vec<Vec<u8>> {
     fragments
 }
 
-fn write_capture_bytes(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
-    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
-    file.write_all(&[
-        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
-        2, 0, 4, 0, // version 2.4
-        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
-        0xff, 0xff, 0, 0, // snap length
-        228, 0, 0, 0, // DLT_IPV4
-    ])
-    .expect("global header must write");
-    for (index, bytes) in frames.iter().enumerate() {
-        let seconds = u32::try_from(index + 1).expect("fixture index fits u32");
-        let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
-        file.write_all(&seconds.to_le_bytes())
-            .expect("timestamp seconds must write");
-        file.write_all(&250_000_u32.to_le_bytes())
-            .expect("timestamp fraction must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("captured length must write");
-        file.write_all(&length.to_le_bytes())
-            .expect("original length must write");
-        file.write_all(bytes).expect("frame bytes must write");
-    }
-    file.flush().expect("capture must flush");
-    file
-}
-
 fn write_snaplen_truncated_capture() -> tempfile::NamedTempFile {
-    let bytes = decode_hex(UDP_CLIENT);
-    let captured = 20_u32; // IPv4 header only.
-    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
-    file.write_all(&[
-        0xd4, 0xc3, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 228, 0, 0, 0,
-    ])
-    .expect("global header must write");
-    file.write_all(&1_u32.to_le_bytes())
-        .expect("timestamp seconds must write");
-    file.write_all(&250_000_u32.to_le_bytes())
-        .expect("timestamp fraction must write");
-    file.write_all(&captured.to_le_bytes())
-        .expect("captured length must write");
-    file.write_all(&(bytes.len() as u32).to_le_bytes())
-        .expect("original length must write");
-    file.write_all(&bytes[..captured as usize])
-        .expect("frame bytes must write");
-    file.flush().expect("capture must flush");
-    file
+    let ipv4_header_only = 20;
+    write_records(&[Record::truncated(
+        (1, 250_000),
+        decode_hex(UDP_CLIENT),
+        ipv4_header_only,
+    )])
 }
 
 fn verify(ingress: &tempfile::NamedTempFile, egress: &tempfile::NamedTempFile) -> Vec<String> {
@@ -107,8 +60,8 @@ fn verify(ingress: &tempfile::NamedTempFile, egress: &tempfile::NamedTempFile) -
 
 #[test]
 fn exact_correspondence_passes_with_zero_status() {
-    let ingress = write_capture(&[UDP_CLIENT, UDP_SERVER]);
-    let egress = write_capture(&[UDP_CLIENT, UDP_SERVER]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER]);
+    let egress = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER]);
     let mut args = verify(&ingress, &egress);
     args.extend(["--identity".to_owned(), "raw.bytes".to_owned()]);
 
@@ -124,8 +77,8 @@ fn exact_correspondence_passes_with_zero_status() {
 
 #[test]
 fn a_preserved_field_mismatch_is_a_concrete_failure() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT_FORWARDED]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT_FORWARDED]);
     let mut args = verify(&ingress, &egress);
     args.extend([
         "--identity".to_owned(),
@@ -145,8 +98,8 @@ fn a_preserved_field_mismatch_is_a_concrete_failure() {
 
 #[test]
 fn missing_egress_is_inconclusive_not_loss() {
-    let ingress = write_capture(&[UDP_CLIENT, UDP_SERVER]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -166,8 +119,8 @@ fn missing_egress_is_inconclusive_not_loss() {
 
 #[test]
 fn extra_egress_is_inconclusive_not_duplication() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT, UDP_SERVER]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT, UDP_SERVER]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -183,8 +136,8 @@ fn extra_egress_is_inconclusive_not_duplication() {
 
 #[test]
 fn repeated_identity_stays_ambiguous_and_unpaired() {
-    let ingress = write_capture(&[UDP_CLIENT, UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT, UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -205,8 +158,8 @@ fn repeated_identity_stays_ambiguous_and_unpaired() {
 
 #[test]
 fn per_side_filters_select_independently() {
-    let ingress = write_capture(&[UDP_CLIENT, TCP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT, TCP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -232,8 +185,8 @@ fn per_side_filters_select_independently() {
 
 #[test]
 fn an_empty_selection_never_passes() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -254,7 +207,7 @@ fn an_empty_selection_never_passes() {
 
 #[test]
 fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
-    let ingress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
     let egress = write_snaplen_truncated_capture();
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
@@ -272,8 +225,8 @@ fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
 
 #[test]
 fn an_expectation_violation_is_attributable_failure() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -299,8 +252,8 @@ fn an_expectation_violation_is_attributable_failure() {
 
 #[test]
 fn satisfied_expectation_and_preservation_pass() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT_FORWARDED]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT_FORWARDED]);
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
     args.extend([
@@ -336,8 +289,8 @@ fn detail_lists_are_bounded_and_omissions_counted() {
             bytes
         })
         .collect();
-    let ingress = write_capture_bytes(&frames);
-    let egress = write_capture(&[UDP_SERVER]);
+    let ingress = write_pcap(&frames);
+    let egress = write_pcap_hex(&[UDP_SERVER]);
 
     let mut args = vec!["--output".to_owned(), "json".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -370,8 +323,8 @@ fn detail_lists_are_bounded_and_omissions_counted() {
 
 #[test]
 fn ndjson_publishes_exactly_one_complete_record() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let mut args = vec!["--output".to_owned(), "ndjson".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -386,8 +339,8 @@ fn ndjson_publishes_exactly_one_complete_record() {
 
 #[test]
 fn a_fail_verdict_ndjson_still_terminates_with_complete() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT_FORWARDED]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT_FORWARDED]);
 
     let mut args = vec!["--output".to_owned(), "ndjson".to_owned()];
     args.extend(verify(&ingress, &egress));
@@ -408,7 +361,7 @@ fn a_fail_verdict_ndjson_still_terminates_with_complete() {
 
 #[test]
 fn simultaneous_stdin_is_rejected() {
-    let capture = write_capture(&[UDP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT]);
     let bytes = std::fs::read(capture.path()).expect("capture bytes");
     let output = run_with_stdin(
         &["verify-forwarding", "-", "-", "--identity", "raw.bytes"],
@@ -422,8 +375,8 @@ fn simultaneous_stdin_is_rejected() {
 
 #[test]
 fn stdin_may_serve_one_side() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
     let bytes = std::fs::read(ingress.path()).expect("capture bytes");
 
     let output = run_with_stdin(
@@ -447,8 +400,8 @@ fn stdin_may_serve_one_side() {
 
 #[test]
 fn capture_local_identity_fields_are_rejected() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let output = run(&[
         "verify-forwarding",
@@ -482,8 +435,8 @@ fn malformed_expectations_are_rejected_before_input_is_read() {
 
 #[test]
 fn an_unsupported_output_format_is_rejected() {
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture(&[UDP_CLIENT]);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap_hex(&[UDP_CLIENT]);
 
     let output = run(&[
         "--output",
@@ -502,8 +455,8 @@ fn an_unsupported_output_format_is_rejected() {
 #[test]
 fn fragment_completion_cannot_supply_physical_udp_evidence() {
     let fragments = ipv4_fragments(&decode_hex(UDP_CLIENT));
-    let ingress = write_capture(&[UDP_CLIENT]);
-    let egress = write_capture_bytes(&fragments);
+    let ingress = write_pcap_hex(&[UDP_CLIENT]);
+    let egress = write_pcap(&fragments);
     for filter in ["udp", "udp.stream == 0"] {
         let output = run(&[
             "--output",
@@ -537,9 +490,9 @@ fn fragmented_conversations_cannot_shift_a_stream_selected_ttl_violation() {
     let mut frames = ipv4_fragments(&decode_hex(UDP_CLIENT));
     frames.push(ordinary(UDP_CLIENT, 12346));
     frames.push(ordinary(UDP_CLIENT, 12347));
-    let ingress = write_capture_bytes(&frames);
+    let ingress = write_pcap(&frames);
     frames[2] = ordinary(UDP_CLIENT_FORWARDED, 12346);
-    let egress = write_capture_bytes(&frames);
+    let egress = write_pcap(&frames);
     for filter in ["udp.stream == 1", "frame.number == 3"] {
         let mut args = vec![
             "--output",
@@ -592,7 +545,7 @@ fn compound_expectations_are_rejected_before_reading_input() {
 
 #[test]
 fn missing_values_and_explicit_presence_have_different_contracts() {
-    let capture = write_capture(&[UDP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT]);
     for (rule, verdict, code) in [
         ("--preserve", "inconclusive", 1),
         ("--preserve-presence", "pass", 0),
@@ -627,7 +580,7 @@ fn forwarding_indexes_only_requested_conversations_but_charges_all_input() {
     let mut second = first.clone();
     second[20..22].copy_from_slice(&12346u16.to_be_bytes());
     second[26..28].fill(0); // UDP checksum intentionally disabled, valid for IPv4.
-    let capture = write_capture_bytes(&[first, second]);
+    let capture = write_pcap(&[first, second]);
     let make = |filter: &str| {
         vec![
             "--output".to_owned(),
@@ -653,23 +606,33 @@ fn forwarding_indexes_only_requested_conversations_but_charges_all_input() {
 
     let indexed = make("udp.stream == 0");
     let output = run(&indexed.iter().map(String::as_str).collect::<Vec<_>>());
-    assert!(
-        !output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(6),
         "requested capture-global index still has its ceiling"
+    );
+    assert_eq!(
+        parse_json(&output)["error"]["code"],
+        "policy.analysis_resource_limit"
     );
     let mut bounded = args;
     bounded.extend(["--max-frames".to_owned(), "1".to_owned()]);
     let output = run(&bounded.iter().map(String::as_str).collect::<Vec<_>>());
-    assert!(
-        !output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(6),
         "excluded frames still consume input budgets"
+    );
+    assert_eq!(
+        parse_json(&output)["error"]["code"],
+        "policy.capture_stream_limit"
     );
 }
 
 #[test]
 fn completed_reports_bind_the_consumed_input_and_decoder_context() {
     use sha2::{Digest, Sha256};
-    let capture = write_capture(&[UDP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT]);
     let args = [
         "--output",
         "json",
@@ -727,7 +690,7 @@ fn large_identity_capture(count: u16) -> tempfile::NamedTempFile {
             wire
         })
         .collect::<Vec<_>>();
-    write_capture_bytes(&frames)
+    write_pcap(&frames)
 }
 
 #[test]
@@ -792,7 +755,7 @@ fn aggregate_publication_bounds_the_pretty_envelope_before_writing() {
 
 #[test]
 fn comparison_resource_diagnostics_validate_new_stages_and_disabled_indexes() {
-    let capture = write_capture(&[UDP_CLIENT]);
+    let capture = write_pcap_hex(&[UDP_CLIENT]);
     let report = parse_json(&run_success(&[
         "--output",
         "json",
@@ -835,7 +798,7 @@ fn forwarding_resource_diagnostics_include_rule_and_filter_requirements() {
     let mut second = first.clone();
     second[20..22].copy_from_slice(&12346u16.to_be_bytes());
     second[26..28].fill(0); // Valid IPv4 UDP with checksum disabled.
-    let capture = write_capture_bytes(&[first, second]);
+    let capture = write_pcap(&[first, second]);
     for (option, value) in [
         ("--expect", "udp.stream=0"),
         ("--ingress-filter", "udp.stream == 0"),

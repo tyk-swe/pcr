@@ -41,7 +41,7 @@ fn dns_profile() -> Arc<UdpProfile> {
                 recursion_desired: true,
                 id_base: 10,
             },
-            response: ResponseCheck::Dns,
+            response: ResponseCheck::Dns {},
         })
         .unwrap(),
     )
@@ -99,7 +99,7 @@ fn explicit_checks_distinguish_dns_identity_bytes_and_unchecked_replies() {
     let profile = UdpProfile::new(Config {
         name: "unvalidated".to_owned(),
         request: Payload::Bytes { data: Bytes::new() },
-        response: ResponseCheck::Any,
+        response: ResponseCheck::Any {},
     })
     .unwrap();
     assert_eq!(profile.evaluate(&[], b"anything").status, Status::Unchecked);

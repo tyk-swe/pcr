@@ -49,6 +49,10 @@ pub enum Error {
         "one fuzz value exceeds the retained/wire budget still unused under the configured limit of {limit} bytes"
     )]
     ValueTooLarge { limit: usize },
+    #[error("one fuzz value holds {items} list or object items, exceeding max_list_items={limit}")]
+    ValueItems { items: usize, limit: usize },
+    #[error("one fuzz value nests deeper than {limit} levels")]
+    ValueNesting { limit: usize },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz progressive output failed")]
@@ -103,6 +107,20 @@ impl Classified for Error {
                     ),
                 )
             }
+            Self::ValueItems { .. } => Classification::new(
+                "policy.fuzz_resource_limit",
+                Kind::Policy,
+                Some(
+                    "shrink the lists or objects in the packet, or deliberately raise the finite max_list_items limit",
+                ),
+            ),
+            Self::ValueNesting { .. } => Classification::new(
+                "policy.fuzz_resource_limit",
+                Kind::Policy,
+                Some(
+                    "flatten the packet's lists and objects; nesting depth is capped at a fixed limit that cannot be raised",
+                ),
+            ),
             Self::Output { source } => source.classification(),
         }
     }

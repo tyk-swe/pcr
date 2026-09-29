@@ -10,7 +10,9 @@ use packetcraftr_core::{
 
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::address::is_public;
-use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
+use crate::target::{
+    Authorized, Error as TargetError, Hostname, Resolver, Target, distinct_addresses,
+};
 
 impl Policy {
     pub fn validate(&self) -> Result<(), Error> {
@@ -167,27 +169,11 @@ impl Policy {
                 // This authorization must precede DNS, route lookup, capture,
                 // neighbor discovery, and transmission side effects.
                 self.authorize_hostname(hostname)?;
-                let resolved = resolver.resolve(hostname, self.max_resolved_addresses)?;
-                let mut addresses =
-                    Vec::with_capacity(resolved.len().min(self.max_resolved_addresses));
-                for address in resolved {
-                    if addresses.contains(&address) {
-                        continue;
-                    }
-                    if addresses.len() >= self.max_resolved_addresses {
-                        return Err(TargetError::AddressLimit {
-                            hostname: hostname.to_string(),
-                            limit: self.max_resolved_addresses,
-                        });
-                    }
-                    addresses.push(address);
-                }
-                if addresses.is_empty() {
-                    return Err(TargetError::NoAddresses {
-                        hostname: hostname.to_string(),
-                    });
-                }
-                addresses
+                distinct_addresses(
+                    hostname,
+                    resolver.resolve(hostname, self.max_resolved_addresses)?,
+                    self.max_resolved_addresses,
+                )?
             }
         };
         self.authorize_selected(target, addresses)
@@ -205,5 +191,57 @@ impl Policy {
             declared: target.clone(),
             addresses,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+    use crate::test_support::ScriptedResolver;
+
+    fn address(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, last))
+    }
+
+    fn resolve(answer: Vec<IpAddr>, limit: usize) -> Result<Authorized, TargetError> {
+        let policy = Policy {
+            allow_hostname_resolution: true,
+            max_resolved_addresses: limit,
+            ..Policy::default()
+        };
+        let target = Target::Hostname("example.test".parse().expect("hostname"));
+        policy.resolve_target(&target, &ScriptedResolver::new([answer]))
+    }
+
+    #[test]
+    fn resolved_addresses_keep_first_seen_order_without_duplicates() {
+        let authorized =
+            resolve(vec![address(2), address(2), address(1), address(2)], 4).expect("authorized");
+        assert_eq!(authorized.addresses(), [address(2), address(1)]);
+    }
+
+    #[test]
+    fn duplicates_beyond_the_limit_do_not_trip_it() {
+        let authorized =
+            resolve(vec![address(1), address(2), address(1), address(2)], 2).expect("authorized");
+        assert_eq!(authorized.addresses(), [address(1), address(2)]);
+    }
+
+    #[test]
+    fn rejected_resolver_answers_name_the_hostname() {
+        let over_limit = resolve(vec![address(1), address(2), address(3)], 2)
+            .expect_err("a third distinct address exceeds the limit");
+        assert!(matches!(
+            over_limit,
+            TargetError::AddressLimit { ref hostname, limit: 2 } if hostname == "example.test"
+        ));
+
+        let empty = resolve(Vec::new(), 2).expect_err("an empty answer resolves nothing");
+        assert!(matches!(
+            empty,
+            TargetError::NoAddresses { ref hostname } if hostname == "example.test"
+        ));
     }
 }

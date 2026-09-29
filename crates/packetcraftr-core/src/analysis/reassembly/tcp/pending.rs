@@ -9,10 +9,7 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-use super::state::{
-    TcpFlowState, emitted_history_conflicts, flow_memory_charge, prepare_emitted_history,
-    retained_bytes,
-};
+use super::state::{TcpFlowState, emitted_history_conflicts, prepare_emitted_history};
 use super::{Error, Limits, Malformed, Resource, Segment};
 use crate::analysis::serial::serial_offset;
 
@@ -24,7 +21,6 @@ pub(super) mod commit;
 pub(super) fn plan_push(
     limits: &Limits,
     state: &TcpFlowState,
-    state_is_accounted: bool,
     aggregate_base_bytes: usize,
     aggregate_base_memory_charge: usize,
     transient_base_memory_charge: usize,
@@ -34,22 +30,11 @@ pub(super) fn plan_push(
     let mut planned = plan_merge_and_accounting(
         limits,
         state,
-        state_is_accounted,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         segment,
         &incoming,
     )?;
-    let error = || Resource::AggregateByteLimit {
-        limit: limits.max_aggregate_bytes,
-    };
-    let new_pages = if planned.merge.emitted_segment_bytes == 0 {
-        pages::page_keys(incoming.offset..incoming.remaining_end)
-            .filter(|key| !state.pages.contains_key(key))
-            .count()
-    } else {
-        0
-    };
     let history = if state.emitted_history.capacity() != planned.history_allocation {
         planned.history_allocation
     } else {
@@ -60,9 +45,14 @@ pub(super) fn plan_push(
         .segment_count
         .saturating_sub(state.pending.len())
         .checked_mul(super::PENDING_SEGMENT_METADATA_CHARGE)
-        .ok_or_else(error)?;
+        .ok_or(limits.aggregate_byte_error())?;
     let peak = transient_base_memory_charge
-        .checked_add(new_pages.checked_mul(PAGE_CHARGE).ok_or_else(error)?)
+        .checked_add(
+            planned
+                .missing_pages
+                .checked_mul(PAGE_CHARGE)
+                .ok_or(limits.aggregate_byte_error())?,
+        )
         .and_then(|value| {
             value.checked_add(if planned.merge.direct_output {
                 0
@@ -78,15 +68,11 @@ pub(super) fn plan_push(
                 0
             })
         })
-        .ok_or_else(error)?;
+        .ok_or(limits.aggregate_byte_error())?;
     if peak > limits.max_aggregate_bytes {
-        return Err(error().into());
+        return Err(limits.aggregate_byte_error().into());
     }
-    materialize_pending_merge(state, incoming.offset, incoming.payload, &mut planned.merge)?
-        .ok_or(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
-    planned.merge.payload_start = incoming.payload_start;
+    materialize_pending_merge(state, incoming.offset, incoming.payload, &mut planned.merge)?;
     let history_replacement = prepare_emitted_history(
         state,
         planned.initial_history_capacity,
@@ -96,9 +82,7 @@ pub(super) fn plan_push(
         let end = incoming
             .payload_start
             .checked_add(incoming.payload.len())
-            .ok_or(Resource::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
+            .ok_or(limits.flow_byte_error())?;
         Some(incoming.payload_start..end)
     } else {
         None
@@ -157,9 +141,7 @@ fn normalize_payload<'a>(
     let mut payload_start = before_base;
     let mut retransmitted = before_base;
     let mut conflicting = false;
-    let mut offset = u64::try_from(absolute.max(0)).map_err(|_| Resource::FlowByteLimit {
-        limit: limits.max_bytes_per_flow,
-    })?;
+    let mut offset = u64::try_from(absolute.max(0)).map_err(|_| limits.flow_byte_error())?;
     if offset < state.next_offset {
         let consumed = usize::try_from(
             state
@@ -169,13 +151,15 @@ fn normalize_payload<'a>(
         )
         .unwrap_or(payload.len());
         let (overlap, rest) = payload.split_at(consumed.min(payload.len()));
-        conflicting = emitted_history_conflicts(state, offset, overlap);
+        // RFC 1122 4.2.3.6 keep-alives may carry one arbitrary byte at SND.NXT-1.
+        let keep_alive_probe = segment.payload.len() == 1
+            && offset.saturating_add(1) == state.next_offset
+            && !(segment.syn || segment.fin || segment.rst);
+        conflicting = !keep_alive_probe && emitted_history_conflicts(state, offset, overlap);
         retransmitted = retransmitted.saturating_add(consumed);
         payload_start = payload_start
             .checked_add(consumed)
-            .ok_or(Resource::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
+            .ok_or(limits.flow_byte_error())?;
         payload = rest;
         offset = state.next_offset;
     }
@@ -202,15 +186,10 @@ fn validate_sequence_bounds(
     let window_end = state
         .next_offset
         .checked_add(limits.max_bytes_per_flow as u64)
-        .ok_or(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
-    let remaining_end =
-        offset
-            .checked_add(payload.len() as u64)
-            .ok_or(Resource::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
+        .ok_or(limits.flow_byte_error())?;
+    let remaining_end = offset
+        .checked_add(payload.len() as u64)
+        .ok_or(limits.flow_byte_error())?;
     if let Some(final_offset) = state.fin_offset {
         if let Some(new_offset) = fin_offset
             && new_offset != final_offset
@@ -231,10 +210,7 @@ fn validate_sequence_bounds(
         return Err(Malformed::BeyondFinalSequence { final_offset }.into());
     }
     if offset > window_end || remaining_end > window_end {
-        return Err(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        }
-        .into());
+        return Err(limits.flow_byte_error().into());
     }
     Ok(remaining_end)
 }
@@ -244,6 +220,7 @@ struct PlannedMerge {
     pending_bytes: usize,
     initial_history_capacity: usize,
     history_allocation: usize,
+    missing_pages: usize,
     closed: bool,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
@@ -252,65 +229,56 @@ struct PlannedMerge {
 fn plan_merge_and_accounting(
     limits: &Limits,
     state: &TcpFlowState,
-    state_is_accounted: bool,
     aggregate_base_bytes: usize,
     aggregate_base_memory_charge: usize,
     segment: &Segment,
     incoming: &IncomingPayload<'_>,
 ) -> Result<PlannedMerge, Error> {
-    let accounting_error = || Resource::AggregateByteLimit {
-        limit: limits.max_aggregate_bytes,
-    };
-    let old_retained_bytes = if state_is_accounted {
-        retained_bytes(state).ok_or_else(accounting_error)?
-    } else {
-        0
-    };
-    let old_memory_charge = if state_is_accounted {
-        flow_memory_charge(state).ok_or_else(accounting_error)?
-    } else {
-        0
-    };
-    let merge = plan_pending_merge(state, incoming.offset, incoming.payload, state.next_offset)
-        .ok_or(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
+    let merge = plan_pending_merge(
+        state,
+        incoming.offset,
+        incoming.payload,
+        incoming.payload_start,
+        state.next_offset,
+    )
+    .ok_or(limits.flow_byte_error())?;
     let pending_bytes = state
         .pending_bytes
         .checked_add(merge.added_bytes)
         .filter(|bytes| *bytes <= limits.max_bytes_per_flow)
-        .ok_or(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
+        .ok_or(limits.flow_byte_error())?;
     validate_pending_final_offset(state, incoming)?;
     let final_next_offset = state
         .next_offset
         .checked_add(merge.emitted_segment_bytes as u64)
-        .ok_or(Resource::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
+        .ok_or(limits.flow_byte_error())?;
     let final_fin_offset = state.fin_offset.or(incoming.fin_offset);
     let closed = segment.rst || final_fin_offset.is_some_and(|offset| final_next_offset >= offset);
-    let final_page_count = if merge.emitted_segment_bytes != 0 {
-        pages::remaining_count(
-            &state.pages,
-            &state.pending,
-            merge.union_start..merge.union_end,
+    let (missing_pages, final_page_count) = if merge.emitted_segment_bytes != 0 {
+        (
+            0,
+            pages::remaining_count(
+                &state.pages,
+                &state.pending,
+                merge.union_start..merge.union_end,
+            ),
         )
     } else {
-        state
-            .pages
-            .len()
-            .checked_add(
-                pages::page_keys(incoming.offset..incoming.remaining_end)
-                    .filter(|key| !state.pages.contains_key(key))
-                    .count(),
-            )
-            .ok_or_else(accounting_error)?
+        let missing = pages::page_keys(incoming.offset..incoming.remaining_end)
+            .filter(|key| !state.pages.contains_key(key))
+            .count();
+        (
+            missing,
+            state
+                .pages
+                .len()
+                .checked_add(missing)
+                .ok_or(limits.aggregate_byte_error())?,
+        )
     };
     let storage_bytes = final_page_count
         .checked_mul(PAGE_CHARGE)
-        .ok_or_else(accounting_error)?;
+        .ok_or(limits.aggregate_byte_error())?;
     let accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
@@ -318,22 +286,19 @@ fn plan_merge_and_accounting(
         storage_bytes,
         emitted_segment_bytes: merge.emitted_segment_bytes,
         segment_count: merge.segment_count,
-        old_retained_bytes,
-        old_memory_charge,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
         retains_flow_state: !closed,
     })?;
-    let (aggregate_bytes, aggregate_memory_charge) =
-        accounting.final_aggregates(closed, limits.max_aggregate_bytes)?;
     Ok(PlannedMerge {
         merge,
         pending_bytes,
         initial_history_capacity: accounting.initial_history_capacity,
         history_allocation: accounting.history_allocation,
+        missing_pages,
         closed,
-        aggregate_bytes,
-        aggregate_memory_charge,
+        aggregate_bytes: accounting.aggregate_bytes,
+        aggregate_memory_charge: accounting.aggregate_memory_charge,
     })
 }
 
@@ -392,6 +357,7 @@ fn plan_pending_merge(
     state: &TcpFlowState,
     offset: u64,
     payload: &[u8],
+    payload_start: usize,
     next_offset: u64,
 ) -> Option<PendingMergePlan> {
     let existing = &state.pending;
@@ -409,7 +375,7 @@ fn plan_pending_merge(
         union_start: offset,
         union_end: payload_end,
         offset,
-        payload_start: 0,
+        payload_start,
         new_pages: BTreeMap::new(),
         output: None,
     };
@@ -459,9 +425,9 @@ fn materialize_pending_merge(
     offset: u64,
     payload: &[u8],
     plan: &mut PendingMergePlan,
-) -> Result<Option<()>, Error> {
+) -> Result<(), Error> {
     if plan.added_bytes == 0 || plan.direct_output {
-        return Ok(Some(()));
+        return Ok(());
     }
     if plan.emitted_segment_bytes == 0 {
         for key in pages::page_keys(offset..offset + payload.len() as u64) {
@@ -469,7 +435,7 @@ fn materialize_pending_merge(
                 plan.new_pages.insert(key, pages::allocate()?);
             }
         }
-        return Ok(Some(()));
+        return Ok(());
     }
     let mut output = Vec::new();
     output
@@ -500,5 +466,5 @@ fn materialize_pending_merge(
         }
     }
     plan.output = Some(Bytes::from(output));
-    Ok(Some(()))
+    Ok(())
 }

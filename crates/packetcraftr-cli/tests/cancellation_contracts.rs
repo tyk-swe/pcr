@@ -54,6 +54,14 @@ impl Running {
         }
     }
 
+    fn intercepts_sigint(&self) -> bool {
+        std::fs::read_to_string(format!("/proc/{}/status", self.child.id()))
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("SigCgt:"))
+            .is_some_and(|mask| u64::from_str_radix(mask.trim(), 16).unwrap() & 2 != 0)
+    }
+
     fn signal(&self, name: &str) {
         assert!(
             Command::new("kill")
@@ -302,13 +310,7 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
             ]);
             // Wait for SIGINT interception before sending it. This avoids
             // mistaking default termination during startup for cancellation.
-            process.wait_until(|p| {
-                std::fs::read_to_string(format!("/proc/{}/status", p.child.id()))
-                    .unwrap()
-                    .lines()
-                    .find_map(|line| line.strip_prefix("SigCgt:"))
-                    .is_some_and(|mask| u64::from_str_radix(mask.trim(), 16).unwrap() & 2 != 0)
-            });
+            process.wait_until(Running::intercepts_sigint);
             std::thread::sleep(Duration::from_millis(100));
             process.signal(signal);
             let output = process.finish();
@@ -337,5 +339,62 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn a_repeated_interrupt_removes_staged_output_before_exiting() {
+    common::require_procfs();
+    let mut seed = tempfile::NamedTempFile::new().unwrap();
+    {
+        let mut writer = Writer::new(&mut seed, Format::Pcap, LinkType::IPV4).unwrap();
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, b"seed".to_vec()).unwrap())
+            .unwrap();
+        writer.flush().unwrap();
+    }
+    let seed = common::path_text(seed.path());
+    for command in ["merge", "rewrite", "export"] {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("out.pcapng");
+        let destination = common::path_text(&destination);
+        // Stdin stays open, so the command blocks in its input after staging.
+        let arguments: &[&str] = match command {
+            "merge" => &["merge", "--write", destination, seed, "-"],
+            "rewrite" => &[
+                "rewrite",
+                "-",
+                "--write",
+                destination,
+                "--set",
+                "ipv4.ttl=64",
+            ],
+            _ => &[
+                "export",
+                "-",
+                "--write",
+                destination,
+                "--filter",
+                "frame.number > 0",
+            ],
+        };
+        let mut process = Running::start(arguments);
+        process.wait_until(|p| {
+            p.intercepts_sigint()
+                && std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
+                    .unwrap()
+                    .contains("pipe_read")
+                && std::fs::read_dir(directory.path()).unwrap().count() == 1
+        });
+        process.signal("INT");
+        std::thread::sleep(Duration::from_millis(100));
+        process.signal("INT");
+        let output = process.finish();
+        assert_eq!(output.status.code(), Some(130), "{command}: {output:?}");
+        let leftovers: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(leftovers.is_empty(), "{command}: {leftovers:?}");
     }
 }

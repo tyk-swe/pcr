@@ -200,6 +200,10 @@ pub enum Error {
         "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
     )]
     PaddingBoundaryRemoval { index: usize },
+    #[error(
+        "invalid hexadecimal MAC address; expected six two-digit bytes separated by ':' or '-'"
+    )]
+    InvalidMacAddress,
 }
 
 impl crate::error::Classified for Error {
@@ -216,6 +220,7 @@ impl crate::error::Classified for Error {
                 Kind::Packet,
                 Some("remove the padding layer before the layer its boundary depends on"),
             ),
+            Self::InvalidMacAddress => Classification::new("cli.error", Kind::Usage, None),
         }
     }
 }
@@ -246,10 +251,10 @@ fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
         let Some(padding) = layer.downcast_mut::<Padding>() else {
             continue;
         };
-        padding.outside_layer = match padding.outside_layer {
-            Some(outside_layer) if outside_layer > index => Some(outside_layer.saturating_sub(1)),
-            Some(outside_layer) if outside_layer == index => Some(index),
-            value => value,
-        };
+        if let Some(outside_layer) = &mut padding.outside_layer
+            && *outside_layer > index
+        {
+            *outside_layer = outside_layer.saturating_sub(1);
+        }
     }
 }

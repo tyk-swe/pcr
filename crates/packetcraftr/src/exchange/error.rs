@@ -21,6 +21,7 @@ pub enum Error {
     /// Boxed: the only variant carrying two complete live-I/O failures.
     #[error("exchange failed and its capture shutdown also failed")]
     OperationAndCaptureShutdown {
+        #[source]
         operation: Box<LiveIoError>,
         shutdown: Box<LiveIoError>,
     },
@@ -31,6 +32,7 @@ pub enum Error {
     },
     #[error("exchange progressive output failed and capture shutdown also failed")]
     OutputAndCaptureShutdown {
+        #[source]
         output: Box<BoundaryError>,
         shutdown: Box<LiveIoError>,
     },
@@ -105,5 +107,47 @@ impl Classified for Error {
             }
             error => packetcraftr_core::error::source_chain(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use super::*;
+
+    fn shutdown() -> Box<LiveIoError> {
+        Box::new(LiveIoError::UnresolvedLinkMode)
+    }
+
+    #[test]
+    fn operation_and_shutdown_failure_expose_the_operation_as_a_source() {
+        let operation = LiveIoError::PartialSend {
+            expected: 60,
+            actual: 42,
+        };
+        let error = Error::OperationAndCaptureShutdown {
+            operation: Box::new(operation.clone()),
+            shutdown: shutdown(),
+        };
+
+        let source = error.source().expect("the operation failure is the source");
+        assert_eq!(source.to_string(), operation.to_string());
+    }
+
+    #[test]
+    fn output_and_shutdown_failure_expose_the_output_failure_as_a_source() {
+        let output = BoundaryError::new(
+            "callback failed",
+            Classification::new("io.fixture", Kind::Io, None),
+            Vec::new(),
+        );
+        let error = Error::OutputAndCaptureShutdown {
+            output: Box::new(output),
+            shutdown: shutdown(),
+        };
+
+        let source = error.source().expect("the output failure is the source");
+        assert_eq!(source.to_string(), "callback failed");
     }
 }

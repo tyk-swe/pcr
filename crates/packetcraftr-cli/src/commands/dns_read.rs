@@ -52,7 +52,7 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             path: &args.path,
             limits: args.limits,
             decode: &args.decode,
-            application: args.application,
+            output_bytes: args.application.max_application_output_bytes,
             selector: args
                 .stream
                 .as_ref()

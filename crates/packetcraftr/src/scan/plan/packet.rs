@@ -12,6 +12,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::application::ntp::Ntp;
+use packetcraftr_core::protocol::application::tftp::Tftp;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
@@ -110,6 +111,7 @@ const ICMP_IDENTITY_TAG: u8 = 0x43;
 
 const DNS_PORT: u16 = 53;
 const NTP_PORT: u16 = 123;
+const TFTP_PORT: u16 = 69;
 const VXLAN_PORT: u16 = 4789;
 const GENEVE_PORT: u16 = 6081;
 const GENEVE_ETHERNET: u16 = 0x6558;
@@ -141,6 +143,14 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
             packetcraftr_core::protocol::application::dhcp::Dhcpv6::try_from(payload.clone())
     {
         packet.push(dhcp);
+        return;
+    }
+    if port == TFTP_PORT
+        && let Some(tftp) = decode_layer(&registry, BuiltinProtocol::Tftp.as_str(), payload)
+        && tftp.layer.is::<Tftp>()
+        && tftp.consumed == payload.len()
+    {
+        packet.push_boxed(tftp.layer);
         return;
     }
     if port == NTP_PORT
@@ -425,6 +435,27 @@ mod tests {
             udp_profile: None,
             tcp_mode: Default::default(),
             udp_payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    #[test]
+    fn tftp_payloads_use_the_exact_tftp_layer_under_strict_port_binding() {
+        for payload in [
+            b"\x00\x01file\x00octet\x00".as_slice(),
+            b"\x00\x03\x00\x01data".as_slice(),
+        ] {
+            let probe = Probe {
+                endpoint: ProbeEndpoint::Udp { port: TFTP_PORT },
+                ..ntp_probe(payload)
+            };
+            let mut packet = probe.packet();
+            packet.get_mut::<Ipv4>().unwrap().source = "192.0.2.1".parse().unwrap();
+            let built = build::Builder::new(builtin::registry())
+                .build(packet, Default::default(), Default::default())
+                .unwrap();
+            assert!(built.bytes.ends_with(payload));
+            assert!(built.packet.get::<Tftp>().is_some());
+            assert!(sent_probe_matches(&probe, &built.packet));
         }
     }
 

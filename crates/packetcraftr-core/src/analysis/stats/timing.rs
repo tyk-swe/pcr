@@ -40,12 +40,16 @@ struct Sent {
 #[derive(Debug, Default)]
 struct Direction {
     pending: VecDeque<Sent>,
-    high: Option<u32>,
+    observed: VecDeque<(u32, u32)>,
+    forgotten_through: Option<u32>,
     sum: u128,
     report: AckRttStat,
 }
 fn at_or_after(value: u32, reference: u32) -> bool {
     value.wrapping_sub(reference) < 0x8000_0000
+}
+fn overlaps(start: u32, end: u32, other_start: u32, other_end: u32) -> bool {
+    at_or_after(end, other_start.wrapping_add(1)) && at_or_after(other_end, start.wrapping_add(1))
 }
 impl Direction {
     fn sent(&mut self, start: u32, length: u32, time: SystemTime, regressed: bool) {
@@ -53,21 +57,43 @@ impl Direction {
             return;
         }
         let end = start.wrapping_add(length);
-        let ambiguous = self.high.is_some_and(|high| !at_or_after(start, high));
+        let ambiguous = self
+            .observed
+            .iter()
+            .any(|&(old_start, old_end)| overlaps(start, end, old_start, old_end))
+            || self
+                .pending
+                .iter()
+                .any(|old| overlaps(start, end, old.start, old.end));
         if ambiguous {
             for old in &mut self.pending {
-                if at_or_after(end, old.start.wrapping_add(1))
-                    && at_or_after(old.end, start.wrapping_add(1))
-                {
+                if overlaps(start, end, old.start, old.end) {
                     old.ambiguous = true;
                 }
             }
         }
-        if self.high.is_none_or(|high| at_or_after(end, high)) {
-            self.high = Some(end);
+        if self.observed.len() == MAX_PENDING
+            && let Some((_, end)) = self.observed.pop_front()
+            && self
+                .forgotten_through
+                .is_none_or(|edge| at_or_after(end, edge))
+        {
+            self.forgotten_through = Some(end);
         }
+        self.observed.push_back((start, end));
         if regressed {
             self.report.excluded_clock_regression += 1;
+            return;
+        }
+        // Once history is discarded, an older arrival cannot be classified
+        // safely as either reordering or retransmission. Exclude it as a
+        // resource limit instead of manufacturing an unambiguous sample.
+        if !ambiguous
+            && self
+                .forgotten_through
+                .is_some_and(|edge| !at_or_after(start, edge))
+        {
+            self.report.excluded_limit += 1;
             return;
         }
         if self.pending.len() == MAX_PENDING {
@@ -120,6 +146,12 @@ impl Direction {
         }
         self.report
     }
+    fn reset_connection(&mut self) {
+        self.report.excluded_missing_ack += self.pending.len() as u64;
+        self.pending.clear();
+        self.observed.clear();
+        self.forgotten_through = None;
+    }
 }
 #[derive(Debug)]
 pub(super) struct State {
@@ -132,6 +164,8 @@ pub(super) struct State {
     syn_to_ack: Option<Duration>,
     final_ack_seen: bool,
     handshake_ambiguous: bool,
+    observed: bool,
+    closed: bool,
 }
 impl State {
     pub(super) fn new(stream: u64, flow: &ScopedFlowKey) -> Self {
@@ -145,6 +179,8 @@ impl State {
             syn_to_ack: None,
             final_ack_seen: false,
             handshake_ambiguous: false,
+            observed: false,
+            closed: false,
         }
     }
     pub(super) fn observe(
@@ -158,6 +194,24 @@ impl State {
         let direction =
             usize::from((flow.flow.source, flow.flow.source_port) != self.canonical.first);
         if tcp.flags & Tcp::SYN != 0 && tcp.flags & Tcp::ACK == 0 {
+            let reused = self.closed
+                || self.syn.is_some_and(|(sender, sequence, _)| {
+                    sender == direction && sequence != tcp.sequence
+                        || sender != direction && self.final_ack_seen
+                })
+                || self.syn.is_none() && self.observed;
+            if reused {
+                for direction in &mut self.directions {
+                    direction.reset_connection();
+                }
+                self.syn = None;
+                self.syn_ack = None;
+                self.syn_to_syn_ack = None;
+                self.syn_to_ack = None;
+                self.final_ack_seen = false;
+                self.handshake_ambiguous = false;
+                self.closed = false;
+            }
             self.handshake_ambiguous |= regressed;
             if self.syn.is_some() {
                 self.handshake_ambiguous = true;
@@ -197,6 +251,8 @@ impl State {
             .saturating_add(u32::from(tcp.flags & Tcp::SYN != 0))
             .saturating_add(u32::from(tcp.flags & Tcp::FIN != 0));
         self.directions[direction].sent(tcp.sequence, length, time, regressed);
+        self.observed = true;
+        self.closed |= tcp.flags & (Tcp::FIN | Tcp::RST) != 0;
     }
     pub(super) fn finish(self) -> TcpTimingStat {
         let [a, b] = self.directions;
@@ -217,6 +273,40 @@ impl State {
 mod tests {
     use super::*;
     use std::time::UNIX_EPOCH;
+    #[test]
+    fn forgotten_history_is_excluded_instead_of_assumed_unambiguous() {
+        let mut direction = Direction::default();
+        for sequence in 0..=MAX_PENDING as u32 {
+            direction.sent(sequence, 1, UNIX_EPOCH, false);
+            direction.acknowledged(sequence + 1, UNIX_EPOCH + Duration::from_secs(1), false);
+        }
+        direction.sent(0, 1, UNIX_EPOCH, false);
+        direction.acknowledged(
+            MAX_PENDING as u32 + 1,
+            UNIX_EPOCH + Duration::from_secs(1),
+            false,
+        );
+        assert_eq!(direction.report.count, MAX_PENDING as u64 + 1);
+        assert_eq!(direction.report.excluded_limit, 1);
+    }
+    #[test]
+    fn reordered_ranges_across_wrap_and_partial_retransmissions_are_distinct() {
+        let mut direction = Direction::default();
+        direction.sent(0, 3, UNIX_EPOCH, false);
+        direction.sent(u32::MAX - 2, 3, UNIX_EPOCH, false);
+        direction.acknowledged(3, UNIX_EPOCH + Duration::from_secs(1), false);
+        assert_eq!(direction.report.count, 2);
+        assert_eq!(direction.report.excluded_retransmission, 0);
+        direction.sent(3, 4, UNIX_EPOCH, false);
+        direction.sent(5, 4, UNIX_EPOCH, false);
+        direction.acknowledged(9, UNIX_EPOCH + Duration::from_secs(1), false);
+        assert_eq!(direction.report.count, 2);
+        assert_eq!(direction.report.excluded_retransmission, 2);
+        // A duplicate of already acknowledged data remains ambiguous.
+        direction.sent(3, 4, UNIX_EPOCH, false);
+        direction.acknowledged(9, UNIX_EPOCH + Duration::from_secs(1), false);
+        assert_eq!(direction.report.excluded_retransmission, 3);
+    }
     #[test]
     fn wrap_and_retransmissions_obey_karn_and_regressions_are_excluded() {
         let mut direction = Direction::default();

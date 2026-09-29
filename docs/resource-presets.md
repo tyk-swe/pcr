@@ -65,7 +65,11 @@ Regex patterns are limited to 8 KiB each and share 1 MiB of compiled storage.
 LLDP permits 256 TLVs; RTCP permits 64 compound entries; MQTT packets permit
 1 MiB. TLS certificate collection retains at most 32 entries within the existing
 128 KiB handshake ceiling. WebSocket messages and HTTP entities default to
-16 MiB; WebSocket direction buffers share 32 MiB. HTTP exports share a 256 MiB
+16 MiB; WebSocket direction buffers share a 32 MiB ceiling, further bounded by
+the shared application buffer limit (16 MiB by default in the CLI). WebSocket
+message counts include control frames, and retained evidence includes event
+metadata plus payloads. The single-stream command omits application stream and
+source-span limits. HTTP exports share a 256 MiB
 encoded-plus-decoded output budget. Capture deduplication keeps 1,024 preceding
 input frames within 64 MiB; exhaustion fails. Splitting creates at most 64 files.
 CIDR mapping allows 64 nonoverlapping source-prefix maps across both directions.

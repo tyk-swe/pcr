@@ -227,9 +227,6 @@ pub(super) fn parse(
                     path::resolve(word, registry, pair[1].offset),
                     Ok(path::Resolved::Field(_))
                 )
-                || word.contains('.')
-                    && word.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-                    && super::literal::parse(word).is_none()
         });
     if !quantifier && !functional && !advanced_operator && !field_rhs {
         return Ok(None);

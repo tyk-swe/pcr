@@ -25,6 +25,14 @@ listed in [codec/filter usage](parity-codecs.md), [offline usage](parity-offline
 and [live usage](parity-live.md). Existing defaults are preserved. WebSocket
 explicit framing uses `websocket --decode-as websocket` with a selected TCP
 stream. Split accepts exactly one of `--packets`, `--bytes`, or `--interval-ms`.
+WebSocket enforces `--max-application-messages` (data messages plus control
+frames), `--max-application-buffer-bytes`, `--max-application-retained-bytes`,
+and `--max-application-output-bytes`. It rejects the unsupported
+`--max-application-streams` and `--max-application-source-spans` arguments.
+Rust `websocket::Limits` adds `max_messages` and `max_retained_bytes`; use
+`..Default::default()` to retain their defaults. `websocket::Collector::finish`
+now returns `Result` because final incomplete-message evidence can exceed the
+retained-byte limit.
 Capture transformations preserve source PCAP/PCAPNG formats and raw metadata.
 HTTP entity filenames derive from stream, canonical direction, generation, and
 message index; encoded `.body` files accompany optional `.body.decoded` files.

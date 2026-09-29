@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- WebSocket application stream-count and source-span arguments are removed
+  because the command selects one conversation and does not retain source spans.
+  Rust `websocket::Limits` gains `max_messages` and `max_retained_bytes`;
+  `Collector::finish` returns `Result` to enforce final evidence limits.
 - Structured output advances to `packetcraftr.output/v7` for the thirty practical
   parity additions. Consumers must explicitly adopt the new family, scan
   classifications, certificate and WebSocket events, capture direction settings,
@@ -1507,6 +1511,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Release archives include the renamed v7 forwarding consumer fixture.
+- Display filters preserve unquoted dotted text literals alongside field-to-field
+  comparisons, and UDP scans materialize valid TFTP payloads under port 69.
+- WebSocket collection enforces application message, buffer, retained-evidence,
+  and output limits, including resource presets.
+- TCP timing distinguishes reordered segments from overlapping retransmissions
+  and resets pending sequence/handshake state when a connection tuple is reused,
+  preserving aggregate RTT counts and counting old outstanding ranges as missing ACKs.
+- TCP service banners share the original connect attempt deadline, including
+  time spent waiting for earlier results and event callbacks.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit

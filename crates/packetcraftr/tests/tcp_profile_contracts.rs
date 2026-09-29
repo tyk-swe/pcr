@@ -141,6 +141,76 @@ fn complete_banner_traffic_is_authorized_before_connect() {
 }
 
 #[test]
+fn delayed_settlement_does_not_restart_a_concurrent_banner_deadline() {
+    struct Concurrent {
+        writes: Arc<Mutex<Vec<u8>>>,
+        connected: std::sync::Barrier,
+    }
+    impl Provider for Concurrent {
+        type Stream = Socket;
+        fn connect(
+            &self,
+            peer: SocketAddr,
+            _: &Deadline,
+        ) -> Result<Socket, packetcraftr_netio::tcp::Error> {
+            self.connected.wait();
+            Ok(Socket {
+                peer,
+                writes: self.writes.clone(),
+                reads: 0,
+            })
+        }
+    }
+    let writes = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        Policy::default(),
+        ProviderSet::tcp(
+            Concurrent {
+                writes: writes.clone(),
+                connected: std::sync::Barrier::new(2),
+            },
+            SystemResolver,
+        ),
+    );
+    let mut request = request();
+    request.ports.push(8081);
+    request.max_in_flight = 2;
+    request.timeout = Duration::from_millis(100);
+    request
+        .tcp_profiles
+        .insert(8081, request.tcp_profiles[&8080].clone());
+    let probes = Arc::new(Mutex::new(Vec::new()));
+    let observed = probes.clone();
+    let report = client
+        .scan_connect(request, move |event| {
+            let connect::Event::Probe(probe) = event;
+            let first = {
+                let mut probes = observed.lock().unwrap();
+                probes.push(probe);
+                probes.len() == 1
+            };
+            if first {
+                // Both connects are complete, but the next result cannot settle
+                // until after its original attempt deadline.
+                std::thread::sleep(Duration::from_millis(150));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(report.stats.connections_succeeded, 2);
+    let probes = probes.lock().unwrap();
+    assert_eq!(probes[0].banner.as_ref().unwrap().request_bytes_written, 4);
+    let delayed = probes[1].banner.as_ref().unwrap();
+    assert_eq!(delayed.request_bytes_written, 0);
+    assert_eq!(
+        delayed.error.as_ref().unwrap().kind(),
+        io::ErrorKind::TimedOut
+    );
+    assert_eq!(writes.lock().unwrap().as_slice(), b"HEAD");
+}
+
+#[test]
 fn profile_peer_recheck_rejects_changed_peer_before_application_io() {
     struct Changed(Arc<Mutex<Vec<u8>>>);
     struct ChangedSocket {

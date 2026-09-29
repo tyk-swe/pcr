@@ -7,6 +7,39 @@ use packetcraftr_core::{
     protocol::builtin,
 };
 #[test]
+fn unquoted_dotted_words_remain_text_literals() {
+    for (protocol, bytes, source) in [
+        (
+            "raw",
+            b"example.test".as_slice(),
+            "raw.bytes == example.test",
+        ),
+        (
+            "http",
+            b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".as_slice(),
+            "http.version == HTTP/1.1",
+        ),
+    ] {
+        let registry = common::packets::rooted_registry(protocol);
+        let frame = packetcraftr_core::frame::Frame::new(
+            std::time::UNIX_EPOCH,
+            common::packets::ROOT_LINK_TYPE,
+            bytes.to_vec(),
+        )
+        .unwrap();
+        let packet = packetcraftr_core::decode::Dissector::new(registry.clone())
+            .decode(frame, Default::default())
+            .unwrap();
+        assert!(
+            Filter::compile(source, &registry, Limits::default())
+                .unwrap()
+                .matches(&context(&packet))
+                .unwrap(),
+            "{source}"
+        );
+    }
+}
+#[test]
 fn advanced_filters_use_byte_functions_and_explicit_repeated_value_semantics() {
     let packet = tunnelled();
     let registry = builtin::registry();

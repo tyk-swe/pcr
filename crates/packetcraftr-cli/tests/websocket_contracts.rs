@@ -135,3 +135,54 @@ fn websocket_rejects_udp_selection_and_limits_are_finite() {
     assert!(!output.status.success());
     assert_eq!(parse_json(&output)["error"]["kind"], "policy");
 }
+
+#[test]
+fn shared_application_limits_are_enforced_with_and_without_presets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ws.pcap");
+    capture(&path, false);
+    for preset in [None, Some("ci-v1")] {
+        for (flag, value) in [
+            ("--max-application-messages", "1"),
+            ("--max-application-buffer-bytes", "1"),
+            ("--max-application-retained-bytes", "1"),
+            ("--max-application-output-bytes", "1"),
+        ] {
+            let mut args = vec!["--output", "json"];
+            if let Some(preset) = preset {
+                args.extend(["--resource-preset", preset]);
+            }
+            args.extend([
+                "websocket",
+                path.to_str().unwrap(),
+                "--stream",
+                "tcp:0",
+                "--decode-as",
+                "websocket",
+                flag,
+                value,
+            ]);
+            let output = run(&args);
+            assert_eq!(output.status.code(), Some(6), "{flag}: {output:?}");
+            assert_eq!(parse_json(&output)["error"]["kind"], "policy");
+        }
+    }
+    for flag in [
+        "--max-application-streams",
+        "--max-application-source-spans",
+    ] {
+        let output = run(&[
+            "websocket",
+            path.to_str().unwrap(),
+            "--stream",
+            "tcp:0",
+            flag,
+            "1",
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "unsupported {flag} must be rejected"
+        );
+    }
+}

@@ -62,6 +62,7 @@ struct Active<S> {
     started: Instant,
     scheduled_at: SystemTime,
     timeout: Duration,
+    attempt_deadline: Deadline,
 }
 fn invalid(field: &'static str, value: usize, reason: &str) -> Error {
     Error::InvalidLimit {
@@ -234,11 +235,8 @@ where
     let timeout = deadline.bounded_timeout(request.timeout)?;
     let admitted = clock.now();
     let scheduled_at = SystemTime::now();
-    let pending = match tcp::start_connect(
-        Arc::clone(provider),
-        endpoint,
-        &Deadline::new(timeout).with_cancellation(deadline.cancellation().cloned()),
-    ) {
+    let attempt_deadline = Deadline::new(timeout).with_parent(Some(Arc::new(deadline.clone())));
+    let pending = match tcp::start_connect(Arc::clone(provider), endpoint, &attempt_deadline) {
         Ok(pending) => pending,
         Err(tcp::Error::Capacity { .. }) => return Ok(None),
         Err(source) => return Err(execution(next as u64, source)),
@@ -251,6 +249,7 @@ where
         started: admitted,
         scheduled_at,
         timeout,
+        attempt_deadline,
     }))
 }
 
@@ -259,7 +258,6 @@ fn settle_active<S: tcp::Stream>(
     index: usize,
     now: Instant,
     request: &Request,
-    deadline: &Deadline,
 ) -> Result<Option<ProbeEvidence>, Error> {
     let result = active[index]
         .pending
@@ -272,7 +270,6 @@ fn settle_active<S: tcp::Stream>(
             entry,
             result,
             request.tcp_profiles.get(&port),
-            deadline,
         )?));
     }
     if now.saturating_duration_since(active[index].started) < active[index].timeout {
@@ -345,8 +342,7 @@ where
         let mut index = 0;
         while index < active.len() {
             enforce_deadline(&Probes, deadline)?;
-            let Some(probe) = settle_active(&mut active, index, clock.now(), request, deadline)?
-            else {
+            let Some(probe) = settle_active(&mut active, index, clock.now(), request)? else {
                 index += 1;
                 continue;
             };
@@ -419,7 +415,6 @@ fn finish_probe_profile<S: tcp::Stream>(
     entry: Active<S>,
     result: tcp::ConnectOutcome<S>,
     profile: Option<&Arc<super::super::profile::TcpProfile>>,
-    deadline: &Deadline,
 ) -> Result<ProbeEvidence, Error> {
     // Settled attempts keep the worker's completion time; publishing earlier
     // events can delay observation without extending the socket's latency.
@@ -460,15 +455,11 @@ fn finish_probe_profile<S: tcp::Stream>(
                         message: "TCP banner requires the exact connected peer".to_owned(),
                     });
                 }
-                let timeout = entry
-                    .timeout
-                    .saturating_sub(elapsed)
-                    .min(deadline.remaining().unwrap_or_default());
                 probe.banner = Some(super::banner::exchange(
                     &mut stream,
                     entry.endpoint,
                     profile,
-                    &Deadline::new(timeout).with_parent(Some(Arc::new(deadline.clone()))),
+                    &entry.attempt_deadline,
                 ));
             }
             drop(stream);

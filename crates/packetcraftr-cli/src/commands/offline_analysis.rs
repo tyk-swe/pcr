@@ -13,7 +13,7 @@ use std::path::Path;
 use analysis::StreamRef;
 use packetcraftr_core::error::Kind;
 
-use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::output::contract::ToolFormat;
@@ -105,7 +105,7 @@ pub(super) struct Inspection<'a> {
     pub(super) path: &'a Path,
     pub(super) limits: OfflineLimitsArgs,
     pub(super) decode: &'a DecodeArgs,
-    pub(super) application: ApplicationLimitsArgs,
+    pub(super) output_bytes: usize,
     pub(super) selector: Option<StreamRef>,
 }
 
@@ -120,7 +120,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         path,
         limits,
         decode,
-        application,
+        output_bytes,
         selector,
     } = inspection;
     let setup = prepare(limits, None, decode)?;
@@ -128,7 +128,7 @@ pub(super) fn inspect<C: analysis::Collector>(
     let session =
         analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
     let mut reader = crate::input::open_capture(path, limits.capture.reader)?;
-    let mut output = EventOutput::new(format, stream, application.max_application_output_bytes);
+    let mut output = EventOutput::new(format, stream, output_bytes);
     let outcome = session
         .run(&mut reader, ip_event_sink(format, stream), |event| {
             publish(&mut output, event).map_err(CliError::into_boundary_error)

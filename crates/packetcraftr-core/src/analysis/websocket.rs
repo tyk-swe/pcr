@@ -10,16 +10,24 @@ use super::{
 };
 use crate::error::{BoundaryError, Classification, Kind};
 use bytes::Bytes;
+
+const INTERRUPTED: &str = "TCP gap or stream reuse interrupted WebSocket framing";
+const HEADER_LIMIT: &str = "HTTP upgrade header limit exceeded";
+const INCOMPLETE: &str = "capture ended inside a WebSocket frame or message";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_message_bytes: usize,
     pub max_buffered_bytes: usize,
+    pub max_messages: usize,
+    pub max_retained_bytes: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
             max_message_bytes: 16 * 1024 * 1024,
             max_buffered_bytes: 32 * 1024 * 1024,
+            max_messages: 4096,
+            max_retained_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -70,6 +78,7 @@ pub struct Collector {
     explicit_decode_as: bool,
     directions: [Direction; 2],
     summary: Summary,
+    retained_bytes: usize,
 }
 impl Collector {
     pub fn new(
@@ -82,9 +91,13 @@ impl Collector {
             || limits.max_message_bytes > 16 * 1024 * 1024
             || limits.max_buffered_bytes == 0
             || limits.max_buffered_bytes > 32 * 1024 * 1024
+            || limits.max_messages == 0
+            || limits.max_messages > 100_000
+            || limits.max_retained_bytes == 0
+            || limits.max_retained_bytes > 256 * 1024 * 1024
         {
             return Err(failure(
-                "WebSocket requires a TCP stream and finite message/buffer limits",
+                "WebSocket requires a TCP stream and finite application limits",
             ));
         }
         let mut directions = [Direction::default(), Direction::default()];
@@ -97,6 +110,7 @@ impl Collector {
             explicit_decode_as,
             directions,
             summary: Summary::default(),
+            retained_bytes: 0,
         })
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
@@ -119,6 +133,7 @@ impl Collector {
                     }
                     let state = &mut self.directions[reset_index];
                     if !state.buffer.is_empty() || state.opcode.is_some() {
+                        charge_event(self.limits, &mut self.retained_bytes, INTERRUPTED.len())?;
                         events.push(Event::Issue {
                             number: chunk.number,
                             direction: if reset_index == 0 {
@@ -126,7 +141,7 @@ impl Collector {
                             } else {
                                 PeerDirection::ServerToClient
                             },
-                            reason: "TCP gap or stream reuse interrupted WebSocket framing".into(),
+                            reason: INTERRUPTED.into(),
                         });
                         self.summary.incomplete_messages += 1;
                     }
@@ -162,10 +177,11 @@ impl Collector {
                     > crate::protocol::application::http::MAX_HEADER_BYTES
                 {
                     state.disabled = true;
+                    charge_event(self.limits, &mut self.retained_bytes, HEADER_LIMIT.len())?;
                     events.push(Event::Issue {
                         number: chunk.number,
                         direction: chunk.direction,
-                        reason: "HTTP upgrade header limit exceeded".into(),
+                        reason: HEADER_LIMIT.into(),
                     });
                     self.summary.malformed_frames += 1;
                     continue;
@@ -213,7 +229,9 @@ impl Collector {
                     "WebSocket upgrade needs one request and one response",
                     &mut events,
                     &mut self.summary,
-                );
+                    self.limits,
+                    &mut self.retained_bytes,
+                )?;
                 continue;
             }
             // Once both upgrade headers have arrived, buffered frames from either
@@ -240,13 +258,17 @@ impl Collector {
                             "WebSocket mask does not match the HTTP upgrade role",
                             &mut events,
                             &mut self.summary,
-                        );
+                            self.limits,
+                            &mut self.retained_bytes,
+                        )?;
                         break;
                     }
                     match frame(&state.buffer, self.limits.max_message_bytes) {
                         Ok(Some((consumed, fin, opcode, payload))) => {
                             state.buffer.drain(..consumed);
                             if opcode & 8 != 0 {
+                                check_messages(self.limits, &self.summary)?;
+                                charge_event(self.limits, &mut self.retained_bytes, payload.len())?;
                                 events.push(Event::Control {
                                     number: chunk.number,
                                     direction: peer,
@@ -264,7 +286,9 @@ impl Collector {
                                         "continuation without a message",
                                         &mut events,
                                         &mut self.summary,
-                                    );
+                                        self.limits,
+                                        &mut self.retained_bytes,
+                                    )?;
                                     break;
                                 }
                             } else {
@@ -275,7 +299,9 @@ impl Collector {
                                         "new message before final continuation",
                                         &mut events,
                                         &mut self.summary,
-                                    );
+                                        self.limits,
+                                        &mut self.retained_bytes,
+                                    )?;
                                     break;
                                 }
                                 state.opcode = Some(opcode);
@@ -295,9 +321,17 @@ impl Collector {
                                         "text message is not UTF-8",
                                         &mut events,
                                         &mut self.summary,
-                                    );
+                                        self.limits,
+                                        &mut self.retained_bytes,
+                                    )?;
                                     break;
                                 }
+                                check_messages(self.limits, &self.summary)?;
+                                charge_event(
+                                    self.limits,
+                                    &mut self.retained_bytes,
+                                    state.message.len(),
+                                )?;
                                 let bytes = Bytes::from(std::mem::take(&mut state.message));
                                 events.push(Event::Message {
                                     number: chunk.number,
@@ -311,7 +345,15 @@ impl Collector {
                         }
                         Ok(None) => break,
                         Err(reason) => {
-                            Self::reject(state, peer, reason, &mut events, &mut self.summary);
+                            Self::reject(
+                                state,
+                                peer,
+                                reason,
+                                &mut events,
+                                &mut self.summary,
+                                self.limits,
+                                &mut self.retained_bytes,
+                            )?;
                             break;
                         }
                     }
@@ -326,7 +368,10 @@ impl Collector {
         reason: &str,
         events: &mut Vec<Event>,
         summary: &mut Summary,
-    ) {
+        limits: Limits,
+        retained_bytes: &mut usize,
+    ) -> Result<(), BoundaryError> {
+        charge_event(limits, retained_bytes, reason.len())?;
         state.disabled = true;
         state.buffer.clear();
         state.message.clear();
@@ -337,11 +382,13 @@ impl Collector {
             direction,
             reason: reason.into(),
         });
+        Ok(())
     }
-    pub fn finish(mut self, run: &RunSummary) -> (Vec<Event>, Summary) {
+    pub fn finish(mut self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         let mut events = Vec::new();
         for (index, state) in self.directions.into_iter().enumerate() {
             if !state.disabled && (!state.buffer.is_empty() || state.opcode.is_some()) {
+                charge_event(self.limits, &mut self.retained_bytes, INCOMPLETE.len())?;
                 self.summary.incomplete_messages += 1;
                 events.push(Event::Issue {
                     number: state.number,
@@ -350,13 +397,31 @@ impl Collector {
                     } else {
                         PeerDirection::ServerToClient
                     },
-                    reason: "capture ended inside a WebSocket frame or message".into(),
+                    reason: INCOMPLETE.into(),
                 });
             }
         }
         self.summary.follow = self.follow.finish(run);
-        (events, self.summary)
+        Ok((events, self.summary))
     }
+}
+fn check_messages(limits: Limits, summary: &Summary) -> Result<(), BoundaryError> {
+    if summary.messages.saturating_add(summary.control_frames) >= limits.max_messages as u64 {
+        return Err(failure(
+            "WebSocket application message count limit exceeded",
+        ));
+    }
+    Ok(())
+}
+fn charge_event(limits: Limits, retained: &mut usize, bytes: usize) -> Result<(), BoundaryError> {
+    let total = retained
+        .saturating_add(std::mem::size_of::<Event>())
+        .saturating_add(bytes);
+    if total > limits.max_retained_bytes {
+        return Err(failure("WebSocket retained evidence limit exceeded"));
+    }
+    *retained = total;
+    Ok(())
 }
 fn failure(reason: &str) -> BoundaryError {
     BoundaryError::new(
@@ -448,7 +513,7 @@ impl session::Collector for Collector {
         Self::observe(self, record)
     }
     fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
-        Ok(Self::finish(self, run))
+        Self::finish(self, run)
     }
 }
 #[cfg(test)]

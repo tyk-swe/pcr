@@ -51,12 +51,91 @@ fn websocket_upgrade_segmented_masked_continuations_and_control_frames() {
         },
     )
     .unwrap();
-    let (last, summary) = collector.finish(&run);
+    let (last, summary) = collector.finish(&run).unwrap();
     events.extend(last);
     assert_eq!(summary.messages, 1);
     assert_eq!(summary.control_frames, 1);
     assert!(events.iter().any(|event| matches!(event,websocket::Event::Message {bytes,opcode:1,..} if bytes.as_ref()==b"hi!")));
     assert!(events.iter().any(|event| matches!(event,websocket::Event::Control {bytes,opcode:9,..} if bytes.as_ref()==b"?")));
+}
+
+#[test]
+fn websocket_limits_count_each_message_in_one_delivery_and_final_issues() {
+    let selector = StreamRef {
+        transport: StreamTransport::Tcp,
+        index: 0,
+    };
+    for payload in [
+        b"\x82\x01a\x82\x01b".as_slice(),
+        b"\x82\x01a\x89\x01b".as_slice(),
+    ] {
+        let mut capture = Capture::new();
+        let mut stream = Stream::new(40000);
+        capture.open(&mut stream);
+        capture.client(&mut stream, payload);
+        let mut collector = websocket::Collector::new(
+            selector,
+            websocket::Limits {
+                max_messages: 1,
+                ..Default::default()
+            },
+            true,
+        )
+        .unwrap();
+        let error = analysis::run(
+            &mut reader(&capture.frames),
+            registry(),
+            &Options {
+                tcp_events: true,
+                ..Default::default()
+            },
+            |record| {
+                collector.observe(&record)?;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        let analysis::Error::Sink { source, .. } = error else {
+            panic!("{error}");
+        };
+        assert!(
+            source.to_string().contains("message count limit"),
+            "{source}"
+        );
+    }
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, b"\x82\x01");
+    let mut collector = websocket::Collector::new(
+        selector,
+        websocket::Limits {
+            max_retained_bytes: 1,
+            ..Default::default()
+        },
+        true,
+    )
+    .unwrap();
+    let run = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &Options {
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            collector.observe(&record)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(
+        collector
+            .finish(&run)
+            .unwrap_err()
+            .to_string()
+            .contains("retained evidence limit")
+    );
 }
 
 #[test]
@@ -197,7 +276,7 @@ fn websocket_upgrade_roles_and_partial_messages_are_diagnostic() {
     ] {
         let mut capture = Capture::new(); let mut stream = Stream::new(40000); stream.server_port = 80; capture.open(&mut stream);
         capture.client(&mut stream,b"GET /chat HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");capture.server(&mut stream,response);capture.client(&mut stream,frame);
-        let mut collector = websocket::Collector::new(StreamRef { transport:StreamTransport::Tcp,index:0 },websocket::Limits::default(),false).unwrap();let mut events=Vec::new();let run=analysis::run(&mut reader(&capture.frames),registry(),&Options {tcp_events:true,..Default::default()},|record|{events.extend(collector.observe(&record)?);Ok(())}).unwrap();let (last,summary)=collector.finish(&run);events.extend(last);
+        let mut collector = websocket::Collector::new(StreamRef { transport:StreamTransport::Tcp,index:0 },websocket::Limits::default(),false).unwrap();let mut events=Vec::new();let run=analysis::run(&mut reader(&capture.frames),registry(),&Options {tcp_events:true,..Default::default()},|record|{events.extend(collector.observe(&record)?);Ok(())}).unwrap();let (last,summary)=collector.finish(&run).unwrap();events.extend(last);
         assert_eq!(summary.messages,0);assert!(events.iter().any(|event|matches!(event,websocket::Event::Issue {..})));if expected_malformed {assert!(summary.malformed_frames>0);}else {assert_eq!(summary.incomplete_messages,1);}
     }
 }
@@ -307,7 +386,7 @@ fn websocket_stream_reuse_requires_fresh_upgrade_in_both_directions() {
         },
     )
     .unwrap();
-    let (_, summary) = collector.finish(&run);
+    let (_, summary) = collector.finish(&run).unwrap();
     assert_eq!(summary.messages, 2);
     assert_eq!(summary.malformed_frames, 0);
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector},
+    command_options::{DecodeArgs, OfflineLimitsArgs, Selector, validate_output_bytes},
     errors::CliError,
     output::{
         contract::{Command, ToolFormat},
@@ -37,8 +37,18 @@ pub(crate) struct Args {
     /// Maximum buffered WebSocket bytes across both directions.
     #[arg(long, default_value_t = 32 * 1024 * 1024)]
     pub(crate) max_websocket_buffer_bytes: usize,
-    #[command(flatten)]
-    pub(crate) application: ApplicationLimitsArgs,
+    /// Maximum data messages and control frames across the selected stream.
+    #[arg(long, default_value_t = Limits::default().max_messages)]
+    pub(crate) max_application_messages: usize,
+    /// Maximum bytes buffered across both directions, including partial messages.
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    pub(crate) max_application_buffer_bytes: usize,
+    /// Cumulative bytes charged for retained and emitted WebSocket evidence.
+    #[arg(long, default_value_t = Limits::default().max_retained_bytes)]
+    pub(crate) max_application_retained_bytes: usize,
+    /// Maximum serialized message, control, and issue bytes in every format.
+    #[arg(long, default_value_t = 64 * 1024 * 1024)]
+    pub(crate) max_application_output_bytes: usize,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
@@ -52,7 +62,12 @@ impl super::Spec for Args {
     }
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [max_websocket_message_bytes: Bytes @ ActiveState, max_websocket_buffer_bytes: Bytes @ ActiveState]);
-        self.application.resources(settings);
+        crate::resources::declare!(settings, self, [
+            max_application_messages: Count @ ActiveState preset(256, 4096),
+            max_application_buffer_bytes: Bytes @ ActiveState preset(2097152, 16777216),
+            max_application_retained_bytes: Bytes @ ActiveState preset(8388608, 67108864),
+            max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864),
+        ]);
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages::with_tcp(true),
@@ -63,7 +78,24 @@ impl super::Spec for Args {
         format: ToolFormat,
         stream: &StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
-        self.application.validate_output()?;
+        validate_output_bytes(self.max_application_output_bytes)?;
+        // Validate each supplied limit before combining the two buffer ceilings.
+        packetcraftr_core::analysis::application::Limits {
+            max_messages: self.max_application_messages,
+            max_buffer_bytes: self.max_application_buffer_bytes,
+            max_retained_bytes: self.max_application_retained_bytes,
+            ..Default::default()
+        }
+        .validate()
+        .map_err(CliError::classified)?;
+        if self.max_websocket_buffer_bytes == 0
+            || self.max_websocket_buffer_bytes > 32 * 1024 * 1024
+        {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--max-websocket-buffer-bytes must be in 1..=33554432",
+            ));
+        }
         let selected = self.stream.get()?;
         if selected.transport != StreamTransport::Tcp {
             return Err(CliError::new(
@@ -75,7 +107,11 @@ impl super::Spec for Args {
             selected,
             Limits {
                 max_message_bytes: self.max_websocket_message_bytes as usize,
-                max_buffered_bytes: self.max_websocket_buffer_bytes,
+                max_buffered_bytes: self
+                    .max_websocket_buffer_bytes
+                    .min(self.max_application_buffer_bytes),
+                max_messages: self.max_application_messages,
+                max_retained_bytes: self.max_application_retained_bytes,
             },
             self.decode_as.is_some(),
         )
@@ -87,7 +123,7 @@ impl super::Spec for Args {
                 path: &self.path,
                 limits: self.limits,
                 decode: &decode,
-                application: self.application,
+                output_bytes: self.max_application_output_bytes,
                 selector: Some(selected),
             },
             collector,

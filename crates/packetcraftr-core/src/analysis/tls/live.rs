@@ -397,10 +397,7 @@ impl Live {
                     self.certificates.as_mut().expect("enabled").status =
                         super::CertificateStatus::NotObserved;
                     self.side_mut(direction).finish();
-                    return Verdict::Finished {
-                        status: Status::Complete,
-                        reason: None,
-                    };
+                    return self.complete();
                 }
                 // TLS 1.3 middlebox-compatibility mode sends one of these
                 // mid-handshake, between a HelloRetryRequest and the second
@@ -477,22 +474,19 @@ impl Live {
                                 collection.status == super::CertificateStatus::Malformed;
                             self.certificates = Some(collection);
                             self.side_mut(direction).finish();
-                            return Verdict::Finished {
-                                status: if malformed {
-                                    Status::Malformed
-                                } else {
-                                    Status::Complete
-                                },
-                                reason: None,
+                            return if malformed {
+                                Verdict::Finished {
+                                    status: Status::Malformed,
+                                    reason: None,
+                                }
+                            } else {
+                                self.complete()
                             };
                         }
                         self.certificates.as_mut().expect("enabled").status =
                             super::CertificateStatus::NotObserved;
                         self.side_mut(direction).finish();
-                        return Verdict::Finished {
-                            status: Status::Complete,
-                            reason: None,
-                        };
+                        return self.complete();
                     }
                 }
             }
@@ -576,13 +570,8 @@ impl Live {
         }
         self.server = Some(ServerSummary::new(hello));
         self.server_time = self.frame_time;
-        // TLS 1.3 encrypts everything after this point and TLS 1.2 follows
-        // with a certificate chain this record does not carry; either way the
-        // server has nothing more to say in the clear.
-        if self.client.is_none() {
-            self.side_mut(direction).finish();
-            return finished(Status::Gap, "no ClientHello observed");
-        }
+        // TLS 1.2 certificates remain readable even when the capture missed
+        // the ClientHello. TLS 1.3 encrypts the rest of the server handshake.
         if let Some(collection) = self.certificates.as_mut() {
             if hello.selected_version <= 0x0303 {
                 return Verdict::Open;
@@ -590,6 +579,13 @@ impl Live {
             collection.status = super::CertificateStatus::Encrypted;
         }
         self.side_mut(direction).finish();
+        self.complete()
+    }
+
+    fn complete(&self) -> Verdict {
+        if self.client.is_none() {
+            return finished(Status::Gap, "no ClientHello observed");
+        }
         Verdict::Finished {
             status: Status::Complete,
             reason: None,
@@ -599,10 +595,15 @@ impl Live {
     /// The status a connection close implies, or `None` when the close says
     /// nothing this collector should report.
     pub(super) fn close_status(&self) -> Option<Status> {
-        self.client.as_ref()?;
         if self.server.is_some() {
-            Some(Status::Complete)
-        } else if self.hello_retry {
+            return Some(if self.client.is_some() {
+                Status::Complete
+            } else {
+                Status::Gap
+            });
+        }
+        self.client.as_ref()?;
+        if self.hello_retry {
             Some(Status::Retry)
         } else {
             Some(Status::ClientOnly)
@@ -615,6 +616,15 @@ impl Live {
         status: Status,
         reason: Option<String>,
     ) -> Session {
+        let missing_client = self.client.is_none() && self.server.is_some();
+        let (status, reason) = if missing_client
+            && (matches!(status, Status::Complete | Status::Truncated)
+                || status == Status::Gap && reason.is_none())
+        {
+            (Status::Gap, Some("no ClientHello observed".to_owned()))
+        } else {
+            (status, reason)
+        };
         let client_flow = if self.client_side == Side::First {
             self.first_flow.clone()
         } else {

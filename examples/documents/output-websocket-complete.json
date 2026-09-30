@@ -16,7 +16,13 @@
       "server_bytes": 0,
       "undelivered_bytes": 0
     },
-    "scopes": [],
+    "scopes": [
+      {
+        "id": 0,
+        "interface": null,
+        "encapsulation": []
+      }
+    ],
     "incomplete_datagrams": 0,
     "source_outcomes_omitted": 0,
     "ip_reassembly": {

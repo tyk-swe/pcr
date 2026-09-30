@@ -4,6 +4,10 @@ mod common;
 use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 fn encoded_entity_capture(path: &std::path::Path, encoding: &str, encoded: &[u8]) {
+    encoded_entity_capture_with_headers(path, &[encoding], encoded);
+}
+
+fn encoded_entity_capture_with_headers(path: &std::path::Path, encodings: &[&str], encoded: &[u8]) {
     use packetcraftr_core::{
         build::Builder,
         capture_file::Writer,
@@ -14,11 +18,12 @@ fn encoded_entity_capture(path: &std::path::Path, encoding: &str, encoded: &[u8]
     };
     use std::time::{Duration, UNIX_EPOCH};
     let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
-    let mut payload = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Encoding: {encoding}\r\n\r\n",
-        encoded.len()
-    )
-    .into_bytes();
+    let mut head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n", encoded.len());
+    for encoding in encodings {
+        head.push_str(&format!("Content-Encoding: {encoding}\r\n"));
+    }
+    head.push_str("\r\n");
+    let mut payload = head.into_bytes();
     payload.extend_from_slice(encoded);
     for (index, (sequence, flags, bytes)) in [
         (10, Tcp::SYN | Tcp::ACK, Vec::new()),
@@ -56,6 +61,53 @@ fn encoded_entity_capture(path: &std::path::Path, encoding: &str, encoded: &[u8]
             .unwrap();
     }
     std::fs::write(path, writer.into_inner()).unwrap();
+}
+
+#[test]
+fn repeated_content_encodings_publish_the_complete_list_and_keep_stacked_bodies_encoded() {
+    let root = tempfile::tempdir().unwrap();
+    // "hello" encoded with gzip twice, in header order.
+    let hex =
+        "1f8b08000000000002ff93efe6600001a6ffa73dce9e3cc9ced0b64cc08c1528000082e20d6119000000";
+    let encoded: Vec<_> = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect();
+    for (index, (headers, expected)) in [
+        (["gzip", "GZIP"].as_slice(), "gzip, gzip"),
+        (["gzip, gzip"].as_slice(), "gzip, gzip"),
+        (["gzip", "br"].as_slice(), "gzip, br"),
+        (["br", "gzip"].as_slice(), "br, gzip"),
+        (
+            [" GZIP ", "x-gzip, deflate"].as_slice(),
+            "gzip, x-gzip, deflate",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let capture = root.path().join(format!("stack-{index}.pcap"));
+        encoded_entity_capture_with_headers(&capture, headers, &encoded);
+        let write = root.path().join(format!("stack-{index}"));
+        let report = parse_json(&run_success(&[
+            "--output",
+            "json",
+            "http",
+            capture.to_str().unwrap(),
+            "--write",
+            write.to_str().unwrap(),
+            "--decode-content",
+        ]));
+        let entity = &report["result"]["messages"][0]["entity"];
+        assert_eq!(entity["content_encoding"], expected);
+        assert!(entity["decoded_path"].is_null());
+        assert!(entity["decoded_bytes"].is_null());
+        assert_eq!(
+            std::fs::read(entity["path"].as_str().unwrap()).unwrap(),
+            encoded
+        );
+        assert_eq!(std::fs::read_dir(write).unwrap().count(), 1);
+    }
 }
 
 #[test]

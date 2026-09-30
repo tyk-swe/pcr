@@ -1511,6 +1511,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- WebSocket collection reports conflicting TCP retransmissions and publishes
+  the selected conversation's capture scope in JSON and NDJSON.
+- Repeated traceroute cycles honor both the configured rate ceiling and cycle
+  interval, with the required delay included in planned-duration admission.
+- HTTP entity exports combine repeated `Content-Encoding` fields and preserve
+  unsupported coding stacks as encoded bodies.
+- TLS certificate inspection retains plaintext TLS 1.2 chains when the capture
+  missed the ClientHello, while preserving the missing-hello gap status.
 - List filters measure list length before flattening and count present empty
   lists as zero while preserving missing-field semantics.
 - WebSocket controls use their own payload ceiling and validate close status
@@ -1518,8 +1526,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   buffer space. Default CLI buffers include maximum frame and mask overhead.
 - TCP timing avoids scanning retained history for disjoint sequential ranges,
   including streams that previously reordered data.
-- TCP connect scans share raw scan ordering with and without a shuffle seed;
-  traceroute cycle boundaries charge the cycle interval without extra rate delays.
+- TCP connect scans share raw scan ordering with and without a shuffle seed.
 - HTTP entity exports decode `x-gzip`, constructed headers reserve capacity
   after replacing framing fields, and TLS certificate limits remain distinct
   from malformed sessions.

@@ -508,12 +508,10 @@ impl Collector {
         let index = self.next_session;
         self.next_session = self.next_session.saturating_add(1);
         self.summary.sessions = self.summary.sessions.saturating_add(1);
-        let by_status = self.summary.by_status.entry(status).or_default();
+        let session = live.into_session(index, status, reason);
+        let by_status = self.summary.by_status.entry(session.status).or_default();
         *by_status = by_status.saturating_add(1);
-        events.push(SessionEvent {
-            number,
-            session: live.into_session(index, status, reason),
-        });
+        events.push(SessionEvent { number, session });
     }
 
     fn discard(&mut self, key: &CanonicalFlow) {

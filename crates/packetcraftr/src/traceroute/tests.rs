@@ -924,7 +924,7 @@ fn repeated_cycles_share_plan_budget_and_keep_cycle_numbers() {
 }
 
 #[test]
-fn repeated_cycles_charge_rate_delays_only_between_hops() {
+fn repeated_cycles_do_not_duplicate_rate_delays_when_the_interval_is_long_enough() {
     let mut request = udp_traceroute_request(Target::Address("192.0.2.2".parse().unwrap()));
     request.cycles = 3;
     request.probes_per_second = Some(2);
@@ -943,6 +943,63 @@ fn repeated_cycles_charge_rate_delays_only_between_hops() {
     )
     .unwrap();
     assert_eq!(aggregate.stats.packets_attempted, 12);
+}
+
+#[test]
+fn repeated_cycles_honor_the_larger_of_rate_delay_and_cycle_interval() {
+    use crate::test_support::RecordingClock;
+
+    for interval in [
+        Duration::ZERO,
+        Duration::from_millis(5),
+        Duration::from_secs(2),
+    ] {
+        let mut request = udp_traceroute_request(Target::Address("192.0.2.2".parse().unwrap()));
+        request.cycles = 3;
+        request.max_hops = 1;
+        request.probes_per_hop = 1;
+        request.probes_per_second = Some(1);
+        request.cycle_interval = interval;
+        let expected_delay = interval.max(Duration::from_secs(1));
+        let planned = request.timeout * 3 + expected_delay * 2;
+        request.limits.max_duration = planned;
+        let mut authorizer = FixedAuthorizer {
+            address: "192.0.2.2".parse().unwrap(),
+            operations: Vec::new(),
+        };
+        let mut clock = RecordingClock::default();
+        let aggregate = run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut NoResponseExecutor::default(),
+            &mut clock,
+        )
+        .unwrap();
+        assert_eq!(clock.delays(), [expected_delay; 2]);
+        assert_eq!(aggregate.stats.packets_attempted, 3);
+        assert_eq!(
+            aggregate.stats.elapsed,
+            expected_delay * 2 + Duration::from_millis(3)
+        );
+
+        request.limits.max_duration = planned - Duration::from_nanos(1);
+        let calls = Arc::new(AtomicUsize::new(0));
+        authorizer.operations.clear();
+        let error = run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut RejectingExecutor {
+                calls: Arc::clone(&calls),
+            },
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::DurationLimit { actual, .. } if actual == planned));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(authorizer.operations.is_empty());
+    }
 }
 
 #[test]

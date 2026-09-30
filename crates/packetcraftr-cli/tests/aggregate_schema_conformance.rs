@@ -2023,7 +2023,7 @@ fn websocket_case() -> Value {
     use packetcraftr_cli::output::{follow::PeerDirection, websocket};
     let run = packetcraftr_core::analysis::Summary::default();
     let summary = packetcraftr_core::analysis::websocket::Summary::default();
-    let complete = websocket::Complete::try_from((&run, summary, Vec::new())).unwrap();
+    let complete = websocket::Complete::try_from((&run, summary, vec![fixture_scope()])).unwrap();
     envelope(
         Command::Websocket,
         websocket::Report {

@@ -66,6 +66,14 @@ impl Collector {
         }
     }
 
+    pub(super) fn direction_generation(
+        &self,
+        flow: &ScopedFlowKey,
+    ) -> Option<(PeerDirection, u64)> {
+        let direction = direction_of(flow, self.client_flow.as_ref()?)?;
+        Some((direction, self.dedup.generation(direction)))
+    }
+
     pub fn finish(mut self, summary: &RunSummary) -> Summary {
         self.summary.clock = summary.clock.clone();
         if let Some(client) = self.client_flow.clone() {
@@ -233,6 +241,10 @@ impl session::Collector for Collector {
 
     fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Chunk>, BoundaryError> {
         Ok(Self::observe(self, record))
+    }
+
+    fn scopes(&self) -> Vec<crate::analysis::scope::Definition> {
+        self.summary.scope.iter().cloned().collect()
     }
 
     fn finish(self, run: &RunSummary) -> Result<(Vec<Chunk>, Summary), BoundaryError> {

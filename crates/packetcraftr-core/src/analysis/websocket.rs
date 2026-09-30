@@ -6,6 +6,7 @@
 use super::{
     FrameRecord, StreamRef, StreamTransport, Summary as RunSummary,
     follow::{self, PeerDirection},
+    reassembly::tcp::Event as TcpEvent,
     session::{self, CollectorNeeds},
 };
 use crate::error::{BoundaryError, Classification, Kind};
@@ -14,6 +15,7 @@ use bytes::Bytes;
 const INTERRUPTED: &str = "TCP gap or stream reuse interrupted WebSocket framing";
 const HEADER_LIMIT: &str = "HTTP upgrade header limit exceeded";
 const INCOMPLETE: &str = "capture ended inside a WebSocket frame or message";
+const CONFLICTING: &str = "conflicting TCP retransmission interrupted WebSocket framing";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_message_bytes: usize,
@@ -115,44 +117,46 @@ impl Collector {
     }
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
         let mut events = Vec::new();
-        for chunk in self.follow.observe(record) {
+        let chunks = self.follow.observe(record);
+        // A conflicting overlap may accompany new data in the same delivery.
+        // Reject it before any of those bytes can complete a message.
+        for event in record.tcp_events {
+            if let TcpEvent::Retransmission {
+                flow,
+                conflicting: true,
+                ..
+            } = event
+                && let Some((direction, generation)) = self.follow.direction_generation(flow)
+            {
+                self.sync_generation(direction, generation, record.number, &mut events)?;
+                let state = &mut self.directions[match direction {
+                    PeerDirection::ClientToServer => 0,
+                    PeerDirection::ServerToClient => 1,
+                }];
+                if !state.disabled {
+                    Self::reject(
+                        state,
+                        direction,
+                        CONFLICTING,
+                        &mut events,
+                        &mut self.summary,
+                        self.limits,
+                        &mut self.retained_bytes,
+                    )?;
+                }
+            }
+        }
+        for chunk in chunks {
+            self.sync_generation(
+                chunk.direction,
+                chunk.direction_generation,
+                chunk.number,
+                &mut events,
+            )?;
             let index = match chunk.direction {
                 PeerDirection::ClientToServer => 0,
                 PeerDirection::ServerToClient => 1,
             };
-            let changed = self.directions[index]
-                .generation
-                .is_some_and(|generation| generation != chunk.direction_generation);
-            if changed {
-                for reset_index in [index, 1 - index] {
-                    if reset_index != index
-                        && self.directions[reset_index].generation
-                            == Some(chunk.direction_generation)
-                    {
-                        continue;
-                    }
-                    let state = &mut self.directions[reset_index];
-                    if !state.buffer.is_empty() || state.opcode.is_some() {
-                        charge_event(self.limits, &mut self.retained_bytes, INTERRUPTED.len())?;
-                        events.push(Event::Issue {
-                            number: chunk.number,
-                            direction: if reset_index == 0 {
-                                PeerDirection::ClientToServer
-                            } else {
-                                PeerDirection::ServerToClient
-                            },
-                            reason: INTERRUPTED.into(),
-                        });
-                        self.summary.incomplete_messages += 1;
-                    }
-                    state.buffer.clear();
-                    state.message.clear();
-                    state.opcode = None;
-                    state.ready = self.explicit_decode_as;
-                    state.disabled = false;
-                    state.expected_mask = None;
-                }
-            }
             if self.directions[index].disabled {
                 continue;
             }
@@ -165,11 +169,6 @@ impl Collector {
                 return Err(failure("WebSocket aggregate buffer limit exceeded"));
             }
             let state = &mut self.directions[index];
-            state.number = chunk.number;
-            state.generation = Some(chunk.direction_generation);
-            if state.disabled {
-                continue;
-            }
             state.buffer.extend_from_slice(&chunk.bytes);
             if !state.ready {
                 let end = state
@@ -387,6 +386,53 @@ impl Collector {
         });
         Ok(())
     }
+    fn sync_generation(
+        &mut self,
+        direction: PeerDirection,
+        generation: u64,
+        number: u64,
+        events: &mut Vec<Event>,
+    ) -> Result<(), BoundaryError> {
+        let index = match direction {
+            PeerDirection::ClientToServer => 0,
+            PeerDirection::ServerToClient => 1,
+        };
+        if self.directions[index]
+            .generation
+            .is_some_and(|previous| previous != generation)
+        {
+            for reset_index in [index, 1 - index] {
+                if reset_index != index
+                    && self.directions[reset_index].generation == Some(generation)
+                {
+                    continue;
+                }
+                let state = &mut self.directions[reset_index];
+                if !state.buffer.is_empty() || state.opcode.is_some() {
+                    charge_event(self.limits, &mut self.retained_bytes, INTERRUPTED.len())?;
+                    events.push(Event::Issue {
+                        number,
+                        direction: if reset_index == 0 {
+                            PeerDirection::ClientToServer
+                        } else {
+                            PeerDirection::ServerToClient
+                        },
+                        reason: INTERRUPTED.into(),
+                    });
+                    self.summary.incomplete_messages += 1;
+                }
+                state.buffer.clear();
+                state.message.clear();
+                state.opcode = None;
+                state.ready = self.explicit_decode_as;
+                state.disabled = false;
+                state.expected_mask = None;
+            }
+        }
+        self.directions[index].number = number;
+        self.directions[index].generation = Some(generation);
+        Ok(())
+    }
     pub fn finish(mut self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         let mut events = Vec::new();
         for (index, state) in self.directions.into_iter().enumerate() {
@@ -522,6 +568,9 @@ impl session::Collector for Collector {
     }
     fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
         Self::observe(self, record)
+    }
+    fn scopes(&self) -> Vec<super::scope::Definition> {
+        session::Collector::scopes(&self.follow)
     }
     fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
         Self::finish(self, run)

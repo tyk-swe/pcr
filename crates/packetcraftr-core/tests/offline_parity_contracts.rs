@@ -60,6 +60,144 @@ fn websocket_upgrade_segmented_masked_continuations_and_control_frames() {
 }
 
 #[test]
+fn websocket_conflicting_retransmissions_stop_ambiguous_framing_until_stream_reuse() {
+    use packetcraftr_core::protocol::transport::Tcp;
+
+    for (prefix, retransmission, tail, conflicting) in [
+        (
+            b"\x82\x03a".as_slice(),
+            b"\x82\x03X".as_slice(),
+            b"bc".as_slice(),
+            true,
+        ),
+        (
+            b"\x82\x03a".as_slice(),
+            b"\x82\x03Xbc".as_slice(),
+            b"".as_slice(),
+            true,
+        ),
+        (
+            b"\x02\x01a".as_slice(),
+            b"\x02\x01X".as_slice(),
+            b"\x80\x02bc".as_slice(),
+            true,
+        ),
+        (
+            b"\x82\x03a".as_slice(),
+            b"\x82\x03a".as_slice(),
+            b"bc".as_slice(),
+            false,
+        ),
+    ] {
+        let mut capture = Capture::new();
+        let mut stream = Stream::new(40000);
+        capture.open(&mut stream);
+        let spec = capture.client_spec(&stream, Tcp::ACK);
+        capture.client(&mut stream, prefix);
+        capture.push(spec, retransmission);
+        capture.client(&mut stream, tail);
+        capture.server(&mut stream, b"\x82\x02ok");
+        capture.reopen(&mut stream, 10000);
+        capture.client(&mut stream, b"\x82\x03new");
+
+        let collector = websocket::Collector::new(
+            StreamRef {
+                transport: StreamTransport::Tcp,
+                index: 0,
+            },
+            websocket::Limits::default(),
+            true,
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        let outcome = analysis::Session::new(registry(), Options::default(), collector, None)
+            .run(
+                &mut reader(&capture.frames),
+                |_| Ok(()),
+                |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(outcome.summary.malformed_frames, u64::from(conflicting));
+        assert_eq!(outcome.summary.messages, if conflicting { 2 } else { 3 });
+        assert_eq!(outcome.summary.incomplete_messages, 0);
+        let messages: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                websocket::Event::Message { bytes, .. } => Some(bytes.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(messages.contains(&b"abc".as_slice()), !conflicting);
+        assert!(messages.contains(&b"ok".as_slice()));
+        assert!(messages.contains(&b"new".as_slice()));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event,
+                    websocket::Event::Issue { number: 5, reason, .. }
+                        if reason.contains("conflicting TCP retransmission")
+                ))
+                .count(),
+            usize::from(conflicting)
+        );
+    }
+}
+
+#[test]
+fn websocket_conflicts_in_pending_bytes_are_reported_and_charge_evidence_limits() {
+    use packetcraftr_core::protocol::transport::Tcp;
+
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    capture.open(&mut stream);
+    let mut pending = capture.client_spec(&stream, Tcp::ACK);
+    pending.sequence += 2;
+    capture.push(pending.clone(), b"abc");
+    capture.push(pending, b"Xbc");
+    capture.client(&mut stream, b"\x82\x03");
+    for maximum in [1, websocket::Limits::default().max_retained_bytes] {
+        let collector = websocket::Collector::new(
+            StreamRef {
+                transport: StreamTransport::Tcp,
+                index: 0,
+            },
+            websocket::Limits {
+                max_retained_bytes: maximum,
+                ..Default::default()
+            },
+            true,
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        let outcome = analysis::Session::new(registry(), Options::default(), collector, None).run(
+            &mut reader(&capture.frames),
+            |_| Ok(()),
+            |event| {
+                events.push(event);
+                Ok(())
+            },
+        );
+        if maximum == 1 {
+            let analysis::Error::Sink { source, .. } = outcome.err().unwrap() else {
+                panic!("expected a collector evidence-limit error");
+            };
+            assert!(source.to_string().contains("retained evidence limit"));
+        } else {
+            let outcome = outcome.unwrap();
+            assert_eq!(outcome.summary.messages, 0);
+            assert_eq!(outcome.summary.malformed_frames, 1);
+            assert!(matches!(
+                events.as_slice(),
+                [websocket::Event::Issue { .. }]
+            ));
+        }
+    }
+}
+
+#[test]
 fn websocket_limits_count_each_message_in_one_delivery_and_final_issues() {
     let selector = StreamRef {
         transport: StreamTransport::Tcp,
@@ -234,6 +372,114 @@ fn tls12_certificates_cross_records_and_tls13_reports_encryption() {
         if !encrypted {
             assert_eq!(chain.entries[0].der.as_ref(), [1, 2, 3]);
         }
+    }
+}
+
+#[test]
+fn certificates_without_client_hello_retain_the_chain_and_missing_hello_gap() {
+    use common::tls_frames::{ServerHelloSpec, TLS_1_2, handshake_record, server_hello};
+
+    for (version, segmented) in [(TLS_1_2, false), (TLS_1_2, true), (0x0304, false)] {
+        let mut capture = Capture::new();
+        let mut stream = Stream::new(40000);
+        let mut payload = handshake_record(&server_hello(&ServerHelloSpec {
+            selected_version: Some(version),
+            ..Default::default()
+        }));
+        if version == TLS_1_2 {
+            payload.extend(handshake_record(&[11, 0, 0, 9, 0, 0, 6, 0, 0, 3, 1, 2, 3]));
+        }
+        if segmented {
+            for bytes in payload.chunks(3) {
+                capture.server(&mut stream, bytes);
+            }
+        } else {
+            capture.server(&mut stream, &payload);
+        }
+        let collector = tls::Collector::new(tls::Limits::default())
+            .unwrap()
+            .with_certificates();
+        let mut events = Vec::new();
+        let outcome = analysis::Session::new(registry(), Options::default(), collector, None)
+            .run(
+                &mut reader(&capture.frames),
+                |_| Ok(()),
+                |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(outcome.summary.by_status.get(&tls::Status::Gap), Some(&1));
+        let session = &events[0].session;
+        assert_eq!(session.status, tls::Status::Gap);
+        assert_eq!(session.reason.as_deref(), Some("no ClientHello observed"));
+        assert!(session.client.is_none());
+        assert!(session.server.is_some());
+        let chain = session.certificates.as_ref().unwrap();
+        if version == TLS_1_2 {
+            assert_eq!(chain.status, tls::CertificateStatus::Complete);
+            assert_eq!(chain.entries.len(), 1);
+            assert_eq!(chain.entries[0].der.as_ref(), [1, 2, 3]);
+        } else {
+            assert_eq!(chain.status, tls::CertificateStatus::Encrypted);
+            assert!(chain.entries.is_empty());
+        }
+    }
+}
+
+#[test]
+fn certificates_without_client_hello_keep_gap_evidence_when_no_chain_arrives() {
+    use common::tls_frames::{
+        ServerHelloSpec, TLS_1_2, change_cipher_spec, handshake_record, server_hello,
+    };
+    use packetcraftr_core::protocol::transport::Tcp;
+
+    for ending in ["capture", "fin", "cipher"] {
+        let mut capture = Capture::new();
+        let mut stream = Stream::new(40000);
+        capture.server(
+            &mut stream,
+            &handshake_record(&server_hello(&ServerHelloSpec {
+                selected_version: Some(TLS_1_2),
+                ..Default::default()
+            })),
+        );
+        match ending {
+            "fin" => capture.push(capture.server_spec(&stream, Tcp::FIN | Tcp::ACK), &[]),
+            "cipher" => capture.server(&mut stream, &change_cipher_spec()),
+            _ => {}
+        }
+        let collector = tls::Collector::new(tls::Limits::default())
+            .unwrap()
+            .with_certificates();
+        let mut events = Vec::new();
+        let outcome = analysis::Session::new(registry(), Options::default(), collector, None)
+            .run(
+                &mut reader(&capture.frames),
+                |_| Ok(()),
+                |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(events.len(), 1, "{ending}");
+        assert_eq!(outcome.summary.by_status.get(&tls::Status::Gap), Some(&1));
+        let session = &events[0].session;
+        assert_eq!(session.status, tls::Status::Gap);
+        assert_eq!(session.reason.as_deref(), Some("no ClientHello observed"));
+        let chain = session.certificates.as_ref().unwrap();
+        assert!(chain.entries.is_empty());
+        assert_eq!(
+            chain.status,
+            if ending == "cipher" {
+                tls::CertificateStatus::NotObserved
+            } else {
+                tls::CertificateStatus::Incomplete
+            }
+        );
     }
 }
 

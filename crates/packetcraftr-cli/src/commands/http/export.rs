@@ -128,19 +128,19 @@ impl Export {
             .file
             .flush()
             .map_err(|error| CliError::caused(Kind::Io, &error))?;
-        let encoding = message
-            .head
-            .as_ref()
-            .and_then(|head| {
-                head.headers
-                    .iter()
-                    .find(|header| header.name.eq_ignore_ascii_case("content-encoding"))
-            })
-            .map(|header| {
-                String::from_utf8_lossy(&header.value)
-                    .trim()
-                    .to_ascii_lowercase()
-            });
+        let encoding = message.head.as_ref().and_then(|head| {
+            let encodings: Vec<_> = head
+                .headers
+                .iter()
+                .filter(|header| header.name.eq_ignore_ascii_case("content-encoding"))
+                .map(|header| {
+                    String::from_utf8_lossy(&header.value)
+                        .trim()
+                        .to_ascii_lowercase()
+                })
+                .collect();
+            (!encodings.is_empty()).then(|| encodings.join(", "))
+        });
         let mut entity = Entity {
             path: self.destination.join(&name).display().to_string(),
             bytes: pending.bytes,

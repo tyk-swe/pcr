@@ -5,11 +5,16 @@ mod common;
 use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 use packetcraftr_core::{
     build::Builder,
-    capture_file::Writer,
+    capture_file::{Interface, TimestampResolution, Writer},
     frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
-    protocol::{builtin, network::Ipv4, transport::Tcp},
+    protocol::{
+        builtin,
+        link::{Ethernet, Vlan},
+        network::Ipv4,
+        transport::Tcp,
+    },
 };
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -151,6 +156,90 @@ fn upgrade_and_explicit_decode_unmask_segmented_continuations_and_report_control
             ["websocket_message", "websocket_control", "complete"]
         );
     }
+}
+
+#[test]
+fn selected_pcapng_conversation_publishes_its_interface_and_encapsulation_in_both_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scoped.pcapng");
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    let builder = Builder::new(builtin::registry());
+    for interface in 0..2 {
+        writer
+            .add_interface_description(Interface {
+                link_type: LinkType::ETHERNET,
+                snap_len: 65535,
+                timestamp_resolution: TimestampResolution::Decimal(6),
+                timestamp_offset: 0,
+            })
+            .unwrap();
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(Vlan {
+            vlan_id: 17 + interface as u16,
+            ..Default::default()
+        });
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "198.51.100.2".parse().unwrap(),
+            ..Default::default()
+        });
+        packet.push(Tcp {
+            source_port: 40000,
+            destination_port: 8080,
+            sequence: 100,
+            flags: Tcp::ACK,
+            ..Default::default()
+        });
+        packet.push(Raw::new(vec![0x82, 1, b'a' + interface as u8]));
+        let built = builder
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+        let mut frame = Frame::new(
+            UNIX_EPOCH + Duration::from_secs(u64::from(interface)),
+            LinkType::ETHERNET,
+            built.bytes,
+        )
+        .unwrap();
+        frame.interface = Some(interface);
+        writer.write_frame(&frame).unwrap();
+    }
+    std::fs::write(&path, writer.into_inner()).unwrap();
+    let mut scope_ids = Vec::new();
+    for (stream, payload) in [("tcp:0", "61"), ("tcp:1", "62")] {
+        let args = [
+            "--output",
+            "json",
+            "websocket",
+            path.to_str().unwrap(),
+            "--stream",
+            stream,
+            "--decode-as",
+            "websocket",
+        ];
+        let report = parse_json(&run_success(&args));
+        assert_eq!(report["result"]["events"][0]["bytes_hex"], payload);
+        let scopes = report["result"]["scopes"].as_array().unwrap();
+        assert_eq!(scopes.len(), 1);
+        let interface = scope_ids.len() as u64;
+        assert_eq!(scopes[0]["interface"], interface);
+        assert_eq!(
+            scopes[0]["encapsulation"],
+            serde_json::json!([
+                {"kind": "vlan", "vlan_id": 17 + interface}
+            ])
+        );
+        scope_ids.push(scopes[0]["id"].as_u64().unwrap());
+        let mut ndjson = args;
+        ndjson[1] = "ndjson";
+        let rows = parse_ndjson(&run_success(&ndjson));
+        assert_contiguous(&rows);
+        assert_eq!(
+            rows.last().unwrap()["result"]["scopes"],
+            report["result"]["scopes"]
+        );
+    }
+    assert_ne!(scope_ids[0], scope_ids[1]);
 }
 
 #[test]

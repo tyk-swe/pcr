@@ -76,6 +76,9 @@ probe/evidence budget. The default is one cycle; the maximum is 1,024. The defau
 at its own destination/unreachable evidence. Hop aggregates retain responder
 counts and latency count/min/mean/max, with loss over every cycle's attempted
 probes. Rust callers set `Request::cycles` and `Request::cycle_interval`.
+Between cycles, pacing waits for the larger of the cycle interval and the rate
+delay for the preceding hop's probes. Planned-duration admission includes that
+delay, including when the cycle interval is zero.
 
 Correlated IPv4 fragmentation-needed and IPv6 Packet Too Big responses retain
 `advertised_mtu` in scan/traceroute evidence. Unknown IPv4 MTU zero is preserved.

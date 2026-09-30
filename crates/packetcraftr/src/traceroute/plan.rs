@@ -118,6 +118,16 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
     }
 }
 
+pub(super) fn cycle_delay(request: &Request) -> Result<Duration, Error> {
+    let delay = rate_delay(
+        &Probes,
+        "probes_per_second",
+        usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
+        request.probes_per_second,
+    )?;
+    Ok(request.cycle_interval.max(delay))
+}
+
 pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> {
     // hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it never exceeds
     // 256
@@ -140,14 +150,11 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
             .saturating_mul(request.cycles),
     )
     .ok_or_else(&overflow)?;
+    let cycle_wait = cycle_delay(request)?
+        .checked_mul(request.cycles.saturating_sub(1))
+        .ok_or_else(&overflow)?;
     exchange
         .checked_add(delay)
-        .and_then(|duration| {
-            duration.checked_add(
-                request
-                    .cycle_interval
-                    .saturating_mul(request.cycles.saturating_sub(1)),
-            )
-        })
+        .and_then(|duration| duration.checked_add(cycle_wait))
         .ok_or_else(overflow)
 }

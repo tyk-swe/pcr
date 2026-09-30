@@ -27,8 +27,13 @@ by `--max-application-retained-bytes` (64 MiB by default); serialized output has
 its own `--max-application-output-bytes` limit. Resource presets apply to each
 of these shared limits. Stream-count and source-span arguments are unavailable
 because the command selects one conversation and does not retain source spans.
+JSON and NDJSON publish that conversation's capture scope, including its
+interface and encapsulation. Conflicting TCP retransmissions report an issue
+and stop framing in the affected direction until a new connection generation.
 
 TLS certificate collection is optional so existing hello-only collection remains unchanged. Plaintext TLS 1.2 and earlier chains retain every exact DER byte and its SHA-256 digest, within 32 certificates and the existing handshake buffer ceiling. TLS 1.3 reports encrypted collection status. Certificate collection status is separate from the hello handshake status; missing chains remain incomplete, never invented.
+Plaintext chains remain collectable when the capture missed the ClientHello;
+the session retains its missing-hello gap status.
 
 TCP timing reports SYN-to-SYN/ACK and SYN-to-final-ACK duration, plus ACK RTT count, minimum, mean, and maximum for each canonical direction. Retransmitted sequence ranges are excluded using Karn's rule; clock regressions, outstanding segments without captured ACKs, and pending-table exhaustion have separate counters. Sequence comparisons handle 32-bit wrap within the TCP serial-number half-space. At most 4,096 outstanding observations are retained per direction.
 
@@ -43,6 +48,9 @@ the most recently observed connection.
 Size bins count captured lengths, including truncated captures, at 0–63, 64–127, 128–255, 256–511, 512–1023, 1024–1518, 1519–4095, and 4096+ bytes. Empty bins remain present in the histogram.
 
 HTTP body chunks contain entity bytes after transfer framing, so chunk sizes, CRLFs, and trailers never appear in exported content. A terminal message event follows the chunks. Callers stage entity data until the message reports complete, discard incomplete objects, and publish deterministic files atomically. Content decoding streams gzip or zlib-wrapped deflate under a separate decoded-byte ceiling, normally 16 MiB and configurable up to the existing 256 MiB body ceiling, retaining encoded entity files. The collector enforces 256 MiB of cumulative emitted entity bytes; filesystem callers also bound cumulative encoded and decoded output bytes.
+Repeated `Content-Encoding` fields form one ordered list. Export decoding
+supports a single `gzip`, `x-gzip`, or `deflate` coding; other lists retain only
+the encoded body.
 
 Deduplication compares exact packet bytes, original lengths, link type, normalized capture interface, and capture direction against preceding input frames, independently of timestamps. The default window includes 1,024 preceding input frames and retains at most 64 MiB of packet bytes and per-frame metadata. Retained-byte exhaustion is an explicit failure. Packet and metadata records remain raw, preserving unknown options and bytes.
 

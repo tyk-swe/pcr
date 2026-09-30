@@ -23,7 +23,7 @@ use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
 use super::error::Probes;
 use super::evidence::ProbeClassifier;
-use super::plan::{build_batches, probe_target, worst_case_duration};
+use super::plan::{build_batches, cycle_delay, probe_target, worst_case_duration};
 use super::{Event, Probe, Report, Request, Termination};
 use crate::probe::enforce_deadline;
 
@@ -112,11 +112,12 @@ where
         emit,
     );
     let mut stats = crate::Stats::default();
+    let cycle_delay = cycle_delay(request)?;
     for cycle in 1..=request.cycles {
         if cycle > 1 {
-            crate::execution::pause(deadline, clock, request.cycle_interval)
+            crate::execution::pause(deadline, clock, cycle_delay)
                 .map_err(|paused| paused.into_error(&Probes, u64::from(cycle)))?;
-            stats.elapsed = stats.elapsed.saturating_add(request.cycle_interval);
+            stats.elapsed = stats.elapsed.saturating_add(cycle_delay);
             evidence.classifier_mut().termination = Termination::Timeout;
         }
         let cycle_stats = run_batches(

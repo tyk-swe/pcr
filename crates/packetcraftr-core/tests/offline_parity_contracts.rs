@@ -60,6 +60,74 @@ fn websocket_upgrade_segmented_masked_continuations_and_control_frames() {
 }
 
 #[test]
+fn websocket_data_frames_after_close_are_rejected_per_direction() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &[0x81, 0x01, b'a']);
+    capture.client(&mut stream, &[0x88, 0x00]);
+    capture.client(&mut stream, &[0x81, 0x01, b'b']);
+    capture.server(&mut stream, &[0x89, 0x00]);
+    capture.server(&mut stream, &[0x81, 0x01, b'c']);
+    let mut collector = websocket::Collector::new(
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
+        },
+        websocket::Limits::default(),
+        true,
+    )
+    .unwrap();
+    let mut events = Vec::new();
+    let run = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &Options {
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            events.extend(collector.observe(&record)?);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let (last, summary) = collector.finish(&run).unwrap();
+    events.extend(last);
+    assert_eq!(summary.messages, 2);
+    assert_eq!(summary.control_frames, 2);
+    assert_eq!(summary.malformed_frames, 1);
+    assert!(
+        events.iter().any(
+            |event| matches!(event,websocket::Event::Message {bytes,..} if bytes.as_ref()==b"a")
+        )
+    );
+    assert!(
+        events.iter().any(
+            |event| matches!(event,websocket::Event::Message {bytes,..} if bytes.as_ref()==b"c")
+        )
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, websocket::Event::Control { opcode: 8, .. }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, websocket::Event::Control { opcode: 9, .. }))
+    );
+    assert!(events.iter().any(|event| matches!(event,
+        websocket::Event::Issue { direction: analysis::follow::PeerDirection::ClientToServer, reason, .. }
+        if reason.contains("close"))));
+    assert!(
+        !events.iter().any(
+            |event| matches!(event,websocket::Event::Message {bytes,..} if bytes.as_ref()==b"b")
+        )
+    );
+}
+
+#[test]
 fn websocket_conflicting_retransmissions_stop_ambiguous_framing_until_stream_reuse() {
     use packetcraftr_core::protocol::transport::Tcp;
 

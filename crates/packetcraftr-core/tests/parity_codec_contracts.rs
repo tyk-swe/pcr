@@ -8,7 +8,7 @@ use packetcraftr_core::{
     field::FieldValue,
     filter::{Filter, Limits},
     frame::Frame,
-    layer::{Layer, Padding},
+    layer::{Layer, Padding, Raw},
     packet::Packet,
     protocol::{
         application::{
@@ -167,6 +167,55 @@ fn tftp_all_six_opcodes_and_option_pairs_roundtrip() {
             .as_str(),
         "tftp"
     );
+}
+#[test]
+fn tftp_request_modes_validate_against_rfc1350_in_construction_and_decode() {
+    let registry = builtin::registry();
+    let context = codec::LayerDecodeContext {
+        parent: None,
+        registry: &registry,
+        network: None,
+        discriminator: None,
+    };
+    for mode in [b"netascii".as_slice(), b"OCTET", b"Mail"] {
+        roundtrip(Tftp {
+            mode: Bytes::copy_from_slice(mode),
+            ..Tftp::default()
+        });
+    }
+    for opcode in [1u16, 2] {
+        let mut packet = Packet::new();
+        packet.push(Tftp {
+            opcode,
+            mode: Bytes::from_static(b"bogus"),
+            ..Tftp::default()
+        });
+        assert!(
+            build::Builder::new(Arc::clone(&registry))
+                .build(packet, Default::default(), Default::default())
+                .is_err(),
+            "opcode={opcode}"
+        );
+        let mut wire = opcode.to_be_bytes().to_vec();
+        wire.extend_from_slice(b"file\0bogus\0");
+        assert!(
+            registry
+                .codec("tftp")
+                .unwrap()
+                .decode(wire.into(), &context)
+                .is_err(),
+            "opcode={opcode}"
+        );
+    }
+    roundtrip(Tftp {
+        opcode: 6,
+        mode: Bytes::from_static(b"bogus"),
+        options: vec![OptionPair {
+            name: Bytes::from_static(b"blksize"),
+            value: Bytes::from_static(b"1024"),
+        }],
+        ..Tftp::default()
+    });
 }
 #[test]
 fn rtp_keeps_csrc_extension_and_nonzero_padding_exact() {
@@ -336,6 +385,94 @@ fn structured_http_derives_length_or_chunking_and_rejects_header_injection() {
         layer.field("method"),
         Some(FieldValue::Text("POST".to_owned()))
     );
+}
+
+#[test]
+fn constructed_http_rejects_payload_children_while_parsed_heads_accept_bodies() {
+    for start in [
+        StartLine::Request {
+            method: "GET".to_owned(),
+            target: Bytes::from_static(b"/"),
+            version: "HTTP/1.1".to_owned(),
+        },
+        StartLine::Response {
+            version: "HTTP/1.1".to_owned(),
+            status: 204,
+            reason: Bytes::from_static(b"No Content"),
+        },
+    ] {
+        let mut packet = Packet::new();
+        packet.push(Http::new(start, Vec::new(), Bytes::new(), Framing::ContentLength).unwrap());
+        packet.push(Raw::new(b"extra".to_vec()));
+        assert!(
+            build::Builder::new(builtin::registry())
+                .build(packet, Default::default(), Default::default())
+                .is_err()
+        );
+    }
+    let mut packet = Packet::new();
+    packet.push(
+        Http::new(
+            StartLine::Request {
+                method: "POST".to_owned(),
+                target: Bytes::from_static(b"/"),
+                version: "HTTP/1.1".to_owned(),
+            },
+            Vec::new(),
+            Bytes::from_static(b"abc"),
+            Framing::ContentLength,
+        )
+        .unwrap(),
+    );
+    packet.push(Raw::new(b"extra".to_vec()));
+    assert!(
+        build::Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .is_err()
+    );
+    let fields = BTreeMap::from([
+        (
+            "wire".to_owned(),
+            FieldValue::Bytes(Bytes::from_static(
+                b"POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\n",
+            )),
+        ),
+        (
+            "body".to_owned(),
+            FieldValue::Bytes(Bytes::from_static(b"abc")),
+        ),
+    ]);
+    let mut packet = Packet::new();
+    packet.push_boxed(
+        builtin::registry()
+            .codec("http")
+            .unwrap()
+            .make_layer(&fields)
+            .unwrap(),
+    );
+    packet.push(Raw::new(b"extra".to_vec()));
+    assert!(
+        build::Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .is_err()
+    );
+    // A wire-parsed header still takes its body from the payload layer, so a
+    // decoded header and body rebuild to identical bytes.
+    let mut packet = Packet::new();
+    packet
+        .push(Http::try_from(b"POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n".as_slice()).unwrap());
+    packet.push(Raw::new(b"extra".to_vec()));
+    let first = built(packet);
+    assert!(first.bytes.ends_with(b"extra"));
+    let decoded = decode::Dissector::new(rooted_registry("http"))
+        .decode(
+            Frame::new(UNIX_EPOCH, ROOT_LINK_TYPE, first.bytes.clone()).unwrap(),
+            decode::Options::default(),
+        )
+        .unwrap();
+    let document = document::Packet::from_packet(&decoded.packet);
+    let rebuilt = built(document.to_packet(&builtin::registry(), 64).unwrap());
+    assert_eq!(first.bytes, rebuilt.bytes);
 }
 
 #[test]

@@ -148,6 +148,7 @@ impl Http {
             ));
         }
         layer.head.body(None)?;
+        layer.constructed = true;
         layer.constructed_body = match framing {
             Framing::ContentLength => body,
             Framing::Chunked => {

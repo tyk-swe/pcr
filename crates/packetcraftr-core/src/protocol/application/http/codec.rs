@@ -42,6 +42,7 @@ impl TryFrom<&[u8]> for Http {
         Ok(Self {
             head,
             constructed_body: Bytes::new(),
+            constructed: false,
         })
     }
 }
@@ -350,10 +351,10 @@ impl LayerCodec for HttpCodec {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<Http>(NAME, layer)?;
-        if !layer.constructed_body.is_empty() && !payload.is_empty() {
+        if layer.constructed && !payload.is_empty() {
             return Err(invalid(
                 NAME,
-                "constructed body cannot also have a payload layer",
+                "constructed message cannot also have a payload layer",
             ));
         }
         ensure_encode_budget(
@@ -377,6 +378,7 @@ impl LayerCodec for HttpCodec {
             layer: Box::new(Http {
                 head,
                 constructed_body: Bytes::new(),
+                constructed: false,
             }),
             consumed,
             payload_len: input.len() - consumed,
@@ -417,6 +419,7 @@ impl LayerCodec for HttpCodec {
                         "retained constructed body has incomplete or conflicting framing",
                     ));
                 }
+                layer.constructed = true;
             }
             layer.constructed_body = body.clone();
         }

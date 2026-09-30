@@ -69,6 +69,7 @@ struct Direction {
     opcode: Option<u8>,
     ready: bool,
     disabled: bool,
+    closed: bool,
     generation: Option<u64>,
     expected_mask: Option<bool>,
     number: u64,
@@ -278,7 +279,22 @@ impl Collector {
                                     bytes: payload,
                                 });
                                 self.summary.control_frames += 1;
+                                if opcode == 8 {
+                                    state.closed = true;
+                                }
                                 continue;
+                            }
+                            if state.closed {
+                                Self::reject(
+                                    state,
+                                    peer,
+                                    "data frame after the close frame",
+                                    &mut events,
+                                    &mut self.summary,
+                                    self.limits,
+                                    &mut self.retained_bytes,
+                                )?;
+                                break;
                             }
                             if opcode == 0 {
                                 if state.opcode.is_none() {
@@ -426,6 +442,7 @@ impl Collector {
                 state.opcode = None;
                 state.ready = self.explicit_decode_as;
                 state.disabled = false;
+                state.closed = false;
                 state.expected_mask = None;
             }
         }

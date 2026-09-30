@@ -106,6 +106,12 @@ fn wire(layer: &Tftp) -> Result<Vec<u8>, crate::codec::Error> {
     let mut wire = layer.opcode.to_be_bytes().to_vec();
     match layer.opcode {
         1 | 2 => {
+            if !layer.mode.eq_ignore_ascii_case(b"netascii")
+                && !layer.mode.eq_ignore_ascii_case(b"octet")
+                && !layer.mode.eq_ignore_ascii_case(b"mail")
+            {
+                return Err(invalid(NAME, "invalid transfer mode"));
+            }
             terminated(&mut wire, &layer.filename, false)?;
             terminated(&mut wire, &layer.mode, false)?;
         }

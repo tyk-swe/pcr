@@ -1511,6 +1511,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- WebSocket streams reject data frames sent after a peer's close frame instead
+  of emitting them as valid messages.
+- TFTP read/write requests validate the RFC 1350 transfer mode (`netascii`,
+  `octet`, or `mail`) on decode and construction.
+- Constructed HTTP/1 messages reject separate payload layers regardless of the
+  constructed body length, including empty bodies and body-forbidden responses.
 - WebSocket collection reports conflicting TCP retransmissions and publishes
   the selected conversation's capture scope in JSON and NDJSON.
 - Repeated traceroute cycles honor both the configured rate ceiling and cycle

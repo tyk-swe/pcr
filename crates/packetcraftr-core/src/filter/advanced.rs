@@ -409,17 +409,21 @@ fn values(operand: &Operand, context: &eval::Context<'_>) -> Vec<FieldValue> {
         Operand::Field(field) => {
             let mut result = Vec::new();
             eval::each_value(context, field, |value| {
-                flatten(value.into_owned(), &mut result);
+                result.push(value.into_owned());
                 false
             });
             result
         }
         Operand::Function(Function::Count, inner) => {
-            let count = values(inner, context).len();
-            if count == 0 {
+            let selected = values(inner, context);
+            if selected.is_empty() {
                 Vec::new()
             } else {
-                vec![FieldValue::Unsigned(count as u64)]
+                let mut scalars = Vec::new();
+                for value in selected {
+                    flatten(value, &mut scalars);
+                }
+                vec![FieldValue::Unsigned(scalars.len() as u64)]
             }
         }
         Operand::Function(func, inner) => values(inner, context)
@@ -432,6 +436,9 @@ fn values(operand: &Operand, context: &eval::Context<'_>) -> Vec<FieldValue> {
                     Some(FieldValue::Unsigned(value.len() as u64))
                 }
                 (Function::Len, FieldValue::Mac(_)) => Some(FieldValue::Unsigned(6)),
+                (Function::Len, FieldValue::List(value)) => {
+                    Some(FieldValue::Unsigned(value.len() as u64))
+                }
                 (Function::Lower, FieldValue::Text(value)) => {
                     Some(FieldValue::Text(value.to_ascii_lowercase()))
                 }
@@ -457,8 +464,14 @@ fn byte_value(value: &FieldValue) -> Option<&[u8]> {
     }
 }
 pub(super) fn test(predicate: &Predicate, context: &eval::Context<'_>) -> bool {
-    let left = values(&predicate.left, context);
-    let right = values(&predicate.right, context);
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for value in values(&predicate.left, context) {
+        flatten(value, &mut left);
+    }
+    for value in values(&predicate.right, context) {
+        flatten(value, &mut right);
+    }
     if left.is_empty() || right.is_empty() {
         return false;
     }

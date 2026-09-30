@@ -66,7 +66,8 @@ LLDP permits 256 TLVs; RTCP permits 64 compound entries; MQTT packets permit
 1 MiB. TLS certificate collection retains at most 32 entries within the existing
 128 KiB handshake ceiling. WebSocket messages and HTTP entities default to
 16 MiB; WebSocket direction buffers share a 32 MiB ceiling, further bounded by
-the shared application buffer limit (16 MiB by default in the CLI). WebSocket
+the shared application buffer limit (16 MiB plus 14 bytes by default and with
+`workstation-v1` in the WebSocket CLI). Explicit buffer overrides remain exact. WebSocket
 message counts include control frames, and retained evidence includes event
 metadata plus payloads. The single-stream command omits application stream and
 source-span limits. HTTP exports share a 256 MiB

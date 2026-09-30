@@ -237,6 +237,58 @@ fn connect_scan_reports_rtt_statistics_across_verdicts() {
     assert_eq!(closed.load(Ordering::SeqCst), 2);
 }
 
+#[test]
+fn connect_scan_sequence_order_matches_raw_plans_with_and_without_shuffle() {
+    let addresses = ["192.0.2.1".parse().unwrap(), "192.0.2.2".parse().unwrap()];
+    let ports = [90, 91];
+    for seed in [None, Some(42)] {
+        let request = Request {
+            targets: crate::target::Selection {
+                include: addresses
+                    .iter()
+                    .map(|address| crate::target::Target::Address(*address).into())
+                    .collect(),
+                exclude: Vec::new(),
+            },
+            transport: Transport::Tcp,
+            tcp_mode: Default::default(),
+            shuffle_seed: seed,
+            tcp_profiles: Default::default(),
+            udp_payload: bytes::Bytes::new(),
+            udp_profiles: Default::default(),
+            address_family: crate::target::Family::Any,
+            ports: ports.to_vec(),
+            attempts: 2,
+            timeout: Duration::from_secs(1),
+            probes_per_second: None,
+            max_in_flight: 1,
+            limits: Limits::default(),
+            route: Default::default(),
+            collection: Default::default(),
+        };
+        let report = collect(&client(FakeProviders::default()), request).unwrap();
+        let mut actual = report
+            .endpoints
+            .iter()
+            .flat_map(|endpoint| &endpoint.probes)
+            .map(|probe| {
+                (
+                    probe.sequence,
+                    (probe.endpoint.ip(), probe.attempt, probe.endpoint.port()),
+                )
+            })
+            .collect::<Vec<_>>();
+        actual.sort_by_key(|(sequence, _)| *sequence);
+        assert_eq!(
+            actual
+                .into_iter()
+                .map(|(_, entry)| entry)
+                .collect::<Vec<_>>(),
+            super::super::plan::schedule(&addresses, &ports, 2, seed)
+        );
+    }
+}
+
 struct Faulty {
     port: u16,
     fault: Fault,

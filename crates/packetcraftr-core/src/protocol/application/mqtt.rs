@@ -250,8 +250,17 @@ impl Mqtt {
                 let mut count = 0;
                 while cursor.index < self.body.len() {
                     let topic = cursor.text()?;
-                    if topic.is_empty() {
-                        return Err(invalid(NAME, "empty topic filter"));
+                    if topic.is_empty()
+                        || topic.split(|byte| *byte == b'/').any(|level| {
+                            level.contains(&b'+') && level != b"+"
+                                || level.contains(&b'#') && level != b"#"
+                        })
+                        || topic
+                            .iter()
+                            .position(|byte| *byte == b'#')
+                            .is_some_and(|index| index + 1 != topic.len())
+                    {
+                        return Err(invalid(NAME, "invalid topic filter"));
                     }
                     if self.packet_type == 8 && cursor.byte()? > 2 {
                         return Err(invalid(NAME, "invalid subscription QoS"));

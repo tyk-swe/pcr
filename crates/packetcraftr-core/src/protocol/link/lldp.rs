@@ -128,7 +128,7 @@ fn validate(tlvs: &[Tlv]) -> Result<(), crate::codec::Error> {
             8 => {
                 let value = &tlv.value;
                 value.first().is_some_and(|length| {
-                    *length >= 2
+                    (2..=31).contains(length)
                         && usize::from(*length) + 7 <= value.len()
                         && value[usize::from(*length) + 6] as usize + usize::from(*length) + 7
                             == value.len()

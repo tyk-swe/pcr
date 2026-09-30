@@ -1511,6 +1511,20 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- List filters measure list length before flattening and count present empty
+  lists as zero while preserving missing-field semantics.
+- WebSocket controls use their own payload ceiling and validate close status
+  and UTF-8 reasons; disabled directions discard later bytes without charging
+  buffer space. Default CLI buffers include maximum frame and mask overhead.
+- TCP timing avoids scanning retained history for disjoint sequential ranges,
+  including streams that previously reordered data.
+- TCP connect scans share raw scan ordering with and without a shuffle seed;
+  traceroute cycle boundaries charge the cycle interval without extra rate delays.
+- HTTP entity exports decode `x-gzip`, constructed headers reserve capacity
+  after replacing framing fields, and TLS certificate limits remain distinct
+  from malformed sessions.
+- MQTT topic filters enforce wildcard placement, and LLDP management-address
+  strings enforce their 31-byte ceiling in construction and decoding.
 - Release archives include the renamed v7 forwarding consumer fixture.
 - Display filters preserve unquoted dotted text literals alongside field-to-field
   comparisons, and UDP scans materialize valid TFTP payloads under port 69.

@@ -17,8 +17,10 @@ any udp.destination_port == 53
 all udp.destination_port != 53
 ```
 
-`len` measures bytes (UTF-8 byte length for text). `count` counts selected scalar
-values, including list elements. `lower` and `upper` change ASCII letters only.
+`len` measures bytes (UTF-8 byte length for text) or the number of list elements.
+`count` counts selected scalar values, including list elements; a present empty
+list counts as zero, while a missing field remains absent. `lower` and `upper`
+change ASCII letters only.
 `starts_with` and `ends_with` accept function-call or infix syntax. Unmodified
 comparisons keep their existing existential semantics. `any` requires at least
 one matching operand pair; `all` requires every selected pair to match. Either

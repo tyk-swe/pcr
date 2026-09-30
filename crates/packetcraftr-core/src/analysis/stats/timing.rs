@@ -6,7 +6,7 @@ use crate::{
     protocol::transport::Tcp,
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     time::{Duration, SystemTime},
 };
 
@@ -41,6 +41,8 @@ struct Sent {
 struct Direction {
     pending: VecDeque<Sent>,
     observed: VecDeque<(u32, u32)>,
+    range_edges: BTreeMap<u32, usize>,
+    wrapping_ranges: usize,
     forgotten_through: Option<u32>,
     sum: u128,
     report: AckRttStat,
@@ -52,19 +54,52 @@ fn overlaps(start: u32, end: u32, other_start: u32, other_end: u32) -> bool {
     at_or_after(end, other_start.wrapping_add(1)) && at_or_after(other_end, start.wrapping_add(1))
 }
 impl Direction {
+    fn retain_range(&mut self, start: u32, end: u32) {
+        for edge in [start, end] {
+            *self.range_edges.entry(edge).or_default() += 1;
+        }
+        self.wrapping_ranges += usize::from(end < start);
+    }
+    fn release_range(&mut self, start: u32, end: u32) {
+        for edge in [start, end] {
+            let count = self
+                .range_edges
+                .get_mut(&edge)
+                .expect("retained range edge");
+            *count -= 1;
+            if *count == 0 {
+                self.range_edges.remove(&edge);
+            }
+        }
+        self.wrapping_ranges -= usize::from(end < start);
+    }
+    fn disjoint_from_bounds(&self, start: u32, end: u32) -> bool {
+        let Some((&low, _)) = self.range_edges.first_key_value() else {
+            return true;
+        };
+        let (&high, _) = self.range_edges.last_key_value().expect("nonempty edges");
+        // A disjoint numeric envelope entirely within a serial-number
+        // half-space proves nonoverlap, even after earlier reordering. Ranges
+        // crossing zero or spanning half the sequence space use the full scan.
+        self.wrapping_ranges == 0
+            && start <= end
+            && (start >= high && end.wrapping_sub(low) < 0x8000_0000
+                || end <= low && high.wrapping_sub(start) < 0x8000_0000)
+    }
     fn sent(&mut self, start: u32, length: u32, time: SystemTime, regressed: bool) {
         if length == 0 {
             return;
         }
         let end = start.wrapping_add(length);
-        let ambiguous = self
-            .observed
-            .iter()
-            .any(|&(old_start, old_end)| overlaps(start, end, old_start, old_end))
-            || self
-                .pending
+        let ambiguous = !self.disjoint_from_bounds(start, end)
+            && (self
+                .observed
                 .iter()
-                .any(|old| overlaps(start, end, old.start, old.end));
+                .any(|&(old_start, old_end)| overlaps(start, end, old_start, old_end))
+                || self
+                    .pending
+                    .iter()
+                    .any(|old| overlaps(start, end, old.start, old.end)));
         if ambiguous {
             for old in &mut self.pending {
                 if overlaps(start, end, old.start, old.end) {
@@ -73,14 +108,18 @@ impl Direction {
             }
         }
         if self.observed.len() == MAX_PENDING
-            && let Some((_, end)) = self.observed.pop_front()
-            && self
-                .forgotten_through
-                .is_none_or(|edge| at_or_after(end, edge))
+            && let Some((old_start, old_end)) = self.observed.pop_front()
         {
-            self.forgotten_through = Some(end);
+            self.release_range(old_start, old_end);
+            if self
+                .forgotten_through
+                .is_none_or(|edge| at_or_after(old_end, edge))
+            {
+                self.forgotten_through = Some(old_end);
+            }
         }
         self.observed.push_back((start, end));
+        self.retain_range(start, end);
         if regressed {
             self.report.excluded_clock_regression += 1;
             return;
@@ -97,7 +136,9 @@ impl Direction {
             return;
         }
         if self.pending.len() == MAX_PENDING {
-            self.pending.pop_front();
+            if let Some(old) = self.pending.pop_front() {
+                self.release_range(old.start, old.end);
+            }
             self.report.excluded_limit += 1;
         }
         self.pending.push_back(Sent {
@@ -106,6 +147,7 @@ impl Direction {
             time,
             ambiguous,
         });
+        self.retain_range(start, end);
     }
     fn acknowledged(&mut self, ack: u32, time: SystemTime, regressed: bool) {
         let mut remaining = VecDeque::new();
@@ -114,6 +156,7 @@ impl Direction {
                 remaining.push_back(sent);
                 continue;
             }
+            self.release_range(sent.start, sent.end);
             if sent.ambiguous {
                 self.report.excluded_retransmission += 1;
                 continue;
@@ -150,6 +193,8 @@ impl Direction {
         self.report.excluded_missing_ack += self.pending.len() as u64;
         self.pending.clear();
         self.observed.clear();
+        self.range_edges.clear();
+        self.wrapping_ranges = 0;
         self.forgotten_through = None;
     }
 }
@@ -273,6 +318,29 @@ impl State {
 mod tests {
     use super::*;
     use std::time::UNIX_EPOCH;
+    #[test]
+    fn million_sequential_segments_keep_timing_bounded_across_wrap() {
+        let started = std::time::Instant::now();
+        let mut direction = Direction::default();
+        let mut sequence = u32::MAX - 7000;
+        // Start with reordered disjoint ranges so the optimization must recover
+        // after reordering rather than work only on a pristine ordered stream.
+        direction.sent(sequence.wrapping_sub(1400), 1400, UNIX_EPOCH, false);
+        direction.sent(sequence.wrapping_sub(2800), 1400, UNIX_EPOCH, false);
+        direction.acknowledged(sequence, UNIX_EPOCH + Duration::from_millis(1), false);
+        for _ in 0..1_000_000 {
+            direction.sent(sequence, 1400, UNIX_EPOCH, false);
+            sequence = sequence.wrapping_add(1400);
+            direction.acknowledged(sequence, UNIX_EPOCH + Duration::from_millis(1), false);
+        }
+        let report = direction.finish();
+        assert_eq!(report.count, 1_000_002);
+        assert_eq!(report.excluded_retransmission, 0);
+        assert_eq!(report.excluded_limit, 0);
+        assert_eq!(report.mean, Some(Duration::from_millis(1)));
+        // The limit tolerates slow CI hosts but catches billions of history scans.
+        assert!(started.elapsed() < Duration::from_secs(30));
+    }
     #[test]
     fn forgotten_history_is_excluded_instead_of_assumed_unambiguous() {
         let mut direction = Direction::default();

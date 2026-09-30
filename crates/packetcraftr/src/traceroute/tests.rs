@@ -924,6 +924,28 @@ fn repeated_cycles_share_plan_budget_and_keep_cycle_numbers() {
 }
 
 #[test]
+fn repeated_cycles_charge_rate_delays_only_between_hops() {
+    let mut request = udp_traceroute_request(Target::Address("192.0.2.2".parse().unwrap()));
+    request.cycles = 3;
+    request.probes_per_second = Some(2);
+    request.udp_port_mode = super::UdpPortMode::Fixed;
+    request.limits.max_duration = Duration::from_millis(5060);
+    let mut authorizer = FixedAuthorizer {
+        address: "192.0.2.2".parse().unwrap(),
+        operations: Vec::new(),
+    };
+    let aggregate = run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut NoResponseExecutor::default(),
+        &mut NoopClock,
+    )
+    .unwrap();
+    assert_eq!(aggregate.stats.packets_attempted, 12);
+}
+
+#[test]
 fn advertised_mtu_is_retained_only_for_correlated_quotes() {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let mut request = Packet::new();

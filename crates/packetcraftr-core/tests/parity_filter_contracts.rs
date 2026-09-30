@@ -48,6 +48,7 @@ fn advanced_filters_use_byte_functions_and_explicit_repeated_value_semantics() {
         (r#"raw.bytes matches "^POST""#, false),
         ("len(raw.bytes) == 19", true),
         ("count(udp.source_port) == 2", true),
+        ("count(tcp.source_port) == 0", false),
         (r#"lower(raw.bytes) == "get /index http/1.1""#, true),
         (r#"upper(raw.bytes) == "GET /INDEX HTTP/1.1""#, true),
         (r#"starts_with(raw.bytes, "GET ")"#, true),
@@ -72,6 +73,81 @@ fn advanced_filters_use_byte_functions_and_explicit_repeated_value_semantics() {
             "{source}"
         );
     }
+}
+
+#[test]
+fn list_functions_distinguish_lengths_empty_lists_and_missing_fields() {
+    use packetcraftr_core::{
+        build::Builder,
+        decode::Dissector,
+        frame::Frame,
+        packet::Packet,
+        protocol::application::{
+            rtcp::{Packet as RtcpPacket, Rtcp},
+            rtp::Rtp,
+        },
+    };
+    for csrcs in [vec![], vec![1, 2]] {
+        let mut packet = Packet::new();
+        packet.push(Rtp {
+            csrcs: csrcs.clone(),
+            ..Default::default()
+        });
+        let bytes = Builder::new(builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap()
+            .bytes;
+        let registry = common::packets::rooted_registry("rtp");
+        let decoded = Dissector::new(registry.clone())
+            .decode(
+                Frame::new(
+                    std::time::UNIX_EPOCH,
+                    common::packets::ROOT_LINK_TYPE,
+                    bytes,
+                )
+                .unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+        for source in [
+            format!("count(rtp.csrcs) == {}", csrcs.len()),
+            format!("len(rtp.csrcs) == {}", csrcs.len()),
+        ] {
+            assert!(
+                Filter::compile(&source, &registry, Limits::default())
+                    .unwrap()
+                    .matches(&context(&decoded))
+                    .unwrap(),
+                "{source}"
+            );
+        }
+    }
+    let mut packet = Packet::new();
+    packet.push(Rtcp {
+        packets: vec![RtcpPacket::receiver_report(1, &[]).unwrap()],
+    });
+    let bytes = Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap()
+        .bytes;
+    let registry = common::packets::rooted_registry("rtcp");
+    let decoded = Dissector::new(registry.clone())
+        .decode(
+            Frame::new(
+                std::time::UNIX_EPOCH,
+                common::packets::ROOT_LINK_TYPE,
+                bytes,
+            )
+            .unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+    assert!(
+        Filter::compile("len(rtcp.packets) == 1", &registry, Limits::default())
+            .unwrap()
+            .matches(&context(&decoded))
+            .unwrap()
+    );
 }
 #[test]
 fn both_comparison_operands_record_requirements_and_reject_incompatible_types() {

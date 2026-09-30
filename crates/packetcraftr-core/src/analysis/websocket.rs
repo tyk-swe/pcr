@@ -153,6 +153,9 @@ impl Collector {
                     state.expected_mask = None;
                 }
             }
+            if self.directions[index].disabled {
+                continue;
+            }
             let buffered = self
                 .directions
                 .iter()
@@ -468,7 +471,7 @@ fn frame(bytes: &[u8], maximum: usize) -> Result<Option<(usize, bool, u8, Bytes)
         }
         n => usize::from(n),
     };
-    if length > maximum {
+    if opcode & 8 == 0 && length > maximum {
         return Err("WebSocket frame length exceeds message limit");
     }
     if opcode & 8 != 0 && (!fin || length > 125 || opcode == 8 && length == 1) {
@@ -497,6 +500,14 @@ fn frame(bytes: &[u8], maximum: usize) -> Result<Option<(usize, bool, u8, Bytes)
     } else {
         Bytes::copy_from_slice(payload)
     };
+    if opcode == 8 && bytes.len() >= 2 {
+        let status = u16::from_be_bytes([bytes[0], bytes[1]]);
+        if !matches!(status, 1000..=1003 | 1007..=1014 | 3000..=4999)
+            || std::str::from_utf8(&bytes[2..]).is_err()
+        {
+            return Err("invalid WebSocket close status or reason");
+        }
+    }
     Ok(Some((offset + length, fin, opcode, bytes)))
 }
 impl session::Collector for Collector {
@@ -532,5 +543,23 @@ mod tests {
         assert!(frame(&[0x09, 0], 100).is_err());
         assert!(frame(&[0x81, 126, 0, 1, 0], 100).is_err());
         assert!(frame(&[0xc1, 0], 100).is_err());
+    }
+    #[test]
+    fn control_frames_ignore_data_ceiling_and_validate_close_payloads() {
+        assert!(frame(&[0x89, 2, b'o', b'k'], 1).unwrap().is_some());
+        assert!(frame(&[0x8a, 2, b'o', b'k'], 1).unwrap().is_some());
+        for code in [1000u16, 1001, 1014, 3000, 4999] {
+            let [a, b] = code.to_be_bytes();
+            assert!(frame(&[0x88, 2, a, b], 1).unwrap().is_some());
+            let masked = [0x88, 0x82, 1, 2, 3, 4, a ^ 1, b ^ 2];
+            assert!(frame(&masked, 1).unwrap().is_some());
+        }
+        for code in [999u16, 1004, 1005, 1006, 1015, 2000, 5000] {
+            let [a, b] = code.to_be_bytes();
+            assert!(frame(&[0x88, 2, a, b], 1).is_err());
+        }
+        assert!(frame(&[0x88, 3, 3, 232, 0xff], 1).is_err());
+        assert!(frame(&[0x88, 0], 1).unwrap().is_some());
+        assert!(frame(&[0x82, 2, b'a', b'b'], 1).is_err());
     }
 }

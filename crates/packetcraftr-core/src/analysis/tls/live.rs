@@ -473,7 +473,8 @@ impl Live {
                     if messages.len() >= length + 4 && matches!(kind, 11 | 14) {
                         if kind == 11 {
                             let collection = super::certificates::parse(&messages[4..length + 4]);
-                            let malformed = collection.status != super::CertificateStatus::Complete;
+                            let malformed =
+                                collection.status == super::CertificateStatus::Malformed;
                             self.certificates = Some(collection);
                             self.side_mut(direction).finish();
                             return Verdict::Finished {

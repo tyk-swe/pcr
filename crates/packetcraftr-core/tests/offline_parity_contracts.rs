@@ -344,7 +344,53 @@ fn tls_certificate_count_and_incomplete_collection_remain_explicit() {
             events[0].session.certificates.as_ref().unwrap().status,
             expected
         );
+        if expected == tls::CertificateStatus::Limit {
+            assert_eq!(events[0].session.status, tls::Status::Complete);
+        } else if expected == tls::CertificateStatus::Malformed {
+            assert_eq!(events[0].session.status, tls::Status::Malformed);
+        }
     }
+}
+
+#[test]
+fn websocket_disabled_directions_discard_deliveries_without_charging_buffer() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &[0x83, 0]);
+    capture.client(&mut stream, &[0; 64]);
+    capture.server(&mut stream, &[0x82, 1, b'a']);
+    let mut collector = websocket::Collector::new(
+        StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
+        },
+        websocket::Limits {
+            max_buffered_bytes: 8,
+            ..Default::default()
+        },
+        true,
+    )
+    .unwrap();
+    let mut events = Vec::new();
+    let run = analysis::run(
+        &mut reader(&capture.frames),
+        registry(),
+        &Options {
+            tcp_events: true,
+            ..Default::default()
+        },
+        |record| {
+            events.extend(collector.observe(&record)?);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let (_, summary) = collector.finish(&run).unwrap();
+    assert_eq!(summary.malformed_frames, 1);
+    assert_eq!(summary.messages, 1);
+    assert!(events.iter().any(|event| matches!(event,
+        websocket::Event::Message { bytes, .. } if bytes.as_ref() == b"a")));
 }
 
 #[test]

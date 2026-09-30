@@ -58,7 +58,14 @@ impl Http {
         if no_body && (!body.is_empty() || framing == Framing::Chunked) {
             return Err(Error::Invalid("response status forbids a body"));
         }
-        if headers.len() > super::MAX_HEADERS.saturating_sub(1) {
+        let retained_headers = headers
+            .iter()
+            .filter(|header| {
+                !header.name.eq_ignore_ascii_case("content-length")
+                    && !header.name.eq_ignore_ascii_case("transfer-encoding")
+            })
+            .count();
+        if retained_headers.saturating_add(usize::from(!no_body)) > super::MAX_HEADERS {
             return Err(Error::Limit(super::Limit::HeaderCount));
         }
         for header in &headers {

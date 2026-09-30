@@ -41,7 +41,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = Limits::default().max_messages)]
     pub(crate) max_application_messages: usize,
     /// Maximum bytes buffered across both directions, including partial messages.
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024 + 14)]
     pub(crate) max_application_buffer_bytes: usize,
     /// Cumulative bytes charged for retained and emitted WebSocket evidence.
     #[arg(long, default_value_t = Limits::default().max_retained_bytes)]
@@ -64,7 +64,7 @@ impl super::Spec for Args {
         crate::resources::declare!(settings, self, [max_websocket_message_bytes: Bytes @ ActiveState, max_websocket_buffer_bytes: Bytes @ ActiveState]);
         crate::resources::declare!(settings, self, [
             max_application_messages: Count @ ActiveState preset(256, 4096),
-            max_application_buffer_bytes: Bytes @ ActiveState preset(2097152, 16777216),
+            max_application_buffer_bytes: Bytes @ ActiveState preset(2097152, 16777230),
             max_application_retained_bytes: Bytes @ ActiveState preset(8388608, 67108864),
             max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864),
         ]);

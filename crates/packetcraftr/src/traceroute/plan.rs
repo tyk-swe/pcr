@@ -121,7 +121,8 @@ pub(super) fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndp
 pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> {
     // hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it never exceeds
     // 256
-    let hops = (request.hop_count() as u32).saturating_mul(request.cycles);
+    let hops_per_cycle = request.hop_count() as u32;
+    let hops = hops_per_cycle.saturating_mul(request.cycles);
     let overflow = || Error::DurationLimit {
         actual: Duration::MAX,
         limit: request.limits.max_duration,
@@ -133,7 +134,11 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,
     )?
-    .checked_mul(hops.saturating_sub(1))
+    .checked_mul(
+        hops_per_cycle
+            .saturating_sub(1)
+            .saturating_mul(request.cycles),
+    )
     .ok_or_else(&overflow)?;
     exchange
         .checked_add(delay)

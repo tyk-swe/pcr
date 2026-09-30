@@ -14,6 +14,10 @@ use packetcraftr_core::{
 use std::time::{Duration, UNIX_EPOCH};
 
 fn capture(path: &std::path::Path, upgraded: bool) {
+    capture_frames(path, upgraded, None);
+}
+
+fn capture_frames(path: &std::path::Path, upgraded: bool, data: Option<&[u8]>) {
     let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
     let builder = Builder::new(builtin::registry());
     let mut index = 0;
@@ -64,16 +68,54 @@ fn capture(path: &std::path::Path, upgraded: bool) {
         write(true, server, Tcp::ACK, response);
         server += response.len() as u32;
     }
-    // One masked fragmented text message, split across TCP segments.
-    let first = [0x01, 0x82, 1, 2, 3, 4, b'h' ^ 1, b'e' ^ 2];
-    write(false, client, Tcp::ACK, &first[..3]);
-    client += 3;
-    write(false, client, Tcp::ACK, &first[3..]);
-    client += 5;
-    let last = [0x80, 0x83, 1, 2, 3, 4, b'l' ^ 1, b'l' ^ 2, b'o' ^ 3];
-    write(false, client, Tcp::ACK, &last);
-    write(true, server, Tcp::ACK, &[0x89, 2, b'o', b'k']);
+    if let Some(data) = data {
+        for bytes in data.chunks(60_000) {
+            write(false, client, Tcp::ACK, bytes);
+            client += bytes.len() as u32;
+        }
+    } else {
+        // One masked fragmented text message, split across TCP segments.
+        let first = [0x01, 0x82, 1, 2, 3, 4, b'h' ^ 1, b'e' ^ 2];
+        write(false, client, Tcp::ACK, &first[..3]);
+        client += 3;
+        write(false, client, Tcp::ACK, &first[3..]);
+        client += 5;
+        let last = [0x80, 0x83, 1, 2, 3, 4, b'l' ^ 1, b'l' ^ 2, b'o' ^ 3];
+        write(false, client, Tcp::ACK, &last);
+        write(true, server, Tcp::ACK, &[0x89, 2, b'o', b'k']);
+    }
     std::fs::write(path, writer.into_inner()).unwrap();
+}
+
+#[test]
+fn maximum_message_includes_masked_frame_overhead_and_explicit_buffer_still_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("maximum.pcap");
+    let maximum = 16 * 1024 * 1024;
+    let mut frame = vec![0x82, 0xff];
+    frame.extend_from_slice(&(maximum as u64).to_be_bytes());
+    frame.extend([0; 4]);
+    frame.resize(maximum + 14, b'a');
+    capture_frames(&path, false, Some(&frame));
+    let args = [
+        "--output",
+        "json",
+        "websocket",
+        path.to_str().unwrap(),
+        "--stream",
+        "tcp:0",
+        "--decode-as",
+        "websocket",
+    ];
+    let report = parse_json(&run_success(&args));
+    let events = report["result"]["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["bytes_hex"].as_str().unwrap().len(), maximum * 2);
+    let mut bounded = args.to_vec();
+    bounded.extend(["--max-application-buffer-bytes", "16777216"]);
+    let output = run(&bounded);
+    assert_eq!(output.status.code(), Some(6));
+    assert_eq!(parse_json(&output)["error"]["kind"], "policy");
 }
 
 #[test]

@@ -150,7 +150,7 @@ impl Export {
         };
         if self.decode
             && let Some(encoding) = encoding
-            && matches!(encoding.as_str(), "gzip" | "deflate")
+            && matches!(encoding.as_str(), "gzip" | "x-gzip" | "deflate")
         {
             pending
                 .file

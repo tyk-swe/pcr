@@ -146,26 +146,15 @@ fn planned<A: Authorizer + ResolveTarget>(
                         .map(move |port| SocketAddr::new(*address, *port))
                 })
                 .collect();
-            let schedule = if request.shuffle_seed.is_none() {
-                (1..=request.attempts)
-                    .flat_map(|attempt| {
-                        endpoints
-                            .iter()
-                            .copied()
-                            .map(move |endpoint| (endpoint, attempt))
-                    })
-                    .collect()
-            } else {
-                super::super::plan::schedule(
-                    &selected.addresses,
-                    &ports,
-                    request.attempts,
-                    request.shuffle_seed,
-                )
-                .into_iter()
-                .map(|(address, attempt, port)| (SocketAddr::new(address, port), attempt))
-                .collect()
-            };
+            let schedule = super::super::plan::schedule(
+                &selected.addresses,
+                &ports,
+                request.attempts,
+                request.shuffle_seed,
+            )
+            .into_iter()
+            .map(|(address, attempt, port)| (SocketAddr::new(address, port), attempt))
+            .collect();
             let outbound = endpoints
                 .iter()
                 .map(|endpoint| {

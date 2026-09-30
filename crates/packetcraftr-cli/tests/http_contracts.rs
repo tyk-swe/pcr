@@ -63,6 +63,7 @@ fn empty_decoded_entity_fits_an_exact_encoded_only_export_budget() {
     let root = tempfile::tempdir().unwrap();
     for (encoding, hex) in [
         ("gzip", "1f8b08000000000002ff03000000000000000000"),
+        ("x-gzip", "1f8b08000000000002ff03000000000000000000"),
         ("deflate", "789c030000000001"),
     ] {
         let encoded: Vec<_> = (0..hex.len())
@@ -99,6 +100,10 @@ fn content_export_keeps_encoded_and_decoded_files_and_cleans_failed_publication(
     let root = tempfile::tempdir().unwrap();
     for (encoding, hex) in [
         ("gzip", "1f8b08000000000002ffcb48cdc9c9070086a6103605000000"),
+        (
+            "x-gzip",
+            "1f8b08000000000002ffcb48cdc9c9070086a6103605000000",
+        ),
         ("deflate", "789ccb48cdc9c90700062c0215"),
     ] {
         let encoded: Vec<_> = (0..hex.len())

@@ -337,6 +337,138 @@ fn structured_http_derives_length_or_chunking_and_rejects_header_injection() {
         Some(FieldValue::Text("POST".to_owned()))
     );
 }
+
+#[test]
+fn http_header_capacity_counts_retained_and_derived_headers() {
+    use packetcraftr_core::protocol::application::http::{Error, Limit, MAX_HEADERS};
+    let headers = || {
+        vec![
+            Header {
+                name: "X".into(),
+                value: Bytes::from_static(b"a")
+            };
+            MAX_HEADERS
+        ]
+    };
+    let start = |status| StartLine::Response {
+        version: "HTTP/1.1".into(),
+        status,
+        reason: Bytes::new(),
+    };
+    for framing in [Framing::ContentLength, Framing::Chunked] {
+        for name in ["Content-Length", "Transfer-Encoding"] {
+            let mut supplied = headers();
+            supplied[0].name = name.into();
+            let layer = Http::new(start(200), supplied, Bytes::new(), framing).unwrap();
+            assert_eq!(layer.head().headers.len(), MAX_HEADERS);
+        }
+        assert!(matches!(
+            Http::new(start(200), headers(), Bytes::new(), framing),
+            Err(Error::Limit(Limit::HeaderCount))
+        ));
+    }
+    assert_eq!(
+        Http::new(start(204), headers(), Bytes::new(), Framing::ContentLength)
+            .unwrap()
+            .head()
+            .headers
+            .len(),
+        MAX_HEADERS
+    );
+}
+
+#[test]
+fn mqtt_topic_filters_validate_wildcards_in_construction_and_wire_decode() {
+    let registry = builtin::registry();
+    let context = codec::LayerDecodeContext {
+        parent: None,
+        registry: &registry,
+        network: None,
+        discriminator: None,
+    };
+    for (topic, valid) in [
+        ("#", true),
+        ("+", true),
+        ("a/+/b/#", true),
+        ("/+/", true),
+        ("foo#bar", false),
+        ("a+b", false),
+        ("a/#/b", false),
+        ("##", false),
+        ("a/+b", false),
+        ("", false),
+    ] {
+        assert_eq!(Mqtt::subscribe(1, &[(topic, 0)]).is_ok(), valid, "{topic}");
+        for kind in [8, 10] {
+            let mut body = vec![0, 1];
+            body.extend_from_slice(&(topic.len() as u16).to_be_bytes());
+            body.extend_from_slice(topic.as_bytes());
+            if kind == 8 {
+                body.push(0);
+            }
+            let mut wire = vec![(kind << 4) | 2, body.len() as u8];
+            wire.extend(body);
+            assert_eq!(
+                registry
+                    .codec("mqtt")
+                    .unwrap()
+                    .decode(wire.into(), &context)
+                    .is_ok(),
+                valid,
+                "kind={kind} {topic}"
+            );
+        }
+    }
+}
+
+#[test]
+fn lldp_management_address_length_is_bounded_in_construction_and_decode() {
+    let registry = builtin::registry();
+    let context = codec::LayerDecodeContext {
+        parent: None,
+        registry: &registry,
+        network: None,
+        discriminator: None,
+    };
+    let base = built({
+        let mut packet = Packet::new();
+        packet.push(Lldp::default());
+        packet
+    })
+    .bytes;
+    for length in [1u8, 2, 31, 32, 255] {
+        let mut value = vec![0; usize::from(length) + 7];
+        value[0] = length;
+        value[1] = 1;
+        let mut layer = Lldp::default();
+        layer.tlvs.push(LldpTlv {
+            kind: 8,
+            value: value.clone().into(),
+        });
+        let mut packet = Packet::new();
+        packet.push(layer);
+        assert_eq!(
+            build::Builder::new(registry.clone())
+                .build(packet, Default::default(), Default::default())
+                .is_ok(),
+            (2..=31).contains(&length),
+            "length={length}"
+        );
+        let mut wire = base[..base.len() - 2].to_vec();
+        wire.extend_from_slice(&((8u16 << 9) | value.len() as u16).to_be_bytes());
+        wire.extend(value);
+        wire.extend([0, 0]);
+        assert_eq!(
+            registry
+                .codec("lldp")
+                .unwrap()
+                .decode(wire.into(), &context)
+                .is_ok(),
+            (2..=31).contains(&length),
+            "length={length}"
+        );
+    }
+}
 #[test]
 fn malformed_truncated_and_oversized_messages_fail_or_preserve_raw_bytes() {
     let registry = builtin::registry();

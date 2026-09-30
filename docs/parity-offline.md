@@ -17,8 +17,9 @@ The portable `packetcraftr_core` APIs add ten offline capabilities, available th
 
 WebSocket collection uses reassembled TCP deliveries, requires both HTTP upgrade directions or explicit decode-as, unmasks frames, assembles continuations, and emits control frames. Text messages require valid UTF-8. RSV bits are rejected, including negotiated compression that cannot be decoded faithfully. Messages are bounded to 16 MiB and the two direction buffers share a 32 MiB ceiling. Missing continuation bytes remain explicit diagnostics.
 
-The WebSocket CLI also applies the shared application buffer limit (16 MiB by
-default); the smaller of it and `--max-websocket-buffer-bytes` governs both
+The WebSocket CLI also applies the shared application buffer limit (16 MiB plus
+14 bytes by default, including maximum frame and mask overhead); the smaller
+of it and `--max-websocket-buffer-bytes` governs both
 directions and partial messages. `--max-application-messages` counts data
 messages and control frames together (4,096 by default). Retained and emitted
 evidence has a cumulative byte charge for event metadata and payloads, bounded

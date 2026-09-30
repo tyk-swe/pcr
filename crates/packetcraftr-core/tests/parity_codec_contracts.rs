@@ -473,6 +473,41 @@ fn constructed_http_rejects_payload_children_while_parsed_heads_accept_bodies() 
     let document = document::Packet::from_packet(&decoded.packet);
     let rebuilt = built(document.to_packet(&builtin::registry(), 64).unwrap());
     assert_eq!(first.bytes, rebuilt.bytes);
+    // Packet documents preserve construction provenance: a constructed
+    // empty-body message still rejects a payload child after a document
+    // roundtrip, while a parsed head omits the constructed body field and
+    // keeps accepting payload layers.
+    let mut packet = Packet::new();
+    packet.push(
+        Http::new(
+            StartLine::Request {
+                method: "GET".to_owned(),
+                target: Bytes::from_static(b"/"),
+                version: "HTTP/1.1".to_owned(),
+            },
+            Vec::new(),
+            Bytes::new(),
+            Framing::ContentLength,
+        )
+        .unwrap(),
+    );
+    let document = document::Packet::from_packet(&built(packet).packet);
+    assert!(document.layers[0].fields.contains_key("body"));
+    let mut rebuilt = document.to_packet(&builtin::registry(), 64).unwrap();
+    rebuilt.push(Raw::new(b"extra".to_vec()));
+    assert!(
+        build::Builder::new(builtin::registry())
+            .build(rebuilt, Default::default(), Default::default())
+            .is_err()
+    );
+    let mut packet = Packet::new();
+    packet.push(Http::try_from(b"GET / HTTP/1.1\r\n\r\n".as_slice()).unwrap());
+    packet.push(Raw::new(b"extra".to_vec()));
+    let first = built(packet);
+    let document = document::Packet::from_packet(&first.packet);
+    assert!(!document.layers[0].fields.contains_key("body"));
+    let rebuilt = built(document.to_packet(&builtin::registry(), 64).unwrap());
+    assert_eq!(first.bytes, rebuilt.bytes);
 }
 
 #[test]

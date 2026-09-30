@@ -1517,6 +1517,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `octet`, or `mail`) on decode and construction.
 - Constructed HTTP/1 messages reject separate payload layers regardless of the
   constructed body length, including empty bodies and body-forbidden responses.
+  Packet documents preserve the constructed/parsed distinction, so the
+  exclusion survives document roundtrips.
 - WebSocket collection reports conflicting TCP retransmissions and publishes
   the selected conversation's capture scope in JSON and NDJSON.
 - Repeated traceroute cycles honor both the configured rate ceiling and cycle

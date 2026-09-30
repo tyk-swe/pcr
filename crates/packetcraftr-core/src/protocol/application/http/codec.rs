@@ -403,24 +403,21 @@ impl LayerCodec for HttpCodec {
         };
         let mut layer = Http::try_from(wire.as_ref()).map_err(|error| rejected(NAME, error))?;
         if let Some(FieldValue::Bytes(body)) = fields.get("body") {
-            if !body.is_empty() {
-                let framing = layer
-                    .head
-                    .body(None)
-                    .map_err(|error| rejected(NAME, error))?;
-                let mut decoder =
-                    BodyDecoder::new(framing, super::MAX_CONSTRUCTED_BODY_BYTES as u64);
-                let progress = decoder
-                    .consume(body)
-                    .map_err(|error| rejected(NAME, error))?;
-                if !progress.complete || progress.consumed != body.len() {
-                    return Err(invalid(
-                        NAME,
-                        "retained constructed body has incomplete or conflicting framing",
-                    ));
-                }
-                layer.constructed = true;
+            let framing = layer
+                .head
+                .body(None)
+                .map_err(|error| rejected(NAME, error))?;
+            let mut decoder = BodyDecoder::new(framing, super::MAX_CONSTRUCTED_BODY_BYTES as u64);
+            let progress = decoder
+                .consume(body)
+                .map_err(|error| rejected(NAME, error))?;
+            if !progress.complete || progress.consumed != body.len() {
+                return Err(invalid(
+                    NAME,
+                    "retained constructed body has incomplete or conflicting framing",
+                ));
             }
+            layer.constructed = true;
             layer.constructed_body = body.clone();
         }
         for (name, value) in fields {

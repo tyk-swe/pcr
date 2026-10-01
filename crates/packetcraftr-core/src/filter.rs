@@ -45,19 +45,21 @@ mod error;
 mod eval;
 mod frames;
 mod lexer;
+mod limits;
 mod literal;
 mod model;
 mod parser;
 mod path;
 mod plan;
 mod projection;
+mod requirements;
 pub use projection::Projection;
 
 pub use error::Error;
 pub use eval::{Context, DerivedPacket};
 pub use frames::{FrameDecoder, FrameSelector};
-pub use model::Filter;
-pub use parser::{
+pub use limits::{
     DEFAULT_MAX_FILTER_BYTES, Limits, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
-    Requirements,
 };
+pub use model::Filter;
+pub use requirements::Requirements;

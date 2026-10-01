@@ -1,137 +1,47 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod correlation;
 mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
-use crate::scan::{Classification, Probe, SentProbe, evidence::Observation, profile};
+use crate::scan::{PendingEvidence, PipelineFailure, Probe, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
-    evidence::ExecutionPermit,
-    evidence::SentPacket,
-    execution::{
-        ExchangeExecutor,
-        evidence::{CandidateKey, candidate_precedes},
-        limits::check_rate,
-        rate_delay,
-    },
+    evidence::{ExecutionPermit, RetentionBudget, RetentionError, SentPacket},
+    execution::{ExchangeExecutor, evidence::candidate_precedes, limits::check_rate, rate_delay},
     preparation::RebuildError,
     probe::Evidence,
     providers::{CaptureProviders, PacketProviders},
     scan::error::Probes,
 };
+use correlation::{Best, SeenFrames, candidates, definitive};
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,
     diagnostic::Diagnostic,
-    error::{BoundaryError, Classification as ErrorClassification, Classified, Kind},
+    error::{BoundaryError, Classification as ErrorClassification, Kind},
     frame::Frame,
 };
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{self, Group, GroupRequest, RecordIdentity, Session as _},
+    capture::{self, Group, GroupRequest, Session as _},
     deadline::MAX_WAIT,
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet},
     iter::Peekable,
-    net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug)]
-pub struct PendingEvidence {
-    pub sent: SentProbe,
-    pub response: Option<Frame>,
-}
-#[derive(Debug, thiserror::Error)]
-#[error("packet scan pipeline failed")]
-pub struct PipelineFailure {
-    #[source]
-    pub source: BoundaryError,
-    pub stats: Stats,
-    pub pending: Vec<PendingEvidence>,
-    pub failed_probe: Option<Probe>,
-    pub capture_sources: Vec<capture::Source>,
-    pub cleanup: Option<Box<LiveIoError>>,
-}
-impl Classified for PipelineFailure {
-    fn classification(&self) -> ErrorClassification {
-        self.source.classification()
-    }
-    fn causes(&self) -> Vec<String> {
-        let mut causes = self.source.as_causes();
-        if let Some(cleanup) = &self.cleanup {
-            causes.push(cleanup.to_string());
-            causes.extend(cleanup.causes());
-        }
-        causes
-    }
-    fn context(&self) -> Option<packetcraftr_core::error::Coordinate> {
-        self.failed_probe
-            .as_ref()
-            .map(|probe| packetcraftr_core::error::Coordinate::ProbeSequence(probe.sequence))
-            .or_else(|| self.source.context())
-    }
-}
-#[derive(Default)]
-struct EvidenceUsage {
-    frames: usize,
-    bytes: usize,
-}
-struct SeenFrames {
-    set: HashSet<RecordIdentity>,
-    order: VecDeque<RecordIdentity>,
-    capacity: usize,
-}
-
-impl SeenFrames {
-    fn new(capacity: usize) -> Self {
-        Self {
-            set: HashSet::new(),
-            order: VecDeque::new(),
-            capacity,
-        }
-    }
-
-    /// Reports whether `identity` is new, forgetting the oldest identity once
-    /// more than `capacity` are held.
-    fn insert(&mut self, identity: RecordIdentity) -> bool {
-        if !self.set.insert(identity) {
-            return false;
-        }
-        self.order.push_back(identity);
-        if self.order.len() > self.capacity
-            && let Some(old) = self.order.pop_front()
-        {
-            self.set.remove(&old);
-        }
-        true
-    }
-}
 struct Pending {
     sent: Arc<SentPacket>,
     deadline: Instant,
     best: Option<Best>,
     last_response: Option<Frame>,
     charge: usize,
-}
-struct Best {
-    response: crate::exchange::Response,
-    rank: u8,
-    responder: IpAddr,
-}
-impl Best {
-    fn key(&self) -> CandidateKey<'_, IpAddr> {
-        CandidateKey {
-            rank: self.rank,
-            tie_break: self.responder,
-            latency: self.response.latency,
-            bytes: self.response.response.frame.bytes().as_ref(),
-        }
-    }
 }
 #[derive(Clone, Copy)]
 struct Planned<'b> {
@@ -197,45 +107,6 @@ fn validate_options(
         Some((field, maximum, _)) => Err(limit(field, maximum)),
         None => Ok(()),
     }
-}
-
-fn candidates(
-    pending: &BTreeMap<usize, Pending>,
-    planned: &[Planned<'_>],
-    registry: &packetcraftr_core::registry::Registry,
-    decoded: &packetcraftr_core::decode::DecodedPacket,
-    native_interface: &packetcraftr_netio::interface::Id,
-    received: Instant,
-) -> Vec<(usize, Observation)> {
-    pending
-        .iter()
-        .filter(|(_, entry)| {
-            entry.sent.route().plan.decision.interface == *native_interface
-                && received >= entry.sent.timing().freshness_marker().monotonic()
-                && received <= entry.deadline
-        })
-        .filter_map(|(index, entry)| {
-            Observation::observe(
-                registry,
-                planned[*index].probe,
-                &entry.sent.built().packet,
-                decoded,
-            )
-            .map(|observation| (*index, observation))
-        })
-        .collect()
-}
-
-/// An open response with confirmed or unchecked application evidence
-/// completes its probe without waiting for the rest of its timeout.
-fn definitive(observation: &Observation) -> bool {
-    observation.response.classification == Classification::Open
-        && observation.application.as_ref().is_none_or(|evidence| {
-            matches!(
-                evidence.status,
-                profile::Status::Confirmed | profile::Status::Unchecked
-            )
-        })
 }
 
 fn max_wait_secs() -> usize {
@@ -311,7 +182,7 @@ struct Pipeline<'a, P: PacketProviders, K> {
     stats: Stats,
     pending: BTreeMap<usize, Pending>,
     retained: usize,
-    evidence: EvidenceUsage,
+    evidence: RetentionBudget,
     failed_probe: Option<Probe>,
     seen: SeenFrames,
     diagnostics: HashSet<&'static str>,
@@ -373,7 +244,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             stats: Stats::default(),
             pending: BTreeMap::new(),
             retained: plan.base_bytes,
-            evidence: EvidenceUsage::default(),
+            evidence: RetentionBudget::default(),
             failed_probe: None,
             seen: SeenFrames::new(options.max_evidence_frames),
             diagnostics: HashSet::new(),
@@ -647,11 +518,24 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .as_ref()
             .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
         {
-            if let Some(previous) = &entry.best {
-                self.evidence.frames -= 1;
-                self.evidence.bytes -= previous.response.response.frame.bytes().len();
-            }
-            retain(raw.bytes().len(), &mut self.evidence, self.options)?;
+            self.evidence
+                .replace(
+                    entry
+                        .best
+                        .as_ref()
+                        .map(|previous| previous.response.response.frame.bytes().len()),
+                    raw.bytes().len(),
+                    self.options.max_evidence_frames,
+                    self.options.max_evidence_bytes,
+                )
+                .map_err(|error| match error {
+                    RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
+                        limit("evidence frames", self.options.max_evidence_frames)
+                    }
+                    RetentionError::ByteCountOverflow | RetentionError::ByteLimit => {
+                        limit("evidence bytes", self.options.max_evidence_bytes)
+                    }
+                })?;
             entry.best = Some(candidate);
         }
         if definitive {
@@ -698,8 +582,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .expect("completed pending probe");
         self.retained -= entry.charge;
         if let Some(response) = entry.last_response {
-            self.evidence.frames -= 1;
-            self.evidence.bytes -= response.bytes().len();
+            self.evidence.release(response.bytes().len());
         }
         self.failed_probe = None;
         Ok(())
@@ -760,23 +643,6 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         }
     }
 }
-fn retain(
-    bytes: usize,
-    usage: &mut EvidenceUsage,
-    options: PipelineOptions,
-) -> Result<(), BoundaryError> {
-    usage.frames = usage
-        .frames
-        .checked_add(1)
-        .filter(|count| *count <= options.max_evidence_frames)
-        .ok_or_else(|| limit("evidence frames", options.max_evidence_frames))?;
-    usage.bytes = usage
-        .bytes
-        .checked_add(bytes)
-        .filter(|count| *count <= options.max_evidence_bytes)
-        .ok_or_else(|| limit("evidence bytes", options.max_evidence_bytes))?;
-    Ok(())
-}
 fn pending_evidence(
     pending: &BTreeMap<usize, Pending>,
     planned: &[Planned<'_>],
@@ -802,9 +668,8 @@ mod tests {
     use super::*;
     use crate::probe::ProbeEndpoint;
     use crate::scan::{MAX_PROBES, MAX_RATE, Probe};
-    use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::deadline::MAX_WAIT;
-    use std::time::SystemTime;
+    use std::net::IpAddr;
 
     fn options() -> PipelineOptions {
         PipelineOptions {
@@ -864,24 +729,5 @@ mod tests {
                 .to_string(),
             format!("scan pipeline exceeds probes={}", MAX_PROBES)
         );
-    }
-
-    fn identity() -> RecordIdentity {
-        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0]).expect("frame");
-        capture::Captured::new(frame, Instant::now()).identity()
-    }
-
-    #[test]
-    fn seen_frames_reject_repeats_and_forget_the_oldest_identity_past_capacity() {
-        let (first, second, third) = (identity(), identity(), identity());
-        let mut seen = SeenFrames::new(2);
-
-        assert!(seen.insert(first));
-        assert!(!seen.insert(first));
-        assert!(seen.insert(second));
-        assert!(seen.insert(third), "a third identity evicts the first");
-        assert!(!seen.insert(second));
-        assert!(!seen.insert(third));
-        assert!(seen.insert(first), "the evicted identity is new again");
     }
 }

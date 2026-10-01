@@ -7,11 +7,14 @@ use super::{
 };
 use crate::{Error, interface::Id};
 use packetcraftr_core::{budget::Deadline, frame::LinkType};
+use source::Owned;
 use std::{
     collections::HashSet,
     fmt,
     time::{Duration, Instant},
 };
+
+mod source;
 
 /// Sources one group arms at once. One worker-pool slot stays free for the
 /// persistent Linux netlink route worker and other pooled work; without it the
@@ -117,12 +120,6 @@ pub struct Source {
     pub delivered_bytes: u64,
 }
 
-struct Owned<C: Session> {
-    capture: C,
-    source: Source,
-    shutdown_attempted: bool,
-}
-
 /// Reported by [`Session::metadata`] for a group that admitted no source.
 static UNARMED: Metadata = Metadata {
     interface: Id {
@@ -209,62 +206,9 @@ impl<C: Session> Group<C> {
                         phase: Phase::Arm,
                         source: Box::new(source),
                     })?;
-            let metadata = capture.metadata();
-            let native = &metadata.native;
-            let valid = capture.source_count() == 1
-                && metadata.interface == request.interface
-                && metadata.snap_length > 0
-                && metadata.snap_length <= request.limits.snap_length
-                && native
-                    .buffer_size
-                    .consistent_with(request.native.buffer_size)
-                && native
-                    .timestamp_source
-                    .consistent_with(request.native.timestamp_source)
-                && native
-                    .timestamp_precision
-                    .consistent_with(request.native.timestamp_precision);
-            // Keep reported identity even on a contract failure, while bounding
-            // an injected provider's invalid name before copying it.
-            let reported_name = if metadata.interface.name.len() > MAX_INTERFACE_NAME_BYTES {
-                format!(
-                    "{}... [truncated]",
-                    metadata
-                        .interface
-                        .name
-                        .chars()
-                        .take(512)
-                        .collect::<String>()
-                )
-            } else {
-                metadata.interface.name.clone()
-            };
-            let metadata = Metadata {
-                interface: Id {
-                    index: metadata.interface.index,
-                    name: reported_name,
-                },
-                link_type: metadata.link_type,
-                snap_length: metadata.snap_length,
-                native: metadata.native,
-            };
-            let limits = request.limits;
-            self.sources.push(Owned {
-                capture,
-                source: Source {
-                    index,
-                    metadata,
-                    limits,
-                    metadata_valid: valid,
-                    ready: false,
-                    shutdown_confirmed: false,
-                    statistics_valid: false,
-                    statistics: Stats::default(),
-                    delivered_frames: 0,
-                    delivered_bytes: 0,
-                },
-                shutdown_attempted: false,
-            });
+            let owned = Owned::new(index, request, capture);
+            let valid = owned.source.metadata_valid;
+            self.sources.push(owned);
             if !valid {
                 return Err(Error::CaptureSourceContract {
                     index,
@@ -280,61 +224,7 @@ impl<C: Session> Group<C> {
     }
 
     pub fn snapshot(&self) -> Vec<Source> {
-        self.sources
-            .iter()
-            .map(|owned| {
-                let mut source = owned.source.clone();
-                if !owned.shutdown_attempted {
-                    source.statistics = owned.capture.stats();
-                    source.statistics_valid = source.statistics.validate().is_ok();
-                }
-                source
-            })
-            .collect()
-    }
-
-    fn poll(
-        &mut self,
-        index: usize,
-        wait: &Deadline,
-        caller: &Deadline,
-    ) -> Result<Option<Captured>, Error> {
-        let Some(mut captured) = self.sources[index]
-            .capture
-            .next_captured_frame(wait)
-            .map_err(|source| self.failure(index, Phase::Receive, source))?
-        else {
-            return Ok(None);
-        };
-        caller.check_cancelled()?;
-        let source = &mut self.sources[index].source;
-        if captured.frame.link_type != source.metadata.link_type
-            || captured.frame.bytes().len() > source.metadata.snap_length
-            || captured
-                .frame
-                .interface
-                .is_some_and(|interface| interface != source.metadata.interface.index)
-        {
-            return Err(Error::CaptureSourceContract {
-                index,
-                reason: "captured frame disagrees with activated source metadata",
-            });
-        }
-        let (Some(frames), Some(bytes)) = (
-            source.delivered_frames.checked_add(1),
-            source
-                .delivered_bytes
-                .checked_add(u64::from(captured.frame.captured_length())),
-        ) else {
-            return Err(Error::CaptureSourceContract {
-                index,
-                reason: "delivery counters overflowed",
-            });
-        };
-        source.delivered_frames = frames;
-        source.delivered_bytes = bytes;
-        captured.source = index;
-        Ok(Some(captured))
+        self.sources.iter().map(Owned::snapshot).collect()
     }
 
     fn wait_sources_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
@@ -346,31 +236,8 @@ impl<C: Session> Group<C> {
                 message: "capture readiness deadline expired".to_owned(),
             });
         };
-        for index in 0..self.sources.len() {
-            caller.check_cancelled()?;
-            if crate::deadline::remaining_before(deadline).is_none() {
-                return Err(self.failure(
-                    index,
-                    Phase::Ready,
-                    Error::CaptureReadiness {
-                        message: "shared capture readiness deadline expired".to_owned(),
-                    },
-                ));
-            }
-            self.sources[index]
-                .capture
-                .wait_ready(caller)
-                .map_err(|source| self.failure(index, Phase::Ready, source))?;
-            if Instant::now() > deadline {
-                return Err(self.failure(
-                    index,
-                    Phase::Ready,
-                    Error::CaptureReadiness {
-                        message: "provider exceeded shared readiness timeout".to_owned(),
-                    },
-                ));
-            }
-            self.sources[index].source.ready = true;
+        for owned in &mut self.sources {
+            owned.wait_ready(caller, deadline)?;
         }
         caller.check_cancelled()?;
         self.lifecycle = Lifecycle::Ready;
@@ -390,7 +257,7 @@ impl<C: Session> Group<C> {
             for _ in 0..self.sources.len() {
                 let index = self.cursor;
                 self.cursor = (self.cursor + 1) % self.sources.len();
-                if let Some(captured) = self.poll(index, &immediate, caller)? {
+                if let Some(captured) = self.sources[index].poll(&immediate, caller)? {
                     return Ok(Some(captured));
                 }
             }
@@ -402,22 +269,13 @@ impl<C: Session> Group<C> {
             let wait = remaining.min(POLL_SLICE);
             let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
             let started = Instant::now();
-            if let Some(captured) = self.poll(index, &slice, caller)? {
+            if let Some(captured) = self.sources[index].poll(&slice, caller)? {
                 return Ok(Some(captured));
             }
             // Test/injected providers may return early: keep the wait from busy-looping.
             if let Some(pause) = wait.checked_sub(started.elapsed()) {
                 std::thread::sleep(pause.min(Duration::from_millis(1)));
             }
-        }
-    }
-
-    fn failure(&self, index: usize, phase: Phase, source: Error) -> Error {
-        Error::CaptureSource {
-            index,
-            interface: self.sources[index].source.metadata.interface.clone(),
-            phase,
-            source: Box::new(source),
         }
     }
 
@@ -429,26 +287,7 @@ impl<C: Session> Group<C> {
     fn shutdown_all(&mut self) {
         self.lifecycle = Lifecycle::Closed;
         for owned in &mut self.sources {
-            if owned.shutdown_attempted {
-                continue;
-            }
-            owned.shutdown_attempted = true;
-            let interface = &owned.source.metadata.interface;
-            let failure = |phase, source| Error::CaptureSource {
-                index: owned.source.index,
-                interface: interface.clone(),
-                phase,
-                source: Box::new(source),
-            };
-            match owned.capture.shutdown() {
-                Ok(()) => owned.source.shutdown_confirmed = true,
-                Err(source) => self.cleanup.push(failure(Phase::Shutdown, source)),
-            }
-            owned.source.statistics = owned.capture.stats();
-            match owned.source.statistics.validate() {
-                Ok(()) => owned.source.statistics_valid = true,
-                Err(source) => self.cleanup.push(failure(Phase::Stats, source)),
-            }
+            owned.shutdown(&mut self.cleanup);
         }
     }
 }

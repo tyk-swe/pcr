@@ -12,6 +12,9 @@ use packetcraftr::{
     target::Target,
 };
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::{
+    BoundaryError, Classification as ErrorClassification, Classified as _, Coordinate, Kind,
+};
 use packetcraftr_core::{
     decode::Dissector,
     protocol::{builtin, network::Ipv4},
@@ -320,4 +323,87 @@ fn the_pipelined_send_schedule_runs_on_the_client_clock() {
         started.elapsed() < Duration::from_secs(3),
         "the schedule is read from the client clock, not waited out in real time"
     );
+}
+
+fn pipeline_failure(error: &scan::Error) -> Option<&scan::PipelineFailure> {
+    use std::error::Error as _;
+    let mut source = error.source();
+    while let Some(error) = source {
+        if let Some(failure) = error.downcast_ref::<scan::PipelineFailure>() {
+            return Some(failure);
+        }
+        source = error.source();
+    }
+    None
+}
+
+fn sink_failure() -> BoundaryError {
+    BoundaryError::new(
+        "fixture sink failed",
+        ErrorClassification::new("io.fixture_sink", Kind::Io, None),
+        Vec::new(),
+    )
+}
+
+#[test]
+fn a_sink_failure_on_sent_retains_the_confirmed_wire_and_probe_coordinate() {
+    let state = Arc::new(Mutex::new(overlapping()));
+    let mut request = request();
+    request.ports = vec![80, 81, 82];
+
+    let error = client(&state)
+        .scan(request, move |event| {
+            if matches!(event, scan::Event::Sent(_)) {
+                return Err(sink_failure());
+            }
+            Ok(())
+        })
+        .expect_err("the sink failure fails the scan");
+
+    let partial = pipeline_failure(&error).expect("typed pipeline evidence survives the boundary");
+    let state = state.lock().unwrap();
+    assert_eq!(state.sends, 1);
+    assert_eq!(state.shutdowns, 1);
+    let submitted = state.sent_wires.clone();
+    drop(state);
+    assert_eq!(partial.pending.len(), 1);
+    let sent = &partial.pending[0].sent.sent;
+    assert_eq!(sent.wire_bytes().len(), 40);
+    assert_eq!(sent.wire_bytes(), &submitted[0]);
+    assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 0);
+    assert_eq!(partial.stats.packets_completed, 1);
+    assert_eq!(error.context(), Some(Coordinate::ProbeSequence(0)));
+    assert_eq!(error.classification().code, "io.fixture_sink");
+}
+
+#[test]
+fn a_sink_failure_on_probe_keeps_the_response_in_partial_evidence() {
+    let state = Arc::new(Mutex::new(overlapping()));
+    let mut request = request();
+    request.ports = vec![80, 81, 82];
+
+    let error = client(&state)
+        .scan(request, move |event| {
+            if matches!(event, scan::Event::Probe { .. }) {
+                return Err(sink_failure());
+            }
+            Ok(())
+        })
+        .expect_err("the sink failure fails the scan without a completed report");
+
+    let partial = pipeline_failure(&error).expect("typed pipeline evidence survives the boundary");
+    let state = state.lock().unwrap();
+    assert_eq!(state.sends, 2);
+    assert_eq!(state.shutdowns, 1);
+    let submitted = state.sent_wires.clone();
+    drop(state);
+    assert_eq!(partial.pending.len(), 2);
+    let probe = &partial.pending[0];
+    assert_eq!(probe.sent.probe.sequence, 0);
+    assert!(probe.response.is_some());
+    let sent = &probe.sent.sent;
+    assert_eq!(sent.wire_bytes().len(), 40);
+    assert_eq!(sent.wire_bytes(), &submitted[0]);
+    assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 0);
+    assert_eq!(error.classification().code, "io.fixture_sink");
 }

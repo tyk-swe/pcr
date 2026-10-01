@@ -1,0 +1,223 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+#[cfg(test)]
+mod tests;
+
+use std::io::{Read, Write};
+
+use packetcraftr_core as core;
+use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Kind;
+
+use super::selection::{Selection, account_frame};
+use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::errors::CliError;
+use crate::rendering::SourceCaptureWriter;
+
+pub(super) fn run(
+    reader: &mut Reader<impl Read>,
+    limits: OfflineCaptureLimitsArgs,
+    selection: Selection<'_>,
+    format: capture::Format,
+    destination: impl Write,
+) -> Result<(), CliError> {
+    reader.refuse_declared_fcs().map_err(CliError::classified)?;
+    match format {
+        capture::Format::PcapNg => normalize_to_pcapng(reader, limits, selection, destination),
+        capture::Format::Pcap => normalize_to_pcap(reader, limits, selection, destination),
+    }
+}
+
+/// The next frame that passes every selector, with its source position.
+///
+/// Every frame read is charged to the input budget, selected or not, and the reader is
+/// checked for a declared frame check sequence after each read.
+fn next_selected(
+    reader: &mut Reader<impl Read>,
+    budget: &mut capture::Budget,
+    selection: Selection<'_>,
+) -> Result<Option<(u64, core::frame::Frame)>, CliError> {
+    loop {
+        let next = reader.next_frame().map_err(CliError::classified)?;
+        reader.refuse_declared_fcs().map_err(CliError::classified)?;
+        let Some(frame) = next else { return Ok(None) };
+        let source_frame = account_frame(budget, &frame)?;
+        if !selection.matches(source_frame, &frame)? {
+            continue;
+        }
+        return Ok(Some((source_frame, frame)));
+    }
+}
+
+fn normalize_to_pcapng(
+    reader: &mut Reader<impl Read>,
+    limits: OfflineCaptureLimitsArgs,
+    selection: Selection<'_>,
+    destination: impl Write,
+) -> Result<(), CliError> {
+    let writer = capture::Writer::pcapng_with_options(
+        destination,
+        capture::PcapNgOptions {
+            max_size: limits.reader.max_frame_bytes,
+            max_interfaces: limits.reader.max_interfaces,
+            stream_limits: limits.stream_limits(),
+            ..capture::PcapNgOptions::default()
+        },
+    )
+    .map_err(CliError::classified)?;
+    let mut output = SourceCaptureWriter::new(writer);
+    let mut budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
+    while let Some((_, frame)) = next_selected(reader, &mut budget, selection)? {
+        // Classic PCAP exposes its single interface at zero; PCAPNG frame IDs are global.
+        let source_interface = frame.interface.unwrap_or(0);
+        output
+            .write_source_frame(
+                Some(source_interface),
+                source_description(reader, source_interface).clone(),
+                frame,
+            )
+            .map_err(CliError::classified)?;
+    }
+    output.flush().map_err(CliError::classified)
+}
+
+fn source_description<R: Read>(reader: &Reader<R>, source_interface: u32) -> &capture::Interface {
+    let source_index = usize::try_from(source_interface)
+        .expect("reader interface IDs fit the in-memory interface table");
+    reader
+        .interfaces()
+        .get(source_index)
+        .expect("reader registers each frame interface before returning the frame")
+}
+
+/// Classic PCAP fixes its header before the first record, so the writer opens at the first
+/// selected frame, and a later conflict can leave the earlier records already written.
+fn normalize_to_pcap<W: Write>(
+    reader: &mut Reader<impl Read>,
+    limits: OfflineCaptureLimitsArgs,
+    selection: Selection<'_>,
+    destination: W,
+) -> Result<(), CliError> {
+    let mut budget = capture::Budget::new(limits.stream_limits()).map_err(CliError::classified)?;
+    let mut destination = Some(destination);
+    let mut open: Option<(u32, capture::Writer<W>)> = None;
+    while let Some((source_frame, mut frame)) = next_selected(reader, &mut budget, selection)? {
+        let source_interface = frame.interface.unwrap_or(0);
+        if open.is_none() {
+            let opened = open_classic_writer(
+                destination.take().expect("the writer opens once"),
+                source_description(reader, source_interface),
+                limits,
+            )?;
+            open = Some((source_interface, opened));
+        }
+        let Some((first_interface, writer)) = open.as_mut() else {
+            unreachable!("the writer opened above");
+        };
+        if source_interface != *first_interface {
+            return Err(pcap_conflict(
+                source_frame,
+                (
+                    *first_interface,
+                    source_description(reader, *first_interface),
+                ),
+                (
+                    source_interface,
+                    source_description(reader, source_interface),
+                ),
+            ));
+        }
+        match frame.direction {
+            None | Some(core::frame::Direction::Unknown) => frame.direction = None,
+            Some(_) => return Err(pcap_direction_error(source_frame)),
+        }
+        frame.interface = None;
+        writer.write_frame(&frame).map_err(CliError::classified)?;
+    }
+    match open {
+        Some((_, mut writer)) => writer.flush().map_err(CliError::classified),
+        None => Err(CliError::from_classification(
+            Classification::new(
+                "cli.capture_normalize_pcap",
+                Kind::Usage,
+                Some("select at least one frame, or use --output pcapng for an empty capture"),
+            ),
+            "classic PCAP output needs one selected frame to choose its link type",
+            Vec::new(),
+        )),
+    }
+}
+
+fn open_classic_writer<W: Write>(
+    destination: W,
+    description: &capture::Interface,
+    limits: OfflineCaptureLimitsArgs,
+) -> Result<capture::Writer<W>, CliError> {
+    let timestamp_resolution = match description.timestamp_resolution {
+        resolution @ (capture::TimestampResolution::Decimal(6)
+        | capture::TimestampResolution::Decimal(9)) => resolution,
+        capture::TimestampResolution::Decimal(exponent) => {
+            return Err(pcap_resolution_error(format!("10^-{exponent} s")));
+        }
+        capture::TimestampResolution::Binary(exponent) => {
+            return Err(pcap_resolution_error(format!("2^-{exponent} s")));
+        }
+    };
+    // PCAPNG marks an unlimited snapshot with zero; classic PCAP needs a finite header value.
+    let snap_len = match description.snap_len {
+        0 => limits.reader.max_frame_bytes,
+        snap_len => usize::try_from(snap_len).unwrap_or(usize::MAX),
+    };
+    capture::Writer::pcap_with_options(
+        destination,
+        description.link_type,
+        capture::PcapOptions {
+            timestamp_resolution,
+            snap_len,
+            max_size: limits.reader.max_frame_bytes,
+            stream_limits: limits.stream_limits(),
+            ..capture::PcapOptions::default()
+        },
+    )
+    .map_err(CliError::classified)
+}
+
+fn pcap_metadata_error(message: String) -> CliError {
+    CliError::from_classification(
+        Classification::new(
+            "packet.capture_transform_metadata",
+            Kind::Packet,
+            Some("use --output pcapng to keep capture metadata classic PCAP cannot carry"),
+        ),
+        message,
+        Vec::new(),
+    )
+}
+
+fn pcap_direction_error(source_frame: u64) -> CliError {
+    pcap_metadata_error(format!(
+        "pcap cannot represent direction (frame {source_frame} is marked inbound or outbound)"
+    ))
+}
+
+fn pcap_resolution_error(resolution: String) -> CliError {
+    pcap_metadata_error(format!(
+        "pcap cannot represent the source timestamp resolution {resolution}; \
+         classic PCAP holds microseconds or nanoseconds"
+    ))
+}
+
+fn pcap_conflict(
+    source_frame: u64,
+    first: (u32, &capture::Interface),
+    other: (u32, &capture::Interface),
+) -> CliError {
+    pcap_metadata_error(format!(
+        "pcap holds one interface, but selected frames use interface {} (link type {}) and \
+         interface {} (link type {}) at frame {source_frame}",
+        first.0, first.1.link_type.0, other.0, other.1.link_type.0,
+    ))
+}

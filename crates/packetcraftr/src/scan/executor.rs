@@ -5,7 +5,6 @@ mod pipeline;
 mod registry;
 
 pub(super) use pipeline::limit;
-pub use pipeline::{PendingEvidence, PipelineFailure};
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -33,12 +33,11 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use error::Error;
+pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
-pub use executor::{PendingEvidence, PipelineFailure};
 pub use plan::Probe;
 pub use report::{
-    Aggregate, Classification, ClassificationCounts, Collector, Endpoint, Event, ProbeEvidence,
-    Report, Rtt, SentProbe,
+    Aggregate, Classification, ClassificationCounts, Collector, Endpoint, Event, PendingEvidence,
+    ProbeEvidence, Report, Rtt, SentProbe,
 };
 pub use request::{Limits, PortSpec, Request, select_ports};

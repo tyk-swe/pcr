@@ -186,6 +186,15 @@ impl FieldTree {
                 Ok(())
             }
             scalar => {
+                if let FieldValue::Bytes(bytes) = scalar {
+                    // The hex rendering costs two characters per byte; refuse
+                    // before allocating it when the budget cannot carry it.
+                    if self.remaining < bytes.len().saturating_mul(2) {
+                        return Err(limit_error(
+                            "field tree output exceeds --max-tree-bytes".to_owned(),
+                        ));
+                    }
+                }
                 let text = scalar_text(scalar);
                 self.line(&format!("{indent}{label} = {text}{marker}"), emit)
             }
@@ -433,6 +442,20 @@ mod tests {
         // "0: ipv4" and "  ttl = 64" with their newlines.
         assert_eq!(lines(&packet, 8 + 11).unwrap().len(), 2);
         assert!(lines(&packet, 8 + 10).is_err());
+    }
+
+    #[test]
+    fn a_byte_field_too_large_for_the_budget_is_refused_before_rendering() {
+        let packet = packet(
+            "ipv4",
+            vec![(
+                "options",
+                FieldValue::Bytes(Bytes::from_static(&[0xab; 64])),
+            )],
+        );
+        // "0: ipv4" leaves 5; the field's 128-character hex dump cannot fit.
+        let error = lines(&packet, 13).unwrap_err();
+        assert_eq!(error.classification.code, "policy.tree_output_limit");
     }
 
     #[test]

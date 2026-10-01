@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use packetcraftr_core::capture_file::{Error, Format, Interface, Writer, compression};
@@ -10,7 +11,7 @@ use crate::errors::CliError;
 
 pub(crate) struct CaptureWriter<W, K> {
     writer: Writer<W>,
-    interface_map: Vec<(K, u32)>,
+    interface_map: BTreeMap<K, u32>,
 }
 
 pub(crate) type LinkCaptureWriter<W> = CaptureWriter<W, LinkType>;
@@ -31,11 +32,11 @@ pub(crate) fn finish_compressed_output<W: Write, T>(
     }
 }
 
-impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
+impl<W: Write, K: Copy + Ord> CaptureWriter<W, K> {
     pub(crate) fn new(writer: Writer<W>) -> Self {
         Self {
             writer,
-            interface_map: Vec::new(),
+            interface_map: BTreeMap::new(),
         }
     }
 
@@ -48,11 +49,11 @@ impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
         if self.writer.format() == Format::Pcap {
             return Ok(None);
         }
-        if let Some((_, output_id)) = self.interface_map.iter().find(|(mapped, _)| *mapped == key) {
+        if let Some(output_id) = self.interface_map.get(&key) {
             return Ok(Some(*output_id));
         }
         let output_id = register(&mut self.writer)?;
-        self.interface_map.push((key, output_id));
+        self.interface_map.insert(key, output_id);
         Ok(Some(output_id))
     }
 
@@ -226,6 +227,15 @@ mod tests {
                 frame(LinkType::IPV4, 3),
             )
             .expect("source without an ID");
+        for value in [4, 5] {
+            output
+                .write_source_frame(
+                    Some(2),
+                    interface(LinkType::ETHERNET, 64),
+                    frame(LinkType::ETHERNET, value),
+                )
+                .expect("distinct source identity");
+        }
 
         let (frames, interfaces) = read(output.into_inner());
         assert_eq!(
@@ -233,8 +243,10 @@ mod tests {
                 .iter()
                 .map(|frame| frame.interface)
                 .collect::<Vec<_>>(),
-            [Some(0), Some(0), Some(1)]
+            [Some(0), Some(0), Some(1), Some(2), Some(2)]
         );
+        assert_eq!(interfaces.len(), 3);
+        assert_eq!(interfaces[0], interfaces[2]);
         assert_eq!(interfaces[0].snap_len, 64);
         assert_eq!(interfaces[1].link_type, LinkType::IPV4);
     }

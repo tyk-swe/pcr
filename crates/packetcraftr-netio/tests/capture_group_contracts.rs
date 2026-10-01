@@ -28,6 +28,7 @@ struct Script {
     shutdown_error: bool,
     statistics: capture::Stats,
     cancel_on_ready: Option<Cancellation>,
+    reported_interface: Option<Id>,
 }
 struct Session {
     metadata: capture::Metadata,
@@ -116,9 +117,13 @@ impl capture::Provider for Provider {
                 source: None,
             });
         }
+        let script = self.scripts.lock().unwrap().pop_front().unwrap();
         Ok(Session {
             metadata: capture::Metadata {
-                interface: request.interface.clone(),
+                interface: script
+                    .reported_interface
+                    .clone()
+                    .unwrap_or_else(|| request.interface.clone()),
                 link_type: LinkType::RAW,
                 snap_length: request.limits.snap_length,
                 native: if self.ignores_native {
@@ -127,7 +132,7 @@ impl capture::Provider for Provider {
                     realized(&request.native)
                 },
             },
-            script: self.scripts.lock().unwrap().pop_front().unwrap(),
+            script,
             shutdowns: self.shutdowns[index].clone(),
         })
     }
@@ -557,4 +562,118 @@ fn single_sessions_and_groups_share_the_filter_limit() {
         .expect("groups apply the same limit");
     assert!(matches!(error, net::Error::CaptureFilterTooLong { .. }));
     assert_eq!(error.classification().code, "cli.capture_filter");
+}
+
+#[test]
+fn captured_frames_must_match_the_activated_source_metadata() {
+    let mut wrong_interface = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0]).unwrap();
+    wrong_interface.interface = Some(99);
+    for frame in [
+        wrong_interface,
+        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0]).unwrap(),
+        Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0; 33]).unwrap(),
+    ] {
+        let provider = Provider::new(vec![Script {
+            frames: [capture::Captured::new(frame, Instant::now())].into(),
+            ..Default::default()
+        }]);
+        let (mut group, armed) = arm(&provider, &request(1), &live());
+        armed.unwrap();
+        group.wait_ready(&live()).unwrap();
+        let error = group
+            .next_captured_frame(&Deadline::new(Duration::ZERO))
+            .expect_err("a frame that disagrees with the activated metadata is a contract failure");
+        assert!(matches!(
+            error,
+            net::Error::CaptureSourceContract { index: 0, .. }
+        ));
+        let source = &group.snapshot()[0];
+        assert_eq!(source.delivered_frames, 0);
+        assert_eq!(source.delivered_bytes, 0);
+        group.shutdown().unwrap();
+        drop(group);
+        assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn an_oversized_reported_interface_name_is_bounded_before_it_is_kept() {
+    let provider = Provider::new(vec![Script {
+        reported_interface: Some(Id {
+            index: 7,
+            name: "é".repeat(3000),
+        }),
+        ..Default::default()
+    }]);
+    let (mut group, armed) = arm(&provider, &request(1), &live());
+    let error = armed.expect_err("invalid activation metadata is a contract failure");
+    assert!(matches!(
+        error,
+        net::Error::CaptureSourceContract { index: 0, .. }
+    ));
+    let source = &group.snapshot()[0];
+    assert_eq!(
+        source.metadata.interface.name,
+        format!("{}... [truncated]", "é".repeat(512))
+    );
+    assert!(!source.metadata_valid);
+    assert!(source.shutdown_confirmed);
+    group.shutdown().unwrap();
+    drop(group);
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn shutdown_failures_and_invalid_statistics_stay_ordered_and_repeatable() {
+    let provider = Provider::new(vec![Script {
+        shutdown_error: true,
+        statistics: capture::Stats {
+            dropped_bytes: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    }]);
+    let (mut group, armed) = arm(&provider, &request(1), &live());
+    armed.unwrap();
+    group.wait_ready(&live()).unwrap();
+    for _ in 0..2 {
+        let cleanup = group
+            .shutdown()
+            .expect_err("shutdown and statistics failures aggregate");
+        let net::Error::CaptureCleanup { first, remaining } = &cleanup else {
+            panic!("two cleanup failures: {cleanup:?}");
+        };
+        assert!(matches!(
+            **first,
+            net::Error::CaptureSource {
+                index: 0,
+                phase: Phase::Shutdown,
+                ..
+            }
+        ));
+        assert!(matches!(
+            remaining.as_slice(),
+            [net::Error::CaptureSource {
+                index: 0,
+                phase: Phase::Stats,
+                ..
+            }]
+        ));
+        assert_eq!(cleanup.classification().code, "io.capture");
+        assert_eq!(
+            cleanup.causes(),
+            [
+                "capture source 0 (fixture0) failed during shutdown",
+                "capture failed: fixture cleanup failure",
+                "capture source 0 (fixture0) failed during statistics",
+                "capture backend returned invalid statistics: dropped bytes were reported without a dropped frame",
+            ]
+        );
+        let source = &group.snapshot()[0];
+        assert_eq!(source.statistics.dropped_bytes, 1);
+        assert!(!source.statistics_valid);
+        assert!(!source.shutdown_confirmed);
+    }
+    drop(group);
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
 }

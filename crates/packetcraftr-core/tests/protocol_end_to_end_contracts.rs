@@ -1222,6 +1222,8 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
         ("geneve", vec![0; 7]),
         ("vxlan", vec![0; 7]),
         ("gre", vec![0; 3]),
+        ("etherip", vec![0; 1]),
+        ("gtpu", vec![0; 7]),
     ] {
         let decoded = decode_from_root(&rooted_registry(root), bytes, decode::Options::default())
             .unwrap_or_else(|error| panic!("{root} malformed preservation failed: {error}"));

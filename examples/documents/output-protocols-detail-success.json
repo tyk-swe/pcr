@@ -47,6 +47,7 @@
         {"parent": "ethernet", "discriminator": 2048},
         {"parent": "geneve", "discriminator": 2048},
         {"parent": "gre", "discriminator": 2048},
+        {"parent": "gtpu", "discriminator": 260},
         {"parent": "ipv4", "discriminator": 4},
         {"parent": "ipv6", "discriminator": 4},
         {"parent": "ipv6_destination_options", "discriminator": 4},

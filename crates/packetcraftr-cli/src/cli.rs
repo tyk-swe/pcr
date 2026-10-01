@@ -39,9 +39,15 @@ Examples:
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";
 
-fn root_after_help() -> String {
-    let mut help = format!(
-        "{ROOT_HELP_FORMATS}\n\nExit codes:\n  0   Success.\n  1   verdict: a completed verify-forwarding comparison returned fail or inconclusive.\n"
+/// The output formats every command draws from, as `--help` describes them.
+pub(crate) const fn output_formats_help() -> &'static str {
+    ROOT_HELP_FORMATS
+}
+
+/// One line per process exit status, shared by `--help` and `topics exit-codes`.
+pub(crate) fn exit_codes_help() -> String {
+    let mut help = String::from(
+        "  0   Success.\n  1   verdict: a completed verify-forwarding comparison returned fail or inconclusive.\n",
     );
     for kind in KINDS {
         let _ = writeln!(
@@ -56,6 +62,11 @@ fn root_after_help() -> String {
         help,
         "  {CANCELLED_EXIT_CODE} cancelled: the operation was interrupted before it completed."
     );
+    help
+}
+
+fn root_after_help() -> String {
+    let mut help = format!("{ROOT_HELP_FORMATS}\n\nExit codes:\n{}", exit_codes_help());
     help.push('\n');
     help.push_str(ROOT_HELP_EXAMPLES);
     help

@@ -207,6 +207,7 @@ pub(super) fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
                 | BuiltinProtocol::Ipv6
                 | BuiltinProtocol::Udp
                 | BuiltinProtocol::Pppoe
+                | BuiltinProtocol::Gtpu
         )
     )
 }

@@ -150,6 +150,15 @@ impl CaptureOutput {
         self.writer_over(destination, limits)
     }
 
+    /// A writer that discards its bytes, so a generated set can be checked
+    /// against the format's limits before the real output opens.
+    pub(crate) fn dry_run_writer(
+        &self,
+        limits: capture_file::Limits,
+    ) -> Result<capture_file::Writer<std::io::Sink>, CliError> {
+        self.writer_over(std::io::sink(), limits)
+    }
+
     fn writer_over<W: std::io::Write>(
         &self,
         destination: W,

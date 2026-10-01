@@ -17,6 +17,8 @@ pub(crate) enum InputKind {
     /// Hexadecimal text that decodes to frame bytes.
     FrameHex,
     Payload,
+    /// The server reply a generated conversation carries.
+    SessionResponse,
     Capture,
 }
 
@@ -27,6 +29,7 @@ impl InputKind {
             Self::Frame => "frame",
             Self::FrameHex => "frame hex text",
             Self::Payload => "UDP payload",
+            Self::SessionResponse => "session response",
             Self::Capture => "capture",
         }
     }
@@ -37,6 +40,7 @@ impl InputKind {
             Self::Frame => "--hex, --file, or redirect non-empty stdin",
             Self::FrameHex => "--hex, --hex-file, --file, or redirect non-empty stdin",
             Self::Payload => "--udp-payload-hex or --udp-payload-file",
+            Self::SessionResponse => "--session-response-file",
             Self::Capture => "a capture path, or use - with redirected capture stdin",
         }
     }
@@ -51,13 +55,14 @@ impl InputKind {
                 "provide --hex, --hex-file, --file, or pipe non-empty hexadecimal text to stdin"
             }
             Self::Payload => "provide --udp-payload-hex or --udp-payload-file",
+            Self::SessionResponse => "provide a non-empty --session-response-file",
             Self::Capture => "provide a capture path or pipe PCAP/PCAPNG bytes with - as the path",
         }
     }
 
     fn oversized_error(self, actual: usize, limit: usize) -> CliError {
         match self {
-            Self::Recipe | Self::Payload | Self::Capture => CliError::new(
+            Self::Recipe | Self::Payload | Self::SessionResponse | Self::Capture => CliError::new(
                 Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),

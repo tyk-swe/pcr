@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use clap::ArgMatches;
 use packetcraftr_core::error::Kind;
 
-use super::{CommandExit, Spec, documentation};
+use super::{CommandExit, Generate, Spec};
 use crate::cli::Parsed;
 use crate::errors::{CANCELLED_EXIT_CODE, CliError};
 use crate::output;
@@ -47,8 +47,8 @@ pub(super) struct Launch<'a> {
 }
 
 impl Launch<'_> {
-    pub(super) fn generate(self, arguments: documentation::arguments::Args) -> ExitCode {
-        match documentation::run(&arguments) {
+    pub(super) fn generate(self, arguments: impl Generate) -> ExitCode {
+        match arguments.generate(self.format) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 let _ = emit_stderr_error(&error);

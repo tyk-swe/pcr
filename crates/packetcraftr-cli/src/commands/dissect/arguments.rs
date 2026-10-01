@@ -21,7 +21,9 @@ Examples:
   packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
   packetcraftr dissect --file frame.bin --link-type 228 --tls-port 4433
   packetcraftr --output hex build --packet 'ipv4()/icmpv4(identifier=1)' | packetcraftr dissect --link-type ipv4 --hex -
-  packetcraftr dissect --hex-file frame.txt --link-type ipv4 --tree";
+  packetcraftr dissect --hex-file frame.txt --link-type ipv4 --tree
+
+See `packetcraftr topics filters` for the --filter language.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

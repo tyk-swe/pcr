@@ -19,14 +19,16 @@ use link::{
 };
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    AhCodec, ErspanCodec, EspCodec, GeneveCodec, GreCodec, L2tpv3Codec, MplsCodec, PppCodec,
-    PppoeCodec, VxlanCodec,
+    AhCodec, ErspanCodec, EspCodec, EtheripCodec, GeneveCodec, GreCodec, GtpuCodec, L2tpv3Codec,
+    MplsCodec, PppCodec, PppoeCodec, VxlanCodec,
 };
 
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::catalog::builtin_protocol_catalog;
 
-use application::{Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, TlsCodec};
+use application::{
+    Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, SyslogCodec, TftpCodec, TlsCodec,
+};
 
 use super::bindings;
 

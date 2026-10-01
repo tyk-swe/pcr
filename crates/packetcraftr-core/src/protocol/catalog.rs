@@ -21,9 +21,11 @@ macro_rules! builtin_protocol_catalog {
             Eapol { canonical: "eapol", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Eapol], codec: EapolCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Erspan], codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Esp], codec: EspCodec }
+            Etherip { canonical: "etherip", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Etherip], codec: EtheripCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Ethernet], codec: EthernetCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Geneve], codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Gre], codec: GreCodec }
+            Gtpu { canonical: "gtpu", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Gtpu], codec: GtpuCodec }
             Http { canonical: "http", aliases: ["http1"], constructible: false, exact_round_trip: true, matcher: none, layer: [application::http::Http], codec: HttpCodec }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: echo_v4, layer: [network::Icmpv4], codec: Icmpv4Codec }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: echo_v6, layer: [network::Icmpv6], codec: Icmpv6Codec }
@@ -50,7 +52,9 @@ macro_rules! builtin_protocol_catalog {
             Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Sctp], codec: SctpCodec }
             Snap { canonical: "snap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Snap], codec: SnapCodec }
             Stp { canonical: "stp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Stp], codec: StpCodec }
+            Syslog { canonical: "syslog", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::syslog::Syslog], codec: SyslogCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Tcp], codec: TcpCodec }
+            Tftp { canonical: "tftp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::tftp::Tftp], codec: TftpCodec }
             Tls { canonical: "tls", aliases: ["ssl"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::tls::Tls], codec: TlsCodec }
             Udp { canonical: "udp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Udp], codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Vlan], codec: VlanCodec }
@@ -161,7 +165,15 @@ macro_rules! define_builtin_protocol {
             }
 
             pub const fn is_encapsulation_boundary(self) -> bool {
-                matches!(self, Self::Erspan | Self::Geneve | Self::Gre | Self::Vxlan)
+                matches!(
+                    self,
+                    Self::Erspan
+                        | Self::Etherip
+                        | Self::Geneve
+                        | Self::Gre
+                        | Self::Gtpu
+                        | Self::Vxlan
+                )
             }
 
             pub const fn preserves_opaque_bytes(self) -> bool {

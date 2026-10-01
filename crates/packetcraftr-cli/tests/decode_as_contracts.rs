@@ -39,7 +39,11 @@ fn frame(tcp: bool, source: u16, destination: u16, payload: &[u8]) -> Frame {
             ..Udp::default()
         });
     }
-    if !tcp && (source == 53 || destination == 53) {
+    if !tcp
+        && [source, destination]
+            .iter()
+            .any(|port| [53, 5353, 5355].contains(port))
+    {
         packet.push(
             packetcraftr_core::protocol::application::dns::Dns::try_from(payload.to_vec()).unwrap(),
         );
@@ -58,7 +62,7 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
     let capture = temporary.path().join("dns.pcap");
     let mut writer =
         Writer::pcap(std::fs::File::create(&capture).unwrap(), LinkType::IPV4).unwrap();
-    for (source, destination, flags) in [(50000, 5353, 0), (5353, 50000, 0x80)] {
+    for (source, destination, flags) in [(50000, 5354, 0), (5354, 50000, 0x80)] {
         let frame = frame(
             false,
             source,
@@ -77,7 +81,7 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
         "--filter",
         "dns",
         "--decode-as",
-        "udp.port=5353:dns",
+        "udp.port=5354:dns",
     ]);
     let records = parse_ndjson(&output);
     assert_eq!(records.len(), 3);
@@ -95,7 +99,7 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
             command,
             path_text(&capture),
             "--decode-as",
-            "udp.port=5353:dns",
+            "udp.port=5354:dns",
         ];
         if command == "follow" {
             arguments.extend(["--stream", "udp:0"]);
@@ -110,7 +114,7 @@ fn alternate_ports_decode_both_directions_and_filter_captures() {
         "--table",
         "protocols",
         "--decode-as",
-        "udp.port=5353:dns",
+        "udp.port=5354:dns",
     ]));
     let dns = document["result"]["protocols"]
         .as_array()
@@ -132,6 +136,9 @@ fn compatible_tunnels_tls_and_raw_overrides_preserve_bytes() {
     for (tcp, port, payload, protocol) in [
         (false, 8472, vxlan, "vxlan"),
         (false, 6082, geneve, "geneve"),
+        (false, 3386, vec![0x30, 0xff, 0, 0, 0, 0, 0, 1], "gtpu"),
+        (false, 49152, vec![0, 3, 0, 1, 0xaa], "tftp"),
+        (false, 6514, b"<14>1 - - - - - -".to_vec(), "syslog"),
         (true, 4433, tls, "tls"),
         (
             true,
@@ -182,6 +189,64 @@ fn incompatible_or_conflicting_bindings_fail_before_input() {
         args.extend(options);
         let output = run(&args);
         assert!(!output.status.success());
+        assert_eq!(parse_json(&output)["error"]["code"], "cli.decode_as");
+    }
+}
+
+#[test]
+fn multicast_dns_ports_are_default_bindings_and_still_accept_explicit_decode_as() {
+    let query = frame(
+        false,
+        50000,
+        5353,
+        &[
+            0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 4, b'h', b'o', b's', b't', 0, 0, 1, 0x80, 1,
+        ],
+    );
+    let hex = packetcraftr_cli::output::hex::CompactHex(query.bytes()).to_string();
+    for arguments in [
+        vec![
+            "--output",
+            "json",
+            "dissect",
+            "--hex",
+            &hex,
+            "--link-type",
+            "228",
+        ],
+        vec![
+            "--output",
+            "json",
+            "dissect",
+            "--hex",
+            &hex,
+            "--link-type",
+            "228",
+            "--decode-as",
+            "udp.port=5353:dns",
+        ],
+    ] {
+        let result = parse_json(&run_success(&arguments));
+        let dissection = &result["result"]["dissection"];
+        assert_eq!(dissection["packet"]["layers"][2]["protocol"], "dns");
+        assert_eq!(dissection["bytes_hex"], hex);
+    }
+}
+
+#[test]
+fn gtpu_tftp_and_syslog_help_and_bindings_are_listed() {
+    let help = String::from_utf8(run_success(&["dissect", "--help"]).stdout).unwrap();
+    for codec in ["gtpu", "tftp", "syslog"] {
+        assert!(help.contains(codec), "--decode-as help lists {codec}");
+    }
+    // an application codec cannot be bound under TCP
+    for mapping in [
+        "tcp.port=2152:gtpu",
+        "tcp.port=69:tftp",
+        "tcp.port=514:syslog",
+    ] {
+        let output = run(&["--output", "json", "dissect", "--decode-as", mapping]);
+        assert!(!output.status.success(), "{mapping}");
         assert_eq!(parse_json(&output)["error"]["code"], "cli.decode_as");
     }
 }

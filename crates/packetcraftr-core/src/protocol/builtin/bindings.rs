@@ -6,9 +6,10 @@ use crate::{
     protocol::BuiltinProtocol,
     protocol::{
         link::LLC_FRAME_DISCRIMINATOR,
+        network::ip_protocol,
         tunnel::{
-            MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, PPPOE_DISCOVERY,
-            PPPOE_SESSION,
+            GTPU_IP_VERSION_BASE, GTPU_OTHER_PAYLOAD, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE,
+            MPLS_NEXT_LABEL, PPPOE_DISCOVERY, PPPOE_SESSION,
         },
     },
 };
@@ -33,7 +34,11 @@ pub(super) fn register(
         builder,
         &[
             (BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100),
+            (BuiltinProtocol::Udp, 69, BuiltinProtocol::Tftp, 100),
             (BuiltinProtocol::Udp, 123, BuiltinProtocol::Ntp, 100),
+            (BuiltinProtocol::Udp, 514, BuiltinProtocol::Syslog, 100),
+            (BuiltinProtocol::Udp, 5353, BuiltinProtocol::Dns, 100),
+            (BuiltinProtocol::Udp, 5355, BuiltinProtocol::Dns, 100),
             (BuiltinProtocol::Udp, 67, BuiltinProtocol::Dhcpv4, 100),
             (BuiltinProtocol::Udp, 68, BuiltinProtocol::Dhcpv4, 100),
             (BuiltinProtocol::Udp, 546, BuiltinProtocol::Dhcpv6, 100),
@@ -189,6 +194,27 @@ fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate:
             (BuiltinProtocol::Erspan, 0, BuiltinProtocol::Ethernet, 100),
             (BuiltinProtocol::Udp, 4789, BuiltinProtocol::Vxlan, 100),
             (BuiltinProtocol::Vxlan, 0, BuiltinProtocol::Ethernet, 100),
+            (BuiltinProtocol::Etherip, 0, BuiltinProtocol::Ethernet, 100),
+            (BuiltinProtocol::Udp, 2152, BuiltinProtocol::Gtpu, 100),
+            (
+                BuiltinProtocol::Gtpu,
+                GTPU_IP_VERSION_BASE + 4,
+                BuiltinProtocol::Ipv4,
+                100,
+            ),
+            (
+                BuiltinProtocol::Gtpu,
+                GTPU_IP_VERSION_BASE + 6,
+                BuiltinProtocol::Ipv6,
+                100,
+            ),
+            (
+                BuiltinProtocol::Gtpu,
+                GTPU_OTHER_PAYLOAD,
+                BuiltinProtocol::Raw,
+                -100,
+            ),
+            (BuiltinProtocol::Udp, 6635, BuiltinProtocol::Mpls, 100),
             (BuiltinProtocol::Udp, 6081, BuiltinProtocol::Geneve, 100),
             (
                 BuiltinProtocol::Geneve,
@@ -257,9 +283,24 @@ fn bind_common_ip_children(
             (47, BuiltinProtocol::Gre, 100),
             (50, BuiltinProtocol::Esp, 100),
             (51, BuiltinProtocol::Ah, 100),
+            (
+                u64::from(ip_protocol::ETHERIP),
+                BuiltinProtocol::Etherip,
+                100,
+            ),
             (112, BuiltinProtocol::Vrrp, 100),
             (115, BuiltinProtocol::L2tpv3, 100),
             (132, BuiltinProtocol::Sctp, 100),
+            (
+                u64::from(ip_protocol::MPLS_IN_IP),
+                BuiltinProtocol::Mpls,
+                100,
+            ),
+            (
+                u64::from(ip_protocol::ETHERNET),
+                BuiltinProtocol::Ethernet,
+                100,
+            ),
             (255, BuiltinProtocol::Raw, -100),
         ],
     )

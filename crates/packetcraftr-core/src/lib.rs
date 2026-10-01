@@ -23,6 +23,7 @@ pub mod build;
 mod byte_slice;
 pub mod capture_file;
 pub mod codec;
+pub mod conversation;
 pub mod decode;
 pub mod diagnostic;
 pub mod document;

@@ -186,7 +186,7 @@ impl Conversation {
         let endpoints = shape.endpoints();
         match self.options.protocol {
             Protocol::Tcp => {
-                let request = self.request(&shape)?;
+                let request = self.request(&endpoints, &shape)?;
                 let base = shape.transport.downcast_ref::<Tcp>().expect("TCP shape");
                 tcp::expand(&endpoints, base, &self.options, &request, response)
             }
@@ -216,21 +216,37 @@ impl Conversation {
         }
     }
 
-    fn request(&self, shape: &Shape<'_>) -> Result<Bytes, Error> {
+    fn request(&self, endpoints: &Endpoints, shape: &Shape<'_>) -> Result<Bytes, Error> {
         match shape.payload.as_slice() {
             [] => Ok(Bytes::new()),
             [only] if only.is::<Raw>() => {
                 Ok(only.downcast_ref::<Raw>().expect("raw layer").bytes.clone())
             }
             layers => {
-                let mut packet = Packet::with_capacity(layers.len());
+                // Transport-dependent encodings need their parents: DNS over
+                // TCP is framed by a length prefix its codec only emits beside
+                // a TCP layer. The client's headers lead the build, and only
+                // the bytes past its transport count as the request.
+                let mut packet = endpoints.client.headers(
+                    shape
+                        .transport
+                        .downcast_ref::<Tcp>()
+                        .expect("TCP shape")
+                        .clone(),
+                );
                 for layer in layers {
                     packet.push_boxed(layer.clone_box());
                 }
-                build::Builder::new(Arc::clone(&self.registry))
+                let built = build::Builder::new(Arc::clone(&self.registry))
                     .build(packet, Context::default(), self.build.clone())
-                    .map(|built| built.bytes)
-                    .map_err(Error::Payload)
+                    .map_err(Error::Payload)?;
+                let transport_end = built
+                    .layout
+                    .layer(shape.link.len() + 1)
+                    .expect("the transport layer has a layout")
+                    .range
+                    .end;
+                Ok(built.bytes.slice(transport_end..))
             }
         }
     }

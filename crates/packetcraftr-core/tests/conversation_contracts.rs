@@ -430,6 +430,55 @@ fn a_typed_udp_request_keeps_its_layers_on_a_registered_port() {
 }
 
 #[test]
+fn a_typed_tcp_request_builds_with_its_transport_framing() {
+    let registry = builtin::registry();
+    let recipe = expression::parse(
+        "ethernet()/ipv4(src=192.0.2.1,dst=198.51.100.2)/tcp(sport=4000,dport=53)/dns(id=1)",
+        &registry,
+        Default::default(),
+    )
+    .expect("recipe parses");
+    let frames = conversation(Protocol::Tcp)
+        .expand(&recipe, &Bytes::new())
+        .expect("expands");
+    let request = frames
+        .iter()
+        .find_map(|frame| frame.get::<Raw>())
+        .map(|raw| raw.bytes.clone())
+        .expect("a data segment carries the request");
+    // DNS over TCP starts with a two-byte length covering its message, not
+    // with the message itself: the transaction id is not a framing length.
+    let declared = usize::from(u16::from_be_bytes([request[0], request[1]]));
+    assert_eq!(declared + 2, request.len());
+    assert_eq!(
+        &request[2..4],
+        &[0, 1],
+        "the message keeps its transaction id"
+    );
+
+    // The carrying frame dissects the stream payload back into a typed layer.
+    let data = frames
+        .iter()
+        .find(|frame| frame.get::<Raw>().is_some())
+        .expect("the request frame");
+    let built = Builder::new(registry.clone())
+        .build(data.clone(), Context::default(), Default::default())
+        .expect("the request frame builds");
+    let decoded = packetcraftr_core::decode::Dissector::new(registry)
+        .decode(
+            Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap(),
+            Default::default(),
+        )
+        .expect("the request frame dissects");
+    let protocols = decoded
+        .packet
+        .iter()
+        .map(|layer| layer.protocol_id().as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(protocols, ["ethernet", "ipv4", "tcp", "dns"]);
+}
+
+#[test]
 fn recipes_that_are_not_a_supported_conversation_are_refused() {
     let udp = recipe(Udp::default(), b"");
     assert!(matches!(

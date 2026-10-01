@@ -38,6 +38,7 @@ pub(crate) struct State {
     pub(crate) tied_resets: bool,
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
+    pub(crate) sent_wires: Vec<Bytes>,
 }
 
 pub(crate) fn router(ttl: u8) -> Ipv4Addr {
@@ -153,6 +154,7 @@ impl transmit::Provider for Io {
                 .push_back(capture::Captured::new(frame, ingress));
             state.pending += 1;
         }
+        state.sent_wires.push(wire.clone());
         state.sends += 1;
         state.ttls.push(ip.ttl);
         state.peak = state.peak.max(state.pending);

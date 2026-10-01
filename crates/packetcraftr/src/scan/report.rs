@@ -164,6 +164,12 @@ pub struct SentProbe {
 }
 
 #[derive(Clone, Debug)]
+pub struct PendingEvidence {
+    pub sent: SentProbe,
+    pub response: Option<Frame>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Event {
     Sent(SentProbe),
     Probe {

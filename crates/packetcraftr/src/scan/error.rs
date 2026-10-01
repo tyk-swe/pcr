@@ -6,10 +6,13 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
+use super::Probe;
 use super::WORKFLOW;
+use super::report::PendingEvidence;
 use crate::StatsOverflow;
 use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
+use packetcraftr_netio::{Error as LiveIoError, capture};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -66,6 +69,37 @@ pub enum Error {
     },
     #[error("scan events are incoherent: {message}")]
     IncoherentEvents { message: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("packet scan pipeline failed")]
+pub struct PipelineFailure {
+    #[source]
+    pub source: BoundaryError,
+    pub stats: crate::Stats,
+    pub pending: Vec<PendingEvidence>,
+    pub failed_probe: Option<Probe>,
+    pub capture_sources: Vec<capture::Source>,
+    pub cleanup: Option<Box<LiveIoError>>,
+}
+impl Classified for PipelineFailure {
+    fn classification(&self) -> Classification {
+        self.source.classification()
+    }
+    fn causes(&self) -> Vec<String> {
+        let mut causes = self.source.as_causes();
+        if let Some(cleanup) = &self.cleanup {
+            causes.push(cleanup.to_string());
+            causes.extend(cleanup.causes());
+        }
+        causes
+    }
+    fn context(&self) -> Option<Coordinate> {
+        self.failed_probe
+            .as_ref()
+            .map(|probe| Coordinate::ProbeSequence(probe.sequence))
+            .or_else(|| self.source.context())
+    }
 }
 
 crate::deadline::deadline_error_conversions!(Error);

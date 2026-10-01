@@ -139,7 +139,7 @@ pub(crate) enum RetentionError {
     ByteLimit,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(crate) struct RetentionBudget {
     retained_frames: usize,
     retained_bytes: usize,
@@ -169,6 +169,35 @@ impl RetentionBudget {
         self.retained_frames = next_frames;
         self.retained_bytes = next_bytes;
         Ok(())
+    }
+
+    pub(crate) fn replace(
+        &mut self,
+        previous_bytes: Option<usize>,
+        additional_bytes: usize,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Result<(), RetentionError> {
+        let mut next = *self;
+        if let Some(bytes) = previous_bytes {
+            next.release(bytes);
+        }
+        next.reserve(additional_bytes, max_frames, max_bytes)?;
+        *self = next;
+        Ok(())
+    }
+
+    pub(crate) fn release(&mut self, bytes: usize) {
+        let frames = self
+            .retained_frames
+            .checked_sub(1)
+            .expect("released frame was retained");
+        let bytes = self
+            .retained_bytes
+            .checked_sub(bytes)
+            .expect("released bytes were retained");
+        self.retained_frames = frames;
+        self.retained_bytes = bytes;
     }
 }
 
@@ -350,6 +379,50 @@ mod tests {
         budget.retained_bytes = usize::MAX;
         assert_eq!(
             budget.reserve(1, 10, usize::MAX),
+            Err(RetentionError::ByteCountOverflow)
+        );
+        assert_eq!(
+            (budget.retained_frames, budget.retained_bytes),
+            (1, usize::MAX)
+        );
+    }
+
+    #[test]
+    fn replacement_swaps_the_previous_charge_and_refusals_change_nothing() {
+        let mut budget = RetentionBudget::default();
+        assert_eq!(budget.replace(None, 8, 1, 10), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 8));
+        assert_eq!(budget.replace(Some(8), 8, 1, 10), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 8));
+        assert_eq!(budget.replace(Some(8), 3, 1, 10), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
+        assert_eq!(budget.replace(Some(3), 10, 1, 10), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
+        assert_eq!(
+            budget.replace(Some(10), 11, 1, 10),
+            Err(RetentionError::ByteLimit)
+        );
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
+        assert_eq!(
+            budget.replace(None, 0, 1, 10),
+            Err(RetentionError::FrameLimit)
+        );
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
+
+        budget.release(10);
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (0, 0));
+        assert_eq!(budget.reserve(10, 1, 10), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
+    }
+
+    #[test]
+    fn replacement_byte_overflow_leaves_both_counters_untouched() {
+        let mut budget = RetentionBudget {
+            retained_frames: 1,
+            retained_bytes: usize::MAX,
+        };
+        assert_eq!(
+            budget.replace(None, 1, usize::MAX, usize::MAX),
             Err(RetentionError::ByteCountOverflow)
         );
         assert_eq!(

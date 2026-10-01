@@ -28,6 +28,9 @@ const MDNS_QU_QUERY: &[u8] =
 /// The matching response: id 0, no question section, cache-flush bit in the
 /// answer's class.
 const MDNS_RESPONSE: &[u8] = b"\x00\x00\x84\x00\x00\x00\x00\x01\x00\x00\x00\x00\x04host\x05local\x00\x00\x01\x80\x01\x00\x00\x00\x78\x00\x04\xc0\x00\x02\x50";
+/// A response whose answer owner is a compression pointer to the question's
+/// `host.local` name; its class also carries the cache-flush bit.
+const MDNS_COMPRESSED_RESPONSE: &[u8] = b"\x00\x00\x84\x00\x00\x01\x00\x01\x00\x00\x00\x00\x04host\x05local\x00\x00\x01\x80\x01\xc0\x0c\x00\x01\x80\x01\x00\x00\x00\x78\x00\x04\xc0\x00\x02\x50";
 const LLMNR_QUERY: &[u8] =
     b"\x12\x34\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x04host\x00\x00\x01\x00\x01";
 
@@ -172,6 +175,32 @@ fn the_cache_flush_class_is_masked_only_on_the_mdns_port() {
             );
         }
     }
+}
+
+#[test]
+fn a_compressed_mdns_response_rebuilds_strictly_to_identical_bytes() {
+    // The retained wire re-parses under the transport context it decoded
+    // with, so an unchanged strict rebuild keeps the compressed names rather
+    // than re-encoding them expanded.
+    let built = build_with(
+        udp_packet(
+            RESPONDER,
+            MDNS_GROUP,
+            MDNS_PORT,
+            MDNS_PORT,
+            Raw::new(MDNS_COMPRESSED_RESPONSE.to_vec()),
+        ),
+        codec::Mode::Permissive,
+    );
+    let decoded = dissect(built.bytes.clone());
+    assert_eq!(protocols(&decoded), ["ipv4", "udp", "dns"]);
+    let answer = &decoded.packet.get::<Dns>().unwrap().answers[0];
+    assert_eq!(answer.class, 0x8001);
+    assert_eq!(answer.value, RecordValue::A(RESPONDER.into()));
+    assert_eq!(
+        build_with(decoded.packet.clone(), codec::Mode::Strict).bytes,
+        built.bytes
+    );
 }
 
 #[test]

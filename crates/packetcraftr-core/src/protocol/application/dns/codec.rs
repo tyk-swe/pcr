@@ -82,7 +82,10 @@ impl Dns {
         if self.wire.is_empty() {
             return false;
         }
-        Self::from_wire_with_limits(self.wire.clone(), Limits::CEILING).is_ok_and(|parsed| {
+        // The retained wire re-parses under the transport context it decoded
+        // with: only multicast DNS masks the record-class cache-flush bit, so
+        // an mDNS message keeps matching its own unchanged bytes.
+        decode::decode(self.wire.clone(), Limits::CEILING, self.mdns).is_ok_and(|parsed| {
             dns_schema()
                 .fields
                 .iter()

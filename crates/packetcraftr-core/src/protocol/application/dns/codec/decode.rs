@@ -120,5 +120,6 @@ pub(super) fn decode(wire: Bytes, limits: Limits, mdns: bool) -> Result<Dns, Err
         authorities,
         additionals,
         wire,
+        mdns,
     })
 }

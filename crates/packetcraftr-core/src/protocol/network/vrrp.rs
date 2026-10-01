@@ -422,13 +422,10 @@ impl LayerCodec for VrrpCodec {
             (_, None) => count > 0 && body.len() == count.saturating_mul(16),
         };
         let size = address_len(ipv6);
-        // Version 2 keeps its trailing authentication words out of the list.
-        let listed = if version == 2 {
-            body.len().saturating_sub(V2_AUTH_LEN)
-        } else {
-            body.len()
-        };
-        let present = count.min(listed / size).min(MAX_ADDRESSES);
+        // The declared count splits the body: up to `count` complete addresses
+        // first, then whatever remains is the version 2 authentication data —
+        // possibly short or absent in a truncated frame.
+        let present = count.min(body.len() / size).min(MAX_ADDRESSES);
         let mut addresses = Vec::with_capacity(present);
         for bytes in body[..present * size].chunks_exact(size) {
             addresses.extend(read_address(bytes, ipv6));
@@ -486,16 +483,11 @@ impl LayerCodec for VrrpCodec {
             }
         }
         if present != count {
-            let before_trailer = if version == 2 {
-                format!(" before the {V2_AUTH_LEN}-byte authentication data")
-            } else {
-                String::new()
-            };
             diagnostics.push(
                 Diagnostic::warning(
                     "decode.vrrp_count",
                     format!(
-                        "count_ip is {count} but the message holds {present} complete addresses{before_trailer}"
+                        "count_ip is {count} but the message holds {present} complete addresses"
                     ),
                 )
                 .at_field("count_ip"),
@@ -656,24 +648,36 @@ mod tests {
     }
 
     #[test]
-    fn a_version_2_count_is_judged_before_the_authentication_data() {
-        // one address and no trailer: the last four bytes are read as the trailer
+    fn a_version_2_count_reads_declared_addresses_before_a_short_trailer() {
+        // one declared address and no trailer: the four bytes are the address,
+        // and the missing authentication data is diagnosed on its own
         let mut message = v2_message()[..12].to_vec();
         let sum = checksum(&message);
         message[6..8].copy_from_slice(&sum.to_be_bytes());
         let decoded = decode(&message, None, None).expect("decodes");
         let layer = decoded.layer.downcast_ref::<Vrrp>().expect("VRRP");
-        assert!(layer.addresses.is_empty());
-        assert_eq!(layer.auth_data.as_deref(), Some(&message[8..]));
-        let count = decoded
+        assert_eq!(layer.addresses, [IpAddr::from([192, 0, 2, 100])]);
+        assert_eq!(layer.auth_data.as_deref(), Some(&[][..]));
+        let length = decoded
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "decode.vrrp_count")
-            .expect("count diagnostic");
+            .find(|diagnostic| diagnostic.code == "decode.vrrp_length")
+            .expect("length diagnostic");
         assert_eq!(
-            count.message,
-            "count_ip is 1 but the message holds 0 complete addresses before the 8-byte authentication data"
+            length.message,
+            "0 bytes follow the addresses; version 2 carries 8"
         );
+
+        // a trailer that fits is authentication data; a partial one is diagnosed
+        let mut short = v2_message();
+        short.truncate(short.len() - 4);
+        let sum = checksum(&short);
+        short[6..8].copy_from_slice(&sum.to_be_bytes());
+        let decoded = decode(&short, None, None).expect("decodes");
+        let layer = decoded.layer.downcast_ref::<Vrrp>().expect("VRRP");
+        assert_eq!(layer.addresses, [IpAddr::from([192, 0, 2, 100])]);
+        assert_eq!(layer.auth_data.as_deref(), Some(&short[12..]));
+        assert_eq!(codes(&decoded), ["decode.vrrp_length"]);
     }
 
     #[test]

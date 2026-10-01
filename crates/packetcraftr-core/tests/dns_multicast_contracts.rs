@@ -141,6 +141,40 @@ fn mdns_query_and_response_decode_as_dns_and_keep_the_class_bits() {
 }
 
 #[test]
+fn the_cache_flush_class_is_masked_only_on_the_mdns_port() {
+    // Only transport dispatch from UDP port 5353 reads the top record-class
+    // bit as RFC 6762's cache-flush flag. Unicast DNS and LLMNR (RFC 4795,
+    // which defines no such flag) keep class 0x8001 unknown.
+    let address = Ipv4Addr::new(192, 0, 2, 80);
+    for (ports, typed) in [
+        ((MDNS_PORT, MDNS_PORT), true),
+        ((MDNS_PORT, 50_000), true),
+        ((53, 50_000), false),
+        ((50_000, 53), false),
+        ((LLMNR_PORT, 50_000), false),
+    ] {
+        let decoded = dissect(
+            build_with(
+                udp_packet(RESPONDER, CLIENT, ports.0, ports.1, dns(MDNS_RESPONSE)),
+                codec::Mode::Strict,
+            )
+            .bytes,
+        );
+        let answer = &decoded.packet.get::<Dns>().unwrap().answers[0];
+        assert_eq!(answer.class, 0x8001, "{ports:?}");
+        if typed {
+            assert_eq!(answer.value, RecordValue::A(address), "{ports:?}");
+        } else {
+            assert!(
+                matches!(&answer.value, RecordValue::Unknown { type_code: 1, .. }),
+                "{ports:?}: {:?}",
+                answer.value
+            );
+        }
+    }
+}
+
+#[test]
 fn llmnr_queries_decode_as_dns() {
     let decoded = round_trip(udp_packet(
         CLIENT,

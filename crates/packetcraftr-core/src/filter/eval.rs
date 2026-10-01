@@ -120,6 +120,22 @@ fn any_byte_length(value: &FieldValue, mut test: impl FnMut(u64) -> bool) -> boo
     }
 }
 
+/// Every layer the filter reads, outermost first: the physical packet's
+/// layers, then each derived packet beyond its replayed prefix.
+fn visible_layers<'a>(context: &'a Context<'a>) -> impl DoubleEndedIterator<Item = &'a dyn Layer> {
+    context
+        .decoded
+        .packet
+        .iter()
+        .chain(context.derived.iter().flat_map(|derived| {
+            derived
+                .decoded
+                .packet
+                .iter()
+                .skip(derived.replayed_prefix_layers)
+        }))
+}
+
 /// Layers matching `protocol`, selected by occurrence, in the order occurrences are counted:
 /// the outer packet first, then each derived packet beyond its replayed prefix.
 fn layers<'a>(
@@ -128,18 +144,7 @@ fn layers<'a>(
     occurrence: Option<Occurrence>,
 ) -> impl Iterator<Item = &'a dyn Layer> {
     let matching = move || {
-        context
-            .decoded
-            .packet
-            .iter()
-            .chain(context.derived.iter().flat_map(|derived| {
-                derived
-                    .decoded
-                    .packet
-                    .iter()
-                    .skip(derived.replayed_prefix_layers)
-            }))
-            .filter(move |layer| layer.protocol_id().as_str() == protocol)
+        visible_layers(context).filter(move |layer| layer.protocol_id().as_str() == protocol)
     };
     let innermost = match occurrence {
         Some(Occurrence::Last) => matching().next_back(),
@@ -166,6 +171,29 @@ where
         matched
     });
     matched
+}
+
+/// Whether the list a `field` selection reads from exists on the layers it
+/// selects. An existing-but-empty list yields no values yet still projects as
+/// `[]` rather than an absent field's null.
+pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> bool {
+    let FieldSource::NestedLayer {
+        protocol,
+        path,
+        selection,
+        occurrence,
+    } = &field.source
+    else {
+        return false;
+    };
+    if selection.is_none() {
+        return false;
+    }
+    layers(context, protocol.as_str(), *occurrence).any(|layer| {
+        layer
+            .field(path.root())
+            .is_some_and(|root| matches!(path.get(&root), Some(FieldValue::List(_))))
+    })
 }
 
 pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
@@ -365,14 +393,9 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
         FrameField::Truncated => {
             FieldValue::Bool(frame.captured_length() < frame.original_length())
         }
-        FrameField::LayerCount => {
-            FieldValue::Unsigned(context.decoded.packet.iter().count() as u64)
-        }
+        FrameField::LayerCount => FieldValue::Unsigned(visible_layers(context).count() as u64),
         FrameField::Protocols => FieldValue::List(
-            context
-                .decoded
-                .packet
-                .iter()
+            visible_layers(context)
                 .map(|layer| FieldValue::Text(layer.protocol_id().as_str().to_owned()))
                 .collect(),
         ),

@@ -22,7 +22,9 @@ use crate::input::{InputKind, read_bounded_file_allow_empty};
 /// The nanoseconds between generated frames when --session-step-ns is absent.
 const DEFAULT_STEP_NS: u64 = 1_000_000;
 /// The largest UDP payload an IPv4 datagram can carry.
-const MAX_UDP_RESPONSE: usize = 65_507;
+const MAX_UDP_RESPONSE_IPV4: usize = 65_507;
+/// The largest UDP payload an IPv6 datagram can carry.
+const MAX_UDP_RESPONSE_IPV6: usize = 65_527;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum SessionProtocol {
@@ -111,6 +113,7 @@ pub(crate) struct SessionArgs {
 /// A resolved conversation request.
 pub(crate) struct Session {
     conversation: Conversation,
+    protocol: SessionProtocol,
     response: Bytes,
     pub(crate) step: Duration,
     /// Whether the step was chosen, which only capture output can honor.
@@ -162,7 +165,9 @@ impl SessionArgs {
                         .max_frames
                         .saturating_mul(usize::from(options.mss))
                         .min(byte_budget),
-                    SessionProtocol::Udp => MAX_UDP_RESPONSE.min(byte_budget),
+                    // The recipe is not parsed yet, so the read takes the
+                    // looser IPv6 ceiling; `expand` applies the recipe's own.
+                    SessionProtocol::Udp => MAX_UDP_RESPONSE_IPV6.min(byte_budget),
                 };
                 let bytes = read_bounded_file_allow_empty(path, limit, InputKind::SessionResponse)?;
                 if bytes.is_empty() {
@@ -182,6 +187,7 @@ impl SessionArgs {
             .with_build_options(budget.build_options(mode));
         Ok(Some(Session {
             conversation,
+            protocol,
             response,
             step: Duration::from_nanos(self.step_ns.unwrap_or(DEFAULT_STEP_NS)),
             step_chosen: self.step_ns.is_some(),
@@ -189,9 +195,34 @@ impl SessionArgs {
     }
 }
 
+/// The UDP payload the recipe's network layer can carry: 20 bytes of header
+/// room under IPv4's total length, only the 16-bit payload length under IPv6.
+fn udp_response_limit(recipe: &Packet) -> (usize, &'static str) {
+    for layer in recipe.iter() {
+        if layer.is::<packetcraftr_core::protocol::network::Ipv6>() {
+            return (MAX_UDP_RESPONSE_IPV6, "IPv6");
+        }
+        if layer.is::<packetcraftr_core::protocol::network::Ipv4>() {
+            return (MAX_UDP_RESPONSE_IPV4, "IPv4");
+        }
+    }
+    (MAX_UDP_RESPONSE_IPV4, "IPv4")
+}
+
 impl Session {
     /// Expands `recipe` into the whole conversation, checking its size first.
     pub(crate) fn expand(&self, recipe: &Packet) -> Result<Vec<Packet>, CliError> {
+        if matches!(self.protocol, SessionProtocol::Udp) && !self.response.is_empty() {
+            let (limit, family) = udp_response_limit(recipe);
+            if self.response.len() > limit {
+                return Err(CliError::new(
+                    Kind::Usage,
+                    format!(
+                        "session response input exceeds {limit} byte limit for the recipe's {family} network layer"
+                    ),
+                ));
+            }
+        }
         self.conversation
             .expand(recipe, &self.response)
             .map_err(CliError::classified)

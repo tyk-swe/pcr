@@ -148,8 +148,16 @@ impl Projection {
             }
             row.push(match values.len() {
                 0 => {
-                    *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
-                    None
+                    // `[*]` reports the selected list itself, so a list that
+                    // exists but is empty projects `[]`; only a field or layer
+                    // that is absent reads as null.
+                    if field.selects_all() && eval::selected_list_present(context, field) {
+                        *remaining = remaining.checked_sub(2).ok_or_else(limit)?;
+                        Some(FieldValue::List(values))
+                    } else {
+                        *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
+                        None
+                    }
                 }
                 // `[*]` always reports a list, so a one-element list does not read as a bare value.
                 1 if !field.selects_all() => values.pop(),

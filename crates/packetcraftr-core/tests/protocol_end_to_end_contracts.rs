@@ -2472,8 +2472,8 @@ fn vrrp_decode_reports_each_departure_from_the_protocol() {
         ["decode.vrrp_destination"]
     );
     let miscounted = Vrrp {
-        count_ip: WireValue::Exact(3),
-        ..vrrp_v2()
+        count_ip: WireValue::Exact(2),
+        ..vrrp_v3(&["192.0.2.100"])
     };
     assert_eq!(
         diagnostics(vrrp_packet(vrrp_ipv4_envelope(), miscounted), &|_| ()),
@@ -2560,7 +2560,7 @@ fn vrrp_malformed_shapes_decode_and_rebuild_to_the_same_bytes() {
                     ..vrrp_v2()
                 },
             ),
-            &["decode.vrrp_count", "decode.vrrp_length"],
+            &["decode.vrrp_length"],
         ),
         (
             "version 2 with a short count",
@@ -2615,7 +2615,8 @@ fn vrrp_decode_and_rebuild_keep_inconsistent_counts() {
         mode: codec::Mode::Permissive,
         ..build::Options::default()
     };
-    // count_ip says 255 but one address and the version 2 trailer follow
+    // count_ip says 255: the 12-byte body reads as 3 complete declared
+    // addresses and the version 2 trailer is missing entirely
     let packet = vrrp_packet(
         vrrp_ipv4_envelope(),
         Vrrp {
@@ -2630,14 +2631,14 @@ fn vrrp_decode_and_rebuild_keep_inconsistent_counts() {
         .expect("decodes");
     let layer = vrrp_layer(&decoded);
     assert_eq!(layer.count_ip, WireValue::Exact(255));
-    assert_eq!(layer.addresses.len(), 1);
-    assert_eq!(layer.auth_data.as_ref().map(Bytes::len), Some(8));
+    assert_eq!(layer.addresses.len(), 3);
+    assert_eq!(layer.auth_data.as_ref().map(Bytes::len), Some(0));
     let codes: Vec<_> = decoded
         .diagnostics
         .iter()
         .map(|diagnostic| diagnostic.code)
         .collect();
-    assert_eq!(codes, ["decode.vrrp_count"]);
+    assert_eq!(codes, ["decode.vrrp_count", "decode.vrrp_length"]);
     let rebuilt = builder
         .build(decoded.packet, codec::Context::default(), permissive)
         .expect("permissive rebuild");

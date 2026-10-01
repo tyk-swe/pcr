@@ -296,6 +296,49 @@ fn build_session_udp_keeps_a_typed_request_on_a_registered_port() {
 }
 
 #[test]
+fn build_session_udp_response_ceiling_follows_the_recipe_network_layer() {
+    let directory = tempfile::tempdir().expect("scratch directory");
+    let response = directory.path().join("response.bin");
+    // Above IPv4's 65,507-byte UDP payload ceiling, inside IPv6's 65,527.
+    std::fs::write(&response, vec![b'r'; 65_520]).unwrap();
+    let output = run_success(&[
+        "--output",
+        "pcap",
+        "build",
+        "--session",
+        "udp",
+        "--packet",
+        "ethernet()/ipv6(src=2001:db8::1,dst=2001:db8::2)/udp(sport=41000,dport=5300)/raw(text=query)",
+        "--link-type",
+        "ethernet",
+        "--session-response-file",
+        path_text(&response),
+    ]);
+    let frames = session_frames(&output.stdout);
+    assert_eq!(frames.len(), 2);
+    let reply = frames[1].bytes();
+    assert_eq!(reply.len(), 14 + 40 + 8 + 65_520);
+    assert!(reply.ends_with(&[b'r'; 65_520]));
+
+    let output = run(&[
+        "--output",
+        "pcap",
+        "build",
+        "--session",
+        "udp",
+        "--packet",
+        "ethernet()/ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=41000,dport=5300)/raw(text=query)",
+        "--link-type",
+        "ethernet",
+        "--session-response-file",
+        path_text(&response),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("65507 byte limit"));
+}
+
+#[test]
 fn build_session_applies_segment_size_and_both_initial_sequence_numbers() {
     let output = run_success(&[
         "--output",

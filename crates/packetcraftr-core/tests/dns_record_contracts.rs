@@ -558,11 +558,13 @@ fn encoding_refuses_more_txt_strings_or_edns_options_than_decoding_accepts() {
 #[test]
 fn non_in_a_records_remain_exact_unknown_rdata_for_compressed_and_full_names() {
     // CH A carries a domain name plus a 16-bit address, not an IPv4 address.
+    // 0x8001 is mDNS's cache-flush spelling of IN, which unicast DNS must not
+    // mask to a typed class.
     for data in [
         vec![0xc0, 12, 0, 1],
         b"\x07example\x04test\0\0\x01".to_vec(),
     ] {
-        for class in [3, 65000] {
+        for class in [3, 0x8001, 65000] {
             let mut wire = question();
             wire[7] = 1;
             record(&mut wire, &[0xc0, 12], 1, class, 123, &data);

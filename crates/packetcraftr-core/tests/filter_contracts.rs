@@ -1229,7 +1229,8 @@ fn projections_gather_all_elements_into_a_list_within_the_cell_budget() {
         ]
     );
 
-    // A one-element list stays a list, and an empty one has no value.
+    // A one-element list stays a list, and a list that exists but is empty
+    // projects `[]`; only an absent field or layer reads as null.
     let single = dns_response("{owner=\"a.test.\",ttl=60,value={kind=a,address=192.0.2.8}}");
     let row = projection
         .values(&context(&single), 4096)
@@ -1240,6 +1241,16 @@ fn projections_gather_all_elements_into_a_list_within_the_cell_budget() {
     assert_eq!(
         projection
             .values(&context(&empty), 4096)
+            .expect("projection within budget"),
+        [
+            Some(FieldValue::List(vec![])),
+            None,
+            Some(FieldValue::List(vec![]))
+        ]
+    );
+    assert_eq!(
+        projection
+            .values(&context(&ipv6_tcp()), 4096)
             .expect("projection within budget"),
         [None, None, None]
     );
@@ -1372,6 +1383,62 @@ fn innermost_occurrence_follows_the_chained_order_of_derived_packets() {
             "{source}"
         );
     }
+}
+
+#[test]
+fn frame_facts_count_the_same_physical_plus_derived_layers() {
+    let physical = layered(vec![ipv4_from("192.0.2.1")]);
+    let completed = layered(vec![
+        ipv4_from("192.0.2.1"),
+        ipv4_from("198.51.100.7"),
+        Box::new(Udp::default()),
+    ]);
+    let derived = [DerivedPacket {
+        decoded: &completed,
+        replayed_prefix_layers: 1,
+    }];
+    let context = Context {
+        decoded: &physical,
+        derived: &derived,
+        number: 1,
+        tcp_stream: None,
+        udp_stream: None,
+    };
+    for (source, expected) in [
+        // one physical ipv4 plus the derived packet's layers past its prefix
+        ("frame.layer_count == 3", true),
+        ("frame.layer_count == 1", false),
+        ("frame.protocols == \"udp\"", true),
+        ("frame.protocols == \"ipv6\"", false),
+        ("count(frame.protocols) == 3", true),
+        ("count(frame.protocols) == 1", false),
+    ] {
+        let filter = Filter::compile(source, &registry(), Limits::default())
+            .unwrap_or_else(|error| panic!("{source} must compile: {error}"));
+        assert_eq!(
+            filter.matches(&context).expect("filter evaluates"),
+            expected,
+            "{source}"
+        );
+    }
+
+    let projection = Projection::compile(["frame.protocols", "frame.layer_count"], &registry())
+        .expect("frame facts project");
+    let row = projection
+        .values(&context, 4096)
+        .expect("projection within budget");
+    let Some(FieldValue::List(names)) = &row[0] else {
+        panic!("frame.protocols projects a list: {:?}", row[0]);
+    };
+    assert_eq!(
+        names,
+        &[
+            FieldValue::Text("ipv4".to_owned()),
+            FieldValue::Text("ipv4".to_owned()),
+            FieldValue::Text("udp".to_owned()),
+        ]
+    );
+    assert_eq!(row[1], Some(FieldValue::Unsigned(3)));
 }
 
 #[test]

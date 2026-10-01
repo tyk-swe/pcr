@@ -27,6 +27,8 @@ pub use decode::decode_name;
 
 pub(super) const NAME: &str = BuiltinProtocol::Dns.as_str();
 pub(super) const HEADER_LEN: usize = 12;
+/// The UDP port registry bindings dispatch to this codec as multicast DNS.
+const MDNS_PORT: u64 = 5353;
 
 pub(crate) const MESSAGE_UNPARSED: &str = "dns.message_unparsed";
 
@@ -63,8 +65,11 @@ impl TryFrom<&[u8]> for Dns {
 
 impl Dns {
     /// Malformed or truncated data returns a typed failure, never an invented record.
+    ///
+    /// No transport is known here, so the message decodes as unicast DNS: a
+    /// record class keeps its top bit rather than mDNS's cache-flush reading.
     pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
-        decode::decode(wire.into(), limits)
+        decode::decode(wire.into(), limits, false)
     }
 
     pub fn to_wire(&self) -> Result<Bytes, Error> {
@@ -96,9 +101,9 @@ fn layer_error(error: Error, available: usize) -> crate::codec::Error {
     }
 }
 
-fn layer_from_wire(wire: Bytes) -> Result<Dns, crate::codec::Error> {
+fn layer_from_wire(wire: Bytes, mdns: bool) -> Result<Dns, crate::codec::Error> {
     let available = wire.len();
-    Dns::try_from(wire).map_err(|error| layer_error(error, available))
+    decode::decode(wire, Limits::default(), mdns).map_err(|error| layer_error(error, available))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -226,7 +231,12 @@ impl LayerCodec for DnsCodec {
                 network: None,
             });
         }
-        let layer = layer_from_wire(input.clone())?;
+        // Only the mDNS port marks the message as multicast DNS; unicast DNS
+        // (and LLMNR, which defines no cache-flush bit) keeps classes whole.
+        let mdns = context
+            .discriminator
+            .is_some_and(|discriminator| discriminator.0 == MDNS_PORT);
+        let layer = layer_from_wire(input.clone(), mdns)?;
         Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: input.len(),
@@ -244,7 +254,7 @@ impl LayerCodec for DnsCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let mut layer = if let Some(FieldValue::Bytes(wire)) = fields.get("wire") {
-            layer_from_wire(wire.clone())?
+            layer_from_wire(wire.clone(), false)?
         } else {
             Dns::default()
         };
@@ -289,7 +299,7 @@ mod tests {
             let available = wire.len();
             assert!(
                 matches!(
-                    layer_from_wire(wire),
+                    layer_from_wire(wire, false),
                     Err(crate::codec::Error::Truncated { needed, available: actual, .. })
                         if needed == expected && actual == available
                 ),
@@ -302,7 +312,7 @@ mod tests {
     fn layer_errors_report_other_failures_as_invalid_dns() {
         let mut too_many = vec![0; 12];
         too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
-        let error = layer_from_wire(too_many.into()).unwrap_err();
+        let error = layer_from_wire(too_many.into(), false).unwrap_err();
         assert!(
             matches!(
                 &error,

@@ -416,36 +416,27 @@ fn a_matching_fragment_keeps_the_typed_transform_error() {
 }
 
 #[test]
-fn the_address_table_accepts_4096_entries_and_refuses_one_more() {
+fn the_address_table_applies_a_large_map_end_to_end() {
+    // The 4096-entry boundary is covered in-process in rewrite.rs: a command
+    // line long enough to hold it cannot spawn on every platform.
     let directory = tempfile::tempdir().unwrap();
     let source = tcp_source(directory.path());
     let target = directory.path().join("mapped.pcapng");
-    let entries = |count: u32| {
-        (0..count)
-            .flat_map(|index| {
-                let [_, _, high, low] = index.to_be_bytes();
-                [
-                    "--map-ip".to_owned(),
-                    format!("10.{high}.{low}.1=172.16.{high}.{low}"),
-                ]
-            })
-            .collect::<Vec<_>>()
-    };
-    let run_with = |entries: &[String]| {
-        let mut command = vec![
-            "rewrite",
-            source.to_str().unwrap(),
-            "--write",
-            target.to_str().unwrap(),
-        ];
-        command.extend(entries.iter().map(String::as_str));
-        run(&command)
-    };
-    let output = run_with(&entries(4096));
+    let mut command = vec![
+        "rewrite",
+        source.to_str().unwrap(),
+        "--write",
+        target.to_str().unwrap(),
+    ];
+    let entries = (0..64)
+        .flat_map(|index| {
+            [
+                "--map-ip".to_owned(),
+                format!("10.0.{index}.1=172.16.{index}.1"),
+            ]
+        })
+        .collect::<Vec<_>>();
+    command.extend(entries.iter().map(String::as_str));
+    let output = run(&command);
     assert!(output.status.success(), "{output:?}");
-    std::fs::remove_file(&target).unwrap();
-    let output = run_with(&entries(4097));
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("address map entries=4096"));
-    assert!(!target.exists());
 }

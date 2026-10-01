@@ -216,10 +216,51 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
+    use clap::Parser;
     use packetcraftr_core::budget::DeadlineExceeded;
     use packetcraftr_core::error::Classified;
 
     use super::*;
+
+    #[test]
+    fn the_address_table_accepts_4096_arguments_and_refuses_one_more() {
+        // The argument vector is exercised in-process: a command line long
+        // enough to hold this many entries cannot spawn on every platform.
+        let entries = |count: usize| {
+            (0..count)
+                .flat_map(|index| {
+                    let [_, _, high, low] = u32::try_from(index).unwrap().to_be_bytes();
+                    [
+                        "--map-ip".to_owned(),
+                        format!("10.{high}.{low}.1=172.16.{high}.{low}"),
+                    ]
+                })
+                .collect::<Vec<_>>()
+        };
+        let rewrite = |entries: &[String]| {
+            let mut argv = vec![
+                "packetcraftr".to_owned(),
+                "rewrite".to_owned(),
+                "in.pcapng".to_owned(),
+                "--write".to_owned(),
+                "out.pcapng".to_owned(),
+            ];
+            argv.extend(entries.iter().cloned());
+            let cli = crate::cli::Cli::try_parse_from(argv).expect("arguments parse");
+            let crate::commands::CommandLine::Rewrite(args) = cli.command else {
+                panic!("rewrite arguments");
+            };
+            args
+        };
+        let full = rewrite(&entries(transform::MAX_ADDRESS_MAP_ENTRIES));
+        assert_eq!(full.map_ips.len(), transform::MAX_ADDRESS_MAP_ENTRIES);
+        AddressMap::new(&full.map_ips, &full.map_macs).expect("the table holds 4096");
+        let over = rewrite(&entries(transform::MAX_ADDRESS_MAP_ENTRIES + 1));
+        let (stream, _) = crate::test_support::stream(Command::Rewrite);
+        let error = run(over, ToolFormat::Text, &stream).expect_err("one more is refused");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains("address map entries=4096"));
+    }
 
     #[test]
     fn an_expired_rewrite_duration_reports_the_shared_duration_limit() {

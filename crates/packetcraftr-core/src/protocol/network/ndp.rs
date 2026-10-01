@@ -246,13 +246,21 @@ impl MessageOption {
                 if option.reserved & !ROUTE_RESERVED_MASK != 0 {
                     return Err(field_range("route information reserved", option.reserved));
                 }
-                match option.prefix.len() {
-                    0 | 8 | 16 => Ok(()),
-                    length => Err(Error::OptionValue {
+                // RFC 4191 ties the option's length to the prefix it carries:
+                // no bytes for /0, eight for /1..64, sixteen for /65..128.
+                let expected = match option.prefix_length {
+                    0 => 0,
+                    1..=64 => 8,
+                    65..=128 => 16,
+                    length => return Err(field_range("route prefix length", length)),
+                };
+                if option.prefix.len() != expected {
+                    return Err(Error::OptionValue {
                         kind: ROUTE_INFORMATION,
-                        length,
-                    }),
+                        length: option.prefix.len(),
+                    });
                 }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -987,12 +995,12 @@ mod tests {
 
     #[test]
     fn router_values_that_do_not_fit_their_bits_are_refused() {
-        let advertisement = |edit: fn(&mut RouterAdvertisement)| {
+        fn advertisement(edit: impl Fn(&mut RouterAdvertisement)) -> Result<Bytes, Error> {
             let mut advertisement =
                 RouterAdvertisement::decode(&router_advertisement_bytes()).expect("decodes");
             edit(&mut advertisement);
             advertisement.encode()
-        };
+        }
         assert_eq!(
             advertisement(|message| message.preference = 4),
             Err(Error::FieldRange {
@@ -1043,5 +1051,34 @@ mod tests {
                 length: 5
             })
         );
+        // the fixture's /32 carries eight prefix bytes; the declared width and
+        // the bytes must agree on the RFC 4191 layout
+        assert_eq!(
+            advertisement(|message| {
+                let MessageOption::RouteInformation(route) = &mut message.options[3] else {
+                    unreachable!("last option is the route");
+                };
+                route.prefix_length = 129;
+            }),
+            Err(Error::FieldRange {
+                field: "route prefix length",
+                value: 129
+            })
+        );
+        for (prefix_length, length) in [(0, 8), (64, 0), (65, 8), (32, 16)] {
+            assert_eq!(
+                advertisement(|message| {
+                    let MessageOption::RouteInformation(route) = &mut message.options[3] else {
+                        unreachable!("last option is the route");
+                    };
+                    route.prefix_length = prefix_length;
+                    route.prefix = Bytes::from(vec![0; length]);
+                }),
+                Err(Error::OptionValue {
+                    kind: ROUTE_INFORMATION,
+                    length
+                })
+            );
+        }
     }
 }

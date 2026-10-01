@@ -437,6 +437,10 @@ fn the_address_table_applies_a_large_map_end_to_end() {
         })
         .collect::<Vec<_>>();
     command.extend(entries.iter().map(String::as_str));
+    command.extend(["--map-ip", "192.0.2.1=203.0.113.9"]);
     let output = run(&command);
     assert!(output.status.success(), "{output:?}");
+    let frame = only_frame(&target);
+    assert_eq!(frame.bytes()[26..30], [203, 0, 113, 9]);
+    assert_tcp_checksums(frame.bytes());
 }

@@ -246,13 +246,9 @@ impl MessageOption {
                 if option.reserved & !ROUTE_RESERVED_MASK != 0 {
                     return Err(field_range("route information reserved", option.reserved));
                 }
-                // RFC 4191 ties the option's length to the prefix it carries:
-                // no bytes for /0, eight for /1..64, sixteen for /65..128.
-                let expected = match option.prefix_length {
-                    0 => 0,
-                    1..=64 => 8,
-                    65..=128 => 16,
-                    length => return Err(field_range("route prefix length", length)),
+                // RFC 4191 ties the option's length to the prefix it carries.
+                let Some(expected) = route_prefix_bytes(option.prefix_length) else {
+                    return Err(field_range("route prefix length", option.prefix_length));
                 };
                 if option.prefix.len() != expected {
                     return Err(Error::OptionValue {
@@ -299,6 +295,17 @@ fn field_range(field: &'static str, value: impl Into<u64>) -> Error {
     Error::FieldRange {
         field,
         value: value.into(),
+    }
+}
+
+/// The prefix byte count a Route Information option reserves for a prefix
+/// length, or `None` when the length exceeds the option's wire layout.
+fn route_prefix_bytes(prefix_length: u8) -> Option<usize> {
+    match prefix_length {
+        0 => Some(0),
+        1..=64 => Some(8),
+        65..=128 => Some(16),
+        _ => None,
     }
 }
 
@@ -371,7 +378,9 @@ impl MtuOption {
 impl RouteInformation {
     fn from_value(value: &[u8]) -> Option<Self> {
         let (fixed, prefix) = value.split_first_chunk::<ROUTE_FIXED_VALUE>()?;
-        if !matches!(prefix.len(), 0 | 8 | 16) {
+        // Only a canonical layout decodes typed: a noncanonical option stays
+        // generic so the message re-encodes to its captured bytes.
+        if route_prefix_bytes(fixed[0]) != Some(prefix.len()) {
             return None;
         }
         Some(Self {
@@ -1079,6 +1088,41 @@ mod tests {
                     length
                 })
             );
+        }
+    }
+
+    #[test]
+    fn noncanonical_route_options_stay_generic_and_reencode() {
+        let route = |prefix_length: u8, width: usize| {
+            let mut value = vec![prefix_length, 0x10];
+            value.extend_from_slice(&7u32.to_be_bytes());
+            value.extend_from_slice(&vec![0xAB; width]);
+            let units = u8::try_from((value.len() + OPTION_HEADER_LENGTH) / OPTION_UNIT)
+                .expect("route option units");
+            (
+                MessageOption::from_wire(ROUTE_INFORMATION, units, &value),
+                Bytes::from(value),
+            )
+        };
+        // A declared width that agrees with its prefix length decodes typed.
+        for (prefix_length, width) in [(0, 0), (1, 8), (64, 8), (65, 16), (128, 16)] {
+            let (option, _) = route(prefix_length, width);
+            assert!(
+                matches!(option, MessageOption::RouteInformation(_)),
+                "{prefix_length}/{width} decodes typed: {option:?}"
+            );
+        }
+        // Any other layout, including an out-of-range prefix length, stays
+        // generic and carries its bytes back out unchanged.
+        for (prefix_length, width) in [(0, 8), (64, 0), (65, 8), (32, 16), (129, 16)] {
+            let (option, value) = route(prefix_length, width);
+            match option {
+                MessageOption::Other { kind, value: kept } => {
+                    assert_eq!(kind, ROUTE_INFORMATION);
+                    assert_eq!(kept, value, "{prefix_length}/{width} keeps its bytes");
+                }
+                _ => panic!("{prefix_length}/{width} stays generic: {option:?}"),
+            }
         }
     }
 }

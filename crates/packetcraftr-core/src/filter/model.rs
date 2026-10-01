@@ -3,8 +3,8 @@
 
 use super::error::Error;
 use super::eval::Context;
-use super::parser::{self, Limits, Requirements};
 use super::plan::Plan;
+use super::{Limits, Requirements, parser};
 use crate::registry::Registry;
 
 #[derive(Clone, Debug)]

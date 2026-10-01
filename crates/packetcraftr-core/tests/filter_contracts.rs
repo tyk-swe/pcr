@@ -1813,3 +1813,20 @@ fn new_frame_facts_are_reserved_and_take_no_slice_or_occurrence() {
         ("frame.protocols[0] == \"ipv4\"", "cannot be sliced"),
     ]);
 }
+
+#[test]
+fn filters_and_projections_report_the_same_combined_requirements() {
+    let registry = registry();
+    let filter = Filter::compile(
+        "frame.time_epoch >= 0 || tcp.stream == 1 && !udp.stream == 2",
+        &registry,
+        Limits::default(),
+    )
+    .unwrap();
+    let projection =
+        Projection::compile(["frame.time_epoch", "tcp.stream", "udp.stream"], &registry).unwrap();
+    let requirements = filter.requirements();
+    assert!(requirements.timestamp);
+    assert!(requirements.tcp_stream && requirements.udp_stream && requirements.stream_index);
+    assert_eq!(projection.requirements(), requirements);
+}

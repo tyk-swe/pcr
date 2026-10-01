@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Context, Error, Requirements,
+    Context, DEFAULT_MAX_FILTER_BYTES, Error, Limits, Requirements,
     ast::{Op, Predicate},
     eval, parser,
     path::{FieldRef, FieldSource, FrameField, Occurrence},
@@ -42,15 +42,15 @@ impl Projection {
             }
             bytes = bytes
                 .checked_add(column.len())
-                .filter(|bytes| *bytes <= parser::DEFAULT_MAX_FILTER_BYTES)
+                .filter(|bytes| *bytes <= DEFAULT_MAX_FILTER_BYTES)
                 .ok_or(Error::ProjectionLimit {
                     field: "field_path_bytes",
-                    limit: parser::DEFAULT_MAX_FILTER_BYTES,
+                    limit: DEFAULT_MAX_FILTER_BYTES,
                 })?;
             let compiled = parser::compile(
                 column,
                 registry,
-                &parser::Limits {
+                &Limits {
                     max_terms: 1,
                     ..Default::default()
                 },

@@ -361,17 +361,18 @@ fn parse_predicate(
 fn measure_call(tokens: &[Spanned], start: usize) -> Option<Measure> {
     let Some(Spanned {
         token: Token::Word(word),
-        ..
+        offset,
     }) = tokens.get(start)
     else {
         return None;
     };
+    // the word is the source text, so the parenthesis must begin where it ends
     if !matches!(
         tokens.get(start.saturating_add(1)),
         Some(Spanned {
             token: Token::LeftParen,
-            ..
-        })
+            offset: open,
+        }) if *open == offset.saturating_add(word.len())
     ) {
         return None;
     }

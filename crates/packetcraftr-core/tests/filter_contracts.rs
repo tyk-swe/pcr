@@ -502,6 +502,19 @@ fn a_lone_b_before_a_quote_is_the_only_byte_string_spelling() {
     );
 }
 
+#[test]
+fn len_and_count_are_functions_only_when_the_parenthesis_follows_directly() {
+    assert_rejected(&[
+        ("len (raw.bytes) > 1400", "unknown display filter field len"),
+        (
+            "count (tcp.options) > 4",
+            "unknown display filter field count",
+        ),
+        ("LEN\t(raw.bytes) > 1", "unknown display filter field LEN"),
+    ]);
+    assert!(measured("len(raw.bytes) > 1400", &payload(&[0; 1500])));
+}
+
 fn tcp_with(flags: &str, dsfield: u8) -> decode::DecodedPacket {
     recipe(&format!(
         "ipv4(source=192.0.2.1,destination=192.0.2.2,dscp_ecn={dsfield})/tcp(source_port=44000,destination_port=443,flags={flags})"
@@ -1404,7 +1417,7 @@ fn len_measures_bytes_text_addresses_and_each_list_element() {
             ("len(raw.bytes) <= 19", true),
             ("len(raw.bytes) gt 18", true),
             ("LEN(raw.bytes) == 19", true),
-            ("len ( raw.bytes ) == 19", true),
+            ("len( raw.bytes ) == 19", true),
             ("len(raw.bytes[0:4]) == 4", true),
             ("len(raw.bytes[0:100]) == 19", true),
             ("len(raw.bytes[30:40]) == 0", false),

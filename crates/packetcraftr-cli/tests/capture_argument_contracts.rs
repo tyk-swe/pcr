@@ -195,6 +195,43 @@ fn decoded_output_options_are_checked_before_interface_lookup() {
 }
 
 #[test]
+fn tree_output_is_checked_before_interface_lookup() {
+    for (output_format, extra, code) in [
+        ("text", vec!["--tree"], "cli.tree_requires_dissect"),
+        (
+            "ndjson",
+            vec!["--dissect", "--tree"],
+            "cli.tree_unsupported_format",
+        ),
+    ] {
+        let mut args = vec![
+            "--output",
+            output_format,
+            "capture",
+            "--interface",
+            "does-not-exist",
+        ];
+        args.extend(extra);
+        let output = run(&args);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{args:?} must be a usage error"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reported = if output_format == "ndjson" {
+            parse_ndjson(&output).last().expect("failure record")["error"]["code"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        } else {
+            stderr.to_string()
+        };
+        assert!(reported.contains(code), "{args:?}: {reported}");
+    }
+}
+
+#[test]
 fn live_capture_rejects_stream_projection_before_interface_discovery() {
     let output = run(&[
         "--output",

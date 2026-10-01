@@ -45,11 +45,33 @@ Codes follow the failure's own classification:
   `internal.codec_contract`.
 - Live workflow build failures report the build error's own code (such as
   `policy.build_resource_limit`) instead of `packet.build`.
-- A display filter that reads `frame.time_epoch` on a frame without a timestamp
-  reports `packet.timestamp_unavailable` (exit 3) from every command, including
-  `read --field`, `capture`, `replay`, and `rewrite`. It previously reported
-  `packet.error` (exit 3) or `cli.filter` (exit 2) depending on the command;
-  update scripts that match either code for this case.
+- A display filter that reads `frame.time_epoch` or `frame.time_nsec` on a
+  frame without a timestamp reports `packet.timestamp_unavailable` (exit 3)
+  from every command, including `read --field`, `capture`, `replay`, and
+  `rewrite`. The message is `display filter requires frame.time_epoch or
+  frame.time_nsec, but the frame has no timestamp`, with the remediation
+  `remove frame.time_epoch and frame.time_nsec from the filter or use
+  timestamped packet blocks`. It previously reported `packet.error` (exit 3) or
+  `cli.filter` (exit 2) depending on the command; update scripts that match
+  either code for this case.
+- A malformed `fuzz --field` (for example `--field bad`) or a selector that
+  names no layer of the recipe reports `cli.selector` (usage, exit 2) instead of
+  `cli.fuzz_limit`, and the `--payload-file` syntax error reads
+  `--payload-file requires <protocol>[#occurrence].<field>=PATH or
+  LAYER.FIELD=PATH`. Scripts that match the old code or text need updating.
+- `build --link-type` validates its value while arguments are parsed, so an
+  unknown name fails as a clap `cli.error` (exit 2) with a multi-line message
+  listing the accepted names, ahead of the "requires PCAP or PCAPNG output"
+  check that used to report a non-capture output first. The exit code is
+  unchanged, so only code that matches the old message needs updating.
+  `dissect --link-type` takes the same names as well as numbers.
+- `read --output pcap --normalize` used to exit 2 with `--normalize requires
+  PCAPNG output`; it now writes classic PCAP. Every other `--normalize` output
+  fails with `cli.capture_normalize_format` and `--normalize requires PCAP or
+  PCAPNG output`.
+- The `cli.filter_unsupported_field` hint for `tcp.stream` and `udp.stream`
+  names `stats`, `expert`, and `export`, and no longer names `follow`, which has
+  no `--filter`.
 - An analysis limit that no capture could satisfy is a usage failure.
   `http` and `dns-read` report a zero or above-ceiling
   `--max-application-messages`, `--max-application-streams`,
@@ -206,6 +228,28 @@ errors. Multi-packet builds support text, hex, NDJSON, and PCAP/PCAPNG output,
 while JSON and raw stay single-packet outputs. Output/v6 streams `build` packet
 records carrying `packet_index` plus the built-packet fields, and a completion
 record carrying `packets_built` and `bytes_built`.
+
+Layers in `--axis`, `--payload-file`, and `fuzz --field` can also be named by
+protocol, as `<protocol>[#occurrence].<field>` (`ipv4#2.ttl`), through the new
+`layer::selector` module; the zero-based `LAYER.FIELD` form still works, and
+selectors are case-insensitive. `build --set SELECTOR=VALUE` is new. The numeric
+`fuzz::Target::from_str` and `document::payload::Target::from_str` stay as the
+numeric path, and `Target::select` and `payload::Target::resolve` take the
+selector grammar.
+
+`expression::Limits` gains `max_generated_bytes` (1 MiB by default), the
+cumulative byte budget for the new `repeat`, `zeros`, and `cyclic` generators.
+Struct literals of `Limits` must name the field or end with
+`..Limits::default()`; code that builds it from `Limits::default()` or a field
+update of an existing value is unaffected. Search for `expression::Limits {`.
+
+`fuzz` Boundary cases derive their values from the target field's probed width,
+so a seed and `--first-case` that reproduced a Boundary case before can yield
+different values. Re-record stored Boundary seeds and indexes; Random, BitFlip,
+and Malformed reproductions are unchanged. The round-trip oracle also adds
+`fuzz.roundtrip_mismatch`, `fuzz.roundtrip_unbuildable`, and
+`fuzz.roundtrip_skipped` diagnostics to a case's diagnostics, and
+`fuzz::is_roundtrip_diagnostic` tells them apart from the others.
 
 Rust `scan::Request` and `scan::Probe` gain `udp_payload: bytes::Bytes`; add
 `udp_payload: bytes::Bytes::new()` to literals to keep empty datagrams.
@@ -542,6 +586,46 @@ capture that stayed under the limit on each count can now stop with
 call the decoded-object charge a flat multiplier that DNS name compression can
 exceed.
 
+`expert` reports more TCP findings: `tcp.syn_retransmission`,
+`tcp.connection_refused`, `tcp.handshake_unanswered`, `tcp.synack_mismatch`,
+`tcp.not_closed_at_end`, `tcp.out_of_order`, `tcp.fast_retransmission`,
+`tcp.ack_unseen_segment`, `tcp.data_after_close`, `tcp.fin_retransmission`, and
+`tcp.window_update`. Three existing codes change meaning, so consumers that match
+on them should account for the new ones. A reset that answers a SYN or SYN-ACK is
+`tcp.connection_refused` where it was `tcp.reset`; the segment at the
+acknowledged edge resent after three duplicate acknowledgments is
+`tcp.fast_retransmission` where it was `tcp.retransmission`; and a segment that
+fills a gap already reported as `tcp.previous_segment_not_captured` is
+`tcp.out_of_order` where it carried the retransmission label. Aggregate output
+(the text summary, the per-code counts, and the JSON and NDJSON totals) for a
+capture with an established TCP connection that never closes also gains one Info
+`tcp.not_closed_at_end` finding per such connection, so consumers that pin exact
+totals should update them. Limits: only four open sequence gaps per direction
+are watched, and a fifth fills silently; a handshake verdict that follows an idle
+expiry is judged against the expired SYN; and findings are judged only on frames
+that pass `--filter`, so a filter that keeps one direction of a conversation can
+report `tcp.handshake_unanswered` or `tcp.not_closed_at_end` for a handshake the
+full capture completed.
+
+## Display filter language
+
+Filters gain escapes and `b"..."` byte-string literals, `field & MASK`, `A..B`
+ranges, the `startswith`, `endswith`, `icontains`, and `iequals` operators,
+`[*]` and `[-1]` list selectors, `#last` and `#-1` occurrences, `len()` and
+`count()`, and the frame facts `frame.time_nsec`, `frame.direction`,
+`frame.truncated`, `frame.layer_count`, and `frame.protocols`; `packetcraftr
+topics filters` is the reference. `len` and `count` are functions only when `(`
+follows the word directly, so `len (raw.bytes)` is an unknown field. Known
+limits: the text operators and `contains` compile on a list of numbers or
+addresses (`dns.qtype`, `tls.cipher_suites`) but never match, because the field
+schema records no element kind, and they are compile errors on a list of objects
+(`tcp.options`, `dns.questions`). `frame.reassembled` is not a field.
+`frame.layer_count` and `frame.protocols` are decoded facts, so forwarding
+verification treats them as unevaluable on a truncated or incompletely decoded
+capture, and `frame.time_nsec`, `frame.direction`, and `frame.truncated` cannot
+name forwarding identity or preservation fields. `verify-forwarding --expect`
+values take the same literals and ranges.
+
 ## Offline epoch bounds
 
 `read`, `stats`, `expert`, `follow`, `tls`, `dns-read`, `http`, `export`, and
@@ -581,6 +665,30 @@ reserved bits, or an FCS length without the present flag, is no longer refused
 by `rewrite` and `merge`; those bits are dropped, as libpcap ignores them. In
 Rust, `capture_file::Reader::refuse_declared_fcs` reports the declaration.
 
+`read --normalize` writes classic PCAP with `--output pcap`, from PCAP or PCAPNG
+input, where it used to accept only PCAPNG output. Classic PCAP holds one link
+type and no interface or direction metadata, so the selected frames must share
+one interface, carry no direction, have timestamps, and fit the source snapshot
+length; the file keeps the source's nanosecond or microsecond resolution, and a
+timestamp the resolution cannot hold exactly, any other resolution, and an
+empty selection fail instead of being rounded or guessed. `read --frames
+RANGES` and `--every N` select frames by one-based source position in every
+`read` path; skipped frames still count against the input budgets, and
+`frame.number` and stream numbers keep the source position.
+
+`merge` interleaves its inputs by timestamp and refuses an input that goes back
+in time with `packet.capture_merge_order`. `--max-reorder-frames N` (at most
+`capture_file::MAX_REORDER_FRAMES`, 65536) repairs inversions within an
+`N`-frame look-ahead window per input and also accepts a single input, and
+`--order append` writes each input whole in argument order, keeping timestamps
+verbatim, so the output may be non-monotonic. In Rust, `MergeLimits` gains
+`order: MergeOrder` (default `Chronological`) and `max_reorder_frames: usize`
+(default 0, which refuses the first out-of-order frame as before); a non-zero
+window above the maximum or combined with `MergeOrder::Append` is refused with
+`capture_file::Error::MergeOption`. `merge` is new since 0.5.0-beta.3, so only
+code that tracks `main` must add the fields to `MergeLimits { .. }` literals,
+for example by ending them with `..Default::default()`.
+
 A PCAPNG interface description or packet block with a malformed option list
 reports the structural error (a truncated option, a non-zero end-of-options
 length, or non-zero bytes after the end marker) even when an earlier
@@ -599,12 +707,69 @@ repair|preserve` and `--dry-run`, whose bounded per-frame `changes` never create
 the destination. `--set` conflicts with `--rules-file`, header flags apply
 first, and rules evaluate the original frame in order, atomically per frame.
 
+`rewrite --map-ip OLD=NEW` and `--map-mac OLD=NEW` (`transform::AddressMap`,
+`Rules::with_address_map`) remap addresses many-to-many, and `--set` and
+rewrite/v2 `assign` gain `ipv4.identification`, `ipv4.dscp_ecn`, `tcp.window`,
+`icmp.identifier` and `icmp.sequence` (and the `icmpv6` forms),
+`dhcpv4.transaction_id`, `vxlan.vni`, and `geneve.vni`, with ICMP and ICMPv6
+checksum repair. `transform::rules::Rule` gains `map: Option<AddressMap>`,
+applied after the header patch and before the field assignments, and has no
+`Default`; the document loaders and `Rules::single` already set it, and code
+that builds `Rule { .. }` literals sets `map: None`. `Rules::has_header_edits`
+also reports true when a rule carries a map. Like `merge`, `rewrite` is new
+since 0.5.0-beta.3, so only code that tracks `main` is affected.
+
 DHCP codecs (`protocol::application::dhcp`) bind the standard UDP ports and
 construct fixtures with named option values under `dhcp::Limits`. Protocol
 discovery may replace repeated `children` arrays with `children_reference`:
 resolve that JSON Pointer against the containing top-level field description
 before traversing its children. This only compacts discovery output; reflective
 paths keep their bounds.
+
+## Protocol coverage and bindings
+
+The registry gains the protocols `stp` (LLC SAP 0x4242), `lldp` (EtherType
+0x88cc), `eapol` (EtherType 0x888e), `vrrp` (IP protocol 112), `etherip` (IP
+protocol 97), `gtpu` (UDP 2152), `tftp` (UDP 69), and `syslog` (UDP 514), plus
+bindings for IP protocols 137 (MPLS-in-IP) and 143 (Ethernet) and UDP 6635
+(MPLS-in-UDP). `protocols` lists eight more rows, and the published
+`output-protocols-success.json` example carries them. UDP 5353 and 5355 also
+decode as `dns`.
+
+Captures that carry those ports or protocol numbers used to dissect as `raw`
+and now dissect as typed layers, so `dissect` and `read --dissect` output for
+them changes, and a filter or consumer that matched their raw payloads should
+match the typed fields instead. The `dns` command types its probes to UDP 53,
+5353, and 5355 as DNS. A DNS record whose class carries the mDNS cache-flush
+bit (the top bit, RFC 6762) decodes its typed rdata instead of unknown rdata,
+and the record keeps its full 16-bit class. `--decode-as` accepts `gtpu`,
+`tftp`, and `syslog` on UDP ports, and the generated man pages and completions
+change with the help text. TFTP transfers move to ephemeral ports, so decode
+their DATA and ACK datagrams with `--decode-as udp.port=N:tftp`.
+
+Setting a `syslog` layer's `format` moves the RFC 5424 header defaults that
+were left untouched: switching to `rfc3164` clears the version and nil fields,
+and switching back after a real change restores them. Values set explicitly
+stay, and a legacy message still refuses them. GTP-U bytes after the declared
+length are padding and rebuild strictly.
+
+`protocol::network::ndp` types Router Solicitation, Router Advertisement, and
+Redirect messages, and its `MessageOption` is `#[non_exhaustive]` with typed
+variants for the Prefix Information, Redirected Header, MTU, Route Information,
+and RDNSS options (kinds 3, 4, 5, 24, and 25). Those kinds used to decode as
+`MessageOption::Other { kind, value }`; they now decode to their typed variants
+when their length fits the layout, with the same wire bytes, and `Other` keeps
+the rest. Add a wildcard arm to exhaustive matches, and stop expecting `Other`
+for those kinds. `MessageOption::value()` returns an owned `Bytes` because a
+typed option stores fields, not a value to borrow. `protocol::network::mld` and
+`protocol::network::igmpv3` are new helpers like `ndp`, not registered layers.
+The NDP, MLD, and IGMPv3 helpers and the VRRP, STP, LLDP, and EAPOL codecs are
+new since 0.5.0-beta.3, so only code that tracks `main` meets their changes.
+
+Analysis does not scope GTP-U or EtherIP inner flows by TEID or tunnel: they
+have no `EncapsulationIdentifier`, which needs an output schema change.
+Identical inner tuples carried between the same outer IP pair in different
+TEIDs or EtherIP tunnels therefore share one scope and one stream.
 
 ## Destination allowlists
 
@@ -677,6 +842,12 @@ requested interface is optional, and each sent frame keeps its actual output
 route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in output/v6
 as `{"bit_rate": BITS_PER_SECOND}`.
 
+`replay::Options` gains `max_gap: Option<Duration>` (CLI `--max-gap-ms`). `None`
+keeps the previous timing, so add `max_gap: None` to struct literals. A `Some`
+gap must be non-zero and is valid only with original or scaled timing, which
+`Options::validate` enforces with `InvalidLimit`; it clamps each inter-frame
+delay after scaling, and the published timing does not record the clamp.
+
 ## Resource and output hardening
 
 Native admission stays process-wide: one worker pool of
@@ -720,8 +891,12 @@ of `&[u8]`. Custom codecs can retain ranges with `input.slice(..)` instead of
 copying them, and callers holding borrowed bytes wrap them once with
 `Bytes::copy_from_slice` or `Bytes::from`. `LayerDecodeContext` gains a
 `parent` field naming the enclosing protocol and drops `allow_trailing_padding`:
-delete it from struct literals and stop reading it in codecs. Link padding is
-decided by the registry (`registry::Builder::allow_trailing_padding`,
+delete it from struct literals and stop reading it in codecs. It also gains
+`hop_limit: Option<u8>`, the TTL or hop limit of the enclosing IP header (`None`
+when unknown, as under a non-IP parent), which the VRRP codec reads for its
+destination and TTL checks; add `hop_limit: None` to struct literals, or the
+real value when the caller knows it. Link padding is decided by the registry
+(`registry::Builder::allow_trailing_padding`,
 `Registry::allows_trailing_padding`) and the decode session.
 
 `Layer::as_any` and `Layer::as_any_mut` are removed. `dyn Layer` upcasts to
@@ -746,11 +921,14 @@ semantics refuse it as an unknown protocol carrying a route field, and it gets
 no built-in matcher or validation behavior. Give a custom layer its own
 protocol name and register it through `registry::Builder`.
 `BuiltinProtocol::from_id` and `from_name` still map registry identifiers and
-names. `protocol::semantics` no longer exports its field-name constants
-(`SOURCE`, `DESTINATION`, `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`,
-`SEGMENTS_LEFT`, `LAST_ENTRY`, `TARGET_PROTOCOL`, `IPV4_OPTIONS`); downcast to
-the built-in layer and read its field, so `layer.field(semantics::DESTINATION)`
-on an Ethernet layer becomes
+names. `BuiltinProtocol` is not `#[non_exhaustive]` and gains `Eapol`,
+`Etherip`, `Gtpu`, `Lldp`, `Stp`, `Syslog`, `Tftp`, and `Vrrp` (see
+[Protocol coverage and bindings](#protocol-coverage-and-bindings)), so add arms
+to exhaustive matches on it. `protocol::semantics` no longer exports its
+field-name constants (`SOURCE`, `DESTINATION`, `SOURCE_PORT`,
+`DESTINATION_PORT`, `SEGMENTS`, `SEGMENTS_LEFT`, `LAST_ENTRY`,
+`TARGET_PROTOCOL`, `IPV4_OPTIONS`); downcast to the built-in layer and read its
+field, so `layer.field(semantics::DESTINATION)` on an Ethernet layer becomes
 `layer.downcast_ref::<Ethernet>().map(|ethernet| ethernet.destination)`.
 `protocol::semantics::Error` messages now read "destination cannot be
 determined because ..."; match on the variant, not the text. Its
@@ -1095,15 +1273,21 @@ finished with another run's report), and `Clock` (`io.send_clock`, for a pacing
 clock that fails).
 
 **Exchange.** `exchange::Options` splits: the per-run fields become
-`exchange::Request { template, send, timeout, max_template_packets, collection }`,
-and the capture, decode, and retention bounds become the reusable
+`exchange::Request { template, send, timeout, max_template_packets, collection,
+stop }`, and the capture, decode, and retention bounds become the reusable
 `exchange::Collection { capture, decode, max_responses, max_unmatched_frames }`
 that scan, traceroute, DNS, and fuzz requests reuse. `Collector::observe` is
 gone: the collector is a `Sink<Event>`, so clone it and pass one clone.
 `options.validate()` becomes `request.validate()` and `collection.validate()`.
-The terminal `exchange::Report` (the former `Summary`) is `Report { unanswered,
-stats }`: its `diagnostics` field is removed, so drop it from any `Report` you
-build or destructure. It was always empty, and diagnostics still arrive as
+`stop: exchange::StopCondition` defaults to `Window`, which collects until the
+window closes as before (`Request::new` sets it); `AllAnswered` (CLI
+`--stop-when-answered`) ends collection once every request of the packet set has
+at least one retained response, never before the last send. `Client::exchange`
+honors it, while workflows that hook an exchange, such as fuzz, supply their own
+stop predicate and set `stop: StopCondition::Window`. The terminal
+`exchange::Report` (the former `Summary`) is `Report { unanswered, stats }`: its
+`diagnostics` field is removed, so drop it from any `Report` you build or
+destructure. It was always empty, and diagnostics still arrive as
 `Event::Diagnostic` events and, through `exchange::Collector`, in
 `Aggregate::diagnostics`.
 
@@ -1130,6 +1314,14 @@ it used to fail after transmission with `internal.scan_evidence` or
 `internal.traceroute_evidence`, and a traceroute `collection.max_responses`
 below `probes_per_hop` is `cli.traceroute_limit` up front, where it failed at
 the executor with `cli.traceroute_executor`.
+
+`traceroute::Request` and `traceroute::Probe` gain `payload_size: u16`,
+`dont_fragment: bool`, and `dscp: u8` (CLI `--payload-size`, `--dont-fragment`,
+and `--dscp`). Add `payload_size: 0, dont_fragment: false, dscp: 0` to struct
+literals to keep the previous probe. `payload_size` appends zero bytes to UDP
+and ICMP echo probes (at most `traceroute::MAX_PAYLOAD_SIZE`, 9000), TCP probes
+carry none, `dscp` is at most 63, and `dont_fragment` is refused for an IPv6
+destination. The wire-byte admission check uses the probe's real size.
 
 **Replay** takes `Sink<replay::Event, Ack = ()>` with `Event::Frame(FrameEvidence)`
 in place of the `FnMut(FrameEvidence) -> Result<(), replay::Error>` callback,
@@ -1335,7 +1527,7 @@ for a row are in the sections above.
 | `fuzz::TargetParseError::{MissingSeparator, InvalidLayer, InvalidField}` | `fuzz::Error::{TargetSeparator, TargetLayer, TargetField}` |
 | `analysis::reassembly::{ip, tcp}::{ResourceError, MalformedError}` | `analysis::reassembly::{ip, tcp}::{Resource, Malformed}` |
 | `analysis::follow::Direction` | `analysis::follow::PeerDirection`, distinct from `frame::Direction` |
-| `expression::Options`, `filter::Options` | `expression::Limits`, `filter::Limits` (each with `validate()`) |
+| `expression::Options`, `filter::Options` | `expression::Limits`, `filter::Limits` (each with `validate()`); `expression::Limits` also has `max_generated_bytes` |
 | `budget::Cancellation::POLL_INTERVAL` | `packetcraftr_netio::deadline::POLL_INTERVAL` |
 | `Deadline::bounded_timeout`, `Deadline::for_wait` | `packetcraftr::deadline::DeadlineExt` methods (import the trait) |
 | `document::PACKET_DOCUMENT_SCHEMA_V1` | `document::PACKET_DOCUMENT_SCHEMA_V2` |
@@ -1476,6 +1668,16 @@ after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
   `pipeline_capacity`, `execute_pipeline`), and the short-lived `scan::Batch`
   alias of `probe::Batch<scan::Probe>` (beta.3's own `scan::Batch` is in the
   packetcraftr table).
+- Fields and variants added to types that are themselves new since beta.3.
+  `capture_file::MergeLimits` gains `order` and `max_reorder_frames`;
+  `transform::rules::Rule` gains `map`, and `Rule` has no `Default`;
+  `exchange::Request` gains `stop`; `expression::Limits` gains
+  `max_generated_bytes`; `protocol::network::ndp::MessageOption` is
+  `#[non_exhaustive]`, has typed option variants, and returns an owned `Bytes`
+  from `value()`; and `protocol::network::vrrp::Vrrp::auth_data` is an
+  `Option<Bytes>`, where `None` builds the version's default trailer (eight zero
+  bytes in version 2, none in version 3) and `Some` is written as given. Add the
+  fields to literals and arms to exhaustive matches if you track `main`.
 - The `transform` field-edit types. `FieldAssignment::value` is a `u64`, so
   build `FieldAssignment { field, value: n }` instead of
   `value: FieldValue::Unsigned(n)`; a non-unsigned value is no longer

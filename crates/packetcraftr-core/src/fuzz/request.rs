@@ -90,7 +90,7 @@ impl Target {
     /// A zero-based `LAYER.FIELD` resolves to itself and a protocol selector
     /// to the layer it names, so reports and reproductions keep publishing
     /// layer indexes. Wildcards expand to at most
-    /// [`MAX_TARGET_FIELDS`](super::MAX_TARGET_FIELDS) targets in total.
+    /// [`MAX_TARGET_FIELDS`] targets in total.
     ///
     /// # Errors
     ///

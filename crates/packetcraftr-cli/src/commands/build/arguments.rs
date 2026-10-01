@@ -40,6 +40,7 @@ pub(crate) struct Args {
     /// zero-based LAYER.FIELD, and the value follows packet-expression syntax.
     /// Repeat up to 64 times; a later override of the same field wins.
     #[arg(long = "set", value_name = "SELECTOR=VALUE")]
+    #[allow(rustdoc::invalid_html_tags)]
     pub(crate) set: Vec<String>,
     #[command(flatten)]
     pub(crate) template: TemplateArgs,

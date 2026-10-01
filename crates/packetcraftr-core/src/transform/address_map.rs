@@ -195,7 +195,7 @@ impl PrefixTable {
 
 /// A validated table of IP and MAC remappings. Each frame's outer source and
 /// destination are looked up independently; a match is applied through
-/// [`rewrite`], which repairs lengths and checksums, and everything else
+/// [`rewrite()`], which repairs lengths and checksums, and everything else
 /// passes through unchanged.
 #[derive(Clone, Debug)]
 pub struct AddressMap {
@@ -257,7 +257,7 @@ impl AddressMap {
     /// reads bytes, so a frame the lookup cannot place (no Ethernet or outer
     /// IP header, or one cut short by the capture) matches nothing and is
     /// returned unchanged; a frame that does match must pass every
-    /// [`rewrite`] check and checksum repair, like the fixed address edits.
+    /// [`rewrite()`] check and checksum repair, like the fixed address edits.
     pub fn apply(&self, frame: &Frame, limits: RewriteLimits) -> Result<Frame, Error> {
         let mut patch = HeaderRewrite::default();
         let bytes = frame.bytes();

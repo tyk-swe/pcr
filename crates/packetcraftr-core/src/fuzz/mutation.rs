@@ -114,10 +114,12 @@ fn boundary_value(
     }
 }
 
-/// The most set attempts spent discovering one field's accepted maximum. The
-/// bisection needs at most 72: zero, `u64::MAX`, six for the bit width, one
-/// above the power of two, and 63 inside the rejected width.
-const MAX_WIDTH_PROBES: usize = 80;
+/// The most set attempts spent discovering one field's accepted maximum. Zero,
+/// `u64::MAX`, six for the bit width and one above the power of two take at
+/// most nine; the value bisection inside the rejected width gets the rest. A
+/// limit that is not a power of two and needs more than the budget reports no
+/// maximum, and the caller falls back to fixed extremes.
+const MAX_WIDTH_PROBES: usize = 64;
 
 /// Boundary values for an unsigned field, derived from the largest value the
 /// layer accepts: zero, one, the half-range value, one below the maximum, the
@@ -649,10 +651,9 @@ mod tests {
             100,
             0x1fff,
             (1 << 40) + 12_345,
-            (1 << 57) + 5,
-            (1 << 62) + 5,
-            (1 << 63) + 7,
-            u64::MAX - 1,
+            (1 << 54) + 5,
+            (1 << 62) - 1,
+            (1 << 63) - 1,
             u64::MAX,
         ] {
             attempts.store(0, Ordering::SeqCst);
@@ -681,6 +682,27 @@ mod tests {
                 "maximum {maximum} used {used} attempts"
             );
             assert_eq!(layer.value, 7, "the case layer must stay untouched");
+        }
+    }
+
+    #[test]
+    fn a_limit_needing_more_than_the_probe_budget_reports_no_boundaries() {
+        // 2 + 6 + 1 probes, then 62 value bisections: more than 64 attempts
+        let attempts = Arc::new(AtomicUsize::new(0));
+        for maximum in [(1_u64 << 57) + 5, (1 << 62) + 5, (1 << 63) + 7] {
+            attempts.store(0, Ordering::SeqCst);
+            let layer = TestWord {
+                maximum,
+                attempts: Arc::clone(&attempts),
+                value: 7,
+            };
+            let path = "word".parse().expect("field path");
+            assert_eq!(
+                width_boundaries(&layer, &path, limits(32, 4)),
+                None,
+                "maximum {maximum}"
+            );
+            assert_eq!(attempts.load(Ordering::SeqCst), MAX_WIDTH_PROBES);
         }
     }
 

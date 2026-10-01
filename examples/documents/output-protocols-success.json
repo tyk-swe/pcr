@@ -73,7 +73,7 @@
         "build": true,
         "dissect": true,
         "exact_round_trip": true,
-        "matcher": false,
+        "matcher": true,
         "decode_only": false
       },
       {

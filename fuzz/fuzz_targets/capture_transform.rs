@@ -98,10 +98,7 @@ fuzz_target!(|data: &[u8]| {
             address
         }
     };
-    assert_eq!(
-        mapped.bytes()[12..16],
-        expected(source).to_be_bytes()
-    );
+    assert_eq!(mapped.bytes()[12..16], expected(source).to_be_bytes());
     assert_eq!(
         mapped.bytes()[16..20],
         expected(u32::from_be_bytes([198, 51, 100, 2])).to_be_bytes()
@@ -109,7 +106,9 @@ fuzz_target!(|data: &[u8]| {
     assert_eq!(&mapped.bytes()[28..], &frame.bytes()[28..]);
     let ip_header = &mapped.bytes()[..20];
     assert_eq!(protocol::checksum(ip_header), 0);
-    let udp_length = u16::try_from(mapped.bytes().len() - 20).unwrap().to_be_bytes();
+    let udp_length = u16::try_from(mapped.bytes().len() - 20)
+        .unwrap()
+        .to_be_bytes();
     assert_eq!(
         protocol::checksum_parts(&[
             &mapped.bytes()[12..20],

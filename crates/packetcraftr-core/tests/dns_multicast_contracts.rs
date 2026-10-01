@@ -12,7 +12,7 @@ use common::registry;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::application::dns::{Dns, RecordValue};
 use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::{build, codec, decode};
 
@@ -123,6 +123,11 @@ fn mdns_query_and_response_decode_as_dns_and_keep_the_class_bits() {
     assert_eq!(response.id, 0);
     assert!(response.response && response.authoritative_answer);
     assert_eq!(response.answers[0].class, 0x8001);
+    // the cache-flush bit stays in the class and the rdata is still typed
+    assert_eq!(
+        response.answers[0].value,
+        RecordValue::A(Ipv4Addr::new(192, 0, 2, 80))
+    );
 
     // a unicast response comes from 5353 to the querier's port
     let unicast = round_trip(udp_packet(

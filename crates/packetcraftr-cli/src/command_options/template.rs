@@ -24,7 +24,7 @@ pub(crate) struct TemplateArgs {
     /// fastest.
     #[arg(long = "axis", value_name = "SELECTOR=[VALUES]|START..END[:STEP]")]
     // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
-    #[allow(rustdoc::broken_intra_doc_links)]
+    #[allow(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
     pub(crate) axes: Vec<String>,
     /// Maximum packets in the complete Cartesian product, checked before preparation.
     #[arg(long, default_value_t = DEFAULT_MAX_TEMPLATE_PACKETS)]

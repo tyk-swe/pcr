@@ -173,7 +173,10 @@ Reserved fields:
   frame.interface_id, frame.link_type, frame.direction, frame.truncated,
   frame.layer_count, and frame.protocols describe the captured frame.
   tcp.stream and udp.stream are the conversation indices stats reports and
-  `follow --stream` selects; they never mix transports.
+  `follow --stream` selects; they never mix transports. Only commands that
+  number conversations accept them: `stats`, `expert`, `export`,
+  `verify-forwarding`, and `read` with --field. `dissect`, `capture`,
+  `replay`, and `read` without --field reject them.
   @filter frame.len > 1500 && !padding
   @filter frame.truncated && frame.protocols == "tls"
   @filter tcp.stream == 0

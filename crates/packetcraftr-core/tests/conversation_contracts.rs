@@ -263,7 +263,7 @@ fn data_stays_within_the_advertised_window() {
     };
     let recipe = recipe(
         Tcp {
-            window: 250,
+            window: 200,
             ..Tcp::default()
         },
         &[7; 500],
@@ -282,9 +282,10 @@ fn data_stays_within_the_advertised_window() {
             outstanding = 0;
         }
     }
-    assert!(peak <= 250, "{peak}");
-    // Five segments, acknowledged after every second one and at the end.
-    assert_eq!(layers.len(), 3 + 5 + 3);
+    // The window is never exactly filled, which `expert` reports as `tcp.window_full`.
+    assert!(peak < 200, "{peak}");
+    // Two segments would fill the window, so each of the five is acknowledged.
+    assert_eq!(layers.len(), 3 + 5 + 5);
 }
 
 #[test]

@@ -198,7 +198,10 @@ fn decode_rdata(
         limits,
     };
     // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
-    match (type_code, class) {
+    // The top class bit is mDNS's cache-flush flag (RFC 6762 section 10.2). The
+    // record keeps the full class, so the flag only decides that the typed
+    // IN rdata applies.
+    match (type_code, class & 0x7fff) {
         (1, 1) => {
             let bytes: [u8; 4] = bytes
                 .try_into()

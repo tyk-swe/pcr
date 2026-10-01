@@ -15,11 +15,12 @@ const HANDSHAKE_FRAMES: u128 = 3;
 /// Frames the exchange produces, so the limit applies before any packet exists.
 ///
 /// Each burst of data is acknowledged by the receiver after every
-/// `window / mss` segments and at its end, which keeps the data in flight
-/// within the advertised window.
+/// `(window - 1) / mss` segments (at least one) and at its end, which keeps
+/// the data in flight below the advertised window rather than exactly filling
+/// it, so the capture shows no window-full condition.
 fn frame_count(request: usize, response: usize, mss: u16, window: u16, close: Close) -> u128 {
     let (mss, window) = (usize::from(mss), usize::from(window));
-    let per_ack = u128::try_from((window / mss).max(1)).unwrap_or(u128::MAX);
+    let per_ack = u128::try_from(((window - 1) / mss).max(1)).unwrap_or(u128::MAX);
     let burst = |length: usize| {
         let segments = u128::try_from(length.div_ceil(mss)).unwrap_or(u128::MAX);
         segments.saturating_add(segments.div_ceil(per_ack))
@@ -78,7 +79,7 @@ pub(super) fn expand(
         server: Side::new(&endpoints.server, options.server_isn),
         base,
         mss: usize::from(options.mss),
-        per_ack: (usize::from(base.window) / usize::from(options.mss)).max(1),
+        per_ack: ((usize::from(base.window) - 1) / usize::from(options.mss)).max(1),
         frames: Vec::new(),
     };
     let mss_option = [TcpOption::Mss(options.mss)];
@@ -216,8 +217,10 @@ mod tests {
         );
         assert_eq!(frame_count(0, 0, 1460, 65_535, Close::None), 3);
         assert_eq!(frame_count(0, 0, 1460, 65_535, Close::Rst), 4);
-        // A window holding two segments is acknowledged after every second one.
-        assert_eq!(frame_count(5, 0, 1, 2, Close::None), 3 + 5 + 3);
+        // Two segments would fill a two-byte window, so every segment is acknowledged.
+        assert_eq!(frame_count(5, 0, 1, 2, Close::None), 3 + 5 + 5);
+        // A window holding two segments and a spare byte is acknowledged after every second one.
+        assert_eq!(frame_count(5, 0, 1, 3, Close::None), 3 + 5 + 3);
     }
 
     #[test]

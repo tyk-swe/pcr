@@ -29,7 +29,7 @@ use std::{
 use self::files::Files;
 use crate::command_options::Compression;
 use crate::output;
-use crate::rendering::{render_frame_text, write_hex_line};
+use crate::rendering::{FieldTree, render_frame_text, render_frame_tree, write_hex_line};
 use packetcraftr::capture::{self as workflow, Control, Event, Source};
 use packetcraftr::policy::{CaptureBudget, Policy};
 use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
@@ -59,6 +59,7 @@ impl super::Spec for Args {
         self.timeout.resources(settings);
         self.limits.resources(settings);
         self.budgets.resources(settings);
+        self.tree.resources(settings);
     }
 
     fn run(
@@ -114,13 +115,19 @@ pub(super) fn run(
             "capture --field cannot select stream indices; save the capture and use read --field",
         ));
     }
-    let decoding = Decoding::prepare(
+    let mut decoding = Decoding::prepare(
         args.dissect,
         projector.is_some(),
         args.filter.as_deref(),
         &registry,
         limits.snap_length,
     )?;
+    if let Some(decoding) = decoding.as_mut() {
+        decoding.tree = args
+            .tree
+            .tree
+            .then(|| FieldTree::new(Arc::clone(&registry), args.tree.max_tree_bytes));
+    }
     // `Decoding` evaluates the same filter itself so a frame is decoded at most once.
     let selector = if decoding.is_none() {
         filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
@@ -216,6 +223,19 @@ fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, Cl
         }
         compression
     };
+    if args.tree.tree && !args.dissect {
+        return Err(CliError::from_classification(
+            packetcraftr_core::error::Classification::new(
+                "cli.tree_requires_dissect",
+                Kind::Usage,
+                Some("add --dissect to show each frame's layers as a tree"),
+            ),
+            "--tree requires --dissect",
+            Vec::new(),
+        ));
+    }
+    args.tree
+        .validate_format(format == CaptureFormat::Text, format.as_format())?;
     if (args.dissect || !args.fields.is_empty())
         && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson)
     {
@@ -237,6 +257,8 @@ fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, Cl
 struct Decoding {
     frames: FrameDecoder,
     parked: Option<(u64, DecodedPacket)>,
+    /// Set by `--tree`; text frames then list each layer's fields.
+    tree: Option<FieldTree>,
 }
 
 impl Decoding {
@@ -253,6 +275,7 @@ impl Decoding {
         Ok(Some(Self {
             frames: filtering::frame_decoder(registry, filter, snap_length)?,
             parked: None,
+            tree: None,
         }))
     }
 
@@ -505,6 +528,7 @@ fn emit_frame(
 ) -> Result<(), CliError> {
     if let Some(decoding) = decoding {
         let decoded = decoding.take_or_decode(source_frame, &frame)?;
+        let tree = decoding.tree.as_mut();
         if let Some(projector) = projector {
             let values = projector
                 .projection
@@ -521,7 +545,10 @@ fn emit_frame(
                 let frame =
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
-                render_frame_text(source_frame, &frame, Some(&stack))
+                match tree {
+                    Some(tree) => render_frame_tree(source_frame, &frame, Some(&stack), tree),
+                    None => render_frame_text(source_frame, &frame, Some(&stack)),
+                }
             }
             CaptureFormat::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
                 .map_err(CliError::classified)

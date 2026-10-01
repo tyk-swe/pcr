@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::time::Duration;
+
 use packetcraftr_core::error::Kind;
 
 use super::arguments::{Args, Timing};
@@ -30,6 +32,16 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     };
     timing.validate().map_err(CliError::classified)?;
     Ok(timing)
+}
+
+pub(super) fn max_gap(arguments: &Args) -> Result<Option<Duration>, CliError> {
+    match arguments.max_gap_ms {
+        Some(_) if matches!(arguments.timing, Timing::Immediate) => Err(CliError::new(
+            Kind::Usage,
+            "--max-gap-ms cannot be combined with --timing immediate",
+        )),
+        gap => Ok(gap.map(Duration::from_millis)),
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +111,50 @@ mod tests {
             let error = timing(&arguments(extra)).expect_err("immediate override must fail");
             assert_eq!(error.message, message, "{extra:?}");
             assert_eq!(error.exit_code(), 2, "{extra:?}");
+        }
+    }
+
+    #[test]
+    fn max_gap_maps_to_a_duration_for_captured_timing_only() {
+        assert_eq!(max_gap(&arguments(&[])).unwrap(), None);
+        assert_eq!(
+            max_gap(&arguments(&["--max-gap-ms", "50"])).unwrap(),
+            Some(Duration::from_millis(50))
+        );
+        assert_eq!(
+            max_gap(&arguments(&["--speed", "4", "--max-gap-ms", "50"])).unwrap(),
+            Some(Duration::from_millis(50))
+        );
+        let error = max_gap(&arguments(&["--timing", "immediate", "--max-gap-ms", "50"]))
+            .expect_err("immediate timing has no gaps to clamp");
+        assert_eq!(
+            error.message,
+            "--max-gap-ms cannot be combined with --timing immediate"
+        );
+        assert_eq!(error.exit_code(), 2);
+    }
+
+    #[test]
+    fn max_gap_arguments_reject_zero_and_rate_modes() {
+        for extra in [
+            vec!["--max-gap-ms", "0"],
+            vec!["--max-gap-ms", "5", "--rate", "1"],
+            vec!["--max-gap-ms", "5", "--bps", "8"],
+        ] {
+            assert!(
+                Cli::try_parse_from(
+                    [
+                        "packetcraftr",
+                        "replay",
+                        "fixture.pcap",
+                        "--interface",
+                        "fixture0"
+                    ]
+                    .into_iter()
+                    .chain(extra)
+                )
+                .is_err()
+            );
         }
     }
 

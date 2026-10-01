@@ -40,6 +40,9 @@ fn request() -> traceroute::Request {
         address_family: Family::Any,
         destination_port: Some(80),
         source_port: None,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
         first_hop: 1,
         max_hops: 5,
         probes_per_hop: 1,
@@ -240,4 +243,52 @@ fn a_failing_sink_stops_the_trace_before_a_later_hop() {
         state.shutdowns, state.armed,
         "the hop's capture was shut down"
     );
+}
+
+#[test]
+fn a_payload_above_the_local_mtu_is_refused_before_any_send() {
+    let state = network();
+    let mut request = request();
+    request.strategy = Transport::Udp;
+    request.destination_port = Some(33_434);
+    request.payload_size = 2_000;
+
+    let error = client(&state, Policy::default())
+        .traceroute(request, |_| Ok(()))
+        .expect_err("the padded probe exceeds the 1500-byte fixture MTU");
+
+    assert!(
+        matches!(error, traceroute::Error::Execution { sequence: 0, .. }),
+        "{error}"
+    );
+    assert_eq!(error.classification().code, "packet.mtu");
+    assert_eq!(state.lock().unwrap().sends, 0);
+}
+
+#[test]
+fn invalid_probe_options_are_usage_errors_before_any_capture_or_send() {
+    let mut oversize = request();
+    oversize.strategy = Transport::Udp;
+    oversize.payload_size = traceroute::MAX_PAYLOAD_SIZE + 1;
+    let mut dscp = request();
+    dscp.dscp = traceroute::MAX_DSCP + 1;
+    let mut tcp_payload = request();
+    tcp_payload.payload_size = 8;
+    for (request, option) in [
+        (oversize, "payload_size"),
+        (dscp, "dscp"),
+        (tcp_payload, "payload_size"),
+    ] {
+        let state = network();
+
+        let error = client(&state, Policy::default())
+            .traceroute(request, |_| Ok(()))
+            .expect_err("the probe option is out of range");
+
+        assert!(error.to_string().contains(option), "{error}");
+        assert_eq!(error.classification().code, "cli.traceroute_limit");
+        let state = state.lock().unwrap();
+        assert_eq!(state.armed, 0);
+        assert_eq!(state.sends, 0);
+    }
 }

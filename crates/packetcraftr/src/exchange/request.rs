@@ -13,6 +13,18 @@ use crate::execution::limits::duration_violation;
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
 pub const DEFAULT_MAX_RESPONSES: usize = MAX_CAPTURE_QUEUE_FRAMES;
 
+/// When an exchange stops collecting before its window closes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StopCondition {
+    /// Collect until the window closes.
+    #[default]
+    Window,
+    /// End the collection as soon as every request of the packet set has at least one retained
+    /// response. Duplicate responses to one request count once, and a request that has not been
+    /// sent cannot be answered, so the set is never cut short before its last send.
+    AllAnswered,
+}
+
 #[derive(Clone, Debug)]
 pub struct Request {
     pub template: Template,
@@ -21,6 +33,9 @@ pub struct Request {
     pub timeout: Duration,
     pub max_template_packets: usize,
     pub collection: Collection,
+    /// Honored by [`Client::exchange`](crate::Client::exchange); workflows that hook an
+    /// exchange supply their own stop predicate.
+    pub stop: StopCondition,
 }
 
 impl Request {
@@ -32,6 +47,7 @@ impl Request {
             timeout: Duration::from_secs(3),
             max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
             collection: Collection::default(),
+            stop: StopCondition::Window,
         }
     }
 

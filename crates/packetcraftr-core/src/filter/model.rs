@@ -32,7 +32,9 @@ impl Filter {
         if !matches!(
             tokens.as_slice(),
             [super::lexer::Spanned {
-                token: super::lexer::Token::Word(_) | super::lexer::Token::Text(_),
+                token: super::lexer::Token::Word(_)
+                    | super::lexer::Token::Text(_)
+                    | super::lexer::Token::ByteString(_),
                 ..
             }]
         ) {
@@ -53,5 +55,40 @@ impl Filter {
             return Err(Error::TimestampUnavailable);
         }
         Ok(self.plan.evaluate(context))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equality_takes_one_literal_of_any_spelling_and_nothing_longer() {
+        let registry = crate::protocol::builtin::registry();
+        for (field, value) in [
+            ("tcp.dstport", "80"),
+            ("tcp.dstport", "1..5"),
+            ("ip.src", "192.0.2.1..192.0.2.9"),
+            ("http.method", "\"GET\""),
+            ("raw.bytes", "\"GET\""),
+            ("raw.bytes", "b\"\\x16\\x03\""),
+        ] {
+            Filter::compile_equality(field, value, &registry)
+                .unwrap_or_else(|error| panic!("{field}={value} must compile: {error}"));
+        }
+        for (field, value) in [
+            ("raw.bytes", "80 && ip"),
+            ("tcp.dstport", "1 & 1"),
+            ("tcp.dstport", "1..5 7"),
+            ("raw.bytes", "b\"a\" \"b\""),
+        ] {
+            assert!(
+                matches!(
+                    Filter::compile_equality(field, value, &registry),
+                    Err(Error::Syntax { .. })
+                ),
+                "{field}={value}"
+            );
+        }
     }
 }

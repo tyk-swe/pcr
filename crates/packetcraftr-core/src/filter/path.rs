@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::field::FieldKind;
+use crate::layer::FieldSchema;
 
 use super::error::Error;
 use super::eval;
@@ -43,13 +44,24 @@ pub(super) enum FieldSource {
 pub(super) struct FieldSpec {
     pub(super) kind: FieldKind,
     pub(super) derived: bool,
+    /// The schema gives the field's elements named children, so they are objects rather than scalars.
+    pub(super) structured: bool,
 }
 
 impl FieldSpec {
-    fn synthetic(kind: FieldKind) -> Self {
+    pub(super) fn synthetic(kind: FieldKind) -> Self {
         Self {
             kind,
             derived: false,
+            structured: false,
+        }
+    }
+
+    fn declared(schema: &FieldSchema) -> Self {
+        Self {
+            kind: schema.kind,
+            derived: schema.derived,
+            structured: !schema.children.is_empty(),
         }
     }
 }
@@ -166,10 +178,7 @@ fn specs_for(
                 path: path.to_owned(),
                 protocol: *protocol,
             })?;
-        specs.push(FieldSpec {
-            kind: declared.kind,
-            derived: declared.derived,
-        });
+        specs.push(FieldSpec::declared(declared));
     }
     Ok(specs)
 }
@@ -216,10 +225,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     occurrence,
                 },
                 slice: None,
-                specs: vec![FieldSpec {
-                    kind: declared.kind,
-                    derived: declared.derived,
-                }],
+                specs: vec![FieldSpec::declared(declared)],
                 path: path.to_owned(),
             }));
         }
@@ -232,10 +238,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                 occurrence,
             },
             slice: None,
-            specs: vec![FieldSpec {
-                kind: declared.kind,
-                derived: declared.derived,
-            }],
+            specs: vec![FieldSpec::declared(declared)],
             path: path.to_owned(),
         }));
     }

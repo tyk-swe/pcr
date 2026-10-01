@@ -139,7 +139,7 @@ fn validate_padding(
         }
     };
     let has_declared_boundary = match outside_builtin {
-        Some(BuiltinProtocol::Arp) => true,
+        Some(BuiltinProtocol::Arp | BuiltinProtocol::Eapol | BuiltinProtocol::Stp) => true,
         Some(BuiltinProtocol::Ethernet | BuiltinProtocol::Vlan | BuiltinProtocol::Vlan8021ad) => {
             link_declares_length()
         }

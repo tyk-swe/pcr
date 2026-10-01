@@ -8,6 +8,8 @@
 //! ipv4#2.destination == 192.168.1.5
 //! ethernet.source[0:3] == 00:1b:21
 //! frame.len > 1500 && !padding
+//! tcp.flags & 0x12 == 0x12 && tcp.port in {53, 49152..65535}
+//! raw.bytes contains b"\x16\x03\x01" || dns.qname endswith ".example.com."
 //! ```
 //!
 //! Paths resolve reserved `frame.*`/`tcp.stream`/`udp.stream` names first,
@@ -17,7 +19,13 @@
 //! (`ipv4#1`/`ipv4#2` select one), and either-field paths hold when either
 //! side matches. Byte fields take separated bytes (`c0:00`) or quoted text; an
 //! unquoted run of hex digits such as `c000`, or a byte run with a malformed
-//! group such as `c0:0`, is an error, not an ASCII needle. There is no regex
+//! group such as `c0:0`, is an error, not an ASCII needle. Quoted text takes
+//! the escapes `\\ \" \r \n \t \0` and `\xNN` up to `\x7f`; `b"..."` holds
+//! bytes, where `\xNN` covers `\x00` to `\xff`. `field & MASK` tests the
+//! masked bits of an unsigned field, alone for "nonzero" or before a
+//! comparison. `A..B` is an inclusive range of numbers or addresses for `==`,
+//! `!=`, and `in`. `startswith`, `endswith`, `icontains`, and `iequals` search
+//! like `contains`, and the `i` forms fold ASCII case only. There is no regex
 //! operator.
 
 mod ast;

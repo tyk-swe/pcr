@@ -28,7 +28,10 @@ pub use limits::{
     DEFAULT_MAX_TOTAL_INTERFACES, Limits, ReaderLimits,
 };
 pub use map::{MapReport, map_frames};
-pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
+pub use merge::{
+    MAX_MERGE_SOURCES, MAX_REORDER_FRAMES, MergeLimits, MergeOrder, MergeReport, MergeSource,
+    MergedInterface, merge,
+};
 pub use reader::Reader;
 pub use record::{CaptureRecord, MetadataBlockKind, PacketBlockKind, RecordKind};
 pub use rewrite::{RewriteReport, SelectionReport, rewrite, select};

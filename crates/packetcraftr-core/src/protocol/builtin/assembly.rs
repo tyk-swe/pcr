@@ -13,7 +13,10 @@ use ip::{
     DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Icmpv4Codec, Icmpv6Codec, IgmpCodec,
     Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec,
 };
-use link::{ArpCodec, EthernetCodec, LlcCodec, SnapCodec, Vlan8021adCodec, VlanCodec};
+use link::{
+    ArpCodec, EapolCodec, EthernetCodec, LlcCodec, LldpCodec, SnapCodec, StpCodec, Vlan8021adCodec,
+    VlanCodec,
+};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
     AhCodec, ErspanCodec, EspCodec, GeneveCodec, GreCodec, L2tpv3Codec, MplsCodec, PppCodec,

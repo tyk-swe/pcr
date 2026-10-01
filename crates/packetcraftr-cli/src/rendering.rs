@@ -23,7 +23,9 @@ pub(crate) use capture_file::{stream_capture_error, stream_limits, write_capture
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_compressed_output};
 
 pub(crate) use dns::{render_dns_fields, render_dns_record, render_dns_records};
-pub(crate) use frame::{captured_frame_text, render_frame_text, render_undecoded};
+pub(crate) use frame::{
+    FieldTree, captured_frame_text, render_frame_text, render_frame_tree, render_undecoded,
+};
 
 pub(crate) use human::{
     HumanWriteError, comma_separated, document_spelling, duration_text, emit_stderr_document,

@@ -449,3 +449,349 @@ fn change_reporting_is_bounded_and_discloses_omissions() {
     assert_eq!(report["result"]["changes"].as_array().unwrap().len(), 4096);
     assert!(report["result"]["changes_omitted"].as_u64().unwrap() > 0);
 }
+
+fn assert_ip_tcp_checksums(frame: &packetcraftr_core::frame::Frame) {
+    use packetcraftr_core::protocol::{checksum, checksum_parts};
+    let bytes = frame.bytes();
+    let ip = field_range(frame, "ipv4", "ttl").0 - 8;
+    let header = usize::from(bytes[ip] & 0xf) * 4;
+    assert_eq!(checksum(&bytes[ip..ip + header]), 0, "IPv4 header checksum");
+    let tcp = field_range(frame, "tcp", "source_port").0;
+    let end = ip + usize::from(u16::from_be_bytes([bytes[ip + 2], bytes[ip + 3]]));
+    let length = u16::try_from(end - tcp).unwrap().to_be_bytes();
+    assert_eq!(
+        checksum_parts(&[&bytes[ip + 12..ip + 20], &[0, 6], &length, &bytes[tcp..end]]),
+        0,
+        "TCP checksum"
+    );
+}
+
+#[test]
+fn identification_dscp_and_window_edits_repair_their_covering_checksums() {
+    let source = examples().join("captures/http-stream.pcap");
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("edited.pcapng");
+    let rules = directory.path().join("rules.json");
+    std::fs::write(
+        &rules,
+        r#"{"schema":"packetcraftr.rewrite/v2","rules":[{"assign":["ipv4.dscp_ecn=0xb8","tcp.window=2048"]}]}"#,
+    )
+    .unwrap();
+    for arguments in [
+        vec![
+            "--set",
+            "ipv4.identification=4660",
+            "--set",
+            "ipv4.dscp_ecn=0xb8",
+            "--set",
+            "tcp.window=2048",
+        ],
+        vec!["--rules-file", path_text(&rules)],
+    ] {
+        let mut command = vec!["rewrite", path_text(&source), "--write", path_text(&target)];
+        command.extend(arguments.iter().copied());
+        run_success(&command);
+        let original = frames(&source);
+        let edited = frames(&target);
+        assert_eq!(original.len(), edited.len());
+        for (before, after) in original.iter().zip(&edited) {
+            let window = field_range(after, "tcp", "window");
+            assert_eq!(after.bytes()[window.0..window.1], 2048_u16.to_be_bytes());
+            let dscp = field_range(after, "ipv4", "dscp_ecn").0;
+            assert_eq!(after.bytes()[dscp], 0xb8);
+            if arguments[0] == "--set" {
+                let id = field_range(after, "ipv4", "identification");
+                assert_eq!(after.bytes()[id.0..id.1], 4660_u16.to_be_bytes());
+            } else {
+                assert_eq!(
+                    field_range(before, "ipv4", "identification"),
+                    field_range(after, "ipv4", "identification")
+                );
+            }
+            assert_ip_tcp_checksums(after);
+        }
+        std::fs::remove_file(&target).unwrap();
+    }
+}
+
+/// An Ethernet echo request carrying identifier 1, sequence 2 and 8 payload bytes.
+fn icmp_echo_frame(ipv6: bool) -> packetcraftr_core::frame::Frame {
+    use packetcraftr_core::{
+        build::Builder,
+        frame::{Frame, LinkType},
+        packet::Packet,
+        protocol::{
+            link::Ethernet,
+            network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
+        },
+    };
+    let body = bytes::Bytes::from([[0, 1, 0, 2].as_slice(), &[0x51; 8]].concat());
+    let mut packet = Packet::new();
+    packet.push(Ethernet::default());
+    if ipv6 {
+        packet.push(Ipv6 {
+            source: "2001:db8::1".parse().unwrap(),
+            destination: "2001:db8::2".parse().unwrap(),
+            ..Default::default()
+        });
+        packet.push(Icmpv6 {
+            body,
+            ..Default::default()
+        });
+    } else {
+        packet.push(Ipv4 {
+            source: "192.0.2.1".parse().unwrap(),
+            destination: "198.51.100.2".parse().unwrap(),
+            ..Default::default()
+        });
+        packet.push(Icmpv4 {
+            body,
+            ..Default::default()
+        });
+    }
+    let built = Builder::new(packetcraftr_core::protocol::builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap()
+}
+
+/// Whether the ICMP message of an Ethernet frame passes its own checksum.
+fn icmp_checksum_is_valid(frame: &packetcraftr_core::frame::Frame, ipv6: bool) -> bool {
+    use packetcraftr_core::protocol::{checksum, checksum_parts};
+    let bytes = frame.bytes();
+    if !ipv6 {
+        let icmp = field_range(frame, "icmpv4", "checksum").0 - 2;
+        return checksum(&bytes[icmp..]) == 0;
+    }
+    let icmp = field_range(frame, "icmpv6", "checksum").0 - 2;
+    let length = u32::try_from(bytes.len() - icmp).unwrap().to_be_bytes();
+    checksum_parts(&[&bytes[22..54], &length, &[0, 0, 0, 58], &bytes[icmp..]]) == 0
+}
+
+#[test]
+fn icmp_identifier_and_sequence_edits_repair_or_preserve_the_message_checksum() {
+    use packetcraftr_core::frame::LinkType;
+    let directory = tempfile::tempdir().unwrap();
+    for (ipv6, protocol, assignments) in [
+        (false, "icmpv4", ["icmp.identifier=7", "icmp.sequence=9"]),
+        (true, "icmpv6", ["icmpv6.identifier=7", "icmpv6.sequence=9"]),
+    ] {
+        let source = directory.path().join("echo.pcapng");
+        write_pcapng(&source, LinkType::ETHERNET, &[icmp_echo_frame(ipv6)]);
+        let original = frames(&source).remove(0);
+        assert!(icmp_checksum_is_valid(&original, ipv6));
+        let identifier = field_range(&original, protocol, "identifier");
+        let sequence = field_range(&original, protocol, "sequence");
+        let checksum = field_range(&original, protocol, "checksum");
+        let target = directory.path().join("edited.pcapng");
+        let mut arguments = vec!["rewrite", path_text(&source), "--write", path_text(&target)];
+        for assignment in assignments {
+            arguments.extend(["--set", assignment]);
+        }
+        run_success(&arguments);
+        let edited = frames(&target).remove(0);
+        assert_eq!(
+            edited.bytes()[identifier.0..identifier.1],
+            7_u16.to_be_bytes()
+        );
+        assert_eq!(edited.bytes()[sequence.0..sequence.1], 9_u16.to_be_bytes());
+        assert!(icmp_checksum_is_valid(&edited, ipv6), "{protocol}");
+        assert_ne!(
+            edited.bytes()[checksum.0..checksum.1],
+            original.bytes()[checksum.0..checksum.1]
+        );
+        let rules = directory.path().join("icmp-rules.json");
+        std::fs::write(
+            &rules,
+            format!(
+                r#"{{"schema":"packetcraftr.rewrite/v2","rules":[{{"assign":["{}","{}"]}}]}}"#,
+                assignments[0], assignments[1]
+            ),
+        )
+        .unwrap();
+        std::fs::remove_file(&target).unwrap();
+        run_success(&[
+            "rewrite",
+            path_text(&source),
+            "--rules-file",
+            path_text(&rules),
+            "--write",
+            path_text(&target),
+        ]);
+        assert_eq!(frames(&target)[0].bytes(), edited.bytes(), "{protocol}");
+        std::fs::remove_file(&target).unwrap();
+        arguments.extend(["--checksum-mode", "preserve"]);
+        run_success(&arguments);
+        let preserved = frames(&target).remove(0);
+        assert_eq!(
+            preserved.bytes()[identifier.0..identifier.1],
+            7_u16.to_be_bytes()
+        );
+        assert_eq!(
+            preserved.bytes()[sequence.0..sequence.1],
+            9_u16.to_be_bytes()
+        );
+        assert_eq!(
+            preserved.bytes()[checksum.0..checksum.1],
+            original.bytes()[checksum.0..checksum.1]
+        );
+        assert!(!icmp_checksum_is_valid(&preserved, ipv6), "{protocol}");
+        std::fs::remove_file(&target).unwrap();
+    }
+}
+
+/// A bare-IP frame carrying `outer` on UDP `port` over an Ethernet/IPv4/UDP inner frame.
+fn tunnel_frame(
+    outer: impl packetcraftr_core::layer::Layer,
+    port: u16,
+) -> packetcraftr_core::frame::Frame {
+    use packetcraftr_core::{
+        frame::{Frame, LinkType},
+        layer::Raw,
+        packet::Packet,
+        protocol::{link::Ethernet, network::Ipv4, transport::Udp},
+    };
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: "192.0.2.1".parse().unwrap(),
+        destination: "198.51.100.20".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Udp {
+        source_port: 50000,
+        destination_port: port,
+        ..Default::default()
+    });
+    packet.push(outer);
+    packet.push(Ethernet::default());
+    packet.push(Ipv4 {
+        source: "192.0.2.2".parse().unwrap(),
+        destination: "198.51.100.2".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Udp {
+        source_port: 40000,
+        destination_port: 40001,
+        ..Default::default()
+    });
+    packet.push(Raw::new(vec![0x51; 32]));
+    let built =
+        packetcraftr_core::build::Builder::new(packetcraftr_core::protocol::builtin::registry())
+            .build(packet, Default::default(), Default::default())
+            .unwrap();
+    Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, built.bytes).unwrap()
+}
+
+/// Whether the outer UDP datagram of a bare IPv4 frame passes its checksum.
+fn outer_udp_checksum_is_valid(frame: &packetcraftr_core::frame::Frame) -> bool {
+    use packetcraftr_core::protocol::checksum_parts;
+    let bytes = frame.bytes();
+    let end = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
+    let length = u16::try_from(end - 20).unwrap().to_be_bytes();
+    checksum_parts(&[&bytes[12..20], &[0, 17], &length, &bytes[20..end]]) == 0
+}
+
+#[test]
+fn dhcp_and_tunnel_identifier_edits_repair_the_outer_udp_checksum_through_the_cli() {
+    use packetcraftr_core::{
+        expression,
+        frame::{Frame, LinkType},
+        protocol::{
+            builtin,
+            tunnel::{Geneve, Vxlan},
+        },
+    };
+    let dhcp = expression::parse(
+        "ipv4(source=192.0.2.1,destination=192.0.2.10)/udp(source_port=67,destination_port=68)/dhcpv4(operation=2,message_type=5,transaction_id=7,your_address=192.0.2.10)",
+        &builtin::registry(),
+        Default::default(),
+    )
+    .unwrap();
+    let dhcp = packetcraftr_core::build::Builder::new(builtin::registry())
+        .build(dhcp, Default::default(), Default::default())
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    for (protocol, field, assignment, expected, original) in [
+        (
+            "dhcpv4",
+            "transaction_id",
+            "dhcp.transaction_id=0xdeadbeef",
+            0xdead_beef_u64,
+            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, dhcp.bytes).unwrap(),
+        ),
+        (
+            "vxlan",
+            "vni",
+            "vxlan.vni=0xabcdef",
+            0xab_cdef,
+            tunnel_frame(Vxlan::default(), 4789),
+        ),
+        (
+            "geneve",
+            "vni",
+            "geneve.vni=0xabcdef",
+            0xab_cdef,
+            tunnel_frame(Geneve::default(), 6081),
+        ),
+    ] {
+        let source = directory.path().join("source.pcapng");
+        write_pcapng(&source, LinkType::IPV4, std::slice::from_ref(&original));
+        let target = directory.path().join("edited.pcapng");
+        let rules = directory.path().join("rules.json");
+        std::fs::write(
+            &rules,
+            format!(
+                r#"{{"schema":"packetcraftr.rewrite/v2","rules":[{{"assign":["{assignment}"]}}]}}"#
+            ),
+        )
+        .unwrap();
+        let range = field_range(&original, protocol, field);
+        let mut outputs = Vec::new();
+        for selection in [["--set", assignment], ["--rules-file", path_text(&rules)]] {
+            run_success(&[
+                "rewrite",
+                path_text(&source),
+                selection[0],
+                selection[1],
+                "--write",
+                path_text(&target),
+            ]);
+            let edited = frames(&target).remove(0);
+            let value = edited.bytes()[range.0..range.1]
+                .iter()
+                .fold(0_u64, |value, byte| value << 8 | u64::from(*byte));
+            assert_eq!(value, expected, "{protocol}");
+            assert!(outer_udp_checksum_is_valid(&edited), "{protocol}");
+            outputs.push(edited.bytes().to_vec());
+            std::fs::remove_file(&target).unwrap();
+        }
+        assert_eq!(outputs[0], outputs[1], "{protocol}");
+    }
+}
+
+#[test]
+fn values_beyond_the_field_width_and_fields_outside_the_catalog_are_usage_errors() {
+    let source = examples().join("captures/http-stream.pcap");
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("refused.pcapng");
+    for (assignment, message) in [
+        ("tcp.window=70000", "exceeds the field width"),
+        ("vxlan.vni=0x1000000", "exceeds the field width"),
+        ("icmp.sequence=65536", "exceeds the field width"),
+        ("ipv6.flow_label=1", "outside the supported edit set"),
+        ("ipv4.protocol=1", "outside the supported edit set"),
+    ] {
+        let output = run(&[
+            "rewrite",
+            path_text(&source),
+            "--set",
+            assignment,
+            "--write",
+            path_text(&target),
+        ]);
+        assert_eq!(output.status.code(), Some(2), "{assignment}: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{assignment}: {stderr}");
+        assert!(!target.exists());
+    }
+}

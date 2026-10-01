@@ -106,6 +106,12 @@ pub enum InvalidInput {
     RewriteTruncatedCapture,
     AddressFamilyChange,
     TruncatedIcmpv6,
+    AddressMapSyntax,
+    AddressMapAddress,
+    AddressMapFamilies,
+    AddressMapPrefix,
+    AddressMapHostBits,
+    AddressMapOverlap,
 }
 
 impl InvalidInput {
@@ -157,6 +163,12 @@ impl InvalidInput {
             Self::RewriteTruncatedCapture => "cannot rewrite a truncated capture",
             Self::AddressFamilyChange => "cannot change IP address family",
             Self::TruncatedIcmpv6 => "truncated ICMPv6",
+            Self::AddressMapSyntax => "address mappings use OLD=NEW",
+            Self::AddressMapAddress => "address mapping holds an invalid address",
+            Self::AddressMapFamilies => "address mapping mixes IPv4 and IPv6",
+            Self::AddressMapPrefix => "address mapping prefix lengths are invalid or differ",
+            Self::AddressMapHostBits => "address mapping prefix has host bits set",
+            Self::AddressMapOverlap => "address mapping sources overlap",
         }
     }
 }
@@ -246,6 +258,7 @@ pub enum Limit {
     MaxOutputBytes,
     FieldAssignments,
     VlanDepth,
+    AddressMapEntries,
 }
 
 impl Limit {
@@ -255,6 +268,7 @@ impl Limit {
             Self::MaxOutputBytes => "max_output_bytes",
             Self::FieldAssignments => "field assignments",
             Self::VlanDepth => "VLAN depth",
+            Self::AddressMapEntries => "address map entries",
         }
     }
 }

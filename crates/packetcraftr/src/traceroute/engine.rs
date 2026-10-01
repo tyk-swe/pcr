@@ -129,12 +129,19 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
         &Probes,
         &request.target,
         FamilyGate::new(request.address_family, Error::family),
-        |_| {
+        |selected| {
+            if request.dont_fragment && selected.addresses.first().is_some_and(IpAddr::is_ipv6) {
+                return Err(Error::InvalidProbeOption {
+                    option: "dont_fragment",
+                    reason: "the IPv4 Don't Fragment flag does not exist for an IPv6 destination"
+                        .to_owned(),
+                });
+            }
             let total_probes = request.total_probe_count()?;
             validate_probe_plan(request, total_probes)?;
             let maximum_wire_bytes = u64::try_from(total_probes)
                 .unwrap_or(u64::MAX)
-                .checked_mul(MAX_PROBE_BYTES)
+                .checked_mul(MAX_PROBE_BYTES + u64::from(request.payload_size))
                 .ok_or(Error::InvalidLimit {
                     field: "wire_bytes",
                     value: u64::MAX,

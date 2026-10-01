@@ -32,7 +32,7 @@ use crate::rendering::{
     HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
     finish_compressed_output, stream_capture_error, write_stdout_line_with_interrupt,
 };
-use conversion::timing;
+use conversion::{max_gap, timing};
 
 struct ReplayRun {
     client: crate::system::Client,
@@ -49,6 +49,7 @@ impl super::Spec for Args {
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_gap_ms: Milliseconds @ Operation]);
         self.duration.resources(settings);
         self.reader.resources(settings);
         self.policy.resources(settings);
@@ -148,6 +149,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         inter_pass_delay: Duration::from_millis(arguments.inter_pass_delay_ms),
         link_mode: arguments.link_mode.into(),
         timing,
+        max_gap: max_gap(arguments)?,
         limits,
         allow_permissive_live: arguments.allow_permissive_live,
     };

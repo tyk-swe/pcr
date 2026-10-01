@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use self::arguments::Args;
+use self::arguments::{Args, OrderArg};
 use crate::output::{self, contract::ToolFormat};
 use crate::{
     errors::CliError,
@@ -20,6 +20,9 @@ impl super::Spec for Args {
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         self.limits.resources(settings);
+        crate::resources::declare!(settings, self, [
+            max_reorder_frames: Count @ Operation if self.max_reorder_frames > 0,
+        ]);
     }
 
     fn run(
@@ -33,6 +36,19 @@ impl super::Spec for Args {
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.limits.validate()?;
+    let reorder = args.max_reorder_frames > 0;
+    if reorder && args.order == OrderArg::Append {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--order append keeps timestamps verbatim and cannot be combined with --max-reorder-frames",
+        ));
+    }
+    if args.paths.len() < 2 && !reorder {
+        return Err(CliError::new(
+            Kind::Usage,
+            "merge needs at least two captures unless --max-reorder-frames is set",
+        ));
+    }
     if args.paths.len() > capture_file::MAX_MERGE_SOURCES
         || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1
     {
@@ -76,6 +92,8 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         &mut writer,
         capture_file::MergeLimits {
             streams: args.limits.stream_limits(),
+            order: args.order.into(),
+            max_reorder_frames: usize::try_from(args.max_reorder_frames).unwrap_or(usize::MAX),
             ..Default::default()
         },
     )

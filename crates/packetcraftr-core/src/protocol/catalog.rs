@@ -18,6 +18,7 @@ macro_rules! builtin_protocol_catalog {
             Dhcpv4 { canonical: "dhcpv4", aliases: ["dhcp"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dhcp::Dhcpv4], codec: Dhcpv4Codec }
             Dhcpv6 { canonical: "dhcpv6", aliases: ["dhcp6"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::dhcp::Dhcpv6], codec: Dhcpv6Codec }
             Dns { canonical: "dns", aliases: [], constructible: true, exact_round_trip: true, matcher: dns, layer: [application::dns::Dns], codec: DnsCodec }
+            Eapol { canonical: "eapol", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Eapol], codec: EapolCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Erspan], codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Esp], codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Ethernet], codec: EthernetCodec }
@@ -37,6 +38,7 @@ macro_rules! builtin_protocol_catalog {
             LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::LinuxSll], codec: LinuxSllCodec }
             LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, exact_round_trip: true, matcher: none, layer: [capture::LinuxSll2], codec: LinuxSll2Codec }
             Llc { canonical: "llc", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Llc], codec: LlcCodec }
+            Lldp { canonical: "lldp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Lldp], codec: LldpCodec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [crate::layer::Malformed], codec: MalformedCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Mpls], codec: MplsCodec }
             Ntp { canonical: "ntp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [application::ntp::Ntp], codec: NtpCodec }
@@ -47,6 +49,7 @@ macro_rules! builtin_protocol_catalog {
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, exact_round_trip: false, matcher: none, layer: [], codec: RawIpCodec }
             Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Sctp], codec: SctpCodec }
             Snap { canonical: "snap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Snap], codec: SnapCodec }
+            Stp { canonical: "stp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Stp], codec: StpCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Tcp], codec: TcpCodec }
             Tls { canonical: "tls", aliases: ["ssl"], constructible: true, exact_round_trip: true, matcher: none, layer: [application::tls::Tls], codec: TlsCodec }
             Udp { canonical: "udp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Udp], codec: UdpCodec }

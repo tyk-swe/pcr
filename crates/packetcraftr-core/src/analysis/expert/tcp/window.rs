@@ -30,8 +30,21 @@ pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<F
 pub(super) fn update_advertisement(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
+    previous_acknowledgment: Option<u32>,
+    keep_alive: bool,
+    findings: &mut Vec<Finding>,
 ) {
-    let TcpObservation { flow, tcp, syn, .. } = *observation;
+    let TcpObservation {
+        number,
+        stream,
+        flow,
+        tcp,
+        payload_len,
+        syn,
+        fin,
+        rst,
+        ..
+    } = *observation;
     let sent = flows.entry(flow.clone()).or_default();
     let window_update = match (sent.window_sequence, sent.window_acknowledgment) {
         (Some(update_sequence), Some(update_acknowledgment)) => {
@@ -42,6 +55,25 @@ pub(super) fn update_advertisement(
         _ => true,
     };
     if window_update {
+        // A window carried by a SYN is unscaled and not an earlier advertisement to compare with.
+        let pure_ack = payload_len == 0 && !syn && !fin && !rst && !keep_alive;
+        if pure_ack
+            && !sent.window_from_syn
+            && sent.window.is_some_and(|previous| previous != tcp.window)
+            && tcp.window != 0
+            && previous_acknowledgment == Some(tcp.acknowledgment)
+        {
+            findings.push(new_finding(
+                Severity::Info,
+                "tcp.window_update",
+                number,
+                stream,
+                format!(
+                    "{}:{} changes its receive window to {} without acknowledging new data",
+                    flow.flow.source, flow.flow.source_port, tcp.window
+                ),
+            ));
+        }
         sent.window = Some(tcp.window);
         sent.window_sequence = Some(tcp.sequence);
         sent.window_acknowledgment = Some(tcp.acknowledgment);

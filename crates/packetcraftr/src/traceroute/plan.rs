@@ -22,6 +22,12 @@ pub struct Probe {
     pub hop_limit: u8,
     pub attempt: u32,
     pub source_port: u16,
+    /// Zero bytes appended after the probe identity (ICMP) or the UDP header.
+    pub payload_size: u16,
+    /// IPv4 Don't Fragment flag; always false for an IPv6 destination.
+    pub dont_fragment: bool,
+    /// Differentiated Services code point, `0..=63`.
+    pub dscp: u8,
 }
 
 impl Probe {
@@ -62,6 +68,9 @@ pub(super) fn build_batches(
                 hop_limit,
                 attempt,
                 source_port,
+                payload_size: request.payload_size,
+                dont_fragment: request.dont_fragment,
+                dscp: request.dscp,
             });
             sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
                 field: "probes",

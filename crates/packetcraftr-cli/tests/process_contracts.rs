@@ -391,25 +391,59 @@ fn root_help_publishes_every_documented_exit_code() {
 }
 
 #[test]
-fn inline_dissect_help_examples_decode_without_diagnostics() {
+fn dissect_help_examples_decode_without_diagnostics() {
+    fn words<'a>(command: &'a str, frame_path: &'a str) -> Vec<&'a str> {
+        command
+            .split_whitespace()
+            .skip(1)
+            .map(|argument| match argument {
+                // The documented file stands in for a temporary one.
+                "frame.txt" => frame_path,
+                _ => argument.trim_matches('\''),
+            })
+            .collect()
+    }
+    let frame = {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(IPV4_FRAME_HEX.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file
+    };
+    let frame_path = frame.path().to_str().expect("temporary path is UTF-8");
     for help in [&["--help"][..], &["dissect", "--help"]] {
         let stdout = String::from_utf8(run_success(help).stdout).expect("help is UTF-8");
         let examples = stdout
             .lines()
             .filter(|line| line.trim_start().starts_with("packetcraftr ") && line.contains("--hex"))
             .collect::<Vec<_>>();
-        assert!(!examples.is_empty(), "{help:?} has no inline example");
+        assert!(!examples.is_empty(), "{help:?} has no hex example");
         for example in examples {
-            let mut arguments = example
-                .split_whitespace()
-                .skip(1)
-                .map(|argument| argument.trim_matches('\''))
-                .collect::<Vec<_>>();
-            if !arguments.contains(&"--output") {
+            // A piped example feeds the output of its first command to its last.
+            let (producer, dissect) = match example.rsplit_once(" | ") {
+                Some((producer, dissect)) => (Some(producer), dissect),
+                None => (None, example),
+            };
+            let mut arguments = words(dissect, frame_path);
+            let tree = arguments.contains(&"--tree");
+            if !tree && !arguments.contains(&"--output") {
                 arguments.splice(0..0, ["--output", "json"]);
             }
-            let document = parse_json(&run_success(&arguments));
-            assert_eq!(document["diagnostics"], serde_json::json!([]), "{example}");
+            let output = match producer {
+                Some(producer) => {
+                    let piped = run_success(&words(producer, frame_path));
+                    run_with_stdin(&arguments, &piped.stdout)
+                }
+                None => run_success(&arguments),
+            };
+            assert!(output.status.success(), "{example}");
+            if tree {
+                // The field tree is text-only.
+                assert!(!output.stdout.is_empty(), "{example}");
+                assert!(output.stderr.is_empty(), "{example}");
+            } else {
+                let document = parse_json(&output);
+                assert_eq!(document["diagnostics"], serde_json::json!([]), "{example}");
+            }
         }
     }
 }

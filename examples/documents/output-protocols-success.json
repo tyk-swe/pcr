@@ -77,6 +77,15 @@
         "decode_only": false
       },
       {
+        "protocol": "eapol",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "erspan",
         "aliases": [],
         "build": true,
@@ -281,6 +290,15 @@
         "decode_only": false
       },
       {
+        "protocol": "lldp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "malformed",
         "aliases": [],
         "build": true,
@@ -370,6 +388,15 @@
       },
       {
         "protocol": "snap",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "stp",
         "aliases": [],
         "build": true,
         "dissect": true,

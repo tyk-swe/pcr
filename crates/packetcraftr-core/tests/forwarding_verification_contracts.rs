@@ -236,6 +236,50 @@ fn expected_port_translation_passes() {
 }
 
 #[test]
+fn expectations_take_range_and_byte_string_literals() {
+    let ingress = vec![frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40_000, 9_000),
+        b"one",
+    )];
+    let egress = vec![frame(
+        2,
+        common::CLIENT,
+        common::SERVER,
+        (40_000, 8_080),
+        b"one",
+    )];
+    let inside = rules(
+        &["raw.bytes"],
+        &[],
+        &[
+            "udp.destination_port=8000..8100",
+            r#"raw.bytes=b"\x6f\x6e\x65""#,
+        ],
+    );
+    let report = compare(&inside, &ingress, &egress);
+    assert_eq!(report.verdict, Verdict::Pass);
+    assert_eq!(report.summary.checks_evaluated, 2);
+
+    let outside = rules(&["raw.bytes"], &[], &["udp.destination_port=9000..9100"]);
+    let report = compare(&outside, &ingress, &egress);
+    assert_eq!(report.verdict, Verdict::Fail);
+    assert_eq!(report.violations[0].check.field, "udp.destination_port");
+    assert_eq!(
+        report.violations[0].actual,
+        Some(FieldValue::Unsigned(8_080))
+    );
+
+    let different = rules(&["raw.bytes"], &[], &[r#"raw.bytes=b"\x6f\x6e\x66""#]);
+    assert_eq!(
+        compare(&different, &ingress, &egress).verdict,
+        Verdict::Fail
+    );
+}
+
+#[test]
 fn a_wrong_transformed_field_is_a_concrete_failure() {
     let ingress = vec![frame(
         1,
@@ -878,7 +922,15 @@ fn reordering_counts_and_flags_survive_detail_limits() {
 
 #[test]
 fn expectations_accept_only_one_literal() {
-    for value in ["63 or udp", "63 || udp", "64 and udp", "(64)", "64 == 64"] {
+    for value in [
+        "63 or udp",
+        "63 || udp",
+        "64 and udp",
+        "(64)",
+        "64 == 64",
+        "64 & 1",
+        "1..5 7",
+    ] {
         assert!(
             forwarding::Rules::compile(
                 &["raw.bytes".into()],

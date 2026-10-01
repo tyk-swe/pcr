@@ -77,7 +77,7 @@ pub(super) fn plan_frame(
         });
     }
     let mode = link_mode(source_index, frame.link_type, options.link_mode)?;
-    let delay = scheduled_delay(options.timing, tally, frame, source_index)?;
+    let delay = scheduled_delay(options, tally, frame, source_index)?;
     let next_duration =
         tally
             .scheduled_duration
@@ -114,7 +114,7 @@ pub(super) fn plan_frame(
 }
 
 fn scheduled_delay(
-    timing: Timing,
+    options: &Options,
     tally: &Tally,
     frame: &Frame,
     source_index: u64,
@@ -122,7 +122,8 @@ fn scheduled_delay(
     if !tally.has_previous {
         return Ok(Duration::ZERO);
     }
-    timing.delay_between(
+    let timing = options.timing;
+    let delay = timing.delay_between(
         tally.previous_timestamp,
         frame.timestamp,
         source_index,
@@ -130,7 +131,12 @@ fn scheduled_delay(
         tally
             .scheduled_duration
             .saturating_sub(tally.pause_duration),
-    )
+    )?;
+    // Only captured gaps are clamped; rate-derived delays are never idle gaps.
+    Ok(match (timing, options.max_gap) {
+        (Timing::Original | Timing::Scaled(_), Some(max_gap)) => delay.min(max_gap),
+        _ => delay,
+    })
 }
 
 impl Timing {
@@ -227,11 +233,20 @@ mod tests {
     use crate::replay::request::Limits;
 
     fn delays(timing: Timing, stamps: &[Option<Duration>]) -> Result<Vec<Duration>, Error> {
+        clamped_delays(timing, None, stamps)
+    }
+
+    fn clamped_delays(
+        timing: Timing,
+        max_gap: Option<Duration>,
+        stamps: &[Option<Duration>],
+    ) -> Result<Vec<Duration>, Error> {
         let options = Options {
             repeat: 1,
             inter_pass_delay: Duration::ZERO,
             link_mode: LinkMode::Auto,
             timing,
+            max_gap,
             limits: Limits::default(),
             allow_permissive_live: false,
         };
@@ -262,6 +277,120 @@ mod tests {
             .iter()
             .map(|value| Some(Duration::from_millis(*value)))
             .collect()
+    }
+
+    #[test]
+    fn a_maximum_gap_clamps_only_the_gaps_that_exceed_it() {
+        let stamps = millis(&[0, 10, 610_010, 610_030]);
+        let gap = Some(Duration::from_millis(50));
+        assert_eq!(
+            clamped_delays(Timing::Original, gap, &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::from_millis(10),
+                Duration::from_millis(50),
+                Duration::from_millis(20),
+            ]
+        );
+        assert_eq!(
+            clamped_delays(Timing::Original, gap, &stamps).unwrap()[1],
+            delays(Timing::Original, &stamps).unwrap()[1],
+            "a shorter gap is untouched"
+        );
+    }
+
+    #[test]
+    fn a_scaled_gap_is_clamped_after_scaling() {
+        let stamps = millis(&[0, 100, 100_100]);
+        let gap = Some(Duration::from_millis(30));
+        assert_eq!(
+            clamped_delays(Timing::Scaled(0.5), gap, &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::from_millis(30),
+                Duration::from_millis(30),
+            ],
+            "50ms scaled exceeds the clamp"
+        );
+        assert_eq!(
+            clamped_delays(Timing::Scaled(0.2), gap, &stamps).unwrap(),
+            [
+                Duration::ZERO,
+                Duration::from_millis(20),
+                Duration::from_millis(30),
+            ],
+            "20ms scaled stays below the clamp"
+        );
+    }
+
+    #[test]
+    fn a_maximum_gap_lowers_the_planned_duration_under_the_duration_limit() {
+        let stamps = seconds(&[0, 600]);
+        let frame = |offset: &Option<Duration>| {
+            Frame::new(
+                UNIX_EPOCH + offset.unwrap(),
+                LinkType::ETHERNET,
+                vec![0; 14],
+            )
+            .expect("capture frame")
+        };
+        let plan = |max_gap| {
+            let options = Options {
+                repeat: 1,
+                inter_pass_delay: Duration::ZERO,
+                link_mode: LinkMode::Auto,
+                timing: Timing::Original,
+                max_gap,
+                limits: Limits {
+                    max_duration: Duration::from_secs(60),
+                    ..Limits::default()
+                },
+                allow_permissive_live: false,
+            };
+            let mut tally = Tally::default();
+            let first = frame(&stamps[0]);
+            let planned = plan_frame(&options, &tally, &first, 0).unwrap();
+            tally.complete(&planned, first.timestamp);
+            plan_frame(&options, &tally, &frame(&stamps[1]), 1)
+        };
+
+        assert!(
+            matches!(
+                plan(None),
+                Err(Error::DurationLimit {
+                    source_index: 1,
+                    ..
+                })
+            ),
+            "the unclamped idle gap exceeds the limit"
+        );
+        assert_eq!(
+            plan(Some(Duration::from_secs(5))).unwrap().next_duration,
+            Duration::from_secs(5)
+        );
+        assert!(matches!(
+            plan(Some(Duration::from_secs(61))),
+            Err(Error::DurationLimit {
+                source_index: 1,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_maximum_gap_never_changes_rate_derived_delays() {
+        for timing in [
+            Timing::FixedRate(2.0),
+            Timing::BitRate(112),
+            Timing::Immediate,
+        ] {
+            let stamps = seconds(&[0, 1, 2]);
+            assert_eq!(
+                clamped_delays(timing, Some(Duration::from_millis(1)), &stamps).unwrap(),
+                delays(timing, &stamps).unwrap(),
+                "{timing:?}"
+            );
+        }
     }
 
     #[test]
@@ -358,6 +487,7 @@ mod tests {
             inter_pass_delay: Duration::ZERO,
             link_mode: LinkMode::Auto,
             timing: Timing::BitRate(1),
+            max_gap: None,
             limits: Limits {
                 max_transmitted_bytes: u64::MAX,
                 ..Limits::default()

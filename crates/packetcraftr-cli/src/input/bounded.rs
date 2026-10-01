@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use crate::errors::CliError;
 
@@ -14,6 +14,8 @@ use crate::errors::CliError;
 pub(crate) enum InputKind {
     Recipe,
     Frame,
+    /// Hexadecimal text that decodes to frame bytes.
+    FrameHex,
     Payload,
     Capture,
 }
@@ -23,6 +25,7 @@ impl InputKind {
         match self {
             Self::Recipe => "packet",
             Self::Frame => "frame",
+            Self::FrameHex => "frame hex text",
             Self::Payload => "UDP payload",
             Self::Capture => "capture",
         }
@@ -32,6 +35,7 @@ impl InputKind {
         match self {
             Self::Recipe => "--packet, --packet-file, or redirect non-empty stdin",
             Self::Frame => "--hex, --file, or redirect non-empty stdin",
+            Self::FrameHex => "--hex, --hex-file, --file, or redirect non-empty stdin",
             Self::Payload => "--udp-payload-hex or --udp-payload-file",
             Self::Capture => "a capture path, or use - with redirected capture stdin",
         }
@@ -43,6 +47,9 @@ impl InputKind {
                 "provide --packet, --packet-file, or pipe a non-empty packet recipe to stdin"
             }
             Self::Frame => "provide --hex, --file, or pipe non-empty frame bytes to stdin",
+            Self::FrameHex => {
+                "provide --hex, --hex-file, --file, or pipe non-empty hexadecimal text to stdin"
+            }
             Self::Payload => "provide --udp-payload-hex or --udp-payload-file",
             Self::Capture => "provide a capture path or pipe PCAP/PCAPNG bytes with - as the path",
         }
@@ -57,11 +64,17 @@ impl InputKind {
             Self::Frame => {
                 CliError::classified(core::decode::Error::PacketSizeLimit { actual, limit })
             }
+            // The text bound derives from the packet budget, so it shares that classification.
+            Self::FrameHex => CliError::from_classification(
+                core::decode::Error::PacketSizeLimit { actual, limit }.classification(),
+                format!("{} input exceeds {limit} byte limit", self.label()),
+                Vec::new(),
+            ),
         }
     }
 }
 
-fn missing_input_error(kind: InputKind) -> CliError {
+pub(crate) fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
         Classification::new("cli.input_source", Kind::Usage, Some(kind.remediation())),
         format!(
@@ -130,6 +143,12 @@ struct InputRead {
     label: &'static str,
     #[source]
     source: io::Error,
+}
+
+/// Text bytes that can hold `max_packet_size` decoded bytes: at most a digit pair, a prefix or
+/// separator, and slack per byte, plus surrounding whitespace.
+pub(crate) fn hex_text_limit(max_packet_size: usize) -> usize {
+    max_packet_size.saturating_mul(4).saturating_add(4096)
 }
 
 pub(crate) fn read_bounded_json_document(
@@ -246,6 +265,29 @@ mod tests {
             oversized_frame.classification.code,
             "policy.decode_resource_limit"
         );
+    }
+
+    #[test]
+    fn hex_text_is_bounded_by_the_packet_budget_with_its_classification() {
+        assert_eq!(hex_text_limit(10), 4136);
+        assert_eq!(hex_text_limit(usize::MAX), usize::MAX);
+
+        let oversized = read_bounded_allow_empty(Cursor::new(b"abcde"), 4, InputKind::FrameHex)
+            .expect_err("the text bound is enforced while reading");
+        assert_eq!(oversized.exit_code(), 6);
+        assert_eq!(
+            oversized.classification.code,
+            "policy.decode_resource_limit"
+        );
+        assert_eq!(
+            oversized.message,
+            "frame hex text input exceeds 4 byte limit"
+        );
+
+        let terminal = require_redirected_stdin(InputKind::FrameHex, true)
+            .expect_err("terminal stdin is rejected");
+        assert_eq!(terminal.exit_code(), 2);
+        assert!(terminal.message.contains("--hex-file"));
     }
 
     #[test]

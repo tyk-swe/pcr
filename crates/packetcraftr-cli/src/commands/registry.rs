@@ -251,6 +251,17 @@ mod tests {
                 undeclared_bounds::<merge::arguments::Args>,
             ),
             (
+                &[
+                    "merge",
+                    "--write",
+                    "m.pcapng",
+                    "--max-reorder-frames",
+                    "8",
+                    CAPTURE,
+                ],
+                undeclared_bounds::<merge::arguments::Args>,
+            ),
+            (
                 &["fragment", "--mtu", "576", "--packet", PACKET],
                 undeclared_bounds::<fragment::arguments::Args>,
             ),
@@ -299,7 +310,7 @@ mod tests {
                 undeclared_bounds::<follow::arguments::Args>,
             ),
             (
-                &["replay", "--interface", "lo", CAPTURE],
+                &["replay", "--interface", "lo", "--max-gap-ms", "50", CAPTURE],
                 undeclared_bounds::<replay::arguments::Args>,
             ),
             (

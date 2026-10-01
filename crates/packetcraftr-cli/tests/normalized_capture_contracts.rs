@@ -270,11 +270,14 @@ fn normalization_enforces_input_accounting_and_output_block_and_interface_limits
 }
 
 #[test]
-fn normalization_requires_explicit_pcapng_and_preserves_default_rewrite_rules() {
-    for format in ["text", "hex", "pcap"] {
+fn normalization_requires_capture_output_and_preserves_default_rewrite_rules() {
+    for format in ["text", "hex"] {
         let output = run(&["--output", format, "read", "missing.pcap", "--normalize"]);
         assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("--normalize requires PCAPNG"));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("--normalize requires PCAP or PCAPNG output")
+        );
     }
     let source = capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]);
     let rejected = run_with_stdin(&["--output", "pcapng", "read", "-"], &source);
@@ -409,6 +412,297 @@ fn normalization_rejects_timestamps_not_representable_in_capture_time() {
         let normalized = normalize(&input, &[], 3);
         assert!(String::from_utf8_lossy(&normalized.stderr).contains("sub-nanosecond timestamp"));
         assert!(read_frames(&normalized.stdout).0.is_empty());
+    }
+}
+
+fn normalize_pcap(input: &[u8], flags: &[&str], expected_code: i32) -> Output {
+    let mut arguments = vec!["--normalize"];
+    arguments.extend_from_slice(flags);
+    assert_file_stdin_parity(input, "read", &arguments, "pcap", expected_code)
+}
+
+fn read_classic(bytes: &[u8]) -> (Vec<Frame>, Vec<Interface>) {
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert_eq!(reader.format(), Format::Pcap);
+    let mut frames = Vec::new();
+    while let Some(frame) = reader.next_frame().unwrap() {
+        frames.push(frame);
+    }
+    (frames, reader.interfaces().to_vec())
+}
+
+fn interface(link_type: LinkType, resolution: TimestampResolution, snap_len: u32) -> Interface {
+    Interface {
+        link_type,
+        snap_len,
+        timestamp_resolution: resolution,
+        timestamp_offset: 0,
+    }
+}
+
+fn pcapng_with(descriptions: &[Interface], frames: &[Frame]) -> Vec<u8> {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    for description in descriptions {
+        writer
+            .add_interface_description(description.clone())
+            .unwrap();
+    }
+    for frame in frames {
+        writer.write_frame(frame).unwrap();
+    }
+    writer.into_inner()
+}
+
+fn on_interface(mut frame: Frame, interface: u32) -> Frame {
+    frame.interface = Some(interface);
+    frame
+}
+
+fn classic_bytes(resolution: TimestampResolution, snap_len: usize, frames: &[Frame]) -> Vec<u8> {
+    let mut writer = Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::IPV4,
+        PcapOptions {
+            timestamp_resolution: resolution,
+            snap_len,
+            ..PcapOptions::default()
+        },
+    )
+    .unwrap();
+    for frame in frames {
+        writer.write_frame(frame).unwrap();
+    }
+    writer.into_inner()
+}
+
+#[test]
+fn pcapng_normalizes_to_classic_pcap_with_the_source_resolution() {
+    for (resolution, nanos) in [
+        (TimestampResolution::Decimal(6), 1_234_567_000),
+        (TimestampResolution::Decimal(9), 1_234_567_891),
+    ] {
+        let frames = [
+            Frame::try_with_lengths(
+                UNIX_EPOCH + Duration::from_nanos(nanos),
+                LinkType::IPV4,
+                Lengths {
+                    captured: 3,
+                    original: 9,
+                },
+                vec![1, 2, 3],
+            )
+            .unwrap(),
+            Frame::new(UNIX_EPOCH + Duration::from_secs(5), LinkType::IPV4, vec![4]).unwrap(),
+        ];
+        let source = pcapng_with(
+            &[interface(LinkType::IPV4, resolution, 9000)],
+            &frames.clone().map(|frame| on_interface(frame, 0)),
+        );
+        let output = normalize_pcap(&source, &[], 0);
+        let (actual, interfaces) = read_classic(&output.stdout);
+        assert_eq!(actual, frames);
+        assert_eq!(interfaces[0].timestamp_resolution, resolution);
+        assert_eq!(interfaces[0].snap_len, 9000);
+        assert_eq!(output.stdout, classic_bytes(resolution, 9000, &frames));
+    }
+}
+
+#[test]
+fn classic_pcap_normalization_keeps_selection_and_limit_accounting() {
+    let frames = [frame(FIRST_FRAGMENT), frame(LAST_FRAGMENT)];
+    let source = pcapng_with(
+        &[interface(
+            LinkType::IPV4,
+            TimestampResolution::Decimal(9),
+            65535,
+        )],
+        &frames.clone().map(|frame| on_interface(frame, 0)),
+    );
+    let selected = normalize_pcap(&source, &["--filter", "frame.number == 2"], 0);
+    assert_eq!(read_classic(&selected.stdout).0, [frames[1].clone()]);
+    let limited = normalize_pcap(
+        &source,
+        &["--filter", "frame.number == 1", "--max-frames", "1"],
+        6,
+    );
+    assert!(String::from_utf8_lossy(&limited.stderr).contains("policy.capture_stream_limit"));
+    // A classic source converts too, and nothing selected has no link type to write.
+    let classic = capture(Format::Pcap, &frames);
+    assert_eq!(
+        read_classic(&normalize_pcap(&classic, &[], 0).stdout).0,
+        frames
+    );
+    for input in [&source, &classic, &capture(Format::Pcap, &[])] {
+        let empty = normalize_pcap(input, &["--filter", "frame.number == 99"], 2);
+        assert!(empty.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&empty.stderr).contains("cli.capture_normalize_pcap"),
+            "{}",
+            String::from_utf8_lossy(&empty.stderr)
+        );
+    }
+}
+
+#[test]
+fn classic_pcap_normalization_refuses_more_than_one_interface() {
+    let first = frame(FIRST_FRAGMENT);
+    let second = Frame::new(UNIX_EPOCH, LinkType::IPV6, vec![0x60, 0]).unwrap();
+    let third = frame(LAST_FRAGMENT);
+    for (descriptions, frames) in [
+        (
+            [
+                interface(LinkType::IPV4, TimestampResolution::Decimal(6), 100),
+                interface(LinkType::IPV6, TimestampResolution::Decimal(6), 100),
+            ],
+            [
+                on_interface(first.clone(), 0),
+                on_interface(second.clone(), 1),
+                on_interface(third.clone(), 0),
+            ],
+        ),
+        // The same link type on a second interface is still a second interface.
+        (
+            [
+                interface(LinkType::IPV4, TimestampResolution::Decimal(6), 100),
+                interface(LinkType::IPV4, TimestampResolution::Decimal(6), 100),
+            ],
+            [
+                on_interface(first.clone(), 0),
+                on_interface(third.clone(), 1),
+                on_interface(first.clone(), 0),
+            ],
+        ),
+    ] {
+        let source = pcapng_with(&descriptions, &frames);
+        let output = normalize_pcap(&source, &[], 3);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("packet.capture_transform_metadata"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("pcap holds one interface"), "{stderr}");
+        assert!(stderr.contains("at frame 2"), "{stderr}");
+        // The conflict is found mid-stream, so the first frame is already written.
+        assert_eq!(read_classic(&output.stdout).0.len(), 1);
+        // Selecting frames from one interface alone converts.
+        let one = normalize_pcap(&source, &["--filter", "frame.number == 3"], 0);
+        assert_eq!(read_classic(&one.stdout).0.len(), 1);
+    }
+}
+
+#[test]
+fn classic_pcap_normalization_refuses_timestamps_beyond_its_seconds_field() {
+    let late = Frame::new(
+        UNIX_EPOCH + Duration::from_secs(u64::from(u32::MAX) + 1),
+        LinkType::IPV4,
+        vec![2],
+    )
+    .unwrap();
+    let source = pcapng_with(
+        &[interface(
+            LinkType::IPV4,
+            TimestampResolution::Decimal(6),
+            100,
+        )],
+        &[
+            on_interface(frame(FIRST_FRAGMENT), 0),
+            on_interface(late, 0),
+        ],
+    );
+    let output = normalize_pcap(&source, &[], 3);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("packet.capture_file"), "{stderr}");
+    assert!(
+        stderr.contains("timestamp cannot be represented in pcap"),
+        "{stderr}"
+    );
+    // The refusal is found when the second frame is written, so the first is already out.
+    assert_eq!(read_classic(&output.stdout).0.len(), 1);
+    // Frames the filter drops never reach the writer.
+    let selected = normalize_pcap(&source, &["--filter", "frame.number == 1"], 0);
+    assert_eq!(read_classic(&selected.stdout).0.len(), 1);
+}
+
+#[test]
+fn classic_pcap_normalization_refuses_direction_and_unsupported_resolutions() {
+    let description = interface(LinkType::IPV4, TimestampResolution::Decimal(6), 100);
+    let mut directed = on_interface(frame(FIRST_FRAGMENT), 0);
+    for direction in [Direction::Inbound, Direction::Outbound] {
+        directed.direction = Some(direction);
+        let source = pcapng_with(
+            std::slice::from_ref(&description),
+            &[on_interface(frame(LAST_FRAGMENT), 0), directed.clone()],
+        );
+        let output = normalize_pcap(&source, &[], 3);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("pcap cannot represent direction"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("frame 2"), "{stderr}");
+        assert_eq!(read_classic(&output.stdout).0.len(), 1);
+        // Direction of frames the filter drops is not a conflict.
+        let selected = normalize_pcap(&source, &["--filter", "frame.number == 1"], 0);
+        assert_eq!(read_classic(&selected.stdout).0.len(), 1);
+    }
+    // An unknown direction carries nothing to lose.
+    directed.direction = Some(Direction::Unknown);
+    let source = pcapng_with(std::slice::from_ref(&description), &[directed.clone()]);
+    let output = normalize_pcap(&source, &[], 0);
+    directed.interface = None;
+    directed.direction = None;
+    assert_eq!(read_classic(&output.stdout).0, [directed]);
+
+    for resolution in [
+        TimestampResolution::Decimal(3),
+        TimestampResolution::Binary(10),
+    ] {
+        let source = pcapng_with(
+            &[interface(LinkType::IPV4, resolution, 100)],
+            &[on_interface(frame(FIRST_FRAGMENT), 0)],
+        );
+        let output = normalize_pcap(&source, &[], 3);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("pcap cannot represent the source timestamp resolution"),
+            "{stderr}"
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn classic_pcap_normalization_keeps_the_existing_refusals() {
+    // A selected frame without a timestamp has none to write.
+    let mut input = capture(Format::PcapNg, &[frame(FIRST_FRAGMENT)]);
+    for value in [3_u32, 20, 4, 0x01020304, 20] {
+        input.extend(value.to_le_bytes());
+    }
+    let failed = normalize_pcap(&input, &[], 3);
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("packet.timestamp_unavailable"));
+    assert_eq!(read_classic(&failed.stdout).0.len(), 1);
+    normalize_pcap(&input, &["--filter", "frame.number == 1"], 0);
+
+    // A declared frame check sequence cannot be kept.
+    let declared = classic_with_network_word(0x2400_0000 | LinkType::IPV4.0);
+    let output = normalize_pcap(&declared, &[], 3);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("packet.capture_transform_metadata"));
+}
+
+#[test]
+fn classic_pcap_output_without_normalize_still_requires_pcap_input() {
+    let source = capture(Format::PcapNg, &[frame(FIRST_FRAGMENT)]);
+    for flags in [&[][..], &["--filter", "ip"][..]] {
+        let mut arguments = vec!["--output", "pcap", "read", "-"];
+        arguments.extend_from_slice(flags);
+        let rejected = run_with_stdin(&arguments, &source);
+        assert_eq!(rejected.status.code(), Some(2));
+        assert!(rejected.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains("without normalization"),
+            "{}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
     }
 }
 

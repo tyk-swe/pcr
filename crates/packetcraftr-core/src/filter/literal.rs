@@ -25,6 +25,26 @@ pub(super) enum Literal {
     /// An IPv6 prefix. Comparing with `==` tests containment.
     Ipv6Net(Ipv6Addr, u8),
     Mac([u8; 6]),
+    /// An inclusive `low..high` range. Comparing with `==` tests membership.
+    Range(Range),
+}
+
+/// Both endpoints are the same kind and `low <= high`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Range {
+    Unsigned(u64, u64),
+    Ipv4(Ipv4Addr, Ipv4Addr),
+    Ipv6(Ipv6Addr, Ipv6Addr),
+}
+
+impl fmt::Display for Range {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsigned(low, high) => write!(formatter, "{low}..{high}"),
+            Self::Ipv4(low, high) => write!(formatter, "{low}..{high}"),
+            Self::Ipv6(low, high) => write!(formatter, "{low}..{high}"),
+        }
+    }
 }
 
 impl fmt::Display for Literal {
@@ -56,9 +76,54 @@ impl fmt::Display for Literal {
                 }
                 Ok(())
             }
+            Self::Range(value) => write!(formatter, "{value}"),
         }
     }
 }
+
+/// Reads `low..high` when at least one side is a number or an address, so a word such as `a..b` stays text.
+///
+/// The faults name why a range-shaped word is refused; nothing is partially accepted.
+pub(super) fn parse_range(word: &str) -> Option<Result<Literal, &'static str>> {
+    let (low, high) = word.split_once("..")?;
+    let low = parse(low);
+    let high = parse(high);
+    let endpoint = |literal: &Option<Literal>| {
+        matches!(
+            literal,
+            Some(Literal::Unsigned(_) | Literal::Signed(_) | Literal::Ipv4(_) | Literal::Ipv6(_))
+        )
+    };
+    if !endpoint(&low) && !endpoint(&high) {
+        return None;
+    }
+    Some(range_between(low, high))
+}
+
+fn range_between(low: Option<Literal>, high: Option<Literal>) -> Result<Literal, &'static str> {
+    let (Some(low), Some(high)) = (low, high) else {
+        return Err("a range needs a number or address at both ends");
+    };
+    let range = match (low, high) {
+        (Literal::Unsigned(low), Literal::Unsigned(high)) => (low <= high)
+            .then_some(Range::Unsigned(low, high))
+            .ok_or(REVERSED_RANGE)?,
+        (Literal::Ipv4(low), Literal::Ipv4(high)) => (low <= high)
+            .then_some(Range::Ipv4(low, high))
+            .ok_or(REVERSED_RANGE)?,
+        (Literal::Ipv6(low), Literal::Ipv6(high)) => (low <= high)
+            .then_some(Range::Ipv6(low, high))
+            .ok_or(REVERSED_RANGE)?,
+        (
+            Literal::Unsigned(_) | Literal::Ipv4(_) | Literal::Ipv6(_),
+            Literal::Unsigned(_) | Literal::Ipv4(_) | Literal::Ipv6(_),
+        ) => return Err("range ends must be the same kind of value"),
+        _ => return Err("range ends must be unsigned numbers or IP addresses"),
+    };
+    Ok(Literal::Range(range))
+}
+
+const REVERSED_RANGE: &str = "the start of a range is above its end";
 
 /// Two-digit hex groups form a byte run even at eight groups, where they could also spell an IPv6 address.
 pub(super) fn parse(word: &str) -> Option<Literal> {
@@ -136,6 +201,10 @@ impl Literal {
     pub(super) fn is_prefix(&self) -> bool {
         matches!(self, Self::Ipv4Net(..) | Self::Ipv6Net(..))
     }
+
+    pub(super) fn is_range(&self) -> bool {
+        matches!(self, Self::Range(_))
+    }
 }
 
 pub(super) fn kind_name(kind: FieldKind) -> &'static str {
@@ -157,7 +226,7 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
     match spec.kind {
         FieldKind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),
         FieldKind::Unsigned | FieldKind::Signed => match literal {
-            Literal::Unsigned(_) | Literal::Signed(_) => true,
+            Literal::Unsigned(_) | Literal::Signed(_) | Literal::Range(Range::Unsigned(..)) => true,
             Literal::Text(text) => spec.derived && text == AUTO_WIRE_VALUE,
             _ => false,
         },
@@ -167,16 +236,30 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
             Literal::Unsigned(value) => *value <= u64::from(u8::MAX),
             _ => false,
         },
-        FieldKind::Ipv4 => matches!(literal, Literal::Ipv4(_) | Literal::Ipv4Net(..)),
-        FieldKind::Ipv6 => matches!(literal, Literal::Ipv6(_) | Literal::Ipv6Net(..)),
+        FieldKind::Ipv4 => matches!(
+            literal,
+            Literal::Ipv4(_) | Literal::Ipv4Net(..) | Literal::Range(Range::Ipv4(..))
+        ),
+        FieldKind::Ipv6 => matches!(
+            literal,
+            Literal::Ipv6(_) | Literal::Ipv6Net(..) | Literal::Range(Range::Ipv6(..))
+        ),
         FieldKind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
         FieldKind::List => true,
         FieldKind::Object => false,
     }
 }
 
-pub(super) fn searchable(kind: FieldKind) -> bool {
-    matches!(kind, FieldKind::Bytes | FieldKind::Text | FieldKind::Mac)
+/// A list qualifies because the search applies to each element, as in `dns.qname`.
+///
+/// The schema does not record a scalar list's element kind, so a list of numbers or addresses compiles
+/// and never matches. Only lists of objects, which no search can match, are refused.
+pub(super) fn searchable(spec: FieldSpec) -> bool {
+    match spec.kind {
+        FieldKind::Bytes | FieldKind::Text | FieldKind::Mac => true,
+        FieldKind::List => !spec.structured,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -184,10 +267,7 @@ mod tests {
     use super::*;
 
     fn spec(kind: FieldKind) -> FieldSpec {
-        FieldSpec {
-            kind,
-            derived: false,
-        }
+        FieldSpec::synthetic(kind)
     }
 
     #[test]
@@ -293,8 +373,8 @@ mod tests {
         ));
         assert!(compatible(
             FieldSpec {
-                kind: FieldKind::Unsigned,
                 derived: true,
+                ..spec(FieldKind::Unsigned)
             },
             &Literal::Text(AUTO_WIRE_VALUE.to_owned())
         ));
@@ -312,19 +392,103 @@ mod tests {
     }
 
     #[test]
-    fn searchable_types_and_prefix_markers_match_evaluation_contracts() {
-        for kind in [FieldKind::Bytes, FieldKind::Text, FieldKind::Mac] {
-            assert!(searchable(kind), "{}", kind_name(kind));
+    fn range_words_split_on_the_first_pair_of_dots_into_same_kind_ends() {
+        assert_eq!(
+            parse_range("1024..65535"),
+            Some(Ok(Literal::Range(Range::Unsigned(1024, 65535))))
+        );
+        assert_eq!(
+            parse_range("0x10..0x20"),
+            Some(Ok(Literal::Range(Range::Unsigned(16, 32))))
+        );
+        assert_eq!(
+            parse_range("5..5"),
+            Some(Ok(Literal::Range(Range::Unsigned(5, 5))))
+        );
+        assert_eq!(
+            parse_range("10.0.0.10..10.0.0.50"),
+            Some(Ok(Literal::Range(Range::Ipv4(
+                Ipv4Addr::new(10, 0, 0, 10),
+                Ipv4Addr::new(10, 0, 0, 50)
+            ))))
+        );
+        assert!(matches!(
+            parse_range("2001:db8::1..2001:db8::ff"),
+            Some(Ok(Literal::Range(Range::Ipv6(..))))
+        ));
+        assert_eq!(
+            Literal::Range(Range::Unsigned(1, 2)).to_string(),
+            "1..2".to_owned()
+        );
+    }
+
+    #[test]
+    fn malformed_ranges_are_refused_and_non_numeric_words_are_not_ranges() {
+        for malformed in [
+            "200..100",
+            "1..",
+            "..9",
+            "1...5",
+            "-5..5",
+            "1..a",
+            "10.0.0.1..::1",
+            "10.0.0.1..5",
+            "10.0.0.50..10.0.0.10",
+            "1..aa:bb",
+            "10.0.0.0/8..10.0.0.9",
+        ] {
+            assert!(
+                matches!(parse_range(malformed), Some(Err(_))),
+                "{malformed}"
+            );
         }
+        for text in ["a..b", "..", "plain", "a.b", "www..example", "true..false"] {
+            assert_eq!(parse_range(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn range_literals_fit_only_fields_of_their_own_kind() {
+        let unsigned = Literal::Range(Range::Unsigned(1, 2));
+        let v4 = Literal::Range(Range::Ipv4(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST));
+        let v6 = Literal::Range(Range::Ipv6(Ipv6Addr::LOCALHOST, Ipv6Addr::LOCALHOST));
+        assert!(compatible(spec(FieldKind::Unsigned), &unsigned));
+        assert!(compatible(spec(FieldKind::Signed), &unsigned));
+        assert!(compatible(spec(FieldKind::Ipv4), &v4));
+        assert!(compatible(spec(FieldKind::Ipv6), &v6));
+        assert!(!compatible(spec(FieldKind::Ipv6), &v4));
+        assert!(!compatible(spec(FieldKind::Ipv4), &v6));
+        assert!(!compatible(spec(FieldKind::Ipv4), &unsigned));
+        assert!(!compatible(spec(FieldKind::Bytes), &unsigned));
+        assert!(!compatible(spec(FieldKind::Text), &unsigned));
+        assert!(unsigned.is_range());
+        assert!(!Literal::Unsigned(1).is_range());
+    }
+
+    #[test]
+    fn searchable_types_and_prefix_markers_match_evaluation_contracts() {
+        for kind in [
+            FieldKind::Bytes,
+            FieldKind::Text,
+            FieldKind::Mac,
+            FieldKind::List,
+        ] {
+            assert!(searchable(spec(kind)), "{}", kind_name(kind));
+        }
+        let objects = FieldSpec {
+            structured: true,
+            ..spec(FieldKind::List)
+        };
+        assert!(!searchable(objects));
         for kind in [
             FieldKind::Bool,
             FieldKind::Unsigned,
             FieldKind::Signed,
             FieldKind::Ipv4,
             FieldKind::Ipv6,
-            FieldKind::List,
+            FieldKind::Object,
         ] {
-            assert!(!searchable(kind), "{}", kind_name(kind));
+            assert!(!searchable(spec(kind)), "{}", kind_name(kind));
         }
         assert!(Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0).is_prefix());
         assert!(!Literal::Ipv4(Ipv4Addr::UNSPECIFIED).is_prefix());

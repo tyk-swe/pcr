@@ -11,6 +11,7 @@ use crate::rendering::{Projector, StreamEncoder};
 pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     args.limits.validate()?;
     let bounds = args.epoch.resolve()?;
+    let selection = args.selection.resolve()?;
     let registry = args.decode.registry()?;
     let mut projector = Projector::prepare(
         &args.fields,
@@ -54,6 +55,10 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
                 ..Default::default()
             },
             |record| {
+                // Selection hides rows only; the analysis still indexes every frame.
+                if !selection.keeps(record.number) {
+                    return Ok(());
+                }
                 let context = record.physical_context();
                 let kept = filter
                     .as_ref()
@@ -90,7 +95,9 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
                 .charge(frame.captured_length())
                 .map_err(CliError::classified)?;
             (frames, bytes) = (budget.frames(), budget.captured_bytes());
-            if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
+            if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp))
+                || !selection.keeps(frames)
+            {
                 continue;
             }
             let Some(decoded) = decoder

@@ -4,7 +4,8 @@
 use serde::Deserialize;
 
 use super::{
-    ChecksumMode, FieldAssignment, FieldChange, FieldEdits, HeaderRewrite, RewriteLimits, rewrite,
+    AddressMap, ChecksumMode, FieldAssignment, FieldChange, FieldEdits, HeaderRewrite,
+    RewriteLimits, rewrite,
 };
 use crate::{
     decode::Dissector,
@@ -24,7 +25,9 @@ pub const MAX_REWRITE_DOCUMENT_BYTES: usize = 1_048_576;
 pub struct Rule<F = String> {
     pub filter: Option<F>,
     pub patch: HeaderRewrite,
-    /// Field assignments, applied after the header edits.
+    /// Address remapping, applied after the header edits and before field assignments.
+    pub map: Option<AddressMap>,
+    /// Field assignments, applied after the header edits and address map.
     pub edits: Option<FieldEdits>,
 }
 
@@ -65,6 +68,7 @@ impl Rules {
             rules.push(Rule {
                 filter: rule.filter,
                 patch: rule.patch,
+                map: None,
                 edits: None,
             });
         }
@@ -89,6 +93,7 @@ impl Rules {
             rules.push(Rule {
                 filter: rule.filter,
                 patch: HeaderRewrite::default(),
+                map: None,
                 edits: Some(edits),
             });
         }
@@ -112,9 +117,18 @@ impl Rules {
             rules: vec![Rule {
                 filter,
                 patch,
+                map: None,
                 edits,
             }],
         })
+    }
+
+    /// Adds `map` to every rule; for the single rule of [`Rules::single`].
+    pub fn with_address_map(mut self, map: AddressMap) -> Self {
+        for rule in &mut self.rules {
+            rule.map = Some(map.clone());
+        }
+        self
     }
 }
 
@@ -136,7 +150,9 @@ impl<F> Rules<F> {
     }
 
     pub fn has_header_edits(&self) -> bool {
-        self.rules.iter().any(|rule| !rule.patch.is_empty())
+        self.rules
+            .iter()
+            .any(|rule| !rule.patch.is_empty() || rule.map.is_some())
     }
 
     pub fn maximum_growth(&self) -> usize {
@@ -158,6 +174,7 @@ impl<F> Rules<F> {
                 Ok(Rule {
                     filter: rule.filter.map(&mut compile).transpose()?,
                     patch: rule.patch,
+                    map: rule.map,
                     edits: rule.edits,
                 })
             })
@@ -185,6 +202,11 @@ impl<F> Rules<F> {
             if !rule.patch.is_empty() {
                 changed =
                     rewrite(&changed, &rule.patch, limits).map_err(BoundaryError::from_error)?;
+            }
+            if let Some(map) = &rule.map {
+                changed = map
+                    .apply(&changed, limits)
+                    .map_err(BoundaryError::from_error)?;
             }
             let mut changes = Vec::new();
             if let Some(edits) = &rule.edits {

@@ -105,14 +105,24 @@ pub struct FieldEditOutcome {
 
 const EDITABLE: &[(&str, &str, usize)] = &[
     ("ipv4", "ttl", 1),
+    ("ipv4", "identification", 2),
+    ("ipv4", "dscp_ecn", 1),
     ("ipv6", "hop_limit", 1),
     ("tcp", "sequence", 4),
     ("tcp", "acknowledgment", 4),
+    ("tcp", "window", 2),
     ("tcp", "source_port", 2),
     ("tcp", "destination_port", 2),
     ("udp", "source_port", 2),
     ("udp", "destination_port", 2),
+    ("icmpv4", "identifier", 2),
+    ("icmpv4", "sequence", 2),
+    ("icmpv6", "identifier", 2),
+    ("icmpv6", "sequence", 2),
     ("dns", "id", 2),
+    ("dhcpv4", "transaction_id", 4),
+    ("vxlan", "vni", 3),
+    ("geneve", "vni", 3),
 ];
 
 #[derive(Clone, Debug)]
@@ -374,6 +384,9 @@ fn collect_repairs(
         Some(BuiltinProtocol::Tcp | BuiltinProtocol::Udp) => {
             repairs.insert(target, Repair::Transport(target));
         }
+        Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6) => {
+            repairs.insert(target, Repair::Icmp(target));
+        }
         _ => refuse_unrepairable(&layout.layers[target])?,
     }
     for ancestor in &layout.layers[..target] {
@@ -453,7 +466,9 @@ fn transport_span(
             }
             end
         }
-        Some(BuiltinProtocol::Tcp) => end_of_payload,
+        Some(BuiltinProtocol::Tcp | BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6) => {
+            end_of_payload
+        }
         _ => return Err(Error::Unsupported(Unsupported::TransportChecksum)),
     };
     Ok(ByteRange::new(start, end))
@@ -463,6 +478,7 @@ fn transport_span(
 enum Repair {
     Ipv4Header(usize),
     Transport(usize),
+    Icmp(usize),
 }
 
 impl Repair {
@@ -470,6 +486,7 @@ impl Repair {
         match *self {
             Self::Ipv4Header(layer) => repair_ipv4(bytes, &decoded.layout, layer),
             Self::Transport(layer) => repair_transport(bytes, decoded, layer),
+            Self::Icmp(layer) => repair_icmp(bytes, decoded, layer),
         }
     }
 }
@@ -548,6 +565,57 @@ fn repair_transport(
             occurrence_of(layout, transport)
         ),
         layer: transport,
+        range: checksum_range,
+        old,
+        new: u64::from(value),
+        origin: ChangeOrigin::Derived,
+    }))
+}
+
+/// ICMPv4 covers only its message; ICMPv6 adds the IPv6 pseudo-header, so the
+/// message must sit in its own address family.
+fn repair_icmp(
+    bytes: &mut [u8],
+    decoded: &DecodedPacket,
+    layer: usize,
+) -> Result<Option<FieldChange>, Error> {
+    let layout = &decoded.layout;
+    let network = enclosing_network(decoded, layer)?;
+    let (network_start, header) = walk_network(layout, network, bytes)?;
+    super::ensure_checksum_coverage(&bytes[network_start..], &header)?;
+    let span = transport_span(decoded, layer, bytes)?;
+    let checksum_range = checksum_field_range(layout, layer)?;
+    if checksum_range.end > span.end || checksum_range.start < span.start {
+        return Err(Error::Invalid(InvalidInput::TransportChecksumPlacement));
+    }
+    let old = read_uint(bytes, checksum_range)?;
+    let value = match (builtin(decoded, layer), &header) {
+        (Some(BuiltinProtocol::Icmpv4), IpHeader::V4(_)) => {
+            bytes[checksum_range.start..checksum_range.end].fill(0);
+            let value = checksum(&bytes[span.start..span.end]);
+            bytes[checksum_range.start..checksum_range.end].copy_from_slice(&value.to_be_bytes());
+            value
+        }
+        (Some(BuiltinProtocol::Icmpv6), IpHeader::V6(_)) => {
+            let addresses = header.addresses(&bytes[network_start..])?;
+            super::repair_checksum(
+                &mut bytes[span.start..span.end],
+                checksum_range.start - span.start..checksum_range.end - span.start,
+                crate::protocol::network::ip_protocol::ICMPV6,
+                BuiltinProtocol::Icmpv6.as_str(),
+                addresses,
+            )?
+            .ok_or(Error::Unsupported(Unsupported::ChecksumLayout))?
+        }
+        _ => return Err(Error::Unsupported(Unsupported::TransportChecksumEnvelope)),
+    };
+    Ok((u64::from(value) != old).then(|| FieldChange {
+        field: format!(
+            "{}#{}.checksum",
+            layout.layers[layer].protocol.as_str(),
+            occurrence_of(layout, layer)
+        ),
+        layer,
         range: checksum_range,
         old,
         new: u64::from(value),

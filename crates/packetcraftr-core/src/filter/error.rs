@@ -64,6 +64,36 @@ pub enum Error {
         path: String,
         literal: String,
     },
+    #[error(
+        "field {path} at byte {offset} is compared to range {literal}, \
+         which only `==`, `!=`, and `in` can test"
+    )]
+    OrderedRangeComparison {
+        offset: usize,
+        path: String,
+        literal: String,
+    },
+    #[error("range {literal} for field {path} at byte {offset} is invalid: {reason}")]
+    InvalidRange {
+        offset: usize,
+        path: String,
+        literal: String,
+        reason: &'static str,
+    },
+    #[error("field {path} at byte {offset} holds {kind}, which cannot take a bitwise `&` mask")]
+    MaskedField {
+        offset: usize,
+        path: String,
+        kind: &'static str,
+    },
+    #[error(
+        "bitwise mask on field {path} at byte {offset} needs an unsigned number, found {found}"
+    )]
+    MaskOperand {
+        offset: usize,
+        path: String,
+        found: String,
+    },
     #[error("protocol {protocol} has no reflective schema, so {path} cannot be resolved")]
     UnresolvableProtocol {
         path: String,
@@ -111,9 +141,17 @@ impl Classified for Error {
             Self::UnknownField { .. } | Self::UnresolvableProtocol { .. } => cli_filter(
                 "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes",
             ),
-            Self::IncompatibleLiteral { .. } | Self::OrderedPrefixComparison { .. } => {
+            Self::IncompatibleLiteral { .. }
+            | Self::OrderedPrefixComparison { .. }
+            | Self::OrderedRangeComparison { .. } => {
                 cli_filter("compare the field against a value of its own type")
             }
+            Self::InvalidRange { .. } => cli_filter(
+                "write a range as LOW..HIGH with two unsigned numbers or two addresses of one family, LOW not above HIGH",
+            ),
+            Self::MaskedField { .. } | Self::MaskOperand { .. } => cli_filter(
+                "mask only unsigned number fields, as in `tcp.flags & 0x12 == 0x12`, with unsigned masks and values",
+            ),
             Self::UnquotedByteWord { .. } => cli_filter(
                 "write bytes as two-digit groups with separators such as c0:00; on byte fields, quote the word to match it as ASCII text",
             ),
@@ -217,6 +255,10 @@ mod tests {
             ("raw.bytes contains 47:45:5", "two-digit groups"),
             ("frame.len[0] == 1", "slice only fields that hold bytes"),
             ("(ethernet", "check the filter syntax"),
+            ("tcp.port in 9..1", "LOW..HIGH"),
+            ("tcp.port > 1..9", "value of its own type"),
+            ("ip.src & 1", "mask only unsigned number fields"),
+            ("tcp.flags & abc", "mask only unsigned number fields"),
         ];
 
         for (source, expected_remediation) in cases {

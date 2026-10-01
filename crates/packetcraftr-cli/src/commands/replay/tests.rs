@@ -135,6 +135,7 @@ fn options() -> packetcraftr::replay::Options {
         inter_pass_delay: Duration::ZERO,
         link_mode: net::link::Mode::Auto,
         timing: packetcraftr::replay::Timing::Immediate,
+        max_gap: None,
         limits: packetcraftr::replay::Limits::default(),
         allow_permissive_live: true,
     }
@@ -388,4 +389,48 @@ fn pcapng_capture_output_gathers_interfaces_from_every_source_section() {
     let second = output.next_frame().unwrap().unwrap();
     assert_ne!(first.interface, second.interface);
     assert_eq!(output.interfaces().len(), 2);
+}
+
+fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
+    use clap::Parser;
+
+    let path = path.to_str().expect("fixture path is UTF-8");
+    let values = ["packetcraftr", "replay", path, "--interface", "fixture0"]
+        .into_iter()
+        .chain(extra.iter().copied());
+    let cli = crate::cli::Cli::try_parse_from(values).expect("fixture replay arguments parse");
+    let crate::commands::CommandLine::Replay(arguments) = cli.command else {
+        panic!("fixture must parse as replay");
+    };
+    arguments
+}
+
+#[test]
+fn prepare_carries_the_gap_clamp_into_the_replay_options() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("fixture.pcap");
+    let mut writer = capture::Writer::pcap(Vec::new(), LinkType::RAW).unwrap();
+    writer
+        .write_frame(&Frame::new(UNIX_EPOCH, LinkType::RAW, frame_bytes(1)).unwrap())
+        .unwrap();
+    std::fs::write(&path, writer.into_inner()).expect("fixture capture writes");
+
+    let run = prepare(&replay_arguments(&path, &["--max-gap-ms", "50"])).expect("prepare");
+    assert_eq!(run.request.options.max_gap, Some(Duration::from_millis(50)));
+    let run = prepare(&replay_arguments(&path, &[])).expect("prepare");
+    assert_eq!(run.request.options.max_gap, None);
+}
+
+#[test]
+fn prepare_rejects_the_gap_clamp_with_immediate_timing_before_opening_the_capture() {
+    let missing = std::path::Path::new("/nonexistent/fixture.pcap");
+    let arguments = replay_arguments(missing, &["--timing", "immediate", "--max-gap-ms", "5"]);
+    let Err(error) = prepare(&arguments) else {
+        panic!("immediate timing has no gaps to clamp");
+    };
+    assert_eq!(
+        error.message,
+        "--max-gap-ms cannot be combined with --timing immediate"
+    );
+    assert_eq!(error.exit_code(), 2);
 }

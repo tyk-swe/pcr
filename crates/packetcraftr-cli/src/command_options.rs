@@ -5,6 +5,7 @@ pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use decode::DecodeArgs;
 pub(crate) use epoch_bounds::EpochBoundsArgs;
+pub(crate) use frame_ranges::{FrameSelection, FrameSelectionArgs};
 pub(crate) use offline_limits::{
     AnalysisStages, CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
 };
@@ -17,11 +18,14 @@ pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
 pub(crate) use send::SendArgs;
 pub(crate) use template::TemplateArgs;
+pub(crate) use tree::TreeArgs;
 
 mod address_family;
 mod capture_limits;
 mod decode;
 mod epoch_bounds;
+mod frame_ranges;
+pub(crate) mod link_type;
 mod offline_limits;
 mod packet_budget;
 mod policy;
@@ -29,6 +33,7 @@ mod recipe;
 mod route;
 mod send;
 mod template;
+mod tree;
 
 mod compression;
 pub(crate) use compression::{

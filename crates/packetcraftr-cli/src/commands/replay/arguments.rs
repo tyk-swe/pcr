@@ -84,6 +84,13 @@ pub(crate) struct Args {
     /// synthetic media overhead. Scheduling is best effort; first frame is immediate.
     #[arg(long, conflicts_with_all = ["rate", "speed"], value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) bps: Option<u64>,
+    /// Clamp every captured inter-frame gap to at most this many milliseconds,
+    /// after any --speed scaling, so long idle periods do not stall the replay.
+    /// Only original and scaled timing are clamped, so this conflicts with
+    /// --rate, --bps and --timing immediate; the published timing does not
+    /// record the clamp.
+    #[arg(long, value_name = "MILLISECONDS", conflicts_with_all = ["rate", "bps"], value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) max_gap_ms: Option<u64>,
     #[command(flatten)]
     pub(crate) duration: MaxDurationArgs<ReplayRunTime>,
     #[command(flatten)]

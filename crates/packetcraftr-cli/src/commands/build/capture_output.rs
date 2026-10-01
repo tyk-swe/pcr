@@ -10,19 +10,24 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{capture_file, protocol::builtin};
 
-use crate::command_options::{CompressionArgs, Destination, parse_timestamp};
+use crate::command_options::{CompressionArgs, Destination, link_type, parse_timestamp};
 use crate::errors::CliError;
 
 /// Capture-file options shared by commands that emit generated frames.
 #[derive(Debug, Args)]
 pub(crate) struct CaptureOutputArgs {
-    /// Capture link-layer type for generated frames, by name or number:
-    /// null (0), ethernet (1), bsd-raw (12), raw (101), loop (108),
-    /// linux-sll (113), ipv4 (228), ipv6 (229), or linux-sll2 (276).
-    /// Required for PCAP and PCAPNG output; the recipe's first layer must
-    /// decode under the selected link type.
-    #[arg(long, value_name = "NAME|NUMBER")]
-    pub(crate) link_type: Option<String>,
+    #[arg(
+        long,
+        value_name = "NAME|NUMBER",
+        value_parser = link_type::parse,
+        help = concat!(
+            "Capture link-layer type for generated frames, ",
+            link_type::names_help!(),
+            ". Required for PCAP and PCAPNG output; the recipe's first layer must \
+             decode under the selected link type.",
+        ),
+    )]
+    pub(crate) link_type: Option<LinkType>,
     /// Fixed timestamp applied to every generated frame, as Unix seconds with
     /// optional fractional precision to nanoseconds. Defaults to the epoch so
     /// generated captures stay byte-deterministic.
@@ -77,7 +82,7 @@ impl CaptureOutputArgs {
             .transpose()?
             .unwrap_or(SystemTime::UNIX_EPOCH);
         Ok(Some(CaptureOutput {
-            link_type: parse_link_type(&link_type)?,
+            link_type,
             timestamp,
             format: capture_format,
             compression,
@@ -209,28 +214,6 @@ fn validate_link_type(
     Ok(())
 }
 
-fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
-    let normalized = input.trim().to_ascii_lowercase();
-    let link_type = match normalized.as_str() {
-        "null" | "bsd-null" => Some(LinkType::NULL),
-        "ethernet" => Some(LinkType::ETHERNET),
-        "bsd-raw" => Some(LinkType::BSD_RAW),
-        "raw" => Some(LinkType::RAW),
-        "loop" | "bsd-loop" => Some(LinkType::LOOP),
-        "linux-sll" | "sll" => Some(LinkType::LINUX_SLL),
-        "ipv4" | "ip" => Some(LinkType::IPV4),
-        "ipv6" => Some(LinkType::IPV6),
-        "linux-sll2" | "sll2" => Some(LinkType::LINUX_SLL2),
-        _ => normalized.parse::<u32>().ok().map(LinkType),
-    };
-    link_type.ok_or_else(|| {
-        CliError::new(
-            Kind::Usage,
-            format!("unknown link type {input:?}; use a capture-root name or a decimal number"),
-        )
-    })
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GeneratedCapture;
 
@@ -274,14 +257,5 @@ mod tests {
             }
             assert_eq!(writer.frames_written(), count, "{format:?}");
         }
-    }
-
-    #[test]
-    fn link_types_resolve_names_and_numbers() {
-        assert_eq!(parse_link_type("ethernet").unwrap(), LinkType::ETHERNET);
-        assert_eq!(parse_link_type("RAW").unwrap(), LinkType::RAW);
-        assert_eq!(parse_link_type("228").unwrap(), LinkType::IPV4);
-        assert!(parse_link_type("fddi").is_err());
-        assert!(parse_link_type("12x").is_err());
     }
 }

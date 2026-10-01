@@ -87,11 +87,15 @@ impl Collector {
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
         let mut findings = finding::from_capture_evidence(record);
         findings.extend(finding::from_diagnostics(record));
+        let tcp = record
+            .tcp
+            .and_then(|tcp| tcp.conversation.map(|conversation| (conversation, tcp)));
+        // Handshake verdicts read the flow as it stood before this frame's own evictions.
+        let prior =
+            tcp.map(|(conversation, _)| tcp::Prior::capture(&self.flows, conversation.flow));
         self.reconcile_tcp_evictions(record.tcp_events);
-        if let Some(tcp) = record.tcp
-            && let Some(conversation) = tcp.conversation
-        {
-            self.observe_tcp(record, conversation, tcp, &mut findings);
+        if let (Some((conversation, tcp)), Some(prior)) = (tcp, prior) {
+            self.observe_tcp(record, conversation, tcp, prior, &mut findings);
         }
 
         for finding in &findings {
@@ -103,6 +107,7 @@ impl Collector {
     pub fn finish(mut self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
         self.summary.clock = summary.clock.clone();
         let findings = tcp::finish(
+            &self.flows,
             &self.streams,
             &summary.trailing_tcp_events,
             summary.frames_read,

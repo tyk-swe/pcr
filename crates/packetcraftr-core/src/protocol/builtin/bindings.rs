@@ -44,6 +44,7 @@ pub(super) fn register(
             (BuiltinProtocol::Http, 0, BuiltinProtocol::Raw, 0),
             (BuiltinProtocol::Dns, 0, BuiltinProtocol::Raw, 0),
             (BuiltinProtocol::Arp, 0, BuiltinProtocol::Padding, 0),
+            (BuiltinProtocol::Eapol, 0, BuiltinProtocol::Raw, 0),
         ],
     )?;
     register_tls(builder)?;
@@ -123,6 +124,7 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
         BuiltinProtocol::Llc,
         &[
             (0xaaaa, BuiltinProtocol::Snap, 100),
+            (0x4242, BuiltinProtocol::Stp, 100),
             (0, BuiltinProtocol::Raw, -100),
         ],
     )?;
@@ -310,7 +312,9 @@ fn bind_link_children(
             (0x8848, BuiltinProtocol::Mpls, 90),
             (0x8864, BuiltinProtocol::Pppoe, 100),
             (0x8863, BuiltinProtocol::Pppoe, 90),
+            (0x888e, BuiltinProtocol::Eapol, 100),
             (0x88a8, BuiltinProtocol::Vlan8021ad, 100),
+            (0x88cc, BuiltinProtocol::Lldp, 100),
             (0x86dd, BuiltinProtocol::Ipv6, 100),
             (0, BuiltinProtocol::Raw, -100),
         ],

@@ -129,6 +129,9 @@ fn prepare_request(
         address_family: arguments.family.into(),
         destination_port,
         source_port: arguments.source_port,
+        payload_size: arguments.payload_size,
+        dont_fragment: arguments.dont_fragment,
+        dscp: arguments.dscp,
         first_hop: arguments.first_hop,
         max_hops: arguments.max_hops,
         probes_per_hop: arguments.attempts,
@@ -140,4 +143,77 @@ fn prepare_request(
     };
     request.validate().map_err(CliError::classified)?;
     Ok(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::{cli::Cli, commands::CommandLine};
+
+    fn arguments(extra: &[&str]) -> Args {
+        let values = ["packetcraftr", "traceroute", "192.0.2.1"]
+            .into_iter()
+            .chain(extra.iter().copied());
+        let cli = Cli::try_parse_from(values).expect("fixture traceroute arguments must parse");
+        let CommandLine::Traceroute(arguments) = cli.command else {
+            panic!("fixture must parse as traceroute");
+        };
+        arguments
+    }
+
+    fn request(extra: &[&str]) -> Result<packetcraftr::traceroute::Request, CliError> {
+        let arguments = arguments(extra);
+        let limits = arguments.limits.clone().into_limits();
+        prepare_request(&arguments, limits)
+    }
+
+    #[test]
+    fn probe_shape_options_default_to_the_historical_probe() {
+        let request = request(&[]).expect("default request");
+        assert_eq!(request.payload_size, 0);
+        assert!(!request.dont_fragment);
+        assert_eq!(request.dscp, 0);
+    }
+
+    #[test]
+    fn probe_shape_options_reach_the_request() {
+        let request = request(&[
+            "--strategy",
+            "icmp",
+            "--payload-size",
+            "1000",
+            "--dont-fragment",
+            "--dscp",
+            "46",
+        ])
+        .expect("shaped request");
+        assert_eq!(request.payload_size, 1_000);
+        assert!(request.dont_fragment);
+        assert_eq!(request.dscp, 46);
+    }
+
+    #[test]
+    fn probe_shape_values_outside_their_ranges_are_usage_errors() {
+        for extra in [
+            &["--payload-size", "9001"][..],
+            &["--dscp", "64"][..],
+            &["--payload-size", "-1"][..],
+        ] {
+            assert!(
+                Cli::try_parse_from(
+                    ["packetcraftr", "traceroute", "192.0.2.1"]
+                        .into_iter()
+                        .chain(extra.iter().copied())
+                )
+                .is_err(),
+                "{extra:?}"
+            );
+        }
+        let error = request(&["--strategy", "tcp", "--payload-size", "8"])
+            .expect_err("a TCP SYN carries no payload");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.message.contains("payload_size"), "{}", error.message);
+    }
 }

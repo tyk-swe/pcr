@@ -14,11 +14,14 @@ pub const DEFAULT_TCP_PORT: u16 = 80;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_PROBES_PER_HOP: u32 = 32;
 pub const MAX_PROBES: usize = 100_000;
+pub const MAX_PAYLOAD_SIZE: u16 = 9_000;
+pub const MAX_DSCP: u8 = 63;
 pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 
-// A generated probe is no larger than Ethernet + IPv6 + TCP without options.
-// The deliberately conservative value makes complete byte-policy approval
-// possible before any route, capture, neighbor, or send side effect.
+// A generated probe is no larger than Ethernet + IPv6 + TCP without options plus
+// its configured payload. The deliberately conservative value makes complete
+// byte-policy approval possible before any route, capture, neighbor, or send
+// side effect.
 const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;

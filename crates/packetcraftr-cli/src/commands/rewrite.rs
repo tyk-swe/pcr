@@ -21,7 +21,7 @@ use packetcraftr_core::{
     decode::Dissector,
     error::{BoundaryError, Kind},
     transform::{
-        self, ChecksumMode, HeaderRewrite,
+        self, AddressMap, ChecksumMode, HeaderRewrite,
         rules::{self, Rules},
     },
 };
@@ -71,6 +71,14 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         },
     };
     let registry = args.decode.registry()?;
+    let map = if args.map_ips.is_empty() && args.map_macs.is_empty() {
+        None
+    } else {
+        Some(
+            AddressMap::new(&args.map_ips, &args.map_macs)
+                .map_err(|error| CliError::caused(Kind::Usage, &error))?,
+        )
+    };
     let rules = if let Some(path) = &args.rules_file {
         if !patch.is_empty() || args.filter.is_some() || !args.sets.is_empty() {
             return Err(CliError::new(
@@ -82,20 +90,24 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             crate::input::read_bounded_json_document(path, rules::MAX_REWRITE_DOCUMENT_BYTES)?;
         Rules::parse(&document, checksum_mode, &registry).map_err(CliError::classified)?
     } else {
-        if patch.is_empty() && args.sets.is_empty() {
+        if patch.is_empty() && args.sets.is_empty() && map.is_none() {
             return Err(CliError::new(
                 Kind::Usage,
-                "rewrite requires a header edit, --set, or --rules-file",
+                "rewrite requires a header edit, --map-ip, --map-mac, --set, or --rules-file",
             ));
         }
-        Rules::single(
+        let rules = Rules::single(
             args.filter.clone(),
             patch,
             &args.sets,
             checksum_mode,
             &registry,
         )
-        .map_err(CliError::classified)?
+        .map_err(CliError::classified)?;
+        match map {
+            Some(map) => rules.with_address_map(map),
+            None => rules,
+        }
     };
     if args.checksum_mode.is_some() && !rules.has_field_edits() {
         return Err(CliError::new(

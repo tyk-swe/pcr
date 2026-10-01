@@ -48,7 +48,11 @@ pub(super) fn apply(
         sent.reassembly_base = Some(first);
         if !renews {
             let peer_is_current = if *ack {
+                // A SYN-ACK that misses the SYN says nothing about the SYN's own generation.
                 reverse_range_verdict == Some(true)
+                    || flows
+                        .get(&reverse)
+                        .is_some_and(DirectionState::awaiting_syn_ack)
             } else {
                 flows.get(&reverse).is_none_or(|peer| {
                     peer.syn_seen

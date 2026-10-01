@@ -88,6 +88,7 @@ fn send_and_exchange_template_failures_publish_each_source_only_once() {
                     timeout: Duration::from_secs(1),
                     max_template_packets: 10,
                     collection: Default::default(),
+                    stop: Default::default(),
                 },
                 exchange::Collector::default(),
             )
@@ -279,6 +280,7 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
         inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Layer2,
         timing: Timing::Immediate,
+        max_gap: None,
         limits: Limits {
             max_source_frames: 10,
             max_transmitted_bytes: 83,

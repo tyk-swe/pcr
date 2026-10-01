@@ -6,12 +6,15 @@ use crate::output::contract::ReadFormat;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::{StreamEncoder, render_frame_text, write_hex_line};
+use crate::rendering::{
+    FieldTree, StreamEncoder, render_frame_text, render_frame_tree, write_hex_line,
+};
 
 pub(super) fn render_record(
     record: output::read::Frame,
     format: ReadFormat,
     stream: &StreamEncoder,
+    tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
     let output::read::Frame {
         source_frame,
@@ -19,7 +22,10 @@ pub(super) fn render_record(
         decoded,
     } = &record;
     match format {
-        ReadFormat::Text => render_frame_text(*source_frame, frame, decoded.as_ref()),
+        ReadFormat::Text => match tree {
+            Some(tree) => render_frame_tree(*source_frame, frame, decoded.as_ref(), tree),
+            None => render_frame_text(*source_frame, frame, decoded.as_ref()),
+        },
         ReadFormat::Hex => write_hex_line(frame.bytes()),
         ReadFormat::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),
         ReadFormat::Json

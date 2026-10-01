@@ -1,0 +1,1 @@
+raw.bytes contains b"\x16\x03\x01" || raw.bytes startswith "GET\x20" && dns.qname icontains "EXAMPLE"

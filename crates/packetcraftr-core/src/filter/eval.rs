@@ -58,6 +58,21 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
         Predicate::Contains { field, needle } => any_value(context, field, |candidate| {
             comparison::contains(candidate, needle)
         }),
+        Predicate::TextMatch {
+            field,
+            needle,
+            mode,
+        } => any_value(context, field, |candidate| {
+            comparison::text_match(candidate, needle, *mode)
+        }),
+        Predicate::Masked {
+            field,
+            mask,
+            operator,
+            value,
+        } => any_value(context, field, |candidate| {
+            comparison::masked(candidate, *mask, *operator, *value)
+        }),
     }
 }
 

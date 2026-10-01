@@ -103,11 +103,14 @@ fn validate_batch(batch: &Batch<Probe>) -> Result<&Probe, BoundaryError> {
         probe.address != first.address
             || probe.target.transport() != first.target.transport()
             || probe.source_port != first.source_port
+            || probe.payload_size != first.payload_size
+            || probe.dont_fragment != first.dont_fragment
+            || probe.dscp != first.dscp
             || probe.hop_limit != first.hop_limit
             || (probe.target.transport() == Transport::Tcp && probe.target != first.target)
     }) {
         return Err(EXECUTOR_FAULT.invalid(
-            "traceroute batches must share address, strategy, source port, hop limit, and TCP destination port",
+            "traceroute batches must share address, strategy, source port, probe shape, hop limit, and TCP destination port",
         ));
     }
     Ok(first)
@@ -134,6 +137,9 @@ mod tests {
                     hop_limit: 1,
                     attempt: u32::try_from(index).expect("test index fits u32"),
                     source_port: *source_port,
+                    payload_size: 0,
+                    dont_fragment: false,
+                    dscp: 0,
                 })
                 .collect(),
             timeout: Duration::from_secs(1),
@@ -158,5 +164,20 @@ mod tests {
             assert!(validate_batch(&batch(target, &[0])).is_err());
         }
         assert!(validate_batch(&batch(ProbeEndpoint::Icmp, &[0])).is_ok());
+    }
+
+    #[test]
+    fn executor_rejects_mixed_probe_shapes() {
+        let mixed: [fn(&mut Probe); 3] = [
+            |probe| probe.payload_size = 8,
+            |probe| probe.dont_fragment = true,
+            |probe| probe.dscp = 46,
+        ];
+        for mutate in mixed {
+            let mut batch = batch(ProbeEndpoint::Icmp, &[0, 0]);
+            assert!(validate_batch(&batch).is_ok());
+            mutate(&mut batch.probes[1]);
+            assert!(validate_batch(&batch).is_err());
+        }
     }
 }

@@ -209,3 +209,243 @@ fn mac_and_vlan_arguments_require_hexadecimal_digits() {
         std::fs::remove_file(&target).unwrap();
     }
 }
+
+/// Writes one Ethernet TCP frame, 192.0.2.1:40000 to 198.51.100.2:80, and returns its directory.
+fn tcp_source(directory: &std::path::Path) -> std::path::PathBuf {
+    use packetcraftr_core::{frame::LinkType, protocol::transport::Tcp};
+    let source = directory.join("source.pcapng");
+    let tcp = Tcp {
+        source_port: 40000,
+        destination_port: 80,
+        ..Default::default()
+    };
+    write_pcapng(&source, LinkType::ETHERNET, &[ethernet_frame(tcp, 16)]);
+    source
+}
+
+fn only_frame(path: &std::path::Path) -> packetcraftr_core::frame::Frame {
+    use packetcraftr_core::capture_file::Reader;
+    let mut reader = Reader::new(std::fs::File::open(path).unwrap()).unwrap();
+    let frame = reader.next_frame().unwrap().unwrap();
+    assert!(reader.next_frame().unwrap().is_none());
+    frame
+}
+
+/// Runs `rewrite` over `source` with `arguments` and returns the single rewritten frame.
+fn mapped_frame(
+    directory: &std::path::Path,
+    source: &std::path::Path,
+    arguments: &[&str],
+) -> packetcraftr_core::frame::Frame {
+    let target = directory.join("mapped.pcapng");
+    let _ = std::fs::remove_file(&target);
+    let mut command = vec![
+        "rewrite",
+        source.to_str().unwrap(),
+        "--write",
+        target.to_str().unwrap(),
+    ];
+    command.extend_from_slice(arguments);
+    run_success(&command);
+    only_frame(&target)
+}
+
+fn assert_tcp_checksums(bytes: &[u8]) {
+    use packetcraftr_core::protocol::{checksum, checksum_parts};
+    let ip = &bytes[14..];
+    assert_eq!(checksum(&ip[..20]), 0, "IPv4 header checksum");
+    let length = u16::try_from(ip.len() - 20).unwrap().to_be_bytes();
+    assert_eq!(
+        checksum_parts(&[&ip[12..20], &[0, 6], &length, &ip[20..]]),
+        0,
+        "TCP checksum"
+    );
+}
+
+#[test]
+fn map_ip_remaps_prefixes_and_single_hosts_and_repairs_checksums() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tcp_source(directory.path());
+    let original = only_frame(&source);
+    let frame = mapped_frame(
+        directory.path(),
+        &source,
+        &[
+            "--map-ip",
+            "192.0.2.0/24=203.0.113.0/24",
+            "--map-ip",
+            "198.51.100.2=203.0.113.200",
+        ],
+    );
+    assert_eq!(frame.bytes()[26..30], [203, 0, 113, 1]);
+    assert_eq!(frame.bytes()[30..34], [203, 0, 113, 200]);
+    assert_tcp_checksums(frame.bytes());
+    let unmatched = mapped_frame(
+        directory.path(),
+        &source,
+        &["--map-ip", "10.0.0.0/8=172.0.0.0/8"],
+    );
+    assert_eq!(unmatched.bytes(), original.bytes());
+    let half = mapped_frame(
+        directory.path(),
+        &source,
+        &["--map-ip", "192.0.2.1=203.0.113.9"],
+    );
+    assert_eq!(half.bytes()[26..30], [203, 0, 113, 9]);
+    assert_eq!(half.bytes()[30..34], original.bytes()[30..34]);
+    assert_tcp_checksums(half.bytes());
+}
+
+#[test]
+fn map_mac_rewrites_only_matching_ethernet_addresses() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tcp_source(directory.path());
+    let original = only_frame(&source);
+    let frame = mapped_frame(
+        directory.path(),
+        &source,
+        &["--map-mac", "00:00:00:00:00:00=02:00:00:00:00:01"],
+    );
+    assert_eq!(frame.bytes()[..6], [2, 0, 0, 0, 0, 1]);
+    assert_eq!(frame.bytes()[6..12], [2, 0, 0, 0, 0, 1]);
+    assert_eq!(frame.bytes()[12..], original.bytes()[12..]);
+    let unmatched = mapped_frame(
+        directory.path(),
+        &source,
+        &["--map-mac", "aa:bb:cc:00:00:01=02:00:00:00:00:01"],
+    );
+    assert_eq!(unmatched.bytes(), original.bytes());
+}
+
+#[test]
+fn invalid_address_maps_and_conflicting_options_are_usage_errors() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tcp_source(directory.path());
+    let target = directory.path().join("refused.pcapng");
+    let rules = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/rewrite-lab-host.json");
+    let cases: Vec<Vec<String>> = [
+        vec!["--map-ip", "192.0.2.1=2001:db8::1"],
+        vec!["--map-ip", "192.0.2.0/24=198.51.100.0/25"],
+        vec!["--map-ip", "192.0.2.0/24=198.51.100.1"],
+        vec!["--map-ip", "192.0.2.1"],
+        vec![
+            "--map-ip",
+            "192.0.2.0/24=198.51.100.0/24",
+            "--map-ip",
+            "192.0.2.5=203.0.113.1",
+        ],
+        vec!["--map-mac", "aa:bb:cc:00:00:01"],
+        vec![
+            "--map-ip",
+            "192.0.2.1=203.0.113.9",
+            "--source-ip",
+            "192.0.2.77",
+        ],
+        vec![
+            "--map-mac",
+            "aa:bb:cc:00:00:01=02:00:00:00:00:01",
+            "--source-mac",
+            "02:00:00:00:00:09",
+        ],
+        vec![
+            "--map-ip",
+            "192.0.2.1=203.0.113.9",
+            "--rules-file",
+            rules.to_str().unwrap(),
+        ],
+        vec!["--map-ip", "192.0.2.1=203.0.113.9", "--dry-run"],
+    ]
+    .into_iter()
+    .map(|case| case.into_iter().map(str::to_owned).collect())
+    .collect();
+    for case in cases {
+        let mut command = vec![
+            "rewrite",
+            source.to_str().unwrap(),
+            "--write",
+            target.to_str().unwrap(),
+        ];
+        command.extend(case.iter().map(String::as_str));
+        let output = run(&command);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{:?}: {}",
+            &case[..case.len().min(4)],
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!target.exists());
+    }
+}
+
+#[test]
+fn a_matching_fragment_keeps_the_typed_transform_error() {
+    use packetcraftr_core::{
+        frame::LinkType,
+        protocol::transport::Udp,
+        transform::{FragmentOptions, fragment},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("fragments.pcapng");
+    let udp = Udp {
+        source_port: 40000,
+        destination_port: 40001,
+        ..Default::default()
+    };
+    let fragments = fragment(
+        &ethernet_frame(udp, 64),
+        FragmentOptions {
+            mtu: 48,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    write_pcapng(&source, LinkType::ETHERNET, &fragments);
+    let target = directory.path().join("mapped.pcapng");
+    let output = run(&[
+        "rewrite",
+        source.to_str().unwrap(),
+        "--write",
+        target.to_str().unwrap(),
+        "--map-ip",
+        "192.0.2.1=203.0.113.9",
+    ]);
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(!target.exists());
+}
+
+#[test]
+fn the_address_table_accepts_4096_entries_and_refuses_one_more() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tcp_source(directory.path());
+    let target = directory.path().join("mapped.pcapng");
+    let entries = |count: u32| {
+        (0..count)
+            .flat_map(|index| {
+                let [_, _, high, low] = index.to_be_bytes();
+                [
+                    "--map-ip".to_owned(),
+                    format!("10.{high}.{low}.1=172.16.{high}.{low}"),
+                ]
+            })
+            .collect::<Vec<_>>()
+    };
+    let run_with = |entries: &[String]| {
+        let mut command = vec![
+            "rewrite",
+            source.to_str().unwrap(),
+            "--write",
+            target.to_str().unwrap(),
+        ];
+        command.extend(entries.iter().map(String::as_str));
+        run(&command)
+    };
+    let output = run_with(&entries(4096));
+    assert!(output.status.success(), "{output:?}");
+    std::fs::remove_file(&target).unwrap();
+    let output = run_with(&entries(4097));
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("address map entries=4096"));
+    assert!(!target.exists());
+}

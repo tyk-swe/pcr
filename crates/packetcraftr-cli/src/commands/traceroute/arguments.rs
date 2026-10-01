@@ -50,6 +50,15 @@ pub(crate) struct Args {
     /// Optional non-zero UDP/TCP source port; defaults to the ephemeral base.
     #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) source_port: Option<u16>,
+    /// Zero bytes appended to every UDP or ICMP echo probe (TCP probes carry none).
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u16).range(..=i64::from(packetcraftr::traceroute::MAX_PAYLOAD_SIZE)))]
+    pub(crate) payload_size: u16,
+    /// Set the IPv4 Don't Fragment flag on every probe; refused for an IPv6 destination.
+    #[arg(long)]
+    pub(crate) dont_fragment: bool,
+    /// Differentiated Services code point (0..=63) for the IPv4 TOS or IPv6 traffic class.
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(..=i64::from(packetcraftr::traceroute::MAX_DSCP)))]
+    pub(crate) dscp: u8,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP, value_parser = clap::value_parser!(u8).range(1..))]
     pub(crate) first_hop: u8,

@@ -48,7 +48,7 @@ pub(crate) fn compile(
                 "cli.filter_unsupported_field",
                 Kind::Usage,
                 Some(
-                    "use `follow`, `stats`, or `expert` for stream-aware filters, \
+                    "use `stats`, `expert`, or `export` for stream-aware filters, \
                      or filter on header fields instead",
                 ),
             ),

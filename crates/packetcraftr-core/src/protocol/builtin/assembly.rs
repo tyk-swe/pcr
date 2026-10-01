@@ -11,19 +11,24 @@ use crate::layer::{MalformedCodec, PaddingCodec, RawCodec};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 use ip::{
     DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Icmpv4Codec, Icmpv6Codec, IgmpCodec,
-    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec,
+    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec, VrrpCodec,
 };
-use link::{ArpCodec, EthernetCodec, LlcCodec, SnapCodec, Vlan8021adCodec, VlanCodec};
+use link::{
+    ArpCodec, EapolCodec, EthernetCodec, LlcCodec, LldpCodec, SnapCodec, StpCodec, Vlan8021adCodec,
+    VlanCodec,
+};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    AhCodec, ErspanCodec, EspCodec, GeneveCodec, GreCodec, L2tpv3Codec, MplsCodec, PppCodec,
-    PppoeCodec, VxlanCodec,
+    AhCodec, ErspanCodec, EspCodec, EtheripCodec, GeneveCodec, GreCodec, GtpuCodec, L2tpv3Codec,
+    MplsCodec, PppCodec, PppoeCodec, VxlanCodec,
 };
 
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::catalog::builtin_protocol_catalog;
 
-use application::{Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, TlsCodec};
+use application::{
+    Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, SyslogCodec, TftpCodec, TlsCodec,
+};
 
 use super::bindings;
 

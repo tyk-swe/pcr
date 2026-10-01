@@ -39,6 +39,9 @@ const CAPTURE_LOCAL_FIELDS: &[(&str, &str)] = &[
     ("frame.number", "a per-capture position"),
     ("frame.interface_id", "a per-capture interface index"),
     ("frame.time_epoch", "a per-capture timestamp"),
+    ("frame.time_nsec", "a per-capture timestamp"),
+    ("frame.direction", "per-capture interface metadata"),
+    ("frame.truncated", "a capture-record length"),
     ("frame.cap_len", "a capture-record length"),
     ("frame.link_type", "capture format metadata"),
     ("tcp.stream", "a per-capture conversation index"),
@@ -65,7 +68,8 @@ impl Rules {
     /// `identity` must hold at least one field and at most the projection
     /// column limit. Identity and preservation fields may not name
     /// capture-local fields (`frame.number`, `frame.interface_id`,
-    /// `frame.time_epoch`, `frame.cap_len`, `frame.link_type`, `tcp.stream`,
+    /// `frame.time_epoch`, `frame.time_nsec`, `frame.cap_len`,
+    /// `frame.truncated`, `frame.direction`, `frame.link_type`, `tcp.stream`,
     /// `udp.stream`), because those describe how one capture recorded a
     /// packet, not what it carried.
     /// Expectations use the existing field-path/literal syntax as

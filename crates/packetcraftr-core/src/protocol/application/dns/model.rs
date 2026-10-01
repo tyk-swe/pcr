@@ -31,6 +31,10 @@ pub struct Dns {
     pub authorities: Vec<Record>,
     pub additionals: Vec<Record>,
     pub(super) wire: Bytes,
+    /// Whether the transport identified the message as multicast DNS. The
+    /// retained wire re-parses under the same class interpretation, so an
+    /// unchanged rebuild keeps its bytes.
+    pub(super) mdns: bool,
 }
 
 impl Dns {
@@ -40,6 +44,7 @@ impl Dns {
 
     pub fn edit(&mut self, edit: impl FnOnce(&mut Self)) {
         self.wire = Bytes::new();
+        self.mdns = false;
         self.question_count = WireValue::Auto;
         self.answer_count = WireValue::Auto;
         self.authority_count = WireValue::Auto;

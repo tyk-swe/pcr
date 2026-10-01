@@ -73,6 +73,15 @@
         "build": true,
         "dissect": true,
         "exact_round_trip": true,
+        "matcher": true,
+        "decode_only": false
+      },
+      {
+        "protocol": "eapol",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
         "matcher": false,
         "decode_only": false
       },
@@ -87,6 +96,15 @@
       },
       {
         "protocol": "esp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "etherip",
         "aliases": [],
         "build": true,
         "dissect": true,
@@ -118,6 +136,15 @@
       },
       {
         "protocol": "gre",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "gtpu",
         "aliases": [],
         "build": true,
         "dissect": true,
@@ -281,6 +308,15 @@
         "decode_only": false
       },
       {
+        "protocol": "lldp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "malformed",
         "aliases": [],
         "build": true,
@@ -378,12 +414,39 @@
         "decode_only": false
       },
       {
+        "protocol": "stp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "syslog",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "tcp",
         "aliases": [],
         "build": true,
         "dissect": true,
         "exact_round_trip": true,
         "matcher": true,
+        "decode_only": false
+      },
+      {
+        "protocol": "tftp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
         "decode_only": false
       },
       {
@@ -425,6 +488,15 @@
           "8021ad",
           "qinq"
         ],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "vrrp",
+        "aliases": [],
         "build": true,
         "dissect": true,
         "exact_round_trip": true,

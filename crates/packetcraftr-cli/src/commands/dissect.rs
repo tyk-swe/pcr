@@ -8,19 +8,21 @@ use packetcraftr_core::error::Kind;
 pub(super) mod arguments;
 mod rendering;
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr_core as core;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::frame::LinkType;
 
 use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
-use crate::rendering::{emit_published, emit_stderr_message, write_hex_line, write_raw};
+use crate::input::{
+    InputKind, hex_text_limit, missing_input_error, read_bounded_file, read_stdin_bounded,
+};
+use crate::rendering::{FieldTree, emit_published, emit_stderr_message, write_hex_line, write_raw};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::DissectFormat;
@@ -29,6 +31,7 @@ impl super::Spec for Args {
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [max_projection_bytes: Bytes @ ResultRetention]);
         self.budget.resources(settings);
+        self.tree.resources(settings);
     }
 
     fn run(
@@ -45,6 +48,9 @@ pub(super) fn run(
     format: DissectFormat,
     stream: &crate::rendering::StreamEncoder,
 ) -> Result<(), CliError> {
+    arguments
+        .tree
+        .validate_format(format == DissectFormat::Text, format)?;
     let registry = arguments.decode.registry()?;
     if arguments.fields.is_empty()
         && matches!(
@@ -77,17 +83,28 @@ pub(super) fn run(
         .as_deref()
         .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
         .transpose()?;
-    let bytes = match (arguments.hex, arguments.file) {
-        (Some(value), None) => core::layer::parse_hex(&value)
-            .map_err(|source| CliError::caused(Kind::Usage, &source))?
-            .to_vec(),
-        (None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
-        (None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,
-        (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
+    let hex_limit = hex_text_limit(max_packet_size);
+    let bytes = match (arguments.hex, arguments.hex_file, arguments.file) {
+        (Some(value), None, None) if value == "-" => hex_frame_bytes(
+            &read_stdin_bounded(hex_limit, InputKind::FrameHex)?,
+            max_packet_size,
+        )?,
+        (Some(value), None, None) => parse_hex_text(&value)?.to_vec(),
+        (None, Some(path), None) => hex_frame_bytes(
+            &read_bounded_file(&path, hex_limit, InputKind::FrameHex)?,
+            max_packet_size,
+        )?,
+        (None, None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
+        (None, None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,
+        _ => unreachable!("clap enforces conflicts"),
     };
+    let mut tree = arguments
+        .tree
+        .tree
+        .then(|| FieldTree::new(Arc::clone(&registry), arguments.tree.max_tree_bytes));
     let decoded = core::decode::Dissector::new(registry)
         .decode(
-            Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
+            Frame::new(SystemTime::now(), arguments.link_type, bytes)
                 .map_err(CliError::classified)?,
             arguments.budget.decode_options(),
         )
@@ -113,7 +130,7 @@ pub(super) fn run(
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        DissectFormat::Text => rendering::render_text(&decoded),
+        DissectFormat::Text => rendering::render_text(&decoded, tree.as_mut()),
         DissectFormat::Hex => write_hex_line(decoded.frame.bytes()),
         DissectFormat::Raw => write_raw(decoded.frame.bytes()),
         DissectFormat::Json => emit_published(
@@ -125,4 +142,26 @@ pub(super) fn run(
             "--field output returned before dissection rendering",
         )),
     }
+}
+
+fn parse_hex_text(text: &str) -> Result<bytes::Bytes, CliError> {
+    core::layer::parse_hex(text).map_err(|source| CliError::caused(Kind::Usage, &source))
+}
+
+/// Decodes bounded hexadecimal text, keeping the decoded size inside the packet budget.
+fn hex_frame_bytes(text: &[u8], max_packet_size: usize) -> Result<Vec<u8>, CliError> {
+    let text = std::str::from_utf8(text)
+        .map_err(|source| CliError::caused(Kind::Usage, &source))?
+        .trim_start();
+    let bytes = parse_hex_text(text)?;
+    if bytes.is_empty() {
+        return Err(missing_input_error(InputKind::FrameHex));
+    }
+    if bytes.len() > max_packet_size {
+        return Err(CliError::classified(core::decode::Error::PacketSizeLimit {
+            actual: bytes.len(),
+            limit: max_packet_size,
+        }));
+    }
+    Ok(bytes.to_vec())
 }

@@ -5,20 +5,29 @@ use packetcraftr_core::decode::DecodedPacket;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    render_diagnostics_text, render_dns_records, write_stdout_line, write_summary_line,
+    FieldTree, render_diagnostics_text, render_dns_records, write_stdout_line, write_summary_line,
 };
 
-pub(super) fn render_text(decoded: &DecodedPacket) -> Result<(), CliError> {
+pub(super) fn render_text(
+    decoded: &DecodedPacket,
+    tree: Option<&mut FieldTree>,
+) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "decoded {} bytes into {} layer(s)",
         decoded.frame.bytes().len(),
         decoded.packet.len()
     ))?;
-    for (index, layer) in decoded.packet.iter().enumerate() {
-        write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
+    let packet = packetcraftr_core::document::Packet::from_packet(&decoded.packet);
+    match tree {
+        Some(tree) => {
+            tree.render_layers(&packet, |index, protocol| format!("{index}: {protocol}"))?;
+        }
+        None => {
+            for (index, layer) in decoded.packet.iter().enumerate() {
+                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
+            }
+            render_dns_records(&packet)?;
+        }
     }
-    render_dns_records(&packetcraftr_core::document::Packet::from_packet(
-        &decoded.packet,
-    ))?;
     render_diagnostics_text(&decoded.diagnostics)
 }

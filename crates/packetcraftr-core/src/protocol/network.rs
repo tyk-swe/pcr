@@ -4,10 +4,13 @@
 mod envelope;
 mod icmp;
 mod igmp;
+pub mod igmpv3;
 mod ipv4;
 mod ipv6;
+pub mod mld;
 pub mod ndp;
 mod raw_ip;
+mod vrrp;
 
 pub mod ip_protocol {
     pub const HOP_BY_HOP: u8 = 0;
@@ -22,10 +25,14 @@ pub mod ip_protocol {
     pub const GRE: u8 = 47;
     pub const ESP: u8 = 50;
     pub const AH: u8 = 51;
+    pub const ETHERIP: u8 = 97;
     pub const ICMPV6: u8 = 58;
     pub const NO_NEXT_HEADER: u8 = 59;
     pub const DESTINATION_OPTIONS: u8 = 60;
+    pub const VRRP: u8 = 112;
     pub const SCTP: u8 = 132;
+    pub const MPLS_IN_IP: u8 = 137;
+    pub const ETHERNET: u8 = 143;
 }
 
 pub(crate) use envelope::resolve_envelope;
@@ -40,3 +47,5 @@ pub(crate) use ipv6::{
     DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Ipv6Codec, SegmentRoutingHeaderCodec,
 };
 pub(crate) use raw_ip::RawIpCodec;
+pub use vrrp::Vrrp;
+pub(crate) use vrrp::VrrpCodec;

@@ -14,11 +14,14 @@ use crate::protocol::application::dns::{
 
 const TYPE_OPT: u16 = 41;
 
+/// `mdns` is true only when the transport identified the message as multicast
+/// DNS (UDP port 5353), where the top record-class bit is the cache-flush flag.
 pub(super) fn decode_records(
     message: &Bytes,
     mut offset: usize,
     count: usize,
     limits: MessageLimits,
+    mdns: bool,
 ) -> Result<(Vec<Record>, usize), WireError> {
     let mut records = Vec::with_capacity(count);
     for _ in 0..count {
@@ -30,15 +33,8 @@ pub(super) fn decode_records(
         let rdata_length = usize::from(read_u16(message, offset + 8, "RDATA length")?);
         let rdata_offset = offset + 10;
         let rdata_end = rdata_offset + rdata_length;
-        let value = decode_rdata(
-            message,
-            type_code,
-            class,
-            ttl,
-            rdata_offset,
-            rdata_end,
-            limits,
-        )?;
+        let rdata = Rdata::new(message, type_code, rdata_offset, rdata_end, limits)?;
+        let value = rdata.decode(class, ttl, mdns)?;
         records.push(Record {
             owner,
             class,
@@ -59,7 +55,67 @@ struct Rdata<'a> {
     limits: MessageLimits,
 }
 
-impl Rdata<'_> {
+impl<'a> Rdata<'a> {
+    fn new(
+        message: &'a Bytes,
+        type_code: u16,
+        offset: usize,
+        end: usize,
+        limits: MessageLimits,
+    ) -> Result<Self, WireError> {
+        let bytes = message.get(offset..end).ok_or(WireError::TruncatedField {
+            field: "RDATA",
+            offset,
+            needed: end,
+        })?;
+        Ok(Self {
+            message,
+            bytes,
+            type_code,
+            offset,
+            end,
+            limits,
+        })
+    }
+
+    // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
+    // The top class bit is mDNS's cache-flush flag (RFC 6762 section 10.2), so
+    // only an mDNS message masks it to find the class the rdata type needs.
+    // The record keeps the full class either way.
+    fn decode(&self, class: u16, ttl: u32, mdns: bool) -> Result<RecordValue, WireError> {
+        let bytes = self.bytes;
+        let class_code = if mdns { class & 0x7fff } else { class };
+        match (self.type_code, class_code) {
+            (1, 1) => {
+                let bytes: [u8; 4] = bytes
+                    .try_into()
+                    .map_err(|_| self.invalid("A RDATA must be 4 bytes"))?;
+                Ok(RecordValue::A(Ipv4Addr::from(bytes)))
+            }
+            (2, 1) => Ok(RecordValue::Ns(self.exact_name(self.offset)?)),
+            (5, 1) => Ok(RecordValue::Cname(self.exact_name(self.offset)?)),
+            (6, 1) => self.decode_soa(),
+            (12, 1) => Ok(RecordValue::Ptr(self.exact_name(self.offset)?)),
+            (15, 1) => self.decode_mx(),
+            (16, 1) => self.decode_txt(),
+            (28, 1) => {
+                let bytes: [u8; 16] = bytes
+                    .try_into()
+                    .map_err(|_| self.invalid("AAAA RDATA must be 16 bytes"))?;
+                Ok(RecordValue::Aaaa(Ipv6Addr::from(bytes)))
+            }
+            (33, 1) => self.decode_srv(),
+            (257, 1) => self.decode_caa(),
+            (TYPE_OPT, _) => {
+                decode_edns(class, ttl, self.message.slice_ref(bytes)).map(RecordValue::Opt)
+            }
+            _ => Ok(RecordValue::Unknown {
+                type_code: self.type_code,
+                rdata: self.message.slice_ref(bytes),
+            }),
+        }
+    }
+
     fn invalid(&self, message: &str) -> WireError {
         WireError::InvalidRdata {
             record_type: self.type_code,
@@ -172,58 +228,6 @@ impl Rdata<'_> {
             tag: self.message.slice_ref(tag),
             value: self.message.slice_ref(value),
         })
-    }
-}
-
-fn decode_rdata(
-    message: &Bytes,
-    type_code: u16,
-    class: u16,
-    ttl: u32,
-    offset: usize,
-    end: usize,
-    limits: MessageLimits,
-) -> Result<RecordValue, WireError> {
-    let bytes = message.get(offset..end).ok_or(WireError::TruncatedField {
-        field: "RDATA",
-        offset,
-        needed: end,
-    })?;
-    let rdata = Rdata {
-        message,
-        bytes,
-        type_code,
-        offset,
-        end,
-        limits,
-    };
-    // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
-    match (type_code, class) {
-        (1, 1) => {
-            let bytes: [u8; 4] = bytes
-                .try_into()
-                .map_err(|_| rdata.invalid("A RDATA must be 4 bytes"))?;
-            Ok(RecordValue::A(Ipv4Addr::from(bytes)))
-        }
-        (2, 1) => Ok(RecordValue::Ns(rdata.exact_name(offset)?)),
-        (5, 1) => Ok(RecordValue::Cname(rdata.exact_name(offset)?)),
-        (6, 1) => rdata.decode_soa(),
-        (12, 1) => Ok(RecordValue::Ptr(rdata.exact_name(offset)?)),
-        (15, 1) => rdata.decode_mx(),
-        (16, 1) => rdata.decode_txt(),
-        (28, 1) => {
-            let bytes: [u8; 16] = bytes
-                .try_into()
-                .map_err(|_| rdata.invalid("AAAA RDATA must be 16 bytes"))?;
-            Ok(RecordValue::Aaaa(Ipv6Addr::from(bytes)))
-        }
-        (33, 1) => rdata.decode_srv(),
-        (257, 1) => rdata.decode_caa(),
-        (TYPE_OPT, _) => decode_edns(class, ttl, message.slice_ref(bytes)).map(RecordValue::Opt),
-        _ => Ok(RecordValue::Unknown {
-            type_code,
-            rdata: message.slice_ref(bytes),
-        }),
     }
 }
 

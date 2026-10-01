@@ -16,6 +16,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
             timeout,
             max_template_packets,
             collection,
+            stop: _,
         } = request;
         let window =
             Window::open(&self.clock, timeout, self.cancellation.clone()).ok_or_else(|| {

@@ -209,6 +209,7 @@ mod tests {
             parent: None,
             registry: &registry,
             network: None,
+            hop_limit: None,
             discriminator: None,
         };
         for (reserved1, reserved2, expected) in [

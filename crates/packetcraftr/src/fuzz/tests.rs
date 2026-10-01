@@ -808,6 +808,62 @@ fn live_execution_uses_the_identical_packet_campaign() {
 }
 
 #[test]
+fn live_cases_keep_the_round_trip_verdicts_of_the_offline_campaign() {
+    let codes = |diagnostics: &[packetcraftr_core::diagnostic::Diagnostic]| {
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>()
+    };
+    // The smallest byte budget that still holds a case leaves no room to
+    // rebuild it, which the oracle reports as a skipped check.
+    let (request, offline) = (256..4096)
+        .find_map(|max_total_bytes| {
+            let mut request = quick(bit_flip(1));
+            request.campaign.limits.max_packet_bytes = 256;
+            request.campaign.limits.max_total_bytes = max_total_bytes;
+            request.campaign.build.limits.max_packet_size = 256;
+            packet_fuzz::run(
+                &request.campaign,
+                packet(),
+                packetcraftr_core::protocol::builtin::registry(),
+            )
+            .ok()
+            .map(|offline| (request, offline))
+        })
+        .expect("some budget holds the case");
+    let skipped = ["fuzz.roundtrip_skipped"];
+    let offline = &offline.cases[0];
+    assert!(
+        codes(&offline.diagnostics).ends_with(&skipped),
+        "{:?}",
+        offline.diagnostics
+    );
+
+    let live = collect(
+        &request,
+        &mut AllowAll,
+        &mut RebuildingExecutor,
+        &mut NoopClock,
+    )
+    .expect("live campaign");
+    let [Trial { case: live, .. }] = &live.trials[..] else {
+        panic!("one live case expected");
+    };
+    assert_eq!(
+        live.diagnostics
+            .iter()
+            .filter(|diagnostic| packet_fuzz::is_roundtrip_diagnostic(diagnostic))
+            .collect::<Vec<_>>(),
+        offline
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| packet_fuzz::is_roundtrip_diagnostic(diagnostic))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn live_fuzz_sink_failure_prevents_later_case_execution() {
     let request = quick(bit_flip(3));
     let mut executor = CountingExecutor::default();

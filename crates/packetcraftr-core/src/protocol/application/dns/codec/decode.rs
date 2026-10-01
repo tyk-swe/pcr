@@ -38,7 +38,9 @@ pub fn decode_name(message: &Bytes, offset: usize, limits: Limits) -> Result<(Na
     ))
 }
 
-pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
+/// `mdns` says the transport identified the message as multicast DNS, so
+/// record classes may carry the RFC 6762 cache-flush bit.
+pub(super) fn decode(wire: Bytes, limits: Limits, mdns: bool) -> Result<Dns, Error> {
     limits.validate()?;
     let message = wire.as_ref();
     let maximum = limits.max_message_bytes;
@@ -86,11 +88,11 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
         offset = next + 4;
     }
     let (answers, next) =
-        records::decode_records(&wire, offset, usize::from(answer_count), limits)?;
+        records::decode_records(&wire, offset, usize::from(answer_count), limits, mdns)?;
     let (authorities, next) =
-        records::decode_records(&wire, next, usize::from(authority_count), limits)?;
+        records::decode_records(&wire, next, usize::from(authority_count), limits, mdns)?;
     let (additionals, next) =
-        records::decode_records(&wire, next, usize::from(additional_count), limits)?;
+        records::decode_records(&wire, next, usize::from(additional_count), limits, mdns)?;
     if next != message.len() {
         return Err(Error::TrailingBytes {
             remaining: message.len() - next,
@@ -118,5 +120,6 @@ pub(super) fn decode(wire: Bytes, limits: Limits) -> Result<Dns, Error> {
         authorities,
         additionals,
         wire,
+        mdns,
     })
 }

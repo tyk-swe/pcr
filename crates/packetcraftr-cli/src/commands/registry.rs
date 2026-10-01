@@ -8,7 +8,7 @@ use super::dispatch::Launch;
 use super::{
     Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
     fragment, fuzz, http, interfaces, merge, plan, protocols, read, replay, rewrite, routes, scan,
-    send, stats, tls, traceroute, verify_forwarding,
+    send, stats, tls, topics, traceroute, verify_forwarding,
 };
 use crate::output::contract::{Format, FormatSubset};
 use crate::resources::Settings;
@@ -199,6 +199,9 @@ commands! {
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
     Documentation(documentation::arguments::Args),
+    /// Print built-in references for packet expressions, filters, formats, and exit codes.
+    #[command(after_long_help = topics::arguments::AFTER_LONG_HELP)]
+    Topics(topics::arguments::Args),
 }
 
 #[cfg(test)]
@@ -251,6 +254,17 @@ mod tests {
                 undeclared_bounds::<merge::arguments::Args>,
             ),
             (
+                &[
+                    "merge",
+                    "--write",
+                    "m.pcapng",
+                    "--max-reorder-frames",
+                    "8",
+                    CAPTURE,
+                ],
+                undeclared_bounds::<merge::arguments::Args>,
+            ),
+            (
                 &["fragment", "--mtu", "576", "--packet", PACKET],
                 undeclared_bounds::<fragment::arguments::Args>,
             ),
@@ -299,7 +313,7 @@ mod tests {
                 undeclared_bounds::<follow::arguments::Args>,
             ),
             (
-                &["replay", "--interface", "lo", CAPTURE],
+                &["replay", "--interface", "lo", "--max-gap-ms", "50", CAPTURE],
                 undeclared_bounds::<replay::arguments::Args>,
             ),
             (

@@ -49,6 +49,8 @@ struct State {
     reads: usize,
     script: Option<Script>,
     replies: VecDeque<Frame>,
+    /// Virtual time that passes before each scripted reply reaches the capture.
+    reply_delay: Duration,
 }
 #[derive(Clone)]
 struct Io {
@@ -138,6 +140,9 @@ impl capture::Session for Capture {
             return Err(injected());
         }
         if let Some(frame) = state.replies.pop_front() {
+            let delay = state.reply_delay;
+            drop(state);
+            self.clock.advance(delay);
             return Ok(Some(capture::Captured::new(frame, Instant::now())));
         }
         drop(state);
@@ -748,4 +753,122 @@ fn scan_reports_a_timeout_for_a_checksum_failed_reply_the_frame_budget_refused()
 
     result.expect("a reply no scan could accept must not fail the scan when it is refused");
     assert_eq!(statuses, [ProbeStatus::Timeout]);
+}
+
+const REPLY_DELAY: Duration = Duration::from_millis(50);
+
+/// The capture answers each request whose destination port is listed, `copies` times over.
+fn answer_ports(ports: &'static [u16], copies: usize) -> Script {
+    Box::new(move |sent| {
+        let request = transmitted(sent);
+        let port = request.get::<Udp>().unwrap().destination_port;
+        if ports.contains(&port) {
+            (0..copies).map(|_| udp_reply(&request)).collect()
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn port_template(ports: &[u16]) -> Template {
+    Template::new(query_packet()).axis(
+        1,
+        "destination_port",
+        ports
+            .iter()
+            .map(|port| FieldValue::Unsigned(u64::from(*port)))
+            .collect(),
+    )
+}
+
+/// Runs one exchange over `ports`, returning its report and the number of published responses.
+fn answered_exchange(
+    stop: exchange::StopCondition,
+    ports: &[u16],
+    script: Script,
+) -> (exchange::Report, usize) {
+    let (client, state) = fixture(Fault::None);
+    {
+        let mut state = state.lock().unwrap();
+        state.script = Some(script);
+        state.reply_delay = REPLY_DELAY;
+    }
+    let mut request = layer3_request(port_template(ports));
+    request.stop = stop;
+    let published = Arc::new(Mutex::new(0_usize));
+    let counter = Arc::clone(&published);
+    let report = client
+        .exchange(request, move |event| {
+            if matches!(event, exchange::Event::Response(_)) {
+                *counter.lock().unwrap() += 1;
+            }
+            Ok(())
+        })
+        .expect("the exchange completes");
+    let responses = *published.lock().unwrap();
+    (report, responses)
+}
+
+#[test]
+fn stop_when_answered_ends_the_collection_at_the_reply_and_keeps_it() {
+    let (report, responses) = answered_exchange(
+        exchange::StopCondition::AllAnswered,
+        &[9999],
+        answer_ports(&[9999], 1),
+    );
+    assert_eq!(responses, 1, "the triggering response is published");
+    assert!(report.unanswered.is_empty());
+    assert_eq!(report.stats.elapsed, REPLY_DELAY);
+
+    let (report, responses) = answered_exchange(
+        exchange::StopCondition::Window,
+        &[9999],
+        answer_ports(&[9999], 1),
+    );
+    assert_eq!(responses, 1);
+    assert!(report.unanswered.is_empty());
+    assert_eq!(
+        report.stats.elapsed, WINDOW,
+        "the default waits the full window"
+    );
+}
+
+#[test]
+fn stop_when_answered_waits_the_window_while_a_request_is_unanswered() {
+    let (report, responses) = answered_exchange(
+        exchange::StopCondition::AllAnswered,
+        &[9999, 10000, 10001],
+        answer_ports(&[9999, 10000], 1),
+    );
+    assert_eq!(responses, 2);
+    assert_eq!(report.unanswered, [2]);
+    assert_eq!(report.stats.elapsed, WINDOW);
+}
+
+#[test]
+fn duplicate_responses_do_not_count_as_another_answered_request() {
+    let (report, responses) = answered_exchange(
+        exchange::StopCondition::AllAnswered,
+        &[9999, 10000],
+        answer_ports(&[9999], 3),
+    );
+    assert_eq!(responses, 3, "every duplicate is still retained");
+    assert_eq!(report.unanswered, [1]);
+    assert_eq!(report.stats.elapsed, WINDOW);
+}
+
+#[test]
+fn stop_when_answered_still_sends_the_requests_an_early_reply_precedes() {
+    let (client, state) = fixture(Fault::None);
+    state.lock().unwrap().script = Some(answer_ports(&[9999, 10000], 1));
+    let mut request = layer3_request(port_template(&[9999, 10000]));
+    request.stop = exchange::StopCondition::AllAnswered;
+
+    let report = client
+        .exchange(request, exchange::Collector::default())
+        .expect("the exchange completes");
+
+    assert_eq!(state.lock().unwrap().sent.len(), 2);
+    assert!(report.unanswered.is_empty());
+    assert_eq!(report.stats.packets_completed, 2);
 }

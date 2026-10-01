@@ -4,6 +4,7 @@
 mod model;
 mod opaque;
 mod reflection;
+pub mod selector;
 
 pub use model::{FieldSchema, Id, Layer, Schema};
 pub use opaque::{Malformed, Padding, Raw, parse_hex};

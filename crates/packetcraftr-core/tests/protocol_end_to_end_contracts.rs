@@ -14,6 +14,7 @@ use bytes::Bytes;
 use packetcraftr_core::diagnostic::{
     CHECKSUM_FAILURE_CODES, Diagnostic, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM,
     IGMP_CHECKSUM, IPV4_CHECKSUM, SCTP_CHECKSUM, Severity, TCP_CHECKSUM, UDP_CHECKSUM,
+    VRRP_CHECKSUM,
 };
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -23,6 +24,7 @@ use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
 use packetcraftr_core::protocol::network::{
     DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, Ipv6, SegmentRoutingHeader,
+    Vrrp,
 };
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, TcpOption, Udp};
 use packetcraftr_core::protocol::tunnel::{
@@ -1220,6 +1222,8 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
         ("geneve", vec![0; 7]),
         ("vxlan", vec![0; 7]),
         ("gre", vec![0; 3]),
+        ("etherip", vec![0; 1]),
+        ("gtpu", vec![0; 7]),
     ] {
         let decoded = decode_from_root(&rooted_registry(root), bytes, decode::Options::default())
             .unwrap_or_else(|error| panic!("{root} malformed preservation failed: {error}"));
@@ -1405,6 +1409,20 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
     igmp.push(ipv4([192, 0, 2, 1], [224, 0, 0, 1]));
     igmp.push(Igmp::default());
 
+    let mut vrrp = Packet::new();
+    vrrp.push(Ipv4 {
+        ttl: 255,
+        ..ipv4([192, 0, 2, 1], [224, 0, 0, 18])
+    });
+    vrrp.push(Vrrp {
+        version: 2,
+        addresses: vec!["192.0.2.100".parse().unwrap()],
+        ..Vrrp::default()
+    });
+
+    let vrrp_v3_ipv4 = vrrp_packet(vrrp_ipv4_envelope(), vrrp_v3(&["192.0.2.100"]));
+    let vrrp_v3_ipv6 = vrrp_packet(vrrp_ipv6_envelope(), vrrp_v3(&["2001:db8::1"]));
+
     let mut gre = Packet::new();
     gre.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
     gre.push(Gre {
@@ -1423,6 +1441,9 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
         (ICMPV4_CHECKSUM, "ipv4", icmpv4, 27),
         (ICMPV6_CHECKSUM, "ipv6", icmpv6, 47),
         (IGMP_CHECKSUM, "ipv4", igmp, 27),
+        (VRRP_CHECKSUM, "ipv4", vrrp, 26),
+        (VRRP_CHECKSUM, "ipv4", vrrp_v3_ipv4, 26),
+        (VRRP_CHECKSUM, "ipv6", vrrp_v3_ipv6, 46),
         (GRE_CHECKSUM, "ipv4", gre, 28),
     ];
 
@@ -2219,6 +2240,48 @@ fn strict_build_rejects_and_permissive_build_warns_with_the_same_message() {
         message: "address family 99 does not select child ipv4",
     });
 
+    let mut packet = Packet::new();
+    packet.push(vrrp_ipv4_envelope());
+    packet.push(Vrrp {
+        version: 2,
+        count_ip: WireValue::Exact(3),
+        addresses: vec!["192.0.2.100".parse().unwrap()],
+        ..Vrrp::default()
+    });
+    cases.push(Case {
+        label: "VRRP count_ip",
+        packet,
+        protocol: "vrrp",
+        code: "build.inconsistent_dependent_field",
+        field: Some("count_ip"),
+        message: "count_ip is 3, expected 1",
+    });
+
+    let mut packet = Packet::new();
+    packet.push(vrrp_ipv4_envelope());
+    packet.push(Vrrp {
+        version: 2,
+        auth_data: Some(Bytes::from_static(&[0; 4])),
+        ..Vrrp::default()
+    });
+    cases.push(Case {
+        label: "VRRP authentication data",
+        packet,
+        protocol: "vrrp",
+        code: "build.vrrp_auth_data",
+        field: Some("auth_data"),
+        message: "VRRP version 2 carries 8 bytes after the addresses, not 4",
+    });
+
+    cases.push(Case {
+        label: "VRRP version 2 over IPv6",
+        packet: vrrp_packet(vrrp_ipv6_envelope(), vrrp_v2()),
+        protocol: "vrrp",
+        code: "build.vrrp_version",
+        field: Some("version"),
+        message: "VRRP version 2 is IPv4-only",
+    });
+
     let registry = registry();
     for case in cases {
         let label = case.label;
@@ -2244,4 +2307,533 @@ fn strict_build_rejects_and_permissive_build_warns_with_the_same_message() {
         assert_eq!(diagnostic.field, case.field, "{label}");
         assert_eq!(diagnostic.message, case.message, "{label}");
     }
+}
+
+fn vrrp_ipv4_envelope() -> Ipv4 {
+    Ipv4 {
+        ttl: 255,
+        ..ipv4([192, 0, 2, 1], [224, 0, 0, 18])
+    }
+}
+
+fn vrrp_ipv6_envelope() -> Ipv6 {
+    Ipv6 {
+        hop_limit: 255,
+        ..ipv6("fe80::1", "ff02::12")
+    }
+}
+
+fn vrrp_v2() -> Vrrp {
+    Vrrp {
+        version: 2,
+        vrid: 7,
+        priority: 120,
+        addresses: vec!["192.0.2.100".parse().unwrap()],
+        ..Vrrp::default()
+    }
+}
+
+fn vrrp_v3(addresses: &[&str]) -> Vrrp {
+    Vrrp {
+        version: 3,
+        vrid: 7,
+        priority: 120,
+        max_advert_interval: 100,
+        addresses: addresses.iter().map(|text| text.parse().unwrap()).collect(),
+        ..Vrrp::default()
+    }
+}
+
+fn vrrp_packet(envelope: impl Layer, vrrp: Vrrp) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(envelope);
+    packet.push(vrrp);
+    packet
+}
+
+fn vrrp_layer(decoded: &decode::DecodedPacket) -> &Vrrp {
+    decoded
+        .packet
+        .layer(1)
+        .and_then(|layer| layer.downcast_ref::<Vrrp>())
+        .expect("a VRRP layer follows the IP header")
+}
+
+fn vrrp_message(built: &build::BuiltPacket, header_len: usize) -> String {
+    built.bytes[header_len..]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn vrrp_advertisements_round_trip_and_verify_their_checksums() {
+    // The messages and checksums below were computed independently of the codec.
+    let v2 = round_trip(vrrp_packet(vrrp_ipv4_envelope(), vrrp_v2()), "ipv4");
+    assert_eq!(
+        vrrp_message(&v2.0, 20),
+        "210778010001a491c00002640000000000000000"
+    );
+    assert!(v2.1.diagnostics.is_empty(), "{:?}", v2.1.diagnostics);
+    let layer = vrrp_layer(&v2.1);
+    assert_eq!((layer.version, layer.vrrp_type, layer.vrid), (2, 1, 7));
+    assert_eq!(layer.advert_interval, 1);
+    assert_eq!(layer.count_ip, WireValue::Exact(1));
+    assert_eq!(
+        layer.addresses,
+        vec!["192.0.2.100".parse::<std::net::IpAddr>().unwrap()]
+    );
+    assert_eq!(layer.auth_data.as_ref().map(Bytes::len), Some(8));
+
+    let v3_ipv6 = round_trip(
+        vrrp_packet(vrrp_ipv6_envelope(), vrrp_v3(&["2001:db8::1"])),
+        "ipv6",
+    );
+    assert_eq!(
+        vrrp_message(&v3_ipv6.0, 40),
+        "3107780100642aba20010db8000000000000000000000001"
+    );
+    assert!(
+        v3_ipv6.1.diagnostics.is_empty(),
+        "{:?}",
+        v3_ipv6.1.diagnostics
+    );
+
+    let mut v3 = vrrp_v3(&["192.0.2.100", "192.0.2.101"]);
+    v3.vrid = 9;
+    v3.priority = 100;
+    v3.reserved = 0b0101;
+    v3.max_advert_interval = 0x123;
+    let v3_ipv4 = round_trip(vrrp_packet(vrrp_ipv4_envelope(), v3), "ipv4");
+    assert_eq!(
+        vrrp_message(&v3_ipv4.0, 20),
+        "310964025123f271c0000264c0000265"
+    );
+    assert!(
+        v3_ipv4.1.diagnostics.is_empty(),
+        "{:?}",
+        v3_ipv4.1.diagnostics
+    );
+    let layer = vrrp_layer(&v3_ipv4.1);
+    assert_eq!((layer.reserved, layer.max_advert_interval), (0b0101, 0x123));
+    assert_eq!(layer.addresses.len(), 2);
+}
+
+#[test]
+fn vrrp_decode_reports_each_departure_from_the_protocol() {
+    let registry = rooted_registry("ipv4");
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let diagnostics = |packet: Packet, edit: &dyn Fn(&mut Vec<u8>)| {
+        let built = builder
+            .build(
+                packet,
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..build::Options::default()
+                },
+            )
+            .expect("permissive build");
+        let mut bytes = built.bytes.to_vec();
+        edit(&mut bytes);
+        let decoded =
+            decode_from_root(&registry, bytes, decode::Options::default()).expect("VRRP decodes");
+        decoded
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        diagnostics(vrrp_packet(vrrp_ipv4_envelope(), vrrp_v2()), &|_| ()),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        diagnostics(vrrp_packet(vrrp_ipv4_envelope(), vrrp_v2()), &|bytes| {
+            bytes[27] ^= 0xff;
+        }),
+        ["decode.vrrp_checksum"]
+    );
+    let hop_limit_64 = Ipv4 {
+        ttl: 64,
+        ..vrrp_ipv4_envelope()
+    };
+    assert_eq!(
+        diagnostics(vrrp_packet(hop_limit_64, vrrp_v2()), &|_| ()),
+        ["decode.vrrp_ttl"]
+    );
+    let unicast = Ipv4 {
+        destination: "192.0.2.2".parse().unwrap(),
+        ..vrrp_ipv4_envelope()
+    };
+    assert_eq!(
+        diagnostics(vrrp_packet(unicast, vrrp_v2()), &|_| ()),
+        ["decode.vrrp_destination"]
+    );
+    let miscounted = Vrrp {
+        count_ip: WireValue::Exact(2),
+        ..vrrp_v3(&["192.0.2.100"])
+    };
+    assert_eq!(
+        diagnostics(vrrp_packet(vrrp_ipv4_envelope(), miscounted), &|_| ()),
+        ["decode.vrrp_count"]
+    );
+    let long_auth = Vrrp {
+        auth_data: Some(Bytes::from_static(&[1; 12])),
+        ..vrrp_v2()
+    };
+    assert_eq!(
+        diagnostics(vrrp_packet(vrrp_ipv4_envelope(), long_auth), &|_| ()),
+        ["decode.vrrp_length"]
+    );
+}
+
+#[test]
+fn vrrp_v3_over_ipv6_reports_each_departure_from_the_protocol() {
+    let registry = rooted_registry("ipv6");
+    let codes = |envelope: Ipv6, edit: &dyn Fn(&mut Vec<u8>)| {
+        let built = rebuild(
+            &registry,
+            vrrp_packet(envelope, vrrp_v3(&["2001:db8::1"])),
+            codec::Mode::Permissive,
+        )
+        .expect("permissive build");
+        let mut bytes = built.bytes.to_vec();
+        edit(&mut bytes);
+        decode_from_root(&registry, bytes, decode::Options::default())
+            .expect("VRRP decodes")
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        codes(vrrp_ipv6_envelope(), &|_| ()),
+        Vec::<&str>::new(),
+        "a well-formed advertisement is clean"
+    );
+    assert_eq!(
+        codes(vrrp_ipv6_envelope(), &|bytes| bytes[47] ^= 0xff),
+        ["decode.vrrp_checksum"]
+    );
+    let hop_limit_64 = Ipv6 {
+        hop_limit: 64,
+        ..vrrp_ipv6_envelope()
+    };
+    assert_eq!(codes(hop_limit_64, &|_| ()), ["decode.vrrp_ttl"]);
+    let other_group = Ipv6 {
+        destination: "ff02::13".parse().unwrap(),
+        ..vrrp_ipv6_envelope()
+    };
+    assert_eq!(codes(other_group, &|_| ()), ["decode.vrrp_destination"]);
+}
+
+#[test]
+fn vrrp_malformed_shapes_decode_and_rebuild_to_the_same_bytes() {
+    let permissive = build::Options {
+        mode: codec::Mode::Permissive,
+        ..build::Options::default()
+    };
+    let cases: [(&str, &'static str, Packet, &[&str]); 4] = [
+        (
+            "version 2 without authentication data",
+            "ipv4",
+            vrrp_packet(
+                vrrp_ipv4_envelope(),
+                Vrrp {
+                    addresses: Vec::new(),
+                    auth_data: Some(Bytes::new()),
+                    ..vrrp_v2()
+                },
+            ),
+            &["decode.vrrp_length"],
+        ),
+        (
+            "version 2 with an address and no authentication data",
+            "ipv4",
+            vrrp_packet(
+                vrrp_ipv4_envelope(),
+                Vrrp {
+                    auth_data: Some(Bytes::new()),
+                    ..vrrp_v2()
+                },
+            ),
+            &["decode.vrrp_length"],
+        ),
+        (
+            "version 2 with a short count",
+            "ipv4",
+            vrrp_packet(
+                vrrp_ipv4_envelope(),
+                Vrrp {
+                    count_ip: WireValue::Exact(0),
+                    ..vrrp_v2()
+                },
+            ),
+            &["decode.vrrp_length"],
+        ),
+        (
+            "version 2 over IPv6",
+            "ipv6",
+            vrrp_packet(vrrp_ipv6_envelope(), vrrp_v2()),
+            &["decode.vrrp_version"],
+        ),
+    ];
+
+    for (label, root, packet, expected) in cases {
+        let registry = rooted_registry(root);
+        let builder = build::Builder::new(Arc::clone(&registry));
+        let built = builder
+            .build(packet, codec::Context::default(), permissive.clone())
+            .unwrap_or_else(|error| panic!("{label}: build failed: {error}"));
+        let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
+            .unwrap_or_else(|error| panic!("{label}: decode failed: {error}"));
+        let codes: Vec<_> = decoded
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        assert_eq!(codes, expected, "{label}");
+        let rebuilt = builder
+            .build(
+                decoded.packet,
+                codec::Context::default(),
+                permissive.clone(),
+            )
+            .unwrap_or_else(|error| panic!("{label}: rebuild failed: {error}"));
+        assert_eq!(rebuilt.bytes, built.bytes, "{label}");
+    }
+}
+
+#[test]
+fn vrrp_decode_and_rebuild_keep_inconsistent_counts() {
+    let registry = rooted_registry("ipv4");
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let permissive = build::Options {
+        mode: codec::Mode::Permissive,
+        ..build::Options::default()
+    };
+    // count_ip says 255: the 12-byte body reads as 3 complete declared
+    // addresses and the version 2 trailer is missing entirely
+    let packet = vrrp_packet(
+        vrrp_ipv4_envelope(),
+        Vrrp {
+            count_ip: WireValue::Exact(255),
+            ..vrrp_v2()
+        },
+    );
+    let built = builder
+        .build(packet, codec::Context::default(), permissive.clone())
+        .expect("permissive build");
+    let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
+        .expect("decodes");
+    let layer = vrrp_layer(&decoded);
+    assert_eq!(layer.count_ip, WireValue::Exact(255));
+    assert_eq!(layer.addresses.len(), 3);
+    assert_eq!(layer.auth_data.as_ref().map(Bytes::len), Some(0));
+    let codes: Vec<_> = decoded
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code)
+        .collect();
+    assert_eq!(codes, ["decode.vrrp_count", "decode.vrrp_length"]);
+    let rebuilt = builder
+        .build(decoded.packet, codec::Context::default(), permissive)
+        .expect("permissive rebuild");
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn vrrp_unknown_version_decodes_as_raw_with_its_bytes_intact() {
+    let registry = rooted_registry("ipv4");
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let built = builder
+        .build(
+            vrrp_packet(vrrp_ipv4_envelope(), vrrp_v2()),
+            codec::Context::default(),
+            build::Options::default(),
+        )
+        .expect("build");
+    let mut bytes = built.bytes.to_vec();
+    bytes[20] = 0x41;
+    let decoded =
+        decode_from_root(&registry, bytes.clone(), decode::Options::default()).expect("decodes");
+    let raw = decoded
+        .packet
+        .layer(1)
+        .and_then(|layer| layer.downcast_ref::<Raw>())
+        .expect("an unknown version stays raw");
+    assert_eq!(raw.bytes.as_ref(), &bytes[20..]);
+}
+
+#[test]
+fn vrrp_needs_an_ip_parent_or_build_addresses() {
+    let builder = build::Builder::new(registry());
+    let standalone = |layer: Box<dyn Layer>| {
+        let mut packet = Packet::new();
+        packet.push_boxed(layer);
+        builder
+            .build(packet, codec::Context::default(), build::Options::default())
+            .expect_err("a checksum over a pseudo-header needs addresses")
+    };
+    let vrrp_error = standalone(Box::<Vrrp>::default());
+    let icmpv6_error = standalone(Box::<Icmpv6>::default());
+    let (
+        build::Error::Codec {
+            source: codec::Error::Invalid { message, .. },
+            ..
+        },
+        build::Error::Codec {
+            source:
+                codec::Error::Invalid {
+                    message: icmpv6_message,
+                    ..
+                },
+            ..
+        },
+    ) = (&vrrp_error, &icmpv6_error)
+    else {
+        panic!("unexpected errors {vrrp_error:?} and {icmpv6_error:?}");
+    };
+    assert_eq!(message, icmpv6_message);
+
+    let context = codec::Context {
+        source: Some("fe80::1".parse().unwrap()),
+        destination: Some("ff02::12".parse().unwrap()),
+    };
+    let mut packet = Packet::new();
+    packet.push(vrrp_v3(&["2001:db8::1"]));
+    let built = builder
+        .build(packet, context, build::Options::default())
+        .expect("build addresses stand in for the IP header");
+    assert_eq!(
+        vrrp_message(&built, 0),
+        "3107780100642aba20010db8000000000000000000000001"
+    );
+}
+
+#[test]
+fn vrrp_builds_refuse_what_the_wire_cannot_carry() {
+    let builder = build::Builder::new(registry());
+    let invalid = |envelope: Box<dyn Layer>, vrrp: Vrrp| {
+        let mut packet = Packet::new();
+        packet.push_boxed(envelope);
+        packet.push(vrrp);
+        for mode in [codec::Mode::Strict, codec::Mode::Permissive] {
+            let result = builder.build(
+                packet.clone(),
+                codec::Context::default(),
+                build::Options {
+                    mode,
+                    ..build::Options::default()
+                },
+            );
+            assert!(
+                matches!(
+                    result,
+                    Err(build::Error::Codec {
+                        source: codec::Error::Invalid { .. },
+                        ..
+                    })
+                ),
+                "{mode:?}: {result:?}"
+            );
+        }
+    };
+    let ipv4 = || Box::new(vrrp_ipv4_envelope()) as Box<dyn Layer>;
+    // the address family must follow the version and the header
+    invalid(
+        Box::new(vrrp_ipv6_envelope()),
+        Vrrp {
+            addresses: vec!["2001:db8::1".parse().unwrap()],
+            ..vrrp_v2()
+        },
+    );
+    invalid(ipv4(), vrrp_v3(&["2001:db8::1"]));
+    invalid(
+        ipv4(),
+        Vrrp {
+            version: 4,
+            ..vrrp_v2()
+        },
+    );
+    invalid(
+        ipv4(),
+        Vrrp {
+            vrrp_type: 16,
+            ..vrrp_v2()
+        },
+    );
+    invalid(
+        ipv4(),
+        Vrrp {
+            max_advert_interval: 0x1000,
+            ..vrrp_v3(&[])
+        },
+    );
+    invalid(
+        ipv4(),
+        Vrrp {
+            reserved: 16,
+            ..vrrp_v3(&[])
+        },
+    );
+    invalid(
+        ipv4(),
+        Vrrp {
+            addresses: vec!["192.0.2.1".parse().unwrap(); 256],
+            ..vrrp_v3(&[])
+        },
+    );
+}
+
+#[test]
+fn vrrp_fields_are_reflective_and_bound_the_address_list() {
+    use packetcraftr_core::field::FieldValue;
+
+    let mut layer = Vrrp::default();
+    layer
+        .set_field(
+            "addresses",
+            FieldValue::List(vec![
+                FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
+                FieldValue::Text("192.0.2.2".to_owned()),
+            ]),
+        )
+        .expect("addresses are settable");
+    assert_eq!(layer.addresses.len(), 2);
+    assert_eq!(
+        layer.field("addresses"),
+        Some(FieldValue::List(vec![
+            FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
+            FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 2)),
+        ]))
+    );
+    layer.set_field("type", FieldValue::Unsigned(1)).unwrap();
+    assert_eq!(layer.vrrp_type, 1);
+
+    let too_many = FieldValue::List(vec![FieldValue::Ipv4(Ipv4Addr::LOCALHOST); 256]);
+    assert!(layer.set_field("addresses", too_many).is_err());
+    assert!(
+        layer
+            .set_field("addresses", FieldValue::List(vec![FieldValue::Unsigned(1)]))
+            .is_err()
+    );
+    assert_eq!(
+        layer.addresses.len(),
+        2,
+        "refused edits leave the list alone"
+    );
+
+    let registry = registry();
+    let codec = registry.codec_named("vrrp").expect("VRRP codec");
+    let made = codec
+        .make_layer(&std::collections::BTreeMap::from([(
+            "vrid".to_owned(),
+            FieldValue::Unsigned(42),
+        )]))
+        .expect("construction by field name");
+    assert_eq!(made.field("vrid"), Some(FieldValue::Unsigned(42)));
 }

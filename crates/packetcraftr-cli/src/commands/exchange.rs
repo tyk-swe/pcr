@@ -47,10 +47,12 @@ pub(super) fn run(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let compression = arguments.send.compression.for_output(format.as_format())?;
+    let stop = arguments.stop();
     let Args {
         send,
         template,
         timeout,
+        stop_when_answered: _,
         max_responses,
         max_unmatched_frames,
         limits,
@@ -58,6 +60,7 @@ pub(super) fn run(
     let limits = limits.into_limits();
     let mut request = packetcraftr::exchange::Request {
         timeout: timeout.timeout(),
+        stop,
         max_template_packets: template.max_template_packets,
         collection: packetcraftr::exchange::Collection {
             max_responses,

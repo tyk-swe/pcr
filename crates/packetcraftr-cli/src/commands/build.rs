@@ -4,6 +4,10 @@
 pub(super) mod arguments;
 mod capture_output;
 mod rendering;
+mod session;
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::output::contract::BuildFormat;
 
@@ -15,7 +19,7 @@ use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::input::read_recipe;
+use crate::input::{apply_overrides, read_recipe};
 use crate::rendering::{
     StreamEncoder, render_diagnostics_stderr, stream_capture_error, stream_limits,
 };
@@ -47,26 +51,84 @@ pub(super) fn run(
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
     let registry = packetcraftr_core::protocol::builtin::registry();
+    let session =
+        arguments
+            .session
+            .resolve(&registry, arguments.budget, arguments.mode.into(), maximum)?;
+    if session.as_ref().is_some_and(|session| session.step_chosen) && capture.is_none() {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--session-step-ns requires PCAP or PCAPNG output",
+        ));
+    }
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
-    let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    let mut packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    apply_overrides(&mut packet, &registry, &arguments.set)?;
     if let Some(capture) = &capture {
         capture.validate_root(&packet)?;
     }
     // Keep OS signal termination while recipe input can block waiting for EOF.
     crate::cancellation::install()?;
-    let template = axes.into_template(packet);
-    let packets = template.expand(maximum).map_err(CliError::classified)?;
+    let builder = core::build::Builder::new(Arc::clone(&registry));
+    let build_options = arguments.budget.build_options(arguments.mode.into());
+    let step = session
+        .as_ref()
+        .map_or(Duration::ZERO, |session| session.step);
+    let limits = stream_limits(
+        maximum as u64,
+        (maximum as u64).saturating_mul(arguments.budget.max_packet_size as u64),
+    );
+    let template;
+    let packets: Box<dyn ExactSizeIterator<Item = Result<core::packet::Packet, CliError>> + '_> =
+        match &session {
+            Some(session) => {
+                let frames = session.expand(&packet)?;
+                // A generated conversation is checked whole, so a frame that cannot
+                // build, encode, or fit the capture format fails before the first
+                // byte of output.
+                let mut dry_run = capture
+                    .as_ref()
+                    .map(|capture| capture.dry_run_writer(limits))
+                    .transpose()?;
+                for (ordinal, frame) in frames.iter().enumerate() {
+                    crate::cancellation::check()?;
+                    let built = builder
+                        .build(
+                            frame.clone(),
+                            core::codec::Context::default(),
+                            build_options.clone(),
+                        )
+                        .map_err(build_error)?;
+                    if let (Some(writer), Some(capture)) = (dry_run.as_mut(), capture.as_ref()) {
+                        capture.validate_wire(&built)?;
+                        let timestamp =
+                            session::frame_timestamp(capture.timestamp, step, ordinal as u64)?;
+                        let frame =
+                            core::frame::Frame::new(timestamp, capture.link_type, built.bytes)
+                                .map_err(CliError::classified)?;
+                        writer.write_frame(&frame).map_err(|source| {
+                            stream_capture_error("write capture output failed", source)
+                        })?;
+                    }
+                }
+                Box::new(frames.into_iter().map(Ok))
+            }
+            None => {
+                template = axes.into_template(packet, &registry)?;
+                Box::new(
+                    template
+                        .expand(maximum)
+                        .map_err(CliError::classified)?
+                        .map(|packet| packet.map_err(CliError::classified)),
+                )
+            }
+        };
     if packets.len() != 1 && matches!(format, BuildFormat::Json | BuildFormat::Raw) {
         return Err(CliError::new(
             Kind::Usage,
             "JSON and raw build output require exactly one packet; use text, hex, or NDJSON for packet sets",
         ));
     }
-    let builder = core::build::Builder::new(registry);
-    let limits = stream_limits(
-        maximum as u64,
-        (maximum as u64).saturating_mul(arguments.budget.max_packet_size as u64),
-    );
     let mut writer = capture
         .as_ref()
         .map(|capture| capture.writer(limits))
@@ -78,9 +140,9 @@ pub(super) fn run(
             crate::cancellation::check()?;
             let built = builder
                 .build(
-                    packet.map_err(CliError::classified)?,
+                    packet?,
                     core::codec::Context::default(),
-                    arguments.budget.build_options(arguments.mode.into()),
+                    build_options.clone(),
                 )
                 .map_err(build_error)?;
             crate::cancellation::check()?;
@@ -96,9 +158,10 @@ pub(super) fn run(
                 for diagnostic in built.diagnostics {
                     core::diagnostic::push_once(&mut diagnostics, diagnostic);
                 }
-                let frame =
-                    core::frame::Frame::new(capture.timestamp, capture.link_type, built.bytes)
-                        .map_err(CliError::classified)?;
+                let timestamp =
+                    session::frame_timestamp(capture.timestamp, step, summary.packets_built)?;
+                let frame = core::frame::Frame::new(timestamp, capture.link_type, built.bytes)
+                    .map_err(CliError::classified)?;
                 writer.write_frame(&frame).map_err(|source| {
                     stream_capture_error("write capture output failed", source)
                 })?;

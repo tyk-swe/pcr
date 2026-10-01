@@ -111,6 +111,9 @@ fn udp_traceroute_request(target: Target) -> Request {
         address_family: Family::Any,
         destination_port: Some(DEFAULT_UDP_PORT),
         source_port: None,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
         first_hop: 1,
         max_hops: 2,
         probes_per_hop: 2,
@@ -559,6 +562,9 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
         hop_limit: 1,
         attempt: 1,
         source_port: super::SOURCE_PORT,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
     }
     .packet();
     probe.get_mut::<Ipv4>().unwrap().source = local;
@@ -614,6 +620,9 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
         hop_limit: 4,
         attempt: 1,
         source_port: super::SOURCE_PORT,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
     }
     .packet();
     probe.get_mut::<Ipv6>().unwrap().source = local;
@@ -820,4 +829,267 @@ fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
         error.classification().code,
         "internal.traceroute_event_coherence"
     );
+}
+
+fn shaped_probe(address: IpAddr, target: ProbeEndpoint) -> Probe {
+    Probe {
+        sequence: 3,
+        address,
+        target,
+        hop_limit: 5,
+        attempt: 1,
+        source_port: super::SOURCE_PORT,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
+    }
+}
+
+#[test]
+fn traceroute_probe_shape_defaults_leave_the_probe_bytes_unchanged() {
+    let remote = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let icmp = shaped_probe(remote, ProbeEndpoint::Icmp).packet();
+    assert_eq!(icmp.get::<Icmpv4>().unwrap().body.len(), 4);
+    let ip = icmp.get::<Ipv4>().unwrap();
+    assert_eq!(ip.dscp_ecn, 0);
+    assert!(!ip.dont_fragment);
+    let udp = shaped_probe(remote, ProbeEndpoint::Udp { port: 33_434 }).packet();
+    assert_eq!(
+        udp.iter().count(),
+        2,
+        "no payload layer without a payload size"
+    );
+}
+
+#[test]
+fn traceroute_probes_carry_the_configured_pad_dscp_and_dont_fragment() {
+    let v4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let v6 = IpAddr::V6("fd00::9".parse().unwrap());
+
+    let probe = Probe {
+        payload_size: 1_000,
+        dont_fragment: true,
+        dscp: 46,
+        ..shaped_probe(v4, ProbeEndpoint::Icmp)
+    };
+    let packet = probe.packet();
+    let ip = packet.get::<Ipv4>().unwrap();
+    assert_eq!(ip.dscp_ecn, 46 << 2);
+    assert!(ip.dont_fragment);
+    let body = &packet.get::<Icmpv4>().unwrap().body;
+    assert_eq!(body.len(), 4 + 1_000);
+    assert_eq!(body[..4], [0x50, 0x54, 0, 3]);
+    assert!(body[4..].iter().all(|byte| *byte == 0));
+    assert!(super::plan::packet::sent_probe_matches(&probe, &packet));
+
+    let probe = Probe {
+        payload_size: 12,
+        dscp: 46,
+        ..shaped_probe(v6, ProbeEndpoint::Icmp)
+    };
+    let packet = probe.packet();
+    assert_eq!(packet.get::<Ipv6>().unwrap().traffic_class, 46 << 2);
+    assert_eq!(packet.get::<Icmpv6>().unwrap().body.len(), 4 + 12);
+    assert!(super::plan::packet::sent_probe_matches(&probe, &packet));
+
+    let probe = Probe {
+        payload_size: 40,
+        dscp: 10,
+        dont_fragment: true,
+        ..shaped_probe(v4, ProbeEndpoint::Udp { port: 33_437 })
+    };
+    let packet = probe.packet();
+    let raw = packet
+        .iter()
+        .last()
+        .and_then(|layer| layer.downcast_ref::<packetcraftr_core::layer::Raw>())
+        .expect("a UDP payload layer");
+    assert_eq!(raw.bytes.as_ref(), [0_u8; 40]);
+    assert!(super::plan::packet::sent_probe_matches(&probe, &packet));
+}
+
+#[test]
+fn traceroute_sent_probe_matching_rejects_a_changed_probe_shape() {
+    let v4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let shaped = Probe {
+        payload_size: 16,
+        dont_fragment: true,
+        dscp: 8,
+        ..shaped_probe(v4, ProbeEndpoint::Icmp)
+    };
+    for sent in [
+        Probe {
+            payload_size: 0,
+            ..shaped
+        },
+        Probe {
+            payload_size: 17,
+            ..shaped
+        },
+        Probe {
+            dont_fragment: false,
+            ..shaped
+        },
+        Probe { dscp: 9, ..shaped },
+    ] {
+        assert!(!super::plan::packet::sent_probe_matches(
+            &shaped,
+            &sent.packet()
+        ));
+    }
+    let udp = Probe {
+        payload_size: 16,
+        ..shaped_probe(v4, ProbeEndpoint::Udp { port: 33_434 })
+    };
+    let unpadded = Probe {
+        payload_size: 0,
+        ..udp
+    };
+    assert!(!super::plan::packet::sent_probe_matches(
+        &udp,
+        &unpadded.packet()
+    ));
+    assert!(!super::plan::packet::sent_probe_matches(
+        &unpadded,
+        &udp.packet()
+    ));
+}
+
+#[test]
+fn traceroute_admission_charges_the_padded_probe_size() {
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.strategy = Transport::Icmp;
+    request.destination_port = None;
+    request.payload_size = 1_000;
+    request.dscp = 46;
+    request.dont_fragment = true;
+    let mut authorizer = FixedAuthorizer {
+        address: destination,
+        operations: Vec::new(),
+    };
+    run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut NoResponseExecutor::default(),
+        &mut NoopClock,
+    )
+    .unwrap();
+
+    assert_eq!(authorizer.operations, vec![(4, 4 * (74 + 1_000))]);
+}
+
+#[test]
+fn traceroute_padded_icmp_probes_still_correlate_with_a_quoting_router() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let local = Ipv4Addr::new(10, 0, 0, 1);
+    let remote = Ipv4Addr::new(10, 0, 0, 9);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut probe = Probe {
+        payload_size: 1_000,
+        ..shaped_probe(IpAddr::V4(remote), ProbeEndpoint::Icmp)
+    }
+    .packet();
+    probe.get_mut::<Ipv4>().unwrap().source = local;
+    let icmp = probe.get::<Icmpv4>().unwrap();
+    let mut quote = vec![0_u8; 28];
+    quote[0] = 0x45;
+    quote[2..4].copy_from_slice(&28_u16.to_be_bytes());
+    quote[8] = 5;
+    quote[9] = 1;
+    quote[12..16].copy_from_slice(&local.octets());
+    quote[16..20].copy_from_slice(&remote.octets());
+    quote[20] = icmp.icmp_type;
+    quote[21] = icmp.code;
+    quote[24..28].copy_from_slice(&icmp.body[..4]);
+
+    let observed = classify_response(
+        &registry,
+        Transport::Icmp,
+        &probe,
+        &icmpv4_error(router, local, 11, 0, quote, 2, Vec::new()),
+    )
+    .expect("the quoted identity survives the pad");
+
+    assert_eq!(observed.kind, ResponseKind::Intermediate);
+    assert_eq!(observed.responder, IpAddr::V4(router));
+}
+
+#[test]
+fn traceroute_rejects_unusable_probe_options_before_authorization_or_execution() {
+    let v4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let v6 = IpAddr::V6("fd00::9".parse().unwrap());
+    let base = udp_traceroute_request(Target::Address(v4));
+    let cases = [
+        (
+            Request {
+                payload_size: super::MAX_PAYLOAD_SIZE + 1,
+                ..base.clone()
+            },
+            v4,
+            "payload_size",
+        ),
+        (
+            Request {
+                dscp: super::MAX_DSCP + 1,
+                ..base.clone()
+            },
+            v4,
+            "dscp",
+        ),
+        (
+            Request {
+                strategy: Transport::Tcp,
+                destination_port: Some(80),
+                payload_size: 1,
+                ..base.clone()
+            },
+            v4,
+            "payload_size",
+        ),
+        (
+            Request {
+                dont_fragment: true,
+                target: Target::Address(v6),
+                ..base.clone()
+            },
+            v6,
+            "dont_fragment",
+        ),
+    ];
+    for (request, address, option) in cases {
+        let mut authorizer = FixedAuthorizer {
+            address,
+            operations: Vec::new(),
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let error = run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut RejectingExecutor {
+                calls: Arc::clone(&calls),
+            },
+            &mut NoopClock,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(option), "{error}");
+        assert_eq!(error.classification().kind, Kind::Usage);
+        assert!(authorizer.operations.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
+fn traceroute_accepts_the_extreme_probe_option_values() {
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.payload_size = super::MAX_PAYLOAD_SIZE;
+    request.dscp = super::MAX_DSCP;
+    request.dont_fragment = true;
+    request
+        .validate()
+        .expect("the documented extremes are valid");
 }

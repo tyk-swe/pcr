@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::ast::{Op, Predicate};
+use bytes::Bytes;
+
+use super::ast::{Measure, Op, Predicate};
 use super::comparison::Needle;
 use super::error::Error;
+use super::eval;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
 use super::path::{self, FieldRef, FieldSource, FrameField, Resolved, StreamTransport};
@@ -335,6 +338,9 @@ fn parse_predicate(
     limits: &Limits,
     requirements: &mut Requirements,
 ) -> Result<(Predicate, usize), Error> {
+    if let Some(measure) = measure_call(tokens, start) {
+        return parse_measure(tokens, start, measure, registry, requirements);
+    }
     let (mut field, mut index) = match parse_subject(tokens, start, registry)? {
         Subject::Field { field, index } => (field, index),
         Subject::Predicate(predicate, index) => return Ok((predicate, index)),
@@ -349,6 +355,186 @@ fn parse_predicate(
     }
     record_requirements(&field, requirements);
     parse_field_predicate(tokens, index, field, limits)
+}
+
+/// `len` or `count` directly followed by `(`; without the parenthesis they stay ordinary words.
+fn measure_call(tokens: &[Spanned], start: usize) -> Option<Measure> {
+    let Some(Spanned {
+        token: Token::Word(word),
+        offset,
+    }) = tokens.get(start)
+    else {
+        return None;
+    };
+    // the word is the source text, so the parenthesis must begin where it ends
+    if !matches!(
+        tokens.get(start.saturating_add(1)),
+        Some(Spanned {
+            token: Token::LeftParen,
+            offset: open,
+        }) if *open == offset.saturating_add(word.len())
+    ) {
+        return None;
+    }
+    if word.eq_ignore_ascii_case("len") {
+        Some(Measure::Len)
+    } else if word.eq_ignore_ascii_case("count") {
+        Some(Measure::Count)
+    } else {
+        None
+    }
+}
+
+/// `len(FIELD) OP N` or `count(FIELD) OP N`; `start` addresses the function name.
+fn parse_measure(
+    tokens: &[Spanned],
+    start: usize,
+    measure: Measure,
+    registry: &Registry,
+    requirements: &mut Requirements,
+) -> Result<(Predicate, usize), Error> {
+    let name = match measure {
+        Measure::Len => "len",
+        Measure::Count => "count",
+    };
+    let syntax = |offset: usize, message: String| Error::Syntax { offset, message };
+    // measure_call saw both the name and the `(`
+    let open = &tokens[start.saturating_add(1)];
+    let inner = start.saturating_add(2);
+    if !matches!(
+        tokens.get(inner),
+        Some(Spanned {
+            token: Token::Word(_),
+            ..
+        })
+    ) {
+        return Err(syntax(open.offset, format!("`{name}(` needs a field path")));
+    }
+    let (mut field, mut index) = match parse_subject(tokens, inner, registry)? {
+        Subject::Field { field, index } => (field, index),
+        Subject::Predicate(..) => {
+            return Err(syntax(
+                tokens[inner].offset,
+                format!("`{name}(` takes a field, not a layer"),
+            ));
+        }
+    };
+    if let Some(Spanned {
+        token: Token::Slice(contents),
+        offset,
+    }) = tokens.get(index)
+    {
+        path::attach_slice(&mut field, contents, *offset)?;
+        index = index.saturating_add(1);
+    }
+    if !matches!(
+        tokens.get(index),
+        Some(Spanned {
+            token: Token::RightParen,
+            ..
+        })
+    ) {
+        return Err(syntax(
+            tokens.get(index).map_or(open.offset, |token| token.offset),
+            format!("expected `)` to close `{name}(`"),
+        ));
+    }
+    check_measurable(&field, measure, open.offset)?;
+    record_requirements(&field, requirements);
+    let compare = index.saturating_add(1);
+    let Some(Spanned {
+        token: Token::Compare(operator),
+        offset: operator_offset,
+    }) = tokens.get(compare)
+    else {
+        return Err(syntax(
+            tokens
+                .get(compare)
+                .map_or(open.offset, |token| token.offset),
+            format!(
+                "`{name}(..)` must be compared to a number, as in `{name}({}) > 1`",
+                field.path
+            ),
+        ));
+    };
+    let value = compare.saturating_add(1);
+    let amount = match tokens.get(value) {
+        Some(Spanned {
+            token: Token::Word(word),
+            ..
+        }) => match literal::parse(word) {
+            Some(Literal::Unsigned(amount)) => amount,
+            _ => {
+                return Err(syntax(
+                    tokens[value].offset,
+                    format!("`{name}(..)` is compared to an unsigned number, found `{word}`"),
+                ));
+            }
+        },
+        other => {
+            return Err(syntax(
+                other.map_or(*operator_offset, |token| token.offset),
+                format!(
+                    "`{name}(..)` is compared to an unsigned number, found {}",
+                    other.map_or_else(
+                        || "the end of the filter".to_owned(),
+                        |token| describe(&token.token)
+                    )
+                ),
+            ));
+        }
+    };
+    Ok((
+        Predicate::Measure {
+            field,
+            measure,
+            operator: *operator,
+            value: amount,
+        },
+        value.saturating_add(1),
+    ))
+}
+
+/// `len` needs bytes, text, an address, or a list of them; `count` needs a whole list.
+fn check_measurable(field: &FieldRef, measure: Measure, offset: usize) -> Result<(), Error> {
+    if field.specs.is_empty() {
+        return Ok(());
+    }
+    // Each protocol id is text, so `len` would measure ids, not layers.
+    if measure == Measure::Len && matches!(field.source, FieldSource::Frame(FrameField::Protocols))
+    {
+        return Err(Error::Syntax {
+            offset,
+            message: format!(
+                "`len(` would measure each protocol name, not the layers; use `count({0})` or `frame.layer_count`",
+                field.path
+            ),
+        });
+    }
+    let measurable = match measure {
+        Measure::Len => field.specs.iter().any(|spec| {
+            eval::byte_addressable(spec.kind) || (spec.kind == FieldKind::List && !spec.structured)
+        }),
+        Measure::Count => {
+            field.specs.iter().any(|spec| spec.kind == FieldKind::List)
+                && field.slice.is_none()
+                && !field.reads_list_elements()
+        }
+    };
+    if measurable {
+        return Ok(());
+    }
+    let (name, needs) = match measure {
+        Measure::Len => ("len", "bytes, text, an address, or a list of them"),
+        Measure::Count => ("count", "a whole list"),
+    };
+    Err(Error::Syntax {
+        offset,
+        message: format!(
+            "`{name}(` needs a field holding {needs}, but `{}` does not",
+            field.path
+        ),
+    })
 }
 
 enum Subject {
@@ -373,7 +559,9 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
         ..
     }) = tokens.get(index)
     {
-        if contents.is_empty() || !contents.bytes().all(|byte| byte.is_ascii_digit()) {
+        let selector = matches!(contents.as_str(), "*" | "-1");
+        if !selector && (contents.is_empty() || !contents.bytes().all(|byte| byte.is_ascii_digit()))
+        {
             break;
         }
         let mut candidate = format!("{combined}[{contents}]");
@@ -389,7 +577,8 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
         }
         match path::resolve(&candidate, registry, offset) {
             Ok(Resolved::Field(_)) => {}
-            Err(error) if next > index + 1 => return Err(error),
+            // A selector is never a byte slice, so a path it cannot select from is an error.
+            Err(error) if selector || next > index + 1 => return Err(error),
             _ => break,
         }
         combined = candidate;
@@ -413,7 +602,12 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
                 });
             }
             if let Some(Spanned {
-                token: Token::Compare(_) | Token::In | Token::Contains,
+                token:
+                    Token::Compare(_)
+                    | Token::In
+                    | Token::Contains
+                    | Token::TextMatch(_)
+                    | Token::Ampersand,
                 offset: operator_offset,
             }) = tokens.get(index)
             {
@@ -439,7 +633,10 @@ fn record_requirements(field: &FieldRef, requirements: &mut Requirements) {
     if let FieldSource::Stream(transport) = &field.source {
         requirements.require_stream(*transport);
     }
-    if matches!(field.source, FieldSource::Frame(FrameField::TimeEpoch)) {
+    if matches!(
+        field.source,
+        FieldSource::Frame(FrameField::TimeEpoch | FrameField::TimeNanoseconds)
+    ) {
         requirements.timestamp = true;
     }
 }
@@ -467,6 +664,15 @@ fn parse_field_predicate(
                     literal: value.to_string(),
                 });
             }
+            if value.is_range()
+                && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
+            {
+                return Err(Error::OrderedRangeComparison {
+                    offset: *operator_offset,
+                    path: field.path,
+                    literal: value.to_string(),
+                });
+            }
             Ok((
                 Predicate::Compare {
                     field,
@@ -488,6 +694,29 @@ fn parse_field_predicate(
             Ok((Predicate::Contains { field, needle }, next))
         }
         Some(Spanned {
+            token: Token::TextMatch(mode),
+            offset: operator_offset,
+        }) => {
+            let (needle, next) =
+                parse_literal(&field, tokens, index.saturating_add(1), *operator_offset)?;
+            check_searchable(&field, &needle, *operator_offset)?;
+            let needle = Needle::for_mode(needle, *mode)
+                .map_err(|literal| incompatible(&field, &literal, *operator_offset))?;
+            let mode = *mode;
+            Ok((
+                Predicate::TextMatch {
+                    field,
+                    needle,
+                    mode,
+                },
+                next,
+            ))
+        }
+        Some(Spanned {
+            token: Token::Ampersand,
+            offset: operator_offset,
+        }) => parse_masked(tokens, index, field, *operator_offset),
+        Some(Spanned {
             token: Token::In,
             offset: operator_offset,
         }) => parse_membership(
@@ -501,6 +730,87 @@ fn parse_field_predicate(
             let flag = field.is_flag();
             Ok((Predicate::Bare { field, flag }, index))
         }
+    }
+}
+
+/// `index` addresses the `&`. The bare form `field & mask` means the masked value is nonzero.
+fn parse_masked(
+    tokens: &[Spanned],
+    index: usize,
+    field: FieldRef,
+    operator_offset: usize,
+) -> Result<(Predicate, usize), Error> {
+    if !field.specs.is_empty()
+        && !field
+            .specs
+            .iter()
+            .all(|spec| spec.kind == FieldKind::Unsigned)
+    {
+        return Err(Error::MaskedField {
+            offset: operator_offset,
+            path: field.path,
+            kind: literal::kind_name(
+                field
+                    .specs
+                    .iter()
+                    .map(|spec| spec.kind)
+                    .find(|kind| *kind != FieldKind::Unsigned)
+                    .unwrap_or(FieldKind::Unsigned),
+            ),
+        });
+    }
+    let mask_index = index.saturating_add(1);
+    let mask = unsigned_operand(&field, tokens, mask_index, operator_offset)?;
+    let after = mask_index.saturating_add(1);
+    let Some(Spanned {
+        token: Token::Compare(operator),
+        offset: compare_offset,
+    }) = tokens.get(after)
+    else {
+        return Ok((
+            Predicate::Masked {
+                field,
+                mask,
+                operator: CompareOperator::NotEqual,
+                value: 0,
+            },
+            after,
+        ));
+    };
+    let value_index = after.saturating_add(1);
+    let value = unsigned_operand(&field, tokens, value_index, *compare_offset)?;
+    Ok((
+        Predicate::Masked {
+            field,
+            mask,
+            operator: *operator,
+            value,
+        },
+        value_index.saturating_add(1),
+    ))
+}
+
+/// A decimal or `0x` hexadecimal number; `fallback` locates the error when the filter ends first.
+fn unsigned_operand(
+    field: &FieldRef,
+    tokens: &[Spanned],
+    index: usize,
+    fallback: usize,
+) -> Result<u64, Error> {
+    let refusal = |offset: usize, found: String| Error::MaskOperand {
+        offset,
+        path: field.path.clone(),
+        found,
+    };
+    let Some(Spanned { token, offset }) = tokens.get(index) else {
+        return Err(refusal(fallback, "the end of the filter".to_owned()));
+    };
+    match token {
+        Token::Word(word) => match literal::parse(word) {
+            Some(Literal::Unsigned(value)) => Ok(value),
+            _ => Err(refusal(*offset, describe(token))),
+        },
+        other => Err(refusal(*offset, describe(other))),
     }
 }
 
@@ -584,7 +894,8 @@ fn parse_literal(
     };
     let value = match token {
         Token::Text(text) => Literal::Text(text.clone()),
-        Token::Word(word) => match literal::parse(word) {
+        Token::ByteString(bytes) => Literal::Bytes(Bytes::copy_from_slice(bytes)),
+        Token::Word(word) => match range_or_literal(field, word, *offset)? {
             Some(value) => value,
             None if field.is_byte_run() && literal::is_malformed_byte_word(word) => {
                 return Err(Error::UnquotedByteWord {
@@ -603,6 +914,36 @@ fn parse_literal(
         }
     };
     Ok((value, index.saturating_add(1)))
+}
+
+/// Only fields that can hold a number or an address read `A..B` as a range; elsewhere it stays text.
+fn range_or_literal(field: &FieldRef, word: &str, offset: usize) -> Result<Option<Literal>, Error> {
+    let ranged = field.specs.is_empty()
+        || field.specs.iter().any(|spec| {
+            matches!(
+                spec.kind,
+                FieldKind::Unsigned
+                    | FieldKind::Signed
+                    | FieldKind::Ipv4
+                    | FieldKind::Ipv6
+                    | FieldKind::List
+            )
+        });
+    let range = if ranged {
+        literal::parse_range(word)
+    } else {
+        None
+    };
+    match range {
+        Some(Ok(value)) => Ok(Some(value)),
+        Some(Err(reason)) => Err(Error::InvalidRange {
+            offset,
+            path: field.path.clone(),
+            literal: word.to_owned(),
+            reason,
+        }),
+        None => Ok(literal::parse(word)),
+    }
 }
 
 fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), Error> {
@@ -624,11 +965,7 @@ fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result
     if field.specs.is_empty() {
         return Ok(());
     }
-    if field
-        .specs
-        .iter()
-        .any(|spec| literal::searchable(spec.kind))
-    {
+    if field.specs.iter().any(|spec| literal::searchable(*spec)) {
         return Ok(());
     }
     Err(incompatible(field, needle, offset))
@@ -660,9 +997,12 @@ fn describe(token: &Token) -> String {
         Token::Not => "`!`".to_owned(),
         Token::In => "`in`".to_owned(),
         Token::Contains => "`contains`".to_owned(),
+        Token::TextMatch(_) => "a text operator".to_owned(),
+        Token::Ampersand => "`&`".to_owned(),
         Token::Compare(_) => "a comparison operator".to_owned(),
         Token::Word(word) => format!("`{word}`"),
         Token::Text(_) => "quoted text".to_owned(),
+        Token::ByteString(_) => "a byte string".to_owned(),
         Token::Slice(_) => "a byte slice".to_owned(),
     }
 }
@@ -826,10 +1166,7 @@ mod tests {
                 slice: None,
                 specs: kinds
                     .iter()
-                    .map(|kind| FieldSpec {
-                        kind: *kind,
-                        derived: false,
-                    })
+                    .map(|kind| FieldSpec::synthetic(*kind))
                     .collect(),
                 path: "fixture".to_owned(),
             }

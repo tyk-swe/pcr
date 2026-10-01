@@ -22,7 +22,7 @@ use crate::execution::validation::{
 
 use super::error::{Error, EvidenceFault};
 use super::executor::ExchangeEvidence;
-use super::plan::Probe;
+use super::plan::{Probe, udp_dissects_as_dns};
 use super::wire;
 use super::wire::{decode_response, decode_tcp_frame};
 use super::{AttemptEvidence, Limits, MessageLimits, Outcome, ValidatedResponse};
@@ -151,13 +151,13 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
         .iter()
         .enumerate()
         .find_map(|(index, layer)| Some((index, layer.downcast_ref::<Udp>()?)))?;
-    let port_53 = udp.source_port == 53 || udp.destination_port == 53;
+    let registered_dns = udp_dissects_as_dns(udp.source_port, udp.destination_port);
     let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
-        Some(BuiltinProtocol::Dns) if port_53 => {
+        Some(BuiltinProtocol::Dns) if registered_dns => {
             payload.downcast_ref::<Dns>().map(|dns| dns.wire().clone())
         }
-        Some(BuiltinProtocol::Malformed) if port_53 => payload
+        Some(BuiltinProtocol::Malformed) if registered_dns => payload
             .downcast_ref::<packetcraftr_core::layer::Malformed>()
             .filter(|layer| layer.intended_protocol.as_deref() == Some("dns"))
             .map(|layer| layer.bytes.clone()),
@@ -449,12 +449,97 @@ mod tests {
         Probe {
             attempt: 1,
             server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
-            server_port: 5353,
+            server_port: 5454,
             source_port: 40_000,
             transaction_id: 0x1234,
             query_name: "example.test".to_owned(),
             query_type: QueryType::A,
             query: Bytes::from_static(b"query"),
+        }
+    }
+
+    fn dns_probe(server_port: u16) -> Probe {
+        Probe {
+            server_port,
+            query: wire::encode_query("example.test", QueryType::A, 0x1234, true, None).unwrap(),
+            ..probe()
+        }
+    }
+
+    fn dns_response_frame(probe: &Probe) -> DecodedPacket {
+        use packetcraftr_core::build::{Builder, Options};
+        use packetcraftr_core::codec::Context;
+        use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
+        use packetcraftr_core::protocol::network::Ipv4;
+
+        let mut answer = probe.query.to_vec();
+        answer[2] |= 0x80;
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 53),
+                destination: Ipv4Addr::UNSPECIFIED,
+                identification: 1,
+                ..Ipv4::default()
+            })
+            .push(Udp {
+                source_port: probe.server_port,
+                destination_port: probe.source_port,
+                ..Udp::default()
+            })
+            .push(Dns::try_from(Bytes::from(answer)).unwrap());
+        let registry = packetcraftr_core::protocol::builtin::registry();
+        let built = Builder::new(registry.clone())
+            .build(packet, Context::default(), Options::default())
+            .expect("a response from a registered DNS port builds strictly");
+        let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).unwrap();
+        Dissector::new(registry)
+            .decode(frame, DecodeOptions::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn the_dns_port_list_matches_the_registry_bindings() {
+        use packetcraftr_core::registry::Discriminator;
+
+        let registry = packetcraftr_core::protocol::builtin::registry();
+        let bound: Vec<u16> = (0..=u16::MAX)
+            .filter(|port| {
+                registry
+                    .child_for("udp", Discriminator(u64::from(*port)))
+                    .is_some_and(|child| child.as_str() == "dns")
+            })
+            .collect();
+        let listed: Vec<u16> = (0..=u16::MAX)
+            .filter(|port| udp_dissects_as_dns(0, *port))
+            .collect();
+        assert_eq!(listed, bound);
+    }
+
+    #[test]
+    fn a_query_to_a_registered_dns_port_is_sent_and_answered_as_dns() {
+        for port in [53, 5353, 5355] {
+            let probe = dns_probe(port);
+            let sent = probe.packet();
+            assert_eq!(
+                BuiltinProtocol::of(sent.layer(2).unwrap()),
+                Some(BuiltinProtocol::Dns),
+                "port {port}"
+            );
+            validate(&probe, sent.clone()).expect("strictly built query is valid evidence");
+
+            let response = dns_response_frame(&probe);
+            let classified = classify_response(
+                &packetcraftr_core::protocol::builtin::registry(),
+                &probe,
+                &sent,
+                &response,
+                MessageLimits::default(),
+            );
+            assert!(
+                matches!(classified, Some(ResponseClassification::Response(_))),
+                "port {port}: {classified:?}"
+            );
         }
     }
 

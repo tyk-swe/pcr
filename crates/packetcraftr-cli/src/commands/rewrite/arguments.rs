@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use packetcraftr_core::{
     error::Kind,
     packet::MacAddress,
-    transform::{ChecksumMode, FieldAssignment, HeaderRewrite, VlanRewrite},
+    transform::{ChecksumMode, FieldAssignment, HeaderRewrite, IpMapping, MacMapping, VlanRewrite},
 };
 
 use crate::command_options::{
@@ -15,12 +15,14 @@ use crate::command_options::{
 };
 use crate::errors::CliError;
 
-pub(crate) const AFTER_LONG_HELP: &str = r"Header edits (--source-mac, --destination-ip, --vlan, and the rest) and field assignments (--set) apply to every frame --filter matches, or to every frame; a --rules-file holds ordered rules instead. Header edits recompute lengths and transport checksums; field assignments repair covering checksums unless --checksum-mode preserve keeps checksum bytes exactly. The destination is published only when every frame rewrote cleanly; --dry-run reports the field changes without writing it.
+pub(crate) const AFTER_LONG_HELP: &str = r"Header edits (--source-mac, --destination-ip, --vlan, and the rest) and field assignments (--set) apply to every frame --filter matches, or to every frame; a --rules-file holds ordered rules instead. --map-ip and --map-mac remap addresses many-to-many instead of setting one fixed address: each frame's outer source and destination are looked up independently, equal-length CIDR prefixes keep the host bits, and unmatched addresses and frames pass through. Header edits recompute lengths and transport checksums; field assignments repair covering checksums unless --checksum-mode preserve keeps checksum bytes exactly. The destination is published only when every frame rewrote cleanly; --dry-run reports the field changes without writing it.
 
 Examples:
   packetcraftr rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10
   packetcraftr rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filter 'udp'
   packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file rules.json
+  packetcraftr rewrite capture.pcapng --write out.pcapng --map-ip 192.0.2.0/24=198.51.100.0/24
+  packetcraftr rewrite capture.pcapng --write out.pcapng --map-mac 02:00:00:00:00:01=02:00:00:00:00:02
   packetcraftr rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run";
 
 #[derive(Debug, clap::Args)]
@@ -39,12 +41,36 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) rules_file: Option<PathBuf>,
     /// Assign one fixed-width field in place, <protocol>[#occurrence].<field>=
-    /// <value>; repeatable. Supports ipv4.ttl, ipv6.hop_limit, tcp.sequence,
-    /// tcp.acknowledgment, tcp/udp ports, and dns.id. Header edits apply first
-    /// when combined with them; conflicts with --rules-file.
+    /// <value>; repeatable. Supports ipv4.ttl, ipv4.identification,
+    /// ipv4.dscp_ecn, ipv6.hop_limit, tcp.sequence, tcp.acknowledgment,
+    /// tcp.window, tcp/udp ports, icmp and icmpv6 identifier and sequence,
+    /// dns.id, dhcpv4.transaction_id, and vxlan.vni and geneve.vni. Header
+    /// edits apply first when combined with them; conflicts with --rules-file.
     #[arg(long = "set", value_name = "FIELD=VALUE", value_parser = assignment)]
     #[allow(rustdoc::invalid_html_tags)]
     pub(crate) sets: Vec<FieldAssignment>,
+    /// Remap IP addresses, OLD=NEW; repeatable. Each side is an address or an
+    /// equal-length CIDR prefix whose host bits carry over, so
+    /// 192.0.2.0/24=198.51.100.0/24 turns 192.0.2.7 into 198.51.100.7. Source
+    /// and destination match independently; sources must not overlap and the
+    /// table holds at most 4096 entries with --map-mac. Conflicts with
+    /// --rules-file and the fixed address flags.
+    #[arg(
+        long = "map-ip",
+        value_name = "OLD=NEW",
+        value_parser = ip_mapping,
+        conflicts_with_all = ["rules_file", "source_mac", "destination_mac", "source_ip", "destination_ip"]
+    )]
+    pub(crate) map_ips: Vec<IpMapping>,
+    /// Remap Ethernet source and destination addresses, OLD=NEW; repeatable.
+    /// Conflicts with --rules-file and the fixed address flags.
+    #[arg(
+        long = "map-mac",
+        value_name = "OLD=NEW",
+        value_parser = mac_mapping,
+        conflicts_with_all = ["rules_file", "source_mac", "destination_mac", "source_ip", "destination_ip"]
+    )]
+    pub(crate) map_macs: Vec<MacMapping>,
     /// Checksum behavior for field assignments: repair recomputes covering
     /// checksums; preserve keeps checksum bytes exactly.
     #[arg(long, value_enum)]
@@ -116,6 +142,18 @@ impl From<ChecksumArg> for ChecksumMode {
 }
 
 fn assignment(value: &str) -> Result<FieldAssignment, CliError> {
+    value
+        .parse()
+        .map_err(|error| CliError::caused(Kind::Usage, &error))
+}
+
+fn ip_mapping(value: &str) -> Result<IpMapping, CliError> {
+    value
+        .parse()
+        .map_err(|error| CliError::caused(Kind::Usage, &error))
+}
+
+fn mac_mapping(value: &str) -> Result<MacMapping, CliError> {
     value
         .parse()
         .map_err(|error| CliError::caused(Kind::Usage, &error))

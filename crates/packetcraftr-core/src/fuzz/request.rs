@@ -6,13 +6,16 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::packet::DEFAULT_MAX_PACKET_SIZE;
+use crate::layer::selector::{self, Selector};
+use crate::packet::{DEFAULT_MAX_PACKET_SIZE, Packet};
+use crate::registry::Registry;
 
 use super::error::{Constraint, Error};
 use super::{
     DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_LIST_ITEMS,
     DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES, MAX_DURATION, MAX_FIELD_BYTES,
-    MAX_LIST_ITEMS, MAX_PACKET_BYTES, MAX_SHRINK_STEPS, MAX_STRATEGIES, MAX_TOTAL_BYTES,
+    MAX_LIST_ITEMS, MAX_PACKET_BYTES, MAX_SHRINK_STEPS, MAX_STRATEGIES, MAX_TARGET_FIELDS,
+    MAX_TOTAL_BYTES,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +41,11 @@ impl Strategy {
 
 display_via_as_str!(Strategy);
 
+/// One mutated field, named by zero-based layer index.
+///
+/// Parsing accepts only the numeric `LAYER.FIELD` spelling. Protocol-name and
+/// wildcard selectors go through [`select`](Self::select), which resolves them
+/// to this form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Target {
     pub layer: usize,
@@ -72,6 +80,51 @@ impl FromStr for Target {
             layer,
             field: field.to_owned(),
         })
+    }
+}
+
+impl Target {
+    /// Resolves selectors against the base packet into numeric targets, in
+    /// selector order with duplicates dropped.
+    ///
+    /// A zero-based `LAYER.FIELD` resolves to itself and a protocol selector
+    /// to the layer it names, so reports and reproductions keep publishing
+    /// layer indexes. Wildcards expand to at most
+    /// [`MAX_TARGET_FIELDS`] targets in total.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Selector`] for an unresolvable selector, and
+    /// [`Error::TargetField`] for a field that is not a bounded reflective path.
+    pub fn select(
+        selectors: &[Selector],
+        packet: &Packet,
+        registry: &Registry,
+    ) -> Result<Vec<Self>, Error> {
+        let mut targets: Vec<Self> = Vec::new();
+        for selector in selectors {
+            for (layer, field) in selector.expand(packet, registry, MAX_TARGET_FIELDS)? {
+                let target = Self { layer, field };
+                if targets.contains(&target) {
+                    continue;
+                }
+                if targets.len() >= MAX_TARGET_FIELDS {
+                    return Err(selector::Error::TooManyTargets {
+                        limit: MAX_TARGET_FIELDS,
+                    }
+                    .into());
+                }
+                target
+                    .field
+                    .parse::<crate::field::Path>()
+                    .map_err(|source| Error::TargetField {
+                        target: selector.to_string(),
+                        source,
+                    })?;
+                targets.push(target);
+            }
+        }
+        Ok(targets)
     }
 }
 

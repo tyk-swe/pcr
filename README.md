@@ -39,13 +39,26 @@ packetcraftr --output ndjson read examples/captures/tls-handshake.pcapng \
 packetcraftr tls examples/captures/tls-handshake.pcapng
 packetcraftr --output json build \
   --packet-file examples/documents/packet-ipv4-udp.json
+packetcraftr --output hex build --packet 'ipv4()/icmpv4(identifier=1)' \
+  | packetcraftr dissect --link-type ipv4 --hex - --tree
+packetcraftr --output pcap build --session tcp --link-type ethernet \
+  --packet 'ethernet()/ipv4(src=192.0.2.1,dst=198.51.100.2)/tcp(sport=40000,dport=80)/raw(text=ping)' \
+  > conversation.pcap
+packetcraftr topics filters
 ```
 
 The `tls` example assembles ClientHello and ServerHello records across TCP
 segments and reports SNI, negotiated parameters, JA3/JA3S/JA4, and status.
 Use `packetcraftr --help`, `packetcraftr <COMMAND> --help`, and
 `packetcraftr protocols [PROTOCOL]` for the authoritative command, option, and
-protocol catalogs. Each command's `--help` ends with examples.
+protocol catalogs. Each command's `--help` ends with examples. `packetcraftr
+topics` lists the built-in references: `topics expressions` for the packet
+expression grammar, `topics filters` for the display-filter language, and
+`topics formats` and `topics exit-codes`. `build --session tcp|udp` expands one
+client-to-server packet into a deterministic conversation (handshake,
+MSS-sized segments with ACKs, an optional `--session-response-file` reply, and
+a close) of at most 4096 frames, byte-identical for equal inputs, for fixture
+captures.
 
 Recipe commands such as `build` read a packet expression, JSON, or YAML from
 redirected stdin when neither `--packet` nor `--packet-file` is supplied. The
@@ -65,13 +78,15 @@ between reads and cannot interrupt one that is waiting for input.
 | Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `verify-forwarding`, `fuzz` |
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
-| Shell integration | `documentation` |
+| References and shell integration | `topics`, `documentation` |
 
 ## Packet sets, decode-as, and capture selection
 
 `build`, `exchange`, and `send` accept repeatable `--axis` selections over
-zero-based layer fields, as an expression list or an inclusive range such as
-`0.ttl=1..64:8`:
+layer fields, as an expression list or an inclusive range such as
+`ipv4.ttl=1..64:8`. A layer is named by protocol with an optional one-based
+`#occurrence` (`ipv4#2.ttl` is the inner IPv4 header of a tunnel) or by
+zero-based index (`0.ttl`), and protocol names are case-insensitive:
 
 ```console
 packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[9000,9001]'
@@ -80,25 +95,48 @@ packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '
 This produces four packets in Cartesian order, with the last axis varying
 fastest; `--max-template-packets` (default 10,000) is checked before any packet
 is prepared. `exchange` applies one budget and response window to the whole
-set, and `send --repeat N` with `--rate N` replays the expansion under one
-finite packet/byte budget. Every frame's endpoints and final bytes are checked
-before it is sent.
+set (`--stop-when-answered` ends the window once every request has a response),
+and `send --repeat N` with `--rate N` replays the expansion under one finite
+packet/byte budget. Every frame's endpoints and final bytes are checked before
+it is sent.
 
-`--decode-as 'udp.port=5353:dns'` binds a port to a codec for decoding and
+`build --set ipv4.ttl=5` overrides a recipe field by the same selectors
+(repeatable, at most 64, applied in order before axes expand), and generators
+such as `repeat(0x41,1400)`, `zeros(64)`, and `cyclic(40)` fill bytes values
+alongside `0b`, `0o`, and underscore-separated integers. `fuzz --field` takes
+the same selectors, plus `*` for the protocol or the field.
+
+`--decode-as 'udp.port=5300:dns'` binds a port to a codec for decoding and
 display filters. It is accepted by `dissect`, `read`, `follow`, `stats`,
 `expert`, `tls`, `dns-read`, `http`, `export`, `rewrite`, `verify-forwarding`,
 and `capture`. TCP ports support `dns`, `http`, `tls`, and `raw`; UDP ports
-support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, and `raw`. A
-mapping overrides the built-in binding for that port, conflicting declarations
-are rejected, and at most 256 declarations and 64 KiB of mapping text are
-accepted. `--tls-port 4433` is shorthand for `--decode-as 'tcp.port=4433:tls'`.
+support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, `gtpu`, `tftp`,
+`syslog`, and `raw`. UDP 53, 5353 (mDNS), and 5355 (LLMNR) already decode as
+DNS, and TFTP transfers, which leave port 69, need `--decode-as
+'udp.port=N:tftp'`. A mapping overrides the built-in binding for that port,
+conflicting declarations are rejected, and at most 256 declarations and 64 KiB
+of mapping text are accepted. `--tls-port 4433` is shorthand for
+`--decode-as 'tcp.port=4433:tls'`.
+
+Display filters (`--filter`, described by `packetcraftr topics filters`) take
+comparisons, sets, prefixes, and inclusive ranges (`udp.dstport in
+1024..65535`), masks (`tcp.flags & 0x12 == 0x12`), the text operators
+`contains`, `startswith`, `endswith`, `icontains`, and `iequals`, escapes and
+`b"..."` byte strings, list selectors (`dns.answers[*].type == 1`,
+`dns.answers[-1].ttl > 20`), `len()` and `count()`, `#last` layer occurrences,
+and `frame.*` facts. Two limits apply: a text operator on a list of numbers or
+addresses, such as `dns.qtype`, compiles but never matches (a list of objects,
+such as `tcp.options`, is a compile error), and `frame.reassembled` is not a
+field.
 
 Save a focused capture in the source format (`--output` must match it), or use
-`--normalize` to export either capture format as PCAPNG:
+`--normalize` to export either capture format as PCAPNG or as classic PCAP:
 
 ```console
 packetcraftr --output pcapng read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
 packetcraftr --output pcapng read capture.pcap --normalize --filter 'udp' > selected.pcapng
+packetcraftr --output pcap read capture.pcapng --normalize > single-interface.pcap
+packetcraftr --output pcapng read capture.pcapng --frames 1-100,250,300- --every 5 > sample.pcapng
 ```
 
 Selected records keep their original bytes, timestamps, and options; PCAPNG
@@ -110,6 +148,14 @@ blocks and options, and the original section structure. It refuses a capture
 that declares a frame check sequence, which the new section cannot record. It
 never invents times, so a selected frame without an exactly representable
 timestamp fails.
+`--normalize --output pcap` writes classic PCAP instead, which holds one link
+type and no interface or direction metadata: the selection must share one
+interface, carry no packet direction, have timestamps in the source's
+nanosecond or microsecond resolution, fit the source snapshot length, and not
+be empty, and anything else fails rather than being rounded. `--frames
+2-3,10` (also `10-`) and `--every 5` select frames by one-based source position
+in every `read` path, and combine with `--filter` and the epoch window; frames
+that are skipped keep their frame and stream numbers.
 All input frames, including filtered-out ones, count toward the finite frame
 and byte limits. An empty selection is a valid capture, errors can leave partial
 output, and without `--filter` or `--normalize` output is a byte-for-byte
@@ -126,6 +172,14 @@ records, including EDNS and exact unknown RDATA; malformed or truncated DNS
 messages produce diagnostics while retaining their captured bytes. The
 [migration notes](docs/migration-unreleased.md#offline-dns-records) describe
 the structured record fields and bounded core decoder.
+
+`dissect` reads frame bytes from `--hex`, from redirected stdin with `--hex -`,
+from `--hex-file PATH`, or from `--file`, so `packetcraftr --output hex build
+... | packetcraftr dissect --hex -` works; hex text may carry `0x` prefixes and
+whitespace, colon, or dash separators. `--link-type` takes names such as `ipv4`
+or `ethernet` as well as numbers, and `--tree`, which `read --dissect` and
+`capture --dissect` also accept, prints each layer's fields as an indented tree
+in text output.
 
 ## Install
 
@@ -208,7 +262,8 @@ fields, enum vocabularies, and embedded packet documents remain strict.
 Put the global `--output` option before the command, for example
 `packetcraftr --output json stats capture.pcapng`. Supported formats depend on
 the command and include `text`, `json`, `ndjson`, `hex`, `raw`, `pcap`,
-`pcapng`, `csv`, and `tsv`; invalid combinations fail explicitly. Every NDJSON
+`pcapng`, `csv`, and `tsv`; invalid combinations fail explicitly, and
+`packetcraftr topics formats` lists which commands offer each. Every NDJSON
 envelope has an `event` discriminator, and the schema enumerates the per-command
 event names. `complete` and `error` are the terminal records, with the payload
 in `result` or `error`, so consumers never need to infer a record kind from
@@ -242,10 +297,15 @@ whole-workflow memory measurements.
 Offline `stats`, `expert`, `follow`, and `tls` perform bounded, capture-global
 IPv4 and IPv6 fragment reassembly before downstream transport indexing. A
 completed datagram is a derived view attached to the physical fragment that
-completed it: `frame.*` fields and physical frame/byte totals remain captured
-facts, while reconstructed child layers can satisfy display filters and join
-TCP or UDP conversations. `stats --table fragments` reports physical fragments
-and derived datagrams separately, and the shared `--ip-overlap`,
+completed it: the capture-record `frame.*` facts (`frame.number`, `frame.len`,
+`frame.cap_len`, `frame.interface_id`, `frame.link_type`, `frame.time_epoch`,
+`frame.time_nsec`, `frame.direction`, and `frame.truncated`) and physical
+frame/byte totals remain captured facts, while reconstructed child layers can
+satisfy display filters and join TCP or UDP conversations. `frame.layer_count`
+and `frame.protocols` are decoded facts, read from what the decoder produced
+rather than from the capture record, so a truncated capture can show fewer
+layers than the wire carried. `stats --table fragments` reports physical
+fragments and derived datagrams separately, and the shared `--ip-overlap`,
 `--ip-idle-expiry-ms`, and `--max-ip-*` options make overlap behavior, expiry,
 and every retained-state limit explicit.
 
@@ -255,6 +315,16 @@ absent, and `follow --write DIR` publishes each selected direction atomically as
 report carries a capture summary (`duration`, `average_packet_size`, packet and
 byte rates, and the declared `interfaces`), and `expert` also reports the
 capture-level warnings `capture.frame_truncated` and `capture.clock_regression`.
+It also reports TCP handshake and sequence findings across frames, such as
+`tcp.connection_refused`, `tcp.handshake_unanswered`, `tcp.out_of_order`, and an
+Info `tcp.not_closed_at_end`. Only four open sequence gaps per direction are
+watched, a handshake after an idle expiry is judged against the expired SYN, and
+findings cover only frames that pass `--filter`, so filter by stream or host
+pair rather than by one direction.
+Analysis separates inner flows by encapsulation identifiers such as VLAN IDs,
+VXLAN and Geneve VNIs, and GRE keys, but GTP-U and EtherIP have none yet, so
+identical inner tuples between the same outer IP pair in different TEIDs or
+EtherIP tunnels share one scope and stream.
 
 Sample commands for fixtures and capture processing; each command's `--help`
 lists its options, limits, and further examples:
@@ -263,6 +333,8 @@ lists its options, limits, and further examples:
 packetcraftr build --packet-file examples/documents/packet-dns-response.json
 packetcraftr --output pcapng fragment --mtu 32 --packet 'ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=40001)/raw(text=fixture)' > fragments.pcapng
 packetcraftr merge --write merged.pcapng.zst --compression zstd first.pcapng second.pcap
+packetcraftr merge --write all.pcapng --order append first.pcapng second.pcapng
+packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 multiqueue.pcapng
 packetcraftr --output pcap read capture.pcap.gz --compression zstd > capture.pcap.zst
 packetcraftr --output csv read capture.pcapng --field frame.number --field ip.src --field udp.source_port
 packetcraftr dns-read capture.pcapng --dns-port 5353 --stream udp:3
@@ -271,7 +343,12 @@ packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
 ```
 
 - `fragment` never sends traffic; `--mtu` excludes the link header. `merge`
-  needs time-ordered inputs and publishes only a new destination.
+  interleaves inputs by timestamp and needs each input time-ordered, unless
+  `--max-reorder-frames N` (up to 65536) gives it a bounded look-ahead window
+  that repairs small inversions, also for a single input, or `--order append`
+  writes the inputs whole in argument order and keeps timestamps verbatim, so
+  regressing captures merge and the output may be non-monotonic (the two
+  options conflict). It publishes only a new destination.
 - Capture readers detect gzip and Zstd by magic, including redirected stdin,
   and binary capture output takes `--compression none|gzip|zstd`.
 - `dns-read`, `http`, and `export` select a whole scoped conversation with
@@ -288,10 +365,17 @@ packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
 `rewrite` edits capture headers with checked lengths and transport checksums.
 Direct options cover MAC and IP addresses, TCP/UDP ports, repeated `--vlan VID`
 or `--vlan TPID:VID[:PRIORITY[:DEI]]`, and `--strip-vlans`. `--set FIELD=VALUE`
-instead assigns one fixed-width field in place (`ipv4.ttl`, `ipv6.hop_limit`,
-`tcp.sequence`, `tcp.acknowledgment`, TCP/UDP ports, and `dns.id`);
-`--checksum-mode preserve` keeps checksum bytes exactly, and `--dry-run`
-reports the changes without writing. `--rules-file` applies ordered conditional
+instead assigns one fixed-width field in place (`ipv4.ttl`,
+`ipv4.identification`, `ipv4.dscp_ecn`, `ipv6.hop_limit`, `tcp.sequence`,
+`tcp.acknowledgment`, `tcp.window`, TCP/UDP ports, `icmp.identifier` and
+`icmp.sequence` (and the `icmpv6` forms), `dns.id`, `dhcpv4.transaction_id`,
+`vxlan.vni`, and `geneve.vni`); IPv4, TCP, UDP, and ICMP checksums are repaired
+unless `--checksum-mode preserve` keeps checksum bytes exactly, and `--dry-run`
+reports the changes without writing. `--map-ip OLD=NEW` and `--map-mac OLD=NEW`
+remap addresses many-to-many instead: an IP side may be an address or an
+equal-length prefix whose host bits carry over, the outer source and
+destination are matched independently, at most 4096 entries are accepted, and
+overlapping prefixes are refused. `--rules-file` applies ordered conditional
 rules: `packetcraftr.rewrite/v1` documents patch headers and
 `packetcraftr.rewrite/v2` documents assign fields, with at most 1 MiB and 64
 rules. The output is one PCAPNG section that keeps application bytes, capture
@@ -302,6 +386,8 @@ rewrote cleanly.
 packetcraftr rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10
 packetcraftr rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filter 'udp'
 packetcraftr rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run
+packetcraftr rewrite capture.pcapng --write out.pcapng --set icmp.identifier=7 --set icmp.sequence=9
+packetcraftr rewrite capture.pcapng --write out.pcapng --map-ip 192.0.2.0/24=198.51.100.0/24 --map-mac 02:00:00:00:00:01=02:00:00:00:00:02
 packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file examples/documents/rewrite-lab-host.json
 ```
 
@@ -311,7 +397,7 @@ Depend on the crate that owns the capability you need:
 
 | Crate | Ownership and entry points |
 |---|---|
-| `packetcraftr-core` | `Packet`, protocol codecs/reflection, bounded documents, capture files, filters, and `analysis::run` |
+| `packetcraftr-core` | `Packet`, protocol codecs/reflection, bounded documents, capture files, filters, the `conversation` builder, and `analysis::run` |
 | `packetcraftr-netio` | Interface/route providers, capture/transmit resources, and platform backends |
 | `packetcraftr` | `Client` preparation/send/exchange, route planning, neighbor resolution, `policy`, and DNS/replay/scan/traceroute/fuzz workflows |
 | `packetcraftr-cli` | Arguments, composition, and rendering behind `packetcraftr_cli::main()`; its `output` module owns machine representations and the stream encoder |
@@ -383,6 +469,8 @@ packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
 packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
   --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
 packetcraftr replay capture.pcap --interface 2 --bps 8000000
+packetcraftr replay capture.pcap --interface 2 --max-gap-ms 500
+packetcraftr traceroute 192.0.2.1 --strategy icmp --payload-size 64 --dont-fragment --dscp 46
 packetcraftr capture --interface 1 --write trace.pcapng --rotate-bytes 1048576 --rotate-files 4
 ```
 
@@ -398,6 +486,11 @@ packetcraftr capture --interface 1 --write trace.pcapng --rotate-bytes 1048576 -
   `--max-in-flight` for a rolling response window. A `--udp-profiles` document
   selects per-port UDP requests and response checks; a matching profile is not
   authenticated service identity.
+- `traceroute --payload-size`, `--dont-fragment` (IPv4 only), and `--dscp` shape
+  the probes, `exchange --stop-when-answered` ends the response window once every
+  request has a retained response, and `replay --max-gap-ms` clamps each
+  captured gap after `--speed` scaling so idle periods do not stall a replay
+  (it conflicts with `--rate`, `--bps`, and `--timing immediate`).
 - `capture --capture-filter` is resolver-free native BPF applied before
   PacketcraftR queues and budgets frames, while `--filter` runs after capture.
 

@@ -4,7 +4,7 @@
 use crate::command_options::InterfaceSelector;
 use crate::command_options::{
     Budget, CaptureLimitsArgs, CompressionArgs, DecodeArgs, Destination, TimeoutArgs,
-    TrafficBudgetArgs, Window,
+    TrafficBudgetArgs, TreeArgs, Window,
 };
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
@@ -56,6 +56,10 @@ per matched frame instead of frame records; rows stream as NDJSON fields
 events or text columns bounded by --max-projection-bytes. Both share the
 --filter/--decode-as registry and decode a frame at most once per selection
 and emission; decoded state never accumulates across frames.
+
+--tree, with --dissect and text output, prints each frame's header line, then
+every layer and its fields as an indented tree. See `dissect --help` for the
+tree format; its lines count against --max-tree-bytes across all frames.
 
 Examples:
   packetcraftr capture --interface 1 --timeout-ms 1000
@@ -123,6 +127,8 @@ pub(crate) struct Args {
     /// Decode each emitted frame and include its layer stack and diagnostics.
     #[arg(long)]
     pub(crate) dissect: bool,
+    #[command(flatten)]
+    pub(crate) tree: TreeArgs,
     /// Select a registered field per matched frame; repeat to preserve column order.
     #[arg(long = "field", value_name = "PATH", conflicts_with = "dissect")]
     pub(crate) fields: Vec<String>,

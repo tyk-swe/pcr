@@ -12,6 +12,75 @@ use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
 use crate::analysis::serial::{serial_ge, serial_gt};
 
+/// Duplicate acknowledgments after which a resend of the acknowledged edge is a fast retransmission.
+const FAST_RETRANSMIT_DUPLICATES: u64 = 3;
+
+/// Gaps one direction can hold open at once; gaps opened beyond this go unwatched.
+const MAX_OPEN_HOLES: usize = 4;
+
+/// Sequence space `[start, end)` a direction skipped over, kept as one fixed-size record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Hole {
+    start: u32,
+    end: u32,
+}
+
+impl Hole {
+    fn contains(self, sequence: u32) -> bool {
+        serial_ge(sequence, self.start) && serial_gt(self.end, sequence)
+    }
+
+    /// What remains of the hole once `[sequence, segment_end)` arrived inside it.
+    fn fill(self, sequence: u32, segment_end: u32) -> Option<Self> {
+        let remaining = if sequence == self.start {
+            Self {
+                start: if serial_ge(segment_end, self.end) {
+                    self.end
+                } else {
+                    segment_end
+                },
+                end: self.end,
+            }
+        } else if serial_ge(segment_end, self.end) {
+            Self {
+                start: self.start,
+                end: sequence,
+            }
+        } else {
+            self
+        };
+        (remaining.start != remaining.end).then_some(remaining)
+    }
+}
+
+/// The gaps a direction has skipped over and not yet filled, in a fixed number of slots.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Holes {
+    slots: [Option<Hole>; MAX_OPEN_HOLES],
+}
+
+impl Holes {
+    /// Watches a gap beyond every open one; a full set keeps its older gaps.
+    fn open(&mut self, hole: Hole) {
+        if let Some(slot) = self.slots.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(hole);
+        }
+    }
+
+    /// Whether `sequence` lies in an open gap, shrinking that gap by `[sequence, segment_end)`.
+    fn fill(&mut self, sequence: u32, segment_end: u32) -> bool {
+        let Some(slot) = self
+            .slots
+            .iter_mut()
+            .find(|slot| slot.is_some_and(|hole| hole.contains(sequence)))
+        else {
+            return false;
+        };
+        *slot = slot.and_then(|hole| hole.fill(sequence, segment_end));
+        true
+    }
+}
+
 pub(super) fn reconcile_events(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
@@ -45,6 +114,27 @@ pub(super) fn reconcile_events(
         if observed == 0 {
             continue;
         }
+        let fast = if *conflicting {
+            None
+        } else {
+            fast_retransmit_duplicates(flows.get(&flow.reverse()), *sequence)
+        };
+        if let Some(duplicates) = fast {
+            if let Some(peer) = flows.get_mut(&flow.reverse()) {
+                peer.fast_retransmit_reported = true;
+            }
+            findings.push(new_finding(
+                Severity::Warning,
+                "tcp.fast_retransmission",
+                observation.number,
+                observation.stream,
+                format!(
+                    "{observed} byte(s) at sequence {sequence} are resent after {duplicates} \
+                     duplicate acknowledgments of that sequence"
+                ),
+            ));
+            continue;
+        }
         findings.push(new_finding(
             if *conflicting {
                 Severity::Error
@@ -62,6 +152,15 @@ pub(super) fn reconcile_events(
         ));
     }
     (probe_shape, reassembly_retransmission)
+}
+
+/// Duplicate acknowledgments of `sequence` that justify calling its resend a fast retransmission.
+fn fast_retransmit_duplicates(peer: Option<&DirectionState>, sequence: u32) -> Option<u64> {
+    let peer = peer?;
+    (peer.acknowledgment == Some(sequence)
+        && peer.duplicate_acks >= FAST_RETRANSMIT_DUPLICATES
+        && !peer.fast_retransmit_reported)
+        .then_some(peer.duplicate_acks)
 }
 
 fn is_probe_shape(state: Option<&DirectionState>, observation: &TcpObservation<'_>) -> bool {
@@ -154,7 +253,32 @@ pub(super) fn observe(
         ));
     }
 
+    let segment_length = u32::try_from(payload_len).unwrap_or(u32::MAX);
+    let hole_fill = if !keep_alive
+        && payload_len > 0
+        && !syn
+        && !reassembly_retransmission
+        && sent
+            .holes
+            .fill(tcp.sequence, tcp.sequence.wrapping_add(segment_length))
+    {
+        findings.push(new_finding(
+            Severity::Warning,
+            "tcp.out_of_order",
+            number,
+            stream,
+            format!(
+                "{}:{} delivers the missing segment at sequence {} after later data",
+                flow.flow.source, flow.flow.source_port, tcp.sequence
+            ),
+        ));
+        true
+    } else {
+        false
+    };
+
     if !keep_alive
+        && !hole_fill
         && sent.closed
         && payload_len > 0
         && !syn
@@ -162,9 +286,7 @@ pub(super) fn observe(
         && serial_ge(tcp.sequence, base)
         && !reassembly_retransmission
     {
-        let end = tcp
-            .sequence
-            .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
+        let end = tcp.sequence.wrapping_add(segment_length);
         if serial_ge(payload_next, end) {
             findings.push(new_finding(
                 Severity::Warning,
@@ -195,10 +317,76 @@ pub(super) fn observe(
                 flow.flow.source, flow.flow.source_port, tcp.sequence
             ),
         ));
+        sent.holes.open(Hole {
+            start: next,
+            end: tcp.sequence,
+        });
     }
+    observe_close(
+        sent,
+        observation,
+        keep_alive,
+        reassembly_retransmission,
+        findings,
+    );
     update_next_sequences(sent, tcp, payload_len, syn, fin, keep_alive);
 
     keep_alive
+}
+
+/// Tracks the sender's first FIN and flags what it sends against that FIN afterwards.
+fn observe_close(
+    sent: &mut DirectionState,
+    observation: &TcpObservation<'_>,
+    keep_alive: bool,
+    reassembly_retransmission: bool,
+    findings: &mut Vec<Finding>,
+) {
+    let TcpObservation {
+        number,
+        stream,
+        flow,
+        tcp,
+        payload_len,
+        syn,
+        fin,
+        rst,
+        ..
+    } = *observation;
+    if keep_alive || rst || syn {
+        return;
+    }
+    let fin_position = tcp
+        .sequence
+        .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
+    match sent.fin_sequence {
+        Some(first) if payload_len > 0 && serial_ge(tcp.sequence, first) => {
+            findings.push(new_finding(
+                Severity::Warning,
+                "tcp.data_after_close",
+                number,
+                stream,
+                format!(
+                    "{}:{} sent {payload_len} byte(s) at sequence {} after its FIN at sequence {first}",
+                    flow.flow.source, flow.flow.source_port, tcp.sequence
+                ),
+            ));
+        }
+        Some(first) if fin && fin_position == first && !reassembly_retransmission => {
+            findings.push(new_finding(
+                Severity::Info,
+                "tcp.fin_retransmission",
+                number,
+                stream,
+                format!(
+                    "{}:{} resends its FIN at sequence {first}",
+                    flow.flow.source, flow.flow.source_port
+                ),
+            ));
+        }
+        None if fin => sent.fin_sequence = Some(fin_position),
+        _ => {}
+    }
 }
 
 fn update_next_sequences(
@@ -284,7 +472,50 @@ pub(in crate::analysis::expert) fn finish(
 #[cfg(test)]
 mod tests {
 
-    use super::retransmission_overlap;
+    use super::{Hole, Holes, MAX_OPEN_HOLES, retransmission_overlap};
+
+    #[test]
+    fn hole_fill_shrinks_from_either_edge_and_across_wraparound() {
+        let hole = Hole {
+            start: u32::MAX - 1,
+            end: 4,
+        };
+        assert!(hole.contains(u32::MAX));
+        assert!(hole.contains(3));
+        assert!(!hole.contains(4));
+        assert!(!hole.contains(u32::MAX - 2));
+
+        let front = hole.fill(u32::MAX - 1, 1).expect("front fill leaves a gap");
+        assert_eq!((front.start, front.end), (1, 4));
+        let back = hole.fill(u32::MAX, 9).expect("back fill leaves a gap");
+        assert_eq!((back.start, back.end), (u32::MAX - 1, u32::MAX));
+        assert_eq!(hole.fill(u32::MAX - 1, 4), None);
+        assert_eq!(hole.fill(u32::MAX - 1, 9), None);
+        assert_eq!(hole.fill(u32::MAX, 2), Some(hole));
+    }
+
+    #[test]
+    fn open_holes_fill_independently_and_keep_older_gaps_when_full() {
+        let mut holes = Holes::default();
+        for index in 0..=MAX_OPEN_HOLES {
+            let start = u32::try_from(index).expect("small index") * 10 + 2;
+            holes.open(Hole {
+                start,
+                end: start + 3,
+            });
+        }
+
+        assert!(holes.fill(12, 15), "a later gap fills without the first");
+        assert!(!holes.fill(12, 15), "a filled gap is not filled twice");
+        assert!(holes.fill(2, 4), "the oldest gap is still watched");
+        assert!(holes.fill(4, 5), "a partly filled gap keeps its remainder");
+        assert!(!holes.fill(4, 5));
+        let overflow = u32::try_from(MAX_OPEN_HOLES).expect("small count") * 10 + 2;
+        assert!(
+            !holes.fill(overflow, overflow + 3),
+            "the newest gap was dropped"
+        );
+    }
 
     #[test]
     fn retransmission_overlap_respects_capture_base_and_wraparound() {

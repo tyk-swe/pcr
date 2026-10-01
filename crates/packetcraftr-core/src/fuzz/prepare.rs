@@ -20,6 +20,7 @@ use super::mutation::{ValueLimit, bounded_value_size, index_from, mutation_value
 use super::report::{Case, CaseFailure, CaseOutcome, Mutation, Stats};
 use super::request::{Limits, Request, Strategy, Target};
 use super::rng::case_seed;
+use super::roundtrip;
 use super::{MAX_TARGET_FIELDS, MAX_VALUE_NESTING};
 
 #[derive(Clone)]
@@ -114,7 +115,7 @@ where
     let mut counters = Counters::default();
     for offset in 0..inputs.request.cases {
         deadline.enforce()?;
-        let case = prepare_case(inputs, offset, &mut counters)?;
+        let case = prepare_case(inputs, offset, &mut counters, deadline)?;
         emit(case, deadline)?;
     }
     Ok(counters)
@@ -124,6 +125,7 @@ fn prepare_case(
     inputs: &CaseInputs<'_>,
     offset: usize,
     counters: &mut Counters,
+    deadline: &Deadline,
 ) -> Result<Case, Error> {
     let request = inputs.request;
     let compatible_mutations = inputs.compatible_mutations;
@@ -154,6 +156,7 @@ fn prepare_case(
     let mutated_value = mutation_value(
         strategy,
         field,
+        &*layer,
         &original,
         seed,
         strategy_round,
@@ -188,6 +191,7 @@ fn prepare_case(
         inputs.dissector,
         counters,
         total_byte_limit,
+        deadline,
     )?;
     Ok(case)
 }
@@ -236,6 +240,7 @@ fn build_case(
     dissector: &Dissector,
     counters: &mut Counters,
     total_byte_limit: u64,
+    deadline: &Deadline,
 ) -> Result<(), Error> {
     match builder.build(
         case.recipe.clone(),
@@ -264,6 +269,11 @@ fn build_case(
                     decoded_bytes,
                     total_byte_limit,
                 )?;
+                deadline.enforce()?;
+                let byte_room = total_byte_limit.saturating_sub(counters.retained_bytes);
+                case.diagnostics.extend(roundtrip::diagnostic(
+                    builder, &built, decoded, request, byte_room,
+                ));
             }
             case.built = Some(built);
             case.outcome = CaseOutcome::Built;

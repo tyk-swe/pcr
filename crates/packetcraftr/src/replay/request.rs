@@ -139,6 +139,10 @@ pub struct Options {
     pub inter_pass_delay: Duration,
     pub link_mode: LinkMode,
     pub timing: Timing,
+    /// Upper bound on each inter-frame delay of original or scaled timing,
+    /// applied after scaling. It only shortens delays and is not recorded in
+    /// the published timing.
+    pub max_gap: Option<Duration>,
     pub limits: Limits,
     /// Second explicit opt-in required in addition to policy approval.
     pub allow_permissive_live: bool,
@@ -148,6 +152,22 @@ impl Options {
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         self.timing.validate()?;
+        if let Some(max_gap) = self.max_gap {
+            if max_gap.is_zero() {
+                return Err(Error::InvalidLimit {
+                    field: "max_gap",
+                    value: 0,
+                    reason: "must be non-zero; use immediate timing to remove every delay",
+                });
+            }
+            if !matches!(self.timing, Timing::Original | Timing::Scaled(_)) {
+                return Err(Error::InvalidLimit {
+                    field: "max_gap",
+                    value: u64::try_from(max_gap.as_millis()).unwrap_or(u64::MAX),
+                    reason: "applies only to original or scaled timing",
+                });
+            }
+        }
         if self.repeat == 0 || self.repeat > 1024 {
             return Err(Error::InvalidLimit {
                 field: "repeat",
@@ -307,6 +327,7 @@ mod tests {
             inter_pass_delay,
             link_mode: LinkMode::Auto,
             timing: Timing::Immediate,
+            max_gap: None,
             limits: Limits::default(),
             allow_permissive_live: false,
         }

@@ -186,7 +186,7 @@ impl Probe {
             destination_port: self.server_port,
             ..Udp::default()
         });
-        if self.server_port == DEFAULT_SERVER_PORT || self.source_port == DEFAULT_SERVER_PORT {
+        if udp_dissects_as_dns(self.source_port, self.server_port) {
             if let Ok(dns) = Dns::try_from(self.query.clone()) {
                 packet.push(dns);
             } else {
@@ -202,6 +202,14 @@ impl Probe {
     pub(super) fn framed_query_bytes(&self) -> usize {
         LENGTH_PREFIX_BYTES + self.query.len()
     }
+}
+
+/// Mirrors the UDP ports the default registry binds to `dns`, which strict
+/// build requires a `Dns` layer, not `Raw`, to carry.
+const UDP_DNS_PORTS: [u16; 3] = [DEFAULT_SERVER_PORT, 5353, 5355];
+
+pub(super) fn udp_dissects_as_dns(source_port: u16, destination_port: u16) -> bool {
+    UDP_DNS_PORTS.contains(&source_port) || UDP_DNS_PORTS.contains(&destination_port)
 }
 
 /// A retried query must not give an off-path spoofer a second chance at the same tuple.

@@ -222,6 +222,7 @@ fn replay_options(timing: Timing) -> Options {
         inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Auto,
         timing,
+        max_gap: None,
         limits: Limits::default(),
         allow_permissive_live: false,
     }
@@ -632,6 +633,121 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
             .collect::<Vec<_>>(),
         [0, 2]
     );
+}
+
+#[test]
+fn replay_clamps_idle_gaps_to_the_maximum_gap_and_keeps_the_run_within_its_limit() {
+    let frames =
+        |reader_frames: &[(Duration, &[u8])]| capture_reader(LinkType::ETHERNET, reader_frames);
+    let capture = [
+        (Duration::from_secs(1), &[1_u8, 2][..]),
+        (Duration::from_millis(1_010), &[3, 4][..]),
+        (Duration::from_millis(601_010), &[5, 6][..]),
+        (Duration::from_millis(601_030), &[7, 8][..]),
+    ];
+    let mut options = replay_options(Timing::Original);
+    options.limits.max_duration = Duration::from_secs(60);
+
+    let mut clock = RecordingClock::default();
+    let refused = replay(
+        frames(&capture),
+        &options,
+        AllFrames,
+        &mut RecordingAuthorizer::default(),
+        &mut RecordingTransmitter::default(),
+        &mut clock,
+        |_, _| Ok(()),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(Error::DurationLimit {
+                source_index: 2,
+                ..
+            })
+        ),
+        "the unclamped idle gap exceeds the duration limit: {refused:?}"
+    );
+
+    options.max_gap = Some(Duration::from_millis(50));
+    let mut transmitter = RecordingTransmitter::default();
+    let mut clock = RecordingClock::default();
+    let summary = replay(
+        frames(&capture),
+        &options,
+        AllFrames,
+        &mut RecordingAuthorizer::default(),
+        &mut transmitter,
+        &mut clock,
+        |_, _| Ok(()),
+    )
+    .expect("the clamped replay fits the limit");
+
+    assert_eq!(
+        clock.delays(),
+        [
+            Duration::ZERO,
+            Duration::from_millis(10),
+            Duration::from_millis(50),
+            Duration::from_millis(20),
+        ]
+    );
+    assert_eq!(summary.frames_transmitted, 4);
+    assert_eq!(summary.scheduled_duration, Duration::from_millis(80));
+}
+
+#[test]
+fn replay_clamps_scaled_gaps_after_scaling() {
+    let capture = [
+        (Duration::from_secs(1), &[1_u8, 2][..]),
+        (Duration::from_millis(1_100), &[3, 4][..]),
+        (Duration::from_millis(101_100), &[5, 6][..]),
+    ];
+    let mut options = replay_options(Timing::Scaled(0.5));
+    options.max_gap = Some(Duration::from_millis(30));
+    let mut clock = RecordingClock::default();
+
+    replay(
+        capture_reader(LinkType::ETHERNET, &capture),
+        &options,
+        AllFrames,
+        &mut RecordingAuthorizer::default(),
+        &mut RecordingTransmitter::default(),
+        &mut clock,
+        |_, _| Ok(()),
+    )
+    .expect("scaled replay");
+
+    assert_eq!(
+        clock.delays(),
+        [
+            Duration::ZERO,
+            Duration::from_millis(30),
+            Duration::from_millis(30)
+        ]
+    );
+}
+
+#[test]
+fn replay_rejects_an_unusable_maximum_gap_before_any_io() {
+    for (timing, max_gap, field) in [
+        (Timing::Original, Duration::ZERO, "max_gap"),
+        (Timing::Immediate, Duration::from_millis(5), "max_gap"),
+        (Timing::FixedRate(10.0), Duration::from_millis(5), "max_gap"),
+        (Timing::BitRate(8_000), Duration::from_millis(5), "max_gap"),
+    ] {
+        let mut options = replay_options(timing);
+        options.max_gap = Some(max_gap);
+        assert!(
+            matches!(options.validate(), Err(Error::InvalidLimit { field: named, .. }) if named == field),
+            "{timing:?}"
+        );
+    }
+    for timing in [Timing::Original, Timing::Scaled(2.0)] {
+        let mut options = replay_options(timing);
+        options.max_gap = Some(Duration::from_millis(1));
+        options.validate().expect("captured timing accepts a clamp");
+    }
 }
 
 #[test]

@@ -30,6 +30,7 @@ fuzz_target!(|data: &[u8]| {
         max_bytes: 64 * 1024,
         max_layers: MAX_LAYERS,
         max_nesting: 16,
+        max_generated_bytes: 64 * 1024,
     };
     if let Ok(packet) = expression::parse(text, &registry, expr_limits) {
         build_both_modes(&registry, &packet);

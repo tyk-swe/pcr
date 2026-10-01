@@ -10,7 +10,7 @@ use packetcraftr_core::codec::Mode;
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz::{
-    CaseOutcome, Error, Limits, Request, Strategy, run as fuzz, run_observed,
+    CaseOutcome, Error, Limits, Request, Strategy, Target, run as fuzz, run_observed,
 };
 use packetcraftr_core::layer::{Malformed, Raw};
 use packetcraftr_core::packet::Packet;
@@ -193,6 +193,161 @@ fn fuzz_boundary_text_mutations_respect_the_field_byte_limit() {
         };
         assert!(text.len() <= 8, "case {}: {text:?}", case.index);
     }
+}
+
+#[test]
+fn fuzz_boundary_values_follow_the_target_fields_real_width() {
+    let request = Request {
+        seed: 7,
+        cases: 96,
+        strategies: vec![Strategy::Boundary],
+        targets: vec!["0.fragment_offset".parse().unwrap()],
+        ..Request::default()
+    };
+    let report = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
+
+    // a value the field refuses fails at mutation; the rest reach the builder
+    let mut values = std::collections::BTreeMap::new();
+    for case in &report.cases {
+        let FieldValue::Unsigned(value) = case.mutation.value else {
+            panic!("case {} did not stay unsigned", case.index);
+        };
+        let refused = case
+            .error
+            .as_ref()
+            .is_some_and(|error| error.classification().code == "packet.fuzz_mutation");
+        values.insert(value, refused);
+    }
+    assert_eq!(
+        values.into_iter().collect::<Vec<_>>(),
+        [
+            (0, false),
+            (1, false),
+            (0x1000, false),
+            (0x1ffe, false),
+            (0x1fff, false),
+            // one above the 13-bit maximum stays as rejected-input evidence
+            (0x2000, true),
+        ]
+    );
+
+    let repeated = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
+    let mutations = |report: &packetcraftr_core::fuzz::Report| {
+        report
+            .cases
+            .iter()
+            .map(|case| case.mutation.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(mutations(&report), mutations(&repeated));
+}
+
+#[test]
+fn fuzz_selectors_resolve_by_protocol_and_occurrence_to_numeric_targets() {
+    let registry = fuzz_protocol_registry();
+    let tunnel = packetcraftr_core::expression::parse(
+        "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(dport=4789)/ipv4(src=198.51.100.1,dst=198.51.100.2)/udp()",
+        &registry,
+        Default::default(),
+    )
+    .unwrap();
+    let select = |texts: &[&str]| {
+        let selectors = texts
+            .iter()
+            .map(|text| text.parse().unwrap())
+            .collect::<Vec<_>>();
+        Target::select(&selectors, &tunnel, &registry)
+    };
+    let targets = |pairs: &[(usize, &str)]| {
+        pairs
+            .iter()
+            .map(|(layer, field)| Target {
+                layer: *layer,
+                field: (*field).to_owned(),
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        select(&["ipv4.ttl", "ipv4#2.ttl", "udp#2.source_port"]).unwrap(),
+        targets(&[(0, "ttl"), (2, "ttl"), (3, "source_port")])
+    );
+    // numeric selectors and duplicates collapse onto one numeric target
+    assert_eq!(
+        select(&["2.ttl", "ipv4#2.ttl", "ip#2.ttl"]).unwrap(),
+        targets(&[(2, "ttl")])
+    );
+    assert_eq!(
+        select(&["*.ttl"]).unwrap(),
+        targets(&[(0, "ttl"), (2, "ttl")])
+    );
+    assert_eq!(
+        select(&["udp#2.*"]).unwrap().len(),
+        select(&["3.*"]).unwrap().len()
+    );
+
+    for text in ["ipv4#3.ttl", "nosuchprotocol.ttl", "9.*", "*.nosuchfield"] {
+        let error = select(&[text]).expect_err(text);
+        assert!(matches!(error, Error::Selector(_)), "{text}: {error:?}");
+        assert_eq!(error.classification().code, "cli.selector", "{text}");
+    }
+    assert!(matches!(
+        select(&["ipv4.a[b"]),
+        Err(Error::TargetField { .. })
+    ));
+    // resolved targets drive a campaign with the numeric index reported
+    let report = fuzz(
+        &Request {
+            cases: 6,
+            strategies: vec![Strategy::Boundary],
+            targets: select(&["ipv4#2.ttl"]).unwrap(),
+            ..Request::default()
+        },
+        tunnel.clone(),
+        registry,
+    )
+    .unwrap();
+    assert!(report.cases.iter().all(|case| case.mutation.layer == 2
+        && case.mutation.protocol == "ipv4"
+        && case.mutation.field == "ttl"));
+}
+
+#[test]
+fn fuzz_selectors_beyond_the_target_cap_are_a_typed_error() {
+    use packetcraftr_core::fuzz::MAX_TARGET_FIELDS;
+    use packetcraftr_core::layer::selector::{self, Selector};
+
+    let registry = fuzz_protocol_registry();
+    let packet = udp_fuzz_packet();
+    let selectors = |count: usize| {
+        (0..count)
+            .map(|index| format!("2.f{index}").parse::<Selector>().unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let at_cap = Target::select(&selectors(MAX_TARGET_FIELDS), &packet, &registry).unwrap();
+    assert_eq!(at_cap.len(), MAX_TARGET_FIELDS);
+    // repeating a selector adds no target, so it never counts against the cap
+    let mut repeated = selectors(MAX_TARGET_FIELDS);
+    repeated.extend(selectors(MAX_TARGET_FIELDS));
+    assert_eq!(
+        Target::select(&repeated, &packet, &registry).unwrap(),
+        at_cap
+    );
+
+    let error = Target::select(&selectors(MAX_TARGET_FIELDS + 1), &packet, &registry)
+        .expect_err("one target over the cap");
+    assert!(
+        matches!(
+            error,
+            Error::Selector(selector::Error::TooManyTargets {
+                limit: MAX_TARGET_FIELDS
+            })
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().kind, Kind::Usage);
+    assert_eq!(error.classification().code, "cli.selector");
 }
 
 #[test]

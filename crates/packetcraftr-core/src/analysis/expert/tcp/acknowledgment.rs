@@ -54,7 +54,51 @@ pub(super) fn observe_duplicate(
             ));
         } else {
             sent.duplicate_acks = 0;
+            sent.fast_retransmit_reported = false;
         }
+    }
+}
+
+/// Flags an acknowledgment of sequence space the capture never saw the peer send.
+///
+/// A peer whose payload was never captured leaves the acknowledged data unknown rather than
+/// anomalous, as in one-directional captures and mid-stream starts.
+pub(super) fn observe_unseen(
+    flows: &HashMap<ScopedFlowKey, DirectionState>,
+    observation: &TcpObservation<'_>,
+    reverse: &ScopedFlowKey,
+    keep_alive: bool,
+    findings: &mut Vec<Finding>,
+) {
+    let TcpObservation {
+        number,
+        stream,
+        flow,
+        tcp,
+        syn,
+        rst,
+        ack,
+        ..
+    } = *observation;
+    if !ack || syn || rst || keep_alive {
+        return;
+    }
+    let Some(peer) = flows.get(reverse) else {
+        return;
+    };
+    if let (Some(_), Some(next)) = (peer.payload_next, peer.next_sequence)
+        && serial_gt(tcp.acknowledgment, next)
+    {
+        findings.push(new_finding(
+            Severity::Warning,
+            "tcp.ack_unseen_segment",
+            number,
+            stream,
+            format!(
+                "{}:{} acknowledges sequence {} but the capture holds the peer's data only up to {next}",
+                flow.flow.source, flow.flow.source_port, tcp.acknowledgment
+            ),
+        ));
     }
 }
 
@@ -86,6 +130,7 @@ pub(super) fn update(
     if ack {
         if sent.acknowledgment != Some(tcp.acknowledgment) || sent.window != Some(tcp.window) {
             sent.duplicate_acks = 0;
+            sent.fast_retransmit_reported = false;
         }
         sent.acknowledgment = Some(tcp.acknowledgment);
     }

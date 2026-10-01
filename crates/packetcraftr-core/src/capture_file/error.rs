@@ -127,6 +127,8 @@ pub enum Error {
         super::merge::MAX_SOURCE_NAME_BYTES
     )]
     MergeSources { maximum: usize },
+    #[error("invalid capture merge option: {0}")]
+    MergeOption(&'static str),
     #[error("merge source {input}, frame {frame} failed")]
     MergeSource {
         input: usize,
@@ -204,6 +206,11 @@ impl Classified for Error {
                 "cli.capture_option",
                 Kind::Usage,
                 Some("use a supported finite capture timestamp or replay timing option"),
+            ),
+            Self::MergeOption(_) => Classification::new(
+                "cli.capture_option",
+                Kind::Usage,
+                Some("choose a supported merge order and a reorder window within the limit"),
             ),
             Self::WrongWriterFormat { .. } => Classification::new(
                 "cli.capture_option",

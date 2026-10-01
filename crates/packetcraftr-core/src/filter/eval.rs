@@ -5,13 +5,17 @@ use std::borrow::Cow;
 
 use bytes::Bytes;
 
-use super::ast::Predicate;
+use super::ast::{Measure, Predicate};
 use super::comparison;
 use super::lexer::CompareOperator;
-use super::path::{ByteSlice, FieldRef, FieldSource, FrameField, StreamTransport};
+use super::literal::Literal;
+use super::path::{
+    ByteSlice, FieldRef, FieldSource, FrameField, ListSelection, Occurrence, Selector,
+    StreamTransport,
+};
 use crate::decode::DecodedPacket;
 use crate::field::{FieldKind, FieldValue};
-use crate::frame::unix_floor;
+use crate::frame::{Direction, unix_floor};
 use crate::layer::Layer;
 use crate::registry::FilterFieldBinding;
 
@@ -58,14 +62,67 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
         Predicate::Contains { field, needle } => any_value(context, field, |candidate| {
             comparison::contains(candidate, needle)
         }),
+        Predicate::TextMatch {
+            field,
+            needle,
+            mode,
+        } => any_value(context, field, |candidate| {
+            comparison::text_match(candidate, needle, *mode)
+        }),
+        Predicate::Masked {
+            field,
+            mask,
+            operator,
+            value,
+        } => any_value(context, field, |candidate| {
+            comparison::masked(candidate, *mask, *operator, *value)
+        }),
+        Predicate::Measure {
+            field,
+            measure,
+            operator,
+            value,
+        } => {
+            let wanted = Literal::Unsigned(*value);
+            any_value(context, field, |candidate| match measure {
+                Measure::Len => any_byte_length(candidate, |length| {
+                    comparison::matches(&FieldValue::Unsigned(length), *operator, &wanted)
+                }),
+                Measure::Count => match candidate {
+                    FieldValue::List(elements) => comparison::matches(
+                        &FieldValue::Unsigned(elements.len() as u64),
+                        *operator,
+                        &wanted,
+                    ),
+                    _ => false,
+                },
+            })
+        }
     }
 }
 
-fn layers<'a>(
-    context: &'a Context<'a>,
-    protocol: &'a str,
-    occurrence: Option<usize>,
-) -> impl Iterator<Item = &'a dyn Layer> {
+/// A list measures per element, like every other comparison on a list.
+fn any_byte_length(value: &FieldValue, mut test: impl FnMut(u64) -> bool) -> bool {
+    let length = |value: &FieldValue| match value {
+        FieldValue::Bytes(bytes) => Some(bytes.len()),
+        FieldValue::Text(text) => Some(text.len()),
+        FieldValue::Mac(mac) => Some(mac.len()),
+        FieldValue::Ipv4(_) => Some(4),
+        FieldValue::Ipv6(_) => Some(16),
+        _ => None,
+    };
+    match value {
+        FieldValue::List(elements) => elements
+            .iter()
+            .filter_map(length)
+            .any(|length| test(length as u64)),
+        other => length(other).is_some_and(|length| test(length as u64)),
+    }
+}
+
+/// Every layer the filter reads, outermost first: the physical packet's
+/// layers, then each derived packet beyond its replayed prefix.
+fn visible_layers<'a>(context: &'a Context<'a>) -> impl DoubleEndedIterator<Item = &'a dyn Layer> {
     context
         .decoded
         .packet
@@ -77,12 +134,31 @@ fn layers<'a>(
                 .iter()
                 .skip(derived.replayed_prefix_layers)
         }))
-        .filter(move |layer| layer.protocol_id().as_str() == protocol)
-        .enumerate()
-        .filter_map(move |(index, layer)| match occurrence {
-            Some(wanted) if index.saturating_add(1) != wanted => None,
-            _ => Some(layer),
-        })
+}
+
+/// Layers matching `protocol`, selected by occurrence, in the order occurrences are counted:
+/// the outer packet first, then each derived packet beyond its replayed prefix.
+fn layers<'a>(
+    context: &'a Context<'a>,
+    protocol: &'a str,
+    occurrence: Option<Occurrence>,
+) -> impl Iterator<Item = &'a dyn Layer> {
+    let matching = move || {
+        visible_layers(context).filter(move |layer| layer.protocol_id().as_str() == protocol)
+    };
+    let innermost = match occurrence {
+        Some(Occurrence::Last) => matching().next_back(),
+        _ => None,
+    };
+    let counted = (occurrence != Some(Occurrence::Last)).then(move || {
+        matching()
+            .enumerate()
+            .filter_map(move |(index, layer)| match occurrence {
+                Some(Occurrence::Nth(wanted)) if index.saturating_add(1) != wanted => None,
+                _ => Some(layer),
+            })
+    });
+    innermost.into_iter().chain(counted.into_iter().flatten())
 }
 
 pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
@@ -97,6 +173,29 @@ where
     matched
 }
 
+/// Whether the list a `field` selection reads from exists on the layers it
+/// selects. An existing-but-empty list yields no values yet still projects as
+/// `[]` rather than an absent field's null.
+pub(super) fn selected_list_present(context: &Context<'_>, field: &FieldRef) -> bool {
+    let FieldSource::NestedLayer {
+        protocol,
+        path,
+        selection,
+        occurrence,
+    } = &field.source
+    else {
+        return false;
+    };
+    if selection.is_none() {
+        return false;
+    }
+    layers(context, protocol.as_str(), *occurrence).any(|layer| {
+        layer
+            .field(path.root())
+            .is_some_and(|root| matches!(path.get(&root), Some(FieldValue::List(_))))
+    })
+}
+
 pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
 where
     F: FnMut(Cow<'_, FieldValue>) -> bool,
@@ -105,6 +204,7 @@ where
         FieldSource::NestedLayer {
             protocol,
             path,
+            selection,
             occurrence,
         } => {
             for layer in layers(context, protocol.as_str(), *occurrence) {
@@ -114,10 +214,20 @@ where
                 let Some(value) = path.get(&root) else {
                     continue;
                 };
-                if let Some(value) = project_nested(value, field.slice)
-                    && consume(value)
-                {
-                    return;
+                let Some(selection) = selection else {
+                    if let Some(value) = project_nested(value, field.slice)
+                        && consume(value)
+                    {
+                        return;
+                    }
+                    continue;
+                };
+                for element in selected_elements(value, selection) {
+                    if let Some(value) = project_nested(element, field.slice)
+                        && consume(value)
+                    {
+                        return;
+                    }
                 }
             }
         }
@@ -154,6 +264,28 @@ where
             }
         }
     }
+}
+
+/// The value inside each element a `[*]` or `[-1]` selects, in list order. A value that is
+/// not a list selects nothing, and the walk never goes beyond the already-decoded list.
+fn selected_elements<'a>(
+    list: &'a FieldValue,
+    selection: &'a ListSelection,
+) -> impl Iterator<Item = &'a FieldValue> {
+    let items: &[FieldValue] = match list {
+        FieldValue::List(items) => items,
+        _ => &[],
+    };
+    let picked = match selection.selector {
+        Selector::All => items,
+        Selector::Last => items.last().map_or(&[][..], std::slice::from_ref),
+    };
+    picked
+        .iter()
+        .filter_map(move |item| match &selection.element {
+            Some(path) => path.get(item),
+            None => Some(item),
+        })
 }
 
 fn is_set(value: &FieldValue) -> bool {
@@ -241,10 +373,32 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
                 Err(_) => FieldValue::Signed(i64::try_from(seconds).ok()?),
             }
         }
+        // The sub-second part of the same floored instant, so no rounding can carry into `time_epoch`.
+        FrameField::TimeNanoseconds => {
+            let (_, nanoseconds) = unix_floor(frame.timestamp?);
+            FieldValue::Unsigned(u64::from(nanoseconds))
+        }
         FrameField::Length => FieldValue::Unsigned(u64::from(frame.original_length())),
         FrameField::CapturedLength => FieldValue::Unsigned(u64::from(frame.captured_length())),
         FrameField::InterfaceId => FieldValue::Unsigned(u64::from(frame.interface?)),
         FrameField::LinkType => FieldValue::Unsigned(u64::from(frame.link_type.0)),
+        FrameField::Direction => FieldValue::Text(
+            match frame.direction? {
+                Direction::Inbound => "inbound",
+                Direction::Outbound => "outbound",
+                Direction::Unknown => "unknown",
+            }
+            .to_owned(),
+        ),
+        FrameField::Truncated => {
+            FieldValue::Bool(frame.captured_length() < frame.original_length())
+        }
+        FrameField::LayerCount => FieldValue::Unsigned(visible_layers(context).count() as u64),
+        FrameField::Protocols => FieldValue::List(
+            visible_layers(context)
+                .map(|layer| FieldValue::Text(layer.protocol_id().as_str().to_owned()))
+                .collect(),
+        ),
     })
 }
 

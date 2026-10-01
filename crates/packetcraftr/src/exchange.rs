@@ -24,6 +24,8 @@ pub use evidence::{Event, Response};
 pub(crate) use evidence::{Observed, into_sent_packet};
 pub(crate) use plan::Prepared;
 pub use report::{Aggregate, Collector, Report};
-pub use request::{Collection, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Request};
+pub use request::{
+    Collection, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Request, StopCondition,
+};
 pub(crate) use shutdown::CaptureGuard;
 pub(crate) use window::Window;

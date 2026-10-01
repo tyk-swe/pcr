@@ -76,6 +76,50 @@ fn repeated_layers_are_arrays_and_occurrence_selection_is_scalar() {
 }
 
 #[test]
+fn innermost_layers_list_selectors_and_frame_facts_project_as_values() {
+    let packet = "ipv4(src=192.0.2.1,dst=192.0.2.2)/ipv4(src=198.51.100.1,dst=198.51.100.2)/udp(sport=40000,dport=53)/dns(id=7,response=true,questions=[{name=\"example.test.\",type=1,class=1}],answers=[{owner=\"a.test.\",ttl=60,value={kind=a,address=192.0.2.8}}])";
+    let built = parse_json(&run_success(&[
+        "--output", "json", "build", "--packet", packet,
+    ]));
+    let hex = built["result"]["bytes_hex"].as_str().unwrap();
+    let result = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "dissect",
+        "--link-type",
+        "228",
+        "--hex",
+        hex,
+        "--field",
+        "ipv4#last.source",
+        "--field",
+        "ipv4#-1.destination",
+        "--field",
+        "dns.answers[*].owner",
+        "--field",
+        "dns.answers[-1].ttl",
+        "--field",
+        "frame.layer_count",
+        "--field",
+        "frame.protocols",
+        "--field",
+        "frame.truncated",
+    ]));
+    assert_eq!(
+        result["result"]["rows"][0]["values"],
+        serde_json::json!([
+            "198.51.100.1",
+            "198.51.100.2",
+            ["a.test."],
+            60,
+            4,
+            ["ipv4", "ipv4", "udp", "dns"],
+            false
+        ])
+    );
+}
+
+#[test]
 fn capture_projection_retains_positions_indexes_and_resource_failures() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/tls-handshake.pcapng");

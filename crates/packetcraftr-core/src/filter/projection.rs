@@ -5,7 +5,7 @@ use super::{
     Context, Error, Requirements,
     ast::{Op, Predicate},
     eval, parser,
-    path::{FieldRef, FieldSource},
+    path::{FieldRef, FieldSource, FrameField, Occurrence},
 };
 use crate::{field::FieldValue, registry::Registry};
 
@@ -80,12 +80,19 @@ impl Projection {
 
     pub(crate) fn selects_single_values(&self) -> impl Iterator<Item = bool> + '_ {
         self.fields.iter().map(|field| match &field.source {
+            // Decoded facts: a cut-off capture decodes fewer layers, so the value read is a prefix.
+            FieldSource::Frame(FrameField::Protocols | FrameField::LayerCount) => false,
             FieldSource::Frame(_) | FieldSource::Stream(_) => true,
-            FieldSource::NestedLayer { occurrence, .. } => occurrence.is_some(),
+            // A list selector or `#last` picks from what was decoded, so a cut-off capture may hide the real choice.
+            FieldSource::NestedLayer {
+                occurrence,
+                selection,
+                ..
+            } => matches!(occurrence, Some(Occurrence::Nth(_))) && selection.is_none(),
             FieldSource::Layer {
                 binding,
                 occurrence,
-            } => occurrence.is_some() && binding.fields().len() == 1,
+            } => matches!(occurrence, Some(Occurrence::Nth(_))) && binding.fields().len() == 1,
         })
     }
 
@@ -141,10 +148,19 @@ impl Projection {
             }
             row.push(match values.len() {
                 0 => {
-                    *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
-                    None
+                    // `[*]` reports the selected list itself, so a list that
+                    // exists but is empty projects `[]`; only a field or layer
+                    // that is absent reads as null.
+                    if field.selects_all() && eval::selected_list_present(context, field) {
+                        *remaining = remaining.checked_sub(2).ok_or_else(limit)?;
+                        Some(FieldValue::List(values))
+                    } else {
+                        *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
+                        None
+                    }
                 }
-                1 => values.pop(),
+                // `[*]` always reports a list, so a one-element list does not read as a bare value.
+                1 if !field.selects_all() => values.pop(),
                 _ => {
                     *remaining = remaining.checked_sub(values.len() + 1).ok_or_else(limit)?;
                     Some(FieldValue::List(values))
@@ -239,6 +255,35 @@ fn measure(value: &FieldValue, maximum: usize, depth: usize) -> Option<usize> {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn only_numbered_occurrences_and_capture_facts_select_single_values() {
+        let cases = [
+            ("frame.cap_len", true),
+            ("frame.truncated", true),
+            ("frame.layer_count", false),
+            ("frame.protocols", false),
+            ("vlan#1.vlan_id", true),
+            ("vlan.vlan_id", false),
+            ("vlan#last.vlan_id", false),
+            ("vlan#-1.vlan_id", false),
+            ("dns#1.answers[0].ttl", true),
+            ("dns.answers[0].ttl", false),
+            ("dns#last.answers[0].ttl", false),
+            ("dns#1.answers[-1].ttl", false),
+            ("dns#1.answers[*].ttl", false),
+        ];
+        let registry = crate::protocol::builtin::registry();
+        for (path, single) in cases {
+            let projection = Projection::compile([path], &registry)
+                .unwrap_or_else(|error| panic!("{path} must compile: {error}"));
+            assert_eq!(
+                projection.selects_single_values().collect::<Vec<_>>(),
+                [single],
+                "{path}"
+            );
+        }
+    }
 
     fn cell_len(value: &FieldValue) -> usize {
         match value {

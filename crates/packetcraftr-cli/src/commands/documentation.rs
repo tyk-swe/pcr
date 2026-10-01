@@ -10,8 +10,15 @@ use packetcraftr_core::error::{Classification, Kind};
 
 use self::arguments::Args;
 use crate::errors::{CliError, source_causes};
+use crate::output::contract::Format;
 
-pub(super) fn run(arguments: &Args) -> Result<(), CliError> {
+impl super::Generate for Args {
+    fn generate(self, _format: Format) -> Result<(), CliError> {
+        run(&self)
+    }
+}
+
+fn run(arguments: &Args) -> Result<(), CliError> {
     let completions = arguments.directory.join("completions");
     let man = arguments.directory.join("man");
     for directory in [&completions, &man] {

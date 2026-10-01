@@ -11,7 +11,8 @@ use super::{
 use crate::frame::Frame;
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap},
     io::{Read, Write},
     time::SystemTime,
 };
@@ -22,6 +23,19 @@ pub struct MergeSource<R> {
 }
 pub const MAX_MERGE_SOURCES: usize = 64;
 pub(super) const MAX_SOURCE_NAME_BYTES: usize = 4096;
+/// Largest per-source look-ahead window accepted for repairing timestamp inversions.
+pub const MAX_REORDER_FRAMES: usize = 65_536;
+
+/// How merged frames are sequenced across sources.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MergeOrder {
+    /// Interleave by timestamp; each source must already be ordered unless a reorder window is set.
+    #[default]
+    Chronological,
+    /// Write every frame of source 0, then source 1, and so on, keeping timestamps verbatim; the
+    /// output may be non-monotonic.
+    Append,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MergeLimits {
@@ -29,6 +43,10 @@ pub struct MergeLimits {
     pub max_sources: usize,
     /// Interfaces declared across every source; zero accepts only sources that declare none.
     pub max_interfaces: usize,
+    pub order: MergeOrder,
+    /// Per-source look-ahead window that repairs small timestamp inversions; zero disables it,
+    /// so the first frame older than its predecessor is refused. Only chronological merges use it.
+    pub max_reorder_frames: usize,
 }
 impl Default for MergeLimits {
     fn default() -> Self {
@@ -36,6 +54,8 @@ impl Default for MergeLimits {
             streams: Limits::default(),
             max_sources: MAX_MERGE_SOURCES,
             max_interfaces: super::DEFAULT_MAX_TOTAL_INTERFACES,
+            order: MergeOrder::default(),
+            max_reorder_frames: 0,
         }
     }
 }
@@ -46,6 +66,16 @@ impl MergeLimits {
             return Err(Error::MergeSources {
                 maximum: MAX_MERGE_SOURCES,
             });
+        }
+        if self.max_reorder_frames > MAX_REORDER_FRAMES {
+            return Err(Error::MergeOption(
+                "the reorder window exceeds the supported maximum",
+            ));
+        }
+        if self.order == MergeOrder::Append && self.max_reorder_frames > 0 {
+            return Err(Error::MergeOption(
+                "append order keeps timestamps verbatim and cannot reorder frames",
+            ));
         }
         Ok(())
     }
@@ -69,19 +99,44 @@ pub struct MergeReport {
 }
 struct Pending {
     frame: Frame,
+    /// One-based physical position within its source.
+    number: u64,
     time: SystemTime,
     description: Interface,
     section: Option<u64>,
     local: Option<u32>,
     global: u32,
 }
+/// Orders a source's look-ahead window so the heap pops its earliest frame, oldest position first.
+struct Windowed(Pending);
+impl PartialEq for Windowed {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+impl Eq for Windowed {}
+impl PartialOrd for Windowed {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Windowed {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (other.0.time, other.0.number).cmp(&(self.0.time, self.0.number))
+    }
+}
 struct State {
+    /// Timestamp of the last frame this source emitted.
     previous: Option<SystemTime>,
+    window: BinaryHeap<Windowed>,
+    exhausted: bool,
     interfaces: usize,
     endianness: Endianness,
 }
 
-/// Merges complete inputs into PCAPNG; ties retain source argument order and physical frame order.
+/// Merges complete inputs into PCAPNG. Chronological merges retain source argument order and
+/// physical frame order for equal timestamps; append merges write each source whole in argument
+/// order.
 pub fn merge<R: Read, W: Write>(
     sources: &mut [MergeSource<R>],
     output: &mut Writer<W>,
@@ -125,6 +180,8 @@ pub fn merge<R: Read, W: Write>(
             })?;
         states.push(State {
             previous: None,
+            window: BinaryHeap::new(),
+            exhausted: false,
             interfaces: source.reader.interfaces().len(),
             endianness,
         });
@@ -151,7 +208,7 @@ pub fn merge<R: Read, W: Write>(
         )?);
     }
     let mut mappings = HashMap::new();
-    while let Some((index, mut current)) = take_earliest(&mut pending) {
+    while let Some((index, mut current)) = take_next(&mut pending, limits.order) {
         let key = (index, current.global);
         let id = if let Some(id) = mappings.get(&key) {
             *id
@@ -200,16 +257,54 @@ pub fn merge<R: Read, W: Write>(
     Ok(report)
 }
 
-fn take_earliest(pending: &mut [Option<Pending>]) -> Option<(usize, Pending)> {
-    let (_, index) = pending
-        .iter()
-        .enumerate()
-        .filter_map(|(index, slot)| slot.as_ref().map(|pending| (pending.time, index)))
-        .min()?;
+fn take_next(pending: &mut [Option<Pending>], order: MergeOrder) -> Option<(usize, Pending)> {
+    let index = match order {
+        MergeOrder::Chronological => {
+            pending
+                .iter()
+                .enumerate()
+                .filter_map(|(index, slot)| slot.as_ref().map(|pending| (pending.time, index)))
+                .min()?
+                .1
+        }
+        MergeOrder::Append => pending.iter().position(Option::is_some)?,
+    };
     pending[index].take().map(|pending| (index, pending))
 }
 
+/// The next frame this source emits: the earliest of its look-ahead window, refilled first.
 fn advance<R: Read>(
+    index: usize,
+    source: &mut MergeSource<R>,
+    state: &mut State,
+    interfaces: &mut usize,
+    report: &mut MergeReport,
+    budget: &mut Budget,
+    limits: MergeLimits,
+) -> Result<Option<Pending>, Error> {
+    let window = limits.max_reorder_frames.max(1);
+    while !state.exhausted && state.window.len() < window {
+        match read_frame(index, source, state, interfaces, report, budget, limits)? {
+            Some(frame) => state.window.push(Windowed(frame)),
+            None => state.exhausted = true,
+        }
+    }
+    let Some(Windowed(next)) = state.window.pop() else {
+        return Ok(None);
+    };
+    if limits.order == MergeOrder::Chronological
+        && state.previous.is_some_and(|previous| next.time < previous)
+    {
+        return Err(Error::MergeClockRegression {
+            input: index,
+            frame: next.number,
+        });
+    }
+    state.previous = Some(next.time);
+    Ok(Some(next))
+}
+
+fn read_frame<R: Read>(
     index: usize,
     source: &mut MergeSource<R>,
     state: &mut State,
@@ -288,13 +383,6 @@ fn advance<R: Read>(
                 format: Format::PcapNg,
             }),
         })?;
-        if state.previous.is_some_and(|previous| time < previous) {
-            return Err(Error::MergeClockRegression {
-                input: index,
-                frame: next,
-            });
-        }
-        state.previous = Some(time);
         budget.charge(frame.captured_length())?;
         (report.frames, report.captured_bytes) = (budget.frames(), budget.captured_bytes());
         report.source_frames[index] = next;
@@ -310,6 +398,7 @@ fn advance<R: Read>(
             .clone();
         return Ok(Some(Pending {
             frame,
+            number: next,
             time,
             description,
             section,

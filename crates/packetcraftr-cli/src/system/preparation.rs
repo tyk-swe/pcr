@@ -93,7 +93,7 @@ pub(crate) fn prepare_live<R: LiveRequest>(
         &registry,
         core::packet::DEFAULT_MAX_LAYERS,
     )?;
-    request.set_template(axes.into_template(packet));
+    request.set_template(axes.into_template(packet, &registry)?);
     let policy = send.policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let count = request.budget_count()?;
@@ -327,6 +327,51 @@ mod tests {
         ]);
         assert_eq!(error.classification.code, "policy.destination_not_allowed");
         assert_eq!(error.exit_code(), 6);
+    }
+
+    #[test]
+    fn live_axes_resolve_protocol_selectors_against_the_recipe() {
+        let options = [
+            "--packet",
+            "vlan(vlan_id=7)/ipv4(dst=192.0.2.1)/udp(dport=9000)",
+            "--axis",
+            "UDP.dport=[1,2]",
+            "--axis",
+            "ipv4.ttl=[5]",
+        ];
+        for command in ["send", "exchange"] {
+            let (send, template) = live_arguments_with(command, &options);
+            let template = match command {
+                "send" => prepare_live(send, template, send_request())
+                    .map(|prepared| prepared.request.template),
+                _ => prepare_live(send, template, exchange_request())
+                    .map(|prepared| prepared.request.template),
+            }
+            .unwrap_or_else(|error| panic!("{command}: {}", error.message));
+            let packets = template
+                .expand(8)
+                .expect("expansion fits")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("axes apply");
+            let fields = packets
+                .iter()
+                .map(|packet| {
+                    (
+                        packet.layer(1).and_then(|layer| layer.field("ttl")),
+                        packet
+                            .layer(2)
+                            .and_then(|layer| layer.field("destination_port")),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let field = |ttl: u64, port: u64| {
+                (
+                    Some(core::field::FieldValue::Unsigned(ttl)),
+                    Some(core::field::FieldValue::Unsigned(port)),
+                )
+            };
+            assert_eq!(fields, [field(5, 1), field(5, 2)], "{command}");
+        }
     }
 
     #[test]

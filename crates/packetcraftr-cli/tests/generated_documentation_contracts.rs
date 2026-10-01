@@ -98,3 +98,53 @@ fn documentation_reports_an_io_failure_for_an_unwritable_directory() {
         "the I/O error appears only as the cause: {stderr}"
     );
 }
+
+#[test]
+fn topics_list_and_print_built_in_references_as_text() {
+    let listing = String::from_utf8(run_success(&["topics"]).stdout).unwrap();
+    for name in ["expressions", "filters", "formats", "exit-codes"] {
+        assert!(listing.contains(name), "{listing}");
+    }
+
+    let filters = String::from_utf8(run_success(&["topics", "filters"]).stdout).unwrap();
+    for operator in ["contains", "startswith", "endswith", "icontains", "iequals"] {
+        assert!(filters.contains(operator), "{operator}");
+    }
+    let expressions = String::from_utf8(run_success(&["topics", "expressions"]).stdout).unwrap();
+    assert!(expressions.contains("repeat(BYTE,COUNT)"));
+    let formats = String::from_utf8(run_success(&["topics", "formats"]).stdout).unwrap();
+    assert!(formats.contains("build") && formats.contains("pcapng"));
+    let codes = String::from_utf8(run_success(&["topics", "exit-codes"]).stdout).unwrap();
+    assert!(codes.contains("130 cancelled"));
+
+    let unknown = run(&["topics", "nope"]);
+    assert_eq!(unknown.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    for name in ["expressions", "filters", "formats", "exit-codes"] {
+        assert!(stderr.contains(name), "{stderr}");
+    }
+    let machine = run(&["--output", "json", "topics", "filters"]);
+    assert_eq!(machine.status.code(), Some(2));
+}
+
+#[test]
+fn topics_stay_outside_the_published_command_contract() {
+    let schema = serde_json::to_string(common::output_schema()).unwrap();
+    assert!(!schema.contains("\"topics\""));
+    assert!(
+        packetcraftr_cli::output::contract::Command::ALL
+            .iter()
+            .all(|command| command.as_str() != "topics")
+    );
+}
+
+#[test]
+fn build_read_and_dissect_help_point_at_the_filter_topic() {
+    for command in ["build", "read", "dissect"] {
+        let help = String::from_utf8(run_success(&[command, "--help"]).stdout).unwrap();
+        assert!(
+            help.contains("See `packetcraftr topics filters`"),
+            "{command}: {help}"
+        );
+    }
+}

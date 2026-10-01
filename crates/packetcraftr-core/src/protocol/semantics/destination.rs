@@ -76,9 +76,11 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::BsdLoop
         | BuiltinProtocol::BsdNull
         | BuiltinProtocol::Erspan
+        | BuiltinProtocol::Etherip
         | BuiltinProtocol::Ethernet
         | BuiltinProtocol::Geneve
         | BuiltinProtocol::Gre
+        | BuiltinProtocol::Gtpu
         | BuiltinProtocol::Ipv4
         | BuiltinProtocol::Ipv6
         | BuiltinProtocol::Ipv6DestinationOptions
@@ -101,18 +103,24 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         BuiltinProtocol::Dhcpv4
         | BuiltinProtocol::Dhcpv6
         | BuiltinProtocol::Dns
+        | BuiltinProtocol::Eapol
         | BuiltinProtocol::Esp
         | BuiltinProtocol::Icmpv4
         | BuiltinProtocol::Icmpv6
         | BuiltinProtocol::Igmp
+        | BuiltinProtocol::Lldp
         | BuiltinProtocol::Malformed
         | BuiltinProtocol::Ntp
         | BuiltinProtocol::Padding
         | BuiltinProtocol::Raw
         | BuiltinProtocol::Sctp
+        | BuiltinProtocol::Stp
+        | BuiltinProtocol::Syslog
         | BuiltinProtocol::Tcp
+        | BuiltinProtocol::Tftp
         | BuiltinProtocol::Http
-        | BuiltinProtocol::Tls => false,
+        | BuiltinProtocol::Tls
+        | BuiltinProtocol::Vrrp => false,
     }
 }
 

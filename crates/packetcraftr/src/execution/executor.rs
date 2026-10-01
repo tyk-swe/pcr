@@ -87,6 +87,7 @@ where
                     timeout: overrides.timeout,
                     max_template_packets: overrides.max_template_packets,
                     collection,
+                    stop: crate::exchange::StopCondition::Window,
                 },
                 Some(matches_request),
                 stop_after_response,

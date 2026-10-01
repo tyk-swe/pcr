@@ -15,7 +15,9 @@ use crate::target::Target;
 use super::Error;
 use super::error::Probes;
 use crate::probe::Transport;
-use crate::traceroute::{DEFAULT_MAX_UNDECODED_FRAMES, MAX_PROBES, MAX_PROBES_PER_HOP};
+use crate::traceroute::{
+    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DSCP, MAX_PAYLOAD_SIZE, MAX_PROBES, MAX_PROBES_PER_HOP,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -82,6 +84,12 @@ pub struct Request {
     /// this to be absent.
     pub destination_port: Option<u16>,
     pub source_port: Option<u16>,
+    /// Zero bytes appended to every UDP or ICMP echo probe; TCP probes require 0.
+    pub payload_size: u16,
+    /// Sets the IPv4 Don't Fragment flag on every probe; an IPv6 destination is refused.
+    pub dont_fragment: bool,
+    /// Differentiated Services code point, `0..=63`.
+    pub dscp: u8,
     pub first_hop: u8,
     pub max_hops: u8,
     pub probes_per_hop: u32,
@@ -136,6 +144,26 @@ impl Request {
             });
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
+        if self.payload_size > MAX_PAYLOAD_SIZE {
+            return Err(Error::InvalidLimit {
+                field: "payload_size",
+                value: u64::from(self.payload_size),
+                reason: format!("must be within 0..={MAX_PAYLOAD_SIZE}"),
+            });
+        }
+        if self.dscp > MAX_DSCP {
+            return Err(Error::InvalidLimit {
+                field: "dscp",
+                value: u64::from(self.dscp),
+                reason: format!("must be within 0..={MAX_DSCP}"),
+            });
+        }
+        if self.payload_size > 0 && self.strategy == Transport::Tcp {
+            return Err(Error::InvalidProbeOption {
+                option: "payload_size",
+                reason: "TCP SYN probes carry no payload".to_owned(),
+            });
+        }
         match (self.strategy, self.destination_port) {
             (Transport::Udp | Transport::Tcp, None) => {
                 return Err(Error::InvalidPort {

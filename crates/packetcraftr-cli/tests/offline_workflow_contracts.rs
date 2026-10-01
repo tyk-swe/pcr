@@ -753,7 +753,10 @@ fn expert_text_lists_one_count_line_per_code_before_the_summary() {
         .collect();
     assert_eq!(
         expected,
-        ["code=tcp.retransmission_conflicting findings=1"],
+        [
+            "code=tcp.not_closed_at_end findings=1",
+            "code=tcp.retransmission_conflicting findings=1"
+        ],
         "the fixture's aggregate code count is part of this contract",
     );
 
@@ -763,7 +766,7 @@ fn expert_text_lists_one_count_line_per_code_before_the_summary() {
     let summary = lines.last().expect("text output ends with a summary");
     assert_eq!(
         *summary,
-        "found 1 finding(s) (1 error(s), 0 warning(s), 0 note(s)) in 5 of 5 frame(s)",
+        "found 2 finding(s) (1 error(s), 0 warning(s), 1 note(s)) in 5 of 5 frame(s)",
     );
     let reported: Vec<String> = lines
         .iter()

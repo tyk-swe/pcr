@@ -60,6 +60,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for ExchangeExecutor<'_, P
                     timeout: case.timeout,
                     max_template_packets: 1,
                     collection: self.collection.clone(),
+                    stop: crate::exchange::StopCondition::Window,
                 },
                 None,
                 None,

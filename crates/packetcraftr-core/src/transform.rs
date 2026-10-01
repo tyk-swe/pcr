@@ -3,11 +3,13 @@
 
 //! Explicit, bounded transformations of complete packet bytes.
 
+mod address_map;
 mod error;
 mod fields;
 mod fragment;
 mod rewrite;
 pub mod rules;
+pub use address_map::{AddressMap, IpMapping, MAX_ADDRESS_MAP_ENTRIES, MacMapping};
 pub use error::{Error, InvalidInput, Limit, Unsupported};
 pub use fields::{
     ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEditOutcome, FieldEdits,

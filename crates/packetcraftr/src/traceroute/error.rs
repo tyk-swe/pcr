@@ -27,6 +27,11 @@ pub enum Error {
     InvalidPort { message: String },
     #[error("invalid traceroute source port: must be non-zero and is only supported for UDP/TCP")]
     InvalidSourcePort,
+    #[error("invalid traceroute probe option {option}: {reason}")]
+    InvalidProbeOption {
+        option: &'static str,
+        reason: String,
+    },
     #[error("traceroute timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("traceroute duration {value:?} is invalid; maximum is {maximum:?}")]
@@ -79,12 +84,13 @@ impl Classified for Error {
             Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }
             | Self::InvalidSourcePort
+            | Self::InvalidProbeOption { .. }
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.traceroute_limit",
                 Kind::Usage,
                 Some(
-                    "use finite non-zero hops, attempts, timeouts, rates, ports, and evidence limits",
+                    "use finite non-zero hops, attempts, timeouts, rates, ports, evidence limits, and probe options valid for the strategy and address family",
                 ),
             ),
             Self::Authorization(source)

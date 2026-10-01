@@ -306,6 +306,7 @@ mod tests {
             parent: None,
             registry,
             network: None,
+            hop_limit: None,
             discriminator: None,
         }
     }

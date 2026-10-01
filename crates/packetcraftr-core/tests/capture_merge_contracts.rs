@@ -84,24 +84,6 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
         capture_file::merge(&mut sources, &mut output, Default::default()),
         Err(capture_file::Error::MergeClockRegression { input: 0, frame: 2 })
     ));
-    let mut writer = Writer::pcapng(Vec::new()).unwrap();
-    writer.add_interface(LinkType::ETHERNET).unwrap();
-    let mut bytes = writer.into_inner();
-    for field in [3u32, 20, 1] {
-        bytes.extend(field.to_le_bytes());
-    }
-    bytes.extend([1, 0, 0, 0]);
-    bytes.extend(20u32.to_le_bytes());
-    let mut sources = [MergeSource {
-        name: "untimed".to_owned(),
-        reader: Reader::new(Cursor::new(bytes)).unwrap(),
-    }];
-    let mut output = Writer::pcapng(Vec::new()).unwrap();
-    assert!(matches!(
-        capture_file::merge(&mut sources, &mut output, Default::default()),
-        Err(capture_file::Error::MergeSource { source, .. })
-            if matches!(*source, capture_file::Error::TimestampUnavailable { .. })
-    ));
     let mut sources = [source("a", &[(1, 1, 0), (2, 2, 1)])];
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     let frame_limit = MergeLimits {
@@ -201,5 +183,175 @@ fn map_and_merge_refuse_only_a_declared_fcs_with_one_reason_for_both_formats() {
             assert_eq!(mapped.unwrap().frames_read, 1);
             assert_eq!(merged.unwrap().frames, 1);
         }
+    }
+}
+
+fn untimed_source() -> MergeSource<Cursor<Vec<u8>>> {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer.add_interface(LinkType::ETHERNET).unwrap();
+    let mut bytes = writer.into_inner();
+    for field in [3u32, 20, 1] {
+        bytes.extend(field.to_le_bytes());
+    }
+    bytes.extend([1, 0, 0, 0]);
+    bytes.extend(20u32.to_le_bytes());
+    MergeSource {
+        name: "untimed".to_owned(),
+        reader: Reader::new(Cursor::new(bytes)).unwrap(),
+    }
+}
+
+/// Merged `(payload byte, seconds)` pairs, or the merge error.
+fn merged_frames(
+    mut sources: Vec<MergeSource<Cursor<Vec<u8>>>>,
+    limits: MergeLimits,
+) -> Result<Vec<(u8, u64)>, capture_file::Error> {
+    let mut output = Writer::pcapng(Vec::new()).unwrap();
+    capture_file::merge(&mut sources, &mut output, limits)?;
+    let mut reader = Reader::new(Cursor::new(output.into_inner())).unwrap();
+    let mut frames = Vec::new();
+    while let Some(frame) = reader.next_frame().unwrap() {
+        let seconds = frame
+            .timestamp
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        frames.push((frame.bytes()[0], seconds));
+    }
+    Ok(frames)
+}
+
+fn append() -> MergeLimits {
+    MergeLimits {
+        order: capture_file::MergeOrder::Append,
+        ..Default::default()
+    }
+}
+
+fn reorder(frames: usize) -> MergeLimits {
+    MergeLimits {
+        max_reorder_frames: frames,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn append_concatenates_sources_without_interleaving_or_changing_timestamps() {
+    let sources = || {
+        vec![
+            source("a", &[(10, 1, 0), (20, 2, 0)]),
+            source("b", &[(1, 3, 0), (5, 4, 1)]),
+        ]
+    };
+    assert_eq!(
+        merged_frames(sources(), append()).unwrap(),
+        [(1, 10), (2, 20), (3, 1), (4, 5)]
+    );
+    assert_eq!(
+        merged_frames(sources(), MergeLimits::default()).unwrap(),
+        [(3, 1), (4, 5), (1, 10), (2, 20)]
+    );
+}
+
+#[test]
+fn append_accepts_inverted_input_that_chronological_merge_refuses() {
+    let inverted = || vec![source("bad", &[(5, 1, 0), (2, 2, 0)])];
+    assert_eq!(
+        merged_frames(inverted(), append()).unwrap(),
+        [(1, 5), (2, 2)]
+    );
+    assert!(matches!(
+        merged_frames(inverted(), MergeLimits::default()),
+        Err(capture_file::Error::MergeClockRegression { input: 0, frame: 2 })
+    ));
+}
+
+#[test]
+fn untimestamped_frames_are_refused_in_both_orders_and_budgets_span_append_sources() {
+    for limits in [append(), MergeLimits::default()] {
+        assert!(matches!(
+            merged_frames(vec![untimed_source()], limits),
+            Err(capture_file::Error::MergeSource { source, .. })
+                if matches!(*source, capture_file::Error::TimestampUnavailable { .. })
+        ));
+    }
+    let limits = MergeLimits {
+        streams: capture_file::Limits {
+            max_frames: 3,
+            max_bytes: 100,
+        },
+        ..append()
+    };
+    assert!(matches!(
+        merged_frames(
+            vec![
+                source("a", &[(1, 1, 0), (2, 2, 0)]),
+                source("b", &[(1, 3, 0), (2, 4, 0)])
+            ],
+            limits
+        ),
+        Err(capture_file::Error::FrameLimitExceeded { limit: 3, .. })
+    ));
+}
+
+#[test]
+fn reorder_window_repairs_bounded_inversions_in_one_source() {
+    let inverted = || vec![source("one", &[(1, 1, 0), (3, 3, 0), (2, 2, 0), (4, 4, 0)])];
+    assert_eq!(
+        merged_frames(inverted(), reorder(2)).unwrap(),
+        [(1, 1), (2, 2), (3, 3), (4, 4)]
+    );
+    assert!(matches!(
+        merged_frames(inverted(), reorder(1)),
+        Err(capture_file::Error::MergeClockRegression { input: 0, frame: 3 })
+    ));
+    let far = vec![source("far", &[(3, 1, 0), (4, 2, 0), (1, 3, 0), (2, 4, 0)])];
+    assert!(matches!(
+        merged_frames(far, reorder(2)),
+        Err(capture_file::Error::MergeClockRegression { input: 0, frame: 3 })
+    ));
+}
+
+#[test]
+fn reorder_window_merges_inverted_sources_globally_with_source_then_physical_ties() {
+    let sources = vec![
+        source("left", &[(2, 1, 0), (1, 2, 0), (4, 3, 0), (4, 4, 0)]),
+        source("right", &[(3, 5, 0), (2, 6, 0), (4, 7, 0)]),
+    ];
+    assert_eq!(
+        merged_frames(sources, reorder(2)).unwrap(),
+        [(2, 1), (1, 2), (6, 2), (5, 3), (3, 4), (4, 4), (7, 4)]
+    );
+}
+
+#[test]
+fn reorder_window_reads_stay_within_the_stream_byte_budget_and_the_window_has_a_maximum() {
+    // Frames are charged as they are read into the window, so the cumulative budget bounds it.
+    let limits = MergeLimits {
+        streams: capture_file::Limits {
+            max_frames: 100,
+            max_bytes: 2,
+        },
+        ..reorder(4)
+    };
+    assert!(matches!(
+        merged_frames(
+            vec![source("a", &[(1, 1, 0), (2, 2, 0), (3, 3, 0), (4, 4, 0)])],
+            limits
+        ),
+        Err(capture_file::Error::StreamByteLimitExceeded { limit: 2, .. })
+    ));
+    for invalid in [
+        reorder(capture_file::MAX_REORDER_FRAMES + 1),
+        MergeLimits {
+            max_reorder_frames: 1,
+            ..append()
+        },
+    ] {
+        assert!(matches!(
+            merged_frames(vec![source("a", &[(1, 1, 0)])], invalid),
+            Err(capture_file::Error::MergeOption(_))
+        ));
     }
 }

@@ -670,6 +670,31 @@ All notable changes to PacketcraftR are documented here. The format follows
   equalled `frame.interface`; read `evidence.frame.interface`. Replay output,
   error codes, and capture bytes are unchanged. See
   `docs/migration-unreleased.md`.
+- New public struct fields break struct literals outside the crate.
+  `capture_file::MergeLimits` gains `order: MergeOrder` and
+  `max_reorder_frames: usize` (end a literal with `..Default::default()`),
+  `transform::rules::Rule` gains `map: Option<AddressMap>` (it has no
+  `Default`, so set `map: None`),
+  `codec::LayerDecodeContext` gains `hop_limit: Option<u8>`, the TTL or hop
+  limit of the enclosing IP header (`None` when unknown), and
+  `expression::Limits` gains `max_generated_bytes` (end a literal with
+  `..Limits::default()`). Several of these types are themselves new since
+  0.5.0-beta.3. See `docs/migration-unreleased.md`.
+- The live request types gain the fields behind the new options.
+  `traceroute::Request` and `traceroute::Probe` gain `payload_size: u16`,
+  `dont_fragment: bool`, and `dscp: u8`; `exchange::Request` gains `stop:
+  exchange::StopCondition` (`Window` keeps the previous behavior); and
+  `replay::Options` gains `max_gap: Option<Duration>` (`None` keeps it).
+  Struct literals outside the crate must name the new fields. See
+  `docs/migration-unreleased.md`.
+- `protocol::BuiltinProtocol` is not `#[non_exhaustive]` and gains `Eapol`,
+  `Etherip`, `Gtpu`, `Lldp`, `Stp`, `Syslog`, `Tftp`, and `Vrrp`, so exhaustive
+  matches need new arms. `protocol::network::ndp::MessageOption` is now
+  `#[non_exhaustive]` and gains typed variants for the Prefix Information,
+  Redirected Header, MTU, Route Information, and RDNSS options (kinds 3, 4, 5,
+  24, and 25), which decoded as `MessageOption::Other` before when they fit
+  their layout; `MessageOption::value()` returns an owned `Bytes` instead of
+  `&Bytes`. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -1035,6 +1060,216 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `filter::Requirements::union` combines two sets of filter requirements, so a
   caller that needs both a filter's and a projection's context no longer merges
   the four flags by hand.
+- Link-layer control codecs, each bound to its standard parent and listed by
+  `protocols` (build, dissect, and exact round trip): `stp` for IEEE
+  802.1D/802.1w BPDUs (configuration, topology change notification, and rapid
+  configuration) under LLC SAP 0x4242, with typed bridge IDs, flags, and timers
+  and `decode.stp_*` / `build.stp_*` diagnostics that strict builds refuse;
+  `lldp` at EtherType 0x88cc under Ethernet, VLAN, QinQ, SNAP, and Linux cooked
+  captures, which keeps the TLV chain verbatim (`Lldp::tlv_iter`) and reports
+  mandatory-TLV order, truncated TLVs, a missing End of LLDPDU TLV, a Time To
+  Live value that is not 2 bytes, and bytes after the End TLV as
+  `decode.lldp_*` / `build.lldp_*` diagnostics; and `eapol` (IEEE 802.1X) at
+  EtherType 0x888e with a derived body length and the EAP or key body carried
+  as a raw layer, where a declared length past the frame is kept as a malformed
+  layer. STP and EAPOL accept Ethernet padding after their self-delimiting
+  bodies. Body fields that a Topology Change Notification or unknown BPDU type
+  does not carry read as their defaults and are never encoded.
+- `vrrp` codec for VRRP versions 2 and 3, bound to IP protocol 112, with
+  checksum, TTL, destination, address-count, length, and version diagnostics
+  (`decode.vrrp_*`, `build.vrrp_*`). A decoded message rebuilds to the same
+  bytes, including a missing or short version 2 authentication trailer and
+  version 2 over IPv6 in permissive mode; strict builds refuse version 2 over
+  IPv6.
+- `protocol::network::ndp` types Router Solicitation, Router Advertisement, and
+  Redirect messages (`RouterSolicitation`, `RouterAdvertisement`, `Redirect`)
+  and the Prefix Information, Redirected Header, MTU, Route Information, and
+  RDNSS options as typed values, with `to_icmpv6`. Unmodelled options and
+  options whose length does not fit their layout stay `MessageOption::Other`,
+  so a decoded body still re-encodes byte for byte.
+- `protocol::network::mld` and `protocol::network::igmpv3` type MLDv1 and MLDv2
+  messages (Query, Report, and Done, with MLDv2 multicast address records) and
+  IGMPv3 membership queries and reports (with group records) as helpers over
+  the generic `Icmpv6` and `Igmp` layers, with bounded record and source
+  counts. Like the NDP helpers, they are not registered layers, so dissection
+  output is unchanged.
+- `etherip` codec for EtherIP (IP protocol 97, RFC 3378) carrying an Ethernet
+  frame, plus bindings for IP protocol 137 (MPLS-in-IP) and 143 (Ethernet
+  next header) and UDP port 6635 (MPLS-in-UDP).
+- `gtpu` codec for GTP-U v1 on UDP 2152. A G-PDU decodes its inner IPv4 or IPv6
+  packet by the payload's first nibble, while echo and other message types keep
+  their payload as a raw layer. Optional header fields and extension-header
+  bytes stay verbatim, and bytes after the declared length are accepted as
+  padding that rebuilds strictly.
+- `tftp` codec (RFC 1350 and the RFC 2347 options) on UDP 69 and `syslog` codec
+  (RFC 5424 and RFC 3164) on UDP 514. Both keep their strings as raw bytes, so
+  wire bytes, trailing bytes, and malformed input are preserved. TFTP transfer
+  ports are ephemeral, so decode DATA and ACK traffic with `--decode-as
+  udp.port=N:tftp`.
+- Display filters: quoted text accepts the escapes `\n`, `\r`, `\t`, `\0`,
+  `\\`, `\"`, and ASCII `\xNN`, and `b"..."` byte-string literals carry
+  arbitrary bytes, so `raw.bytes contains b"\x16\x03\x01"` and `raw.bytes
+  contains "\r\n\r\n"` work. A non-ASCII escape in plain text is a syntax error
+  that names its offset. `verify-forwarding --expect` values take the same
+  literals.
+- Display filters: `field & MASK` tests the bits of an unsigned field, alone to
+  mean the masked value is nonzero or before a comparison, as in `tcp.flags &
+  0x12 == 0x12`. A mask on a field that is not unsigned is a compile error.
+- Display filters: inclusive `A..B` range literals of unsigned numbers, IPv4
+  addresses, or IPv6 addresses work with `==`, `!=`, `in`, and as set members
+  (`udp.dstport in 1024..65535`, `ip.src in 192.0.2.1..192.0.2.50`). Reversed,
+  mixed-kind, and malformed ranges are compile errors with offsets, and
+  `verify-forwarding --expect` accepts ranges.
+- Display filters: the `startswith`, `endswith`, `icontains`, and `iequals` text
+  operators work on text, bytes, MAC, and list fields (`dns.qname endswith
+  ".example.com."`). A list is searched element by element, and case folding
+  is ASCII only. Known limits: these operators and `contains` compile on a list
+  of numbers or addresses such as `dns.qtype` or `tls.cipher_suites` but never
+  match, because the field schema does not record element kinds, and a list of
+  objects such as `tcp.options` or `dns.questions` is a compile error.
+- Display filters, projections, and forwarding rules accept `[*]` (every
+  element) and `[-1]` (the last element) after a list field, as in
+  `dns.answers[*].type == 1` and `dns.answers[-1].ttl > 20`, and `#last` or
+  `#-1` for the innermost matching layer, as in `ipv4#last.destination`. A
+  `[*]` projection column is always a list. Forwarding verification never
+  establishes a violation through these selectors on a truncated or incompletely
+  decoded capture.
+- Display filters: `len(field)` is the size of a bytes, text, MAC, or address
+  value (or of each element of a list), and `count(field)` is the number of
+  elements in a whole list, as in `len(raw.bytes) > 1400` and
+  `count(dns.answers) == 0`. They are functions only when `(` follows the word
+  directly (the name is case-insensitive), so `len (raw.bytes)` is an unknown
+  field. `len(frame.protocols)` is refused; use `count(frame.protocols)` or
+  `frame.layer_count`.
+- Display filters, projections, and forwarding checks read the frame facts
+  `frame.time_nsec`, `frame.direction`, `frame.truncated`, `frame.layer_count`,
+  and `frame.protocols`. `frame.layer_count` and `frame.protocols` come from
+  what the decoder produced, so forwarding verification treats them as
+  unevaluable on a truncated or incompletely decoded capture, while
+  `frame.time_nsec`, `frame.direction`, and `frame.truncated` cannot name
+  forwarding identity or preservation fields. `frame.reassembled` is not
+  supported.
+- `expert` reports TCP findings that need more than one frame:
+  `tcp.syn_retransmission`, `tcp.connection_refused`,
+  `tcp.handshake_unanswered`, `tcp.synack_mismatch`, `tcp.not_closed_at_end`
+  (Info), `tcp.out_of_order`, `tcp.fast_retransmission`,
+  `tcp.ack_unseen_segment`, `tcp.data_after_close`, `tcp.fin_retransmission`,
+  and `tcp.window_update` (Info). A SYN-ACK that acknowledges the wrong
+  sequence leaves the SYN pending, so a later correct SYN-ACK is still seen and
+  a SYN that never gets a valid answer reports `tcp.handshake_unanswered`.
+  Known limits: `tcp.out_of_order` watches at most four open gaps per direction
+  and a fifth fills silently; a handshake that follows an idle expiry is judged
+  against the expired SYN; and findings are judged only on frames that pass
+  `--filter`, so a filter that keeps one direction of a conversation can report
+  `tcp.handshake_unanswered` or `tcp.not_closed_at_end` for a handshake the
+  full capture completed.
+- `merge --order append` writes each input whole in argument order and keeps
+  every timestamp verbatim, so captures that regress in time (such as
+  `examples/captures/clock-regression.pcap`) merge without error and the output
+  may be non-monotonic. The default `--order chronological` keeps refusing a
+  regressing input with `packet.capture_merge_order`. Core exposes
+  `capture_file::MergeOrder`.
+- `merge --max-reorder-frames N` (at most 65536,
+  `capture_file::MAX_REORDER_FRAMES`) gives each input a bounded look-ahead
+  window that repairs small timestamp inversions, such as those of multi-queue
+  captures, before the chronological merge; a frame displaced beyond the window
+  is still refused. It is accepted with a single input, which it then sorts,
+  and conflicts with `--order append`. Frames read into the window count
+  against the existing frame and byte budgets.
+- `rewrite --map-ip OLD=NEW` and `--map-mac OLD=NEW` remap addresses
+  many-to-many. An IP side is an address or an equal-length prefix whose host
+  bits carry over (`192.0.2.0/24=198.51.100.0/24`). Entries repeat, at most
+  4096 across both options, overlapping sources are refused, the outer source
+  and destination are matched independently, and lengths and checksums are
+  repaired. The options conflict with `--rules-file` and the fixed address
+  flags. Core exposes `transform::AddressMap`, `IpMapping`, and `MacMapping`,
+  and `Rules::with_address_map`.
+- `rewrite --set` and rewrite/v2 `assign` accept `ipv4.identification`,
+  `ipv4.dscp_ecn`, `tcp.window`, `icmp.identifier` and `icmp.sequence` (and
+  the `icmpv6` forms), `dhcpv4.transaction_id`, `vxlan.vni`, and `geneve.vni`.
+  IPv4 header, TCP, UDP, ICMP, and ICMPv6 checksums are repaired, or left alone
+  under `--checksum-mode preserve`, and a value wider than its field is a
+  usage error.
+- `read --normalize` with `--output pcap` writes a classic PCAP from PCAP or
+  PCAPNG input. It keeps the link type, snapshot length, original lengths, and
+  the nanosecond or microsecond timestamp resolution of the source, and refuses
+  without rounding what classic PCAP cannot hold: more than one interface, a
+  packet direction, a missing timestamp, other timestamp resolutions, a
+  timestamp the resolution cannot represent exactly, a frame longer than the
+  snapshot length, and an empty selection.
+- `read --frames RANGES` (such as `2-3,10` or `10-`) and `--every N` select
+  frames by their one-based source position in every `read` path: stream,
+  `--field`, `--normalize`, and capture output. Skipped frames still count
+  against the input budgets, and `frame.number` and stream numbering keep the
+  source position.
+- `dissect --hex -` reads hexadecimal text from redirected stdin and `dissect
+  --hex-file PATH` reads it from a file. Both accept `0x` prefixes and
+  whitespace, colon, or dash separators, so `packetcraftr --output hex build
+  ... | packetcraftr dissect --hex -` works. The text is read through a bound
+  derived from `--max-packet-size`, and text that decodes to no bytes is
+  rejected as `cli.input_source` (exit 2).
+- `--tree` on `dissect`, `read --dissect`, and `capture --dissect` prints each
+  layer's fields as an indented tree in text output. Decoded wire values are
+  shown unchanged, derivable fields such as lengths and checksums are marked,
+  and the text is escaped and bounded by `--max-tree-bytes`. `--tree` without
+  `--dissect` (`cli.tree_requires_dissect`) or with a machine output format
+  (`cli.tree_unsupported_format`) is a usage error.
+- `traceroute --payload-size`, `--dont-fragment`, and `--dscp` shape the
+  probes: zero bytes appended to UDP and ICMP echo probes (up to 9000), the
+  IPv4 Don't Fragment flag, and the DSCP codepoint of the IPv4 TOS or IPv6
+  traffic class. The defaults keep the previous probe, TCP probes carry no
+  payload, and `--dont-fragment` is refused for an IPv6 destination.
+- `exchange --stop-when-answered` ends the response window once every request
+  has at least one retained response, instead of waiting out `--timeout-ms`.
+- `replay --max-gap-ms` clamps each captured inter-frame gap, after `--speed`
+  scaling, so long idle periods do not stall a replay. It applies to original
+  and scaled timing and conflicts with `--rate`, `--bps`, and `--timing
+  immediate`, which is rejected before any input is opened.
+- `packetcraftr build --session tcp|udp` expands a client-to-server recipe into
+  a deterministic conversation: a TCP handshake, MSS-sized request segments
+  with their ACKs, an optional response from `--session-response-file`, and a
+  FIN, RST, or open close, or a UDP request with one reply frame. The other
+  options are `--session-mss`, `--session-close`, `--session-client-isn`,
+  `--session-server-isn`, and `--session-step-ns`. Output is at most 4096
+  frames, byte-identical for equal inputs, and every frame, including capture
+  timestamp representability, is checked before any output is written. A TCP
+  conversation acknowledges after `(window - 1) / mss` segments, so the data in
+  flight stays below the advertised window and `expert` reports no
+  `tcp.window_full`. A UDP request keeps its typed payload layers, while a TCP
+  request and every response are raw bytes: strict mode refuses a raw reply
+  from a registered UDP port such as 53 (use `--mode permissive`, which warns),
+  an empty `--session-response-file` is an error, and a `--session-step-ns`
+  whose timestamp the capture format cannot represent exits 3 with
+  `packet.capture_file` and empty stdout. Core exposes the builder as
+  `packetcraftr_core::conversation` (`Conversation`, `Options`, `Protocol`,
+  `Close`, and `Error`).
+- `packetcraftr topics [NAME]` prints built-in references for packet
+  expressions, display filters, output formats, and exit codes. Embedded
+  examples are checked against the real parsers in tests.
+- `fuzz` rebuilds each decoded case, offline and live, and reports
+  `fuzz.roundtrip_mismatch` (the first differing byte, with its layer and
+  field), `fuzz.roundtrip_unbuildable`, or `fuzz.roundtrip_skipped` when a codec
+  decodes something its own encoder does not reproduce. Lossy protocols report
+  at info severity, malformed layers are not checked, and the rebuild is
+  bounded by the campaign byte budget and never retained. A live case keeps the
+  verdict reached when it was prepared. `fuzz::is_roundtrip_diagnostic`
+  identifies these diagnostics.
+- Packet expressions accept the byte generators `repeat(BYTE,COUNT)`,
+  `zeros(COUNT)`, and `cyclic(LENGTH)`, and `0b`, `0o`, and underscore-separated
+  integer literals, so `raw(bytes=repeat(0x41,1400))` builds a 1400-byte
+  payload. Generated bytes share one budget per expression,
+  `expression::Limits::max_generated_bytes` (1 MiB by default), which two
+  `build --set` overrides spend together.
+- Layer fields can be selected by protocol name, as
+  `<protocol>[#occurrence].<field>` (`ipv4#2.ttl` is the inner IPv4 header),
+  wherever a zero-based `LAYER.FIELD` was accepted: `--axis` on `build`,
+  `send`, and `exchange`, `--payload-file`, and `fuzz --field`, which also
+  accepts `*` for the protocol or the field.
+  Selectors are case-insensitive and resolve once against the recipe, so
+  reports and reproductions keep numeric layer indexes. The new repeatable
+  `build --set SELECTOR=VALUE` overrides recipe fields (at most 64, in order)
+  before axes expand. Core exposes the grammar as the `layer::selector` module,
+  `fuzz::Target::select`, and `document::payload::Target::resolve`.
 
 ### Changed
 
@@ -1437,6 +1672,73 @@ All notable changes to PacketcraftR are documented here. The format follows
   a matched response without a timestamp or slower than the case timeout,
   returned after the duration expired, reports `internal.fuzz_evidence` where
   it reported `policy.fuzz_resource_limit`.
+- `fuzz` Boundary mutations probe the target field's real accepted width and
+  use its zero, one, half-range, maximum minus one, maximum, and maximum plus
+  one (kept as rejected-input evidence), where a fixed list of 0, 1, and the
+  8-, 16-, 32-, and 64-bit maximums applied before. A seed or `--first-case`
+  that reproduced a Boundary case on an earlier build may now yield different
+  values; Random, BitFlip, and Malformed reproductions are unchanged. Probing
+  is capped at 64 set attempts per field and falls back to the fixed extremes
+  for a limit that needs more, such as an exotic non-power-of-two one; no
+  built-in field does.
+- UDP ports 5353 (mDNS) and 5355 (LLMNR) dissect as `dns`, so the `dns`
+  command types its probes to ports 53, 5353, and 5355 alike as DNS. A
+  record whose class carries the mDNS cache-flush bit (the top bit, RFC 6762)
+  decodes its A, AAAA, SRV, TXT, and other typed IN rdata instead of unknown
+  rdata, and the record keeps its full 16-bit class. Datagrams on UDP 69, 514,
+  2152, 5353, 5355, and 6635 and on IP protocols 97, 137, and 143 that decoded
+  as `raw` now decode as typed layers, so `dissect` and `read --dissect` output
+  for such captures changes, and so do filters that matched their raw payloads.
+- The `--decode-as` UDP allowlist and its help text now also accept `gtpu`,
+  `tftp`, and `syslog`. Generated man pages and shell
+  completions change with the help text.
+- Setting a `syslog` layer's `format` moves the header defaults that were left
+  untouched: switching to `rfc3164` clears the RFC 5424 version and nil fields,
+  so `syslog(format="rfc3164", message="...")` builds without blanking each
+  header field, and switching back after a real change restores them. Values
+  set explicitly stay, and a legacy message still refuses them.
+- Analysis does not scope GTP-U or EtherIP inner flows by TEID or tunnel: they
+  have no encapsulation identifier, which needs an output schema change.
+  Identical inner tuples carried between the same outer IP pair in different
+  TEIDs or EtherIP tunnels share one scope and stream. Known limitation.
+- `dissect --link-type` accepts link types by name or number through the
+  parser `build --link-type` uses: `null`, `bsd-null`, `ethernet`, `bsd-raw`,
+  `raw`, `loop`, `bsd-loop`, `linux-sll`, `sll`, `ipv4`, `ip`, `ipv6`,
+  `linux-sll2`, and `sll2`; any other decimal DLT is still a number.
+  `build --link-type` validates its value while arguments are parsed, so an
+  unknown name is a `cli.error` usage failure (exit 2) listing the accepted
+  names, and it is no longer reported as "--link-type requires PCAP or PCAPNG
+  output" for a non-capture output.
+- `read --normalize` with `--output pcap` converts to classic PCAP instead of
+  failing, and its error for any other format reads "--normalize requires PCAP
+  or PCAPNG output" (`cli.capture_normalize_format`, exit 2).
+- `expert` emits an Info `tcp.not_closed_at_end` finding for an established TCP
+  connection still open when the capture ends, so aggregate finding counts,
+  summaries, and totals grow by one note per such connection. It reports
+  `tcp.connection_refused` instead of `tcp.reset` for a reset that answers a
+  SYN or SYN-ACK, `tcp.fast_retransmission` instead of `tcp.retransmission` for
+  the acknowledged-edge segment resent after three duplicate acknowledgments,
+  and `tcp.out_of_order` instead of the retransmission label for a segment that
+  fills a gap already reported as `tcp.previous_segment_not_captured`. See
+  `docs/migration-unreleased.md`.
+- A malformed `fuzz --field` or an unresolvable selector fails with
+  `cli.selector` (usage, exit 2) instead of `cli.fuzz_limit`, and the
+  `--payload-file` syntax error reads `--payload-file requires
+  <protocol>[#occurrence].<field>=PATH or LAYER.FIELD=PATH`. `fuzz --field`,
+  `--axis`, `--set`, and `--payload-file` read one selector grammar, so field
+  names are case-insensitive in all of them.
+- A display filter that reads `frame.time_epoch` or `frame.time_nsec` on a
+  frame without a timestamp fails with `display filter requires frame.time_epoch
+  or frame.time_nsec, but the frame has no timestamp`; the code
+  `packet.timestamp_unavailable` is unchanged. The `cli.filter_unsupported_field`
+  hint for `tcp.stream` and `udp.stream` now names `stats`, `expert`, and
+  `export`, which number conversations, and no longer names `follow`, which has
+  no `--filter`. `packetcraftr topics filters` lists exactly where those fields
+  work: `stats`, `expert`, `export`, `verify-forwarding`, and `read` with
+  `--field`.
+- `examples/documents/output-protocols-success.json` lists the new protocols and
+  now matches `protocols --output json` row for row (the `dns` matcher is
+  `true`).
 
 ### Removed
 

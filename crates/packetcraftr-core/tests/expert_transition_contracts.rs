@@ -994,6 +994,46 @@ fn syn_ack_matching_uses_serial_arithmetic_and_allows_syn_data() {
 }
 
 #[test]
+fn the_completing_ack_must_acknowledge_the_syn_acks_sequence_space() {
+    let below: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 42, Tcp::ACK, 100), b""),
+    ];
+    let (findings, _) = analyze(&below);
+    assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+
+    let refused: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 42, Tcp::ACK, 100), b""),
+        (client(101, 0, Tcp::RST, 0), b""),
+    ];
+    assert_expert(
+        &refused,
+        vec![finding(
+            Severity::Warning,
+            "tcp.connection_refused",
+            4,
+            "192.0.2.1:40000 reset the SYN-ACK exchanged with 198.51.100.2:443",
+        )],
+        0,
+        1,
+        0,
+    );
+
+    // An acknowledgment above the floor still covers the SYN-ACK's space; any
+    // excess belongs to the unseen-acknowledgment checks, not to establishment.
+    let beyond: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 9_999, Tcp::ACK, 100), b""),
+    ];
+    let (findings, _) = analyze(&beyond);
+    assert_eq!(codes_and_numbers(&findings), [("tcp.not_closed_at_end", 3)]);
+}
+
+#[test]
 fn established_connection_without_a_close_is_noted_at_the_end() {
     let mut open = established();
     open.push((client(101, 501, Tcp::ACK, 100), b"abc"));

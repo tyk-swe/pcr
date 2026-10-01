@@ -9,13 +9,16 @@ use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
-use crate::analysis::serial::{serial_offset, serial_range_contains};
+use crate::analysis::serial::{serial_ge, serial_offset, serial_range_contains};
 
 /// Handshake progress one direction contributes within the current generation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct State {
     /// Initial sequence number of the pure SYN this direction opened the connection with.
     syn_sequence: Option<u32>,
+    /// One past the answering SYN-ACK's sequence: the least acknowledgment that completes
+    /// the handshake.
+    expected_acknowledgment: Option<u32>,
     /// Set on the opening direction once a SYN-ACK came back.
     answered: bool,
     /// Set on the opening direction once it acknowledged the SYN-ACK.
@@ -177,6 +180,7 @@ pub(super) fn record(
             .filter(|opener| opener.handshake.syn_sequence.is_some())
         {
             opener.handshake.answered = true;
+            opener.handshake.expected_acknowledgment = Some(tcp.sequence.wrapping_add(1));
         }
     } else if syn {
         let sent = flows.entry(flow.clone()).or_default();
@@ -199,8 +203,16 @@ pub(super) fn record(
         }
     } else if ack {
         let sent = flows.entry(flow.clone()).or_default();
-        if sent.handshake.syn_sequence.is_some() && sent.handshake.answered {
-            sent.handshake.established = true;
+        let handshake = &mut sent.handshake;
+        // The completing ACK must acknowledge the SYN-ACK's sequence space; an
+        // acknowledgment below it is just a segment, never establishment.
+        if handshake.syn_sequence.is_some()
+            && handshake.answered
+            && handshake
+                .expected_acknowledgment
+                .is_some_and(|expected| serial_ge(tcp.acknowledgment, expected))
+        {
+            handshake.established = true;
         }
     }
 }

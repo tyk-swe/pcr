@@ -172,6 +172,7 @@ fn decode_layer(registry: &Registry, protocol: &str, payload: &[u8]) -> Option<D
                 parent: None,
                 registry,
                 network: None,
+                hop_limit: None,
                 discriminator: None,
             },
         )

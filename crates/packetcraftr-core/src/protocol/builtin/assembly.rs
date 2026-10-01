@@ -11,7 +11,7 @@ use crate::layer::{MalformedCodec, PaddingCodec, RawCodec};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 use ip::{
     DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Icmpv4Codec, Icmpv6Codec, IgmpCodec,
-    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec,
+    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec, VrrpCodec,
 };
 use link::{
     ArpCodec, EapolCodec, EthernetCodec, LlcCodec, LldpCodec, SnapCodec, StpCodec, Vlan8021adCodec,

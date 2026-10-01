@@ -39,6 +39,8 @@ pub enum Error {
         #[source]
         source: crate::field::Error,
     },
+    #[error("a fuzz target selector is invalid")]
+    Selector(#[from] crate::layer::selector::Error),
     #[error("fuzz base packet is invalid: {reason}")]
     InvalidBasePacket { reason: BaseFault },
     #[error("packet has no field compatible with the selected fuzz strategies")]
@@ -86,6 +88,7 @@ impl Classified for Error {
                     ),
                 )
             }
+            Self::Selector(source) => source.classification(),
             Self::InvalidBasePacket { .. } => Classification::new(
                 "packet.fuzz_recipe",
                 Kind::Packet,

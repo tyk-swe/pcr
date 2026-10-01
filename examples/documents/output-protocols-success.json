@@ -459,6 +459,15 @@
         "decode_only": false
       },
       {
+        "protocol": "vrrp",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "vxlan",
         "aliases": [],
         "build": true,

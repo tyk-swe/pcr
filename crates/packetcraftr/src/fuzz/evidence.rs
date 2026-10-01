@@ -56,6 +56,14 @@ impl Recorder {
         deadline: &Deadline,
     ) -> Result<Evidence, Error> {
         let had_response = !execution.responses.is_empty();
+        // The oracle's verdicts were reached when the case was prepared; the
+        // executed bytes are the same case, so they are kept, not recomputed.
+        let roundtrip = case
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| packet_fuzz::is_roundtrip_diagnostic(diagnostic))
+            .cloned()
+            .collect::<Vec<_>>();
         case.diagnostics = execution.sent.built().diagnostics.clone();
         case.decoded = packet_fuzz::dissect_built(
             &self.dissector,
@@ -63,6 +71,7 @@ impl Recorder {
             self.decode_limits,
             &mut case.diagnostics,
         );
+        case.diagnostics.extend(roundtrip);
         deadline.enforce()?;
         case.built = Some(execution.sent.built().clone());
         case.diagnostics.extend(execution.diagnostics);

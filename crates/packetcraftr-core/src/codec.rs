@@ -181,6 +181,8 @@ pub struct LayerDecodeContext<'a> {
     pub parent: Option<Id>,
     pub registry: &'a Registry,
     pub network: Option<NetworkEnvelope>,
+    /// The TTL or hop limit of the IP header that produced `network`.
+    pub hop_limit: Option<u8>,
     pub discriminator: Option<Discriminator>,
 }
 

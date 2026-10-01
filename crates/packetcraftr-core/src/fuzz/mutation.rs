@@ -3,7 +3,8 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::field::{FieldKind, FieldValue};
+use crate::field::{FieldKind, FieldValue, Path};
+use crate::layer::Layer;
 use bytes::Bytes;
 
 use super::MAX_VALUE_NESTING;
@@ -14,6 +15,7 @@ use super::rng::SplitMix64;
 pub(super) fn mutation_value(
     strategy: Strategy,
     field: &ResolvedField,
+    layer: &dyn Layer,
     original: &FieldValue,
     seed: u64,
     round: u64,
@@ -21,7 +23,7 @@ pub(super) fn mutation_value(
 ) -> FieldValue {
     let mut random = SplitMix64::new(seed ^ round.rotate_left(17));
     match strategy {
-        Strategy::Boundary => boundary_value(field.kind, original, seed, round, limits),
+        Strategy::Boundary => boundary_value(field, layer, original, seed, round, limits),
         Strategy::Random => random_value(field.kind, original, &mut random, limits),
         Strategy::BitFlip => bit_flip_value(original, &mut random, limits.max_field_bytes),
         Strategy::Malformed => malformed_value(field.kind, original, &mut random, round, limits),
@@ -29,17 +31,18 @@ pub(super) fn mutation_value(
 }
 
 fn boundary_value(
-    kind: FieldKind,
+    field: &ResolvedField,
+    layer: &dyn Layer,
     original: &FieldValue,
     seed: u64,
     round: u64,
     limits: Limits,
 ) -> FieldValue {
     let selector = seed.wrapping_add(round);
-    match kind {
+    match field.kind {
         FieldKind::Bool => FieldValue::Bool(!original.as_bool().unwrap_or(false)),
         FieldKind::Unsigned => {
-            const VALUES: &[u64] = &[
+            const FALLBACK: &[u64] = &[
                 0,
                 1,
                 u8::MAX as u64,
@@ -47,7 +50,9 @@ fn boundary_value(
                 u32::MAX as u64,
                 u64::MAX,
             ];
-            FieldValue::Unsigned(VALUES[index_from(selector, VALUES.len())])
+            let values = width_boundaries(layer, &field.path, limits);
+            let values = values.as_deref().unwrap_or(FALLBACK);
+            FieldValue::Unsigned(values[index_from(selector, values.len())])
         }
         FieldKind::Signed => {
             const VALUES: &[i64] = &[0, 1, -1, i8::MIN as i64, i8::MAX as i64, i64::MIN, i64::MAX];
@@ -107,6 +112,114 @@ fn boundary_value(
             _ => FieldValue::List(Vec::new()),
         },
     }
+}
+
+/// The most set attempts spent discovering one field's accepted maximum. The
+/// bisection needs at most 72: zero, `u64::MAX`, six for the bit width, one
+/// above the power of two, and 63 inside the rejected width.
+const MAX_WIDTH_PROBES: usize = 80;
+
+/// Boundary values for an unsigned field, derived from the largest value the
+/// layer accepts: zero, one, the half-range value, one below the maximum, the
+/// maximum, and one above it. The value above the maximum is kept as
+/// rejected-input evidence. `None` means the width could not be discovered, so
+/// the caller falls back to fixed extremes.
+///
+/// Probing only ever writes to a clone of `layer` and spends at most
+/// [`MAX_WIDTH_PROBES`] set attempts.
+fn width_boundaries(layer: &dyn Layer, path: &Path, limits: Limits) -> Option<Vec<u64>> {
+    // Every probe is an unsigned value, which the field budget has to admit.
+    bounded_value_size(
+        &FieldValue::Unsigned(u64::MAX),
+        limits.max_field_bytes,
+        limits.max_list_items,
+    )
+    .ok()?;
+    let mut prober = WidthProber {
+        layer: layer.clone_box(),
+        path,
+        attempts: 0,
+    };
+    let maximum = prober.accepted_maximum()?;
+    let width = u64::BITS - maximum.leading_zeros();
+    let mut values = vec![0, 1, maximum, maximum.saturating_sub(1)];
+    if width > 1 {
+        values.push(1 << (width - 1));
+    }
+    if let Some(above) = maximum.checked_add(1) {
+        values.push(above);
+    }
+    values.sort_unstable();
+    values.dedup();
+    Some(values)
+}
+
+struct WidthProber<'a> {
+    layer: Box<dyn Layer>,
+    path: &'a Path,
+    attempts: usize,
+}
+
+impl WidthProber<'_> {
+    /// `None` once the attempt budget is spent.
+    fn accepts(&mut self, value: u64) -> Option<bool> {
+        if self.attempts >= MAX_WIDTH_PROBES {
+            return None;
+        }
+        self.attempts += 1;
+        Some(
+            self.layer
+                .set_field_path(self.path, FieldValue::Unsigned(value))
+                .is_ok(),
+        )
+    }
+
+    /// Assumes the accepted values are `0..=maximum`. Bisects the bit width
+    /// first, then the value inside the rejected width, so a field bounded
+    /// below a power of two still reports its exact maximum while attempts
+    /// last. A field that refuses zero has no usable range, and a spent budget
+    /// yields no maximum rather than a lower bound mistaken for one.
+    fn accepted_maximum(&mut self) -> Option<u64> {
+        if !self.accepts(0)? {
+            return None;
+        }
+        if self.accepts(u64::MAX)? {
+            return Some(u64::MAX);
+        }
+        let (mut accepted_bits, mut rejected_bits) = (0_u32, u64::BITS);
+        while rejected_bits - accepted_bits > 1 {
+            let middle = accepted_bits + (rejected_bits - accepted_bits) / 2;
+            if self.accepts(width_mask(middle))? {
+                accepted_bits = middle;
+            } else {
+                rejected_bits = middle;
+            }
+        }
+        let mut accepted = width_mask(accepted_bits);
+        let mut rejected = width_mask(rejected_bits);
+        // a power-of-two limit is rejected by the very next value
+        if rejected - accepted > 1 {
+            // `accepted` is below `rejected`, so `accepted + 1` cannot overflow
+            if !self.accepts(accepted + 1)? {
+                return Some(accepted);
+            }
+            accepted += 1;
+        }
+        while rejected - accepted > 1 {
+            let middle = accepted + (rejected - accepted) / 2;
+            if self.accepts(middle)? {
+                accepted = middle;
+            } else {
+                rejected = middle;
+            }
+        }
+        Some(accepted)
+    }
+}
+
+/// The largest value that fits in `bits` bits; `bits` is at most 64.
+fn width_mask(bits: u32) -> u64 {
+    u64::MAX.checked_shr(u64::BITS - bits).unwrap_or(0)
 }
 
 pub(super) fn random_value(
@@ -388,6 +501,12 @@ mod tests {
 
     use super::*;
     use crate::fuzz::request::Target;
+    use crate::layer::Raw;
+    use crate::protocol::network::Ipv4;
+    use crate::protocol::transport::Udp;
+    use crate::protocol::tunnel::Mpls;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn resolved(kind: FieldKind) -> ResolvedField {
         ResolvedField {
@@ -411,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_mutations_cycle_through_stable_numeric_extremes() {
+    fn boundary_mutations_fall_back_to_stable_numeric_extremes_for_an_unprobeable_field() {
         let unsigned = resolved(FieldKind::Unsigned);
         let signed = resolved(FieldKind::Signed);
         let expected_unsigned = [
@@ -429,6 +548,7 @@ mod tests {
                 mutation_value(
                     Strategy::Boundary,
                     &unsigned,
+                    &Raw::default(),
                     &FieldValue::Unsigned(42),
                     0,
                     round as u64,
@@ -442,6 +562,7 @@ mod tests {
                 mutation_value(
                     Strategy::Boundary,
                     &signed,
+                    &Raw::default(),
                     &FieldValue::Signed(42),
                     0,
                     round as u64,
@@ -449,6 +570,203 @@ mod tests {
                 ),
                 FieldValue::Signed(expected)
             );
+        }
+    }
+
+    fn boundary_values(layer: &dyn Layer, field: &str, limits: Limits) -> Vec<u64> {
+        let mut target = resolved(FieldKind::Unsigned);
+        target.path = field.parse().expect("field path");
+        let original = layer.field(field).expect("reflected field");
+        let mut values = Vec::new();
+        // the first full cycle visits every candidate, whatever their number
+        for round in 0..16 {
+            let FieldValue::Unsigned(value) = mutation_value(
+                Strategy::Boundary,
+                &target,
+                layer,
+                &original,
+                0,
+                round,
+                limits,
+            ) else {
+                panic!("boundary values of an unsigned field stay unsigned");
+            };
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+        values.sort_unstable();
+        values
+    }
+
+    #[test]
+    fn boundary_values_follow_each_fields_accepted_width() {
+        let ipv4 = Ipv4::default();
+        assert_eq!(
+            boundary_values(&ipv4, "fragment_offset", limits(32, 4)),
+            [0, 1, 0x1000, 0x1ffe, 0x1fff, 0x2000]
+        );
+        assert_eq!(
+            boundary_values(&ipv4, "ttl", limits(32, 4)),
+            [0, 1, 0x80, 0xfe, 0xff, 0x100]
+        );
+        assert_eq!(
+            boundary_values(&Udp::default(), "source_port", limits(32, 4)),
+            [0, 1, 0x8000, 0xfffe, 0xffff, 0x1_0000]
+        );
+        assert_eq!(
+            boundary_values(&Mpls::default(), "traffic_class", limits(32, 4)),
+            [0, 1, 4, 6, 7, 8]
+        );
+    }
+
+    #[test]
+    fn a_full_width_field_has_no_value_above_its_maximum() {
+        assert_eq!(
+            boundary_values(&TestWord::default(), "word", limits(32, 4)),
+            [0, 1, 1 << 63, u64::MAX - 1, u64::MAX]
+        );
+    }
+
+    #[test]
+    fn a_limit_below_a_power_of_two_is_found_exactly() {
+        let layer = TestWord {
+            maximum: 100,
+            ..TestWord::default()
+        };
+        assert_eq!(
+            boundary_values(&layer, "word", limits(32, 4)),
+            [0, 1, 64, 99, 100, 101]
+        );
+    }
+
+    #[test]
+    fn width_probing_is_bounded_and_never_touches_the_case_layer() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        for maximum in [
+            0,
+            1,
+            100,
+            0x1fff,
+            (1 << 40) + 12_345,
+            (1 << 57) + 5,
+            (1 << 62) + 5,
+            (1 << 63) + 7,
+            u64::MAX - 1,
+            u64::MAX,
+        ] {
+            attempts.store(0, Ordering::SeqCst);
+            let layer = TestWord {
+                maximum,
+                attempts: Arc::clone(&attempts),
+                value: 7,
+            };
+            let path = "word".parse().expect("field path");
+            let mut expected = vec![0, 1, maximum, maximum.saturating_sub(1)];
+            let width = u64::BITS - maximum.leading_zeros();
+            if width > 1 {
+                expected.push(1 << (width - 1));
+            }
+            expected.extend(maximum.checked_add(1));
+            expected.sort_unstable();
+            expected.dedup();
+            assert_eq!(
+                width_boundaries(&layer, &path, limits(32, 4)),
+                Some(expected),
+                "maximum {maximum}"
+            );
+            let used = attempts.load(Ordering::SeqCst);
+            assert!(
+                (1..=MAX_WIDTH_PROBES).contains(&used),
+                "maximum {maximum} used {used} attempts"
+            );
+            assert_eq!(layer.value, 7, "the case layer must stay untouched");
+        }
+    }
+
+    #[test]
+    fn a_spent_probe_budget_reports_no_maximum_instead_of_a_lower_bound() {
+        let path = "word".parse().expect("field path");
+        for left in [1, 10, 40, 60] {
+            let mut prober = WidthProber {
+                layer: Box::new(TestWord {
+                    maximum: (1 << 62) + 5,
+                    ..TestWord::default()
+                }),
+                path: &path,
+                attempts: MAX_WIDTH_PROBES - left,
+            };
+            assert_eq!(prober.accepted_maximum(), None, "{left} attempts left");
+        }
+    }
+
+    #[test]
+    fn a_field_budget_below_one_word_skips_probing() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let layer = TestWord {
+            attempts: Arc::clone(&attempts),
+            ..TestWord::default()
+        };
+        let values = boundary_values(&layer, "word", limits(4, 4));
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+        assert!(values.contains(&u64::from(u32::MAX)));
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestWord {
+        maximum: u64,
+        attempts: Arc<AtomicUsize>,
+        value: u64,
+    }
+
+    impl Default for TestWord {
+        fn default() -> Self {
+            Self {
+                maximum: u64::MAX,
+                attempts: Arc::default(),
+                value: 0,
+            }
+        }
+    }
+
+    impl Layer for TestWord {
+        fn schema(&self) -> &'static crate::layer::Schema {
+            static SCHEMA: crate::layer::Schema = crate::layer::Schema {
+                protocol: crate::layer::Id::new("test_word"),
+                name: "Test word",
+                fields: &[crate::layer::FieldSchema {
+                    name: "word",
+                    aliases: &[],
+                    kind: FieldKind::Unsigned,
+                    derived: false,
+                    required: false,
+                    description: "A counted unsigned word",
+                    children: &[],
+                }],
+            };
+            &SCHEMA
+        }
+
+        fn clone_box(&self) -> Box<dyn Layer> {
+            Box::new(self.clone())
+        }
+
+        fn field(&self, name: &str) -> Option<FieldValue> {
+            (name == "word").then_some(FieldValue::Unsigned(self.value))
+        }
+
+        fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), crate::field::Error> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            match (name, value) {
+                ("word", FieldValue::Unsigned(value)) if value <= self.maximum => {
+                    self.value = value;
+                    Ok(())
+                }
+                _ => Err(crate::field::Error::OutOfRange {
+                    protocol: self.schema().protocol,
+                    field: name.to_owned(),
+                }),
+            }
         }
     }
 
@@ -479,6 +797,7 @@ mod tests {
                 let first = mutation_value(
                     Strategy::Boundary,
                     &resolved(kind),
+                    &Raw::default(),
                     &original,
                     19,
                     round,
@@ -487,6 +806,7 @@ mod tests {
                 let repeated = mutation_value(
                     Strategy::Boundary,
                     &resolved(kind),
+                    &Raw::default(),
                     &original,
                     19,
                     round,
@@ -508,7 +828,17 @@ mod tests {
         let original = FieldValue::Text("original".to_owned());
         let candidates = |limits: Limits, count: u64| {
             (0..count)
-                .map(|round| mutation_value(Strategy::Boundary, &text, &original, 0, round, limits))
+                .map(|round| {
+                    mutation_value(
+                        Strategy::Boundary,
+                        &text,
+                        &Raw::default(),
+                        &original,
+                        0,
+                        round,
+                        limits,
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         let texts = |values: &[&str]| {
@@ -562,6 +892,7 @@ mod tests {
             let first = mutation_value(
                 Strategy::Random,
                 &resolved(kind),
+                &Raw::default(),
                 &original,
                 0xfeed_beef,
                 17,
@@ -570,6 +901,7 @@ mod tests {
             let repeated = mutation_value(
                 Strategy::Random,
                 &resolved(kind),
+                &Raw::default(),
                 &original,
                 0xfeed_beef,
                 17,
@@ -590,6 +922,7 @@ mod tests {
             mutation_value(
                 Strategy::BitFlip,
                 &bytes,
+                &Raw::default(),
                 &FieldValue::Bytes(Bytes::new()),
                 1,
                 0,
@@ -602,6 +935,7 @@ mod tests {
         let FieldValue::Bytes(flipped) = mutation_value(
             Strategy::BitFlip,
             &bytes,
+            &Raw::default(),
             &FieldValue::Bytes(Bytes::copy_from_slice(&original)),
             2,
             0,
@@ -624,6 +958,7 @@ mod tests {
             mutation_value(
                 Strategy::Malformed,
                 &unsigned,
+                &Raw::default(),
                 &FieldValue::Unsigned(1),
                 3,
                 0,
@@ -634,6 +969,7 @@ mod tests {
         let FieldValue::Bytes(malformed) = mutation_value(
             Strategy::Malformed,
             &unsigned,
+            &Raw::default(),
             &FieldValue::Unsigned(1),
             3,
             1,
@@ -651,6 +987,7 @@ mod tests {
             mutation_value(
                 Strategy::BitFlip,
                 &bytes,
+                &Raw::default(),
                 &FieldValue::Bytes(Bytes::from_static(b"abc")),
                 5,
                 0,
@@ -666,6 +1003,7 @@ mod tests {
                     mutation_value(
                         Strategy::Malformed,
                         &unsigned,
+                        &Raw::default(),
                         &FieldValue::Unsigned(1),
                         5,
                         round,
@@ -681,6 +1019,7 @@ mod tests {
             mutation_value(
                 Strategy::Random,
                 &bytes,
+                &Raw::default(),
                 &FieldValue::Bytes(Bytes::from_static(b"abc")),
                 5,
                 0,

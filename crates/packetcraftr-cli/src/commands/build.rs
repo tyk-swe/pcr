@@ -15,7 +15,7 @@ use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::input::read_recipe;
+use crate::input::{apply_overrides, read_recipe};
 use crate::rendering::{
     StreamEncoder, render_diagnostics_stderr, stream_capture_error, stream_limits,
 };
@@ -48,13 +48,14 @@ pub(super) fn run(
     let axes = arguments.template.parse()?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
-    let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    let mut packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    apply_overrides(&mut packet, &registry, &arguments.set)?;
     if let Some(capture) = &capture {
         capture.validate_root(&packet)?;
     }
     // Keep OS signal termination while recipe input can block waiting for EOF.
     crate::cancellation::install()?;
-    let template = axes.into_template(packet);
+    let template = axes.into_template(packet, &registry)?;
     let packets = template.expand(maximum).map_err(CliError::classified)?;
     if packets.len() != 1 && matches!(format, BuildFormat::Json | BuildFormat::Raw) {
         return Err(CliError::new(

@@ -15,6 +15,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r"NDJSON publishes each case as soon as
 
 Examples:
   packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --cases 16
+  packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --field ipv4.ttl,udp.* --cases 16
   packetcraftr --output ndjson fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -77,8 +78,13 @@ pub(crate) struct Args {
         default_value = "boundary,random,bit-flip,malformed"
     )]
     pub(crate) strategies: Vec<Strategy>,
-    /// Restrict mutation to repeated LAYER.FIELD targets; defaults to all fields.
-    #[arg(long = "field", value_delimiter = ',')]
+    /// Restrict mutation to repeated field targets; defaults to all fields. A
+    /// target is a zero-based LAYER.FIELD or <protocol>[#occurrence].<field>,
+    /// e.g. ipv4.ttl or ipv4#2.ttl, where the 1-based occurrence counts layers
+    /// of that protocol from the outermost. A * in place of the protocol or
+    /// the field selects every layer or every readable field. Reports always
+    /// publish numeric layer indexes.
+    #[arg(long = "field", value_delimiter = ',', value_name = "SELECTOR")]
     pub(crate) fields: Vec<String>,
     /// Strict or permissive packet construction for generated cases.
     #[arg(long, value_enum, default_value_t = BuildMode::Strict)]

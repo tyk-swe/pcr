@@ -9,6 +9,7 @@ mod rendering;
 use std::sync::Arc;
 
 use packetcraftr_core as core;
+use packetcraftr_core::layer::selector::Selector;
 
 use crate::output;
 
@@ -62,22 +63,27 @@ pub(super) fn run(
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let request = prepare_request(&arguments)?;
-    let live = prepare_live(&arguments, &request)?;
+    let (mut request, selectors) = prepare_request(&arguments)?;
+    let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let packet = read_recipe(arguments.recipe, &registry, request.build.limits.max_layers)?;
+    // Selectors name layers by protocol, so they resolve once the recipe is
+    // known; everything after this point sees numeric layer indexes.
+    request.targets =
+        core::fuzz::Target::select(&selectors, &packet, &registry).map_err(CliError::classified)?;
+    if let Some(live) = &mut live {
+        live.request.campaign.targets.clone_from(&request.targets);
+    }
     execute_and_render(request, packet, registry, live, format, stream)
 }
 
-fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
-    let targets = arguments
+/// The request without its targets, and the `--field` selectors that become
+/// them once the recipe is read.
+fn prepare_request(arguments: &Args) -> Result<(core::fuzz::Request, Vec<Selector>), CliError> {
+    let selectors = arguments
         .fields
         .iter()
-        .map(|field| {
-            field
-                .parse::<core::fuzz::Target>()
-                .map_err(CliError::classified)
-        })
+        .map(|field| field.parse::<Selector>().map_err(CliError::classified))
         .collect::<Result<Vec<_>, _>>()?;
     let request = core::fuzz::Request {
         seed: arguments.seed,
@@ -89,7 +95,7 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
             .copied()
             .map(Into::into)
             .collect(),
-        targets,
+        targets: Vec::new(),
         build: core::build::Options {
             mode: arguments.mode.into(),
             limits: core::packet::Limits {
@@ -108,7 +114,7 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
         },
     };
     request.validate().map_err(CliError::classified)?;
-    Ok(request)
+    Ok((request, selectors))
 }
 
 fn prepare_live(

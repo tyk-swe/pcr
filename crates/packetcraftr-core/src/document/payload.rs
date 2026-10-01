@@ -5,7 +5,12 @@ use bytes::Bytes;
 
 use crate::error::{Classification, Classified, Kind, Source};
 use crate::field::{self, FieldValue};
+use crate::layer::selector::{self, Selector};
 
+/// The empty bytes field a payload file fills, named by zero-based layer index.
+///
+/// Parsing accepts only the numeric `LAYER.FIELD` spelling. A protocol-name
+/// [`Selector`] goes through [`resolve`](Self::resolve), which yields this form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     layer: usize,
@@ -27,6 +32,26 @@ impl std::str::FromStr for Target {
 }
 
 impl Target {
+    /// Resolves a selector against `packet` into a numeric target.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Syntax`] for a wildcard, and [`Error::Selector`] for a
+    /// protocol or occurrence the packet cannot satisfy.
+    pub fn resolve(
+        selector: &Selector,
+        packet: &crate::packet::Packet,
+        registry: &crate::registry::Registry,
+    ) -> Result<Self, Error> {
+        if selector.has_wildcard() {
+            return Err(Error::Syntax);
+        }
+        Ok(Self {
+            layer: selector.resolve_layer(packet, registry)?,
+            field: selector.field().to_owned(),
+        })
+    }
+
     pub fn layer(&self) -> usize {
         self.layer
     }
@@ -83,8 +108,12 @@ impl Target {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("payload target requires LAYER.FIELD with a zero-based layer index")]
+    #[error(
+        "payload target requires <protocol>[#occurrence].<field> or LAYER.FIELD with a zero-based layer index"
+    )]
     Syntax,
+    #[error("payload target selector cannot be resolved")]
+    Selector(#[source] selector::Error),
     #[error("payload layer index {layer} is outside the recipe's {layers} layers")]
     LayerOutOfRange { layer: usize, layers: usize },
     #[error("payload field {field} is unknown on layer {layer}")]
@@ -100,6 +129,17 @@ pub enum Error {
         #[source]
         source: Source,
     },
+}
+
+impl From<selector::Error> for Error {
+    /// A selector that cannot be read is a syntax error of the target; one
+    /// that reads but does not resolve keeps its detail.
+    fn from(source: selector::Error) -> Self {
+        match source {
+            selector::Error::Syntax { .. } | selector::Error::Occurrence { .. } => Self::Syntax,
+            source => Self::Selector(source),
+        }
+    }
 }
 
 impl Classified for Error {

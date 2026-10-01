@@ -8,6 +8,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output raw build --packet-file packet.json
   packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[53,5353]'
+  packetcraftr build --packet-file vlan.json --set ipv4.ttl=5 --set udp.destination_port=53
+  packetcraftr build --packet-file tunnel.json --set ipv4#2.ttl=9
   packetcraftr --output pcapng build --packet 'ipv4()/icmpv4(identifier=1)' --link-type ipv4 > packet.pcapng
   packetcraftr --output pcap build --packet 'ethernet()/ipv4()/udp()' --link-type ethernet --timestamp 1700000000.5 > packet.pcap
 
@@ -23,6 +25,12 @@ or the Unix epoch, keeping generated captures byte-deterministic.";
 pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) recipe: RecipeArgs,
+    /// Override one recipe field before axes expand, e.g. ipv4.ttl=5 or
+    /// ipv4#2.ttl=9. The selector is <protocol>[#occurrence].<field> or a
+    /// zero-based LAYER.FIELD, and the value follows packet-expression syntax.
+    /// Repeat up to 64 times; a later override of the same field wins.
+    #[arg(long = "set", value_name = "SELECTOR=VALUE")]
+    pub(crate) set: Vec<String>,
     #[command(flatten)]
     pub(crate) template: TemplateArgs,
     /// Enforce protocol invariants or preserve explicitly permissive values.

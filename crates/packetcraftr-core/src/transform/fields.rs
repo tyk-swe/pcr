@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::decode::{self, DecodedPacket, Dissector};
 use crate::frame::Frame;
+use crate::layer::selector::OccurrenceFault;
 use crate::layout::{ByteRange, PacketLayout};
 use crate::protocol::{BuiltinProtocol, checksum, headers::IpHeader};
 use crate::registry::Registry;
@@ -142,21 +143,14 @@ impl FieldEdit {
             .field
             .split_once('.')
             .ok_or(Error::Invalid(InvalidInput::EditSyntax))?;
-        let (name, occurrence) = match head.split_once('#') {
-            None => (head, 1),
-            Some((name, digits)) => {
-                if name.is_empty() || digits.contains('#') {
-                    return Err(Error::Invalid(InvalidInput::EditOccurrence));
-                }
-                let occurrence: usize = digits
-                    .parse()
-                    .map_err(|_| Error::Invalid(InvalidInput::EditOccurrenceNotNumber))?;
-                if occurrence == 0 {
-                    return Err(Error::Invalid(InvalidInput::EditOccurrenceZero));
-                }
-                (name, occurrence)
-            }
-        };
+        let (name, occurrence) =
+            crate::layer::selector::split_occurrence(head).map_err(|fault| {
+                Error::Invalid(match fault {
+                    OccurrenceFault::Malformed => InvalidInput::EditOccurrence,
+                    OccurrenceFault::NotNumber => InvalidInput::EditOccurrenceNotNumber,
+                    OccurrenceFault::Zero => InvalidInput::EditOccurrenceZero,
+                })
+            })?;
         let protocol = registry
             .protocol_named(name)
             .ok_or(Error::Invalid(InvalidInput::EditUnknownProtocol))?;

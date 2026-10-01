@@ -33,6 +33,7 @@ mod prepare;
 mod report;
 mod request;
 mod rng;
+mod roundtrip;
 mod run;
 mod totals;
 
@@ -40,5 +41,6 @@ pub use decode::{dissect_built, packet_link_type};
 pub use error::{BaseFault, Constraint, Error, TargetFault};
 pub use report::{Case, CaseFailure, CaseOutcome, Mutation, Report, Stats, Summary};
 pub use request::{Limits, Request, Strategy, Target};
+pub use roundtrip::is_roundtrip_diagnostic;
 pub use run::{Campaign, run, run_observed};
 pub use totals::{IncoherentReport, Totals};

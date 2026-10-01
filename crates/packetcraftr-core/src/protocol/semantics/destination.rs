@@ -115,7 +115,8 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Stp
         | BuiltinProtocol::Tcp
         | BuiltinProtocol::Http
-        | BuiltinProtocol::Tls => false,
+        | BuiltinProtocol::Tls
+        | BuiltinProtocol::Vrrp => false,
     }
 }
 

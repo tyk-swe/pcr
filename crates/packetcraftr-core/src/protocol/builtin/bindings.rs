@@ -257,6 +257,7 @@ fn bind_common_ip_children(
             (47, BuiltinProtocol::Gre, 100),
             (50, BuiltinProtocol::Esp, 100),
             (51, BuiltinProtocol::Ah, 100),
+            (112, BuiltinProtocol::Vrrp, 100),
             (115, BuiltinProtocol::L2tpv3, 100),
             (132, BuiltinProtocol::Sctp, 100),
             (255, BuiltinProtocol::Raw, -100),

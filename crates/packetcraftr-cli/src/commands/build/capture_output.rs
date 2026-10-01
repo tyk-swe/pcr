@@ -115,6 +115,7 @@ impl CaptureOutput {
                     parent: None,
                     registry: &registry,
                     network: None,
+                    hop_limit: None,
                     discriminator: None,
                 },
             )

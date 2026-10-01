@@ -14,7 +14,7 @@ use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
     "bsd_loop", "bsd_null", "erspan", "esp", "icmpv6", "ipv6_srh", "llc", "padding", "pppoe",
-    "sctp", "tcp", "udp", "vxlan",
+    "sctp", "tcp", "udp", "vrrp", "vxlan",
 ];
 
 #[test]

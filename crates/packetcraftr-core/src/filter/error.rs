@@ -16,7 +16,9 @@ pub enum Error {
         "display filter reads a conversation index, which frame-at-a-time selection does not assign"
     )]
     StreamIndexUnavailable,
-    #[error("display filter requires frame.time_epoch, but the frame has no timestamp")]
+    #[error(
+        "display filter requires frame.time_epoch or frame.time_nsec, but the frame has no timestamp"
+    )]
     TimestampUnavailable,
     #[error("display filter is empty")]
     Empty,
@@ -136,7 +138,9 @@ impl Classified for Error {
             Self::TimestampUnavailable => Classification::new(
                 "packet.timestamp_unavailable",
                 Kind::Packet,
-                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
+                Some(
+                    "remove frame.time_epoch and frame.time_nsec from the filter or use timestamped packet blocks",
+                ),
             ),
             Self::UnknownField { .. } | Self::UnresolvableProtocol { .. } => cli_filter(
                 "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes",

@@ -60,6 +60,7 @@ fuzz_target!(|data: &[u8]| {
         max_bytes: 4096,
         max_layers: 16,
         max_nesting: 16,
+        max_generated_bytes: 4096,
     };
     let _ = expression::parse(text, &registry, expr_limits);
 });

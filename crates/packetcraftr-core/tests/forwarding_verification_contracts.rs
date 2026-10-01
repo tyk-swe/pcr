@@ -729,10 +729,14 @@ fn capture_local_fields_cannot_name_identity() {
         "frame.number",
         "frame.interface_id",
         "frame.time_epoch",
+        "frame.time_nsec",
+        "frame.direction",
+        "frame.truncated",
         "tcp.stream",
         "udp.stream",
         "Frame.number",
         "FRAME.time_epoch",
+        "FRAME.time_nsec",
         "TCP.stream",
         "Udp.stream",
     ] {
@@ -1195,6 +1199,66 @@ fn selected_occurrences_can_establish_violations_before_an_incomplete_header() {
             forwarding::ValueState::Observed
         );
         assert_eq!(report.matches[0].checks[1].outcome, Outcome::Unevaluable);
+    }
+}
+
+fn dns_response_frame(first_ttl: u32, second_ttl: u32) -> Frame {
+    let recipe = format!(
+        "ethernet(source=02:00:00:00:00:02,destination=02:00:00:00:00:01)/ipv4(source=192.0.2.53,destination=192.0.2.1)/udp(source_port=53,destination_port=12345)/dns(id=7,response=true,questions=[{{name=\"example.test.\",type=1,class=1}}],answers=[{{owner=\"a.test.\",ttl={first_ttl},value={{kind=a,address=192.0.2.8}}}},{{owner=\"b.test.\",ttl={second_ttl},value={{kind=a,address=192.0.2.9}}}}])"
+    );
+    Frame::new(
+        UNIX_EPOCH + Duration::from_secs(1),
+        LinkType::ETHERNET,
+        common::packets::build(&recipe).bytes,
+    )
+    .expect("DNS fixture frame is valid")
+}
+
+fn assert_cut_capture_is_never_a_violation(
+    rules: &forwarding::Rules,
+    full: &Frame,
+    partial: &Frame,
+) {
+    for (ingress, egress) in [(full, partial), (partial, full)] {
+        let report = compare(rules, from_ref(ingress), from_ref(egress));
+        assert_eq!(report.verdict, Verdict::Inconclusive);
+        assert_eq!(report.summary.unique_matches, 1);
+        assert_eq!(report.summary.checks_violated, 0);
+        assert_eq!(report.summary.checks_unevaluable, 1);
+        assert!(report.violations.is_empty());
+    }
+}
+
+#[test]
+fn list_selectors_still_prove_changes_in_a_complete_capture() {
+    let rules = rules(&["ethernet#1.source"], &["dns.answers[-1].ttl"], &[]);
+    let full = dns_response_frame(60, 30);
+    let changed = dns_response_frame(60, 31);
+    let report = compare(&rules, from_ref(&full), from_ref(&changed));
+    assert_eq!(report.verdict, Verdict::Fail);
+    assert_eq!(report.summary.checks_violated, 1);
+}
+
+#[test]
+fn innermost_occurrences_cannot_establish_violations_in_a_cut_capture() {
+    let rules = rules(&["ethernet#1.source"], &["vlan#last.vlan_id"], &[]);
+    let full = double_vlan_frame();
+    // Only the outer tag decodes, so it would read as the innermost one.
+    let partial = frame_prefix(&full, 18, true);
+    assert_cut_capture_is_never_a_violation(&rules, &full, &partial);
+    let complete = compare(&rules, from_ref(&full), from_ref(&full));
+    assert_eq!(complete.verdict, Verdict::Pass);
+}
+
+#[test]
+fn decoded_frame_facts_cannot_establish_violations_in_a_cut_capture() {
+    let full = double_vlan_frame();
+    let partial = frame_prefix(&full, 18, true);
+    for field in ["frame.layer_count", "frame.protocols"] {
+        let rules = rules(&["ethernet#1.source"], &[field], &[]);
+        assert_cut_capture_is_never_a_violation(&rules, &full, &partial);
+        let complete = compare(&rules, from_ref(&full), from_ref(&full));
+        assert_eq!(complete.verdict, Verdict::Pass, "{field}");
     }
 }
 

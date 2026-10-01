@@ -7,6 +7,7 @@ use packetcraftr_core::{
     error::{Classified, Kind},
     expression,
     field::FieldValue,
+    layer::selector,
     packet::DEFAULT_MAX_LAYERS,
     packet::Packet,
     protocol::builtin,
@@ -224,4 +225,60 @@ fn a_refused_payload_target_never_loads_its_bytes() {
         );
         assert!(error.causes().is_empty());
     }
+}
+
+#[test]
+fn a_payload_selector_names_its_layer_by_protocol_and_occurrence() {
+    let registry = builtin::registry();
+    let tunnel = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(dport=4789)/raw()/ipv4(src=198.51.100.1,dst=198.51.100.2)/udp()/raw()";
+    let resolve = |packet: &Packet, text: &str| {
+        let selector = text.parse::<selector::Selector>().expect("selector syntax");
+        payload::Target::resolve(&selector, packet, &registry)
+    };
+    let packet = recipe(tunnel, None).unwrap();
+
+    let outer = resolve(&packet, "raw.BYTES").unwrap();
+    assert_eq!((outer.layer(), outer.field()), (2, "bytes"));
+    let inner = resolve(&packet, "raw#2.bytes").unwrap();
+    assert_eq!((inner.layer(), inner.field()), (5, "bytes"));
+    let numeric = resolve(&packet, "5.bytes").unwrap();
+    assert_eq!(numeric, inner);
+
+    let mut packet = packet;
+    inner
+        .inject(&mut packet, || {
+            Ok::<_, payload::Error>(Bytes::from_static(b"\x01"))
+        })
+        .unwrap();
+    assert_eq!(
+        packet.layer(5).unwrap().field("bytes"),
+        Some(FieldValue::Bytes(Bytes::from_static(b"\x01")))
+    );
+    assert_eq!(
+        packet.layer(2).unwrap().field("bytes"),
+        Some(FieldValue::Bytes(Bytes::new()))
+    );
+
+    for text in ["raw#3.bytes", "nosuchprotocol.bytes"] {
+        let error = resolve(&packet, text).expect_err(text);
+        assert!(
+            matches!(error, payload::Error::Selector(_)),
+            "{text}: {error:?}"
+        );
+        assert_eq!(error.classification().kind, Kind::Usage);
+        assert!(
+            !error.causes().is_empty(),
+            "{text} keeps its selector cause"
+        );
+    }
+    for text in ["*.bytes", "raw.*"] {
+        assert!(
+            matches!(resolve(&packet, text), Err(payload::Error::Syntax)),
+            "{text}"
+        );
+    }
+    assert!(matches!(
+        payload::Error::from("raw#0.bytes".parse::<selector::Selector>().unwrap_err()),
+        payload::Error::Syntax
+    ));
 }

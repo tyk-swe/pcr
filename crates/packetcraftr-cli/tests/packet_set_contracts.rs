@@ -235,7 +235,7 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
         vec![0_u8; packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES + 1],
     )
     .expect("oversized fixture");
-    let syntax = "--payload-file requires LAYER.FIELD=PATH";
+    let syntax = "--payload-file requires <protocol>[#occurrence].<field>=PATH or LAYER.FIELD=PATH";
     let unfillable = "--payload-file cannot fill its recipe field";
     // The payload file is already removed: a refused target must win over the missing file.
     for (spec, status, code, message) in [
@@ -650,4 +650,267 @@ fn capture_build_rejects_a_malformed_wire_root_and_finishes_compression() {
         let mut reader = Reader::new(input).unwrap();
         assert!(reader.next_frame().unwrap().is_none());
     }
+}
+
+const VLAN_PACKET: &str = "vlan(vlan_id=7)/ipv4(src=192.0.2.1,dst=192.0.2.2)/udp()";
+const TUNNEL: &str = "ipv4(src=192.0.2.1,dst=192.0.2.2)/\
+                      ipv4(src=198.51.100.1,dst=198.51.100.2)/udp()";
+
+fn built_layers(args: &[&str]) -> Vec<serde_json::Value> {
+    let output = run_success(args);
+    parse_ndjson(&output)
+        .iter()
+        .filter(|record| record["event"] == "packet")
+        .map(|record| record["result"]["packet"]["layers"].clone())
+        .collect()
+}
+
+fn ttl(layers: &serde_json::Value, layer: usize) -> u64 {
+    layers[layer]["fields"]["ttl"]["value"]
+        .as_u64()
+        .expect("ttl field")
+}
+
+#[test]
+fn axes_select_layers_by_protocol_name_and_occurrence() {
+    let by_name = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        VLAN_PACKET,
+        "--axis",
+        "ipv4.ttl=[1,64]",
+        "--axis",
+        "udp.dport=[53,5353]",
+    ]);
+    let by_index = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        VLAN_PACKET,
+        "--axis",
+        "1.ttl=[1,64]",
+        "--axis",
+        "2.dport=[53,5353]",
+    ]);
+    assert_eq!(by_name.len(), 4);
+    assert_eq!(by_name, by_index);
+    assert_eq!(ttl(&by_name[2], 1), 64);
+
+    let inner = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        TUNNEL,
+        "--axis",
+        "ipv4#2.ttl=[7,8]",
+    ]);
+    assert_eq!(inner.len(), 2);
+    assert_eq!((ttl(&inner[0], 1), ttl(&inner[1], 1)), (7, 8));
+    assert_eq!((ttl(&inner[0], 0), ttl(&inner[1], 0)), (64, 64));
+    // an unmarked name is the outermost layer
+    let outer = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        TUNNEL,
+        "--axis",
+        "ipv4.ttl=[7]",
+    ]);
+    assert_eq!((ttl(&outer[0], 0), ttl(&outer[0], 1)), (7, 64));
+}
+
+#[test]
+fn unresolvable_axis_selectors_are_typed_usage_errors_before_output() {
+    for selector in [
+        "nosuchprotocol.ttl",
+        "ipv4#0.ttl",
+        "ipv4#3.ttl",
+        "dns.id",
+        "ipv4#x.ttl",
+        "*.ttl",
+        "ipv4.*",
+    ] {
+        let axis = format!("{selector}=[1]");
+        let output = run(&[
+            "--output", "ndjson", "build", "--packet", TUNNEL, "--axis", &axis,
+        ]);
+        assert_eq!(output.status.code(), Some(2), "{selector}");
+        let records = parse_ndjson(&output);
+        assert_eq!(records.len(), 1, "{selector}");
+        assert_eq!(records[0]["error"]["code"], "cli.selector", "{selector}");
+    }
+}
+
+#[test]
+fn set_overrides_a_field_by_protocol_even_when_a_layer_shifts_the_index() {
+    let packet = |extra: &[&str], recipe: &'static str| {
+        let mut args = vec!["--output", "ndjson", "build", "--packet", recipe];
+        args.extend_from_slice(extra);
+        built_layers(&args)
+    };
+    let vlan = packet(&["--set", "ipv4.ttl=5"], VLAN_PACKET);
+    assert_eq!(ttl(&vlan[0], 1), 5);
+    let numeric = packet(&["--set", "1.ttl=5"], VLAN_PACKET);
+    assert_eq!(vlan, numeric);
+    assert_eq!(vlan, packet(&["--set", "IPV4.TTL=5"], VLAN_PACKET));
+
+    let tunnel = packet(&["--set", "ipv4#2.ttl=9"], TUNNEL);
+    assert_eq!((ttl(&tunnel[0], 0), ttl(&tunnel[0], 1)), (64, 9));
+
+    // several overrides apply in order, then axes expand over the result
+    let expanded = packet(
+        &[
+            "--set",
+            "ipv4.ttl=5",
+            "--set",
+            "ipv4.ttl=6",
+            "--set",
+            "ipv4.source=192.0.2.77",
+            "--axis",
+            "udp.destination_port=[1,2]",
+        ],
+        VLAN_PACKET,
+    );
+    assert_eq!(expanded.len(), 2);
+    for layers in &expanded {
+        assert_eq!(ttl(layers, 1), 6);
+        assert_eq!(layers[1]["fields"]["source"]["value"], "192.0.2.77");
+    }
+    assert_eq!(expanded[1][2]["fields"]["destination_port"]["value"], 2);
+}
+
+#[test]
+fn set_refuses_bad_selectors_and_values_like_set_field_path_does() {
+    let oversized = vec!["--set=ipv4.ttl=1"; 65];
+    let mut too_many = vec!["--output", "json", "build", "--packet", TUNNEL];
+    too_many.extend(oversized);
+    for (arguments, status, code) in [
+        (vec!["--set", "ipv4.ttl=300"], 3, "packet.invalid_layer"),
+        (vec!["--set", "ipv4.ttl=fast"], 3, "packet.invalid_layer"),
+        (
+            vec!["--set", "ipv4.nosuchfield=1"],
+            3,
+            "packet.invalid_layer",
+        ),
+        (vec!["--set", "9.ttl=1"], 2, "cli.error"),
+        (vec!["--set", "ipv4#3.ttl=1"], 2, "cli.selector"),
+        (vec!["--set", "nosuchprotocol.ttl=1"], 2, "cli.selector"),
+        (vec!["--set", "*.ttl=1"], 2, "cli.selector"),
+        (vec!["--set", "ipv4.ttl"], 2, "cli.error"),
+        (vec!["--set", "ttl=1"], 2, "cli.error"),
+        (vec!["--set", "ipv4.ttl=[1"], 2, "cli.expression_syntax"),
+        (too_many[5..].to_vec(), 2, "cli.error"),
+    ] {
+        let mut args = vec!["--output", "json", "build", "--packet", TUNNEL];
+        args.extend(arguments.iter().copied());
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(status), "{arguments:?}");
+        let document = parse_json(&output);
+        assert_eq!(document["status"], "error", "{arguments:?}");
+        assert_eq!(document["error"]["code"], code, "{arguments:?}");
+    }
+}
+
+#[test]
+fn payload_files_select_layers_by_protocol_name() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let payload_path = directory.path().join("payload.bin");
+    std::fs::write(&payload_path, [0xde, 0xad]).expect("payload fixture");
+    let recipe = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/raw()";
+    let build = |spec: String| {
+        run(&[
+            "--output",
+            "raw",
+            "build",
+            "--packet",
+            recipe,
+            "--payload-file",
+            &spec,
+        ])
+    };
+    let numeric = build(format!("2.bytes={}", payload_path.display()));
+    let by_name = build(format!("raw.bytes={}", payload_path.display()));
+    assert!(numeric.status.success(), "{:?}", numeric.stderr);
+    assert_eq!(by_name.stdout, numeric.stdout);
+    assert!(by_name.stdout.ends_with(&[0xde, 0xad]));
+
+    for spec in ["raw#2.bytes", "nosuchprotocol.bytes", "*.bytes"] {
+        let output = build(format!("{spec}={}", payload_path.display()));
+        assert_eq!(output.status.code(), Some(2), "{spec}");
+        assert!(output.stdout.is_empty(), "{spec}");
+    }
+}
+
+const GENERATOR_RECIPE: &str = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/raw()";
+
+fn raw_bytes(layers: &serde_json::Value) -> Vec<u8> {
+    layers[2]["fields"]["bytes"]["value"]
+        .as_array()
+        .expect("raw bytes field")
+        .iter()
+        .map(|byte| u8::try_from(byte.as_u64().expect("byte")).expect("byte range"))
+        .collect()
+}
+
+#[test]
+fn generated_literals_build_into_payload_bytes_and_axis_values() {
+    let recipe = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/\
+                  raw(bytes=repeat(0x41,1400))";
+    let output = run_success(&["--output", "raw", "build", "--packet", recipe]);
+    assert!(output.stdout.ends_with(&[0x41; 1400]));
+    assert_eq!(output.stdout.len(), 20 + 8 + 1400);
+
+    let axes = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        GENERATOR_RECIPE,
+        "--axis",
+        "raw.bytes=[zeros(4),repeat(255,4)]",
+    ]);
+    assert_eq!(axes.len(), 2);
+    assert_eq!(raw_bytes(&axes[0]), [0; 4]);
+    assert_eq!(raw_bytes(&axes[1]), [255; 4]);
+
+    let set = built_layers(&[
+        "--output",
+        "ndjson",
+        "build",
+        "--packet",
+        GENERATOR_RECIPE,
+        "--set",
+        "raw.bytes=cyclic(12)",
+    ]);
+    assert_eq!(set.len(), 1);
+    assert_eq!(raw_bytes(&set[0]), b"Aa0Aa1Aa2Aa3");
+}
+
+#[test]
+fn set_generators_spend_one_byte_budget_across_every_override() {
+    let set = |overrides: &[&str]| {
+        let mut args = vec!["--output", "json", "build", "--packet", GENERATOR_RECIPE];
+        for text in overrides {
+            args.extend(["--set", text]);
+        }
+        parse_json(&run(&args))
+    };
+    // either generator alone is inside the budget, so the build refuses it for
+    // its own reasons and the budget error is never raised
+    let alone = set(&["raw.bytes=zeros(600000)"]);
+    assert_ne!(alone["error"]["code"], "cli.expression_limit");
+    // together they exceed it, and the second reports what remained
+    let together = set(&["raw.bytes=zeros(600000)", "raw.bytes=zeros(600000)"]);
+    assert_eq!(together["error"]["code"], "cli.expression_limit");
+    assert!(
+        together["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("generates 600000 bytes")),
+        "{together}"
+    );
 }

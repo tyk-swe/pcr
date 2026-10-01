@@ -9,6 +9,7 @@ use crate::codec::{DecodedLayer, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
 use crate::packet::Packet;
+use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::registry::Discriminator;
@@ -129,9 +130,22 @@ impl<'registry> DecodeSession<'registry> {
                 parent: self.packet.iter().last().map(|layer| *layer.protocol_id()),
                 registry: self.registry,
                 network: self.traversal.network(),
+                hop_limit: self.enclosing_hop_limit(),
                 discriminator: cursor.discriminator,
             },
         )
+    }
+
+    /// The TTL or hop limit of the IP header whose envelope is in scope.
+    fn enclosing_hop_limit(&self) -> Option<u8> {
+        self.traversal.network()?;
+        self.packet.iter().rev().find_map(|layer| {
+            if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
+                Some(ipv4.ttl)
+            } else {
+                layer.downcast_ref::<Ipv6>().map(|ipv6| ipv6.hop_limit)
+            }
+        })
     }
 
     fn preserve_missing_codec(&mut self, cursor: &DecodeCursor) -> Result<(), Error> {

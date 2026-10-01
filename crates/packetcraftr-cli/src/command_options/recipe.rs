@@ -16,9 +16,11 @@ pub(crate) struct RecipeArgs {
     #[arg(long, value_name = "PATH", conflicts_with = "packet")]
     pub(crate) packet_file: Option<PathBuf>,
     /// Literal bytes for a recipe field loaded from a file, e.g.
-    /// 1.payload=data.bin. The zero-based layer field must be bytes-typed and
-    /// empty in the recipe; the file stays inside the packet input limit.
-    #[arg(long, value_name = "LAYER.FIELD=PATH")]
+    /// raw.bytes=data.bin or 2.bytes=data.bin. The layer is a protocol name
+    /// with an optional #occurrence, or a zero-based index. The field must be
+    /// bytes-typed and empty in the recipe; the file stays inside the packet
+    /// input limit.
+    #[arg(long, value_name = "SELECTOR=PATH")]
     pub(crate) payload_file: Option<String>,
 }
 

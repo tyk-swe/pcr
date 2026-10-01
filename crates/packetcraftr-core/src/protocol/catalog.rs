@@ -55,6 +55,7 @@ macro_rules! builtin_protocol_catalog {
             Udp { canonical: "udp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, layer: [transport::Udp], codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Vlan], codec: VlanCodec }
             Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, exact_round_trip: true, matcher: none, layer: [link::Vlan8021ad], codec: Vlan8021adCodec }
+            Vrrp { canonical: "vrrp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [network::Vrrp], codec: VrrpCodec }
             Vxlan { canonical: "vxlan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, layer: [tunnel::Vxlan], codec: VxlanCodec }
         }
     };

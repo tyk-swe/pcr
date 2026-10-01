@@ -315,6 +315,7 @@ mod tests {
             parent: None,
             registry: &registry,
             network: None,
+            hop_limit: None,
             discriminator: None,
         };
         LldpCodec.decode(Bytes::copy_from_slice(input), &context)

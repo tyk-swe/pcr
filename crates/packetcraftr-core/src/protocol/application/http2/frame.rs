@@ -23,6 +23,21 @@ const FLAG_PADDED: u8 = 0x8;
 const FLAG_PRIORITY: u8 = 0x20;
 
 pub fn parse_frame(input: &Bytes, max_frame_bytes: usize) -> Result<Option<(Frame, usize)>, Error> {
+    parse_frame_inner(input, max_frame_bytes, false)
+}
+
+pub(crate) fn parse_frame_for_analysis(
+    input: &Bytes,
+    max_frame_bytes: usize,
+) -> Result<Option<(Frame, usize)>, Error> {
+    parse_frame_inner(input, max_frame_bytes, true)
+}
+
+fn parse_frame_inner(
+    input: &Bytes,
+    max_frame_bytes: usize,
+    allow_stream_errors: bool,
+) -> Result<Option<(Frame, usize)>, Error> {
     if input.len() < HEADER_LEN {
         return Ok(None);
     }
@@ -42,7 +57,7 @@ pub fn parse_frame(input: &Bytes, max_frame_bytes: usize) -> Result<Option<(Fram
         return Ok(None);
     }
     let payload = input.slice(HEADER_LEN..total);
-    let payload = parse_payload(&header, &payload)?;
+    let payload = parse_payload(&header, &payload, allow_stream_errors)?;
     Ok(Some((
         Frame {
             header,
@@ -108,7 +123,11 @@ fn check_header(header: &FrameHeader) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_payload(header: &FrameHeader, payload: &Bytes) -> Result<Payload, Error> {
+fn parse_payload(
+    header: &FrameHeader,
+    payload: &Bytes,
+    allow_stream_errors: bool,
+) -> Result<Payload, Error> {
     match header.frame_type {
         TYPE_DATA => {
             let (data, padding) = split_padding(header, payload)?;
@@ -123,7 +142,10 @@ fn parse_payload(header: &FrameHeader, payload: &Bytes) -> Result<Payload, Error
                 let Some((fixed, rest)) = rest.split_at_checked(5) else {
                     return Err(Error::Invalid("HEADERS priority is truncated"));
                 };
-                (Some(priority(fixed, header.stream_id)?), rest)
+                (
+                    Some(priority(fixed, header.stream_id, allow_stream_errors)?),
+                    rest,
+                )
             } else {
                 (None, rest)
             };
@@ -133,7 +155,11 @@ fn parse_payload(header: &FrameHeader, payload: &Bytes) -> Result<Payload, Error
                 padding: payload.slice_ref(padding),
             })
         }
-        TYPE_PRIORITY => Ok(Payload::Priority(priority(payload, header.stream_id)?)),
+        TYPE_PRIORITY => Ok(Payload::Priority(priority(
+            payload,
+            header.stream_id,
+            allow_stream_errors,
+        )?)),
         TYPE_RESET => Ok(Payload::Reset {
             error_code: be32(&payload[..4]),
         }),
@@ -177,7 +203,7 @@ fn parse_payload(header: &FrameHeader, payload: &Bytes) -> Result<Payload, Error
         }),
         TYPE_WINDOW_UPDATE => {
             let increment = be32(&payload[..4]) & 0x7fff_ffff;
-            if increment == 0 {
+            if increment == 0 && !allow_stream_errors {
                 return Err(Error::Invalid("WINDOW_UPDATE has a zero increment"));
             }
             Ok(Payload::WindowUpdate { increment })
@@ -203,10 +229,10 @@ fn split_padding<'a>(
     Ok(rest.split_at(rest.len() - usize::from(pad_len)))
 }
 
-fn priority(bytes: &[u8], stream_id: u32) -> Result<Priority, Error> {
+fn priority(bytes: &[u8], stream_id: u32, allow_stream_errors: bool) -> Result<Priority, Error> {
     let raw = be32(&bytes[..4]);
     let dependency = raw & 0x7fff_ffff;
-    if dependency == stream_id {
+    if dependency == stream_id && !allow_stream_errors {
         return Err(Error::Invalid("priority depends on its own stream"));
     }
     Ok(Priority {

@@ -32,7 +32,8 @@ pub(crate) struct SettingIssue {
 pub(crate) struct PendingSettings {
     pub final_values: PeerSettings,
     pub minimum_table_size: Option<u32>,
-    pub window_deltas: Vec<i64>,
+    pub window_delta: i64,
+    pub peak_window_delta: Option<i64>,
     pub charged: usize,
 }
 
@@ -44,7 +45,8 @@ pub(crate) struct Applied {
 pub(crate) struct Acked {
     pub values: PeerSettings,
     pub minimum_table_size: Option<u32>,
-    pub window_deltas: Vec<i64>,
+    pub window_delta: i64,
+    pub peak_window_delta: Option<i64>,
     pub charged: usize,
 }
 
@@ -69,7 +71,8 @@ impl DirectionSettings {
         let mut pending = PendingSettings {
             final_values: self.advertised,
             minimum_table_size: None,
-            window_deltas: Vec::new(),
+            window_delta: 0,
+            peak_window_delta: None,
             charged: 0,
         };
         let mut issues = Vec::new();
@@ -114,9 +117,16 @@ impl DirectionSettings {
                             ),
                         });
                     } else {
-                        pending.window_deltas.push(
-                            i64::from(setting.value)
-                                - i64::from(pending.final_values.initial_window_size),
+                        pending.window_delta += i64::from(setting.value)
+                            - i64::from(pending.final_values.initial_window_size);
+                        // Preserve intermediate overflow checks without retaining
+                        // one update per duplicate setting for every open stream.
+                        pending.peak_window_delta = Some(
+                            pending
+                                .peak_window_delta
+                                .map_or(pending.window_delta, |peak| {
+                                    peak.max(pending.window_delta)
+                                }),
                         );
                         pending.final_values.initial_window_size = setting.value;
                     }
@@ -149,7 +159,8 @@ impl DirectionSettings {
         Some(Acked {
             values: pending.final_values,
             minimum_table_size: pending.minimum_table_size,
-            window_deltas: pending.window_deltas,
+            window_delta: pending.window_delta,
+            peak_window_delta: pending.peak_window_delta,
             charged: pending.charged,
         })
     }

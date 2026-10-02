@@ -1331,3 +1331,172 @@ fn review_reset_peer_frames_preserve_compression_and_same_side_errors() {
         }
     }
 }
+
+#[test]
+fn duplicate_settings_preserve_transient_window_overflow() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+        capture.client(stream, &window_update(1, 1));
+        capture.client(stream, &settings(&[(4, 0x7fff_ffff), (4, 65_535)]));
+        capture.server(stream, &settings_ack());
+    });
+    assert!(codes(&events).contains(&"window_overflow"));
+}
+
+#[test]
+fn review_hpack_increase_before_ack_is_accepted() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &settings(&[(1, 8192)]));
+        let mut block = vec![0x3f, 0xe1, 0x3f];
+        block.extend_from_slice(RESPONSE_OK);
+        capture.server(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+        capture.server(stream, &settings_ack());
+    });
+    assert!(!codes(&events).contains(&"hpack_decode"));
+    assert_eq!(connection(&events).status, Status::Complete);
+}
+
+#[test]
+fn review_protocol_is_only_valid_for_connect() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        let mut request = REQUEST.to_vec();
+        review_literal(&mut request, b":protocol", b"websocket");
+        capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"header_semantics"));
+}
+
+#[test]
+fn review_unsafe_push_is_malformed() {
+    for method in [
+        "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH",
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            let mut request = vec![0x86, 0x84];
+            review_literal(&mut request, b":method", method.as_bytes());
+            review_literal(&mut request, b":authority", b"example.com");
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, &request, END_HEADERS),
+            );
+        });
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::PushPromise && m.status == Status::Malformed),
+            "{method}"
+        );
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "push_promise_headers" && i.http2_stream_id == Some(2))
+        );
+    }
+}
+
+#[test]
+fn review_stream_frame_errors_preserve_later_messages_and_hpack() {
+    for kind in [0, 1, 2, 8] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut payload = 1u32.to_be_bytes().to_vec();
+            payload.push(0);
+            let bad = match kind {
+                0 => frame(2, 0, 1, &[0; 4]),
+                1 => {
+                    payload.extend_from_slice(REQUEST);
+                    frame(1, 0x20 | END_HEADERS | END_STREAM, 1, &payload)
+                }
+                2 => frame(2, 0, 1, &payload),
+                _ => window_update(1, 0),
+            };
+            capture.client(stream, &bad);
+            let request = if kind == 1 {
+                vec![0x82, 0x86, 0x84, 0xbe]
+            } else {
+                REQUEST.to_vec()
+            };
+            capture.client(stream, &headers(3, &request, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            issues(&events).iter().any(|i| i.code == "frame_invalid"
+                && i.scope == IssueScope::Stream
+                && i.http2_stream_id == Some(1)),
+            "kind {kind}"
+        );
+        assert!(
+            messages(&events).iter().any(|m| m.http2_stream_id == 3
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete),
+            "kind {kind}"
+        );
+        assert!(!codes(&events).contains(&"hpack_decode"));
+    }
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &window_update(0, 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "frame_invalid" && i.scope == IssueScope::Connection)
+    );
+    assert!(messages(&events).is_empty());
+}
+
+#[test]
+fn review_path_rejects_literal_fragment_but_accepts_escaped_hash() {
+    for path in ["/resource#fragment", "/resource%23fragment"] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x86];
+            review_literal(&mut request, b":path", path.as_bytes());
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            codes(&events).contains(&"header_semantics"),
+            path.contains('#')
+        );
+    }
+}
+
+#[test]
+fn review_101_forbids_framing_fields() {
+    for field in ["Content-Length: 0", "Transfer-Encoding: chunked"] {
+        let events = exercise(|capture, stream| {
+            capture.client(stream, &common::http2::upgrade_request(&[]));
+            let response = format!(
+                "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n{field}\r\n\r\n"
+            );
+            capture.server(stream, response.as_bytes());
+        });
+        assert_eq!(connection(&events).status, Status::Malformed, "{field}");
+        assert_ne!(connection(&events).startup, Startup::H2c);
+    }
+}
+
+#[test]
+fn review_hpack_increase_before_server_direction_exists() {
+    let events = exercise(|capture, stream| {
+        let mut client = common::http2::preface();
+        client.extend_from_slice(&settings(&[(1, 8192)]));
+        client.extend_from_slice(&headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &client);
+        capture.server(stream, &settings(&[]));
+        let mut block = vec![0x3f, 0xe1, 0x3f];
+        block.extend_from_slice(RESPONSE_OK);
+        capture.server(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+        capture.server(stream, &settings_ack());
+        capture.client(stream, &settings_ack());
+    });
+    assert!(!codes(&events).contains(&"hpack_decode"));
+    assert_eq!(connection(&events).status, Status::Complete);
+}

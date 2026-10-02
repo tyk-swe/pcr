@@ -162,6 +162,12 @@ impl Decoder {
         })
     }
 
+    pub(crate) fn permit_table_size(&mut self, maximum: u32) {
+        // An encoder may act on an advertised increase before sending its ACK.
+        // Decreases still become mandatory through acknowledge_table_size.
+        self.ceiling = self.ceiling.max(maximum);
+    }
+
     pub(crate) fn acknowledge_table_size(&mut self, maximum: u32) -> Result<(), Error> {
         if self.poisoned {
             return Err(Error::Compression("decoder is poisoned"));

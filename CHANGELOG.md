@@ -1806,6 +1806,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Preserve HTTP/2 stream-local frame errors and HPACK state, accept advertised
+  HPACK table increases before ACK, and charge retained frame provenance.
+  Reject unsafe push methods, non-CONNECT `:protocol`, literal path fragments,
+  and forbidden framing fields on h2c 101 responses.
+
+- Coalesce duplicate HTTP/2 SETTINGS window changes so acknowledgment work
+  is linear in active streams while preserving intermediate overflow checks.
+
 - Offline HTTP/2 analysis accepts all HTTP token methods during h2c startup,
   preserves refused upgrade evidence while allowing later retries, retains
   pushed HEAD semantics, rejects empty CONNECT authorities, and tolerates

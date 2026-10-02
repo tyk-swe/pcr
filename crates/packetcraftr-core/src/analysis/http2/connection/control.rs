@@ -37,14 +37,16 @@ impl Conn {
             };
             self.release_conn(cx, acked.charged);
             let mut overflow = false;
-            for delta in &acked.window_deltas {
-                for stream in self.streams.values_mut() {
-                    if stream.phase != StreamPhase::Closed {
-                        stream.send_window[side] += *delta;
-                        if stream.send_window[side] > settings::WINDOW_MAX {
-                            overflow = true;
-                        }
+            for stream in self.streams.values_mut() {
+                cx.check_deadline()?;
+                if stream.phase != StreamPhase::Closed {
+                    if acked
+                        .peak_window_delta
+                        .is_some_and(|peak| stream.send_window[side] + peak > settings::WINDOW_MAX)
+                    {
+                        overflow = true;
                     }
+                    stream.send_window[side] += acked.window_delta;
                 }
             }
             if overflow {
@@ -70,6 +72,9 @@ impl Conn {
                     decoder.acknowledge_table_size(minimum)?;
                 }
                 decoder.acknowledge_table_size(acked.values.header_table_size)?;
+                for pending in &self.settings[peer(side)].pending {
+                    decoder.permit_table_size(pending.final_values.header_table_size);
+                }
             }
             self.decoder_sync(side, cx)?;
             return Ok(());
@@ -95,11 +100,16 @@ impl Conn {
         }
         let applied = self.settings[side].apply(&settings, side == SERVER);
         let mut pending = applied.pending;
-        pending.charged = resources::PENDING_OVERHEAD
-            .checked_add(pending.window_deltas.capacity().saturating_mul(8))
-            .expect("pending charge");
+        pending.charged = resources::PENDING_OVERHEAD;
         self.charge_conn(cx, pending.charged)?;
+        let advertised_table_size = pending.final_values.header_table_size;
         self.settings[side].pending.push_back(pending);
+        if let Some(decoder) = self.dirs[peer(side)]
+            .as_mut()
+            .and_then(|dir| dir.decoder.as_mut())
+        {
+            decoder.permit_table_size(advertised_table_size);
+        }
         let issues = applied.issues;
         for issue in issues {
             self.issue(

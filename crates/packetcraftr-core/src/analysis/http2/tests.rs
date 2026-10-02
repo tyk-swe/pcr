@@ -58,7 +58,7 @@ fn settings_validate_wire_values() {
     assert_eq!(direction.advertised.initial_window_size, 65_535);
     let mut direction = DirectionSettings::new();
     let applied = direction.apply(&[Setting { id: 4, value: 100 }], true);
-    assert_eq!(applied.pending.window_deltas, vec![100 - 65_535]);
+    assert_eq!(applied.pending.window_delta, 100 - 65_535);
     assert_eq!(direction.advertised.initial_window_size, 100);
 }
 
@@ -332,6 +332,67 @@ mod owner {
     }
 
     #[test]
+    fn duplicate_settings_keep_pending_state_bounded() {
+        let mut rig = Rig::new(Limits::default(), application::Limits::default());
+        let tracker = Tracker::new(1 << 20, 64).expect("tracker");
+        let mut conn = Conn::new(1, 0, client_flow());
+        let client = handshake(&mut conn, &mut rig, &tracker);
+        let server = client.reverse();
+        let baseline = conn.live;
+        let entry = [0, 4, 0, 0, 0x10, 0];
+        let payload = entry.repeat(2048);
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &server,
+            20,
+            &frame(SETTINGS, 0, 0, &payload),
+        )
+        .expect("settings");
+        assert_eq!(
+            conn.live - baseline,
+            PENDING_OVERHEAD,
+            "duplicate values must not grow retained pending work"
+        );
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            21,
+            &frame(SETTINGS, ACK, 0, &[]),
+        )
+        .expect("ack");
+        assert_eq!(conn.live, baseline);
+        assert_eq!(conn.settings[SERVER].acknowledged.initial_window_size, 4096);
+    }
+
+    #[test]
+    fn emitted_frames_charge_retained_provenance() {
+        let mut rig = Rig::new(Limits::default(), application::Limits::default());
+        let tracker = Tracker::new(1 << 20, 64).expect("tracker");
+        let mut conn = Conn::new(1, 0, client_flow());
+        let client = handshake(&mut conn, &mut rig, &tracker);
+        let baseline = rig.retained;
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            20,
+            &frame(6, 0, 0, &[0; 8]),
+        )
+        .expect("ping");
+        assert_eq!(
+            rig.retained - baseline,
+            application::Limits::decoded_charge(
+                17 + resources::EVENT_OVERHEAD + resources::SET_OVERHEAD + resources::SPAN_OVERHEAD
+            )
+        );
+    }
+
+    #[test]
     fn settings_ack_releases_pending_charge() {
         let mut rig = Rig::new(Limits::default(), application::Limits::default());
         let tracker = Tracker::new(1 << 20, 64).expect("tracker");
@@ -349,15 +410,7 @@ mod owner {
             &setting_frame(4, 4096),
         )
         .expect("settings");
-        let expected = PENDING_OVERHEAD
-            + conn.settings[SERVER]
-                .pending
-                .front()
-                .expect("pending entry")
-                .window_deltas
-                .capacity()
-                * 8;
-        assert_eq!(conn.live - baseline, expected);
+        assert_eq!(conn.live - baseline, PENDING_OVERHEAD);
         feed(
             &mut conn,
             &mut rig,
@@ -1089,7 +1142,9 @@ mod owner {
         let flow = client_flow();
         let mut conn = Conn::new(1, 0, flow.clone());
         let client = handshake(&mut conn, &mut rig, &tracker);
-        let mut block = vec![0x82, 0x84, 0x86, 0x41, 0x0b];
+        let mut block = vec![0x02, 7];
+        block.extend_from_slice(b"CONNECT");
+        block.extend_from_slice(&[0x84, 0x86, 0x41, 0x0b]);
         block.extend_from_slice(b"example.com");
         block.extend_from_slice(&[0x00, 0x09]);
         block.extend_from_slice(b":protocol");
@@ -1386,12 +1441,12 @@ mod owner {
             );
             (result, rig.retained, after_handshake)
         };
-        let (at_boundary, retained, _handshake) = run(85_408);
+        let (at_boundary, retained, _handshake) = run(99_488);
         assert!(at_boundary.is_ok(), "the exact retained charge must fit");
-        assert_eq!(retained, 85_408);
-        let (plus_one, retained, _handshake) = run(85_407);
+        assert_eq!(retained, 99_488);
+        let (plus_one, retained, _handshake) = run(99_487);
         assert!(plus_one.is_err(), "one byte over the bound must reject");
-        assert!(retained <= 85_407);
+        assert!(retained <= 99_487);
     }
 
     #[test]

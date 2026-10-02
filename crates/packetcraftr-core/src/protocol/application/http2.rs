@@ -9,4 +9,5 @@ pub(crate) mod hpack;
 
 pub use error::{Error, Limit};
 pub use frame::parse_frame;
+pub(crate) use frame::parse_frame_for_analysis;
 pub use model::{CLIENT_PREFACE, Frame, FrameHeader, Payload, Priority, Setting};

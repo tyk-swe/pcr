@@ -565,6 +565,27 @@ impl Conn {
                     .is_some_and(|p| p.offers.contains_key(index))
         });
         if status == 101 {
+            if head.values("content-length").next().is_some()
+                || head.values("transfer-encoding").next().is_some()
+            {
+                self.issue(
+                    cx,
+                    Fault {
+                        flow: self.dir_flow(SERVER),
+                        http2_stream_id: None,
+                        scope: IssueScope::Connection,
+                        certainty: Certainty::Confirmed,
+                        status: Status::Malformed,
+                        code: "prelude_framing",
+                        detail: "101 responses cannot contain Content-Length or Transfer-Encoding"
+                            .into(),
+                        wire: head_wire_bytes,
+                        sources: union_balanced(sets)?,
+                    },
+                )?;
+                self.fail(cx, Status::Malformed)?;
+                return Ok(true);
+            }
             if matched && upgrade::accepts_upgrade(&head) {
                 let (index, method, _) = front.clone().expect("front");
                 let prelude = self.prelude.as_mut().expect("prelude");
@@ -766,10 +787,9 @@ impl Conn {
             decoder.acknowledge_table_size(applied.pending.final_values.header_table_size)?;
         }
         self.decoder_sync(SERVER, cx)?;
-        for delta in &applied.pending.window_deltas {
-            for stream in self.streams.values_mut() {
-                stream.send_window[SERVER] += *delta;
-            }
+        for stream in self.streams.values_mut() {
+            cx.check_deadline()?;
+            stream.send_window[SERVER] += applied.pending.window_delta;
         }
         self.startup = Startup::H2c;
         self.refused = false;

@@ -854,7 +854,12 @@ impl Conn {
                 },
             )?;
         }
-        let meta = validate(FieldRole::Request, &headers);
+        let meta = validate(FieldRole::Request, &headers).and_then(|meta| {
+            if !matches!(meta.method.as_deref(), Some(b"GET" | b"HEAD")) {
+                return Err("a pushed request must use a known safe and cacheable method");
+            }
+            Ok(meta)
+        });
         let mut msg = self.new_message(promised, MessageKind::PushPromise, cx)?;
         let content_charge = headers
             .iter()
@@ -892,7 +897,7 @@ impl Conn {
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
+                    http2_stream_id: Some(promised),
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,

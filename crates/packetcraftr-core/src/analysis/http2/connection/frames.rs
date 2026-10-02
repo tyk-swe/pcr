@@ -32,7 +32,7 @@ impl Conn {
                 return Ok(false);
             }
             let header = Bytes::copy_from_slice(&dir.buffer.bytes()[..9]);
-            if let Err(error) = wire::parse_frame(&header, cx.limits.max_frame_bytes) {
+            if let Err(error) = wire::parse_frame_for_analysis(&header, cx.limits.max_frame_bytes) {
                 return self.frame_fault(side, error, cx);
             }
             let length = usize::try_from(u32::from_be_bytes([0, header[0], header[1], header[2]]))
@@ -97,7 +97,7 @@ impl Conn {
         let result = (|conn: &mut Self, cx: &mut Cx<'_>| -> Result<bool, Error> {
             let dir = conn.dirs[side].as_mut().expect("dir");
             let wire_bytes = Bytes::copy_from_slice(&dir.buffer.bytes()[..total]);
-            let parsed = wire::parse_frame(&wire_bytes, cx.limits.max_frame_bytes);
+            let parsed = wire::parse_frame_for_analysis(&wire_bytes, cx.limits.max_frame_bytes);
             match parsed {
                 Ok(Some((frame, _))) => {
                     cx.check_frames()?;
@@ -126,7 +126,25 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<bool, Error> {
         let dir = self.dirs[side].as_mut().expect("dir");
-        let take = dir.buffer.len();
+        let bytes = dir.buffer.bytes();
+        let stream_error = matches!(
+            error,
+            wire::Error::Invalid("frame has an invalid fixed length")
+        ) && bytes.len() >= 9
+            && bytes[3] == 2;
+        let stream_id = stream_error
+            .then(|| u32::from_be_bytes([bytes[5] & 0x7f, bytes[6], bytes[7], bytes[8]]));
+        let take = if stream_error {
+            let total = 9 + u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) as usize;
+            if bytes.len() < total {
+                return Ok(false);
+            }
+            cx.check_frames()?;
+            self.frames += 1;
+            total
+        } else {
+            dir.buffer.len()
+        };
         let sets = dir.buffer.contributors(take);
         let (wire, dropped) = dir.buffer.take(take);
         let sources = union_balanced(sets)?;
@@ -146,8 +164,12 @@ impl Conn {
             cx,
             Fault {
                 flow,
-                http2_stream_id: None,
-                scope: IssueScope::Connection,
+                http2_stream_id: stream_id,
+                scope: if stream_error {
+                    IssueScope::Stream
+                } else {
+                    IssueScope::Connection
+                },
                 certainty: Certainty::Confirmed,
                 status,
                 code,
@@ -156,7 +178,9 @@ impl Conn {
                 sources,
             },
         )?;
-        self.fail(cx, status)?;
+        if !stream_error {
+            self.fail(cx, status)?;
+        }
         Ok(true)
     }
 
@@ -263,6 +287,46 @@ impl Conn {
                 },
             )?;
         }
+        let semantic_error = match &frame.payload {
+            wire::Payload::Priority(priority)
+            | wire::Payload::Headers {
+                priority: Some(priority),
+                ..
+            } if priority.dependency == stream_id => Some("priority depends on its own stream"),
+            wire::Payload::WindowUpdate { increment: 0 } => {
+                Some("WINDOW_UPDATE has a zero increment")
+            }
+            _ => None,
+        };
+        if let Some(detail) = semantic_error {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: (stream_id != 0).then_some(stream_id),
+                    scope: if stream_id == 0 {
+                        IssueScope::Connection
+                    } else {
+                        IssueScope::Stream
+                    },
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "frame_invalid",
+                    detail: detail.into(),
+                    wire: wire_bytes.clone(),
+                    sources: sources.clone(),
+                },
+            )?;
+            if stream_id == 0 {
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
+            }
+        }
+        if semantic_error.is_some() && !matches!(frame.payload, wire::Payload::Headers { .. }) {
+            // Invalid control values remain in the issue's exact wire evidence,
+            // rather than being emitted as a valid typed control payload.
+            return Ok(());
+        }
         self.emit_frame(side, &frame, &wire_bytes, sources.clone(), cx)?;
         self.apply_frame(
             side,
@@ -307,7 +371,17 @@ impl Conn {
         } else {
             9
         };
-        cx.charge_retained(retained + resources::EVENT_OVERHEAD)?;
+        let sources = sources.ok_or(Error::Application(
+            crate::analysis::application::Error::Sources {
+                number: self.number,
+            },
+        ))?;
+        cx.charge_retained(
+            retained
+                + resources::EVENT_OVERHEAD
+                + resources::SET_OVERHEAD
+                + sources.frames().len() * resources::SPAN_OVERHEAD,
+        )?;
         cx.frame(super::super::model::Frame {
             index: self.frames,
             stream: self.stream,
@@ -319,11 +393,7 @@ impl Conn {
             payload_wire,
             data_bytes,
             padding_bytes,
-            sources: sources.ok_or(Error::Application(
-                crate::analysis::application::Error::Sources {
-                    number: self.number,
-                },
-            ))?,
+            sources,
         });
         Ok(())
     }

@@ -365,7 +365,12 @@ impl Conn {
             let elected = self.dirs[CLIENT].is_some();
             if elected && self.dirs[SERVER].is_none() {
                 let mut dir = Dir::new(delivery.flow.clone());
-                dir.decoder = Some(hpack::Decoder::new(cx.limits.hpack())?);
+                let mut decoder = hpack::Decoder::new(cx.limits.hpack())?;
+                decoder.permit_table_size(self.settings[CLIENT].advertised.header_table_size);
+                for pending in &self.settings[CLIENT].pending {
+                    decoder.permit_table_size(pending.final_values.header_table_size);
+                }
+                dir.decoder = Some(decoder);
                 dir.phase = match self.phase {
                     Phase::H2 => DirPhase::Frames,
                     Phase::Prelude => DirPhase::Prelude,

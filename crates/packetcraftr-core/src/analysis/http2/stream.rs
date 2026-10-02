@@ -213,9 +213,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     if value != b"*"
                         && value
                             .iter()
-                            .any(|b| matches!(*b, b' ' | b'\t') || *b < 0x20 || *b == 0x7f)
+                            .any(|b| matches!(*b, b' ' | b'\t' | b'#') || *b < 0x20 || *b == 0x7f)
                     {
-                        return Err(":path carries whitespace or control bytes");
+                        return Err(":path carries a fragment, whitespace or control bytes");
                     }
                     meta.path = true;
                 }
@@ -294,6 +294,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 return Err("request lacks :method");
             }
             let connect = meta.method.as_deref() == Some(b"CONNECT");
+            if meta.protocol && !connect {
+                return Err(":protocol is only valid for CONNECT");
+            }
             if connect && !meta.protocol {
                 if meta.scheme || meta.path {
                     return Err("CONNECT requests omit :scheme and :path");

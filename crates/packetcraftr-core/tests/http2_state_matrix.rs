@@ -160,13 +160,13 @@ fn headers_on_client_promised_stream_id() {
 }
 
 #[test]
-fn response_on_unknown_stream_is_stream_error() {
+fn response_on_unknown_stream_preserves_ordering_uncertainty() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &headers(7, RESPONSE_OK, END_HEADERS));
     });
     assert!(codes(&events).contains(&"response_without_stream"));
-    assert_eq!(connection(&events).status, Status::Malformed);
+    assert_eq!(connection(&events).status, Status::Incomplete);
 }
 
 #[test]
@@ -1623,7 +1623,7 @@ fn review_invalid_settings_stop_later_messages() {
 }
 
 #[test]
-fn review_malformed_informational_does_not_hide_final_response() {
+fn review_malformed_informational_is_preserved_and_closes_stream() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1639,9 +1639,9 @@ fn review_malformed_informational_does_not_hide_final_response() {
             .any(|m| m.kind == MessageKind::Informational && m.status == Status::Malformed)
     );
     assert!(
-        messages(&events)
+        !messages(&events)
             .iter()
-            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            .any(|m| m.kind == MessageKind::Response)
     );
     assert!(!codes(&events).contains(&"trailer_without_end_stream"));
 }
@@ -2418,8 +2418,8 @@ fn review_headers_priority_error_closes_stream_after_hpack() {
         payload.extend_from_slice(&[0x40, 1, b'x', 1, b'y']);
         capture.client(stream, &frame(1, 0x20 | END_HEADERS, 1, &payload));
         capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
-        let mut later = REQUEST.to_vec();
-        later.push(0xbe);
+        // Reference the original authority (63) and inserted x:y (62).
+        let later = vec![0x82, 0x86, 0x84, 0xbf, 0xbe];
         capture.client(stream, &headers(3, &later, END_HEADERS | END_STREAM));
         capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
     });
@@ -2591,5 +2591,184 @@ fn review_field_values_reject_controls_and_preserve_visible_bytes() {
                 "byte={byte}, response={response}"
             );
         }
+    }
+}
+
+#[test]
+fn review_data_on_reserved_push_terminates_connection() {
+    for client_sender in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+            if client_sender {
+                capture.client(stream, &data(2, b"bad", 0));
+            } else {
+                capture.server(stream, &data(2, b"bad", 0));
+            }
+            capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response || m.http2_stream_id == 3)
+        );
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "data_closed_stream"
+                    && i.scope == IssueScope::Connection
+                    && i.certainty == Certainty::Confirmed
+                    && i.sources.is_some()
+                    && !i.wire.is_empty())
+        );
+    }
+}
+
+#[test]
+fn review_malformed_field_sections_close_only_their_stream() {
+    for section in 0..4 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            if section != 0 {
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            }
+            let mut block = match section {
+                0 => REQUEST.to_vec(),
+                1 => RESPONSE_OK.to_vec(),
+                _ => Vec::new(),
+            };
+            review_literal(&mut block, b"connection", b"close");
+            block.extend_from_slice(&[0x40, 1, b'x', 1, b'y']);
+            let flags = END_HEADERS | if section == 3 { 0 } else { END_STREAM };
+            if section == 1 {
+                capture.server(stream, &headers(1, &block, flags));
+            } else {
+                capture.client(stream, &headers(1, &block, flags));
+            }
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            let request = if section == 1 {
+                REQUEST.to_vec()
+            } else {
+                vec![0x82, 0x86, 0x84, 0xbe]
+            };
+            capture.client(stream, &headers(3, &request, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            !messages(&events).iter().any(|m| m.http2_stream_id == 1
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete),
+            "section={section}"
+        );
+        let malformed = messages(&events)
+            .into_iter()
+            .find(|m| m.http2_stream_id == 1 && m.status == Status::Malformed)
+            .unwrap();
+        assert!(!malformed.header_blocks.is_empty());
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+        assert!(!codes(&events).contains(&"hpack_decode"));
+    }
+}
+
+#[test]
+fn review_sender_closed_data_flushes_pending_peer_message() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+        capture.client(stream, &data(1, b"bad", 0));
+        capture.server(stream, &data(1, b"later", END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    let response = messages(&events)
+        .into_iter()
+        .find(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Response)
+        .unwrap();
+    assert_eq!(response.status, Status::Malformed);
+    assert_eq!(response.body_bytes, 0);
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_capture_delayed_request_preserves_early_response_evidence() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+        capture.server(stream, &data(1, b"early", END_STREAM));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Request)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+    for code in ["response_without_stream", "data_unknown_stream"] {
+        let issue = issues(&events)
+            .into_iter()
+            .find(|i| i.code == code)
+            .unwrap();
+        assert_eq!(issue.certainty, Certainty::Indeterminate);
+        assert_eq!(issue.status, Status::Incomplete);
+        assert!(issue.sources.is_some());
+        assert!(!issue.wire.is_empty());
+    }
+}
+
+#[test]
+fn review_http_authority_enforces_host_port_grammar() {
+    for (authority, valid) in [
+        ("good.example bad.example", false),
+        ("example.com:abc", false),
+        ("[::1", false),
+        ("[bad]", false),
+        ("::1", false),
+        ("[::1]tail", false),
+        ("example.com/path", false),
+        ("example.com?x", false),
+        ("example.com#x", false),
+        ("example%zz.com", false),
+        ("example%.com", false),
+        (":80", false),
+        ("", false),
+        ("example.com", true),
+        ("example.com:443", true),
+        ("example.com:", true),
+        ("[2001:db8::1]:443", true),
+        ("[::ffff:192.0.2.1]", true),
+        ("[v1.alpha:beta]:80", true),
+        ("ex%61mple.com", true),
+        ("a!b.example", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut block = vec![0x82, 0x87, 0x84];
+            review_literal(&mut block, b":authority", authority.as_bytes());
+            capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status,
+            if valid {
+                Status::Complete
+            } else {
+                Status::Malformed
+            },
+            "authority={authority}"
+        );
+        assert!(!messages(&events)[0].header_blocks.is_empty());
     }
 }

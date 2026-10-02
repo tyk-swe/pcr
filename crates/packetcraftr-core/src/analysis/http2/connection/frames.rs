@@ -586,6 +586,7 @@ impl Conn {
             };
             let closed =
                 self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
+            let uncertain = !closed && (!self.clean_start || side != owner);
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
@@ -597,8 +598,16 @@ impl Conn {
                     } else {
                         IssueScope::Connection
                     },
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
+                    certainty: if uncertain {
+                        Certainty::Indeterminate
+                    } else {
+                        Certainty::Confirmed
+                    },
+                    status: if uncertain {
+                        Status::Incomplete
+                    } else {
+                        Status::Malformed
+                    },
                     code: if closed {
                         "data_closed_stream"
                     } else {
@@ -613,19 +622,24 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
-            if !closed {
+            if !closed && !uncertain {
                 self.fail(cx, Status::Malformed)?;
             }
             return Ok(());
         };
         if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
+            let reserved = stream.phase == crate::analysis::http2::stream::Phase::Reserved;
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
+                    scope: if reserved {
+                        IssueScope::Connection
+                    } else {
+                        IssueScope::Stream
+                    },
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
                     code: "data_closed_stream",
@@ -634,6 +648,11 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            if reserved {
+                self.fail(cx, Status::Malformed)?;
+            } else {
+                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            }
             return Ok(());
         }
         stream.send_window[side] -= i64::from(length);

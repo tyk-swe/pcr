@@ -383,21 +383,36 @@ impl Conn {
                         "HEADERS opened a stream the endpoint did not initiate",
                     )
                 };
+                let delayed_opener = side == SERVER
+                    && client_initiated
+                    && (!self.clean_start || stream_id > self.max_initiated[CLIENT]);
                 self.issue(
                     cx,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
                         scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
+                        certainty: if delayed_opener {
+                            Certainty::Indeterminate
+                        } else {
+                            Certainty::Confirmed
+                        },
+                        status: if delayed_opener {
+                            Status::Incomplete
+                        } else {
+                            Status::Malformed
+                        },
                         code,
                         detail: detail.into(),
                         wire: block.clone(),
                         sources: block_sources.clone(),
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                // Keep the bounded, sourced header-block evidence without inventing
+                // request correlation. A delayed client opener can still be admitted.
+                if !delayed_opener {
+                    self.fail(cx, Status::Malformed)?;
+                }
                 return Ok(());
             }
         }
@@ -591,7 +606,10 @@ impl Conn {
                     },
                 )?;
             }
-            let flawed = trailer_conflict || failure.is_some();
+            if trailer_conflict {
+                failure = Some(Status::Malformed);
+            }
+            let flawed = failure.is_some();
             let stream = self.streams.get_mut(&stream_id).expect("stream");
             if let Some(msg) = stream.msgs[side].as_mut() {
                 if flawed {
@@ -639,6 +657,7 @@ impl Conn {
                     }
                 }
             } else {
+                failure = Some(Status::Malformed);
                 self.issue(
                     cx,
                     Fault {
@@ -658,7 +677,10 @@ impl Conn {
         if matches!(self.phase, Phase::Dead) {
             return Ok(());
         }
-        if end_stream {
+        if failure == Some(Status::Malformed) {
+            // Preserve the decoded field section before applying its stream error.
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+        } else if end_stream {
             self.end_side(side, stream_id, Status::Complete, cx)?;
         }
         Ok(())

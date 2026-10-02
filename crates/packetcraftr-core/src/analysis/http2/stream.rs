@@ -173,6 +173,90 @@ fn check_value(value: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
+// RFC 3986 host and port syntax, without HTTP's forbidden userinfo.
+fn valid_http_authority(authority: &[u8]) -> bool {
+    fn host_char(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'.'
+                    | b'_'
+                    | b'~'
+                    | b'!'
+                    | b'$'
+                    | b'&'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'*'
+                    | b'+'
+                    | b','
+                    | b';'
+                    | b'='
+            )
+    }
+    fn port(suffix: &[u8]) -> bool {
+        suffix.is_empty()
+            || suffix
+                .strip_prefix(b":")
+                .is_some_and(|digits| digits.iter().all(u8::is_ascii_digit))
+    }
+    if let Some(literal) = authority.strip_prefix(b"[") {
+        let Some(end) = literal.iter().position(|byte| *byte == b']') else {
+            return false;
+        };
+        let address = &literal[..end];
+        let valid_address = if address
+            .first()
+            .is_some_and(|byte| matches!(byte, b'v' | b'V'))
+        {
+            address[1..]
+                .iter()
+                .position(|byte| *byte == b'.')
+                .is_some_and(|dot| {
+                    let version = &address[1..1 + dot];
+                    let host = &address[2 + dot..];
+                    !version.is_empty()
+                        && version.iter().all(u8::is_ascii_hexdigit)
+                        && !host.is_empty()
+                        && host.iter().all(|byte| host_char(*byte) || *byte == b':')
+                })
+        } else {
+            std::str::from_utf8(address)
+                .ok()
+                .and_then(|text| text.parse::<std::net::Ipv6Addr>().ok())
+                .is_some()
+        };
+        return valid_address && port(&literal[end + 1..]);
+    }
+    let end = authority
+        .iter()
+        .position(|byte| *byte == b':')
+        .unwrap_or(authority.len());
+    let host = &authority[..end];
+    if host.is_empty() || !port(&authority[end..]) {
+        return false;
+    }
+    let mut pos = 0;
+    while pos < host.len() {
+        if host[pos] == b'%' {
+            if !host
+                .get(pos + 1..pos + 3)
+                .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+            {
+                return false;
+            }
+            pos += 3;
+        } else {
+            if !host_char(host[pos]) {
+                return false;
+            }
+            pos += 1;
+        }
+    }
+    true
+}
+
 pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'static str> {
     let mut meta = Meta::default();
     let mut regular_seen = false;
@@ -312,9 +396,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 && meta
                     .authority
                     .as_ref()
-                    .is_some_and(|authority| authority.contains(&b'@'))
+                    .is_some_and(|authority| !valid_http_authority(authority))
             {
-                return Err("HTTP authority must not contain userinfo");
+                return Err("HTTP authority has an invalid host or port");
             }
             let connect = meta.method.as_deref() == Some(b"CONNECT");
             if meta.protocol && !connect {

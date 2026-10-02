@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Offline HTTP/2 terminates DATA violations on reserved push streams and closes
+  malformed field-section streams after retaining their decoded evidence. Early
+  peer response blocks/DATA preserve ordering uncertainty without discarding
+  later requests, and HTTP(S) authorities validate URI host/port syntax.
+
 - Offline HTTP/2 keeps capture-delayed peer resets uncertain, closes rejected
   promised streams, rejects userinfo in HTTP(S) authorities and forbidden field
   control bytes, and interrupts long HPACK/Huffman decoding at cancellation or

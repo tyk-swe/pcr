@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Stop HTTP/2 analysis after confirmed initial-SETTINGS, window-overflow,
+  idle-reset, disabled-push, and invalid h2c-settings connection errors.
+  Preserve unsolicited/interim HTTP/1 prelude errors, method-dependent response
+  semantics after malformed headers, pending frame-size increases, and sourced
+  late-GOAWAY corrections for completed exchanges.
 - Keep malformed HTTP/2 priority status across CONTINUATION, preserve the final
   response after malformed informational headers, and reject idle-stream DATA,
   invalid SETTINGS, invalid request-target forms, and content on 205 responses.

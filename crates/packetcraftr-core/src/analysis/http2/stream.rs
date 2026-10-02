@@ -128,6 +128,7 @@ const FORBIDDEN: &[&[u8]] = &[
     b"proxy-connection",
     b"transfer-encoding",
     b"upgrade",
+    b"http2-settings",
 ];
 
 fn token(b: u8) -> bool {
@@ -354,4 +355,16 @@ pub(crate) fn response_status(fields: &[Header]) -> Option<u16> {
     }
     let status = value.iter().fold(0u16, |n, b| n * 10 + u16::from(b - b'0'));
     (100..=599).contains(&status).then_some(status)
+}
+
+/// Preserve method-dependent response semantics after unrelated field errors.
+pub(crate) fn request_method(fields: &[Header]) -> Option<Bytes> {
+    let mut methods = fields
+        .iter()
+        .filter(|field| field.name.as_ref() == b":method");
+    let value = &methods.next()?.value;
+    if methods.next().is_some() || value.is_empty() || !value.iter().all(|b| token(*b)) {
+        return None;
+    }
+    Some(value.clone())
 }

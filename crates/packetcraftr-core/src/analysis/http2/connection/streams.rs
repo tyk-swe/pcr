@@ -453,6 +453,11 @@ impl Conn {
                 )?;
                 failure = Some(Status::Malformed);
                 super::super::stream::Meta {
+                    method: if role == FieldRole::Request {
+                        super::super::stream::request_method(&headers)
+                    } else {
+                        None
+                    },
                     status: if role == FieldRole::Response {
                         super::super::stream::response_status(&headers)
                     } else {
@@ -815,7 +820,7 @@ impl Conn {
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
+                    scope: IssueScope::Connection,
                     certainty,
                     status: Status::Malformed,
                     code: "push_disabled",
@@ -824,6 +829,10 @@ impl Conn {
                     sources: block_sources.clone(),
                 },
             )?;
+            if certainty == Certainty::Confirmed {
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
+            }
         }
         if promised.is_multiple_of(2) && promised > self.max_initiated[SERVER] {
             self.max_initiated[SERVER] = promised;
@@ -970,7 +979,12 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         if !self.streams.contains_key(&stream_id) {
-            if self.closed.contains_key(&stream_id) {
+            let owner = if stream_id.is_multiple_of(2) {
+                SERVER
+            } else {
+                CLIENT
+            };
+            if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
             self.issue(
@@ -978,7 +992,7 @@ impl Conn {
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
+                    scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
                     code: "reset_idle_stream",
@@ -987,6 +1001,7 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");

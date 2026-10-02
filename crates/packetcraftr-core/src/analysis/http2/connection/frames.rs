@@ -38,10 +38,7 @@ impl Conn {
             let length = usize::try_from(u32::from_be_bytes([0, header[0], header[1], header[2]]))
                 .expect("24-bit frame length");
             let receiver = &self.settings[peer(side)];
-            let effective_max = receiver
-                .advertised
-                .max_frame_size
-                .max(receiver.acknowledged.max_frame_size);
+            let effective_max = receiver.permitted_frame_size();
             if length as u32 > effective_max {
                 let flow = dir.flow.clone();
                 let sets = dir.buffer.contributors(9);
@@ -249,10 +246,7 @@ impl Conn {
             return Ok(());
         }
         let receiver = &self.settings[peer(side)];
-        let effective_max = receiver
-            .advertised
-            .max_frame_size
-            .max(receiver.acknowledged.max_frame_size);
+        let effective_max = receiver.permitted_frame_size();
         if header.length > effective_max {
             let flow = self.dir_flow(side);
             self.issue(
@@ -447,6 +441,10 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+            if certainty == Certainty::Confirmed {
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
+            }
         }
         match frame.payload {
             wire::Payload::Data { data, .. } => self.data_frame(

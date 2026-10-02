@@ -64,6 +64,8 @@ impl Conn {
                         sources: evidence.sources.clone(),
                     },
                 )?;
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
             }
             if let Some(dir) = self.dirs[side].as_mut()
                 && let Some(decoder) = dir.decoder.as_mut()
@@ -232,12 +234,24 @@ impl Conn {
                 },
             )?;
         }
-        self.goaway[side] =
-            Some(self.goaway[side].map_or(last_stream_id, |p| p.min(last_stream_id)));
-        let scratch = self.streams.len() * size_of::<u32>();
+        let previous_last = self.goaway[side];
+        let effective_last = previous_last.map_or(last_stream_id, |p| p.min(last_stream_id));
+        self.goaway[side] = Some(effective_last);
+        let closed_range = (
+            std::ops::Bound::Excluded(effective_last),
+            previous_last.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Included),
+        );
+        // Successive GOAWAY bounds only decrease: scan newly excluded closed
+        // IDs, rather than revisiting every completed stream for every frame.
+        let mut capacity = self.streams.len();
+        for _ in self.closed.range(closed_range) {
+            cx.check_deadline()?;
+            capacity += 1;
+        }
+        let scratch = capacity * size_of::<u32>();
         cx.charge_live(scratch)?;
         let result = (|| {
-            let mut emitted = Vec::with_capacity(self.streams.len());
+            let mut emitted = Vec::with_capacity(capacity);
             for (id, stream) in &mut self.streams {
                 cx.check_deadline()?;
                 let initiated_by_receiver = stream.by_client == (side == SERVER);
@@ -246,6 +260,13 @@ impl Conn {
                         emitted.push(*id);
                     }
                     stream.unprocessed = true;
+                }
+            }
+            for (id, _) in self.closed.range(closed_range) {
+                cx.check_deadline()?;
+                let initiated_by_receiver = !id.is_multiple_of(2) == (side == SERVER);
+                if initiated_by_receiver {
+                    emitted.push(*id);
                 }
             }
             for id in emitted {

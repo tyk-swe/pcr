@@ -66,6 +66,14 @@ impl DirectionSettings {
             pending: VecDeque::new(),
         }
     }
+    pub(crate) fn permitted_frame_size(&self) -> u32 {
+        self.pending.iter().fold(
+            self.advertised
+                .max_frame_size
+                .max(self.acknowledged.max_frame_size),
+            |limit, pending| limit.max(pending.final_values.max_frame_size),
+        )
+    }
     pub(crate) fn apply(&mut self, settings: &[Setting], server_sent: bool) -> Applied {
         self.seen = true;
         let mut pending = PendingSettings {

@@ -564,28 +564,30 @@ impl Conn {
                     .as_ref()
                     .is_some_and(|p| p.offers.contains_key(index))
         });
-        if status == 101 {
-            if head.values("content-length").next().is_some()
-                || head.values("transfer-encoding").next().is_some()
-            {
-                self.issue(
-                    cx,
-                    Fault {
-                        flow: self.dir_flow(SERVER),
-                        http2_stream_id: None,
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
-                        code: "prelude_framing",
-                        detail: "101 responses cannot contain Content-Length or Transfer-Encoding"
+        if status < 200
+            && (head.values("content-length").next().is_some()
+                || head.values("transfer-encoding").next().is_some())
+        {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(SERVER),
+                    http2_stream_id: None,
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "prelude_framing",
+                    detail:
+                        "informational responses cannot contain Content-Length or Transfer-Encoding"
                             .into(),
-                        wire: head_wire_bytes,
-                        sources: union_balanced(sets)?,
-                    },
-                )?;
-                self.fail(cx, Status::Malformed)?;
-                return Ok(true);
-            }
+                    wire: head_wire_bytes,
+                    sources: union_balanced(sets)?,
+                },
+            )?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(true);
+        }
+        if status == 101 {
             if matched && upgrade::accepts_upgrade(&head) {
                 let (index, method, _) = front.clone().expect("front");
                 let prelude = self.prelude.as_mut().expect("prelude");
@@ -609,6 +611,28 @@ impl Conn {
                 },
             )?;
             self.fail(cx, Status::Unsupported)?;
+            return Ok(true);
+        }
+        if front.is_none() {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(SERVER),
+                    http2_stream_id: None,
+                    scope: IssueScope::Connection,
+                    certainty: if self.clean_start {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    },
+                    status: Status::Malformed,
+                    code: "prelude_unsolicited_response",
+                    detail: "HTTP/1 response has no pending request".into(),
+                    wire: head_wire_bytes,
+                    sources: union_balanced(sets)?,
+                },
+            )?;
+            self.fail(cx, Status::Malformed)?;
             return Ok(true);
         }
         let mut msg = self.new_message(0, MessageKind::Response, cx)?;
@@ -762,6 +786,23 @@ impl Conn {
             direction.acknowledged = direction.advertised;
             applied
         };
+        let invalid = !applied.issues.is_empty();
+        let request_evidence = if invalid {
+            let msg = offer.msg.as_ref().or(prelude.live_request.as_ref());
+            msg.map(|msg| {
+                Ok::<_, Error>((
+                    msg.upgrade_head
+                        .as_ref()
+                        .expect("upgrade request head")
+                        .wire()
+                        .clone(),
+                    union_balanced(msg.sets.clone())?,
+                ))
+            })
+            .transpose()?
+        } else {
+            None
+        };
         for issue in applied.issues {
             self.issue(
                 cx,
@@ -773,10 +814,23 @@ impl Conn {
                     status: Status::Malformed,
                     code: issue.code,
                     detail: issue.detail.into(),
-                    wire: head_wire.clone(),
-                    sources: self.upgrade_sources.clone(),
+                    wire: request_evidence
+                        .as_ref()
+                        .map_or_else(|| head_wire.clone(), |(wire, _)| wire.clone()),
+                    sources: request_evidence.as_ref().map_or_else(
+                        || self.upgrade_sources.clone(),
+                        |(_, sources)| sources.clone(),
+                    ),
                 },
             )?;
+        }
+        if invalid {
+            if let Some(msg) = offer.msg.take() {
+                self.drop_msg(msg, cx);
+            }
+            self.prelude = Some(prelude);
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
         }
         if let Some(dir) = self.dirs[SERVER].as_mut()
             && let Some(decoder) = dir.decoder.as_mut()

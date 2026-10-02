@@ -1920,3 +1920,193 @@ fn review_http2_settings_header_is_forbidden_on_streams() {
             .any(|m| m.status == Status::Malformed)
     );
 }
+
+#[test]
+fn review_early_prelude_responses_wait_for_partial_request_heads() {
+    for clean in [false, true] {
+        for upgrade in [false, true] {
+            let (mut capture, mut stream) = setup();
+            if !clean {
+                capture.frames.clear();
+            }
+            let request = if upgrade {
+                common::http2::upgrade_request(&[])
+            } else {
+                b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".to_vec()
+            };
+            let cut = request.len() / 2;
+            capture.client(&mut stream, &request[..cut]);
+            let response = if upgrade {
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"
+                    .as_slice()
+            } else {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".as_slice()
+            };
+            capture.server(&mut stream, response);
+            capture.client(&mut stream, &request[cut..]);
+            if !upgrade {
+                capture.client(&mut stream, &common::http2::upgrade_request(&[]));
+                capture.server(&mut stream, b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n");
+            }
+            let mut client = common::http2::preface();
+            client.extend_from_slice(&settings(&[]));
+            capture.client(&mut stream, &client);
+            capture.server(&mut stream, &settings(&[]));
+            capture.server(
+                &mut stream,
+                &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM),
+            );
+            fin(&mut capture, &mut stream, true);
+            fin(&mut capture, &mut stream, false);
+            let events = collect_events(&capture.frames, collector()).0;
+            assert_eq!(
+                connection(&events).startup,
+                Startup::H2c,
+                "clean={clean}, upgrade={upgrade}"
+            );
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            );
+            assert!(connection(&events).upgrade_sources.is_some());
+            assert!(!codes(&events).contains(&"prelude_unsolicited_response"));
+        }
+    }
+}
+
+#[test]
+fn review_increasing_goaway_stops_later_messages() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &goaway(3, 0));
+        capture.server(stream, &goaway(5, 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"goaway_last_stream_increased"));
+    assert!(messages(&events).is_empty());
+}
+
+#[test]
+fn review_idle_window_update_stops_but_implicitly_closed_does_not() {
+    for idle in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &window_update(if idle { 5 } else { 1 }, 1));
+            capture.client(stream, &headers(7, REQUEST, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events).iter().any(|m| m.http2_stream_id == 7),
+            !idle
+        );
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "window_update_unknown_stream"
+                    && i.scope == IssueScope::Connection
+                    && i.certainty == Certainty::Confirmed),
+            idle
+        );
+    }
+}
+
+#[test]
+fn review_push_on_closed_parent_stops_later_messages() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.server(
+            stream,
+            &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+        );
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "push_promise_closed_parent" && i.scope == IssueScope::Connection)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::PushPromise || m.http2_stream_id == 3)
+    );
+}
+
+#[test]
+fn review_connect_host_must_match_authority() {
+    for host in [
+        b"target-a.example".as_slice(),
+        b"target-b.example".as_slice(),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut block = vec![];
+            review_literal(&mut block, b":method", b"CONNECT");
+            review_literal(&mut block, b":authority", b"target-a.example");
+            review_literal(&mut block, b"host", host);
+            capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            codes(&events).contains(&"header_semantics"),
+            host != b"target-a.example"
+        );
+    }
+}
+
+#[test]
+fn review_in_flight_push_after_peer_reset_still_reserves_stream() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &rst(1, 0));
+        capture.server(
+            stream,
+            &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+        );
+        capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+    });
+    assert!(!codes(&events).contains(&"push_promise_closed_parent"));
+    assert!(!codes(&events).contains(&"unpromised_stream"));
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 2 && m.kind == MessageKind::Response)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3));
+}
+
+#[test]
+fn review_stream_window_overflow_flushes_only_affected_stream() {
+    for increment in [0, 0x7fff_ffff] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.server(stream, &window_update(1, increment));
+            capture.client(stream, &data(1, b"x", END_STREAM));
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(codes(&events).contains(&if increment == 0 {
+            "frame_invalid"
+        } else {
+            "stream_window_overflow"
+        }));
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.status == Status::Malformed)
+        );
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
+        );
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+    }
+}

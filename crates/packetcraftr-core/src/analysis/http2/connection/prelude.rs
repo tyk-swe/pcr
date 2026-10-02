@@ -482,6 +482,16 @@ impl Conn {
     }
 
     fn server_prelude_step(&mut self, cx: &mut Cx<'_>) -> Result<bool, Error> {
+        let unmatched = self.prelude.as_ref().is_some_and(|p| p.requests.is_empty());
+        let partial_request = self.dirs[CLIENT]
+            .as_ref()
+            .is_some_and(|dir| !dir.buffer.is_empty());
+        if unmatched && (!self.clean_start || partial_request) {
+            // Capture order can expose a response before the request head is
+            // complete. Keep its bytes and sources in the charged direction
+            // buffer; the next client delivery pumps this direction again.
+            return Ok(false);
+        }
         let dir =
             self.dirs[SERVER]
                 .as_mut()

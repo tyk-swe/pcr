@@ -858,13 +858,16 @@ impl Conn {
             .streams
             .get(&stream_id)
             .is_some_and(|s| s.phase == StreamPhase::Open && s.by_client && !s.ended[SERVER]);
-        if !parent_open {
+        // A peer promise may have been sent before it received our reset.
+        // RFC 9113 §5.1 still requires HPACK processing and stream reservation.
+        let in_flight_after_reset = self.closed.get(&stream_id) == Some(&Some(peer(side)));
+        if !parent_open && !in_flight_after_reset {
             self.issue(
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
+                    scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
                     code: "push_promise_closed_parent",
@@ -873,6 +876,8 @@ impl Conn {
                     sources: block_sources.clone(),
                 },
             )?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
         }
         let meta = validate(FieldRole::Request, &headers).and_then(|meta| {
             if !matches!(meta.method.as_deref(), Some(b"GET" | b"HEAD")) {
@@ -1004,6 +1009,16 @@ impl Conn {
             self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
+        self.close_stream(stream_id, Status::Reset, Some(side), cx)
+    }
+
+    pub(crate) fn close_stream(
+        &mut self,
+        stream_id: u32,
+        status: Status,
+        reset_by: Option<usize>,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
         let stream = self.streams.get_mut(&stream_id).expect("stream");
         if stream.phase == StreamPhase::Closed && stream.ended == [true, true] {
             return Ok(());
@@ -1021,11 +1036,11 @@ impl Conn {
                 .get_mut(&stream_id)
                 .and_then(|s| s.msgs[msg_side].take())
             {
-                self.emit_message(msg_side, msg, Status::Reset, cx)?;
+                self.emit_message(msg_side, msg, status, cx)?;
             }
         }
         self.streams.remove(&stream_id);
-        self.closed.insert(stream_id, Some(side));
+        self.closed.insert(stream_id, reset_by);
         self.release_conn(cx, resources::STREAM_OVERHEAD - 64);
         Ok(())
     }

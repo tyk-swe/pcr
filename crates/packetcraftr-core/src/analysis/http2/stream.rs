@@ -325,7 +325,6 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
             }
             if let (Some(authority), Some(host)) = (&meta.authority, &meta.host)
                 && authority.as_ref() != host.as_ref()
-                && !connect
             {
                 return Err("host differs from :authority");
             }

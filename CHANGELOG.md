@@ -1806,6 +1806,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Terminate confirmed GOAWAY, idle-window, connection-window, and push-parent
+  violations; flush only the affected stream on stream-window overflow. Preserve
+  in-flight push reservations after a peer reset and reject conflicting CONNECT
+  authority/Host values.
+- Retain early HTTP/1 prelude responses in bounded source-tracked buffers until
+  partially captured request heads can be matched across capture ordering.
 - Stop HTTP/2 analysis after confirmed initial-SETTINGS, window-overflow,
   idle-reset, disabled-push, and invalid h2c-settings connection errors.
   Preserve unsolicited/interim HTTP/1 prelude errors, method-dependent response

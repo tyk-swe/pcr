@@ -331,6 +331,11 @@ impl Conn {
         if semantic_error.is_some() && !matches!(frame.payload, wire::Payload::Headers { .. }) {
             // Invalid control values remain in the issue's exact wire evidence,
             // rather than being emitted as a valid typed control payload.
+            if matches!(frame.payload, wire::Payload::WindowUpdate { .. })
+                && self.streams.contains_key(&stream_id)
+            {
+                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            }
             return Ok(());
         }
         self.emit_frame(side, &frame, &wire_bytes, sources.clone(), cx)?;
@@ -543,6 +548,8 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
         } else if length > 0 && self.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(

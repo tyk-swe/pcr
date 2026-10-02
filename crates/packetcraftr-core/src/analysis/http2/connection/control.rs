@@ -167,16 +167,26 @@ impl Conn {
             return Ok(());
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            if self.closed.contains_key(&stream_id) {
+            let owner = if stream_id.is_multiple_of(2) {
+                SERVER
+            } else {
+                super::super::stream::CLIENT
+            };
+            if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
+            let confirmed_idle = self.clean_start && side == owner;
             self.issue(
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
-                    certainty: Certainty::ObservedOrder,
+                    scope: IssueScope::Connection,
+                    certainty: if confirmed_idle {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::ObservedOrder
+                    },
                     status: Status::Malformed,
                     code: "window_update_unknown_stream",
                     detail: "WINDOW_UPDATE on a stream that is not open".into(),
@@ -184,6 +194,9 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            if confirmed_idle {
+                self.fail(cx, Status::Malformed)?;
+            }
             return Ok(());
         };
         if stream.phase == StreamPhase::Closed {
@@ -205,6 +218,7 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
         }
         Ok(())
     }
@@ -233,6 +247,8 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
         }
         let previous_last = self.goaway[side];
         let effective_last = previous_last.map_or(last_stream_id, |p| p.min(last_stream_id));

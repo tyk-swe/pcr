@@ -2602,4 +2602,53 @@ mod owner {
         assert_eq!(rig.buffered, 0);
         assert_eq!(rig.spans, 0);
     }
+    #[test]
+    fn confirmed_connection_window_underflow_stops_messages() {
+        let tracker = Tracker::new(1 << 20, 1024).expect("tracker");
+        let mut rig = Rig::new(Limits::default(), application::Limits::default());
+        let mut conn = Conn::new(1, 0, client_flow());
+        let client = handshake(&mut conn, &mut rig, &tracker);
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            14,
+            &request_block_headers(1),
+        )
+        .expect("request");
+        // Model the boundary reached after cumulative DATA across many streams,
+        // without allocating a multi-gigabyte regression fixture.
+        conn.send_window[CLIENT] = -(1i64 << 31);
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            15,
+            &frame(DATA, END_STREAM, 1, b"x"),
+        )
+        .expect("data");
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            16,
+            &frame(HEADERS, END_HEADERS | END_STREAM, 3, &request_block()),
+        )
+        .expect("later request");
+        finish(conn, &mut rig);
+        assert!(
+            rig.out
+                .iter()
+                .any(|e| matches!(e, Event::Issue(i) if i.code == "connection_window_underflow"))
+        );
+        assert!(
+            !rig.out
+                .iter()
+                .any(|e| matches!(e, Event::Message(m) if m.status == Status::Complete))
+        );
+        assert_eq!((rig.buffered, rig.spans), (0, 0));
+    }
 }

@@ -230,8 +230,12 @@ fn valid_uri_path(path: &[u8]) -> bool {
     true
 }
 
-// RFC 3986 host and port syntax, without HTTP's forbidden userinfo.
 fn valid_http_authority(authority: &[u8]) -> bool {
+    valid_authority(authority, true)
+}
+
+// RFC 3986 authority, with HTTP's stricter userinfo and nonempty-host rules.
+fn valid_authority(authority: &[u8], http: bool) -> bool {
     fn host_char(byte: u8) -> bool {
         byte.is_ascii_alphanumeric()
             || matches!(
@@ -258,6 +262,23 @@ fn valid_http_authority(authority: &[u8]) -> bool {
                 .strip_prefix(b":")
                 .is_some_and(|digits| digits.iter().all(u8::is_ascii_digit))
     }
+    let authority = if !http {
+        if let Some(at) = authority.iter().position(|byte| *byte == b'@') {
+            let userinfo = &authority[..at];
+            if !valid_uri_path(userinfo)
+                || userinfo
+                    .iter()
+                    .any(|byte| matches!(byte, b'/' | b'?' | b'@'))
+            {
+                return false;
+            }
+            &authority[at + 1..]
+        } else {
+            authority
+        }
+    } else {
+        authority
+    };
     if let Some(literal) = authority.strip_prefix(b"[") {
         let Some(end) = literal.iter().position(|byte| *byte == b']') else {
             return false;
@@ -291,7 +312,7 @@ fn valid_http_authority(authority: &[u8]) -> bool {
         .position(|byte| *byte == b':')
         .unwrap_or(authority.len());
     let host = &authority[..end];
-    if host.is_empty() || !port(&authority[end..]) {
+    if (http && host.is_empty()) || !port(&authority[end..]) {
         return false;
     }
     let mut pos = 0;
@@ -455,13 +476,15 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
             if asterisk && meta.method.as_deref() != Some(b"OPTIONS") {
                 return Err("asterisk :path requires OPTIONS");
             }
-            if http_scheme
-                && meta
-                    .authority
-                    .as_ref()
-                    .is_some_and(|authority| !valid_http_authority(authority))
+            if meta
+                .authority
+                .as_ref()
+                .is_some_and(|authority| !valid_authority(authority, http_scheme))
             {
-                return Err("HTTP authority has an invalid host or port");
+                return Err("authority has invalid URI syntax");
+            }
+            if http_scheme && meta.authority.is_none() && meta.host.is_none() {
+                return Err("HTTP requests require :authority or Host");
             }
             if http_scheme
                 && meta.authority.is_none()

@@ -289,9 +289,9 @@ fn hpack_state_survives_reset() {
 
 #[test]
 fn content_length_mismatch_is_flagged() {
-    let block = [
-        0x82, 0x86, 0x84, 0x0f, 0x0d, 0x08, b'1', b'0', b'0', b'0', b'0', b'0', b'0', b'0',
-    ];
+    let mut block = vec![0x82, 0x86, 0x84];
+    review_literal(&mut block, b":authority", b"example.com");
+    review_literal(&mut block, b"content-length", b"10000000");
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, &block, END_HEADERS));
@@ -1302,6 +1302,7 @@ fn review_reset_peer_frames_preserve_compression_and_same_side_errors() {
                         capture.server(stream, &late);
                     }
                     let mut request = vec![0x82, 0x86, 0x84];
+                    review_literal(&mut request, b":authority", b"example.com");
                     let mut response = RESPONSE_OK.to_vec();
                     if late_headers {
                         if sender_client {
@@ -1463,6 +1464,7 @@ fn review_path_rejects_literal_fragment_but_accepts_escaped_hash() {
             prior_knowledge_handshake(capture, stream);
             let mut request = vec![0x82, 0x86];
             review_literal(&mut request, b":path", path.as_bytes());
+            review_literal(&mut request, b":authority", b"example.com");
             capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
         });
         assert_eq!(
@@ -1602,6 +1604,7 @@ fn review_request_path_forms_follow_method_semantics() {
             let mut block = vec![0x86];
             review_literal(&mut block, b":method", method.as_bytes());
             review_literal(&mut block, b":path", path.as_bytes());
+            review_literal(&mut block, b":authority", b"example.com");
             capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
         });
         assert_eq!(
@@ -2675,7 +2678,10 @@ fn review_malformed_field_sections_close_only_their_stream() {
             let request = if section == 1 {
                 REQUEST.to_vec()
             } else {
-                vec![0x82, 0x86, 0x84, 0xbe]
+                let mut request = vec![0x82, 0x86, 0x84];
+                review_literal(&mut request, b":authority", b"example.com");
+                request.push(0xbe);
+                request
             };
             capture.client(stream, &headers(3, &request, END_HEADERS | END_STREAM));
             capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
@@ -2849,6 +2855,7 @@ fn review_path_enforces_uri_characters_and_percent_escapes() {
             prior_knowledge_handshake(capture, stream);
             let mut request = vec![0x82, 0x86];
             review_literal(&mut request, b":path", path);
+            review_literal(&mut request, b":authority", b"example.com");
             capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
         });
         assert_eq!(
@@ -3377,7 +3384,7 @@ fn review_closed_granting_direction_preserves_valid_credit_cases() {
 }
 
 #[test]
-fn review_early_data_without_response_headers_closes_delayed_stream() {
+fn review_early_data_without_response_headers_preserves_delayed_request() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &data(1, b"x", 0));
@@ -3393,11 +3400,12 @@ fn review_early_data_without_response_headers_closes_delayed_stream() {
                 && i.certainty == Certainty::Confirmed
                 && i.scope == IssueScope::Stream)
     );
-    assert!(
-        !messages(&events)
-            .iter()
-            .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
-    );
+    assert!(!messages(&events).iter().any(|m| m.http2_stream_id == 1
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 1
+        && m.kind == MessageKind::Request
+        && m.status == Status::Complete));
     assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
         && m.kind == MessageKind::Response
         && m.status == Status::Complete));
@@ -3819,4 +3827,142 @@ fn review_upgrade_settings_do_not_replace_wire_preface() {
         codes(&events).contains(&"settings_unobserved")
             || codes(&events).contains(&"missing_initial_settings")
     );
+}
+
+#[test]
+fn review_failed_early_response_preserves_delayed_request() {
+    for extra in 0..3 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut invalid = RESPONSE_OK.to_vec();
+            review_literal(&mut invalid, b"connection", b"close");
+            capture.server(stream, &headers(1, &invalid, END_HEADERS));
+            if extra == 1 {
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            } else if extra == 2 {
+                capture.server(stream, &data(1, b"bad", END_STREAM));
+            }
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.client(stream, &data(1, b"request", END_STREAM));
+        });
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Request
+                    && m.http2_stream_id == 1
+                    && m.status == Status::Complete),
+            "extra={extra}"
+        );
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+        );
+        assert_eq!(connection(&events).status, Status::Malformed);
+        assert!(!codes(&events).contains(&"closed_stream_headers"));
+    }
+}
+
+#[test]
+fn review_http_requests_require_target_authority() {
+    for (scheme, host, valid) in [
+        (b"http".as_slice(), false, false),
+        (b"https", false, false),
+        (b"http", true, true),
+        (b"custom", false, true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x84];
+            review_literal(&mut request, b":scheme", scheme);
+            if host {
+                review_literal(&mut request, b"host", b"example.com");
+            }
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(messages(&events)[0].status == Status::Complete, valid);
+    }
+}
+
+#[test]
+fn review_non_http_authority_uses_uri_grammar() {
+    for (authority, valid) in [
+        (b"good.example bad.example".as_slice(), false),
+        (b"user:pass@example.com:21", true),
+        (b"user%20name@example.com", true),
+        (b"user%zz@example.com", false),
+        (b"", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x84];
+            review_literal(&mut request, b":scheme", b"custom");
+            review_literal(&mut request, b":authority", authority);
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status == Status::Complete,
+            valid,
+            "{authority:?}"
+        );
+    }
+}
+
+#[test]
+fn review_ipvfuture_rejects_percent_even_when_escaped() {
+    for (authority, valid) in [
+        (b"[v1.%zz]:80".as_slice(), false),
+        (b"[v1.%20]:80", false),
+        (b"[v1.host:part!]:80", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x86, 0x84];
+            review_literal(&mut request, b":authority", authority);
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(messages(&events)[0].status == Status::Complete, valid);
+    }
+}
+
+#[test]
+fn review_delayed_priority_error_terminates_response_direction() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        let mut payload = 1u32.to_be_bytes().to_vec();
+        payload.push(0);
+        review_literal(&mut payload, b":status", b"103");
+        capture.server(stream, &frame(1, 0x20 | END_HEADERS, 1, &payload));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"frame_invalid"));
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Request && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_trace_requests_reject_content_but_allow_empty_data() {
+    for body in [b"".as_slice(), b"content"] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x86, 0x84];
+            review_literal(&mut request, b":method", b"TRACE");
+            review_literal(&mut request, b":authority", b"example.com");
+            capture.client(stream, &headers(1, &request, END_HEADERS));
+            capture.client(stream, &data(1, body, END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status == Status::Complete,
+            body.is_empty()
+        );
+    }
 }

@@ -628,18 +628,15 @@ impl Conn {
                     detail: "server DATA preceded any response HEADERS in the same ordered byte stream".into(),
                     wire: evidence.wire, sources: evidence.sources,
                 })?;
-                if self.early_response_headers.remove(&stream_id).is_none() {
+                if !self.early_response_headers.contains_key(&stream_id) {
                     cx.check_streams()?;
                     self.admitted_streams += 1;
                     self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
                 }
-                self.closed.insert(
-                    stream_id,
-                    super::ClosedStream {
-                        reset_by: None,
-                        request: None,
-                    },
-                );
+                self.early_response_headers
+                    .entry(stream_id)
+                    .or_default()
+                    .ended = true;
                 return Ok(());
             }
             let uncertain = !closed && (!self.clean_start || side != owner);
@@ -760,7 +757,8 @@ impl Conn {
             return Ok(());
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");
-        if stream.response_bodyless && side == SERVER && data_bytes > 0 {
+        let trace_content = side == CLIENT && stream.method.as_deref() == Some(b"TRACE");
+        if data_bytes > 0 && (trace_content || (stream.response_bodyless && side == SERVER)) {
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
@@ -770,8 +768,12 @@ impl Conn {
                     scope: IssueScope::Stream,
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
-                    code: "bodyless_response_body",
-                    detail: "a response that must not carry a body carried DATA".into(),
+                    code: if trace_content {
+                        "trace_request_body"
+                    } else {
+                        "bodyless_response_body"
+                    },
+                    detail: "a message that must not carry content carried DATA".into(),
                     wire: evidence.wire.clone(),
                     sources: evidence.sources.clone(),
                 },

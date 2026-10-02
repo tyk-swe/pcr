@@ -477,7 +477,7 @@ impl Conn {
                                 .status
                                 .is_none_or(|status| !(100..200).contains(&status));
                             early.forbids_trailers = matches!(meta.status, Some(204 | 304));
-                            early.ended = end_stream;
+                            early.ended = end_stream || malformed;
                         }
                         Err(detail) => {
                             self.issue(
@@ -494,15 +494,12 @@ impl Conn {
                                     sources: block_sources.clone(),
                                 },
                             )?;
-                            // Transfer the equally charged provisional marker to a tombstone.
-                            self.early_response_headers.remove(&stream_id);
-                            self.closed.insert(
-                                stream_id,
-                                super::ClosedStream {
-                                    reset_by: None,
-                                    request: None,
-                                },
-                            );
+                            // Reject further response activity while retaining the
+                            // capture-delayed request's admission and evidence.
+                            self.early_response_headers
+                                .get_mut(&stream_id)
+                                .expect("early response")
+                                .ended = true;
                         }
                     }
                 }
@@ -858,15 +855,6 @@ impl Conn {
             } else {
                 self.end_side(SERVER, id, Status::Incomplete, cx)?;
             }
-        } else if invalid {
-            self.early_response_headers.remove(&id);
-            self.closed.insert(
-                id,
-                super::ClosedStream {
-                    reset_by: None,
-                    request: None,
-                },
-            );
         } else if let Some(state) = self.early_response_headers.get_mut(&id) {
             state.ended = true;
         }

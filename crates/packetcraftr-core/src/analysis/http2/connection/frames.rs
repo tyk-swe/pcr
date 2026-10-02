@@ -86,7 +86,12 @@ impl Conn {
             .and_then(|v| {
                 v.checked_add((length / 6).saturating_mul(setting_words.saturating_mul(2)))
             })
-            .and_then(|v| v.checked_add(resources::EVENT_OVERHEAD))
+            .and_then(|v| {
+                v.checked_add(
+                    resources::EVENT_OVERHEAD
+                        + 4 * size_of::<super::super::settings::SettingIssue>(),
+                )
+            })
             .ok_or(Error::Application(
                 crate::analysis::application::Error::Limit {
                     field: "frame_scratch",
@@ -127,11 +132,13 @@ impl Conn {
     ) -> Result<bool, Error> {
         let dir = self.dirs[side].as_mut().expect("dir");
         let bytes = dir.buffer.bytes();
-        let stream_error = matches!(
+        let priority_length_error = matches!(
             error,
             wire::Error::Invalid("frame has an invalid fixed length")
         ) && bytes.len() >= 9
             && bytes[3] == 2;
+        let interrupted_chain = priority_length_error && dir.chain.is_some();
+        let stream_error = priority_length_error && !interrupted_chain;
         let stream_id = stream_error
             .then(|| u32::from_be_bytes([bytes[5] & 0x7f, bytes[6], bytes[7], bytes[8]]));
         let take = if stream_error {
@@ -152,6 +159,11 @@ impl Conn {
         Self::release_dropped(dir, dropped, cx);
         let flow = dir.flow.clone();
         let (status, code, detail) = match &error {
+            _ if interrupted_chain => (
+                Status::Malformed,
+                "broken_header_block",
+                "an invalid PRIORITY frame interrupts an unfinished header block".to_owned(),
+            ),
             wire::Error::Limit(limit) => (Status::Limit, "frame_limit", format!("{limit}")),
             wire::Error::Invalid(reason) => {
                 (Status::Malformed, "frame_invalid", (*reason).to_string())
@@ -451,10 +463,13 @@ impl Conn {
                 },
                 cx,
             ),
-            wire::Payload::Headers { fragment, .. } => self.block_start(
+            wire::Payload::Headers {
+                fragment, priority, ..
+            } => self.block_start(
                 Pos { side, stream_id },
                 ChainHead::Headers {
                     end_stream: flags & 0x1 != 0,
+                    malformed: priority.is_some_and(|priority| priority.dependency == stream_id),
                 },
                 fragment,
                 evidence,
@@ -553,14 +568,24 @@ impl Conn {
             return Ok(());
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            let closed = self.closed.contains_key(&stream_id);
+            let owner = if stream_id.is_multiple_of(2) {
+                SERVER
+            } else {
+                CLIENT
+            };
+            let closed =
+                self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
                 Fault {
                     flow,
                     http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Stream,
+                    scope: if closed {
+                        IssueScope::Stream
+                    } else {
+                        IssueScope::Connection
+                    },
                     certainty: Certainty::Confirmed,
                     status: Status::Malformed,
                     code: if closed {
@@ -577,6 +602,9 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            if !closed {
+                self.fail(cx, Status::Malformed)?;
+            }
             return Ok(());
         };
         if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
@@ -957,6 +985,7 @@ impl Conn {
                         let mut seen = HashSet::new();
                         for field in &block.fields {
                             for origin in &field.origins {
+                                cx.check_deadline()?;
                                 if !seen.insert(*origin) {
                                     continue;
                                 }
@@ -967,9 +996,10 @@ impl Conn {
                                         },
                                     ));
                                 };
-                                if !compression_sets.iter().any(|s| s.frames() == set.frames()) {
-                                    compression_sets.push(set.clone());
-                                }
+                                // Origins are keyed above; the balanced source union
+                                // deduplicates overlapping physical frames without an
+                                // all-previous-sets comparison for each origin.
+                                compression_sets.push(set.clone());
                             }
                         }
                     }

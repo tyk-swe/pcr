@@ -1500,3 +1500,213 @@ fn review_hpack_increase_before_server_direction_exists() {
     assert!(!codes(&events).contains(&"hpack_decode"));
     assert_eq!(connection(&events).status, Status::Complete);
 }
+
+#[test]
+fn review_invalid_priority_cannot_interrupt_a_header_chain() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, &REQUEST[..2], END_STREAM));
+        capture.client(stream, &frame(2, 0, 3, &[0; 4]));
+        capture.client(stream, &continuation(1, &REQUEST[2..], END_HEADERS));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "broken_header_block" && i.scope == IssueScope::Connection)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_invalid_priority_marks_whole_or_split_messages_malformed() {
+    for client in [false, true] {
+        for split in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                if !client {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                }
+                let block = if client { REQUEST } else { RESPONSE_OK };
+                let cut = if split { 0 } else { block.len() };
+                let mut payload = vec![0, 0, 0, 1, 0];
+                payload.extend_from_slice(&block[..cut]);
+                let first = frame(
+                    1,
+                    0x20 | END_STREAM | if split { 0 } else { END_HEADERS },
+                    1,
+                    &payload,
+                );
+                if client {
+                    capture.client(stream, &first);
+                } else {
+                    capture.server(stream, &first);
+                }
+                if split {
+                    let last = continuation(1, &block[cut..], END_HEADERS);
+                    if client {
+                        capture.client(stream, &last);
+                    } else {
+                        capture.server(stream, &last);
+                    }
+                }
+            });
+            let kind = if client {
+                MessageKind::Request
+            } else {
+                MessageKind::Response
+            };
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == kind && m.status == Status::Malformed),
+                "client={client}, split={split}"
+            );
+        }
+    }
+}
+
+#[test]
+fn review_idle_data_terminates_clean_connections() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &data(11, b"idle", 0));
+        capture.client(stream, &headers(13, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(13, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "data_unknown_stream" && i.scope == IssueScope::Connection)
+    );
+    assert!(messages(&events).is_empty());
+}
+
+#[test]
+fn review_request_path_forms_follow_method_semantics() {
+    for (method, path, valid) in [
+        ("GET", "*", false),
+        ("OPTIONS", "*", true),
+        ("GET", "relative", false),
+        ("GET", "/absolute?q=x", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut block = vec![0x86];
+            review_literal(&mut block, b":method", method.as_bytes());
+            review_literal(&mut block, b":path", path.as_bytes());
+            capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            codes(&events).contains(&"header_semantics"),
+            !valid,
+            "{method} {path}"
+        );
+    }
+}
+
+#[test]
+fn review_invalid_settings_stop_later_messages() {
+    for (id, value) in [(4, 0x8000_0000), (5, 100), (2, 1)] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.server(stream, &settings(&[(id, value)]));
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(messages(&events).is_empty(), "setting {id}");
+        assert_eq!(connection(&events).status, Status::Malformed);
+    }
+}
+
+#[test]
+fn review_malformed_informational_does_not_hide_final_response() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        let mut block = vec![];
+        review_literal(&mut block, b":status", b"103");
+        review_literal(&mut block, b"content-length", b"1");
+        capture.server(stream, &headers(1, &block, END_HEADERS));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Informational && m.status == Status::Malformed)
+    );
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+    assert!(!codes(&events).contains(&"trailer_without_end_stream"));
+}
+
+#[test]
+fn review_205_rejects_content() {
+    for with_length in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            let mut block = vec![];
+            review_literal(&mut block, b":status", b"205");
+            if with_length {
+                review_literal(&mut block, b"content-length", b"4");
+            }
+            capture.server(stream, &headers(1, &block, END_HEADERS));
+            capture.server(stream, &data(1, b"body", END_STREAM));
+        });
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Malformed)
+        );
+    }
+}
+
+#[test]
+fn review_late_goaway_amends_complete_request_with_sourced_issue() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &goaway(0, 0));
+    });
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Request && m.status == Status::Complete)
+    );
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "goaway_unprocessed"
+                && i.http2_stream_id == Some(1)
+                && i.status == Status::Unprocessed
+                && i.sources.is_some())
+    );
+    assert_eq!(connection(&events).status, Status::Unprocessed);
+}
+
+#[test]
+fn review_data_on_implicitly_closed_stream_does_not_become_idle_error() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.client(stream, &data(1, b"closed", 0));
+        capture.client(stream, &headers(5, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(5, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "data_closed_stream" && i.scope == IssueScope::Stream)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 5
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}

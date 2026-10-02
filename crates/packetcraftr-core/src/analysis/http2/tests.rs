@@ -63,6 +63,13 @@ fn settings_validate_wire_values() {
 }
 
 #[test]
+fn repeated_invalid_settings_have_bounded_diagnostics() {
+    let mut direction = DirectionSettings::new();
+    let applied = direction.apply(&vec![Setting { id: 2, value: 99 }; 2048], false);
+    assert_eq!(applied.issues.len(), 1);
+}
+
+#[test]
 fn base64url_is_strict_and_unpadded() {
     assert!(
         upgrade::upgrade_offer(&head_with(&[
@@ -1441,12 +1448,12 @@ mod owner {
             );
             (result, rig.retained, after_handshake)
         };
-        let (at_boundary, retained, _handshake) = run(99_488);
+        let (at_boundary, retained, _handshake) = run(119_968);
         assert!(at_boundary.is_ok(), "the exact retained charge must fit");
-        assert_eq!(retained, 99_488);
-        let (plus_one, retained, _handshake) = run(99_487);
+        assert_eq!(retained, 119_968);
+        let (plus_one, retained, _handshake) = run(119_967);
         assert!(plus_one.is_err(), "one byte over the bound must reject");
-        assert!(retained <= 99_487);
+        assert!(retained <= 119_967);
     }
 
     #[test]

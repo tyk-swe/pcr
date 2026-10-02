@@ -1806,6 +1806,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Keep malformed HTTP/2 priority status across CONTINUATION, preserve the final
+  response after malformed informational headers, and reject idle-stream DATA,
+  invalid SETTINGS, invalid request-target forms, and content on 205 responses.
+  Bound duplicate SETTINGS diagnostics and compression provenance processing,
+  charge retained message metadata, and emit sourced corrections when a later
+  GOAWAY excludes an already-emitted request.
+
 - Preserve HTTP/2 stream-local frame errors and HPACK state, accept advertised
   HPACK table increases before ACK, and charge retained frame provenance.
   Reject unsafe push methods, non-CONNECT `:protocol`, literal path fragments,

@@ -53,7 +53,7 @@ pub(crate) struct Chain {
 }
 #[derive(Clone, Copy)]
 pub(crate) enum ChainHead {
-    Headers { end_stream: bool },
+    Headers { end_stream: bool, malformed: bool },
     PushPromise { promised: u32 },
 }
 

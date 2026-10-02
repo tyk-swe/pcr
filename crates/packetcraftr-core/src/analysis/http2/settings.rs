@@ -26,7 +26,7 @@ pub(crate) fn defaults() -> PeerSettings {
 
 pub(crate) struct SettingIssue {
     pub code: &'static str,
-    pub detail: String,
+    pub detail: &'static str,
 }
 
 pub(crate) struct PendingSettings {
@@ -77,6 +77,21 @@ impl DirectionSettings {
         };
         let mut issues = Vec::new();
         for setting in settings {
+            let code = match setting.id {
+                ENABLE_PUSH if setting.value > 1 => Some("settings_enable_push_value"),
+                ENABLE_PUSH if server_sent => Some("settings_enable_push_role"),
+                INITIAL_WINDOW_SIZE if setting.value > WINDOW_MAX as u32 => {
+                    Some("settings_initial_window_size")
+                }
+                MAX_FRAME_SIZE if !(16384..=16_777_215).contains(&setting.value) => {
+                    Some("settings_max_frame_size")
+                }
+                _ => None,
+            };
+            if code.is_some_and(|code| issues.iter().any(|issue: &SettingIssue| issue.code == code))
+            {
+                continue;
+            }
             match setting.id {
                 HEADER_TABLE_SIZE => {
                     pending.final_values.header_table_size = setting.value;
@@ -91,17 +106,14 @@ impl DirectionSettings {
                         if server_sent {
                             issues.push(SettingIssue {
                                 code: "settings_enable_push_role",
-                                detail: "a server must not send SETTINGS_ENABLE_PUSH".into(),
+                                detail: "a server must not send SETTINGS_ENABLE_PUSH",
                             });
                         }
                         pending.final_values.enable_push = setting.value != 0;
                     }
                     _ => issues.push(SettingIssue {
                         code: "settings_enable_push_value",
-                        detail: format!(
-                            "SETTINGS_ENABLE_PUSH value {} is not 0 or 1",
-                            setting.value
-                        ),
+                        detail: "SETTINGS_ENABLE_PUSH value is not 0 or 1",
                     }),
                 },
                 MAX_CONCURRENT_STREAMS => {
@@ -111,10 +123,7 @@ impl DirectionSettings {
                     if setting.value > WINDOW_MAX as u32 {
                         issues.push(SettingIssue {
                             code: "settings_initial_window_size",
-                            detail: format!(
-                                "SETTINGS_INITIAL_WINDOW_SIZE {value} exceeds 2^31-1",
-                                value = setting.value
-                            ),
+                            detail: "SETTINGS_INITIAL_WINDOW_SIZE exceeds 2^31-1",
                         });
                     } else {
                         pending.window_delta += i64::from(setting.value)
@@ -135,10 +144,7 @@ impl DirectionSettings {
                     if !(16384..=16_777_215).contains(&setting.value) {
                         issues.push(SettingIssue {
                             code: "settings_max_frame_size",
-                            detail: format!(
-                                "SETTINGS_MAX_FRAME_SIZE {value} is outside 16384..=16777215",
-                                value = setting.value
-                            ),
+                            detail: "SETTINGS_MAX_FRAME_SIZE is outside 16384..=16777215",
                         });
                     } else {
                         pending.final_values.max_frame_size = setting.value;

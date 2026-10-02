@@ -21,9 +21,10 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         match head {
-            ChainHead::Headers { end_stream } => {
-                self.stream_headers(side, stream_id, end_stream, decoded, cx)
-            }
+            ChainHead::Headers {
+                end_stream,
+                malformed,
+            } => self.stream_headers(side, stream_id, end_stream, malformed, decoded, cx),
             ChainHead::PushPromise { promised } => {
                 self.push_promise(side, stream_id, promised, decoded, cx)
             }
@@ -137,10 +138,12 @@ impl Conn {
         cx.charge_retained(
             Self::msg_content_charge(&build)
                 + resources::EVENT_OVERHEAD
+                + resources::MESSAGE_OVERHEAD
+                + resources::SET_OVERHEAD
                 + sources.frames().len() * resources::SPAN_OVERHEAD
-                + compression_sources
-                    .as_ref()
-                    .map_or(0, |set| set.frames().len() * resources::SPAN_OVERHEAD),
+                + compression_sources.as_ref().map_or(0, |set| {
+                    resources::SET_OVERHEAD + set.frames().len() * resources::SPAN_OVERHEAD
+                }),
         )?;
         cx.message(Message {
             index: build.index,
@@ -283,6 +286,7 @@ impl Conn {
         side: usize,
         stream_id: u32,
         end_stream: bool,
+        malformed: bool,
         decoded: Decoded,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
@@ -429,7 +433,7 @@ impl Conn {
                 )?;
             }
         }
-        let mut failure = None;
+        let mut failure = malformed.then_some(Status::Malformed);
         let meta = match validate(role, &headers) {
             Ok(meta) => meta,
             Err(detail) => {
@@ -448,7 +452,14 @@ impl Conn {
                     },
                 )?;
                 failure = Some(Status::Malformed);
-                Default::default()
+                super::super::stream::Meta {
+                    status: if role == FieldRole::Response {
+                        super::super::stream::response_status(&headers)
+                    } else {
+                        None
+                    },
+                    ..Default::default()
+                }
             }
         };
         if role == FieldRole::Trailer && !end_stream {
@@ -700,7 +711,7 @@ impl Conn {
         if let Some(status) = meta.status {
             let head_request = stream.method.as_deref() == Some(b"HEAD");
             stream.response_bodyless =
-                head_request || (100..200).contains(&status) || status == 204 || status == 304;
+                head_request || (100..200).contains(&status) || matches!(status, 204 | 205 | 304);
         }
         let unprocessed = stream.unprocessed;
         if kind == MessageKind::Informational {

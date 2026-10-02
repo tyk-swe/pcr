@@ -49,9 +49,12 @@ Ports 80 and 8080 are inspected by default; repeat `--http2-port PORT` for
 other cleartext services. TLS application data is unsupported and is not
 decrypted. Read `http2_frame`, `http2_message`, `http2_issue`, and the final
 `http2_connection` assessment as well as the terminal completion/error.
-A complete message does not override a later connection conflict. An
-unaccepted h2c offer is preserved as `incomplete_upgrade` evidence, without
-inventing an HTTP/2 stream. DATA bodies are counted and discarded.
+A complete message does not override later evidence. A later GOAWAY that
+excludes an already-emitted request produces a sourced `goaway_unprocessed`
+issue for that stream; consumers must apply it alongside the earlier message.
+An unaccepted h2c offer is preserved as `refused_upgrade` evidence when declined,
+or `incomplete_upgrade` at termination, without inventing an HTTP/2 stream.
+DATA bodies are counted and discarded.
 
 For an ordinary failure, lower `--max-frames` below the physical capture count.
 Filtered-out input still counts; adding a display filter does not bypass that

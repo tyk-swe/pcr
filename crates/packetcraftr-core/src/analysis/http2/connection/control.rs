@@ -111,6 +111,7 @@ impl Conn {
             decoder.permit_table_size(advertised_table_size);
         }
         let issues = applied.issues;
+        let invalid = !issues.is_empty();
         for issue in issues {
             self.issue(
                 cx,
@@ -126,6 +127,9 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+        }
+        if invalid {
+            self.fail(cx, Status::Malformed)?;
         }
         Ok(())
     }
@@ -230,13 +234,37 @@ impl Conn {
         }
         self.goaway[side] =
             Some(self.goaway[side].map_or(last_stream_id, |p| p.min(last_stream_id)));
-        for (id, stream) in self.streams.iter_mut() {
-            let initiated_by_receiver = stream.by_client == (side == SERVER);
-            if *id > last_stream_id && initiated_by_receiver {
-                stream.unprocessed = true;
+        let scratch = self.streams.len() * size_of::<u32>();
+        cx.charge_live(scratch)?;
+        let result = (|| {
+            let mut emitted = Vec::with_capacity(self.streams.len());
+            for (id, stream) in &mut self.streams {
+                cx.check_deadline()?;
+                let initiated_by_receiver = stream.by_client == (side == SERVER);
+                if *id > last_stream_id && initiated_by_receiver {
+                    if !stream.unprocessed && stream.ended[peer(side)] {
+                        emitted.push(*id);
+                    }
+                    stream.unprocessed = true;
+                }
             }
-        }
-        Ok(())
+            for id in emitted {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Unprocessed,
+                    code: "goaway_unprocessed",
+                    detail: "GOAWAY excludes this already-emitted request; the earlier event records byte completeness only".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                })?;
+            }
+            Ok(())
+        })();
+        cx.release_live(scratch);
+        result
     }
 }
 

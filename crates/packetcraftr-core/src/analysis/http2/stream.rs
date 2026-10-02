@@ -173,6 +173,7 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
     let mut meta = Meta::default();
     let mut regular_seen = false;
     let mut pseudo_seen = Vec::new();
+    let mut asterisk = false;
     for field in fields {
         let name: &[u8] = &field.name;
         let value: &[u8] = &field.value;
@@ -217,6 +218,10 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     {
                         return Err(":path carries a fragment, whitespace or control bytes");
                     }
+                    if value != b"*" && !value.starts_with(b"/") {
+                        return Err(":path must be absolute or the OPTIONS asterisk form");
+                    }
+                    asterisk = value == b"*";
                     meta.path = true;
                 }
                 (FieldRole::Request, b":authority") => meta.authority = Some(field.value.clone()),
@@ -293,6 +298,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
             if !pseudo_seen.contains(&b":method".as_slice()) {
                 return Err("request lacks :method");
             }
+            if asterisk && meta.method.as_deref() != Some(b"OPTIONS") {
+                return Err("asterisk :path requires OPTIONS");
+            }
             let connect = meta.method.as_deref() == Some(b"CONNECT");
             if meta.protocol && !connect {
                 return Err(":protocol is only valid for CONNECT");
@@ -332,4 +340,18 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
         FieldRole::Trailer => {}
     }
     Ok(meta)
+}
+
+/// Recover only an unambiguous, syntactically valid response status after
+/// other header semantics failed, so informational/final sequencing survives.
+pub(crate) fn response_status(fields: &[Header]) -> Option<u16> {
+    let mut statuses = fields
+        .iter()
+        .filter(|field| field.name.as_ref() == b":status");
+    let value = &statuses.next()?.value;
+    if statuses.next().is_some() || value.len() != 3 || !value.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let status = value.iter().fold(0u16, |n, b| n * 10 + u16::from(b - b'0'));
+    (100..=599).contains(&status).then_some(status)
 }

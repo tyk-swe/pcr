@@ -53,7 +53,9 @@ HTTP/2 analysis is cleartext-only (prior knowledge or h2c upgrade). TCP
 conversation selectors (`tcp:INDEX`) and HTTP/2 stream IDs are distinct.
 Frame/message evidence is emitted as observed; the final connection record
 reflects late gaps or retransmission conflicts, so earlier complete messages do
-not override a later connection failure. `sources` names direct physical
+not override a later connection failure. Likewise, a later GOAWAY can add a
+`goaway_unprocessed` issue that corrects the processing assessment of an earlier
+complete request without retracting that message event. `sources` names direct physical
 contributors; `compression_sources` also includes earlier HPACK dictionary
 contributors. Application retained-byte accounting is a conservative cumulative
 charge, not RSS. Decoded DATA bodies are counted and discarded; undecodable or

@@ -912,6 +912,7 @@ impl Conn {
             stream.phase = StreamPhase::Closed;
             if stream.msgs.iter().all(Option::is_none) {
                 let request = stream.request;
+                self.retain_closed_credit(stream_id, cx)?;
                 self.streams.remove(&stream_id);
                 self.closed.insert(
                     stream_id,
@@ -1230,6 +1231,7 @@ impl Conn {
             }
         }
         let request = self.streams.get(&stream_id).and_then(|s| s.request);
+        self.retain_closed_credit(stream_id, cx)?;
         self.streams.remove(&stream_id);
         self.closed
             .insert(stream_id, super::ClosedStream { reset_by, request });

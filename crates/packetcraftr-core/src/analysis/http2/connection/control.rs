@@ -105,12 +105,22 @@ impl Conn {
                     {
                         overflow = true;
                     }
-                    if stream.send_window[side] + acked.peak_window_delta.unwrap_or(0).max(0) >= 0 {
+                    if stream.send_window[side] + acked.window_delta.max(0) >= 0 {
                         stream.credit_exceeded[side] = false;
                     }
                     stream.send_window[side] += acked.window_delta;
                 }
             }
+            for debt in self.closed_credit.values_mut() {
+                cx.check_deadline()?;
+                if let Some(window) = debt[side].as_mut() {
+                    *window += acked.window_delta;
+                    if *window >= 0 {
+                        debt[side] = None;
+                    }
+                }
+            }
+            self.release_resolved_credit(cx);
             if overflow {
                 self.issue(
                     cx,
@@ -251,6 +261,15 @@ impl Conn {
             }
             return Ok(());
         }
+        if let Some(debt) = self.closed_credit.get_mut(&stream_id) {
+            if let Some(window) = debt[grant].as_mut() {
+                *window = window.saturating_add(i64::from(increment));
+                if *window >= 0 {
+                    debt[grant] = None;
+                }
+            }
+            self.release_credit(stream_id, cx);
+        }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             let owner = if stream_id.is_multiple_of(2) {
                 SERVER
@@ -353,7 +372,6 @@ impl Conn {
         let mut extra = 0i64;
         for pending in &self.settings[peer(side)].pending {
             cx.check_deadline()?;
-            extra = extra.max(delta + pending.peak_window_delta.unwrap_or(0));
             delta += pending.window_delta;
             extra = extra.max(delta);
         }
@@ -386,13 +404,84 @@ impl Conn {
                     detail: "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained".into(),
                     wire: bytes::Bytes::new(), sources: None,
                 })?;
+                self.streams.get_mut(&id).expect("stream").credit_exceeded[side] = false;
                 self.close_stream(id, Status::Malformed, None, cx)?;
                 if only_stream.is_some() {
                     return Ok(true);
                 }
             }
         }
+        let mut cursor = 0;
+        loop {
+            cx.check_deadline()?;
+            let id = match only_stream {
+                Some(id) if cursor == 0 => Some(id),
+                Some(_) => None,
+                None => self
+                    .closed_credit
+                    .range((
+                        std::ops::Bound::Excluded(cursor),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .next()
+                    .map(|(id, _)| *id),
+            };
+            let Some(id) = id else {
+                break;
+            };
+            cursor = id;
+            if self
+                .closed_credit
+                .get(&id)
+                .and_then(|debt| debt[side])
+                .is_some_and(|window| window + extra < 0)
+            {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(side), http2_stream_id: Some(id),
+                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
+                    status: Status::Malformed, code: "stream_window_exceeded",
+                    detail: "completed stream DATA exhausted credit before the granting direction ended; earlier DATA evidence is retained".into(),
+                    wire: bytes::Bytes::new(), sources: None,
+                })?;
+                self.closed_credit.get_mut(&id).expect("debt")[side] = None;
+                self.release_credit(id, cx);
+            }
+        }
         Ok(false)
+    }
+
+    pub(crate) fn retain_closed_credit(&mut self, id: u32, cx: &mut Cx<'_>) -> Result<(), Error> {
+        let stream = self.streams.get(&id).expect("stream");
+        let debt = std::array::from_fn(|side| {
+            (stream.credit_exceeded[side] && stream.send_window[side] < 0)
+                .then_some(stream.send_window[side])
+        });
+        if debt.iter().any(Option::is_some) && !self.closed_credit.contains_key(&id) {
+            self.charge_conn(cx, resources::CLOSED_CREDIT_OVERHEAD)?;
+            self.closed_credit.insert(id, debt);
+        }
+        Ok(())
+    }
+
+    fn release_credit(&mut self, id: u32, cx: &mut Cx<'_>) {
+        if self
+            .closed_credit
+            .get(&id)
+            .is_some_and(|debt| debt.iter().all(Option::is_none))
+        {
+            self.closed_credit.remove(&id);
+            self.release_conn(cx, resources::CLOSED_CREDIT_OVERHEAD);
+        }
+    }
+
+    fn release_resolved_credit(&mut self, cx: &mut Cx<'_>) {
+        let before = self.closed_credit.len();
+        self.closed_credit
+            .retain(|_, debt| debt.iter().any(Option::is_some));
+        self.release_conn(
+            cx,
+            (before - self.closed_credit.len()) * resources::CLOSED_CREDIT_OVERHEAD,
+        );
     }
 
     pub(crate) fn goaway_frame(

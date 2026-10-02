@@ -3431,3 +3431,64 @@ fn review_payload_free_reverse_reset_closes_known_connection() {
     assert!(!codes(&events).contains(&"capture_end"));
     assert!(messages(&events).iter().any(|m| m.status == Status::Reset));
 }
+
+#[test]
+fn review_completed_stream_credit_is_reconciled_at_late_fin() {
+    for restore in 0..4 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &window_update(0, 100_000));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+            for n in 0..4 {
+                capture.server(
+                    stream,
+                    &data(1, &[0; 16384], if n == 3 { END_STREAM } else { 0 }),
+                );
+            }
+            if restore == 1 {
+                capture.client(stream, &window_update(1, 1));
+            } else if restore >= 2 {
+                capture.client(stream, &settings(&[(4, 65_536)]));
+                if restore == 2 {
+                    capture.server(stream, &settings_ack());
+                }
+            }
+            fin(capture, stream, true);
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "stream_window_exceeded" && i.certainty == Certainty::Confirmed),
+            restore == 0
+        );
+    }
+}
+
+#[test]
+fn review_transient_settings_peak_is_not_data_credit() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &window_update(0, 100_000));
+        capture.client(stream, &settings(&[(4, 131_070), (4, 0)]));
+        fin(capture, stream, true);
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+        for n in 0..4 {
+            capture.server(
+                stream,
+                &data(1, &[0; 16384], if n == 3 { END_STREAM } else { 0 }),
+            );
+        }
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "stream_window_exceeded" && i.certainty == Certainty::Confirmed)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+}

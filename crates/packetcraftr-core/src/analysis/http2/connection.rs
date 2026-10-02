@@ -144,6 +144,7 @@ pub(crate) struct Conn {
     pub streams: BTreeMap<u32, StreamState>,
     pub closed: BTreeMap<u32, ClosedStream>,
     pub early_response_headers: BTreeSet<u32>,
+    pub closed_credit: BTreeMap<u32, [Option<i64>; 2]>,
     pub admitted_streams: u64,
     pub max_initiated: [u32; 2],
     pub active: [usize; 2],
@@ -185,6 +186,7 @@ impl Conn {
             streams: BTreeMap::new(),
             closed: BTreeMap::new(),
             early_response_headers: BTreeSet::new(),
+            closed_credit: BTreeMap::new(),
             admitted_streams: 0,
             max_initiated: [0, 0],
             active: [0, 0],
@@ -616,6 +618,7 @@ impl Conn {
         self.streams.clear();
         self.closed.clear();
         self.early_response_headers.clear();
+        self.closed_credit.clear();
         self.prelude = None;
         cx.release_live(bytes);
         *cx.spans = cx.spans.checked_sub(spans).expect("span release");

@@ -1806,6 +1806,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Retain bounded unresolved HTTP/2 credit debt after message completion for later
+  FIN reconciliation, and exclude intermediate values inside a SETTINGS frame
+  from usable DATA credit.
+
 - Preserve early HTTP/2 response ordering when client openers are capture-delayed,
   associate payload-free reverse TCP resets, correct reserved-stream issue scope,
   and charge decoded SETTINGS vectors against retained-output limits.

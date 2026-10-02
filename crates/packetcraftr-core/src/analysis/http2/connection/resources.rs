@@ -152,3 +152,6 @@ impl Cx<'_> {
         self.out.push(Event::Connection(Box::new(connection)));
     }
 }
+
+// Two historical directional debts, stream key, and map-node overhead.
+pub(crate) const CLOSED_CREDIT_OVERHEAD: usize = 160;

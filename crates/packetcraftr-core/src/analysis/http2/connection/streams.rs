@@ -997,17 +997,47 @@ impl Conn {
         result
     }
 
+    pub(crate) fn stream_window_overflows(
+        &self,
+        side: usize,
+        stream_id: u32,
+        cx: &Cx<'_>,
+    ) -> Result<bool, Error> {
+        let Some(stream) = self.streams.get(&stream_id) else {
+            return Ok(false);
+        };
+        let granted = stream.window_granted[side];
+        let base = stream.send_window[side].saturating_sub(granted);
+        let mut previous_grants = 0;
+        let mut delta = 0i64;
+        let mut overflow = base > super::super::settings::WINDOW_MAX;
+        // A WINDOW_UPDATE is received after every preceding SETTINGS in the
+        // granting direction. Later decreases cannot repair an earlier overflow.
+        // Subtracting all observed DATA makes each intermediate bound conservative.
+        for pending in &self.settings[peer(side)].pending {
+            cx.check_deadline()?;
+            let before = pending.window_grants.get(&stream_id).copied().unwrap_or(0);
+            if before > previous_grants {
+                overflow |= base.saturating_add(before).saturating_add(delta)
+                    > super::super::settings::WINDOW_MAX;
+            }
+            previous_grants = before;
+            delta = delta.saturating_add(pending.window_delta);
+        }
+        if granted > previous_grants || self.settings[peer(side)].pending.is_empty() {
+            overflow |=
+                stream.send_window[side].saturating_add(delta) > super::super::settings::WINDOW_MAX;
+        }
+        Ok(overflow)
+    }
+
     pub(crate) fn confirm_stream_window_overflow(
         &mut self,
         side: usize,
         stream_id: u32,
         cx: &mut Cx<'_>,
     ) -> Result<bool, Error> {
-        if self
-            .streams
-            .get(&stream_id)
-            .is_some_and(|stream| stream.send_window[side] > super::super::settings::WINDOW_MAX)
-        {
+        if self.stream_window_overflows(side, stream_id, cx)? {
             self.issue(cx, Fault {
                 flow: self.dir_flow(side),
                 http2_stream_id: Some(stream_id),

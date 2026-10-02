@@ -1806,6 +1806,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Reconcile pending SETTINGS and WINDOW_UPDATE ordering before confirming stream
+  overflow; compare Host and :authority using URI host, address and port normalization.
 - Confirm remaining stream-window overflow on a clean sender FIN and validate
   exactly one Host authority before accepting an h2c upgrade request.
 - Require a target authority or Host fallback for HTTP(S) requests, validate

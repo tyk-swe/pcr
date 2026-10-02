@@ -336,7 +336,8 @@ impl Conn {
             stream.credit_exceeded[grant] = false;
         }
         if stream.send_window[grant] > settings::WINDOW_MAX {
-            let confirmed = stream.ended[grant];
+            let confirmed =
+                stream.ended[grant] && self.stream_window_overflows(grant, stream_id, cx)?;
             self.issue(
                 cx,
                 Fault {

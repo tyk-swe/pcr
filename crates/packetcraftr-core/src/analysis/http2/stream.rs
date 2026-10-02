@@ -335,12 +335,92 @@ fn valid_authority(authority: &[u8], http: bool) -> bool {
     true
 }
 
+fn authorities_equal(a: &[u8], b: &[u8], default_port: Option<&'static [u8]>) -> bool {
+    fn normalized(value: &[u8], fold_case: bool) -> impl Iterator<Item = u8> + '_ {
+        let mut pos = 0;
+        std::iter::from_fn(move || {
+            let mut byte = *value.get(pos)?;
+            if byte == b'%'
+                && let Some(hex) = value.get(pos + 1..pos + 3)
+                && let (Some(high), Some(low)) =
+                    ((hex[0] as char).to_digit(16), (hex[1] as char).to_digit(16))
+            {
+                let decoded = (high * 16 + low) as u8;
+                if decoded.is_ascii_alphanumeric() || matches!(decoded, b'-' | b'.' | b'_' | b'~') {
+                    byte = decoded;
+                    pos += 2;
+                }
+            }
+            pos += 1;
+            Some(if fold_case {
+                byte.to_ascii_lowercase()
+            } else {
+                byte
+            })
+        })
+    }
+    fn user_host(value: &[u8]) -> (Option<&[u8]>, &[u8]) {
+        value
+            .iter()
+            .position(|byte| *byte == b'@')
+            .map_or((None, value), |at| (Some(&value[..at]), &value[at + 1..]))
+    }
+    fn parts<'a>(
+        value: &'a [u8],
+        default_port: Option<&'static [u8]>,
+    ) -> (&'a [u8], Option<&'a [u8]>) {
+        let end = if value.starts_with(b"[") {
+            value
+                .iter()
+                .position(|byte| *byte == b']')
+                .map_or(value.len(), |end| end + 1)
+        } else {
+            value
+                .iter()
+                .position(|byte| *byte == b':')
+                .unwrap_or(value.len())
+        };
+        let port = value
+            .get(end..)
+            .and_then(|suffix| suffix.strip_prefix(b":"))
+            .filter(|port| !port.is_empty())
+            .or(default_port)
+            .map(|port| {
+                &port[port
+                    .iter()
+                    .position(|byte| *byte != b'0')
+                    .unwrap_or(port.len() - 1)..]
+            });
+        (&value[..end], port)
+    }
+    fn ipv6(host: &[u8]) -> Option<std::net::Ipv6Addr> {
+        let host = host.strip_prefix(b"[")?.strip_suffix(b"]")?;
+        std::str::from_utf8(host).ok()?.parse().ok()
+    }
+    let (user_a, a) = user_host(a);
+    let (user_b, b) = user_host(b);
+    if user_a.is_some() != user_b.is_some()
+        || !normalized(user_a.unwrap_or_default(), false)
+            .eq(normalized(user_b.unwrap_or_default(), false))
+    {
+        return false;
+    }
+    let (host_a, port_a) = parts(a, default_port);
+    let (host_b, port_b) = parts(b, default_port);
+    port_a == port_b
+        && match (ipv6(host_a), ipv6(host_b)) {
+            (Some(a), Some(b)) => a == b,
+            _ => normalized(host_a, true).eq(normalized(host_b, true)),
+        }
+}
+
 pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'static str> {
     let mut meta = Meta::default();
     let mut regular_seen = false;
     let mut pseudo_seen = Vec::new();
     let mut asterisk = false;
     let mut http_scheme = false;
+    let mut default_port = None;
     for field in fields {
         let name: &[u8] = &field.name;
         let value: &[u8] = &field.value;
@@ -373,8 +453,14 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                         return Err(":scheme is empty or invalid");
                     }
                     meta.scheme = true;
-                    http_scheme =
-                        value.eq_ignore_ascii_case(b"http") || value.eq_ignore_ascii_case(b"https");
+                    default_port = if value.eq_ignore_ascii_case(b"http") {
+                        Some(b"80".as_slice())
+                    } else if value.eq_ignore_ascii_case(b"https") {
+                        Some(b"443".as_slice())
+                    } else {
+                        None
+                    };
+                    http_scheme = default_port.is_some();
                 }
                 (FieldRole::Request, b":path") => {
                     if value.is_empty() {
@@ -526,7 +612,7 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 }
             }
             if let (Some(authority), Some(host)) = (&meta.authority, &meta.host)
-                && authority.as_ref() != host.as_ref()
+                && !authorities_equal(authority, host, default_port)
             {
                 return Err("host differs from :authority");
             }

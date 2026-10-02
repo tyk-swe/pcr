@@ -4036,3 +4036,65 @@ fn review_upgrade_requires_one_valid_host() {
         }
     }
 }
+
+#[test]
+fn review_pending_settings_preserve_overflow_causality() {
+    for ended in [false, true] {
+        for order in 0..3 {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                capture.client(
+                    stream,
+                    &headers(1, REQUEST, END_HEADERS | if ended { END_STREAM } else { 0 }),
+                );
+                if order == 1 {
+                    capture.server(stream, &window_update(1, 0x7fff_ffff));
+                }
+                capture.server(stream, &settings(&[(4, 0)]));
+                if order == 2 {
+                    capture.server(stream, &settings(&[(4, 65535)]));
+                }
+                if order != 1 {
+                    capture.server(stream, &window_update(1, 0x7fff_ffff));
+                }
+            });
+            assert_eq!(
+                issues(&events)
+                    .iter()
+                    .any(|i| i.code == "stream_window_overflow"
+                        && i.certainty == Certainty::Confirmed),
+                order != 0,
+                "order={order}"
+            );
+        }
+    }
+}
+
+#[test]
+fn review_host_authority_comparison_normalizes_uri_components() {
+    for (scheme, authority, host, valid) in [
+        ("http", "Example.COM", "example.com", true),
+        ("http", "example.com", "example.com:080", true),
+        ("https", "example.com:443", "EXAMPLE.COM", true),
+        ("http", "[::1]", "[0:0:0:0:0:0:0:1]:80", true),
+        ("http", "%65xample.com", "example.com", true),
+        ("http", "example.com", "other.example", false),
+        ("http", "example.com:81", "example.com", false),
+        ("http", "example.com", "example.com:0", false),
+        ("custom", "example.com", "example.com:80", false),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x84];
+            review_literal(&mut request, b":scheme", scheme.as_bytes());
+            review_literal(&mut request, b":authority", authority.as_bytes());
+            review_literal(&mut request, b"host", host.as_bytes());
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status == Status::Complete,
+            valid,
+            "{scheme} {authority} {host}"
+        );
+    }
+}

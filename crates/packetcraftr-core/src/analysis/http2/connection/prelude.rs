@@ -497,6 +497,15 @@ impl Conn {
         if need == 0 {
             return Ok(());
         }
+        let uncertain = !self.clean_start
+            || self.status != Status::Complete
+            || self.dirs[CLIENT]
+                .as_ref()
+                .is_some_and(|dir| !dir.buffer.is_empty())
+            || self
+                .prelude
+                .as_ref()
+                .is_some_and(|p| p.live_request.is_some());
         let scratch = need * 4 + resources::PRELUDE_HEADER_OVERHEAD;
         cx.charge_live(scratch)?;
         let result = (|| {
@@ -518,12 +527,12 @@ impl Conn {
                     flow: self.dir_flow(SERVER),
                     http2_stream_id: None,
                     scope: IssueScope::Connection,
-                    certainty: if self.clean_start {
+                    certainty: if !uncertain {
                         Certainty::Confirmed
                     } else {
                         Certainty::Indeterminate
                     },
-                    status: if self.clean_start {
+                    status: if !uncertain {
                         Status::Malformed
                     } else {
                         Status::Incomplete

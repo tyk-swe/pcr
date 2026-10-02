@@ -961,30 +961,58 @@ impl Conn {
         cx.charge_live(scratch)?;
         let result = (|| {
             let updates = hpack::table_size_updates(&bytes);
+            let mut ambiguous_minimum = false;
             let decoded = match updates {
                 Err(error) => Err(error),
                 Ok(updates) => {
-                    let (minimum, confirmed_prefix) = updates.map_or((None, 0), |(_, maximum)| {
-                        self.settings[peer(side)].causal_table_minimum(maximum)
-                    });
+                    let (minimum, confirmed_prefix, pending_uncertain) = updates
+                        .map_or((None, 0, None), |(_, maximum)| {
+                            self.settings[peer(side)].causal_table_minimum(maximum)
+                        });
+                    let uncertain = [
+                        pending_uncertain,
+                        self.settings[peer(side)].uncertain_table_minimum,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .min();
                     let decoder = self.dirs[side]
                         .as_mut()
                         .expect("dir")
                         .decoder
                         .as_mut()
                         .expect("decoder");
+                    ambiguous_minimum = uncertain.is_some_and(|bound| {
+                        decoder.table_maximum() > bound
+                            && updates.is_none_or(|(observed, _)| observed > bound)
+                    });
                     if let Some(minimum) = minimum {
                         decoder.require_table_minimum(minimum);
                     }
                     let decoded = decoder.decode(&bytes, origin);
-                    if decoded.is_ok()
-                        && let Some((minimum, _)) = updates
-                    {
-                        self.settings[peer(side)].observed_table_updates(minimum, confirmed_prefix);
+                    if decoded.is_ok() {
+                        self.settings[peer(side)].uncertain_table_minimum = None;
+                        if let Some((minimum, _)) = updates {
+                            self.settings[peer(side)]
+                                .observed_table_updates(minimum, confirmed_prefix);
+                        }
                     }
                     decoded
                 }
             };
+            if decoded.is_ok() && ambiguous_minimum {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Compression,
+                    certainty: Certainty::ObservedOrder,
+                    status: Status::Incomplete,
+                    code: "hpack_table_size_ordering",
+                    detail: "an earlier table shrink may precede or follow receipt of SETTINGS; its required minimum cannot be confirmed".into(),
+                    wire: bytes.clone(),
+                    sources: block_sources.clone(),
+                })?;
+            }
             self.decoder_sync(side, cx)?;
             match decoded {
                 Err(error) => {

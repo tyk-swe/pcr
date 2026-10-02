@@ -24,7 +24,16 @@ impl Conn {
             ChainHead::Headers {
                 end_stream,
                 malformed,
-            } => self.stream_headers(side, stream_id, end_stream, malformed, decoded, cx),
+            } => {
+                self.stream_headers(side, stream_id, end_stream, malformed, decoded, cx)?;
+                if malformed
+                    && !matches!(self.phase, Phase::Dead)
+                    && self.streams.contains_key(&stream_id)
+                {
+                    self.close_stream(stream_id, Status::Malformed, None, cx)?;
+                }
+                Ok(())
+            }
             ChainHead::PushPromise { promised } => {
                 self.push_promise(side, stream_id, promised, decoded, cx)
             }
@@ -64,8 +73,19 @@ impl Conn {
     pub(crate) fn emit_message(
         &mut self,
         side: usize,
+        build: MsgBuild,
+        status: Status,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        self.emit_message_with_completion(side, build, status, status == Status::Complete, cx)
+    }
+
+    fn emit_message_with_completion(
+        &mut self,
+        side: usize,
         mut build: MsgBuild,
         status: Status,
+        complete: bool,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
@@ -101,7 +121,7 @@ impl Conn {
             )?;
             build.failure = build.failure.or(Some(Status::Malformed));
         }
-        if status == Status::Complete
+        if complete
             && !cl_exempt
             && let Some(declared) = build.content_length
             && declared != build.body_bytes
@@ -274,19 +294,10 @@ impl Conn {
         if self.active[initiator] <= max as usize {
             return Ok(false);
         }
-        let mut definitely_open = 0usize;
-        for stream in self.streams.values() {
-            cx.check_deadline()?;
-            if stream.by_client == (initiator == CLIENT)
-                && stream.phase == StreamPhase::Open
-                && !stream.ended[initiator]
-            {
-                definitely_open += 1;
-            }
-        }
-        // Peer END_STREAM frames can lag in capture order. Streams still open
-        // on the initiator's own ordered direction are certainly concurrent.
-        let confirmed = receiver.pending.is_empty() && definitely_open > max as usize;
+        // Any existing stream might already have been reset by the peer in
+        // the other capture direction. Only a zero limit proves rejection
+        // without needing to infer whether prior streams remain open.
+        let confirmed = receiver.pending.is_empty() && max == 0;
         self.issue(
             cx,
             Fault {
@@ -760,7 +771,7 @@ impl Conn {
         stream.ended[side] = true;
         let unprocessed = stream.unprocessed;
         if let Some(msg) = stream.msgs[side].take() {
-            self.emit_message(
+            self.emit_message_with_completion(
                 side,
                 msg,
                 if unprocessed {
@@ -768,6 +779,7 @@ impl Conn {
                 } else {
                     status
                 },
+                status == Status::Complete,
                 cx,
             )?;
         }

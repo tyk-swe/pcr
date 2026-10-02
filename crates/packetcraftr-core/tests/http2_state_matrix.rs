@@ -2301,22 +2301,174 @@ fn review_concurrency_preserves_uncertain_peer_closure() {
             );
             capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
         });
-        assert_eq!(
+        assert!(
             messages(&events)
                 .iter()
-                .any(|m| m.http2_stream_id == 3 && m.status == Status::Complete),
-            end_request
+                .any(|m| m.http2_stream_id == 3 && m.status == Status::Complete)
         );
         assert!(
             issues(&events)
                 .iter()
-                .any(|i| i.code == "concurrent_streams"
-                    && i.certainty
-                        == if end_request {
-                            Certainty::ObservedOrder
-                        } else {
-                            Certainty::Confirmed
-                        })
+                .any(|i| i.code == "concurrent_streams" && i.certainty == Certainty::ObservedOrder)
         );
+    }
+}
+
+#[test]
+fn review_concurrency_allows_capture_delayed_peer_reset() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &settings(&[(3, 1)]));
+        capture.client(stream, &settings_ack());
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &rst(1, 0));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "concurrent_streams" && i.certainty == Certainty::ObservedOrder)
+    );
+}
+
+#[test]
+fn review_pre_ack_hpack_shrink_without_receipt_proof_is_uncertain() {
+    for repeat_shrink in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            for id in [1, 3] {
+                capture.client(stream, &headers(id, REQUEST, END_HEADERS | END_STREAM));
+            }
+            capture.client(stream, &settings(&[(1, 64), (1, 8192)]));
+            let mut block = vec![0x3f, 33, 0x3f, 0xe1, 0x1f];
+            block.extend_from_slice(RESPONSE_OK);
+            capture.server(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+            capture.server(stream, &settings_ack());
+            let mut later = if repeat_shrink {
+                vec![0x3f, 33]
+            } else {
+                vec![]
+            };
+            later.extend_from_slice(&[0x3f, 0xe1, 0x3f]);
+            later.extend_from_slice(RESPONSE_OK);
+            capture.server(stream, &headers(3, &later, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "hpack_table_size_ordering"
+                    && i.certainty == Certainty::ObservedOrder),
+            !repeat_shrink
+        );
+        assert_eq!(
+            connection(&events).status,
+            if repeat_shrink {
+                Status::Complete
+            } else {
+                Status::Incomplete
+            }
+        );
+    }
+}
+
+#[test]
+fn review_partial_request_at_eof_does_not_confirm_unsolicited_response() {
+    for with_fin in [false, true] {
+        let (mut capture, mut stream) = setup();
+        capture.client(&mut stream, b"GET / HTTP/1.1\r\nHost: examp");
+        capture.server(&mut stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        if with_fin {
+            fin(&mut capture, &mut stream, true);
+            fin(&mut capture, &mut stream, false);
+        }
+        let events = collect_events(&capture.frames, collector()).0;
+        assert_ne!(connection(&events).status, Status::Malformed);
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "prelude_unsolicited_response"
+                    && i.certainty == Certainty::Indeterminate
+                    && i.sources.is_some())
+        );
+    }
+}
+
+#[test]
+fn review_unsolicited_settings_ack_stops_later_messages() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &settings_ack());
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"unsolicited_settings_ack"));
+    assert!(messages(&events).is_empty());
+}
+
+#[test]
+fn review_headers_priority_error_closes_stream_after_hpack() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        let mut payload = vec![0, 0, 0, 1, 0];
+        payload.extend_from_slice(REQUEST);
+        payload.extend_from_slice(&[0x40, 1, b'x', 1, b'y']);
+        capture.client(stream, &frame(1, 0x20 | END_HEADERS, 1, &payload));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        let mut later = REQUEST.to_vec();
+        later.push(0xbe);
+        capture.client(stream, &headers(3, &later, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
+    );
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 1 && m.status == Status::Malformed)
+    );
+    assert!(!codes(&events).contains(&"hpack_decode"));
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_completed_unprocessed_requests_validate_content_length() {
+    for complete in [false, true] {
+        for bytes in [b"abc".as_slice(), b"abcde".as_slice()] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                capture.server(stream, &goaway(0, 0));
+                let mut request = REQUEST.to_vec();
+                review_literal(&mut request, b"content-length", b"5");
+                capture.client(stream, &headers(1, &request, END_HEADERS));
+                capture.client(
+                    stream,
+                    &data(1, bytes, if complete { END_STREAM } else { 0 }),
+                );
+            });
+            assert_eq!(
+                codes(&events).contains(&"content_length_mismatch"),
+                complete && bytes.len() != 5
+            );
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Request
+                        && m.status
+                            == if !complete || bytes.len() == 5 {
+                                Status::Unprocessed
+                            } else {
+                                Status::Malformed
+                            })
+            );
+        }
     }
 }

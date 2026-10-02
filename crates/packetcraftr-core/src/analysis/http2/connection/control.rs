@@ -33,6 +33,7 @@ impl Conn {
                         sources: evidence.sources,
                     },
                 )?;
+                self.fail(cx, Status::Malformed)?;
                 return Ok(());
             };
             self.release_conn(cx, acked.charged);
@@ -71,7 +72,12 @@ impl Conn {
                 && let Some(decoder) = dir.decoder.as_mut()
             {
                 if let Some(minimum) = acked.minimum_table_size {
-                    decoder.acknowledge_table_size(minimum)?;
+                    if acked.possibly_applied_table_minimum {
+                        let uncertain = &mut self.settings[peer(side)].uncertain_table_minimum;
+                        *uncertain = Some(uncertain.map_or(minimum, |old| old.min(minimum)));
+                    } else {
+                        decoder.acknowledge_table_size(minimum)?;
+                    }
                 }
                 decoder.acknowledge_table_size(acked.values.header_table_size)?;
                 for pending in &self.settings[peer(side)].pending {

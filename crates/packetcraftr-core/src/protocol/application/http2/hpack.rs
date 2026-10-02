@@ -182,6 +182,10 @@ impl Decoder {
         self.ceiling = self.ceiling.max(maximum);
     }
 
+    pub(crate) fn table_maximum(&self) -> u32 {
+        self.effective_max
+    }
+
     pub(crate) fn require_table_minimum(&mut self, minimum: u32) {
         self.pending_min = Some(self.pending_min.map_or(minimum, |old| old.min(minimum)));
     }

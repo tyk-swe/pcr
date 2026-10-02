@@ -1806,6 +1806,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Preserve uncertainty for capture-delayed resets, unproven pre-ACK HPACK
+  shrinks, and partial request heads at EOF; known zero concurrency limits and
+  causally established table minima remain enforced. Unsolicited SETTINGS ACKs
+  now stop subsequent message processing. Embedded self-dependent HEADERS priorities
+  close their stream after HPACK decoding, and fully captured unprocessed
+  messages still validate content length.
 - Flush confirmed PRIORITY, stream-window underflow, premature DATA, and
   concurrency violations without misclassifying uncertain peer closure. Enforce
   causally proven HPACK decreases before pending increases, retain post-reset

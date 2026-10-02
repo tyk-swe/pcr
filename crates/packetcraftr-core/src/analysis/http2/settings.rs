@@ -32,6 +32,7 @@ pub(crate) struct SettingIssue {
 pub(crate) struct PendingSettings {
     pub final_values: PeerSettings,
     pub minimum_table_size: Option<u32>,
+    pub possibly_applied_table_minimum: bool,
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
     pub charged: usize,
@@ -45,6 +46,7 @@ pub(crate) struct Applied {
 pub(crate) struct Acked {
     pub values: PeerSettings,
     pub minimum_table_size: Option<u32>,
+    pub possibly_applied_table_minimum: bool,
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
     pub charged: usize,
@@ -55,6 +57,7 @@ pub(crate) struct DirectionSettings {
     pub acknowledged: PeerSettings,
     pub seen: bool,
     pub pending: VecDeque<PendingSettings>,
+    pub uncertain_table_minimum: Option<u32>,
 }
 
 impl DirectionSettings {
@@ -64,6 +67,7 @@ impl DirectionSettings {
             acknowledged: defaults(),
             seen: false,
             pending: VecDeque::new(),
+            uncertain_table_minimum: None,
         }
     }
     pub(crate) fn permitted_frame_size(&self) -> u32 {
@@ -79,6 +83,7 @@ impl DirectionSettings {
         let mut pending = PendingSettings {
             final_values: self.advertised,
             minimum_table_size: None,
+            possibly_applied_table_minimum: false,
             window_delta: 0,
             peak_window_delta: None,
             charged: 0,
@@ -169,33 +174,42 @@ impl DirectionSettings {
     }
     /// A size above every earlier ceiling proves receipt of the first pending
     /// SETTINGS that permits it, including that frame's ordered decreases.
-    pub(crate) fn causal_table_minimum(&self, maximum: u32) -> (Option<u32>, usize) {
+    pub(crate) fn causal_table_minimum(&self, maximum: u32) -> (Option<u32>, usize, Option<u32>) {
         let mut ceiling = self.acknowledged.header_table_size;
         if maximum <= ceiling {
-            return (None, 0);
+            return (None, 0, None);
         }
         let mut minimum: Option<u32> = None;
+        let mut uncertain: Option<u32> = None;
         for (index, pending) in self.pending.iter().enumerate() {
             if let Some(value) = pending.minimum_table_size {
-                minimum = Some(minimum.map_or(value, |old| old.min(value)));
+                let target = if pending.possibly_applied_table_minimum {
+                    &mut uncertain
+                } else {
+                    &mut minimum
+                };
+                *target = Some(target.map_or(value, |old| old.min(value)));
             }
             ceiling = ceiling.max(pending.final_values.header_table_size);
             if maximum <= ceiling {
-                return (minimum, index + 1);
+                return (minimum, index + 1, uncertain);
             }
         }
-        (None, 0)
+        (None, 0, None)
     }
 
     pub(crate) fn observed_table_updates(&mut self, minimum: u32, confirmed_prefix: usize) {
         for (index, pending) in self.pending.iter_mut().enumerate() {
-            if index < confirmed_prefix
-                || pending
-                    .minimum_table_size
-                    .is_some_and(|bound| minimum <= bound)
-            {
-                // Do not require an already observed shrink a second time on ACK.
+            if index < confirmed_prefix {
                 pending.minimum_table_size = None;
+                pending.possibly_applied_table_minimum = false;
+            } else if pending
+                .minimum_table_size
+                .is_some_and(|bound| minimum <= bound)
+            {
+                // A voluntary shrink before receipt has identical wire bytes.
+                // Retain the obligation and its uncertainty until causal proof.
+                pending.possibly_applied_table_minimum = true;
             }
         }
     }
@@ -206,6 +220,7 @@ impl DirectionSettings {
         Some(Acked {
             values: pending.final_values,
             minimum_table_size: pending.minimum_table_size,
+            possibly_applied_table_minimum: pending.possibly_applied_table_minimum,
             window_delta: pending.window_delta,
             peak_window_delta: pending.peak_window_delta,
             charged: pending.charged,

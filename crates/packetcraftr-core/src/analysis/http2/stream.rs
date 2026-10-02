@@ -186,7 +186,7 @@ fn check_value(value: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn valid_uri_path(path: &[u8]) -> bool {
+pub(super) fn valid_uri_path(path: &[u8]) -> bool {
     let mut pos = 0;
     while pos < path.len() {
         let byte = path[pos];
@@ -235,7 +235,7 @@ pub(super) fn valid_http_authority(authority: &[u8]) -> bool {
 }
 
 // RFC 3986 authority, with HTTP's stricter userinfo and nonempty-host rules.
-fn valid_authority(authority: &[u8], http: bool) -> bool {
+pub(super) fn valid_authority(authority: &[u8], http: bool) -> bool {
     fn host_char(byte: u8) -> bool {
         byte.is_ascii_alphanumeric()
             || matches!(
@@ -517,6 +517,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 if !value.eq_ignore_ascii_case(b"trailers") {
                     return Err("te field may only carry 'trailers'");
                 }
+            }
+            if name == b"host" && role == FieldRole::Trailer {
+                return Err("Host routing information is invalid in trailers");
             }
             if name == b"host" && role == FieldRole::Request {
                 if meta.host.is_some() {

@@ -600,7 +600,7 @@ impl Conn {
         if self
             .closed
             .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(peer(side)))
+            .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side])
         {
             return Ok(());
         }

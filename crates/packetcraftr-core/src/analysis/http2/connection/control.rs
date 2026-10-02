@@ -302,7 +302,8 @@ impl Conn {
             if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
-            let confirmed_idle = self.clean_start && side == owner;
+            let confirmed_idle =
+                self.clean_start && (side == owner || self.opener_exhausted(owner));
             self.issue(
                 cx,
                 Fault {
@@ -323,6 +324,8 @@ impl Conn {
             )?;
             if confirmed_idle {
                 self.fail(cx, Status::Malformed)?;
+            } else {
+                self.retain_pending_opener(stream_id, "window_update_unknown_stream", cx)?;
             }
             return Ok(());
         };

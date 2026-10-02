@@ -12,6 +12,61 @@ use crate::analysis::application;
 use bytes::Bytes;
 
 impl Conn {
+    pub(crate) fn opener_exhausted(&self, owner: usize) -> bool {
+        self.clean_start
+            && self.dirs[owner]
+                .as_ref()
+                .is_some_and(|dir| dir.fully_consumed_fin)
+    }
+
+    pub(crate) fn retain_pending_opener(
+        &mut self,
+        id: u32,
+        code: &'static str,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        if !self.pending_openers.contains_key(&id) {
+            self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.pending_openers.insert(id, code);
+        }
+        Ok(())
+    }
+
+    fn resolve_pending_opener(&mut self, id: u32, cx: &mut Cx<'_>) {
+        if self.pending_openers.remove(&id).is_some() {
+            self.release_conn(cx, resources::CLOSED_STREAM_OVERHEAD);
+        }
+    }
+
+    pub(crate) fn reconcile_pending_openers(
+        &mut self,
+        owner: usize,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let mut fault = None;
+        for (&id, &code) in &self.pending_openers {
+            cx.check_deadline()?;
+            if id.is_multiple_of(2) == (owner == SERVER) {
+                fault = Some((id, code));
+                break;
+            }
+        }
+        if let Some((id, code)) = fault {
+            self.issue(cx, Fault {
+                flow: self.dir_flow(peer(owner)),
+                http2_stream_id: Some(id),
+                scope: IssueScope::Connection,
+                certainty: Certainty::Confirmed,
+                status: Status::Malformed,
+                code,
+                detail: "clean initiator FIN proves no opener exists; original frame evidence is retained in the earlier issue".into(),
+                wire: Bytes::new(), sources: None,
+            })?;
+            self.fail(cx, Status::Malformed)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn headers_block(
         &mut self,
         side: usize,
@@ -273,6 +328,7 @@ impl Conn {
             self.fail(cx, Status::Limit)?;
             return Ok(());
         }
+        self.resolve_pending_opener(stream_id, cx);
         let early_response = self.early_response_headers.remove(&stream_id);
         if early_response.is_some() {
             self.release_conn(cx, resources::CLOSED_STREAM_OVERHEAD);
@@ -384,7 +440,7 @@ impl Conn {
             if self
                 .closed
                 .get(&stream_id)
-                .is_some_and(|closed| closed.reset_by == Some(peer(side)))
+                .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side])
             {
                 // The peer's HEADERS may have been in flight when we observed the
                 // reset. HPACK has already been decoded to preserve table state.
@@ -425,6 +481,7 @@ impl Conn {
                 };
                 let delayed_opener = side == SERVER
                     && client_initiated
+                    && !self.opener_exhausted(CLIENT)
                     && (!self.clean_start || stream_id > self.max_initiated[CLIENT]);
                 self.issue(
                     cx,
@@ -448,6 +505,9 @@ impl Conn {
                         sources: block_sources.clone(),
                     },
                 )?;
+                if delayed_opener {
+                    self.retain_pending_opener(stream_id, code, cx)?;
+                }
                 if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
                     cx.check_streams()?;
                     self.admitted_streams += 1;
@@ -1112,6 +1172,7 @@ impl Conn {
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
+                        ended: [true, true],
                         reset_by: None,
                         request,
                     },
@@ -1185,7 +1246,7 @@ impl Conn {
         let promised_reset_in_flight = self
             .closed
             .get(&promised)
-            .is_some_and(|closed| closed.reset_by == Some(CLIENT));
+            .is_some_and(|closed| closed.reset_by == Some(CLIENT) && !closed.ended[SERVER]);
         if promised.is_multiple_of(2)
             && promised > self.max_initiated[SERVER]
             && (!self.closed.contains_key(&promised) || promised_reset_in_flight)
@@ -1209,6 +1270,7 @@ impl Conn {
             self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
+        self.resolve_pending_opener(promised, cx);
         let parent_open = self
             .streams
             .get(&stream_id)
@@ -1218,12 +1280,8 @@ impl Conn {
         let in_flight_after_reset = self
             .closed
             .get(&stream_id)
-            .is_some_and(|closed| closed.reset_by == Some(peer(side)));
-        let opener_possible = !self.clean_start
-            || !self.dirs[CLIENT]
-                .as_ref()
-                .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none());
-        let delayed_parent = opener_possible
+            .is_some_and(|closed| closed.reset_by == Some(peer(side)) && !closed.ended[side]);
+        let delayed_parent = !self.opener_exhausted(CLIENT)
             && !stream_id.is_multiple_of(2)
             && stream_id > self.max_initiated[CLIENT]
             && !self.streams.contains_key(&stream_id)
@@ -1335,6 +1393,7 @@ impl Conn {
             self.closed.insert(
                 promised,
                 super::ClosedStream {
+                    ended: [true, true],
                     reset_by: None,
                     request: Some(index),
                 },
@@ -1407,6 +1466,7 @@ impl Conn {
             self.closed.insert(
                 id,
                 super::ClosedStream {
+                    ended: [true, true],
                     reset_by: None,
                     request: None,
                 },
@@ -1458,7 +1518,7 @@ impl Conn {
             if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
-            let confirmed = self.clean_start && side == owner;
+            let confirmed = self.clean_start && (side == owner || self.opener_exhausted(owner));
             self.issue(
                 cx,
                 Fault {
@@ -1484,18 +1544,21 @@ impl Conn {
             if confirmed {
                 self.fail(cx, Status::Malformed)?;
             } else if side == SERVER && owner == CLIENT {
+                self.retain_pending_opener(stream_id, "reset_idle_stream", cx)?;
                 self.retain_early_parent(stream_id, cx)?;
                 self.early_response_headers
                     .get_mut(&stream_id)
                     .expect("early parent")
                     .ended = true;
             } else {
+                self.retain_pending_opener(stream_id, "reset_idle_stream", cx)?;
                 cx.check_streams()?;
                 self.admitted_streams += 1;
                 self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
+                        ended: [side == CLIENT, side == SERVER],
                         reset_by: Some(side),
                         request: None,
                     },
@@ -1520,6 +1583,12 @@ impl Conn {
         {
             return Ok(());
         }
+        let mut ended = stream.ended;
+        if let Some(side) = reset_by {
+            ended[side] = true;
+        } else {
+            ended = [true, true];
+        }
         let was_open = stream.phase == StreamPhase::Open;
         stream.phase = StreamPhase::Closed;
         stream.ended = [true, true];
@@ -1539,8 +1608,14 @@ impl Conn {
         let request = self.streams.get(&stream_id).and_then(|s| s.request);
         self.retain_closed_credit(stream_id, cx)?;
         self.streams.remove(&stream_id);
-        self.closed
-            .insert(stream_id, super::ClosedStream { reset_by, request });
+        self.closed.insert(
+            stream_id,
+            super::ClosedStream {
+                ended,
+                reset_by,
+                request,
+            },
+        );
         self.release_conn(
             cx,
             resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,

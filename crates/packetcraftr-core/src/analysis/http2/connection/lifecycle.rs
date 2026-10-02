@@ -47,6 +47,21 @@ impl Conn {
         if self.phase == Phase::H2 {
             self.pump(cx)?;
         }
+        if self.phase == Phase::H2
+            && let Some(side) = self.side_of(flow)
+            && let Some(dir) = self.dirs[side].as_mut()
+            && dir.buffer.is_empty()
+            && dir.chain.is_none()
+            && dir.phase == DirPhase::Frames
+        {
+            dir.fully_consumed_fin = true;
+            if self.clean_start {
+                self.reconcile_pending_openers(side, cx)?;
+                if self.phase == Phase::Dead {
+                    return Ok(());
+                }
+            }
+        }
         if let Some(side) = self.side_of(flow)
             && self.send_window[side] > super::super::settings::WINDOW_MAX
             && self.dirs[side]

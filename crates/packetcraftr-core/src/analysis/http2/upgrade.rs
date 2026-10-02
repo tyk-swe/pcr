@@ -71,12 +71,56 @@ fn http11(head: &Head) -> bool {
     version == "HTTP/1.1"
 }
 
+fn valid_request_target(method: &str, target: &[u8]) -> bool {
+    use super::stream::{valid_authority, valid_http_authority, valid_uri_path};
+    if method == "CONNECT" {
+        return valid_http_authority(target)
+            && target.contains(&b':')
+            && target
+                .rsplit(|b| *b == b':')
+                .next()
+                .is_some_and(|port| !port.is_empty() && port.iter().all(u8::is_ascii_digit));
+    }
+    if target == b"*" {
+        return method == "OPTIONS";
+    }
+    if target.starts_with(b"/") {
+        return valid_uri_path(target);
+    }
+    let Some(colon) = target.iter().position(|b| *b == b':') else {
+        return false;
+    };
+    let scheme = &target[..colon];
+    if !scheme.first().is_some_and(u8::is_ascii_alphabetic)
+        || !scheme
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+    {
+        return false;
+    }
+    let http = scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https");
+    let rest = &target[colon + 1..];
+    if let Some(rest) = rest.strip_prefix(b"//") {
+        let end = rest
+            .iter()
+            .position(|b| matches!(b, b'/' | b'?' | b'#'))
+            .unwrap_or(rest.len());
+        valid_authority(&rest[..end], http) && valid_uri_path(&rest[end..])
+    } else {
+        !http && valid_uri_path(rest)
+    }
+}
+
 pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'static str> {
     if !has_token(head, "upgrade", b"h2c") {
         return Ok(None);
     }
     if !http11(head) {
         return Err("h2c upgrade requires an HTTP/1.1 request");
+    }
+    if !matches!(&head.start, StartLine::Request { method, target, .. } if valid_request_target(method, target))
+    {
+        return Err("h2c request target has invalid method-specific URI syntax");
     }
     let mut hosts = head.values("host");
     let host = hosts.next().ok_or("h2c request requires Host")?;

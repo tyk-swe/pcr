@@ -161,10 +161,11 @@ fn headers_on_client_promised_stream_id() {
 
 #[test]
 fn response_on_unknown_stream_preserves_ordering_uncertainty() {
-    let events = exercise(|capture, stream| {
-        prior_knowledge_handshake(capture, stream);
-        capture.server(stream, &headers(7, RESPONSE_OK, END_HEADERS));
-    });
+    let (mut capture, mut stream) = setup();
+    prior_knowledge_handshake(&mut capture, &mut stream);
+    capture.server(&mut stream, &headers(7, RESPONSE_OK, END_HEADERS));
+    // Capture EOF without a TCP FIN cannot exclude a delayed client opener.
+    let events = collect_events(&capture.frames, collector()).0;
     assert!(codes(&events).contains(&"response_without_stream"));
     assert_eq!(connection(&events).status, Status::Incomplete);
 }
@@ -4357,4 +4358,261 @@ fn review_promise_in_flight_after_client_reset_does_not_revive_stream() {
     assert!(messages(&events).iter().any(|m| m.http2_stream_id == 1
         && m.kind == MessageKind::Response
         && m.status == Status::Complete));
+}
+
+#[test]
+fn review_parent_reset_preserves_prior_server_end() {
+    for server_ended in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            if server_ended {
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            }
+            capture.client(stream, &rst(1, 0));
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+            capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "push_promise_closed_parent"
+                    && i.certainty == Certainty::Confirmed),
+            server_ended
+        );
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::PushPromise && m.status == Status::Complete),
+            !server_ended
+        );
+    }
+}
+
+#[test]
+fn review_peer_reset_does_not_hide_prior_directional_end() {
+    for client_sender in [false, true] {
+        for ended in [false, true] {
+            for send_data in [false, true] {
+                let events = exercise(|capture, stream| {
+                    prior_knowledge_handshake(capture, stream);
+                    capture.client(
+                        stream,
+                        &headers(
+                            1,
+                            REQUEST,
+                            END_HEADERS
+                                | if client_sender && ended {
+                                    END_STREAM
+                                } else {
+                                    0
+                                },
+                        ),
+                    );
+                    capture.server(
+                        stream,
+                        &headers(
+                            1,
+                            RESPONSE_OK,
+                            END_HEADERS
+                                | if !client_sender && ended {
+                                    END_STREAM
+                                } else {
+                                    0
+                                },
+                        ),
+                    );
+                    let followup = if send_data {
+                        data(1, b"", 0)
+                    } else {
+                        headers(1, &[], END_HEADERS | END_STREAM)
+                    };
+                    if client_sender {
+                        capture.server(stream, &rst(1, 0));
+                        capture.client(stream, &followup);
+                    } else {
+                        capture.client(stream, &rst(1, 0));
+                        capture.server(stream, &followup);
+                    }
+                });
+                assert_eq!(
+                    issues(&events)
+                        .iter()
+                        .any(|i| i.status == Status::Malformed
+                            && i.certainty == Certainty::Confirmed),
+                    ended
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn review_idle_peer_frames_are_confirmed_at_clean_owner_fin() {
+    for kind in 0..3 {
+        for fin_first in [false, true] {
+            let (mut capture, mut stream) = setup();
+            prior_knowledge_handshake(&mut capture, &mut stream);
+            if fin_first {
+                fin(&mut capture, &mut stream, true);
+            }
+            let bytes = match kind {
+                0 => headers(1, RESPONSE_OK, END_HEADERS | END_STREAM),
+                1 => rst(1, 0),
+                _ => window_update(1, 1),
+            };
+            capture.server(&mut stream, &bytes);
+            if !fin_first {
+                fin(&mut capture, &mut stream, true);
+            }
+            fin(&mut capture, &mut stream, false);
+            let events = collect_events(&capture.frames, collector()).0;
+            let code = match kind {
+                0 => "response_without_stream",
+                1 => "reset_idle_stream",
+                _ => "window_update_unknown_stream",
+            };
+            assert!(
+                issues(&events)
+                    .iter()
+                    .any(|i| i.code == code && i.certainty == Certainty::Confirmed),
+                "kind={kind} fin_first={fin_first}"
+            );
+        }
+    }
+}
+
+#[test]
+fn review_host_is_not_a_trailer_field() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+        let mut trailer = Vec::new();
+        review_literal(&mut trailer, b"host", b"example.com");
+        capture.client(stream, &headers(1, &trailer, END_HEADERS | END_STREAM));
+    });
+    assert_eq!(messages(&events)[0].status, Status::Malformed);
+}
+
+#[test]
+fn review_head_response_allows_no_content_data_framing() {
+    for content in [false, true] {
+        for padded in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                let mut request = vec![0x86, 0x84, 0x01, 0x01, b'a'];
+                review_literal(&mut request, b":method", b"HEAD");
+                capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+                let mut payload = if padded { vec![1] } else { Vec::new() };
+                if content {
+                    payload.push(b'x');
+                }
+                if padded {
+                    payload.push(0);
+                }
+                capture.server(
+                    stream,
+                    &frame(0, END_STREAM | if padded { 8 } else { 0 }, 1, &payload),
+                );
+            });
+            assert_eq!(
+                messages(&events)
+                    .iter()
+                    .find(|m| m.kind == MessageKind::Response)
+                    .unwrap()
+                    .status
+                    == Status::Complete,
+                !content
+            );
+        }
+    }
+}
+
+#[test]
+fn review_h2c_request_target_forms_are_validated() {
+    for (method, target, valid) in [
+        ("GET", "relative", false),
+        ("GET", "/x#fragment", false),
+        ("GET", "/x%20y?q=ok", true),
+        ("GET", "http://example.com/x?q=ok", true),
+        ("GET", "http://example.com/x#bad", false),
+        ("OPTIONS", "*", true),
+        ("GET", "*", false),
+    ] {
+        let events = exercise(|capture, stream| {
+            let offer = format!(
+                "{method} {target} HTTP/1.1\r\nHost: example.com\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n"
+            );
+            capture.client(stream, offer.as_bytes());
+            capture.server(
+                stream,
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+            );
+            capture.server(stream, &settings(&[]));
+            let mut client = common::http2::preface();
+            client.extend_from_slice(&settings(&[]));
+            client.extend_from_slice(&settings_ack());
+            capture.client(stream, &client);
+            capture.server(stream, &settings_ack());
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Request && m.status == Status::Complete),
+            valid,
+            "{method} {target}"
+        );
+    }
+}
+
+#[test]
+fn review_provisional_controls_reconcile_both_initiator_directions() {
+    for client_owner in [false, true] {
+        for reset in [false, true] {
+            for opener in [false, true] {
+                let events = exercise(|capture, stream| {
+                    prior_knowledge_handshake(capture, stream);
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+                    let id = if client_owner { 3 } else { 2 };
+                    let control = if reset {
+                        rst(id, 0)
+                    } else {
+                        window_update(id, 1)
+                    };
+                    if client_owner {
+                        capture.server(stream, &control);
+                    } else {
+                        capture.client(stream, &control);
+                    }
+                    if opener {
+                        if client_owner {
+                            capture.client(stream, &headers(id, REQUEST, END_HEADERS | END_STREAM));
+                        } else {
+                            capture.server(
+                                stream,
+                                &common::http2::push_promise(1, id, REQUEST, END_HEADERS),
+                            );
+                        }
+                    }
+                });
+                let code = if reset {
+                    "reset_idle_stream"
+                } else {
+                    "window_update_unknown_stream"
+                };
+                assert_eq!(
+                    issues(&events)
+                        .iter()
+                        .any(|i| i.code == code && i.certainty == Certainty::Confirmed),
+                    !opener,
+                    "client_owner={client_owner} reset={reset} opener={opener}"
+                );
+            }
+        }
+    }
 }

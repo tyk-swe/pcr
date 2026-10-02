@@ -66,6 +66,7 @@ pub(crate) struct Dir {
     pub block_sources: HashMap<u64, SourceSet>,
     pub chain: Option<Chain>,
     pub closed: bool,
+    pub fully_consumed_fin: bool,
     pub saw_frame: bool,
     pub received: bool,
     pub garbage: bool,
@@ -83,6 +84,7 @@ impl Dir {
             block_sources: HashMap::new(),
             chain: None,
             closed: false,
+            fully_consumed_fin: false,
             saw_frame: false,
             received: false,
             garbage: false,
@@ -129,6 +131,7 @@ pub(crate) struct Evidence {
 }
 
 pub(crate) struct ClosedStream {
+    pub ended: [bool; 2],
     pub reset_by: Option<usize>,
     pub request: Option<u64>,
 }
@@ -170,6 +173,7 @@ pub(crate) struct Conn {
     pub done: bool,
     pub finalizing: bool,
     pub resume_side: Option<usize>,
+    pub pending_openers: BTreeMap<u32, &'static str>,
     pub parent_deferred: VecDeque<MsgBuild>,
     pub ack_deferred: VecDeque<(usize, MsgBuild, Status)>,
 }
@@ -213,6 +217,7 @@ impl Conn {
             done: false,
             finalizing: false,
             resume_side: None,
+            pending_openers: BTreeMap::new(),
             parent_deferred: VecDeque::new(),
             ack_deferred: VecDeque::new(),
         }

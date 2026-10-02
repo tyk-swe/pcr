@@ -1806,6 +1806,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Reconcile provisional idle-stream diagnostics at a clean initiator FIN,
+  validate h2c request-target forms, and reject Host routing fields in trailers.
+- Preserve directional END_STREAM state across peer resets before admitting
+  later promises, headers, or DATA as in-flight traffic.
 - Reject pushed-stream reuse after PRIORITY errors and impossible delayed
   parents after a clean client FIN.
 - Retain idle PRIORITY errors and capture-delayed resets, and defer pushed

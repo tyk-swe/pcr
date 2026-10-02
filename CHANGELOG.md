@@ -1806,6 +1806,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Invalidate retained HTTP/2 messages on stream failure even after their active
+  slot has closed while awaiting SETTINGS acknowledgment reconciliation.
+
 - Reconcile provisional HTTP/2 flow-window overflow when senders end, retain both
   unmatched ACK heads at EOF, and correct closed-stream/push-limit diagnostics.
   Deferred message emission now releases completed push slots and rejects later

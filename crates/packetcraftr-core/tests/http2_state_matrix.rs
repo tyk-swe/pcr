@@ -3227,3 +3227,63 @@ fn review_headers_after_deferred_end_stream_are_rejected() {
         && m.kind == MessageKind::Response
         && m.status == Status::Complete));
 }
+
+#[test]
+fn review_closed_deferred_messages_are_invalidated() {
+    for reset in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &settings_ack());
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            if reset {
+                capture.server(stream, &rst(1, 0));
+            } else {
+                capture.server(stream, &headers(1, &[], END_HEADERS | END_STREAM));
+            }
+            capture.server(stream, &settings(&[(3, 10)]));
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        let response = messages(&events)
+            .into_iter()
+            .find(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Response)
+            .unwrap();
+        assert_eq!(
+            response.status,
+            if reset {
+                Status::Reset
+            } else {
+                Status::Malformed
+            }
+        );
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+    }
+}
+
+#[test]
+fn review_later_settings_do_not_reopen_closed_deferred_streams() {
+    for early_ack in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            if early_ack {
+                capture.client(stream, &settings_ack());
+            }
+            capture.server(stream, &window_update(1, 1));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            capture.server(stream, &settings(&[(4, 2147483647)]));
+            if !early_ack {
+                capture.client(stream, &settings_ack());
+            }
+        });
+        assert!(!codes(&events).contains(&"window_overflow"));
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+        );
+    }
+}

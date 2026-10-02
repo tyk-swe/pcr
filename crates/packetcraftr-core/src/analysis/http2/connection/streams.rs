@@ -1197,7 +1197,10 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         let stream = self.streams.get_mut(&stream_id).expect("stream");
-        if stream.phase == StreamPhase::Closed && stream.ended == [true, true] {
+        if stream.phase == StreamPhase::Closed
+            && stream.ended == [true, true]
+            && stream.msgs.iter().all(Option::is_none)
+        {
             return Ok(());
         }
         let was_open = stream.phase == StreamPhase::Open;

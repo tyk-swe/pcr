@@ -26,6 +26,21 @@ impl Conn {
                 cx,
             );
         }
+        if !self.has_flow(flow) && self.has_flow(&flow.reverse()) {
+            self.charge_conn(cx, resources::DIR_OVERHEAD)?;
+            let mut dir = super::Dir::new(flow.clone());
+            dir.closed = true;
+            if let Some(reverse) = self.side_of(&flow.reverse()) {
+                dir.phase = match self.phase {
+                    Phase::H2 => DirPhase::Frames,
+                    Phase::Prelude => DirPhase::Prelude,
+                    _ => DirPhase::Sniff,
+                };
+                self.dirs[1 - reverse] = Some(dir);
+            } else {
+                self.pending.push(dir);
+            }
+        }
         if let Some(dir) = self.dir_mut(flow) {
             dir.closed = true;
         }
@@ -477,8 +492,8 @@ impl Conn {
                 self.worst(Status::Incomplete);
             }
             if self.dirs[CLIENT].is_none() {
-                let all_garbage =
-                    !self.pending.is_empty() && self.pending.iter().all(|dir| dir.garbage);
+                let all_garbage = self.pending.iter().any(|dir| dir.received)
+                    && self.pending.iter().all(|dir| !dir.received || dir.garbage);
                 self.worst(if self.startup == Startup::Unknown && all_garbage {
                     Status::Unsupported
                 } else {

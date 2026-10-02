@@ -603,7 +603,10 @@ impl Conn {
                 && self.clean_start
                 && side == SERVER
                 && owner == CLIENT
-                && !self.early_response_headers.contains(&stream_id)
+                && self
+                    .early_response_headers
+                    .get(&stream_id)
+                    .is_none_or(|early| !early.final_seen || early.ended)
             {
                 self.issue(cx, Fault {
                     flow: self.dir_flow(side), http2_stream_id: Some(stream_id),
@@ -612,9 +615,11 @@ impl Conn {
                     detail: "server DATA preceded any response HEADERS in the same ordered byte stream".into(),
                     wire: evidence.wire, sources: evidence.sources,
                 })?;
-                cx.check_streams()?;
-                self.admitted_streams += 1;
-                self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                if self.early_response_headers.remove(&stream_id).is_none() {
+                    cx.check_streams()?;
+                    self.admitted_streams += 1;
+                    self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                }
                 self.closed.insert(
                     stream_id,
                     super::ClosedStream {
@@ -625,6 +630,12 @@ impl Conn {
                 return Ok(());
             }
             let uncertain = !closed && (!self.clean_start || side != owner);
+            if side == SERVER
+                && end_stream
+                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+            {
+                early.ended = true;
+            }
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
@@ -817,6 +828,23 @@ impl Conn {
                     msg.sets.push(sources);
                 }
             }
+        } else if side == SERVER && stream.early_response.is_some_and(|early| early.final_seen) {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Indeterminate,
+                    status: Status::Incomplete,
+                    code: "data_after_early_response",
+                    detail:
+                        "DATA follows response HEADERS observed before the delayed client opener"
+                            .into(),
+                    wire: evidence.wire,
+                    sources: evidence.sources,
+                },
+            )?;
         } else {
             let flow = self.dir_flow(side);
             self.issue(

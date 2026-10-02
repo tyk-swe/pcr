@@ -96,12 +96,19 @@ impl Conn {
             };
             self.release_conn(cx, acked.charged);
             let mut overflow = false;
-            for stream in self.streams.values_mut() {
+            for (id, stream) in &mut self.streams {
                 cx.check_deadline()?;
                 if stream.phase != StreamPhase::Closed {
-                    if acked
-                        .peak_window_delta
-                        .is_some_and(|peak| stream.send_window[side] + peak > settings::WINDOW_MAX)
+                    let owner = if stream.by_client {
+                        super::super::stream::CLIENT
+                    } else {
+                        SERVER
+                    };
+                    let existed = owner != peer(side) || *id <= acked.sender_stream_limit;
+                    if existed
+                        && acked.peak_window_delta.is_some_and(|peak| {
+                            stream.send_window[side] + peak > settings::WINDOW_MAX
+                        })
                     {
                         overflow = true;
                     }
@@ -182,6 +189,7 @@ impl Conn {
         let resume_peer = self.waiting_settings_ack(peer(side));
         let applied = self.settings[side].apply(&settings, side == SERVER);
         let mut pending = applied.pending;
+        pending.sender_stream_limit = self.max_initiated[side];
         pending.charged = resources::PENDING_OVERHEAD;
         self.charge_conn(cx, pending.charged)?;
         let advertised_table_size = pending.final_values.header_table_size;

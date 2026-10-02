@@ -66,6 +66,12 @@ impl MsgBuild {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct EarlyResponse {
+    pub final_seen: bool,
+    pub ended: bool,
+}
+
 pub(crate) struct StreamState {
     pub phase: Phase,
     pub by_client: bool,
@@ -75,6 +81,7 @@ pub(crate) struct StreamState {
     pub msgs: [Option<MsgBuild>; 2],
     pub send_window: [i64; 2],
     pub credit_exceeded: [bool; 2],
+    pub early_response: Option<EarlyResponse>,
     pub method: Option<Bytes>,
     pub response_bodyless: bool,
     pub unprocessed: bool,
@@ -91,6 +98,7 @@ impl StreamState {
             msgs: [None, None],
             send_window: windows,
             credit_exceeded: [false; 2],
+            early_response: None,
             method: None,
             response_bodyless: false,
             unprocessed: false,
@@ -457,8 +465,17 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 if meta.scheme || meta.path {
                     return Err("CONNECT requests omit :scheme and :path");
                 }
-                if meta.authority.as_ref().is_none_or(Bytes::is_empty) {
+                let Some(authority) = meta.authority.as_ref() else {
                     return Err("CONNECT requests require :authority");
+                };
+                if !valid_http_authority(authority)
+                    || !authority.contains(&b':')
+                    || authority
+                        .rsplit(|b| *b == b':')
+                        .next()
+                        .is_none_or(|port| port.is_empty() || !port.iter().all(u8::is_ascii_digit))
+                {
+                    return Err("CONNECT authority requires a valid host and explicit port");
                 }
             } else {
                 for required in [b":scheme".as_slice(), b":path".as_slice()] {

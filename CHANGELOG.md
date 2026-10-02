@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Validate classic CONNECT host/port targets, preserve delayed-response final and
+  END_STREAM state, reconcile positive concurrency limits after peer FIN, and
+  apply transient SETTINGS changes only to eligible existing streams. Treat
+  skipped stream IDs as closed and retain payload-free reverse FIN evidence.
+
 - Retain bounded unresolved HTTP/2 credit debt after message completion for later
   FIN reconciliation, and exclude intermediate values inside a SETTINGS frame
   from usable DATA credit.

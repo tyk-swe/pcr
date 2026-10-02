@@ -35,6 +35,7 @@ pub(crate) struct PendingSettings {
     pub possibly_applied_table_minimum: bool,
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
+    pub sender_stream_limit: u32,
     pub charged: usize,
 }
 
@@ -49,6 +50,7 @@ pub(crate) struct Acked {
     pub possibly_applied_table_minimum: bool,
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
+    pub sender_stream_limit: u32,
     pub charged: usize,
 }
 
@@ -86,6 +88,7 @@ impl DirectionSettings {
             possibly_applied_table_minimum: false,
             window_delta: 0,
             peak_window_delta: None,
+            sender_stream_limit: 0,
             charged: 0,
         };
         let mut issues = Vec::new();
@@ -223,6 +226,7 @@ impl DirectionSettings {
             possibly_applied_table_minimum: pending.possibly_applied_table_minimum,
             window_delta: pending.window_delta,
             peak_window_delta: pending.peak_window_delta,
+            sender_stream_limit: pending.sender_stream_limit,
             charged: pending.charged,
         })
     }

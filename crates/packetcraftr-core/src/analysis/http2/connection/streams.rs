@@ -273,7 +273,8 @@ impl Conn {
             self.fail(cx, Status::Limit)?;
             return Ok(());
         }
-        if self.early_response_headers.remove(&stream_id) {
+        let early_response = self.early_response_headers.remove(&stream_id);
+        if early_response.is_some() {
             self.release_conn(cx, resources::CLOSED_STREAM_OVERHEAD);
         } else {
             cx.check_streams()?;
@@ -285,6 +286,8 @@ impl Conn {
             i64::from(self.settings[CLIENT].acknowledged.initial_window_size),
         ];
         let mut state = StreamState::open(initiator == CLIENT, windows);
+        state.early_response = early_response;
+        state.ended[SERVER] = early_response.is_some_and(|early| early.ended);
         state.unprocessed = self.goaway[peer(initiator)].is_some_and(|last| stream_id > last);
         self.streams.insert(stream_id, state);
         self.active[initiator] += 1;
@@ -308,8 +311,13 @@ impl Conn {
         }
         // Any existing stream might already have been reset by the peer in
         // the other capture direction. Only a zero limit proves rejection
-        // without needing to infer whether prior streams remain open.
-        let confirmed = receiver.pending.is_empty() && max == 0;
+        // without needing to infer whether prior streams remain open. A fully
+        // consumed receiving FIN also rules out any hidden peer resets.
+        let confirmed = receiver.pending.is_empty()
+            && (max == 0
+                || self.dirs[peer(initiator)]
+                    .as_ref()
+                    .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none()));
         self.issue(
             cx,
             Fault {
@@ -354,6 +362,24 @@ impl Conn {
             wire: block.clone(),
             sources: block_sources.clone(),
         };
+        let early = self
+            .streams
+            .get(&stream_id)
+            .and_then(|stream| stream.early_response)
+            .or_else(|| self.early_response_headers.get(&stream_id).copied());
+        if side == SERVER
+            && let Some(early) = early
+            && self.early_response_followup(
+                stream_id,
+                early,
+                &headers,
+                end_stream,
+                &block_evidence,
+                cx,
+            )?
+        {
+            return Ok(());
+        }
         if !self.streams.contains_key(&stream_id) {
             if self
                 .closed
@@ -364,7 +390,9 @@ impl Conn {
                 // reset. HPACK has already been decoded to preserve table state.
                 return Ok(());
             }
-            if self.closed.contains_key(&stream_id) {
+            if self.closed.contains_key(&stream_id)
+                || stream_id <= self.max_initiated[if client_initiated { CLIENT } else { SERVER }]
+            {
                 self.issue(
                     cx,
                     Fault {
@@ -420,11 +448,19 @@ impl Conn {
                         sources: block_sources.clone(),
                     },
                 )?;
-                if delayed_opener && !self.early_response_headers.contains(&stream_id) {
+                if delayed_opener && !self.early_response_headers.contains_key(&stream_id) {
                     cx.check_streams()?;
                     self.admitted_streams += 1;
                     self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
-                    self.early_response_headers.insert(stream_id);
+                    self.early_response_headers
+                        .insert(stream_id, Default::default());
+                }
+                if let Some(early) = self.early_response_headers.get_mut(&stream_id) {
+                    early.final_seen = validate(FieldRole::Response, &headers)
+                        .ok()
+                        .and_then(|meta| meta.status)
+                        .is_none_or(|status| !(100..200).contains(&status));
+                    early.ended = end_stream;
                 }
                 // Keep the bounded, sourced header-block evidence without inventing
                 // request correlation. A delayed client opener can still be admitted.
@@ -725,6 +761,48 @@ impl Conn {
         Ok(())
     }
 
+    fn early_response_followup(
+        &mut self,
+        id: u32,
+        early: super::super::stream::EarlyResponse,
+        headers: &[super::super::model::Header],
+        end_stream: bool,
+        evidence: &Evidence,
+        cx: &mut Cx<'_>,
+    ) -> Result<bool, Error> {
+        if !early.final_seen && !early.ended {
+            return Ok(false);
+        }
+        let invalid = early.ended || !end_stream || validate(FieldRole::Trailer, headers).is_err();
+        self.issue(cx, Fault {
+            flow: self.dir_flow(SERVER), http2_stream_id: Some(id), scope: IssueScope::Stream,
+            certainty: if invalid { Certainty::Confirmed } else { Certainty::Indeterminate },
+            status: if invalid { Status::Malformed } else { Status::Incomplete },
+            code: if early.ended { "headers_after_end" } else if invalid { "header_semantics" } else { "early_response_trailers" },
+            detail: "HEADERS follow a previously observed final response whose opener was capture-delayed".into(),
+            wire: evidence.wire.clone(), sources: evidence.sources.clone(),
+        })?;
+        if self.streams.contains_key(&id) {
+            if invalid {
+                self.close_stream(id, Status::Malformed, None, cx)?;
+            } else {
+                self.end_side(SERVER, id, Status::Incomplete, cx)?;
+            }
+        } else if invalid {
+            self.early_response_headers.remove(&id);
+            self.closed.insert(
+                id,
+                super::ClosedStream {
+                    reset_by: None,
+                    request: None,
+                },
+            );
+        } else if let Some(state) = self.early_response_headers.get_mut(&id) {
+            state.ended = true;
+        }
+        Ok(true)
+    }
+
     pub(crate) fn start_message(
         &mut self,
         side: usize,
@@ -886,6 +964,11 @@ impl Conn {
             return Ok(());
         };
         stream.ended[side] = true;
+        if side == SERVER
+            && let Some(early) = stream.early_response.as_mut()
+        {
+            early.ended = true;
+        }
         let unprocessed = stream.unprocessed;
         if !defer_complete && let Some(msg) = stream.msgs[side].take() {
             let emitted = self.emit_message_with_completion(

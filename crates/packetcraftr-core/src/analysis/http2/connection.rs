@@ -22,7 +22,7 @@ use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
 
@@ -67,6 +67,7 @@ pub(crate) struct Dir {
     pub chain: Option<Chain>,
     pub closed: bool,
     pub saw_frame: bool,
+    pub received: bool,
     pub garbage: bool,
     pub charged: usize,
     pub charged_spans: usize,
@@ -83,6 +84,7 @@ impl Dir {
             chain: None,
             closed: false,
             saw_frame: false,
+            received: false,
             garbage: false,
             charged: 0,
             charged_spans: 0,
@@ -143,7 +145,7 @@ pub(crate) struct Conn {
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
     pub closed: BTreeMap<u32, ClosedStream>,
-    pub early_response_headers: BTreeSet<u32>,
+    pub early_response_headers: BTreeMap<u32, super::stream::EarlyResponse>,
     pub closed_credit: BTreeMap<u32, [Option<i64>; 2]>,
     pub admitted_streams: u64,
     pub max_initiated: [u32; 2],
@@ -185,7 +187,7 @@ impl Conn {
             prelude: None,
             streams: BTreeMap::new(),
             closed: BTreeMap::new(),
-            early_response_headers: BTreeSet::new(),
+            early_response_headers: BTreeMap::new(),
             closed_credit: BTreeMap::new(),
             admitted_streams: 0,
             max_initiated: [0, 0],
@@ -397,6 +399,11 @@ impl Conn {
                 self.charge_conn(cx, resources::DIR_OVERHEAD)?;
                 self.pending.push(Dir::new(delivery.flow.clone()));
             }
+        }
+        if !delivery.bytes.is_empty()
+            && let Some(dir) = self.dir_mut(&delivery.flow)
+        {
+            dir.received = true;
         }
         let mut cursor = 0usize;
         while cursor < delivery.bytes.len() {

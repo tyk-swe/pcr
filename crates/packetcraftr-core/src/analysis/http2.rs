@@ -203,11 +203,7 @@ impl Collector {
                 let Some(key) = self
                     .flow_index
                     .get(&flow)
-                    .or_else(|| {
-                        reset
-                            .then(|| self.flow_index.get(&flow.reverse()))
-                            .flatten()
-                    })
+                    .or_else(|| self.flow_index.get(&flow.reverse()))
                     .copied()
                 else {
                     return Ok(());
@@ -215,7 +211,7 @@ impl Collector {
                 let Some(mut conn) = self.connections.remove(&key) else {
                     return Ok(());
                 };
-                if !conn.has_flow(&flow) && !(reset && conn.has_flow(&flow.reverse())) {
+                if !conn.has_flow(&flow) && !conn.has_flow(&flow.reverse()) {
                     self.connections.insert(key, conn);
                     return Ok(());
                 }

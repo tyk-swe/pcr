@@ -954,8 +954,8 @@ fn connect_response_tunnels_data() {
     block.extend_from_slice(b"CONNECT");
     block.extend_from_slice(&[0x00, 0x0a]);
     block.extend_from_slice(b":authority");
-    block.extend_from_slice(&[0x0b]);
-    block.extend_from_slice(b"example.com");
+    block.extend_from_slice(&[0x0f]);
+    block.extend_from_slice(b"example.com:443");
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, &block, END_HEADERS));
@@ -981,8 +981,8 @@ fn connect_2xx_content_length_is_prohibited() {
     block.extend_from_slice(b"CONNECT");
     block.extend_from_slice(&[0x00, 0x0a]);
     block.extend_from_slice(b":authority");
-    block.extend_from_slice(&[0x0b]);
-    block.extend_from_slice(b"example.com");
+    block.extend_from_slice(&[0x0f]);
+    block.extend_from_slice(b"example.com:443");
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, &block, END_HEADERS));
@@ -2038,20 +2038,20 @@ fn review_push_on_closed_parent_stops_later_messages() {
 #[test]
 fn review_connect_host_must_match_authority() {
     for host in [
-        b"target-a.example".as_slice(),
-        b"target-b.example".as_slice(),
+        b"target-a.example:443".as_slice(),
+        b"target-b.example:443".as_slice(),
     ] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
             let mut block = vec![];
             review_literal(&mut block, b":method", b"CONNECT");
-            review_literal(&mut block, b":authority", b"target-a.example");
+            review_literal(&mut block, b":authority", b"target-a.example:443");
             review_literal(&mut block, b"host", host);
             capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
         });
         assert_eq!(
             codes(&events).contains(&"header_semantics"),
-            host != b"target-a.example"
+            host != b"target-a.example:443"
         );
     }
 }
@@ -3491,4 +3491,154 @@ fn review_transient_settings_peak_is_not_data_credit() {
             .iter()
             .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
     );
+}
+
+#[test]
+fn review_connect_authority_uses_host_port_grammar() {
+    for (authority, valid) in [
+        (b"good.example bad.example".as_slice(), false),
+        (b"user@host:443", false),
+        (b"[::1]:443", true),
+        (b"example.com:443", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = Vec::new();
+            review_literal(&mut request, b":method", b"CONNECT");
+            review_literal(&mut request, b":authority", authority);
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(messages(&events)[0].status == Status::Complete, valid);
+    }
+}
+
+#[test]
+fn review_delayed_opener_preserves_early_response_end() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        codes(&events)
+            .iter()
+            .any(|code| matches!(*code, "headers_after_end" | "closed_stream_headers"))
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_receiver_fin_confirms_positive_concurrency_limit() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &settings(&[(3, 1)]));
+        capture.client(stream, &settings_ack());
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        fin(capture, stream, false);
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "concurrent_streams" && i.certainty == Certainty::Confirmed)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 3 && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_settings_transient_does_not_apply_to_later_sender_stream() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &settings(&[(4, 0x7fff_ffff), (4, 65535)]));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &window_update(1, 1));
+        capture.server(stream, &settings_ack());
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(!codes(&events).contains(&"window_overflow"));
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_skipped_response_stream_is_a_stream_error() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "closed_stream_headers" && i.scope == IssueScope::Stream)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_payload_free_reverse_fin_is_observed() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, &common::http2::preface());
+    capture.client(&mut stream, &settings(&[]));
+    capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS));
+    fin(&mut capture, &mut stream, false);
+    fin(&mut capture, &mut stream, true);
+    let events = collect_events(&capture.frames, collector()).0;
+    assert!(!codes(&events).contains(&"capture_end"));
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.status == Status::Incomplete)
+    );
+}
+
+#[test]
+fn review_delayed_response_final_and_data_end_state_are_preserved() {
+    for kind in 0..3 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let early = if kind == 0 {
+                let mut info = Vec::new();
+                review_literal(&mut info, b":status", b"103");
+                info
+            } else {
+                RESPONSE_OK.to_vec()
+            };
+            capture.server(stream, &headers(1, &early, END_HEADERS));
+            if kind == 2 {
+                capture.server(stream, &data(1, b"x", END_STREAM));
+            }
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete),
+            kind == 0,
+            "kind={kind}"
+        );
+        if kind != 0 {
+            assert!(
+                issues(&events)
+                    .iter()
+                    .any(|i| i.certainty == Certainty::Confirmed && i.status == Status::Malformed)
+            );
+        }
+    }
 }

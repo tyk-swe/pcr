@@ -2950,3 +2950,98 @@ fn review_connection_window_overflow_after_sender_fin_is_confirmed() {
             .any(|m| m.kind == MessageKind::Response)
     );
 }
+
+#[test]
+fn review_reconciled_ack_releases_complete_message_evidence() {
+    for reconcile in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.server(stream, &settings_ack());
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            if reconcile {
+                capture.client(stream, &settings(&[(3, 10)]));
+            }
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        if reconcile {
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Request && m.status == Status::Complete)
+            );
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            );
+            assert_eq!(connection(&events).status, Status::Complete);
+        } else {
+            assert!(
+                !messages(&events)
+                    .iter()
+                    .any(|m| m.status == Status::Complete)
+            );
+            assert!(codes(&events).contains(&"unsolicited_settings_ack"));
+        }
+    }
+}
+
+#[test]
+fn review_mutually_early_acks_do_not_invent_a_valid_tcp_order() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &settings_ack());
+        capture.server(stream, &settings_ack());
+        capture.client(stream, &settings(&[(3, 10)]));
+        capture.server(stream, &settings(&[(3, 10)]));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"unsolicited_settings_ack"));
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.status == Status::Complete)
+    );
+    assert_ne!(connection(&events).status, Status::Complete);
+}
+
+#[test]
+fn review_reconciled_ack_releases_informational_and_push_messages() {
+    for reconcile in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &settings_ack());
+            let mut informational = vec![];
+            review_literal(&mut informational, b":status", b"103");
+            capture.server(stream, &headers(1, &informational, END_HEADERS));
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+            capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            if reconcile {
+                capture.server(stream, &settings(&[(3, 10)]));
+            }
+        });
+        for kind in [
+            MessageKind::Informational,
+            MessageKind::PushPromise,
+            MessageKind::Response,
+        ] {
+            let found: Vec<_> = messages(&events)
+                .into_iter()
+                .filter(|m| m.kind == kind)
+                .collect();
+            assert!(!found.is_empty());
+            assert!(
+                found
+                    .iter()
+                    .all(|m| (m.status == Status::Complete) == reconcile),
+                "kind={kind:?}, reconcile={reconcile}"
+            );
+        }
+    }
+}

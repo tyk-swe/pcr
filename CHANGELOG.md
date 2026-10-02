@@ -1806,6 +1806,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Byte-complete HTTP/2 messages now remain in their charged stream state while
+  an early SETTINGS acknowledgment is unresolved, then emit Complete after
+  reconciliation; unresolved ACK failures still prevent complete message output.
+
 - Offline HTTP/2 defers capture-early SETTINGS acknowledgments in bounded
   directional buffers until peer SETTINGS can reconcile them, preserving
   incomplete evidence while acknowledgment is unresolved. Flow-window overflow

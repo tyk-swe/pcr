@@ -77,6 +77,13 @@ impl Conn {
         status: Status,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
+        if status == Status::Complete
+            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
+        {
+            self.charge_conn(cx, resources::PENDING_OVERHEAD)?;
+            self.ack_deferred.push_back((side, build, status));
+            return Ok(());
+        }
         self.emit_message_with_completion(side, build, status, status == Status::Complete, cx)
             .map(|_| ())
     }
@@ -145,14 +152,6 @@ impl Conn {
             build.failure = build.failure.or(Some(Status::Malformed));
         }
         let status = build.failure.unwrap_or(status);
-        let status = if status == Status::Complete
-            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
-        {
-            self.worst(Status::Incomplete);
-            Status::Incomplete
-        } else {
-            status
-        };
         let sources = union_balanced(std::mem::take(&mut build.sets))?.ok_or(
             Error::Application(application::Error::Sources {
                 number: self.number,
@@ -789,6 +788,41 @@ impl Conn {
         Ok(())
     }
 
+    pub(crate) fn release_ack_deferred_messages(&mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
+        if self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER) {
+            return Ok(());
+        }
+        let immediate = std::mem::take(&mut self.ack_deferred);
+        self.release_conn(cx, immediate.len() * resources::PENDING_OVERHEAD);
+        for (side, msg, status) in immediate {
+            cx.check_deadline()?;
+            self.emit_message(side, msg, status, cx)?;
+        }
+        let scratch = self
+            .streams
+            .len()
+            .saturating_mul(2 * size_of::<(usize, u32)>());
+        cx.charge_live(scratch)?;
+        let result = (|| {
+            let mut completed = Vec::with_capacity(self.streams.len().saturating_mul(2));
+            for (id, stream) in &self.streams {
+                cx.check_deadline()?;
+                for side in [CLIENT, SERVER] {
+                    if stream.ended[side] && stream.msgs[side].is_some() {
+                        completed.push((side, *id));
+                    }
+                }
+            }
+            for (side, id) in completed {
+                cx.check_deadline()?;
+                self.end_side(side, id, Status::Complete, cx)?;
+            }
+            Ok(())
+        })();
+        cx.release_live(scratch);
+        result
+    }
+
     pub(crate) fn end_side(
         &mut self,
         side: usize,
@@ -796,10 +830,15 @@ impl Conn {
         status: Status,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
+        let defer_complete = status == Status::Complete
+            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER));
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             return Ok(());
         };
         stream.ended[side] = true;
+        if defer_complete {
+            return Ok(());
+        }
         let unprocessed = stream.unprocessed;
         if let Some(msg) = stream.msgs[side].take() {
             let emitted = self.emit_message_with_completion(

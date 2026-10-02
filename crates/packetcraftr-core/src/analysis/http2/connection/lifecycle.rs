@@ -94,7 +94,7 @@ impl Conn {
             let ids: Vec<u32> = self
                 .streams
                 .iter()
-                .filter(|(_, s)| s.msgs[side].is_some())
+                .filter(|(_, s)| s.msgs[side].is_some() && !s.ended[side])
                 .map(|(id, _)| *id)
                 .collect();
             let flushed = !ids.is_empty();
@@ -278,6 +278,12 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
+        let immediate = std::mem::take(&mut self.ack_deferred);
+        self.release_conn(cx, immediate.len() * resources::PENDING_OVERHEAD);
+        for (side, msg, _) in immediate {
+            pending_msgs.push((side, msg.stream_id, msg));
+        }
+
         for (id, stream) in self.streams.iter_mut() {
             for side in [CLIENT, SERVER] {
                 if let Some(msg) = stream.msgs[side].take() {

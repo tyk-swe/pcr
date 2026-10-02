@@ -98,6 +98,7 @@ impl Conn {
                 }
             }
             self.decoder_sync(side, cx)?;
+            self.release_ack_deferred_messages(cx)?;
             return Ok(());
         }
         if self.settings[side].pending.len() + 1 > cx.limits.max_pending_settings {

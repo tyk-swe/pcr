@@ -15,14 +15,14 @@ use super::Error;
 use super::buffer::SourceBuffer;
 use super::model::{Certainty, Issue, IssueScope, Startup, Status};
 use super::settings::DirectionSettings;
-use super::stream::{CLIENT, SERVER, StreamState};
+use super::stream::{CLIENT, MsgBuild, SERVER, StreamState};
 use super::upgrade::Prelude;
 use crate::analysis::application::{self, Delivery};
 use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
 
@@ -166,6 +166,7 @@ pub(crate) struct Conn {
     pub done: bool,
     pub finalizing: bool,
     pub resume_side: Option<usize>,
+    pub ack_deferred: VecDeque<(usize, MsgBuild, Status)>,
 }
 
 impl Conn {
@@ -205,6 +206,7 @@ impl Conn {
             done: false,
             finalizing: false,
             resume_side: None,
+            ack_deferred: VecDeque::new(),
         }
     }
 

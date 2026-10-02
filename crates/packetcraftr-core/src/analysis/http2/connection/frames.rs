@@ -189,6 +189,10 @@ impl Conn {
         )?;
         if !stream_error {
             self.fail(cx, status)?;
+        } else if let Some(id) = stream_id
+            && self.streams.contains_key(&id)
+        {
+            self.close_stream(id, Status::Malformed, None, cx)?;
         }
         Ok(true)
     }
@@ -331,9 +335,7 @@ impl Conn {
         if semantic_error.is_some() && !matches!(frame.payload, wire::Payload::Headers { .. }) {
             // Invalid control values remain in the issue's exact wire evidence,
             // rather than being emitted as a valid typed control payload.
-            if matches!(frame.payload, wire::Payload::WindowUpdate { .. })
-                && self.streams.contains_key(&stream_id)
-            {
+            if self.streams.contains_key(&stream_id) {
                 self.close_stream(stream_id, Status::Malformed, None, cx)?;
             }
             return Ok(());
@@ -569,7 +571,11 @@ impl Conn {
         }
         // In-flight peer DATA after a reset still consumes connection credit,
         // but cannot establish a stream error from cross-direction ordering.
-        if self.closed.get(&stream_id) == Some(&Some(peer(side))) {
+        if self
+            .closed
+            .get(&stream_id)
+            .is_some_and(|closed| closed.reset_by == Some(peer(side)))
+        {
             return Ok(());
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
@@ -647,6 +653,8 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            return Ok(());
         } else if length > 0 && stream.send_window[side] < 0 {
             let flow = self.dir_flow(side);
             self.issue(
@@ -762,6 +770,7 @@ impl Conn {
                     sources: evidence.sources,
                 },
             )?;
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
             return Ok(());
         }
         if end_stream {
@@ -951,10 +960,30 @@ impl Conn {
             ))?;
         cx.charge_live(scratch)?;
         let result = (|| {
-            let decoded = {
-                let dir = self.dirs[side].as_mut().expect("dir");
-                let decoder = dir.decoder.as_mut().expect("decoder");
-                decoder.decode(&bytes, origin)
+            let updates = hpack::table_size_updates(&bytes);
+            let decoded = match updates {
+                Err(error) => Err(error),
+                Ok(updates) => {
+                    let (minimum, confirmed_prefix) = updates.map_or((None, 0), |(_, maximum)| {
+                        self.settings[peer(side)].causal_table_minimum(maximum)
+                    });
+                    let decoder = self.dirs[side]
+                        .as_mut()
+                        .expect("dir")
+                        .decoder
+                        .as_mut()
+                        .expect("decoder");
+                    if let Some(minimum) = minimum {
+                        decoder.require_table_minimum(minimum);
+                    }
+                    let decoded = decoder.decode(&bytes, origin);
+                    if decoded.is_ok()
+                        && let Some((minimum, _)) = updates
+                    {
+                        self.settings[peer(side)].observed_table_updates(minimum, confirmed_prefix);
+                    }
+                    decoded
+                }
             };
             self.decoder_sync(side, cx)?;
             match decoded {

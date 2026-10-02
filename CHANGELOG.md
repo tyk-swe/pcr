@@ -1806,6 +1806,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Flush confirmed PRIORITY, stream-window underflow, premature DATA, and
+  concurrency violations without misclassifying uncertain peer closure. Enforce
+  causally proven HPACK decreases before pending increases, retain post-reset
+  push correlation, and classify unmatched midstream HTTP/1 responses at EOF.
 - Terminate confirmed GOAWAY, idle-window, connection-window, and push-parent
   violations; flush only the affected stream on stream-window overflow. Preserve
   in-flight push reservations after a peer reset and reject conflicting CONNECT

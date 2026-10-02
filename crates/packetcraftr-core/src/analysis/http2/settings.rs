@@ -167,6 +167,39 @@ impl DirectionSettings {
         self.advertised = pending.final_values;
         Applied { pending, issues }
     }
+    /// A size above every earlier ceiling proves receipt of the first pending
+    /// SETTINGS that permits it, including that frame's ordered decreases.
+    pub(crate) fn causal_table_minimum(&self, maximum: u32) -> (Option<u32>, usize) {
+        let mut ceiling = self.acknowledged.header_table_size;
+        if maximum <= ceiling {
+            return (None, 0);
+        }
+        let mut minimum: Option<u32> = None;
+        for (index, pending) in self.pending.iter().enumerate() {
+            if let Some(value) = pending.minimum_table_size {
+                minimum = Some(minimum.map_or(value, |old| old.min(value)));
+            }
+            ceiling = ceiling.max(pending.final_values.header_table_size);
+            if maximum <= ceiling {
+                return (minimum, index + 1);
+            }
+        }
+        (None, 0)
+    }
+
+    pub(crate) fn observed_table_updates(&mut self, minimum: u32, confirmed_prefix: usize) {
+        for (index, pending) in self.pending.iter_mut().enumerate() {
+            if index < confirmed_prefix
+                || pending
+                    .minimum_table_size
+                    .is_some_and(|bound| minimum <= bound)
+            {
+                // Do not require an already observed shrink a second time on ACK.
+                pending.minimum_table_size = None;
+            }
+        }
+    }
+
     pub(crate) fn acknowledge(&mut self) -> Option<Acked> {
         let pending = self.pending.pop_front()?;
         self.acknowledged = pending.final_values;

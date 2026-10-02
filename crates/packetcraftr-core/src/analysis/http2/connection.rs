@@ -126,6 +126,11 @@ pub(crate) struct Evidence {
     pub sources: Option<SourceSet>,
 }
 
+pub(crate) struct ClosedStream {
+    pub reset_by: Option<usize>,
+    pub request: Option<u64>,
+}
+
 pub(crate) struct Conn {
     pub stream: u64,
     pub generation: u64,
@@ -137,7 +142,7 @@ pub(crate) struct Conn {
     pub dirs: [Option<Dir>; 2],
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
-    pub closed: BTreeMap<u32, Option<usize>>,
+    pub closed: BTreeMap<u32, ClosedStream>,
     pub admitted_streams: u64,
     pub max_initiated: [u32; 2],
     pub active: [usize; 2],

@@ -131,6 +131,20 @@ impl Entry {
     }
 }
 
+/// Summarize leading size updates without allocating another representation.
+pub(crate) fn table_size_updates(block: &[u8]) -> Result<Option<(u32, u32)>, Error> {
+    let mut pos = 0;
+    let mut bounds: Option<(u32, u32)> = None;
+    while block.get(pos).is_some_and(|first| first & 0xe0 == 0x20) {
+        let value = u32::try_from(integer(block, &mut pos, 5)?)
+            .map_err(|_| Error::Compression("table size update exceeds u32"))?;
+        bounds = Some(bounds.map_or((value, value), |(min, max)| {
+            (min.min(value), max.max(value))
+        }));
+    }
+    Ok(bounds)
+}
+
 pub(crate) struct Decoder {
     table: VecDeque<Entry>,
     table_bytes: usize,
@@ -166,6 +180,10 @@ impl Decoder {
         // An encoder may act on an advertised increase before sending its ACK.
         // Decreases still become mandatory through acknowledge_table_size.
         self.ceiling = self.ceiling.max(maximum);
+    }
+
+    pub(crate) fn require_table_minimum(&mut self, minimum: u32) {
+        self.pending_min = Some(self.pending_min.map_or(minimum, |old| old.min(minimum)));
     }
 
     pub(crate) fn acknowledge_table_size(&mut self, maximum: u32) -> Result<(), Error> {

@@ -12,6 +12,7 @@ pub(crate) const ISSUE_OVERHEAD: usize = 192;
 pub(crate) const MESSAGE_OVERHEAD: usize = 512;
 pub(crate) const HEADER_OVERHEAD: usize = 48;
 pub(crate) const STREAM_OVERHEAD: usize = 512;
+pub(crate) const CLOSED_STREAM_OVERHEAD: usize = 96;
 pub(crate) const DIR_OVERHEAD: usize = 1024;
 pub(crate) const SET_OVERHEAD: usize = 64;
 pub(crate) const SPAN_OVERHEAD: usize = 24;

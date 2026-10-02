@@ -481,6 +481,64 @@ impl Conn {
         Ok(true)
     }
 
+    pub(crate) fn report_unmatched_response_at_eof(
+        &mut self,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        if !matches!(self.phase, Phase::Prelude)
+            || !self.prelude.as_ref().is_some_and(|p| p.requests.is_empty())
+        {
+            return Ok(());
+        }
+        let Some(dir) = self.dirs[SERVER].as_ref() else {
+            return Ok(());
+        };
+        let need = dir.buffer.len().min(http::MAX_HEADER_BYTES + 1);
+        if need == 0 {
+            return Ok(());
+        }
+        let scratch = need * 4 + resources::PRELUDE_HEADER_OVERHEAD;
+        cx.charge_live(scratch)?;
+        let result = (|| {
+            let dir = self.dirs[SERVER].as_mut().expect("server");
+            let view = Bytes::copy_from_slice(&dir.buffer.bytes()[..need]);
+            let Ok(Some((head, consumed))) = http::parse_head(&view) else {
+                return Ok(());
+            };
+            if !matches!(head.start, StartLine::Response { .. }) {
+                return Ok(());
+            }
+            let sets = dir.buffer.contributors(consumed);
+            let (wire, dropped) = dir.buffer.take(consumed);
+            Self::release_dir(dir, cx, consumed);
+            Self::release_dropped(dir, dropped, cx);
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(SERVER),
+                    http2_stream_id: None,
+                    scope: IssueScope::Connection,
+                    certainty: if self.clean_start {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    },
+                    status: if self.clean_start {
+                        Status::Malformed
+                    } else {
+                        Status::Incomplete
+                    },
+                    code: "prelude_unsolicited_response",
+                    detail: "capture ended without a request matching this HTTP/1 response".into(),
+                    wire,
+                    sources: union_balanced(sets)?,
+                },
+            )
+        })();
+        cx.release_live(scratch);
+        result
+    }
+
     fn server_prelude_step(&mut self, cx: &mut Cx<'_>) -> Result<bool, Error> {
         let unmatched = self.prelude.as_ref().is_some_and(|p| p.requests.is_empty());
         let partial_request = self.dirs[CLIENT]

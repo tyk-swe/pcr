@@ -26,6 +26,9 @@ impl Conn {
                 cx,
             );
         }
+        if self.side_of(flow) == Some(SERVER) {
+            self.report_unmatched_response_at_eof(cx)?;
+        }
         let mut faults = Vec::new();
         if let Some(dir) = self.dir_mut(flow) {
             dir.closed = true;
@@ -153,6 +156,7 @@ impl Conn {
             },
         )?;
         self.clean_start = false;
+        self.report_unmatched_response_at_eof(cx)?;
         let mut partials: Vec<(ScopedFlowKey, Option<u32>, Bytes, Option<SourceSet>)> = Vec::new();
         for dir in self
             .dirs
@@ -360,6 +364,7 @@ impl Conn {
 
     pub(crate) fn finish(mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
         cx.check_deadline()?;
+        self.report_unmatched_response_at_eof(cx)?;
         for side in [CLIENT, SERVER] {
             if let Some(dir) = self.dirs[side].as_mut() {
                 if !dir.buffer.is_empty() && !matches!(self.phase, Phase::Dead) {

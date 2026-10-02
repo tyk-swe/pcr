@@ -2077,6 +2077,15 @@ fn review_in_flight_push_after_peer_reset_still_reserves_stream() {
             .any(|m| m.http2_stream_id == 2 && m.kind == MessageKind::Response)
     );
     assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3));
+    let request = messages(&events)
+        .into_iter()
+        .find(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Request)
+        .expect("parent request");
+    let push = messages(&events)
+        .into_iter()
+        .find(|m| m.kind == MessageKind::PushPromise)
+        .expect("push");
+    assert_eq!(push.request, Some(request.index));
 }
 
 #[test]
@@ -2108,5 +2117,206 @@ fn review_stream_window_overflow_flushes_only_affected_stream() {
         assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
             && m.kind == MessageKind::Response
             && m.status == Status::Complete));
+    }
+}
+
+#[test]
+fn review_priority_errors_close_only_the_affected_stream() {
+    for priority in [frame(2, 0, 1, &[0, 0, 0, 1, 0]), frame(2, 0, 1, &[0; 4])] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.client(stream, &priority);
+            capture.client(stream, &data(1, b"x", END_STREAM));
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.status == Status::Malformed)
+        );
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
+        );
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+    }
+}
+
+#[test]
+fn review_acknowledged_zero_concurrency_rejects_request_and_push() {
+    for push in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            if push {
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                capture.client(stream, &settings(&[(3, 0)]));
+                capture.server(stream, &settings_ack());
+                capture.server(
+                    stream,
+                    &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+                );
+                capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+            } else {
+                capture.server(stream, &settings(&[(3, 0)]));
+                capture.client(stream, &settings_ack());
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            }
+        });
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "concurrent_streams"
+                    && i.scope == IssueScope::Stream
+                    && i.certainty == Certainty::Confirmed)
+        );
+        assert!(!messages(&events).iter().any(|m| if push {
+            m.kind == MessageKind::Response
+        } else {
+            m.kind == MessageKind::Request
+        }));
+    }
+}
+
+#[test]
+fn review_data_before_final_response_closes_stream() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        let mut informational = vec![];
+        review_literal(&mut informational, b":status", b"103");
+        capture.server(stream, &headers(1, &informational, END_HEADERS));
+        capture.server(stream, &data(1, b"x", 0));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"data_without_headers"));
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_pending_hpack_increase_proves_required_intermediate_decrease() {
+    for shrink in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.client(stream, &settings(&[(1, 64), (1, 8192)]));
+            let mut block = if shrink { vec![0x3f, 33] } else { vec![] };
+            block.extend_from_slice(&[0x3f, 0xe1, 0x3f]);
+            block.extend_from_slice(RESPONSE_OK);
+            capture.server(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+            capture.server(stream, &settings_ack());
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events).iter().any(|m| m.http2_stream_id == 1
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete),
+            shrink
+        );
+        assert_eq!(codes(&events).contains(&"hpack_decode"), !shrink);
+        assert_eq!(
+            messages(&events).iter().any(|m| m.http2_stream_id == 3
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete),
+            shrink
+        );
+    }
+}
+
+#[test]
+fn review_unmatched_midstream_response_is_classified_at_eof() {
+    let (mut capture, mut stream) = setup();
+    capture.frames.clear();
+    let request = b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    capture.server(&mut stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    capture.client(&mut stream, request);
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 200 Orphan\r\nContent-Length: 0\r\n\r\n",
+    );
+    let events = collect_events(&capture.frames, collector()).0;
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "prelude_unsolicited_response"
+                && i.certainty == Certainty::Indeterminate
+                && i.sources.is_some()
+                && i.wire.windows(6).any(|w| w == b"Orphan")),
+        "{:#?}",
+        issues(&events)
+    );
+    assert_ne!(connection(&events).status, Status::Malformed);
+}
+
+#[test]
+fn review_observed_hpack_shrink_is_not_required_twice() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        for id in [1, 3, 5] {
+            capture.client(stream, &headers(id, REQUEST, END_HEADERS | END_STREAM));
+        }
+        capture.client(stream, &settings(&[(1, 64), (1, 8192)]));
+        let mut first = vec![0x3f, 33, 0x3f, 0xe1, 0x1f]; // 64 then 4096
+        first.extend_from_slice(RESPONSE_OK);
+        capture.server(stream, &headers(1, &first, END_HEADERS | END_STREAM));
+        let mut second = vec![0x3f, 0xe1, 0x3f]; // 8192 proves the increase
+        second.extend_from_slice(RESPONSE_OK);
+        capture.server(stream, &headers(3, &second, END_HEADERS | END_STREAM));
+        capture.server(stream, &settings_ack());
+        capture.server(stream, &headers(5, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(!codes(&events).contains(&"hpack_decode"));
+    assert_eq!(
+        messages(&events)
+            .iter()
+            .filter(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn review_concurrency_preserves_uncertain_peer_closure() {
+    for end_request in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.server(stream, &settings(&[(3, 1)]));
+            capture.client(stream, &settings_ack());
+            capture.client(
+                stream,
+                &headers(
+                    1,
+                    REQUEST,
+                    END_HEADERS | if end_request { END_STREAM } else { 0 },
+                ),
+            );
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 3 && m.status == Status::Complete),
+            end_request
+        );
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "concurrent_streams"
+                    && i.certainty
+                        == if end_request {
+                            Certainty::ObservedOrder
+                        } else {
+                            Certainty::Confirmed
+                        })
+        );
     }
 }

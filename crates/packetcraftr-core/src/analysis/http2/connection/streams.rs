@@ -256,29 +256,59 @@ impl Conn {
         state.unprocessed = self.goaway[peer(initiator)].is_some_and(|last| stream_id > last);
         self.streams.insert(stream_id, state);
         self.active[initiator] += 1;
-        let effective = self.settings[peer(initiator)]
-            .acknowledged
-            .max_concurrent_streams;
-        if let Some(max) = effective
-            && self.active[initiator] > max as usize
-        {
-            let flow = self.dir_flow(side);
-            self.issue(
-                cx,
-                Fault {
-                    flow,
-                    http2_stream_id: Some(stream_id),
-                    scope: IssueScope::Connection,
-                    certainty: Certainty::ObservedOrder,
-                    status: Status::Malformed,
-                    code: "concurrent_streams",
-                    detail: "open streams exceed the peer's acknowledged limit".into(),
-                    wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
-                    sources: evidence.and_then(|e| e.sources.clone()),
-                },
-            )?;
-        }
+        self.enforce_concurrency(initiator, stream_id, evidence, cx)?;
         Ok(())
+    }
+
+    fn enforce_concurrency(
+        &mut self,
+        initiator: usize,
+        stream_id: u32,
+        evidence: Option<&Evidence>,
+        cx: &mut Cx<'_>,
+    ) -> Result<bool, Error> {
+        let receiver = &self.settings[peer(initiator)];
+        let Some(max) = receiver.acknowledged.max_concurrent_streams else {
+            return Ok(false);
+        };
+        if self.active[initiator] <= max as usize {
+            return Ok(false);
+        }
+        let mut definitely_open = 0usize;
+        for stream in self.streams.values() {
+            cx.check_deadline()?;
+            if stream.by_client == (initiator == CLIENT)
+                && stream.phase == StreamPhase::Open
+                && !stream.ended[initiator]
+            {
+                definitely_open += 1;
+            }
+        }
+        // Peer END_STREAM frames can lag in capture order. Streams still open
+        // on the initiator's own ordered direction are certainly concurrent.
+        let confirmed = receiver.pending.is_empty() && definitely_open > max as usize;
+        self.issue(
+            cx,
+            Fault {
+                flow: self.dir_flow(initiator),
+                http2_stream_id: Some(stream_id),
+                scope: IssueScope::Stream,
+                certainty: if confirmed {
+                    Certainty::Confirmed
+                } else {
+                    Certainty::ObservedOrder
+                },
+                status: Status::Malformed,
+                code: "concurrent_streams",
+                detail: "open streams exceed the peer's acknowledged limit".into(),
+                wire: evidence.map_or_else(Bytes::new, |e| e.wire.clone()),
+                sources: evidence.and_then(|e| e.sources.clone()),
+            },
+        )?;
+        if confirmed {
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+        }
+        Ok(confirmed)
     }
 
     pub(crate) fn stream_headers(
@@ -302,7 +332,11 @@ impl Conn {
             sources: block_sources.clone(),
         };
         if !self.streams.contains_key(&stream_id) {
-            if self.closed.get(&stream_id) == Some(&Some(peer(side))) {
+            if self
+                .closed
+                .get(&stream_id)
+                .is_some_and(|closed| closed.reset_by == Some(peer(side)))
+            {
                 // The peer's HEADERS may have been in flight when we observed the
                 // reset. HPACK has already been decoded to preserve table state.
                 return Ok(());
@@ -405,32 +439,8 @@ impl Conn {
         {
             stream.phase = StreamPhase::Open;
             self.active[SERVER] += 1;
-            let initiator = if stream.by_client { CLIENT } else { SERVER };
-            let open = self
-                .streams
-                .values()
-                .filter(|s| s.phase != StreamPhase::Closed)
-                .count();
-            let effective = self.settings[peer(initiator)]
-                .acknowledged
-                .max_concurrent_streams;
-            if open > cx.limits.max_active_streams
-                || effective.is_some_and(|max| self.active[initiator] > max as usize)
-            {
-                self.issue(
-                    cx,
-                    Fault {
-                        flow: self.dir_flow(side),
-                        http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Connection,
-                        certainty: Certainty::ObservedOrder,
-                        status: Status::Malformed,
-                        code: "concurrent_streams",
-                        detail: "a promised stream opened beyond the peer's concurrency".into(),
-                        wire: block.clone(),
-                        sources: block_sources.clone(),
-                    },
-                )?;
+            if self.enforce_concurrency(SERVER, stream_id, Some(&block_evidence), cx)? {
+                return Ok(());
             }
         }
         let mut failure = malformed.then_some(Status::Malformed);
@@ -769,9 +779,19 @@ impl Conn {
             }
             stream.phase = StreamPhase::Closed;
             if stream.msgs.iter().all(Option::is_none) {
+                let request = stream.request;
                 self.streams.remove(&stream_id);
-                self.closed.insert(stream_id, None);
-                self.release_conn(cx, resources::STREAM_OVERHEAD - 64);
+                self.closed.insert(
+                    stream_id,
+                    super::ClosedStream {
+                        reset_by: None,
+                        request,
+                    },
+                );
+                self.release_conn(
+                    cx,
+                    resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
+                );
             }
         }
         Ok(())
@@ -860,7 +880,10 @@ impl Conn {
             .is_some_and(|s| s.phase == StreamPhase::Open && s.by_client && !s.ended[SERVER]);
         // A peer promise may have been sent before it received our reset.
         // RFC 9113 §5.1 still requires HPACK processing and stream reservation.
-        let in_flight_after_reset = self.closed.get(&stream_id) == Some(&Some(peer(side)));
+        let in_flight_after_reset = self
+            .closed
+            .get(&stream_id)
+            .is_some_and(|closed| closed.reset_by == Some(peer(side)));
         if !parent_open && !in_flight_after_reset {
             self.issue(
                 cx,
@@ -896,7 +919,11 @@ impl Conn {
         msg.headers = headers;
         msg.header_blocks.push(block);
         msg.promised_by = Some(stream_id);
-        msg.request = self.streams.get(&stream_id).and_then(|s| s.request);
+        msg.request = self
+            .streams
+            .get(&stream_id)
+            .and_then(|s| s.request)
+            .or_else(|| self.closed.get(&stream_id).and_then(|s| s.request));
         if let Some(sources) = block_sources.clone() {
             let frames = sources.frames().len();
             let charge = resources::SET_OVERHEAD + frames * resources::SPAN_OVERHEAD;
@@ -1039,9 +1066,14 @@ impl Conn {
                 self.emit_message(msg_side, msg, status, cx)?;
             }
         }
+        let request = self.streams.get(&stream_id).and_then(|s| s.request);
         self.streams.remove(&stream_id);
-        self.closed.insert(stream_id, reset_by);
-        self.release_conn(cx, resources::STREAM_OVERHEAD - 64);
+        self.closed
+            .insert(stream_id, super::ClosedStream { reset_by, request });
+        self.release_conn(
+            cx,
+            resources::STREAM_OVERHEAD - resources::CLOSED_STREAM_OVERHEAD,
+        );
         Ok(())
     }
 }

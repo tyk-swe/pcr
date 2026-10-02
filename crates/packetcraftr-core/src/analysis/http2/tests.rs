@@ -2651,4 +2651,45 @@ mod owner {
         );
         assert_eq!((rig.buffered, rig.spans), (0, 0));
     }
+    #[test]
+    fn confirmed_stream_window_underflow_stops_only_affected_stream() {
+        let tracker = Tracker::new(1 << 20, 1024).expect("tracker");
+        let mut rig = Rig::new(Limits::default(), application::Limits::default());
+        let mut conn = Conn::new(1, 0, client_flow());
+        let client = handshake(&mut conn, &mut rig, &tracker);
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            14,
+            &request_block_headers(1),
+        )
+        .expect("request");
+        conn.streams.get_mut(&1).expect("stream").send_window[CLIENT] = -(1i64 << 31);
+        // Padded DATA consumes stream credit without counting as body bytes.
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            15,
+            &frame(DATA, END_STREAM | 8, 1, &[1, 0]),
+        )
+        .expect("data");
+        feed(
+            &mut conn,
+            &mut rig,
+            &tracker,
+            &client,
+            16,
+            &frame(HEADERS, END_HEADERS | END_STREAM, 3, &request_block()),
+        )
+        .expect("later request");
+        finish(conn, &mut rig);
+        assert!(rig.out.iter().any(|e| matches!(e, Event::Message(m) if m.http2_stream_id == 1 && m.status == Status::Malformed)));
+        assert!(!rig.out.iter().any(|e| matches!(e, Event::Message(m) if m.http2_stream_id == 1 && m.status == Status::Complete)));
+        assert!(rig.out.iter().any(|e| matches!(e, Event::Message(m) if m.http2_stream_id == 3 && m.status == Status::Complete)));
+        assert_eq!((rig.buffered, rig.spans), (0, 0));
+    }
 }

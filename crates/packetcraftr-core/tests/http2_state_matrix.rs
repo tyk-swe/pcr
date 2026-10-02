@@ -3045,3 +3045,185 @@ fn review_reconciled_ack_releases_informational_and_push_messages() {
         }
     }
 }
+
+#[test]
+fn review_provisional_overflow_is_reconciled_at_sender_end() {
+    for id in [0, 1] {
+        for body in [b"".as_slice(), b"x"] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+                capture.server(stream, &window_update(id, 0x7fff_ffff - 65535));
+                capture.server(stream, &window_update(id, 2));
+                capture.client(stream, &data(1, body, END_STREAM));
+                if id == 0 {
+                    fin(capture, stream, true);
+                }
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            });
+            let code = if id == 0 {
+                "connection_window_overflow"
+            } else {
+                "stream_window_overflow"
+            };
+            assert!(
+                issues(&events).iter().any(|i| i.code == code
+                    && i.certainty == Certainty::Confirmed
+                    && i.status == Status::Malformed),
+                "id={id}, body={body:?}"
+            );
+            assert!(
+                !messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            );
+        }
+    }
+}
+
+#[test]
+fn review_both_unsolicited_acks_retain_confirmed_evidence() {
+    for fins in [false, true] {
+        let (mut capture, mut stream) = setup();
+        prior_knowledge_handshake(&mut capture, &mut stream);
+        capture.client(&mut stream, &settings_ack());
+        capture.server(&mut stream, &settings_ack());
+        if fins {
+            fin(&mut capture, &mut stream, true);
+            fin(&mut capture, &mut stream, false);
+        }
+        let events = collect_events(&capture.frames, collector()).0;
+        let faults: Vec<_> = issues(&events)
+            .into_iter()
+            .filter(|i| i.code == "unsolicited_settings_ack")
+            .collect();
+        assert_eq!(faults.len(), 2);
+        assert!(faults.iter().all(|i| i.certainty == Certainty::Confirmed
+            && i.status == Status::Malformed
+            && i.sources.is_some()));
+        assert_eq!(connection(&events).status, Status::Malformed);
+    }
+}
+
+#[test]
+fn review_post_reset_headers_are_stream_scoped() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+        capture.client(stream, &rst(1, 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    let issue = issues(&events)
+        .into_iter()
+        .find(|i| i.code == "closed_stream_headers")
+        .unwrap();
+    assert_eq!(issue.scope, IssueScope::Stream);
+    assert_eq!(issue.http2_stream_id, Some(1));
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_push_capacity_failure_names_promised_stream() {
+    use packetcraftr_core::analysis::{
+        application::Limits as AppLimits,
+        http2::{Collector, Limits},
+    };
+    let (mut capture, mut stream) = setup();
+    prior_knowledge_handshake(&mut capture, &mut stream);
+    capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+    capture.server(
+        &mut stream,
+        &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+    );
+    let collector = Collector::new(
+        AppLimits::default(),
+        vec![80],
+        Limits {
+            max_active_streams: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let events = collect_events(&capture.frames, collector).0;
+    let issue = issues(&events)
+        .into_iter()
+        .find(|i| i.code == "active_streams")
+        .unwrap();
+    assert_eq!(issue.http2_stream_id, Some(2));
+}
+
+#[test]
+fn review_ack_deferred_pushes_release_active_slots() {
+    use packetcraftr_core::analysis::{
+        application::Limits as AppLimits,
+        http2::{Collector, Limits},
+    };
+    let (mut capture, mut stream) = setup();
+    prior_knowledge_handshake(&mut capture, &mut stream);
+    capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+    capture.client(&mut stream, &settings_ack());
+    for id in [2, 4, 6] {
+        capture.server(
+            &mut stream,
+            &common::http2::push_promise(1, id, REQUEST, END_HEADERS),
+        );
+        capture.server(
+            &mut stream,
+            &headers(id, RESPONSE_OK, END_HEADERS | END_STREAM),
+        );
+    }
+    capture.server(&mut stream, &settings(&[(3, 10)]));
+    capture.server(
+        &mut stream,
+        &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM),
+    );
+    let collector = Collector::new(
+        AppLimits::default(),
+        vec![80],
+        Limits {
+            max_active_streams: 2,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let events = collect_events(&capture.frames, collector).0;
+    assert!(!codes(&events).contains(&"active_streams"));
+    for id in [1, 2, 4, 6] {
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .filter(|m| m.http2_stream_id == id
+                    && m.kind == MessageKind::Response
+                    && m.status == Status::Complete)
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn review_headers_after_deferred_end_stream_are_rejected() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &settings_ack());
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(1, &[], END_HEADERS | END_STREAM));
+        capture.client(stream, &settings(&[(3, 10)]));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(codes(&events).contains(&"headers_after_end"));
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}

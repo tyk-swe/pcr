@@ -18,10 +18,34 @@ impl Conn {
     ) -> Result<(), Error> {
         if flags & 0x1 != 0 {
             let Some(acked) = self.settings[super::super::stream::peer(side)].acknowledge() else {
+                // Two unmatched ACK heads cannot be explained by reordering:
+                // both matching SETTINGS would have to precede the other's ACK.
+                // Retain the peer's still-buffered evidence before failure drains it.
+                let peer_ack = self.dirs[peer(side)]
+                    .as_ref()
+                    .filter(|dir| {
+                        let bytes = dir.buffer.bytes();
+                        self.settings[side].pending.is_empty()
+                            && dir.saw_frame
+                            && dir.chain.is_none()
+                            && bytes.len() >= 9
+                            && bytes[..3] == [0, 0, 0]
+                            && bytes[3] == 4
+                            && bytes[4] & 1 != 0
+                            && bytes[5] & 0x7f == 0
+                            && bytes[6..9] == [0, 0, 0]
+                    })
+                    .map(|dir| {
+                        (
+                            bytes::Bytes::copy_from_slice(&dir.buffer.bytes()[..9]),
+                            dir.buffer.contributors(9),
+                        )
+                    });
                 let confirmed = self.clean_start
-                    && self.dirs[peer(side)]
-                        .as_ref()
-                        .is_some_and(|dir| dir.buffer.is_empty());
+                    && (peer_ack.is_some()
+                        || self.dirs[peer(side)]
+                            .as_ref()
+                            .is_some_and(|dir| dir.buffer.is_empty()));
                 let status = if confirmed {
                     Status::Malformed
                 } else {
@@ -46,6 +70,27 @@ impl Conn {
                         sources: evidence.sources,
                     },
                 )?;
+                if let Some((wire, sets)) = peer_ack {
+                    self.issue(
+                        cx,
+                        Fault {
+                            flow: self.dir_flow(peer(side)),
+                            http2_stream_id: None,
+                            scope: IssueScope::Connection,
+                            certainty: if confirmed {
+                                Certainty::Confirmed
+                            } else {
+                                Certainty::Indeterminate
+                            },
+                            status,
+                            code: "unsolicited_settings_ack",
+                            detail: "both directional ACK heads lack preceding matching SETTINGS"
+                                .into(),
+                            wire,
+                            sources: super::super::buffer::union_balanced(sets)?,
+                        },
+                    )?;
+                }
                 self.fail(cx, status)?;
                 return Ok(());
             };

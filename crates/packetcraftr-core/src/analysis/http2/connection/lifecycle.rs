@@ -32,6 +32,27 @@ impl Conn {
         if self.phase == Phase::H2 {
             self.pump(cx)?;
         }
+        if let Some(side) = self.side_of(flow)
+            && self.send_window[side] > super::super::settings::WINDOW_MAX
+            && self.dirs[side]
+                .as_ref()
+                .is_some_and(|dir| dir.buffer.is_empty())
+            && self.phase == Phase::H2
+        {
+            self.issue(cx, Fault {
+                flow: flow.clone(),
+                http2_stream_id: Some(0),
+                scope: IssueScope::Connection,
+                certainty: Certainty::Confirmed,
+                status: Status::Malformed,
+                code: "connection_window_overflow",
+                detail: "connection flow window remains above 2^31-1 after sender FIN; earlier WINDOW_UPDATE evidence is retained".into(),
+                wire: Bytes::new(),
+                sources: None,
+            })?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
+        }
         let deferred_ack = self
             .side_of(flow)
             .is_some_and(|side| self.waiting_settings_ack(side));

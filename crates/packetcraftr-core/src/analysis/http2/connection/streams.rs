@@ -366,7 +366,7 @@ impl Conn {
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(stream_id),
-                        scope: IssueScope::Connection,
+                        scope: IssueScope::Stream,
                         certainty: Certainty::Confirmed,
                         status: Status::Malformed,
                         code: "closed_stream_headers",
@@ -423,6 +423,27 @@ impl Conn {
                 }
                 return Ok(());
             }
+        }
+        if self
+            .streams
+            .get(&stream_id)
+            .is_some_and(|stream| stream.phase != StreamPhase::Reserved && stream.ended[side])
+        {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "headers_after_end",
+                    detail: "HEADERS arrived after the sender already ended the stream".into(),
+                    wire: block,
+                    sources: block_sources,
+                },
+            )?;
+            return self.close_stream(stream_id, Status::Malformed, None, cx);
         }
         let (role, new_head) = {
             let Some(stream) = self.streams.get(&stream_id) else {
@@ -830,17 +851,33 @@ impl Conn {
         status: Status,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
+        if status == Status::Complete
+            && self
+                .streams
+                .get(&stream_id)
+                .is_some_and(|stream| stream.send_window[side] > super::super::settings::WINDOW_MAX)
+        {
+            self.issue(cx, Fault {
+                flow: self.dir_flow(side),
+                http2_stream_id: Some(stream_id),
+                scope: IssueScope::Stream,
+                certainty: Certainty::Confirmed,
+                status: Status::Malformed,
+                code: "stream_window_overflow",
+                detail: "stream flow window remains above 2^31-1 after the sender ended; earlier WINDOW_UPDATE evidence is retained".into(),
+                wire: Bytes::new(),
+                sources: None,
+            })?;
+            return self.close_stream(stream_id, Status::Malformed, None, cx);
+        }
         let defer_complete = status == Status::Complete
             && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER));
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             return Ok(());
         };
         stream.ended[side] = true;
-        if defer_complete {
-            return Ok(());
-        }
         let unprocessed = stream.unprocessed;
-        if let Some(msg) = stream.msgs[side].take() {
+        if !defer_complete && let Some(msg) = stream.msgs[side].take() {
             let emitted = self.emit_message_with_completion(
                 side,
                 msg,
@@ -857,7 +894,7 @@ impl Conn {
             }
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");
-        if stream.ended == [true, true] && stream.phase != StreamPhase::Closed {
+        if stream.ended == [true, true] {
             if stream.phase == StreamPhase::Open {
                 let owner = if stream.by_client { CLIENT } else { SERVER };
                 self.active[owner] = self.active[owner].saturating_sub(1);
@@ -1077,7 +1114,7 @@ impl Conn {
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
-                    http2_stream_id: Some(stream_id),
+                    http2_stream_id: Some(promised),
                     scope: IssueScope::Connection,
                     certainty: Certainty::Confirmed,
                     status: Status::Limit,

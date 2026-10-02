@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Reconcile provisional HTTP/2 flow-window overflow when senders end, retain both
+  unmatched ACK heads at EOF, and correct closed-stream/push-limit diagnostics.
+  Deferred message emission now releases completed push slots and rejects later
+  HEADERS on an already-ended sender.
+
 - Byte-complete HTTP/2 messages now remain in their charged stream state while
   an early SETTINGS acknowledgment is unresolved, then emit Complete after
   reconciliation; unresolved ACK failures still prevent complete message output.

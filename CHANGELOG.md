@@ -1806,6 +1806,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Preserve semantic failures in capture-delayed response headers, reject
+  trailers on 204/304 responses, and terminate idle-stream WINDOW_UPDATE errors.
+  Keep h2c header settings separate from the mandatory on-wire preface.
+- Reject malformed fallback Host authorities and duplicate Host fields in
+  HTTP/2 requests while preserving their original header evidence.
+
+- Evaluate HTTP/2 SETTINGS overflow before credit from later peer WINDOW_UPDATE
+  frames, using bounded snapshots rather than cross-direction capture order.
+
 - Validate classic CONNECT host/port targets, preserve delayed-response final and
   END_STREAM state, reconcile positive concurrency limits after peer FIN, and
   apply transient SETTINGS changes only to eligible existing streams. Treat

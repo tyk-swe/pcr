@@ -455,12 +455,56 @@ impl Conn {
                     self.early_response_headers
                         .insert(stream_id, Default::default());
                 }
-                if let Some(early) = self.early_response_headers.get_mut(&stream_id) {
-                    early.final_seen = validate(FieldRole::Response, &headers)
-                        .ok()
-                        .and_then(|meta| meta.status)
-                        .is_none_or(|status| !(100..200).contains(&status));
-                    early.ended = end_stream;
+                if delayed_opener {
+                    let validation = validate(FieldRole::Response, &headers).and_then(|meta| {
+                        if end_stream
+                            && meta
+                                .status
+                                .is_some_and(|status| (100..200).contains(&status))
+                        {
+                            Err("a 1xx response must not end the stream")
+                        } else {
+                            Ok(meta)
+                        }
+                    });
+                    match validation {
+                        Ok(meta) => {
+                            let early = self
+                                .early_response_headers
+                                .get_mut(&stream_id)
+                                .expect("early response");
+                            early.final_seen = meta
+                                .status
+                                .is_none_or(|status| !(100..200).contains(&status));
+                            early.forbids_trailers = matches!(meta.status, Some(204 | 304));
+                            early.ended = end_stream;
+                        }
+                        Err(detail) => {
+                            self.issue(
+                                cx,
+                                Fault {
+                                    flow: self.dir_flow(side),
+                                    http2_stream_id: Some(stream_id),
+                                    scope: IssueScope::Stream,
+                                    certainty: Certainty::Confirmed,
+                                    status: Status::Malformed,
+                                    code: "header_semantics",
+                                    detail: detail.into(),
+                                    wire: block.clone(),
+                                    sources: block_sources.clone(),
+                                },
+                            )?;
+                            // Transfer the equally charged provisional marker to a tombstone.
+                            self.early_response_headers.remove(&stream_id);
+                            self.closed.insert(
+                                stream_id,
+                                super::ClosedStream {
+                                    reset_by: None,
+                                    request: None,
+                                },
+                            );
+                        }
+                    }
                 }
                 // Keep the bounded, sourced header-block evidence without inventing
                 // request correlation. A delayed client opener can still be admitted.
@@ -578,6 +622,29 @@ impl Conn {
                 }
             }
         };
+        if role == FieldRole::Trailer
+            && self
+                .streams
+                .get(&stream_id)
+                .and_then(|stream| stream.msgs[side].as_ref())
+                .is_some_and(|msg| matches!(msg.status_code, Some(204 | 304)))
+        {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "header_semantics",
+                    detail: "204 and 304 responses cannot contain trailers".into(),
+                    wire: block.clone(),
+                    sources: block_sources.clone(),
+                },
+            )?;
+            failure = Some(Status::Malformed);
+        }
         if role == FieldRole::Trailer && !end_stream {
             self.issue(
                 cx,
@@ -773,7 +840,10 @@ impl Conn {
         if !early.final_seen && !early.ended {
             return Ok(false);
         }
-        let invalid = early.ended || !end_stream || validate(FieldRole::Trailer, headers).is_err();
+        let invalid = early.ended
+            || early.forbids_trailers
+            || !end_stream
+            || validate(FieldRole::Trailer, headers).is_err();
         self.issue(cx, Fault {
             flow: self.dir_flow(SERVER), http2_stream_id: Some(id), scope: IssueScope::Stream,
             certainty: if invalid { Certainty::Confirmed } else { Certainty::Indeterminate },

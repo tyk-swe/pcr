@@ -69,6 +69,7 @@ impl MsgBuild {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct EarlyResponse {
     pub final_seen: bool,
+    pub forbids_trailers: bool,
     pub ended: bool,
 }
 
@@ -81,6 +82,7 @@ pub(crate) struct StreamState {
     pub msgs: [Option<MsgBuild>; 2],
     pub send_window: [i64; 2],
     pub credit_exceeded: [bool; 2],
+    pub window_granted: [i64; 2],
     pub early_response: Option<EarlyResponse>,
     pub method: Option<Bytes>,
     pub response_bodyless: bool,
@@ -98,6 +100,7 @@ impl StreamState {
             msgs: [None, None],
             send_window: windows,
             credit_exceeded: [false; 2],
+            window_granted: [0; 2],
             early_response: None,
             method: None,
             response_bodyless: false,
@@ -409,6 +412,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 }
             }
             if name == b"host" && role == FieldRole::Request {
+                if meta.host.is_some() {
+                    return Err("request contains multiple Host fields");
+                }
                 meta.host = Some(field.value.clone());
             }
             if name == b"content-length" {
@@ -456,6 +462,15 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     .is_some_and(|authority| !valid_http_authority(authority))
             {
                 return Err("HTTP authority has an invalid host or port");
+            }
+            if http_scheme
+                && meta.authority.is_none()
+                && meta
+                    .host
+                    .as_ref()
+                    .is_some_and(|host| !valid_http_authority(host))
+            {
+                return Err("Host authority has an invalid host or port");
             }
             let connect = meta.method.as_deref() == Some(b"CONNECT");
             if meta.protocol && !connect {

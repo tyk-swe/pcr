@@ -452,9 +452,9 @@ impl Conn {
                     )?;
                 }
                 if !self.settings[side].seen
-                    && self.dirs[side]
-                        .as_ref()
-                        .is_some_and(|dir| dir.saw_frame || !dir.buffer.is_empty())
+                    && self.dirs[side].as_ref().is_some_and(|dir| {
+                        self.clean_start || dir.saw_frame || !dir.buffer.is_empty()
+                    })
                 {
                     self.issue(
                         cx,

@@ -1416,6 +1416,10 @@ fn review_stream_frame_errors_preserve_later_messages_and_hpack() {
                 2 => frame(2, 0, 1, &payload),
                 _ => window_update(1, 0),
             };
+            if kind == 8 {
+                // A zero increment is stream-scoped only after the stream opens.
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            }
             capture.client(stream, &bad);
             let request = if kind == 1 {
                 vec![0x82, 0x86, 0x84, 0xbe]
@@ -3641,4 +3645,178 @@ fn review_delayed_response_final_and_data_end_state_are_preserved() {
             );
         }
     }
+}
+
+#[test]
+fn review_settings_peak_does_not_assume_receipt_of_later_window_update() {
+    for open_first in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            if open_first {
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            }
+            capture.server(stream, &settings(&[(4, 0x7fff_ffff), (4, 65535)]));
+            if !open_first {
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            }
+            capture.server(stream, &window_update(1, 1));
+            capture.client(stream, &settings_ack());
+            capture.client(stream, &data(1, &[], END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            !issues(&events)
+                .iter()
+                .any(|i| i.code == "window_overflow" && i.certainty == Certainty::Confirmed)
+        );
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+        );
+    }
+}
+
+#[test]
+fn review_later_credit_does_not_hide_proven_settings_overflow() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+        capture.server(stream, &window_update(1, 1));
+        capture.server(stream, &settings(&[(4, 0x7fff_ffff), (4, 65535)]));
+        capture.server(stream, &window_update(1, 1));
+        capture.client(stream, &settings_ack());
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "window_overflow" && i.certainty == Certainty::Confirmed)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+}
+
+#[test]
+fn review_host_fallback_requires_one_valid_authority() {
+    for (host, duplicates, valid) in [
+        (b"good.example bad.example".as_slice(), false, false),
+        (b"user@host:80", false, false),
+        (b"example.com:80", true, false),
+        (b"example.com:80", false, true),
+        (b"[::1]:80", false, true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x86, 0x84];
+            review_literal(&mut request, b"host", host);
+            if duplicates {
+                review_literal(&mut request, b"host", host);
+            }
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(messages(&events)[0].status == Status::Complete, valid);
+    }
+}
+
+#[test]
+fn review_delayed_response_retains_invalid_headers() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        let mut invalid = RESPONSE_OK.to_vec();
+        review_literal(&mut invalid, b"connection", b"close");
+        capture.server(stream, &headers(1, &invalid, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "header_semantics" && i.certainty == Certainty::Confirmed)
+    );
+    assert_eq!(connection(&events).status, Status::Malformed);
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_zero_window_update_on_idle_stream_terminates() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &window_update(1, 0));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "window_update_unknown_stream"
+                && i.scope == IssueScope::Connection
+                && i.certainty == Certainty::Confirmed)
+    );
+    assert!(messages(&events).is_empty());
+}
+
+#[test]
+fn review_status_specific_trailer_rules() {
+    for delayed in [false, true] {
+        for (status, valid) in [(b"204".as_slice(), false), (b"304", false), (b"205", true)] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                if !delayed {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                }
+                let mut response = Vec::new();
+                review_literal(&mut response, b":status", status);
+                capture.server(stream, &headers(1, &response, END_HEADERS));
+                let mut trailers = Vec::new();
+                review_literal(&mut trailers, b"x-check", b"ok");
+                capture.server(stream, &headers(1, &trailers, END_HEADERS | END_STREAM));
+                if delayed {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                }
+            });
+            assert_eq!(
+                issues(&events)
+                    .iter()
+                    .any(|i| i.code == "header_semantics" && i.certainty == Certainty::Confirmed),
+                !valid
+            );
+            if !delayed {
+                assert_eq!(
+                    messages(&events)
+                        .iter()
+                        .find(|m| m.kind == MessageKind::Response)
+                        .unwrap()
+                        .status
+                        == Status::Complete,
+                    valid
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn review_upgrade_settings_do_not_replace_wire_preface() {
+    let events = exercise(|capture, stream| {
+        capture.client(stream, &common::http2::upgrade_request(&[]));
+        capture.server(
+            stream,
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+        );
+        capture.server(stream, &settings(&[]));
+        capture.client(stream, &common::http2::preface());
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert_ne!(connection(&events).status, Status::Complete);
+    assert!(
+        codes(&events).contains(&"settings_unobserved")
+            || codes(&events).contains(&"missing_initial_settings")
+    );
 }

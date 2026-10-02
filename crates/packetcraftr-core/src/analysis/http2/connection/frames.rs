@@ -340,6 +340,19 @@ impl Conn {
             // rather than being emitted as a valid typed control payload.
             if self.streams.contains_key(&stream_id) {
                 self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            } else if matches!(frame.payload, wire::Payload::WindowUpdate { increment: 0 }) {
+                // Preserve the idle/closed/capture-delayed classification even
+                // when the control value itself is invalid.
+                self.window_update(
+                    side,
+                    stream_id,
+                    0,
+                    Evidence {
+                        wire: wire_bytes,
+                        sources,
+                    },
+                    cx,
+                )?;
             }
             return Ok(());
         }

@@ -860,6 +860,8 @@ impl Conn {
         let applied = {
             let direction = &mut self.settings[CLIENT];
             let applied = direction.apply(&offer.settings, false);
+            // Upgrade header values do not satisfy the mandatory wire preface.
+            direction.seen = false;
             direction.acknowledged = direction.advertised;
             applied
         };

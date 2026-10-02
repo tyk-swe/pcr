@@ -94,7 +94,6 @@ impl Conn {
                 self.fail(cx, status)?;
                 return Ok(());
             };
-            self.release_conn(cx, acked.charged);
             let mut overflow = false;
             for (id, stream) in &mut self.streams {
                 cx.check_deadline()?;
@@ -105,9 +104,13 @@ impl Conn {
                         SERVER
                     };
                     let existed = owner != peer(side) || *id <= acked.sender_stream_limit;
+                    let later_grants = stream.window_granted[side]
+                        - acked.window_grants.get(id).copied().unwrap_or(0);
+                    // Grants following SETTINGS cannot have taken effect before
+                    // its immediate ACK, even if capture order shows them first.
                     if existed
                         && acked.peak_window_delta.is_some_and(|peak| {
-                            stream.send_window[side] + peak > settings::WINDOW_MAX
+                            stream.send_window[side] - later_grants + peak > settings::WINDOW_MAX
                         })
                     {
                         overflow = true;
@@ -118,6 +121,8 @@ impl Conn {
                     stream.send_window[side] += acked.window_delta;
                 }
             }
+            drop(acked.window_grants);
+            self.release_conn(cx, acked.charged);
             for debt in self.closed_credit.values_mut() {
                 cx.check_deadline()?;
                 if let Some(window) = debt[side].as_mut() {
@@ -190,8 +195,18 @@ impl Conn {
         let applied = self.settings[side].apply(&settings, side == SERVER);
         let mut pending = applied.pending;
         pending.sender_stream_limit = self.max_initiated[side];
-        pending.charged = resources::PENDING_OVERHEAD;
+        pending.charged = resources::PENDING_OVERHEAD
+            + self
+                .streams
+                .len()
+                .saturating_mul(resources::CLOSED_STREAM_OVERHEAD);
         self.charge_conn(cx, pending.charged)?;
+        for (id, stream) in &self.streams {
+            cx.check_deadline()?;
+            pending
+                .window_grants
+                .insert(*id, stream.window_granted[peer(side)]);
+        }
         let advertised_table_size = pending.final_values.header_table_size;
         self.settings[side].pending.push_back(pending);
         if let Some(decoder) = self.dirs[peer(side)]
@@ -314,6 +329,8 @@ impl Conn {
         if stream.phase == StreamPhase::Closed {
             return Ok(());
         }
+        stream.window_granted[grant] =
+            stream.window_granted[grant].saturating_add(i64::from(increment));
         stream.send_window[grant] = stream.send_window[grant].saturating_add(i64::from(increment));
         if stream.send_window[grant] >= 0 {
             stream.credit_exceeded[grant] = false;

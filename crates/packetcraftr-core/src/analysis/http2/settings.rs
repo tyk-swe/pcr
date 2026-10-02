@@ -36,6 +36,7 @@ pub(crate) struct PendingSettings {
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
+    pub window_grants: std::collections::BTreeMap<u32, i64>,
     pub charged: usize,
 }
 
@@ -51,6 +52,7 @@ pub(crate) struct Acked {
     pub window_delta: i64,
     pub peak_window_delta: Option<i64>,
     pub sender_stream_limit: u32,
+    pub window_grants: std::collections::BTreeMap<u32, i64>,
     pub charged: usize,
 }
 
@@ -89,6 +91,7 @@ impl DirectionSettings {
             window_delta: 0,
             peak_window_delta: None,
             sender_stream_limit: 0,
+            window_grants: std::collections::BTreeMap::new(),
             charged: 0,
         };
         let mut issues = Vec::new();
@@ -227,6 +230,7 @@ impl DirectionSettings {
             window_delta: pending.window_delta,
             peak_window_delta: pending.peak_window_delta,
             sender_stream_limit: pending.sender_stream_limit,
+            window_grants: pending.window_grants,
             charged: pending.charged,
         })
     }

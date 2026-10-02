@@ -164,6 +164,8 @@ pub(crate) struct Conn {
     pub final_pending_pings: Option<u64>,
     pub refused: bool,
     pub done: bool,
+    pub finalizing: bool,
+    pub resume_side: Option<usize>,
 }
 
 impl Conn {
@@ -201,6 +203,8 @@ impl Conn {
             final_pending_pings: None,
             refused: false,
             done: false,
+            finalizing: false,
+            resume_side: None,
         }
     }
 
@@ -432,7 +436,36 @@ impl Conn {
             .sum()
     }
 
+    pub(crate) fn waiting_settings_ack(&self, side: usize) -> bool {
+        let peer = 1 - side;
+        if self.finalizing
+            || !self.settings[peer].pending.is_empty()
+            || self.dirs[peer].as_ref().is_some_and(|dir| dir.closed)
+        {
+            return false;
+        }
+        self.dirs[side].as_ref().is_some_and(|dir| {
+            let bytes = dir.buffer.bytes();
+            dir.saw_frame
+                && dir.chain.is_none()
+                && bytes.len() >= 9
+                && bytes[..3] == [0, 0, 0]
+                && bytes[3] == 4
+                && bytes[4] & 1 != 0
+                && bytes[5] & 0x7f == 0
+                && bytes[6..9] == [0, 0, 0]
+        })
+    }
+
     fn next_want(&self, flow: &ScopedFlowKey) -> Option<usize> {
+        if self
+            .side_of(flow)
+            .is_some_and(|side| self.waiting_settings_ack(side))
+        {
+            // The already charged directional buffer bounds deferred ACKs and
+            // following bytes while the opposite reassembly direction advances.
+            return Some(4096);
+        }
         let dir = self
             .dirs
             .iter()
@@ -494,9 +527,20 @@ impl Conn {
                     }
                 }
                 Phase::Prelude | Phase::H2 => {
+                    if let Some(side) = self.resume_side.take() {
+                        self.pump_side(side, cx)?;
+                        continue;
+                    }
+                    let before = self.buffered_len();
                     self.pump_side(CLIENT, cx)?;
+                    if self.resume_side.is_some() {
+                        continue;
+                    }
                     self.pump_side(SERVER, cx)?;
-                    if !matches!(self.phase, Phase::Dead) {
+                    if self.resume_side.is_some() {
+                        continue;
+                    }
+                    if !matches!(self.phase, Phase::Dead) && self.buffered_len() == before {
                         return Ok(());
                     }
                 }
@@ -581,7 +625,7 @@ impl Conn {
             let Some(dir) = self.dirs[side].as_ref() else {
                 return Ok(());
             };
-            if dir.closed || dir.buffer.is_empty() {
+            if dir.buffer.is_empty() || (dir.closed && dir.phase != DirPhase::Frames) {
                 return Ok(());
             }
             let progressed = match dir.phase {
@@ -590,7 +634,7 @@ impl Conn {
                 DirPhase::Frames => self.frame_step(side, cx)?,
                 DirPhase::Sniff => false,
             };
-            if !progressed {
+            if !progressed || self.resume_side.is_some() {
                 return Ok(());
             }
         }

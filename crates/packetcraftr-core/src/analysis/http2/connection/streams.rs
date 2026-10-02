@@ -78,6 +78,7 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         self.emit_message_with_completion(side, build, status, status == Status::Complete, cx)
+            .map(|_| ())
     }
 
     fn emit_message_with_completion(
@@ -87,7 +88,7 @@ impl Conn {
         status: Status,
         complete: bool,
         cx: &mut Cx<'_>,
-    ) -> Result<(), Error> {
+    ) -> Result<Status, Error> {
         let (cl_exempt, connect_cl_illegal) = match build.status_code {
             Some(status) => {
                 let stream = self.streams.get(&build.stream_id);
@@ -144,6 +145,14 @@ impl Conn {
             build.failure = build.failure.or(Some(Status::Malformed));
         }
         let status = build.failure.unwrap_or(status);
+        let status = if status == Status::Complete
+            && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER))
+        {
+            self.worst(Status::Incomplete);
+            Status::Incomplete
+        } else {
+            status
+        };
         let sources = union_balanced(std::mem::take(&mut build.sets))?.ok_or(
             Error::Application(application::Error::Sources {
                 number: self.number,
@@ -183,7 +192,7 @@ impl Conn {
             sources,
             compression_sources,
         });
-        Ok(())
+        Ok(status)
     }
 
     pub(crate) fn begin_stream(
@@ -793,7 +802,7 @@ impl Conn {
         stream.ended[side] = true;
         let unprocessed = stream.unprocessed;
         if let Some(msg) = stream.msgs[side].take() {
-            self.emit_message_with_completion(
+            let emitted = self.emit_message_with_completion(
                 side,
                 msg,
                 if unprocessed {
@@ -804,6 +813,9 @@ impl Conn {
                 status == Status::Complete,
                 cx,
             )?;
+            if emitted == Status::Malformed {
+                return self.close_stream(stream_id, Status::Malformed, None, cx);
+            }
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");
         if stream.ended == [true, true] && stream.phase != StreamPhase::Closed {

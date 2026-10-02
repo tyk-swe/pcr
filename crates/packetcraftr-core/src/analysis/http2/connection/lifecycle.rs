@@ -26,6 +26,15 @@ impl Conn {
                 cx,
             );
         }
+        if let Some(dir) = self.dir_mut(flow) {
+            dir.closed = true;
+        }
+        if self.phase == Phase::H2 {
+            self.pump(cx)?;
+        }
+        let deferred_ack = self
+            .side_of(flow)
+            .is_some_and(|side| self.waiting_settings_ack(side));
         if self.side_of(flow) == Some(SERVER) {
             self.report_unmatched_response_at_eof(cx)?;
         }
@@ -34,7 +43,7 @@ impl Conn {
             dir.closed = true;
             let phase = dir.phase;
             let partial = dir.buffer.len();
-            if partial > 0 {
+            if partial > 0 && !deferred_ack {
                 let sets = dir.buffer.contributors(partial);
                 let (wire, dropped) = dir.buffer.take(partial);
                 let sources = union_balanced(sets)?;
@@ -364,6 +373,10 @@ impl Conn {
 
     pub(crate) fn finish(mut self, cx: &mut Cx<'_>) -> Result<(), Error> {
         cx.check_deadline()?;
+        self.finalizing = true;
+        if self.phase == Phase::H2 {
+            self.pump(cx)?;
+        }
         self.report_unmatched_response_at_eof(cx)?;
         for side in [CLIENT, SERVER] {
             if let Some(dir) = self.dirs[side].as_mut() {

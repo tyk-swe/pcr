@@ -173,6 +173,50 @@ fn check_value(value: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn valid_uri_path(path: &[u8]) -> bool {
+    let mut pos = 0;
+    while pos < path.len() {
+        let byte = path[pos];
+        if byte == b'%' {
+            if !path
+                .get(pos + 1..pos + 3)
+                .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+            {
+                return false;
+            }
+            pos += 3;
+        } else {
+            if !byte.is_ascii_alphanumeric()
+                && !matches!(
+                    byte,
+                    b'-' | b'.'
+                        | b'_'
+                        | b'~'
+                        | b'!'
+                        | b'$'
+                        | b'&'
+                        | b'\''
+                        | b'('
+                        | b')'
+                        | b'*'
+                        | b'+'
+                        | b','
+                        | b';'
+                        | b'='
+                        | b':'
+                        | b'@'
+                        | b'/'
+                        | b'?'
+                )
+            {
+                return false;
+            }
+            pos += 1;
+        }
+    }
+    true
+}
+
 // RFC 3986 host and port syntax, without HTTP's forbidden userinfo.
 fn valid_http_authority(authority: &[u8]) -> bool {
     fn host_char(byte: u8) -> bool {
@@ -311,6 +355,9 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     }
                     if value != b"*" && !value.starts_with(b"/") {
                         return Err(":path must be absolute or the OPTIONS asterisk form");
+                    }
+                    if value != b"*" && !valid_uri_path(value) {
+                        return Err(":path has invalid URI characters or percent escapes");
                     }
                     asterisk = value == b"*";
                     meta.path = true;

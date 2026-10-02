@@ -2093,7 +2093,17 @@ fn review_stream_window_overflow_flushes_only_affected_stream() {
     for increment in [0, 0x7fff_ffff] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
-            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.client(
+                stream,
+                &headers(
+                    1,
+                    REQUEST,
+                    END_HEADERS | if increment == 0 { 0 } else { END_STREAM },
+                ),
+            );
+            if increment != 0 {
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+            }
             capture.server(stream, &window_update(1, increment));
             capture.client(stream, &data(1, b"x", END_STREAM));
             capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
@@ -2109,11 +2119,9 @@ fn review_stream_window_overflow_flushes_only_affected_stream() {
                 .iter()
                 .any(|m| m.http2_stream_id == 1 && m.status == Status::Malformed)
         );
-        assert!(
-            !messages(&events)
-                .iter()
-                .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
-        );
+        assert!(!messages(&events).iter().any(|m| m.http2_stream_id == 1
+            && m.status == Status::Complete
+            && (increment == 0 || m.kind == MessageKind::Response)));
         assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
             && m.kind == MessageKind::Response
             && m.status == Status::Complete));
@@ -2406,7 +2414,16 @@ fn review_unsolicited_settings_ack_stops_later_messages() {
         capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
     });
     assert!(codes(&events).contains(&"unsolicited_settings_ack"));
-    assert!(messages(&events).is_empty());
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.status == Status::Complete)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response)
+    );
 }
 
 #[test]
@@ -2771,4 +2788,165 @@ fn review_http_authority_enforces_host_port_grammar() {
         );
         assert!(!messages(&events)[0].header_blocks.is_empty());
     }
+}
+
+#[test]
+fn review_malformed_body_closes_stream_before_later_peer_frames() {
+    for bodyless in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = REQUEST.to_vec();
+            if !bodyless {
+                review_literal(&mut request, b"content-length", b"2");
+            }
+            capture.client(stream, &headers(1, &request, END_HEADERS));
+            if bodyless {
+                capture.server(stream, &headers(1, &[0x89], END_HEADERS));
+                capture.server(stream, &data(1, b"bad", 0));
+                capture.client(stream, &data(1, b"late", END_STREAM));
+                capture.server(stream, &data(1, b"later", END_STREAM));
+            } else {
+                capture.client(stream, &data(1, b"bad", END_STREAM));
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            }
+            capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete),
+            "bodyless={bodyless}"
+        );
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+        assert!(codes(&events).contains(&if bodyless {
+            "bodyless_response_body"
+        } else {
+            "content_length_mismatch"
+        }));
+    }
+}
+
+#[test]
+fn review_path_enforces_uri_characters_and_percent_escapes() {
+    for (path, valid) in [
+        (b"/item%zz".as_slice(), false),
+        (b"/bad[", false),
+        (b"/raw\xff", false),
+        (b"/bad%2", false),
+        (b"/a\\b", false),
+        (b"/a?b[", false),
+        (b"/item%20name?q=%ff&x=1", true),
+        (b"/a:@!$&'()*+,;=-._~/?q=/?:@", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![0x82, 0x86];
+            review_literal(&mut request, b":path", path);
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status,
+            if valid {
+                Status::Complete
+            } else {
+                Status::Malformed
+            },
+            "path={path:?}"
+        );
+    }
+}
+
+#[test]
+fn review_window_updates_allow_delayed_peer_data() {
+    for id in [0, 1] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.server(stream, &window_update(id, 0x7fff_ffff - 65535));
+            capture.server(stream, &window_update(id, 1));
+            capture.client(stream, &data(1, b"x", END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        let code = if id == 0 {
+            "connection_window_overflow"
+        } else {
+            "stream_window_overflow"
+        };
+        let issue = issues(&events)
+            .into_iter()
+            .find(|i| i.code == code)
+            .unwrap();
+        assert_eq!(issue.certainty, Certainty::ObservedOrder);
+        assert_eq!(issue.status, Status::Incomplete);
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+        );
+    }
+}
+
+#[test]
+fn review_settings_ack_waits_for_delayed_peer_settings() {
+    for client_ack in [false, true] {
+        for early_fin in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                if client_ack {
+                    let mut bytes = settings_ack();
+                    bytes.extend_from_slice(&headers(1, REQUEST, END_HEADERS | END_STREAM));
+                    capture.client(stream, &bytes);
+                    if early_fin {
+                        fin(capture, stream, true);
+                    }
+                    capture.server(stream, &settings(&[(3, 10)]));
+                    capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+                } else {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                    let mut bytes = settings_ack();
+                    bytes.extend_from_slice(&headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+                    capture.server(stream, &bytes);
+                    if early_fin {
+                        fin(capture, stream, false);
+                    }
+                    capture.client(stream, &settings(&[(3, 10)]));
+                }
+            });
+            assert!(
+                !codes(&events).contains(&"unsolicited_settings_ack"),
+                "client_ack={client_ack}, early_fin={early_fin}"
+            );
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            );
+            assert_eq!(connection(&events).pending_settings, 0);
+        }
+    }
+}
+
+#[test]
+fn review_connection_window_overflow_after_sender_fin_is_confirmed() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        fin(capture, stream, true);
+        capture.server(stream, &window_update(0, 0x7fff_ffff));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    let issue = issues(&events)
+        .into_iter()
+        .find(|i| i.code == "connection_window_overflow")
+        .unwrap();
+    assert_eq!(issue.certainty, Certainty::Confirmed);
+    assert_eq!(issue.status, Status::Malformed);
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response)
+    );
 }

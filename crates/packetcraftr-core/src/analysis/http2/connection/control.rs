@@ -18,14 +18,27 @@ impl Conn {
     ) -> Result<(), Error> {
         if flags & 0x1 != 0 {
             let Some(acked) = self.settings[super::super::stream::peer(side)].acknowledge() else {
+                let confirmed = self.clean_start
+                    && self.dirs[peer(side)]
+                        .as_ref()
+                        .is_some_and(|dir| dir.buffer.is_empty());
+                let status = if confirmed {
+                    Status::Malformed
+                } else {
+                    Status::Incomplete
+                };
                 self.issue(
                     cx,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: None,
                         scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
+                        certainty: if confirmed {
+                            Certainty::Confirmed
+                        } else {
+                            Certainty::Indeterminate
+                        },
+                        status,
                         code: "unsolicited_settings_ack",
                         detail: "a SETTINGS acknowledgment does not match a pending SETTINGS"
                             .into(),
@@ -33,7 +46,7 @@ impl Conn {
                         sources: evidence.sources,
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                self.fail(cx, status)?;
                 return Ok(());
             };
             self.release_conn(cx, acked.charged);
@@ -106,6 +119,7 @@ impl Conn {
             self.fail(cx, Status::Limit)?;
             return Ok(());
         }
+        let resume_peer = self.waiting_settings_ack(peer(side));
         let applied = self.settings[side].apply(&settings, side == SERVER);
         let mut pending = applied.pending;
         pending.charged = resources::PENDING_OVERHEAD;
@@ -138,6 +152,8 @@ impl Conn {
         }
         if invalid {
             self.fail(cx, Status::Malformed)?;
+        } else if resume_peer {
+            self.resume_side = Some(peer(side));
         }
         Ok(())
     }
@@ -152,23 +168,36 @@ impl Conn {
     ) -> Result<(), Error> {
         let grant = peer(side);
         if stream_id == 0 {
-            self.send_window[grant] += i64::from(increment);
+            self.send_window[grant] = self.send_window[grant].saturating_add(i64::from(increment));
             if self.send_window[grant] > settings::WINDOW_MAX {
+                let confirmed = self.dirs[grant]
+                    .as_ref()
+                    .is_some_and(|dir| dir.closed && dir.buffer.is_empty());
                 self.issue(
                     cx,
                     Fault {
                         flow: self.dir_flow(side),
                         http2_stream_id: Some(0),
                         scope: IssueScope::Connection,
-                        certainty: Certainty::Confirmed,
-                        status: Status::Malformed,
+                        certainty: if confirmed {
+                            Certainty::Confirmed
+                        } else {
+                            Certainty::ObservedOrder
+                        },
+                        status: if confirmed {
+                            Status::Malformed
+                        } else {
+                            Status::Incomplete
+                        },
                         code: "connection_window_overflow",
                         detail: "connection flow window exceeds 2^31-1".into(),
                         wire: evidence.wire,
                         sources: evidence.sources,
                     },
                 )?;
-                self.fail(cx, Status::Malformed)?;
+                if confirmed {
+                    self.fail(cx, Status::Malformed)?;
+                }
             }
             return Ok(());
         }
@@ -208,23 +237,34 @@ impl Conn {
         if stream.phase == StreamPhase::Closed {
             return Ok(());
         }
-        stream.send_window[grant] += i64::from(increment);
+        stream.send_window[grant] = stream.send_window[grant].saturating_add(i64::from(increment));
         if stream.send_window[grant] > settings::WINDOW_MAX {
+            let confirmed = stream.ended[grant];
             self.issue(
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
                     scope: IssueScope::Stream,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
+                    certainty: if confirmed {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::ObservedOrder
+                    },
+                    status: if confirmed {
+                        Status::Malformed
+                    } else {
+                        Status::Incomplete
+                    },
                     code: "stream_window_overflow",
                     detail: "stream flow window exceeds 2^31-1".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
                 },
             )?;
-            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            if confirmed {
+                self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            }
         }
         Ok(())
     }

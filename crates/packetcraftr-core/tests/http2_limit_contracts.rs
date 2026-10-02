@@ -322,3 +322,24 @@ fn header_bytes_and_count_boundaries() {
         Event::Issue(issue) if issue.scope == packetcraftr_core::analysis::http2::IssueScope::Compression
     )));
 }
+
+#[test]
+fn capture_early_settings_ack_cannot_grow_an_unbounded_buffer() {
+    for flood in [false, true] {
+        let (mut capture, mut stream) = setup();
+        prior_knowledge_handshake(&mut capture, &mut stream);
+        capture.server(&mut stream, &common::http2::settings_ack());
+        if flood {
+            for _ in 0..64 {
+                capture.server(&mut stream, &[0; 1024]);
+            }
+        }
+        let app = AppLimits {
+            max_buffer_bytes: 32 * 1024,
+            ..Default::default()
+        };
+        let mut collector = Collector::new(app, vec![80], Limits::default()).unwrap();
+        let result = run_capture(&capture.frames, &mut collector);
+        assert_eq!(result.is_err(), flood, "flood={flood}, result={result:?}");
+    }
+}

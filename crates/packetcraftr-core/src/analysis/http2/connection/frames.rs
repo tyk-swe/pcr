@@ -22,6 +22,9 @@ pub(crate) struct DataHead {
 impl Conn {
     pub(crate) fn frame_step(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<bool, Error> {
         cx.check_deadline()?;
+        if self.waiting_settings_ack(side) {
+            return Ok(false);
+        }
         {
             let dir = self.dirs[side].as_mut().ok_or(Error::Application(
                 crate::analysis::application::Error::Sources {
@@ -792,7 +795,14 @@ impl Conn {
             self.close_stream(stream_id, Status::Malformed, None, cx)?;
             return Ok(());
         }
-        if end_stream {
+        if self
+            .streams
+            .get(&stream_id)
+            .and_then(|stream| stream.msgs[side].as_ref())
+            .is_some_and(|msg| msg.failure == Some(Status::Malformed))
+        {
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+        } else if end_stream {
             self.end_side(side, stream_id, Status::Complete, cx)?;
         }
         Ok(())

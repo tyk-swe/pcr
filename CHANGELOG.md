@@ -1806,6 +1806,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Offline HTTP/2 defers capture-early SETTINGS acknowledgments in bounded
+  directional buffers until peer SETTINGS can reconcile them, preserving
+  incomplete evidence while acknowledgment is unresolved. Flow-window overflow
+  distinguishes delayed DATA from proven violations; URI paths validate their
+  characters and percent escapes, and malformed bodies close affected streams.
+
 - Offline HTTP/2 terminates DATA violations on reserved push streams and closes
   malformed field-section streams after retaining their decoded evidence. Early
   peer response blocks/DATA preserve ordering uncertainty without discarding

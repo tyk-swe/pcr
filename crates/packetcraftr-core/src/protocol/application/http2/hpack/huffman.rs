@@ -301,18 +301,26 @@ fn build() -> Vec<[Edge; 2]> {
     nodes
 }
 
-pub(super) fn decode(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+pub(super) fn decode<E: From<Error>>(
+    input: &[u8],
+    max_output: usize,
+    check: &mut impl FnMut() -> Result<(), E>,
+) -> Result<Vec<u8>, E> {
     static TREE: OnceLock<Vec<[Edge; 2]>> = OnceLock::new();
     let nodes = TREE.get_or_init(build);
     let mut out = Vec::with_capacity(input.len().min(max_output));
     let mut node = 0usize;
     let mut padding = 0u32;
     let mut padding_len = 0u32;
-    for &byte in input {
+    for (offset, &byte) in input.iter().enumerate() {
+        // At most 8192 bit transitions between interruption checks.
+        if offset.is_multiple_of(1024) {
+            check()?;
+        }
         for shift in (0..8).rev() {
             let bit = ((byte >> shift) & 1) as usize;
             match nodes[node][bit] {
-                Edge::Empty => return Err(Error::Compression("invalid Huffman code")),
+                Edge::Empty => return Err(Error::Compression("invalid Huffman code").into()),
                 Edge::Node(next) => {
                     node = next as usize;
                     padding = (padding << 1) | bit as u32;
@@ -320,10 +328,10 @@ pub(super) fn decode(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> 
                 }
                 Edge::Leaf(symbol) => {
                     if symbol == EOS {
-                        return Err(Error::Compression("Huffman end-of-string symbol"));
+                        return Err(Error::Compression("Huffman end-of-string symbol").into());
                     }
                     if out.len() >= max_output {
-                        return Err(Error::Limit(Limit::HeaderBytes));
+                        return Err(Error::Limit(Limit::HeaderBytes).into());
                     }
                     out.push(symbol as u8);
                     node = 0;
@@ -334,10 +342,10 @@ pub(super) fn decode(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> 
         }
     }
     if padding_len > 7 {
-        return Err(Error::Compression("Huffman padding exceeds seven bits"));
+        return Err(Error::Compression("Huffman padding exceeds seven bits").into());
     }
     if padding != (1u32 << padding_len) - 1 {
-        return Err(Error::Compression("Huffman padding is not an EOS prefix"));
+        return Err(Error::Compression("Huffman padding is not an EOS prefix").into());
     }
     Ok(out)
 }

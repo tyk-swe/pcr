@@ -960,7 +960,9 @@ impl Conn {
             ))?;
         cx.charge_live(scratch)?;
         let result = (|| {
-            let updates = hpack::table_size_updates(&bytes);
+            let updates = hpack::table_size_updates(&bytes, &mut || {
+                cx.check_deadline().map_err(hpack::DecodeError::Interrupted)
+            });
             let mut ambiguous_minimum = false;
             let decoded = match updates {
                 Err(error) => Err(error),
@@ -989,7 +991,9 @@ impl Conn {
                     if let Some(minimum) = minimum {
                         decoder.require_table_minimum(minimum);
                     }
-                    let decoded = decoder.decode(&bytes, origin);
+                    let decoded = decoder.decode_checked(&bytes, origin, &mut || {
+                        cx.check_deadline().map_err(hpack::DecodeError::Interrupted)
+                    });
                     if decoded.is_ok() {
                         self.settings[peer(side)].uncertain_table_minimum = None;
                         if let Some((minimum, _)) = updates {
@@ -999,6 +1003,11 @@ impl Conn {
                     }
                     decoded
                 }
+            };
+            let decoded = match decoded {
+                Ok(block) => Ok(block),
+                Err(hpack::DecodeError::Wire(error)) => Err(error),
+                Err(hpack::DecodeError::Interrupted(error)) => return Err(error),
             };
             if decoded.is_ok() && ambiguous_minimum {
                 self.issue(cx, Fault {

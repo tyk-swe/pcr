@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Offline HTTP/2 keeps capture-delayed peer resets uncertain, closes rejected
+  promised streams, rejects userinfo in HTTP(S) authorities and forbidden field
+  control bytes, and interrupts long HPACK/Huffman decoding at cancellation or
+  deadline checkpoints while preserving the original interruption error.
+
 - Preserve uncertainty for capture-delayed resets, unproven pre-ACK HPACK
   shrinks, and partial request heads at EOF; known zero concurrency limits and
   causally established table minima remain enforced. Unsolicited SETTINGS ACKs

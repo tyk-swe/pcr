@@ -131,11 +131,27 @@ impl Entry {
     }
 }
 
+/// Keep caller interruption distinct from malformed compressed input.
+#[derive(Debug)]
+pub(crate) enum DecodeError<E> {
+    Wire(Error),
+    Interrupted(E),
+}
+impl<E> From<Error> for DecodeError<E> {
+    fn from(error: Error) -> Self {
+        Self::Wire(error)
+    }
+}
+
 /// Summarize leading size updates without allocating another representation.
-pub(crate) fn table_size_updates(block: &[u8]) -> Result<Option<(u32, u32)>, Error> {
+pub(crate) fn table_size_updates<E: From<Error>>(
+    block: &[u8],
+    check: &mut impl FnMut() -> Result<(), E>,
+) -> Result<Option<(u32, u32)>, E> {
     let mut pos = 0;
     let mut bounds: Option<(u32, u32)> = None;
     while block.get(pos).is_some_and(|first| first & 0xe0 == 0x20) {
+        check()?;
         let value = u32::try_from(integer(block, &mut pos, 5)?)
             .map_err(|_| Error::Compression("table size update exceeds u32"))?;
         bounds = Some(bounds.map_or((value, value), |(min, max)| {
@@ -202,11 +218,22 @@ impl Decoder {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn decode(&mut self, block: &Bytes, origin: u64) -> Result<Block, Error> {
+        self.decode_checked(block, origin, &mut || Ok(()))
+    }
+
+    pub(crate) fn decode_checked<E: From<Error>>(
+        &mut self,
+        block: &Bytes,
+        origin: u64,
+        check: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<Block, E> {
         if self.poisoned {
-            return Err(Error::Compression("decoder is poisoned"));
+            return Err(Error::Compression("decoder is poisoned").into());
         }
-        self.decode_block(block, origin).inspect_err(|_| {
+        // An interrupted block may have partially changed the dynamic table.
+        self.decode_block(block, origin, check).inspect_err(|_| {
             self.poisoned = true;
         })
     }
@@ -224,9 +251,14 @@ impl Decoder {
         set.into_iter().collect()
     }
 
-    fn decode_block(&mut self, block: &Bytes, origin: u64) -> Result<Block, Error> {
+    fn decode_block<E: From<Error>>(
+        &mut self,
+        block: &Bytes,
+        origin: u64,
+        check: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<Block, E> {
         if block.len() > self.limits.max_block_bytes {
-            return Err(Error::Limit(Limit::BlockBytes));
+            return Err(Error::Limit(Limit::BlockBytes).into());
         }
         let must_shrink = self
             .pending_min
@@ -238,10 +270,11 @@ impl Decoder {
         let mut updating = true;
         let mut updated = false;
         while pos < block.len() {
+            check()?;
             let first = block[pos];
             if first & 0xe0 == 0x20 {
                 if !updating {
-                    return Err(Error::Compression("table size update after header fields"));
+                    return Err(Error::Compression("table size update after header fields").into());
                 }
                 self.size_update(block, &mut pos, must_shrink && !updated)?;
                 updated = true;
@@ -250,11 +283,11 @@ impl Decoder {
             if updating {
                 updating = false;
                 if must_shrink && !updated {
-                    return Err(Error::Compression("missing required table size update"));
+                    return Err(Error::Compression("missing required table size update").into());
                 }
             }
             if fields.len() >= self.limits.max_headers {
-                return Err(Error::Limit(Limit::HeaderCount));
+                return Err(Error::Limit(Limit::HeaderCount).into());
             }
             let budget = self
                 .limits
@@ -276,8 +309,9 @@ impl Decoder {
                     (4, first & 0x10 != 0, false)
                 };
                 let index = integer(block, &mut pos, prefix)?;
-                let (field, lineage) =
-                    self.literal(block, &mut pos, index, never_indexed, origin, &mut charge)?;
+                let (mut field, lineage) =
+                    self.literal(block, &mut pos, index, origin, &mut charge, check)?;
+                field.never_indexed = never_indexed;
                 (field, incremental.then_some(lineage))
             };
             origin_bytes = charge.origins;
@@ -290,7 +324,7 @@ impl Decoder {
             fields.push(field);
         }
         if updating && must_shrink && !updated {
-            return Err(Error::Compression("missing required table size update"));
+            return Err(Error::Compression("missing required table size update").into());
         }
         self.pending_min = None;
         Ok(Block {
@@ -385,28 +419,28 @@ impl Decoder {
         })
     }
 
-    fn literal(
+    fn literal<E: From<Error>>(
         &self,
         block: &Bytes,
         pos: &mut usize,
         index: u64,
-        never_indexed: bool,
         origin: u64,
         charge: &mut Charge,
-    ) -> Result<(Field, Vec<u64>), Error> {
+        check: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<(Field, Vec<u64>), E> {
         let (name, lineage) = if index == 0 {
-            let value = self.string(block, pos, charge.remaining)?;
+            let value = self.string(block, pos, charge.remaining, check)?;
             self.charge_origins(0, charge)?;
             (value, Vec::new())
         } else {
             let resolved = self.resolve(index)?;
             if resolved.name().len() > charge.remaining {
-                return Err(Error::Limit(Limit::HeaderBytes));
+                return Err(Error::Limit(Limit::HeaderBytes).into());
             }
             self.charge_origins(resolved.origins_len(), charge)?;
             (resolved.name_bytes(), resolved.origins())
         };
-        let value = self.string(block, pos, charge.remaining - name.len())?;
+        let value = self.string(block, pos, charge.remaining - name.len(), check)?;
         let mut origins = lineage.clone();
         origins.push(origin);
         origins.sort_unstable();
@@ -415,7 +449,7 @@ impl Decoder {
             Field {
                 name,
                 value,
-                never_indexed,
+                never_indexed: false,
                 origins,
             },
             lineage,
@@ -451,7 +485,13 @@ impl Decoder {
         Ok(())
     }
 
-    fn string(&self, block: &Bytes, pos: &mut usize, max_output: usize) -> Result<Bytes, Error> {
+    fn string<E: From<Error>>(
+        &self,
+        block: &Bytes,
+        pos: &mut usize,
+        max_output: usize,
+        check: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<Bytes, E> {
         let first = *block
             .get(*pos)
             .ok_or(Error::Compression("truncated string literal"))?;
@@ -463,15 +503,15 @@ impl Decoder {
             .checked_add(length)
             .ok_or(Error::Compression("string length overflows"))?;
         if end > block.len() {
-            return Err(Error::Compression("truncated string literal"));
+            return Err(Error::Compression("truncated string literal").into());
         }
         let raw = &block[*pos..end];
         *pos = end;
         if huffman_coded {
-            Ok(Bytes::from(huffman::decode(raw, max_output)?))
+            Ok(Bytes::from(huffman::decode(raw, max_output, check)?))
         } else {
             if length > max_output {
-                return Err(Error::Limit(Limit::HeaderBytes));
+                return Err(Error::Limit(Limit::HeaderBytes).into());
             }
             Ok(block.slice_ref(raw))
         }

@@ -2472,3 +2472,124 @@ fn review_completed_unprocessed_requests_validate_content_length() {
         }
     }
 }
+
+#[test]
+fn review_capture_delayed_open_survives_peer_reset() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &rst(1, 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 3 && m.kind == MessageKind::Response)
+    );
+    let issue = issues(&events)
+        .into_iter()
+        .find(|i| i.code == "reset_idle_stream")
+        .unwrap();
+    assert_eq!(issue.certainty, Certainty::Indeterminate);
+    assert_eq!(issue.status, Status::Incomplete);
+    assert!(issue.sources.is_some());
+}
+
+#[test]
+fn review_rejected_push_cannot_emit_complete_response() {
+    for invalid in 0..3 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            let mut request = REQUEST.to_vec();
+            if invalid == 0 {
+                request[0] = 0x83;
+            } else if invalid == 1 {
+                review_literal(&mut request, b"connection", b"close");
+            } else {
+                review_literal(&mut request, b"content-length", b"1");
+            }
+            request.extend_from_slice(&[0x40, 1, b'x', 1, b'y']);
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, &request, END_HEADERS),
+            );
+            // The rejected promise's dynamic-table insertion must remain usable.
+            capture.server(stream, &headers(2, &[0x88, 0xbe], END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::PushPromise && m.status == Status::Malformed)
+        );
+        assert!(!messages(&events).iter().any(|m| m.http2_stream_id == 2
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+        assert!(!codes(&events).contains(&"hpack_decode"));
+        assert!(messages(&events).iter().any(|m| m.http2_stream_id == 1
+            && m.kind == MessageKind::Response
+            && m.status == Status::Complete));
+    }
+}
+
+#[test]
+fn review_http_authority_rejects_userinfo() {
+    for scheme in [b"http".as_slice(), b"https", b"HTTP"] {
+        for authority in [b"user@example.com".as_slice(), b"example.com"] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                let mut request = vec![0x82, 0x84];
+                review_literal(&mut request, b":authority", authority);
+                review_literal(&mut request, b":scheme", scheme);
+                capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+            });
+            assert_eq!(
+                messages(&events)[0].status,
+                if authority.contains(&b'@') {
+                    Status::Malformed
+                } else {
+                    Status::Complete
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn review_field_values_reject_controls_and_preserve_visible_bytes() {
+    for byte in (0u8..=32).chain([0x7f, 0x80, 0xff]) {
+        for response in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                let mut block = if response {
+                    RESPONSE_OK.to_vec()
+                } else {
+                    REQUEST.to_vec()
+                };
+                review_literal(&mut block, b"x-value", &[b'a', byte, b'b']);
+                if response {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                    capture.server(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+                } else {
+                    capture.client(stream, &headers(1, &block, END_HEADERS | END_STREAM));
+                }
+            });
+            let message = messages(&events)
+                .into_iter()
+                .find(|m| (m.kind == MessageKind::Response) == response)
+                .unwrap();
+            let invalid = (byte < 32 && byte != b'\t') || byte == 0x7f;
+            assert_eq!(
+                message.status,
+                if invalid {
+                    Status::Malformed
+                } else {
+                    Status::Complete
+                },
+                "byte={byte}, response={response}"
+            );
+        }
+    }
+}

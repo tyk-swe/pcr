@@ -159,8 +159,11 @@ fn check_name(name: &[u8], pseudo: bool) -> Result<(), &'static str> {
 }
 
 fn check_value(value: &[u8]) -> Result<(), &'static str> {
-    if value.iter().any(|b| matches!(b, 0 | b'\r' | b'\n')) {
-        return Err("header field value contains NUL, CR or LF");
+    if value
+        .iter()
+        .any(|b| (*b < 0x20 && *b != b'\t') || *b == 0x7f)
+    {
+        return Err("header field value contains a forbidden control byte");
     }
     if value.first().is_some_and(|b| matches!(b, b' ' | b'\t'))
         || value.last().is_some_and(|b| matches!(b, b' ' | b'\t'))
@@ -175,6 +178,7 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
     let mut regular_seen = false;
     let mut pseudo_seen = Vec::new();
     let mut asterisk = false;
+    let mut http_scheme = false;
     for field in fields {
         let name: &[u8] = &field.name;
         let value: &[u8] = &field.value;
@@ -207,6 +211,8 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                         return Err(":scheme is empty or invalid");
                     }
                     meta.scheme = true;
+                    http_scheme =
+                        value.eq_ignore_ascii_case(b"http") || value.eq_ignore_ascii_case(b"https");
                 }
                 (FieldRole::Request, b":path") => {
                     if value.is_empty() {
@@ -301,6 +307,14 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
             }
             if asterisk && meta.method.as_deref() != Some(b"OPTIONS") {
                 return Err("asterisk :path requires OPTIONS");
+            }
+            if http_scheme
+                && meta
+                    .authority
+                    .as_ref()
+                    .is_some_and(|authority| authority.contains(&b'@'))
+            {
+                return Err("HTTP authority must not contain userinfo");
             }
             let connect = meta.method.as_deref() == Some(b"CONNECT");
             if meta.protocol && !connect {

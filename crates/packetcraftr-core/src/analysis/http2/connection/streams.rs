@@ -918,6 +918,9 @@ impl Conn {
             if !matches!(meta.method.as_deref(), Some(b"GET" | b"HEAD")) {
                 return Err("a pushed request must use a known safe and cacheable method");
             }
+            if meta.content_length.is_some_and(|length| length != 0) {
+                return Err("a pushed request must not indicate request content");
+            }
             Ok(meta)
         });
         let mut msg = self.new_message(promised, MessageKind::PushPromise, cx)?;
@@ -954,6 +957,7 @@ impl Conn {
             msg.charged_spans += frames;
             msg.compression.push(set);
         }
+        let rejected = meta.is_err();
         let mut promised_method = None;
         if let Err(detail) = meta {
             msg.failure = Some(Status::Malformed);
@@ -977,6 +981,19 @@ impl Conn {
         }
         let index = msg.index;
         self.emit_message(SERVER, msg, Status::Complete, cx)?;
+        if rejected {
+            cx.check_streams()?;
+            self.admitted_streams += 1;
+            self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.closed.insert(
+                promised,
+                super::ClosedStream {
+                    reset_by: None,
+                    request: Some(index),
+                },
+            );
+            return Ok(());
+        }
         let open_count = self
             .streams
             .values()
@@ -1031,21 +1048,32 @@ impl Conn {
             if self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner] {
                 return Ok(());
             }
+            let confirmed = self.clean_start && side == owner;
             self.issue(
                 cx,
                 Fault {
                     flow: self.dir_flow(side),
                     http2_stream_id: Some(stream_id),
                     scope: IssueScope::Connection,
-                    certainty: Certainty::Confirmed,
-                    status: Status::Malformed,
+                    certainty: if confirmed {
+                        Certainty::Confirmed
+                    } else {
+                        Certainty::Indeterminate
+                    },
+                    status: if confirmed {
+                        Status::Malformed
+                    } else {
+                        Status::Incomplete
+                    },
                     code: "reset_idle_stream",
                     detail: "RST_STREAM on a stream that was never opened".into(),
                     wire: evidence.wire,
                     sources: evidence.sources,
                 },
             )?;
-            self.fail(cx, Status::Malformed)?;
+            if confirmed {
+                self.fail(cx, Status::Malformed)?;
+            }
             return Ok(());
         }
         self.close_stream(stream_id, Status::Reset, Some(side), cx)

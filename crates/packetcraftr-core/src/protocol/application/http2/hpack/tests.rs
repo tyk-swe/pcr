@@ -613,3 +613,77 @@ fn oversized_blocks_poison_the_decoder() {
         Err(Error::Compression(_))
     ));
 }
+
+#[test]
+fn checked_decode_interrupts_within_one_huffman_literal() {
+    use super::DecodeError;
+    use crate::budget::{Cancellation, Deadline};
+    use std::time::Duration;
+
+    // 5120 zero bytes encode 8192 '0' characters without padding.
+    let encoded_len = 5120usize;
+    let mut block = vec![0, 1, b'x', 0xff];
+    let mut remaining = encoded_len - 127;
+    while remaining >= 128 {
+        block.push((remaining as u8 & 0x7f) | 0x80);
+        remaining >>= 7;
+    }
+    block.push(remaining as u8);
+    block.resize(block.len() + encoded_len, 0);
+    let block = Bytes::from(block);
+    let mut decoder = Decoder::new(limits()).unwrap();
+    assert_eq!(
+        decoder.decode(&block, 1).unwrap().fields[0].value.len(),
+        8192
+    );
+
+    let mut decoder = Decoder::new(limits()).unwrap();
+    let cancellation = Cancellation::default();
+    let deadline =
+        Deadline::new(Duration::from_secs(600)).with_cancellation(Some(cancellation.clone()));
+    let mut calls = 0;
+    let result = decoder.decode_checked(&block, 2, &mut || {
+        calls += 1;
+        // Field boundary, then the first and second Huffman chunks.
+        if calls == 3 {
+            cancellation.cancel();
+        }
+        deadline.enforce().map_err(DecodeError::Interrupted)
+    });
+    assert!(matches!(result, Err(DecodeError::Interrupted(_))));
+    assert_eq!(calls, 3);
+    assert!(matches!(
+        decoder.decode(&hex("82"), 3),
+        Err(Error::Compression("decoder is poisoned"))
+    ));
+}
+
+#[test]
+fn checked_decode_interrupts_field_and_table_update_runs() {
+    use super::DecodeError;
+    for byte in [0x82, 0x20] {
+        let mut decoder = Decoder::new(limits()).unwrap();
+        let mut calls = 0;
+        let result = decoder.decode_checked(&Bytes::from(vec![byte; 100]), 1, &mut || {
+            calls += 1;
+            if calls == 4 {
+                Err(DecodeError::Interrupted("cancelled"))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(result, Err(DecodeError::Interrupted("cancelled"))));
+        assert_eq!(calls, 4);
+    }
+    let mut calls = 0;
+    let result = super::table_size_updates(&[0x20; 100], &mut || {
+        calls += 1;
+        if calls == 4 {
+            Err(DecodeError::Interrupted("deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    assert!(matches!(result, Err(DecodeError::Interrupted("deadline"))));
+    assert_eq!(calls, 4);
+}

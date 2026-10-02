@@ -192,10 +192,8 @@ impl Conn {
         )?;
         if !stream_error {
             self.fail(cx, status)?;
-        } else if let Some(id) = stream_id
-            && self.streams.contains_key(&id)
-        {
-            self.close_stream(id, Status::Malformed, None, cx)?;
+        } else if let Some(id) = stream_id {
+            self.reject_priority_stream(side, id, cx)?;
         }
         Ok(true)
     }
@@ -340,6 +338,8 @@ impl Conn {
             // rather than being emitted as a valid typed control payload.
             if self.streams.contains_key(&stream_id) {
                 self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            } else if matches!(frame.payload, wire::Payload::Priority(_)) {
+                self.reject_priority_stream(side, stream_id, cx)?;
             } else if matches!(frame.payload, wire::Payload::WindowUpdate { increment: 0 }) {
                 // Preserve the idle/closed/capture-delayed classification even
                 // when the control value itself is invalid.

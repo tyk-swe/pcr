@@ -170,6 +170,7 @@ pub(crate) struct Conn {
     pub done: bool,
     pub finalizing: bool,
     pub resume_side: Option<usize>,
+    pub parent_deferred: VecDeque<MsgBuild>,
     pub ack_deferred: VecDeque<(usize, MsgBuild, Status)>,
 }
 
@@ -212,6 +213,7 @@ impl Conn {
             done: false,
             finalizing: false,
             resume_side: None,
+            parent_deferred: VecDeque::new(),
             ack_deferred: VecDeque::new(),
         }
     }

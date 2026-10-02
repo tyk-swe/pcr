@@ -346,6 +346,11 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<usize, Error> {
         let mut pending_msgs = Vec::new();
+        let promises = std::mem::take(&mut self.parent_deferred);
+        self.release_conn(cx, promises.len() * resources::PENDING_OVERHEAD);
+        for msg in promises {
+            pending_msgs.push((SERVER, msg.stream_id, msg));
+        }
         let immediate = std::mem::take(&mut self.ack_deferred);
         self.release_conn(cx, immediate.len() * resources::PENDING_OVERHEAD);
         for (side, msg, _) in immediate {

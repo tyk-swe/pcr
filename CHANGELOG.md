@@ -1806,8 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Retain idle PRIORITY errors and capture-delayed resets, and defer pushed
+  requests until their capture-delayed parent opens.
 - Reconcile pending SETTINGS and WINDOW_UPDATE ordering before confirming stream
-  overflow; compare Host and :authority using URI host, address and port normalization.
+  overflow, without treating unacknowledged increases as proven; compare Host and
+  :authority using URI host, address and port normalization.
 - Confirm remaining stream-window overflow on a clean sender FIN and validate
   exactly one Host authority before accepting an h2c upgrade request.
 - Require a target authority or Host fallback for HTTP(S) requests, validate

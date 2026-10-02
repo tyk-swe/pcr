@@ -4098,3 +4098,170 @@ fn review_host_authority_comparison_normalizes_uri_components() {
         );
     }
 }
+
+#[test]
+fn review_pending_increase_cannot_confirm_window_overflow() {
+    for ack in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.server(stream, &settings(&[(4, 65536)]));
+            capture.server(stream, &window_update(1, 0x7fff_ffff - 65535));
+            if ack {
+                capture.client(stream, &settings_ack());
+            }
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(
+                    |i| (i.code == "stream_window_overflow" || i.code == "window_overflow")
+                        && i.certainty == Certainty::Confirmed
+                ),
+            ack
+        );
+    }
+}
+
+#[test]
+fn review_idle_priority_errors_prevent_later_same_sender_messages() {
+    for server in [false, true] {
+        for bad_length in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                let invalid = if bad_length {
+                    common::http2::frame(2, 0, 1, &[0; 4])
+                } else {
+                    common::http2::priority(1, 1, 0)
+                };
+                if server {
+                    capture.server(stream, &invalid);
+                } else {
+                    capture.client(stream, &invalid);
+                }
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+                capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+                capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+            });
+            assert!(!messages(&events).iter().any(|m| m.http2_stream_id == 1
+                && m.kind
+                    == if server {
+                        MessageKind::Response
+                    } else {
+                        MessageKind::Request
+                    }
+                && m.status == Status::Complete));
+            assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete));
+        }
+    }
+}
+
+#[test]
+fn review_early_reset_prevents_later_server_response() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &common::http2::rst(1, 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+    );
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.certainty == Certainty::Confirmed && i.status == Status::Malformed)
+    );
+}
+
+#[test]
+fn review_push_promise_preserves_capture_delayed_parent() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(
+            stream,
+            &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+        );
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        !issues(&events)
+            .iter()
+            .any(|i| i.certainty == Certainty::Confirmed && i.status == Status::Malformed)
+    );
+    assert!(
+        messages(&events)
+            .iter()
+            .any(|m| m.kind == MessageKind::PushPromise && m.status == Status::Complete)
+    );
+    assert_eq!(
+        messages(&events)
+            .iter()
+            .filter(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn review_pending_transient_increase_requires_receiver_ack() {
+    for ack in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.server(stream, &window_update(1, 0x7fff_ffff - 1 - 65535));
+            capture.server(stream, &settings(&[(4, 65537)]));
+            capture.server(stream, &settings(&[(4, 65535)]));
+            capture.server(stream, &window_update(1, 1));
+            if ack {
+                capture.client(stream, &settings_ack());
+            }
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(
+                    |i| (i.code == "stream_window_overflow" || i.code == "window_overflow")
+                        && i.certainty == Certainty::Confirmed
+                ),
+            ack
+        );
+    }
+}
+
+#[test]
+fn review_delayed_pushes_reconcile_parent_or_remain_incomplete() {
+    for opener in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            for id in [2, 4] {
+                capture.server(
+                    stream,
+                    &common::http2::push_promise(1, id, REQUEST, END_HEADERS),
+                );
+                capture.server(stream, &headers(id, RESPONSE_OK, END_HEADERS | END_STREAM));
+            }
+            if opener {
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+            }
+        });
+        let msgs = messages(&events);
+        let pushed = msgs
+            .iter()
+            .filter(|m| m.kind == MessageKind::PushPromise)
+            .collect::<Vec<_>>();
+        assert_eq!(pushed.len(), 2);
+        for msg in pushed {
+            assert_eq!(msg.status == Status::Complete, opener);
+            assert_eq!(msg.request.is_some(), opener);
+        }
+    }
+}

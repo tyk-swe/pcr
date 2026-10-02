@@ -959,6 +959,9 @@ impl Conn {
             let stream = self.streams.get_mut(&stream_id).expect("stream");
             stream.msgs[side] = Some(msg);
         }
+        if role == FieldRole::Request {
+            self.release_parent_promises(stream_id, cx)?;
+        }
         Ok(())
     }
 
@@ -1013,20 +1016,22 @@ impl Conn {
         let mut overflow = base > super::super::settings::WINDOW_MAX;
         // A WINDOW_UPDATE is received after every preceding SETTINGS in the
         // granting direction. Later decreases cannot repair an earlier overflow.
+        // Unacknowledged increases cannot establish receipt; only a nonpositive
+        // cumulative delta lowers the bound. ACKed increases are already in base.
         // Subtracting all observed DATA makes each intermediate bound conservative.
         for pending in &self.settings[peer(side)].pending {
             cx.check_deadline()?;
             let before = pending.window_grants.get(&stream_id).copied().unwrap_or(0);
             if before > previous_grants {
-                overflow |= base.saturating_add(before).saturating_add(delta)
+                overflow |= base.saturating_add(before).saturating_add(delta.min(0))
                     > super::super::settings::WINDOW_MAX;
             }
             previous_grants = before;
             delta = delta.saturating_add(pending.window_delta);
         }
         if granted > previous_grants || self.settings[peer(side)].pending.is_empty() {
-            overflow |=
-                stream.send_window[side].saturating_add(delta) > super::super::settings::WINDOW_MAX;
+            overflow |= stream.send_window[side].saturating_add(delta.min(0))
+                > super::super::settings::WINDOW_MAX;
         }
         Ok(overflow)
     }
@@ -1207,7 +1212,15 @@ impl Conn {
             .closed
             .get(&stream_id)
             .is_some_and(|closed| closed.reset_by == Some(peer(side)));
-        if !parent_open && !in_flight_after_reset {
+        let delayed_parent = !stream_id.is_multiple_of(2)
+            && stream_id > self.max_initiated[CLIENT]
+            && !self.streams.contains_key(&stream_id)
+            && !self.closed.contains_key(&stream_id)
+            && !self
+                .early_response_headers
+                .get(&stream_id)
+                .is_some_and(|early| early.ended);
+        if !parent_open && !in_flight_after_reset && !delayed_parent {
             self.issue(
                 cx,
                 Fault {
@@ -1291,7 +1304,13 @@ impl Conn {
             promised_method = meta.method;
         }
         let index = msg.index;
-        self.emit_message(SERVER, msg, Status::Complete, cx)?;
+        if delayed_parent && !rejected {
+            self.retain_early_parent(stream_id, cx)?;
+            self.charge_conn(cx, resources::PENDING_OVERHEAD)?;
+            self.parent_deferred.push_back(msg);
+        } else {
+            self.emit_message(SERVER, msg, Status::Complete, cx)?;
+        }
         if rejected {
             cx.check_streams()?;
             self.admitted_streams += 1;
@@ -1343,6 +1362,69 @@ impl Conn {
         Ok(())
     }
 
+    // A peer's terminal event may precede the captured opener. Preserve its
+    // direction without discarding the opener's independently valid evidence.
+    pub(crate) fn reject_priority_stream(
+        &mut self,
+        side: usize,
+        id: u32,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        if self.streams.contains_key(&id) {
+            return self.close_stream(id, Status::Malformed, None, cx);
+        }
+        let owner = if id.is_multiple_of(2) { SERVER } else { CLIENT };
+        if self.closed.contains_key(&id) || id <= self.max_initiated[owner] {
+            return Ok(());
+        }
+        if side == SERVER && owner == CLIENT {
+            self.retain_early_parent(id, cx)?;
+            self.early_response_headers
+                .get_mut(&id)
+                .expect("early parent")
+                .ended = true;
+        } else {
+            cx.check_streams()?;
+            self.admitted_streams += 1;
+            self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.closed.insert(
+                id,
+                super::ClosedStream {
+                    reset_by: None,
+                    request: None,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn retain_early_parent(&mut self, id: u32, cx: &mut Cx<'_>) -> Result<(), Error> {
+        if !self.early_response_headers.contains_key(&id) {
+            cx.check_streams()?;
+            self.admitted_streams += 1;
+            self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+            self.early_response_headers.insert(id, Default::default());
+        }
+        Ok(())
+    }
+
+    fn release_parent_promises(&mut self, id: u32, cx: &mut Cx<'_>) -> Result<(), Error> {
+        let count = self.parent_deferred.len();
+        let request = self.streams.get(&id).and_then(|stream| stream.request);
+        for _ in 0..count {
+            cx.check_deadline()?;
+            let mut msg = self.parent_deferred.pop_front().expect("pending promise");
+            if msg.promised_by == Some(id) {
+                self.release_conn(cx, resources::PENDING_OVERHEAD);
+                msg.request = request;
+                self.emit_message(SERVER, msg, Status::Complete, cx)?;
+            } else {
+                self.parent_deferred.push_back(msg);
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn reset_stream(
         &mut self,
         side: usize,
@@ -1384,6 +1466,23 @@ impl Conn {
             )?;
             if confirmed {
                 self.fail(cx, Status::Malformed)?;
+            } else if side == SERVER && owner == CLIENT {
+                self.retain_early_parent(stream_id, cx)?;
+                self.early_response_headers
+                    .get_mut(&stream_id)
+                    .expect("early parent")
+                    .ended = true;
+            } else {
+                cx.check_streams()?;
+                self.admitted_streams += 1;
+                self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                self.closed.insert(
+                    stream_id,
+                    super::ClosedStream {
+                        reset_by: Some(side),
+                        request: None,
+                    },
+                );
             }
             return Ok(());
         }

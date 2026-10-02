@@ -298,7 +298,12 @@ impl Conn {
             sources: block_sources.clone(),
         };
         if !self.streams.contains_key(&stream_id) {
-            if self.closed.contains(&stream_id) {
+            if self.closed.get(&stream_id) == Some(&Some(peer(side))) {
+                // The peer's HEADERS may have been in flight when we observed the
+                // reset. HPACK has already been decoded to preserve table state.
+                return Ok(());
+            }
+            if self.closed.contains_key(&stream_id) {
                 self.issue(
                     cx,
                     Fault {
@@ -749,7 +754,7 @@ impl Conn {
             stream.phase = StreamPhase::Closed;
             if stream.msgs.iter().all(Option::is_none) {
                 self.streams.remove(&stream_id);
-                self.closed.insert(stream_id);
+                self.closed.insert(stream_id, None);
                 self.release_conn(cx, resources::STREAM_OVERHEAD - 64);
             }
         }
@@ -880,6 +885,7 @@ impl Conn {
             msg.charged_spans += frames;
             msg.compression.push(set);
         }
+        let mut promised_method = None;
         if let Err(detail) = meta {
             msg.failure = Some(Status::Malformed);
             self.issue(
@@ -898,6 +904,7 @@ impl Conn {
             )?;
         } else if let Ok(meta) = meta {
             msg.content_length = meta.content_length;
+            promised_method = meta.method;
         }
         let index = msg.index;
         self.emit_message(SERVER, msg, Status::Complete, cx)?;
@@ -933,6 +940,7 @@ impl Conn {
         ];
         let mut promised_stream = StreamState::reserved(stream_id, windows);
         promised_stream.request = Some(index);
+        promised_stream.method = promised_method;
         promised_stream.unprocessed = self.goaway[CLIENT].is_some_and(|last| promised > last);
         self.streams.insert(promised, promised_stream);
         Ok(())
@@ -946,7 +954,7 @@ impl Conn {
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
         if !self.streams.contains_key(&stream_id) {
-            if self.closed.contains(&stream_id) {
+            if self.closed.contains_key(&stream_id) {
                 return Ok(());
             }
             self.issue(
@@ -986,7 +994,7 @@ impl Conn {
             }
         }
         self.streams.remove(&stream_id);
-        self.closed.insert(stream_id);
+        self.closed.insert(stream_id, Some(side));
         self.release_conn(cx, resources::STREAM_OVERHEAD - 64);
         Ok(())
     }

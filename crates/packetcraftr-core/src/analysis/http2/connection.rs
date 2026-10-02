@@ -22,7 +22,7 @@ use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 pub(crate) const PREFACE_LEN: usize = 24;
 
@@ -137,7 +137,7 @@ pub(crate) struct Conn {
     pub dirs: [Option<Dir>; 2],
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
-    pub closed: BTreeSet<u32>,
+    pub closed: BTreeMap<u32, Option<usize>>,
     pub admitted_streams: u64,
     pub max_initiated: [u32; 2],
     pub active: [usize; 2],
@@ -174,7 +174,7 @@ impl Conn {
             dirs: [None, None],
             prelude: None,
             streams: BTreeMap::new(),
-            closed: BTreeSet::new(),
+            closed: BTreeMap::new(),
             admitted_streams: 0,
             max_initiated: [0, 0],
             active: [0, 0],

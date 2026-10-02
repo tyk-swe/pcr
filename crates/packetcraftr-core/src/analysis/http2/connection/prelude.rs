@@ -58,6 +58,28 @@ impl Conn {
         *cx.spans = cx.spans.checked_sub(msg.charged_spans).expect("msg spans");
     }
 
+    fn refused_upgrade(&mut self, mut msg: MsgBuild, cx: &mut Cx<'_>) -> Result<(), Error> {
+        let head = msg.upgrade_head.take().expect("upgrade request head");
+        let sources = union_balanced(std::mem::take(&mut msg.sets))?;
+        self.drop_msg(msg, cx);
+        self.issue(
+            cx,
+            Fault {
+                flow: self.dir_flow(CLIENT),
+                http2_stream_id: None,
+                scope: IssueScope::Connection,
+                certainty: Certainty::Confirmed,
+                // A refusal is a complete HTTP/1 exchange, not an HTTP/2 error.
+                // EOF classifies the connection as unsupported if no retry succeeds.
+                status: Status::Complete,
+                code: "refused_upgrade",
+                detail: "the server declined this h2c upgrade request".into(),
+                wire: head.wire().clone(),
+                sources,
+            },
+        )
+    }
+
     fn prelude_body_step(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<BodyStep, Error> {
         let dir =
             self.dirs[side]
@@ -623,11 +645,24 @@ impl Conn {
                     resources::OFFER_OVERHEAD + offer.settings.capacity() * 24,
                 );
                 if let Some(held) = offer.msg.take() {
-                    self.drop_msg(held, cx);
+                    self.refused_upgrade(held, cx)?;
                 }
             }
+            let live = self.prelude.as_mut().and_then(|prelude| {
+                if prelude
+                    .live_request
+                    .as_ref()
+                    .is_some_and(|msg| msg.index == front_index)
+                {
+                    prelude.live_request.take()
+                } else {
+                    None
+                }
+            });
+            if let Some(live) = live {
+                self.refused_upgrade(live, cx)?;
+            }
             self.refused = true;
-            self.worst(Status::Unsupported);
         }
         let framing = match head.body(method.as_deref()) {
             Ok(framing) => framing,
@@ -737,6 +772,7 @@ impl Conn {
             }
         }
         self.startup = Startup::H2c;
+        self.refused = false;
         self.max_initiated[CLIENT] = 1;
         self.charge_conn(cx, resources::STREAM_OVERHEAD)?;
         let windows = [

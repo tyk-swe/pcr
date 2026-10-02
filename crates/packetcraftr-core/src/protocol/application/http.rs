@@ -7,8 +7,8 @@ mod codec;
 mod model;
 mod reflection;
 
-pub(crate) use codec::HttpCodec;
 pub use codec::{BodyDecoder, Progress, parse_head};
+pub(crate) use codec::{HttpCodec, token};
 pub use model::{Body, Head, Header, Http, StartLine};
 
 pub const MAX_HEADER_BYTES: usize = 65_536;

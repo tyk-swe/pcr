@@ -32,7 +32,7 @@ fn first_line(bytes: &[u8]) -> Option<&[u8]> {
 fn request_line(line: &[u8]) -> Option<()> {
     let mut parts = line.split(|b| *b == b' ');
     let method = parts.next()?;
-    if method.is_empty() || !method.iter().all(u8::is_ascii_uppercase) {
+    if method.is_empty() || !method.iter().all(|b| http::token(*b)) {
         return None;
     }
     let target = parts.next()?;

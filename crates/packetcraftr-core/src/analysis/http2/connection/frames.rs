@@ -477,8 +477,13 @@ impl Conn {
                 },
             )?;
         }
+        // In-flight peer DATA after a reset still consumes connection credit,
+        // but cannot establish a stream error from cross-direction ordering.
+        if self.closed.get(&stream_id) == Some(&Some(peer(side))) {
+            return Ok(());
+        }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            let closed = self.closed.contains(&stream_id);
+            let closed = self.closed.contains_key(&stream_id);
             let flow = self.dir_flow(side);
             self.issue(
                 cx,

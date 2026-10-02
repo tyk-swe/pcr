@@ -1597,7 +1597,7 @@ mod owner {
             &frame(HEADERS, END_HEADERS | END_STREAM, 1, &[0x88]),
         )
         .expect("response");
-        assert!(conn.closed.contains(&1), "closed stream is tombstoned");
+        assert!(conn.closed.contains_key(&1), "closed stream is tombstoned");
         let mut insert = vec![0x40, 0x06];
         insert.extend_from_slice(b"x-late");
         insert.extend_from_slice(&[0x05]);

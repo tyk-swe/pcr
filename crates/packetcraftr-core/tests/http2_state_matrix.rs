@@ -1126,3 +1126,208 @@ fn status_code_range_is_checked() {
     });
     assert!(codes(&events).contains(&"header_semantics"));
 }
+
+#[test]
+fn review_h2c_accepts_token_methods() {
+    for method in ["M-SEARCH", "foo", "METHOD123", "!#$%&'*+-.^_`|~"] {
+        let events = exercise(|capture, stream| {
+            let request = common::http2::upgrade_request(&[]);
+            let mut request_with_method = method.as_bytes().to_vec();
+            request_with_method.extend_from_slice(&request[3..]);
+            capture.client(stream, &request_with_method);
+            capture.server(
+                stream,
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+            );
+            capture.server(stream, &settings(&[]));
+            let mut client = common::http2::preface();
+            client.extend_from_slice(&settings(&[]));
+            client.extend_from_slice(&settings_ack());
+            capture.client(stream, &client);
+            capture.server(stream, &settings_ack());
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(connection(&events).startup, Startup::H2c, "{method}");
+        assert_eq!(
+            connection(&events).status,
+            Status::Complete,
+            "{method}: {:?}",
+            codes(&events)
+        );
+    }
+}
+
+#[test]
+fn review_refused_upgrade_preserves_evidence_and_allows_retry() {
+    for active_body in [false, true] {
+        for retry in [false, true] {
+            let mut request = common::http2::upgrade_request(&[]);
+            if active_body {
+                request.truncate(request.len() - 2);
+                request.extend_from_slice(b"Content-Length: 4\r\n\r\n");
+            }
+            let events = exercise(|capture, stream| {
+                capture.client(stream, &request);
+                capture.server(stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                if active_body {
+                    capture.client(stream, b"body");
+                }
+                if retry {
+                    common::http2::h2c_handshake(capture, stream);
+                    capture.client(stream, &settings_ack());
+                    capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+                }
+            });
+            assert!(
+                issues(&events)
+                    .iter()
+                    .any(|issue| issue.wire.as_ref() == request
+                        && issue
+                            .sources
+                            .as_ref()
+                            .is_some_and(|sources| !sources.frames().is_empty())),
+                "body={active_body}, retry={retry}"
+            );
+            assert_eq!(
+                connection(&events).status,
+                if retry {
+                    Status::Complete
+                } else {
+                    Status::Unsupported
+                },
+                "{:?}",
+                codes(&events)
+            );
+            assert_eq!(
+                messages(&events)
+                    .iter()
+                    .filter(|m| m.kind == MessageKind::Request)
+                    .count(),
+                usize::from(retry)
+            );
+        }
+    }
+}
+
+fn review_literal(block: &mut Vec<u8>, name: &[u8], value: &[u8]) {
+    block.extend_from_slice(&[0, u8::try_from(name.len()).unwrap()]);
+    block.extend_from_slice(name);
+    block.push(u8::try_from(value.len()).unwrap());
+    block.extend_from_slice(value);
+}
+
+#[test]
+fn review_pushed_head_retains_bodyless_semantics() {
+    for with_data in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            let mut request = vec![0x86, 0x84];
+            review_literal(&mut request, b":method", b"HEAD");
+            review_literal(&mut request, b":authority", b"example.com");
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, &request, END_HEADERS),
+            );
+            let mut response = RESPONSE_OK.to_vec();
+            review_literal(&mut response, b"content-length", b"10");
+            capture.server(
+                stream,
+                &headers(
+                    2,
+                    &response,
+                    END_HEADERS | if with_data { 0 } else { END_STREAM },
+                ),
+            );
+            if with_data {
+                capture.server(stream, &data(2, b"0123456789", END_STREAM));
+            }
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(!codes(&events).contains(&"content_length_mismatch"));
+        assert_eq!(
+            connection(&events).status,
+            if with_data {
+                Status::Malformed
+            } else {
+                Status::Complete
+            },
+            "{:?}",
+            codes(&events)
+        );
+    }
+}
+
+#[test]
+fn review_connect_rejects_empty_authority() {
+    for extended in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = vec![];
+            review_literal(&mut request, b":method", b"CONNECT");
+            review_literal(&mut request, b":authority", b"");
+            if extended {
+                request.extend_from_slice(&[0x86, 0x84]);
+                review_literal(&mut request, b":protocol", b"websocket");
+            }
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        assert!(codes(&events).contains(&"header_semantics"));
+    }
+}
+
+#[test]
+fn review_reset_peer_frames_preserve_compression_and_same_side_errors() {
+    for reset_client in [false, true] {
+        for late_headers in [false, true] {
+            for same_side in [false, true] {
+                let events = exercise(|capture, stream| {
+                    prior_knowledge_handshake(capture, stream);
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+                    capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+                    if reset_client {
+                        capture.client(stream, &rst(1, 8));
+                    } else {
+                        capture.server(stream, &rst(1, 8));
+                    }
+                    let sender_client = reset_client == same_side;
+                    let late = if late_headers {
+                        headers(1, &[0x40, 1, b'x', 1, b'y'], END_HEADERS | END_STREAM)
+                    } else {
+                        data(1, b"late", END_STREAM)
+                    };
+                    if sender_client {
+                        capture.client(stream, &late);
+                    } else {
+                        capture.server(stream, &late);
+                    }
+                    let mut request = vec![0x82, 0x86, 0x84];
+                    let mut response = RESPONSE_OK.to_vec();
+                    if late_headers {
+                        if sender_client {
+                            request.push(0xbe);
+                        } else {
+                            response.push(0xbe);
+                        }
+                    }
+                    capture.client(stream, &headers(3, &request, END_HEADERS | END_STREAM));
+                    capture.server(stream, &headers(3, &response, END_HEADERS | END_STREAM));
+                });
+                let code = if late_headers {
+                    "closed_stream_headers"
+                } else {
+                    "data_closed_stream"
+                };
+                assert_eq!(
+                    codes(&events).contains(&code),
+                    same_side,
+                    "reset_client={reset_client} headers={late_headers} same={same_side}: {:?}",
+                    codes(&events)
+                );
+                assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+                    && m.kind == MessageKind::Response
+                    && m.status == Status::Complete));
+            }
+        }
+    }
+}

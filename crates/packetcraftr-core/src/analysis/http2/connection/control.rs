@@ -151,7 +151,7 @@ impl Conn {
             return Ok(());
         }
         let Some(stream) = self.streams.get_mut(&stream_id) else {
-            if self.closed.contains(&stream_id) {
+            if self.closed.contains_key(&stream_id) {
                 return Ok(());
             }
             self.issue(

@@ -298,7 +298,7 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                 if meta.scheme || meta.path {
                     return Err("CONNECT requests omit :scheme and :path");
                 }
-                if meta.authority.is_none() {
+                if meta.authority.as_ref().is_none_or(Bytes::is_empty) {
                     return Err("CONNECT requests require :authority");
                 }
             } else {
@@ -307,7 +307,7 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                         return Err("request lacks a required pseudo-header field");
                     }
                 }
-                if meta.protocol && meta.authority.is_none() {
+                if meta.protocol && meta.authority.as_ref().is_none_or(Bytes::is_empty) {
                     return Err("extended CONNECT requests require :authority");
                 }
             }

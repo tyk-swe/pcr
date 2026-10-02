@@ -1806,6 +1806,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Offline HTTP/2 analysis accepts all HTTP token methods during h2c startup,
+  preserves refused upgrade evidence while allowing later retries, retains
+  pushed HEAD semantics, rejects empty CONNECT authorities, and tolerates
+  peer frames already in flight when a stream reset is observed.
+
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit

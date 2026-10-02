@@ -1,0 +1,31 @@
+{
+  "schema": "packetcraftr.output/v6",
+  "command": "http2",
+  "mode": "stream",
+  "sequence": 7,
+  "event": "http2_issue",
+  "status": "success",
+  "result": {
+    "number": 27,
+    "stream": 0,
+    "generation": 0,
+    "http2_stream_id": null,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.1",
+        "source_port": 40000,
+        "destination": "198.51.100.2",
+        "destination_port": 80
+      }
+    },
+    "code": "capture_end",
+    "scope": "capture",
+    "certainty": "confirmed",
+    "status": "incomplete",
+    "detail": "the capture ended before connection analysis completed",
+    "wire_hex": "",
+    "sources": []
+  },
+  "diagnostics": []
+}

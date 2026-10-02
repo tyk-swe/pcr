@@ -32,6 +32,32 @@ defaults retain at most 4 MiB of detail charges across categories, in addition
 to the per-category entry ceiling; omission counts stay explicit and do not
 change verdicts.
 
+## Offline HTTP/2 analysis
+
+The new `http2` command and `packetcraftr_core::analysis::http2` collector add
+cleartext prior-knowledge and h2c-upgrade analysis. The
+`packetcraftr_core::protocol::application::http2` module exposes bounded frame
+parsing. Existing `http` behavior and prior output/v6 branches are unchanged.
+HTTP/2 is not a stateless dissect/protocols/packet-recipe/`--decode-as`
+codec; use `--http2-port` for service selection. TLS decryption, HTTP/3,
+gRPC message decoding, extended CONNECT, and live HTTP/2 endpoints are out of
+scope.
+
+Rust consumers matching
+`packetcraftr_cli::output::contract::Command` exhaustively must handle
+`Command::Http2`. Output/v6 adds http2 success/error branches and NDJSON
+`http2_frame`/`http2_message`/`http2_issue`/`http2_connection` events plus
+`complete`. TCP conversation `stream` and `http2_stream_id` are different
+identifiers. Preserve unknown frame/setting values and exact hex evidence.
+Final connection status and later issues can qualify earlier complete
+messages. Unaccepted upgrade requests are `incomplete_upgrade` issues with no
+HTTP/2 stream ID; accepted requests use stream 1 and retain `upgrade_head`
+rather than invented HPACK. Existing v1 presets affect shared limits only;
+new HTTP/2-specific defaults remain unchanged. See
+[resource accounting](analysis-resources.md#http2-limits) and the examples
+`output-http2-success.json`, `output-http2-issue-event.json`, and
+`output-http2-connection-event.json`.
+
 ## Error codes and messages
 
 Codes follow the failure's own classification:

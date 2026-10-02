@@ -137,3 +137,27 @@ name = "http_pipeline"
 path = "fuzz_targets/http_pipeline.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "http2_wire"
+path = "fuzz_targets/http2_wire.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http2_hpack"
+path = "fuzz_targets/http2_hpack.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http2_segmentation"
+path = "fuzz_targets/http2_segmentation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http2_pipeline"
+path = "fuzz_targets/http2_pipeline.rs"
+test = false
+doc = false

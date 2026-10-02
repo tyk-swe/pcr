@@ -698,6 +698,25 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr http2` inspects cleartext HTTP/2 and h2c-upgraded TCP streams
+  offline: RFC 9113 frames, stateful HPACK decoding, stream/message lifecycle,
+  and per-connection startup/status evidence, with eleven HTTP/2-specific
+  analysis limits and NDJSON `http2_frame`, `http2_message`, `http2_issue`,
+  `http2_connection`, and `complete` records under `packetcraftr.output/v6`.
+  DATA bodies are counted and discarded, never retained. The public
+  `analysis::http2::Collector` and `Event`/`Message`/`Frame`/`Issue`/
+  `Connection` types expose the same engine. Examples cover
+  `examples/captures/http2-multiplexed.pcapng` and
+  `examples/captures/http2-upgrade.pcapng`. Ordinary capture EOF reports
+  incomplete open connections with bounded partial evidence instead of TCP
+  eviction; a reuse of a cleanly closed tuple emits a new generation without
+  relabelling the earlier one; observer deadlines are enforced at record
+  observation and at connection finalization. An unaccepted h2c offer survives
+  as an `incomplete_upgrade` issue retaining the original HTTP/1 request head
+  and its physical sources without fabricated HTTP/2 stream IDs; an accepted
+  upgrade keeps the real request on stream 1 with `upgrade_head`. Four
+  libfuzzer targets (`http2_wire`, `http2_hpack`, `http2_segmentation`,
+  `http2_pipeline`) run in the scheduled fuzz workflow.
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own (or, for `cli.worker_capacity`,
   was not a failure):

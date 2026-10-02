@@ -4,6 +4,7 @@
 pub mod dhcp;
 pub mod dns;
 pub mod http;
+pub mod http2;
 pub mod ntp;
 pub mod syslog;
 pub mod tftp;

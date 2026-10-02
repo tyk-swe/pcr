@@ -69,6 +69,7 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::Merge, "empty merged captures", merge_case),
     (Command::DnsRead, "offline DNS", dns_read_case),
     (Command::Http, "offline HTTP", http_case),
+    (Command::Http2, "offline HTTP/2", http2_case),
     (Command::Export, "physical dependencies", export_case),
     (Command::Rewrite, "rewritten headers", rewrite_case),
     (Command::Capture, "capture completion", capture_case),
@@ -1812,6 +1813,21 @@ fn http_case() -> Value {
     envelope(
         Command::Http,
         Report::from((Vec::new(), Vec::new(), complete)),
+        Vec::new(),
+    )
+}
+
+fn http2_case() -> Value {
+    use packetcraftr_cli::output::http2::{Complete, Report};
+    let complete = Complete::try_from((
+        &packetcraftr_core::analysis::Summary::default(),
+        Default::default(),
+        Vec::new(),
+    ))
+    .expect("an empty run converts");
+    envelope(
+        Command::Http2,
+        Report::from((Vec::new(), Vec::new(), Vec::new(), Vec::new(), complete)),
         Vec::new(),
     )
 }

@@ -45,7 +45,13 @@ fn documentation_generates_completions_and_man_pages_for_every_command() {
     }
     let bash = std::fs::read_to_string(directory.join("completions/packetcraftr.bash"))
         .expect("bash completion");
-    for option in ["--dissect", "--decode-as", "--field"] {
+    for option in [
+        "--dissect",
+        "--decode-as",
+        "--field",
+        "--http2-port",
+        "--max-http2-header-block-bytes",
+    ] {
         assert!(
             bash.contains(option),
             "bash completion misses finalized option {option}"
@@ -72,6 +78,17 @@ fn documentation_generates_completions_and_man_pages_for_every_command() {
     assert!(
         capture.contains("--dissect") && capture.contains("--decode-as"),
         "capture man page misses finalized options"
+    );
+    let http2 = std::fs::read_to_string(man.join("packetcraftr-http2.1"))
+        .expect("http2 page")
+        .replace("\\-", "-");
+    assert!(
+        http2.contains("--http2-port") && http2.contains("--max-http2-header-block-bytes"),
+        "http2 man page misses its service and header-block options"
+    );
+    assert!(
+        http2.contains("TLS is not decrypted"),
+        "http2 man page must state the cleartext scope"
     );
 }
 

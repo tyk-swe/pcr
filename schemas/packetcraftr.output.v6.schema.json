@@ -64,7 +64,8 @@
             "http",
             "export",
             "rewrite",
-            "verify-forwarding"
+            "verify-forwarding",
+            "http2"
           ]
         },
         "mode": {
@@ -237,6 +238,9 @@
             },
             {
               "$ref": "#/$defs/verifyForwardingSuccess"
+            },
+            {
+              "$ref": "#/$defs/http2Success"
             }
           ]
         }
@@ -336,6 +340,9 @@
             },
             {
               "$ref": "#/$defs/verifyForwardingStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/http2StreamSuccess"
             }
           ]
         }
@@ -11178,6 +11185,1093 @@
         "truncated",
         "decode_incomplete",
         "field_budget"
+      ]
+    },
+    "http2Setting": {
+      "type": "object",
+      "required": [
+        "id",
+        "value"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Priority": {
+      "type": "object",
+      "required": [
+        "exclusive",
+        "dependency",
+        "weight"
+      ],
+      "properties": {
+        "exclusive": {
+          "type": "boolean"
+        },
+        "dependency": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Control": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "fragment_hex",
+            "priority",
+            "padding_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "headers"
+            },
+            "fragment_hex": {
+              "$ref": "#/$defs/hexBytes"
+            },
+            "priority": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/http2Priority"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "padding_hex": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "exclusive",
+            "dependency",
+            "weight"
+          ],
+          "properties": {
+            "type": {
+              "const": "priority"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "dependency": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "weight": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "error_code"
+          ],
+          "properties": {
+            "type": {
+              "const": "reset"
+            },
+            "error_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "settings"
+          ],
+          "properties": {
+            "type": {
+              "const": "settings"
+            },
+            "settings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/http2Setting"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "promised_stream_id",
+            "fragment_hex",
+            "padding_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "push_promise"
+            },
+            "promised_stream_id": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "fragment_hex": {
+              "$ref": "#/$defs/hexBytes"
+            },
+            "padding_hex": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "opaque_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "ping"
+            },
+            "opaque_hex": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "last_stream_id",
+            "error_code",
+            "debug_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "goaway"
+            },
+            "last_stream_id": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "error_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "debug_hex": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "increment"
+          ],
+          "properties": {
+            "type": {
+              "const": "window_update"
+            },
+            "increment": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "fragment_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "continuation"
+            },
+            "fragment_hex": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "payload_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "unknown"
+            },
+            "payload_hex": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "http2Frame": {
+      "type": "object",
+      "required": [
+        "index",
+        "stream",
+        "generation",
+        "flow",
+        "http2_stream_id",
+        "length",
+        "frame_type",
+        "flags",
+        "reserved",
+        "header_wire_hex",
+        "control",
+        "payload_wire_hex",
+        "data_bytes",
+        "padding_bytes",
+        "sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "http2_stream_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777215
+        },
+        "frame_type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "reserved": {
+          "type": "boolean"
+        },
+        "header_wire_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{18}$"
+        },
+        "control": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/http2Control"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload_wire_hex": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hexBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "padding_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Header": {
+      "type": "object",
+      "required": [
+        "name",
+        "name_hex",
+        "value",
+        "value_hex",
+        "never_indexed"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "name_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "value": {
+          "type": "string"
+        },
+        "value_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "never_indexed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2UpgradeHead": {
+      "type": "object",
+      "required": [
+        "start",
+        "headers",
+        "wire_hex"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/httpStartLine"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpHeader"
+          }
+        },
+        "wire_hex": {
+          "$ref": "#/$defs/hexBytes"
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Message": {
+      "type": "object",
+      "required": [
+        "index",
+        "stream",
+        "generation",
+        "http2_stream_id",
+        "flow",
+        "kind",
+        "request",
+        "promised_by",
+        "status",
+        "headers",
+        "trailers",
+        "header_blocks_hex",
+        "upgrade_head",
+        "body_bytes",
+        "sources",
+        "compression_sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "http2_stream_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "kind": {
+          "enum": [
+            "request",
+            "response",
+            "informational",
+            "push_promise"
+          ]
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promised_by": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "unprocessed",
+            "unsupported"
+          ]
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Header"
+          }
+        },
+        "trailers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Header"
+          }
+        },
+        "header_blocks_hex": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hexBytes"
+          }
+        },
+        "upgrade_head": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/http2UpgradeHead"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        },
+        "compression_sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Issue": {
+      "type": "object",
+      "required": [
+        "number",
+        "stream",
+        "generation",
+        "http2_stream_id",
+        "flow",
+        "code",
+        "scope",
+        "certainty",
+        "status",
+        "detail",
+        "wire_hex",
+        "sources"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "http2_stream_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "code": {
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "connection",
+            "stream",
+            "compression",
+            "capture"
+          ]
+        },
+        "certainty": {
+          "enum": [
+            "confirmed",
+            "observed_order",
+            "indeterminate"
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "unprocessed",
+            "unsupported"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "wire_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2PeerSettings": {
+      "type": "object",
+      "required": [
+        "header_table_size",
+        "enable_push",
+        "max_concurrent_streams",
+        "initial_window_size",
+        "max_frame_size",
+        "max_header_list_size"
+      ],
+      "properties": {
+        "header_table_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "enable_push": {
+          "type": "boolean"
+        },
+        "max_concurrent_streams": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "initial_window_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "max_frame_size": {
+          "type": "integer",
+          "minimum": 16384,
+          "maximum": 16777215
+        },
+        "max_header_list_size": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Connection": {
+      "type": "object",
+      "required": [
+        "stream",
+        "generation",
+        "flow",
+        "startup",
+        "status",
+        "client_settings",
+        "server_settings",
+        "client_window",
+        "server_window",
+        "streams",
+        "frames",
+        "issues",
+        "pending_settings",
+        "pending_pings",
+        "upgrade_response",
+        "upgrade_sources"
+      ],
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "startup": {
+          "enum": [
+            "prior_knowledge",
+            "h2c",
+            "unknown"
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "unprocessed",
+            "unsupported"
+          ]
+        },
+        "client_settings": {
+          "$ref": "#/$defs/http2PeerSettings"
+        },
+        "server_settings": {
+          "$ref": "#/$defs/http2PeerSettings"
+        },
+        "client_window": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
+        "server_window": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
+        "streams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "issues": {
+          "$ref": "#/$defs/uint64"
+        },
+        "pending_settings": {
+          "$ref": "#/$defs/uint64"
+        },
+        "pending_pings": {
+          "$ref": "#/$defs/uint64"
+        },
+        "upgrade_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/http2UpgradeHead"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upgrade_sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Summary": {
+      "type": "object",
+      "required": [
+        "connections",
+        "prior_knowledge_connections",
+        "upgraded_connections",
+        "unsupported_connections",
+        "frames",
+        "streams",
+        "messages",
+        "complete_messages",
+        "incomplete_messages",
+        "malformed_messages",
+        "limited_messages",
+        "issues"
+      ],
+      "properties": {
+        "connections": {
+          "$ref": "#/$defs/uint64"
+        },
+        "prior_knowledge_connections": {
+          "$ref": "#/$defs/uint64"
+        },
+        "upgraded_connections": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unsupported_connections": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "streams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "limited_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "issues": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Result": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "frames",
+        "messages",
+        "issues",
+        "connections"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/http2Summary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Frame"
+          }
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Message"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Issue"
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/http2Connection"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Complete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/http2Summary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "http2Success": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http2"
+        },
+        "result": {
+          "$ref": "#/$defs/http2Result"
+        }
+      }
+    },
+    "http2StreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http2"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http2_frame"
+            },
+            "result": {
+              "$ref": "#/$defs/http2Frame"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http2_message"
+            },
+            "result": {
+              "$ref": "#/$defs/http2Message"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http2_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/http2Issue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http2_connection"
+            },
+            "result": {
+              "$ref": "#/$defs/http2Connection"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/http2Complete"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "#/$defs/ipOverlapResolvedEvent"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramCompletedEvent"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramIncompleteEvent"
+            }
+          }
+        }
       ]
     }
   }

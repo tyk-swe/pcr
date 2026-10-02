@@ -34,6 +34,11 @@ const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
         include_str!("../../../examples/documents/output-http-complete.json"),
     ),
     (
+        output::contract::Command::Http2,
+        false,
+        include_str!("../../../examples/documents/output-http2-complete.json"),
+    ),
+    (
         output::contract::Command::DnsRead,
         false,
         include_str!("../../../examples/documents/output-dns-read-complete.json"),
@@ -365,9 +370,118 @@ fn production_typed_event_variants_are_schema_valid() {
         tls_session_event(),
         Vec::new(),
     );
+    validate_http2_event_variants();
     validate_active_event_variants();
     validate_fuzz_event_variants();
     validate_exchange_event_variants();
+}
+
+fn http2_flow() -> output::analysis::ScopedFlowKey {
+    output::analysis::ScopedFlowKey {
+        scope: 0,
+        flow: output::analysis::FlowKey {
+            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            source_port: 40_000,
+            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            destination_port: 80,
+        },
+    }
+}
+
+fn validate_http2_event_variants() {
+    let frame = output::http2::Frame {
+        index: 1,
+        stream: 0,
+        generation: 0,
+        flow: http2_flow(),
+        http2_stream_id: 0,
+        length: 3,
+        frame_type: 0xfe,
+        flags: 0xa5,
+        reserved: false,
+        header_wire_hex: "000003fea500000000".to_owned(),
+        control: Some(output::http2::Control::Unknown {
+            payload_hex: "aabbcc".to_owned(),
+        }),
+        payload_wire_hex: Some("aabbcc".to_owned()),
+        data_bytes: 0,
+        padding_bytes: 0,
+        sources: Vec::new(),
+    };
+    validate_typed_event(output::contract::Command::Http2, frame, Vec::new());
+    let message = output::http2::Message {
+        index: 1,
+        stream: 0,
+        generation: 0,
+        http2_stream_id: 1,
+        flow: http2_flow(),
+        kind: output::http2::MessageKind::Request,
+        request: None,
+        promised_by: Some(1),
+        status: output::http2::Status::Malformed,
+        headers: vec![output::http2::Header {
+            name: ":method".to_owned(),
+            name_hex: "3a6d6574686f64".to_owned(),
+            value: "GET".to_owned(),
+            value_hex: "474554".to_owned(),
+            never_indexed: false,
+        }],
+        trailers: Vec::new(),
+        header_blocks_hex: vec!["82".to_owned()],
+        upgrade_head: None,
+        body_bytes: 0,
+        sources: Vec::new(),
+        compression_sources: Vec::new(),
+    };
+    validate_typed_event(output::contract::Command::Http2, message, Vec::new());
+    let issue = output::http2::Issue {
+        number: 1,
+        stream: 0,
+        generation: 0,
+        http2_stream_id: Some(1),
+        flow: http2_flow(),
+        code: "malformed_frame".to_owned(),
+        scope: output::http2::IssueScope::Connection,
+        certainty: output::http2::Certainty::ObservedOrder,
+        status: output::http2::Status::Malformed,
+        detail: "fixture issue".to_owned(),
+        wire_hex: "ff".to_owned(),
+        sources: Vec::new(),
+    };
+    validate_typed_event(output::contract::Command::Http2, issue, Vec::new());
+    let connection = output::http2::Connection {
+        stream: 0,
+        generation: 0,
+        flow: http2_flow(),
+        startup: output::http2::Startup::PriorKnowledge,
+        status: output::http2::Status::Complete,
+        client_settings: output::http2::PeerSettings {
+            header_table_size: 4096,
+            enable_push: true,
+            max_concurrent_streams: None,
+            initial_window_size: 65_535,
+            max_frame_size: 16_384,
+            max_header_list_size: None,
+        },
+        server_settings: output::http2::PeerSettings {
+            header_table_size: 4096,
+            enable_push: true,
+            max_concurrent_streams: Some(100),
+            initial_window_size: 65_535,
+            max_frame_size: 16_384,
+            max_header_list_size: Some(1024),
+        },
+        client_window: 65_535,
+        server_window: -5,
+        streams: 1,
+        frames: 4,
+        issues: 1,
+        pending_settings: 0,
+        pending_pings: 2,
+        upgrade_response: None,
+        upgrade_sources: Vec::new(),
+    };
+    validate_typed_event(output::contract::Command::Http2, connection, Vec::new());
 }
 
 fn ip_reassembly_events() -> [output::reassembly::Event; 3] {

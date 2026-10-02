@@ -1,0 +1,974 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::super::Error;
+use super::super::buffer::union_balanced;
+use super::super::model::{Certainty, Header, IssueScope, Status};
+use super::super::stream::{CLIENT, SERVER, peer};
+use super::{Chain, ChainHead, Conn, Cx, Decoded, Evidence, Fault, Pos, resources};
+use crate::protocol::application::http2 as wire;
+use crate::protocol::application::http2::hpack;
+use bytes::Bytes;
+use std::collections::HashSet;
+
+pub(crate) struct DataHead {
+    pub(crate) side: usize,
+    pub(crate) stream_id: u32,
+    pub(crate) length: u32,
+    pub(crate) data_bytes: u64,
+    pub(crate) end_stream: bool,
+}
+
+impl Conn {
+    pub(crate) fn frame_step(&mut self, side: usize, cx: &mut Cx<'_>) -> Result<bool, Error> {
+        cx.check_deadline()?;
+        {
+            let dir = self.dirs[side].as_mut().ok_or(Error::Application(
+                crate::analysis::application::Error::Sources {
+                    number: self.number,
+                },
+            ))?;
+            if dir.buffer.len() < 9 {
+                return Ok(false);
+            }
+            let header = Bytes::copy_from_slice(&dir.buffer.bytes()[..9]);
+            if let Err(error) = wire::parse_frame(&header, cx.limits.max_frame_bytes) {
+                return self.frame_fault(side, error, cx);
+            }
+            let length = usize::try_from(u32::from_be_bytes([0, header[0], header[1], header[2]]))
+                .expect("24-bit frame length");
+            let receiver = &self.settings[peer(side)];
+            let effective_max = receiver
+                .advertised
+                .max_frame_size
+                .max(receiver.acknowledged.max_frame_size);
+            if length as u32 > effective_max {
+                let flow = dir.flow.clone();
+                let sets = dir.buffer.contributors(9);
+                let (_, dropped) = dir.buffer.take(9);
+                let sources = union_balanced(sets)?;
+                Self::release_dir(dir, cx, 9);
+                Self::release_dropped(dir, dropped, cx);
+                self.issue(
+                    cx,
+                    Fault {
+                        flow,
+                        http2_stream_id: None,
+                        scope: IssueScope::Connection,
+                        certainty: Certainty::Confirmed,
+                        status: Status::Malformed,
+                        code: "frame_over_max_size",
+                        detail: format!("frame payload {length} exceeds the permitted maximum")
+                            .into(),
+                        wire: header,
+                        sources,
+                    },
+                )?;
+                self.fail(cx, Status::Malformed)?;
+                return Ok(true);
+            }
+            if dir.buffer.len() < 9 + length {
+                return Ok(false);
+            }
+        }
+        let dir = self.dirs[side].as_mut().expect("dir");
+        let length = usize::try_from(u32::from_be_bytes([
+            0,
+            dir.buffer.bytes()[0],
+            dir.buffer.bytes()[1],
+            dir.buffer.bytes()[2],
+        ]))
+        .expect("24-bit frame length");
+        let total = 9 + length;
+        let setting_words = size_of::<wire::Setting>();
+        let scratch = total
+            .checked_mul(2)
+            .and_then(|v| {
+                v.checked_add((length / 6).saturating_mul(setting_words.saturating_mul(2)))
+            })
+            .and_then(|v| v.checked_add(resources::EVENT_OVERHEAD))
+            .ok_or(Error::Application(
+                crate::analysis::application::Error::Limit {
+                    field: "frame_scratch",
+                    limit: total,
+                },
+            ))?;
+        cx.charge_live(scratch)?;
+        let result = (|conn: &mut Self, cx: &mut Cx<'_>| -> Result<bool, Error> {
+            let dir = conn.dirs[side].as_mut().expect("dir");
+            let wire_bytes = Bytes::copy_from_slice(&dir.buffer.bytes()[..total]);
+            let parsed = wire::parse_frame(&wire_bytes, cx.limits.max_frame_bytes);
+            match parsed {
+                Ok(Some((frame, _))) => {
+                    cx.check_frames()?;
+                    let dir = conn.dirs[side].as_mut().expect("dir");
+                    let sets = dir.buffer.contributors(total);
+                    let dropped = dir.buffer.discard(total);
+                    Self::release_dir(dir, cx, total);
+                    Self::release_dropped(dir, dropped, cx);
+                    let sources = union_balanced(sets)?;
+                    conn.frames += 1;
+                    conn.handle_frame(side, frame, wire_bytes, sources, cx)?;
+                    Ok(true)
+                }
+                Ok(None) => Ok(false),
+                Err(error) => conn.frame_fault(side, error, cx),
+            }
+        })(self, cx);
+        cx.release_live(scratch);
+        result
+    }
+
+    fn frame_fault(
+        &mut self,
+        side: usize,
+        error: wire::Error,
+        cx: &mut Cx<'_>,
+    ) -> Result<bool, Error> {
+        let dir = self.dirs[side].as_mut().expect("dir");
+        let take = dir.buffer.len();
+        let sets = dir.buffer.contributors(take);
+        let (wire, dropped) = dir.buffer.take(take);
+        let sources = union_balanced(sets)?;
+        Self::release_dir(dir, cx, take);
+        Self::release_dropped(dir, dropped, cx);
+        let flow = dir.flow.clone();
+        let (status, code, detail) = match &error {
+            wire::Error::Limit(limit) => (Status::Limit, "frame_limit", format!("{limit}")),
+            wire::Error::Invalid(reason) => {
+                (Status::Malformed, "frame_invalid", (*reason).to_string())
+            }
+            wire::Error::Compression(reason) => {
+                (Status::Malformed, "compression", (*reason).to_string())
+            }
+        };
+        self.issue(
+            cx,
+            Fault {
+                flow,
+                http2_stream_id: None,
+                scope: IssueScope::Connection,
+                certainty: Certainty::Confirmed,
+                status,
+                code,
+                detail: detail.into(),
+                wire,
+                sources,
+            },
+        )?;
+        self.fail(cx, status)?;
+        Ok(true)
+    }
+
+    fn handle_frame(
+        &mut self,
+        side: usize,
+        frame: wire::Frame,
+        wire_bytes: Bytes,
+        sources: Option<crate::analysis::provenance::SourceSet>,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let header = frame.header.clone();
+        let stream_id = header.stream_id;
+        let chained = self.dirs[side]
+            .as_ref()
+            .and_then(|dir| dir.chain.as_ref().map(|chain| chain.stream_id));
+        if let Some(chained) = chained {
+            if header.frame_type != 0x9 || stream_id != chained {
+                let flow = self.dir_flow(side);
+                self.issue(
+                    cx,
+                    Fault {
+                        flow,
+                        http2_stream_id: Some(stream_id),
+                        scope: IssueScope::Connection,
+                        certainty: Certainty::Confirmed,
+                        status: Status::Malformed,
+                        code: "broken_header_block",
+                        detail: "a frame interrupts an unfinished header block".into(),
+                        wire: wire_bytes.clone(),
+                        sources: sources.clone(),
+                    },
+                )?;
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
+            }
+        } else if header.frame_type == 0x9 {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "stray_continuation",
+                    detail: "CONTINUATION does not follow a header block".into(),
+                    wire: wire_bytes.clone(),
+                    sources: sources.clone(),
+                },
+            )?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(());
+        }
+        let receiver = &self.settings[peer(side)];
+        let effective_max = receiver
+            .advertised
+            .max_frame_size
+            .max(receiver.acknowledged.max_frame_size);
+        if header.length > effective_max {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: (stream_id != 0).then_some(stream_id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "frame_over_max_size",
+                    detail: format!(
+                        "frame payload {} exceeds the permitted maximum",
+                        header.length
+                    )
+                    .into(),
+                    wire: wire_bytes.slice(..9),
+                    sources: sources.clone(),
+                },
+            )?;
+        } else if header.length
+            > receiver
+                .advertised
+                .max_frame_size
+                .min(receiver.acknowledged.max_frame_size)
+        {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: (stream_id != 0).then_some(stream_id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::ObservedOrder,
+                    status: Status::Malformed,
+                    code: "frame_size_ordering",
+                    detail: format!(
+                        "frame payload {} exceeds an unacknowledged bound",
+                        header.length
+                    )
+                    .into(),
+                    wire: wire_bytes.slice(..9),
+                    sources: sources.clone(),
+                },
+            )?;
+        }
+        self.emit_frame(side, &frame, &wire_bytes, sources.clone(), cx)?;
+        self.apply_frame(
+            side,
+            frame,
+            Evidence {
+                wire: wire_bytes,
+                sources,
+            },
+            cx,
+        )
+    }
+
+    fn emit_frame(
+        &mut self,
+        side: usize,
+        frame: &wire::Frame,
+        wire_bytes: &Bytes,
+        sources: Option<crate::analysis::provenance::SourceSet>,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let (control, payload_wire, data_bytes, padding_bytes) = match &frame.payload {
+            wire::Payload::Data { data, padding } => (None, None, data.len() as u64, padding.len()),
+            wire::Payload::Headers { padding, .. } | wire::Payload::PushPromise { padding, .. } => {
+                (
+                    Some(frame.payload.clone()),
+                    Some(wire_bytes.slice(9..)),
+                    0,
+                    padding.len(),
+                )
+            }
+            _ => (
+                Some(frame.payload.clone()),
+                Some(wire_bytes.slice(9..)),
+                0,
+                0,
+            ),
+        };
+        let mut header_wire = [0u8; 9];
+        header_wire.copy_from_slice(&wire_bytes[..9]);
+        let retained = if payload_wire.is_some() {
+            wire_bytes.len()
+        } else {
+            9
+        };
+        cx.charge_retained(retained + resources::EVENT_OVERHEAD)?;
+        cx.frame(super::super::model::Frame {
+            index: self.frames,
+            stream: self.stream,
+            generation: self.generation,
+            flow: self.dir_flow(side),
+            header: frame.header.clone(),
+            header_wire,
+            control,
+            payload_wire,
+            data_bytes,
+            padding_bytes,
+            sources: sources.ok_or(Error::Application(
+                crate::analysis::application::Error::Sources {
+                    number: self.number,
+                },
+            ))?,
+        });
+        Ok(())
+    }
+
+    fn apply_frame(
+        &mut self,
+        side: usize,
+        frame: wire::Frame,
+        evidence: Evidence,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let flags = frame.header.flags;
+        let stream_id = frame.header.stream_id;
+        let first_frame = {
+            let Some(dir) = self.dirs[side].as_mut() else {
+                return Ok(());
+            };
+            let first = !dir.saw_frame;
+            dir.saw_frame = true;
+            first
+        };
+        if first_frame && !(frame.header.frame_type == 0x4 && flags & 0x1 == 0) {
+            let certainty = if side == CLIENT || self.clean_start {
+                Certainty::Confirmed
+            } else {
+                Certainty::Indeterminate
+            };
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: None,
+                    scope: IssueScope::Connection,
+                    certainty,
+                    status: Status::Malformed,
+                    code: "missing_initial_settings",
+                    detail: "the first frame on a direction was not a non-ACK SETTINGS".into(),
+                    wire: evidence.wire.slice(..9),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+        }
+        match frame.payload {
+            wire::Payload::Data { data, .. } => self.data_frame(
+                DataHead {
+                    side,
+                    stream_id,
+                    length: frame.header.length,
+                    data_bytes: data.len() as u64,
+                    end_stream: flags & 0x1 != 0,
+                },
+                Evidence {
+                    wire: Bytes::copy_from_slice(&evidence.wire[..9]),
+                    sources: evidence.sources,
+                },
+                cx,
+            ),
+            wire::Payload::Headers { fragment, .. } => self.block_start(
+                Pos { side, stream_id },
+                ChainHead::Headers {
+                    end_stream: flags & 0x1 != 0,
+                },
+                fragment,
+                evidence,
+                cx,
+                flags & 0x4 != 0,
+            ),
+            wire::Payload::Reset { .. } => self.reset_stream(side, stream_id, evidence, cx),
+            wire::Payload::Settings(settings) => {
+                self.settings_frame(side, flags, settings, evidence, cx)
+            }
+            wire::Payload::PushPromise {
+                promised_stream_id,
+                fragment,
+                ..
+            } => self.block_start(
+                Pos { side, stream_id },
+                ChainHead::PushPromise {
+                    promised: promised_stream_id,
+                },
+                fragment,
+                evidence,
+                cx,
+                flags & 0x4 != 0,
+            ),
+            wire::Payload::Ping(opaque) => self.ping_frame(side, flags, opaque, evidence, cx),
+            wire::Payload::Priority(_) | wire::Payload::Unknown(_) => Ok(()),
+            wire::Payload::Goaway { last_stream_id, .. } => {
+                self.goaway_frame(side, last_stream_id, evidence, cx)
+            }
+            wire::Payload::WindowUpdate { increment } => {
+                self.window_update(side, stream_id, increment, evidence, cx)
+            }
+            wire::Payload::Continuation(fragment) => {
+                self.block_continue(side, stream_id, fragment, flags, evidence, cx)
+            }
+        }
+    }
+
+    fn data_frame(
+        &mut self,
+        head: DataHead,
+        evidence: Evidence,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let DataHead {
+            side,
+            stream_id,
+            length,
+            data_bytes,
+            end_stream,
+        } = head;
+        self.send_window[side] = self.send_window[side]
+            .checked_sub(i64::from(length))
+            .ok_or(Error::Application(
+                crate::analysis::application::Error::Limit {
+                    field: "flow_window",
+                    limit: 0x8000_0000,
+                },
+            ))?;
+        if self.send_window[side] < -(1i64 << 31) {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "connection_window_underflow",
+                    detail: "connection flow window passed the 31-bit floor".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+        } else if length > 0 && self.send_window[side] < 0 {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::ObservedOrder,
+                    status: Status::Malformed,
+                    code: "connection_window_exceeded",
+                    detail: "DATA exceeded the observed connection window".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+        }
+        let Some(stream) = self.streams.get_mut(&stream_id) else {
+            let closed = self.closed.contains(&stream_id);
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: if closed {
+                        "data_closed_stream"
+                    } else {
+                        "data_unknown_stream"
+                    },
+                    detail: if closed {
+                        "DATA arrived on a fully closed stream".into()
+                    } else {
+                        "DATA arrived on a stream that was never opened".into()
+                    },
+                    wire: evidence.wire,
+                    sources: evidence.sources,
+                },
+            )?;
+            return Ok(());
+        };
+        if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "data_closed_stream",
+                    detail: "DATA arrived on a stream closed to the sender".into(),
+                    wire: evidence.wire,
+                    sources: evidence.sources,
+                },
+            )?;
+            return Ok(());
+        }
+        stream.send_window[side] -= i64::from(length);
+        if stream.send_window[side] < -(1i64 << 31) {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "stream_window_underflow",
+                    detail: "stream flow window passed the 31-bit floor".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+        } else if length > 0 && stream.send_window[side] < 0 {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::ObservedOrder,
+                    status: Status::Malformed,
+                    code: "stream_window_exceeded",
+                    detail: "DATA exceeded the observed stream window".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+        }
+        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        if stream.response_bodyless && side == SERVER && data_bytes > 0 {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "bodyless_response_body",
+                    detail: "a response that must not carry a body carried DATA".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            if let Some(msg) = stream.msgs[side].as_mut() {
+                msg.failure = Some(Status::Malformed);
+            }
+        }
+        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        if stream.msgs[side]
+            .as_ref()
+            .is_some_and(|msg| msg.trailers_seen)
+        {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "data_after_trailers",
+                    detail: "DATA arrived after a trailer block".into(),
+                    wire: evidence.wire.clone(),
+                    sources: evidence.sources.clone(),
+                },
+            )?;
+            let stream = self.streams.get_mut(&stream_id).expect("stream");
+            if let Some(msg) = stream.msgs[side].as_mut() {
+                msg.failure = Some(Status::Malformed);
+            }
+        }
+        let stream = self.streams.get_mut(&stream_id).expect("stream");
+        if let Some(msg) = stream.msgs[side].as_mut() {
+            msg.saw_body = true;
+            msg.body_bytes = msg.body_bytes.saturating_add(data_bytes);
+            if msg.body_bytes > cx.limits.max_body_bytes {
+                let flow = self.dir_flow(side);
+                self.issue(
+                    cx,
+                    Fault {
+                        flow,
+                        http2_stream_id: Some(stream_id),
+                        scope: IssueScope::Stream,
+                        certainty: Certainty::Confirmed,
+                        status: Status::Limit,
+                        code: "body_limit",
+                        detail: "observed message body exceeds the configured bound".into(),
+                        wire: evidence.wire.clone(),
+                        sources: evidence.sources.clone(),
+                    },
+                )?;
+                self.fail(cx, Status::Limit)?;
+                return Ok(());
+            }
+            if let Some(sources) = evidence.sources.clone() {
+                let charge =
+                    resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
+                self.charge_conn(cx, charge)?;
+                let stream = self.streams.get_mut(&stream_id).expect("stream");
+                if let Some(msg) = stream.msgs[side].as_mut() {
+                    msg.charged += charge;
+                    msg.charged_spans += sources.frames().len();
+                    cx.charge_spans(sources.frames().len())?;
+                    msg.sets.push(sources);
+                }
+            }
+        } else {
+            let flow = self.dir_flow(side);
+            self.issue(
+                cx,
+                Fault {
+                    flow,
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "data_without_headers",
+                    detail: "DATA arrived before a header block on the stream".into(),
+                    wire: evidence.wire,
+                    sources: evidence.sources,
+                },
+            )?;
+            return Ok(());
+        }
+        if end_stream {
+            self.end_side(side, stream_id, Status::Complete, cx)?;
+        }
+        Ok(())
+    }
+
+    fn block_start(
+        &mut self,
+        at: Pos,
+        head: ChainHead,
+        fragment: Bytes,
+        evidence: Evidence,
+        cx: &mut Cx<'_>,
+        end_headers: bool,
+    ) -> Result<(), Error> {
+        let Pos { side, stream_id } = at;
+        let Evidence { wire, sources } = evidence;
+        if fragment.len() > cx.limits.max_header_block_bytes {
+            self.limited_block(cx, side, stream_id, wire, sources)?;
+            return Ok(());
+        }
+        let charge = fragment.len() + resources::HEADER_OVERHEAD;
+        cx.charge_live(charge)?;
+        let mut chain = Chain {
+            stream_id,
+            head,
+            bytes: bytes::BytesMut::from(&fragment[..]),
+            frames: 1,
+            sets: Vec::new(),
+            charged: charge,
+            charged_spans: 0,
+        };
+        if let Some(sources) = sources.clone() {
+            if let Err(error) = cx.charge_sources(&sources) {
+                cx.release_live(charge);
+                return Err(error);
+            }
+            chain.charged_spans += sources.frames().len();
+            chain.charged +=
+                resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
+            chain.sets.push(sources);
+        }
+        if chain.bytes.len() > cx.limits.max_header_block_bytes {
+            cx.release_live(chain.charged);
+            *cx.spans = cx
+                .spans
+                .checked_sub(chain.charged_spans)
+                .expect("chain spans");
+            self.limited_block(cx, side, stream_id, wire, sources)?;
+            return Ok(());
+        }
+        if end_headers {
+            self.block_done(side, chain, cx)
+        } else {
+            let dir = self.dirs[side].as_mut().expect("dir");
+            dir.charged += chain.charged;
+            dir.charged_spans += chain.charged_spans;
+            dir.chain = Some(chain);
+            Ok(())
+        }
+    }
+
+    fn block_continue(
+        &mut self,
+        side: usize,
+        stream_id: u32,
+        fragment: Bytes,
+        flags: u8,
+        evidence: Evidence,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        let Evidence { wire, sources } = evidence;
+        let dir = self.dirs[side].as_mut().expect("dir");
+        let Some(mut chain) = dir.chain.take() else {
+            return Ok(());
+        };
+        dir.charged -= chain.charged;
+        dir.charged_spans -= chain.charged_spans;
+        debug_assert_eq!(chain.stream_id, stream_id);
+        if chain.bytes.len() + fragment.len() > cx.limits.max_header_block_bytes
+            || chain.frames + 1 > cx.limits.max_continuations + 1
+        {
+            cx.release_live(chain.charged);
+            *cx.spans = cx
+                .spans
+                .checked_sub(chain.charged_spans)
+                .expect("chain spans");
+            self.limited_block(cx, side, stream_id, wire, sources)?;
+            return Ok(());
+        }
+        if let Err(error) = cx.charge_live(fragment.len()) {
+            cx.release_live(chain.charged);
+            *cx.spans -= chain.charged_spans;
+            return Err(error);
+        }
+        chain.bytes.extend_from_slice(&fragment);
+        chain.charged += fragment.len();
+        chain.frames += 1;
+        if let Some(sources) = sources.clone() {
+            if let Err(error) = cx.charge_sources(&sources) {
+                cx.release_live(chain.charged);
+                *cx.spans = cx
+                    .spans
+                    .checked_sub(chain.charged_spans)
+                    .expect("chain spans");
+                return Err(error);
+            }
+            chain.charged_spans += sources.frames().len();
+            chain.charged +=
+                resources::SET_OVERHEAD + sources.frames().len() * resources::SPAN_OVERHEAD;
+            chain.sets.push(sources);
+        }
+        if flags & 0x4 != 0 {
+            self.block_done(side, chain, cx)
+        } else {
+            let dir = self.dirs[side].as_mut().expect("dir");
+            dir.charged += chain.charged;
+            dir.charged_spans += chain.charged_spans;
+            dir.chain = Some(chain);
+            Ok(())
+        }
+    }
+
+    fn limited_block(
+        &mut self,
+        cx: &mut Cx<'_>,
+        side: usize,
+        stream_id: u32,
+        wire: Bytes,
+        sources: Option<crate::analysis::provenance::SourceSet>,
+    ) -> Result<(), Error> {
+        let flow = self.dir_flow(side);
+        self.issue(
+            cx,
+            Fault {
+                flow,
+                http2_stream_id: Some(stream_id),
+                scope: IssueScope::Connection,
+                certainty: Certainty::Confirmed,
+                status: Status::Limit,
+                code: "block_limit",
+                detail: "a header block exceeded its configured bound".into(),
+                wire,
+                sources,
+            },
+        )?;
+        self.fail(cx, Status::Limit)
+    }
+
+    fn block_done(&mut self, side: usize, mut chain: Chain, cx: &mut Cx<'_>) -> Result<(), Error> {
+        cx.release_live(chain.charged);
+        *cx.spans -= chain.charged_spans;
+        cx.check_deadline()?;
+        let bytes = chain.bytes.freeze();
+        let stream_id = chain.stream_id;
+        let origin = self.next_origin;
+        self.next_origin += 1;
+        let block_sets = std::mem::take(&mut chain.sets);
+        let block_sources = union_balanced(block_sets)?;
+        let dir = self.dirs[side].as_mut().expect("dir");
+        if let Some(sources) = block_sources.clone() {
+            Self::track_sources(dir, cx, &sources)?;
+            let dir = self.dirs[side].as_mut().expect("dir");
+            dir.block_sources.insert(origin, sources);
+            Self::charge_dir(dir, cx, resources::ORIGIN_ENTRY_OVERHEAD)?;
+        }
+        let scratch = 6usize
+            .checked_mul(cx.limits.max_header_bytes)
+            .and_then(|v| {
+                v.checked_add(
+                    2usize.saturating_mul(
+                        cx.limits
+                            .max_headers
+                            .saturating_mul(size_of::<hpack::Field>()),
+                    ),
+                )
+            })
+            .and_then(|v| v.checked_add(2usize.saturating_mul(cx.limits.max_table_bytes)))
+            .and_then(|v| v.checked_add(2usize.saturating_mul(bytes.len())))
+            .ok_or(Error::Application(
+                crate::analysis::application::Error::Limit {
+                    field: "hpack_scratch",
+                    limit: cx.limits.max_header_bytes,
+                },
+            ))?;
+        cx.charge_live(scratch)?;
+        let result = (|| {
+            let decoded = {
+                let dir = self.dirs[side].as_mut().expect("dir");
+                let decoder = dir.decoder.as_mut().expect("decoder");
+                decoder.decode(&bytes, origin)
+            };
+            self.decoder_sync(side, cx)?;
+            match decoded {
+                Err(error) => {
+                    let flow = self.dir_flow(side);
+                    let (code, status) = match &error {
+                        wire::Error::Limit(_) => ("header_block_limit", Status::Limit),
+                        _ => ("hpack_decode", Status::Malformed),
+                    };
+                    self.issue(
+                        cx,
+                        Fault {
+                            flow,
+                            http2_stream_id: Some(stream_id),
+                            scope: IssueScope::Compression,
+                            certainty: Certainty::Confirmed,
+                            status,
+                            code,
+                            detail: error.to_string().into(),
+                            wire: bytes,
+                            sources: block_sources,
+                        },
+                    )?;
+                    self.fail(cx, status)?;
+                    Ok(())
+                }
+                Ok(block) => {
+                    cx.check_deadline()?;
+                    let mut compression_sets: Vec<crate::analysis::provenance::SourceSet> =
+                        Vec::new();
+                    {
+                        let dir = self.dirs[side].as_ref().expect("dir");
+                        let mut seen = HashSet::new();
+                        for field in &block.fields {
+                            for origin in &field.origins {
+                                if !seen.insert(*origin) {
+                                    continue;
+                                }
+                                let Some(set) = dir.block_sources.get(origin) else {
+                                    return Err(Error::Application(
+                                        crate::analysis::application::Error::Sources {
+                                            number: self.number,
+                                        },
+                                    ));
+                                };
+                                if !compression_sets.iter().any(|s| s.frames() == set.frames()) {
+                                    compression_sets.push(set.clone());
+                                }
+                            }
+                        }
+                    }
+                    let compression = union_balanced(compression_sets)?;
+                    let decoded_bytes = block.decoded_bytes;
+                    {
+                        let dir = self.dirs[side].as_mut().expect("dir");
+                        let kept: HashSet<u64> = dir
+                            .decoder
+                            .as_ref()
+                            .expect("decoder")
+                            .retained_origins()
+                            .into_iter()
+                            .collect();
+                        let removed: Vec<u64> = dir
+                            .block_sources
+                            .keys()
+                            .filter(|id| !kept.contains(*id))
+                            .copied()
+                            .collect();
+                        for id in removed {
+                            if let Some(set) = dir.block_sources.remove(&id) {
+                                Self::release_dropped(dir, vec![set], cx);
+                                Self::release_dir(dir, cx, resources::ORIGIN_ENTRY_OVERHEAD);
+                            }
+                        }
+                    }
+                    if let Some(limit) = self.settings[peer(side)].advertised.max_header_list_size
+                        && decoded_bytes > limit as usize
+                    {
+                        let flow = self.dir_flow(side);
+                        self.issue(
+                        cx,
+                        Fault {
+                            flow,
+                            http2_stream_id: Some(stream_id),
+                            scope: IssueScope::Stream,
+                            certainty: Certainty::ObservedOrder,
+                            status: Status::Incomplete,
+                            code: "header_list_size_advisory",
+                            detail: format!(
+                                "decoded header list {decoded_bytes} exceeds the peer's advertised maximum"
+                            )
+                            .into(),
+                            wire: Bytes::new(),
+                            sources: None,
+                        },
+                    )?;
+                    }
+                    let headers: Vec<Header> = block
+                        .fields
+                        .iter()
+                        .map(|field| Header {
+                            name: field.name.clone(),
+                            value: field.value.clone(),
+                            never_indexed: field.never_indexed,
+                        })
+                        .collect();
+                    self.headers_block(
+                        side,
+                        stream_id,
+                        chain.head,
+                        Decoded {
+                            headers,
+                            block: bytes,
+                            sources: block_sources,
+                            compression,
+                        },
+                        cx,
+                    )
+                }
+            }
+        })();
+        cx.release_live(scratch);
+        result
+    }
+}

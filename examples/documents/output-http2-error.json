@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.output/v6",
+  "command": "http2",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "policy.application_limit",
+    "kind": "policy",
+    "message": "analysis consumer failed at frame 7",
+    "causes": [
+      "application analysis exceeds max_frames=3"
+    ],
+    "remediation": "raise a finite application-analysis limit or narrow the capture"
+  },
+  "diagnostics": []
+}

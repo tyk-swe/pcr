@@ -398,3 +398,55 @@ fn a_repeated_interrupt_removes_staged_output_before_exiting() {
         assert!(leftovers.is_empty(), "{command}: {leftovers:?}");
     }
 }
+
+#[test]
+fn http2_cancellation_emits_one_error_without_complete() {
+    common::require_procfs();
+    for signal in ["INT", "TERM"] {
+        let bytes = common::http2_capture::capture_bytes(&[common::http2_capture::multiplexed(80)]);
+        let mut process = Running::start(&["--output", "ndjson", "http2", "-"]);
+        process
+            .child
+            .stdin
+            .as_mut()
+            .expect("stdin must be piped")
+            .write_all(&bytes)
+            .expect("capture bytes must write");
+        process
+            .child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .flush()
+            .expect("capture bytes must flush");
+        process.wait_until(|p| {
+            let emitted = std::fs::read(p.stdout.path()).unwrap_or_default();
+            let complete_frame_line = emitted.split(|b| *b == b'\n').any(|line| {
+                !line.is_empty()
+                    && serde_json::from_slice::<serde_json::Value>(line)
+                        .is_ok_and(|record| record["event"] == "http2_frame")
+            });
+            complete_frame_line
+                && p.intercepts_sigint()
+                && std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
+                    .is_ok_and(|wchan| wchan.contains("pipe_read"))
+        });
+        process.signal(signal);
+        std::thread::sleep(Duration::from_millis(100));
+        process.child.stdin.take();
+        let output = process.finish();
+        assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
+        let records = common::parse_ndjson(&output);
+        common::assert_contiguous(&records);
+        let errors: Vec<_> = records
+            .iter()
+            .filter(|record| record["event"] == "error")
+            .collect();
+        assert_eq!(errors.len(), 1, "{signal}: {records:?}");
+        assert_eq!(errors[0]["error"]["code"], "io.cancelled");
+        assert!(
+            records.iter().all(|record| record["event"] != "complete"),
+            "{signal}: cancelled analysis must not complete"
+        );
+    }
+}

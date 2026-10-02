@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod application_output;
+pub(crate) mod http2_capture;
 
 use std::path::Path;
 use std::process::{Command, Output};

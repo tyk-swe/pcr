@@ -55,6 +55,7 @@ fn expected_kinds(command: Command) -> &'static [&'static str] {
         | Command::Tls
         | Command::Traceroute
         | Command::Http
+        | Command::Http2
         | Command::DnsRead
         | Command::Dns
         | Command::Fuzz => &["success", "event", "complete", "error"],

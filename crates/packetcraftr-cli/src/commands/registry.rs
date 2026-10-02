@@ -7,8 +7,8 @@ use serde::Serialize;
 use super::dispatch::Launch;
 use super::{
     Spec, build, capture, dissect, dns, dns_read, documentation, exchange, expert, export, follow,
-    fragment, fuzz, http, interfaces, merge, plan, protocols, read, replay, rewrite, routes, scan,
-    send, stats, tls, topics, traceroute, verify_forwarding,
+    fragment, fuzz, http, http2, interfaces, merge, plan, protocols, read, replay, rewrite, routes,
+    scan, send, stats, tls, topics, traceroute, verify_forwarding,
 };
 use crate::output::contract::{Format, FormatSubset};
 use crate::resources::Settings;
@@ -182,6 +182,11 @@ commands! {
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
     #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
     Http(http::arguments::Args) = "http",
+    #[command(
+        about = "Inspect cleartext HTTP/2 and h2c over captured TCP streams.",
+        after_long_help = http2::arguments::AFTER_LONG_HELP
+    )]
+    Http2(http2::arguments::Args) = "http2",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
     #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
     Export(export::arguments::Args) = "export",
@@ -340,6 +345,10 @@ mod tests {
             (
                 &["http", CAPTURE],
                 undeclared_bounds::<http::arguments::Args>,
+            ),
+            (
+                &["http2", CAPTURE],
+                undeclared_bounds::<http2::arguments::Args>,
             ),
             (
                 &["export", "--write", "e.pcapng", CAPTURE],

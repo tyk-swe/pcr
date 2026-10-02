@@ -35,6 +35,24 @@ HTTP message records identify framing/status and physical source evidence.
 Read the terminal completion or error as well as individual messages. A parse,
 capture, or resource limit is not proof that an application message was absent.
 
+For cleartext HTTP/2, inspect the multiplexed and h2c examples with the separate
+`http2` command; `http` remains HTTP/1-only:
+
+```sh
+packetcraftr --resource-preset ci-v1 --resource-diagnostics --output ndjson \
+  http2 examples/captures/http2-multiplexed.pcapng
+packetcraftr --output json http2 examples/captures/http2-upgrade.pcapng --stream tcp:0
+```
+
+`--stream tcp:INDEX` selects a TCP conversation, not an HTTP/2 stream ID.
+Ports 80 and 8080 are inspected by default; repeat `--http2-port PORT` for
+other cleartext services. TLS application data is unsupported and is not
+decrypted. Read `http2_frame`, `http2_message`, `http2_issue`, and the final
+`http2_connection` assessment as well as the terminal completion/error.
+A complete message does not override a later connection conflict. An
+unaccepted h2c offer is preserved as `incomplete_upgrade` evidence, without
+inventing an HTTP/2 stream. DATA bodies are counted and discarded.
+
 For an ordinary failure, lower `--max-frames` below the physical capture count.
 Filtered-out input still counts; adding a display filter does not bypass that
 limit. Inspect resource diagnostics, then raise the specific finite ceiling or

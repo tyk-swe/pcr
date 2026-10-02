@@ -78,6 +78,11 @@ pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'stati
     if !http11(head) {
         return Err("h2c upgrade requires an HTTP/1.1 request");
     }
+    let mut hosts = head.values("host");
+    let host = hosts.next().ok_or("h2c request requires Host")?;
+    if hosts.next().is_some() || !super::stream::valid_http_authority(host) {
+        return Err("h2c request requires exactly one valid Host authority");
+    }
     if !has_token(head, "connection", b"upgrade")
         || !has_token(head, "connection", b"http2-settings")
     {

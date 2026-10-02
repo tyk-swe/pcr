@@ -74,6 +74,32 @@ impl Conn {
                 return Ok(());
             }
         }
+        if let Some(side) = self.side_of(flow)
+            && self.phase == Phase::H2
+            && self.dirs[side]
+                .as_ref()
+                .is_some_and(|dir| dir.buffer.is_empty() && dir.chain.is_none())
+        {
+            // Check before truncation handling discards any undecoded bytes.
+            // A clean sender FIN excludes future DATA that could lower credit.
+            let mut cursor = 0;
+            loop {
+                cx.check_deadline()?;
+                let Some(id) = self
+                    .streams
+                    .range((
+                        std::ops::Bound::Excluded(cursor),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .next()
+                    .map(|(id, _)| *id)
+                else {
+                    break;
+                };
+                cursor = id;
+                self.confirm_stream_window_overflow(side, id, cx)?;
+            }
+        }
         let deferred_ack = self
             .side_of(flow)
             .is_some_and(|side| self.waiting_settings_ack(side));

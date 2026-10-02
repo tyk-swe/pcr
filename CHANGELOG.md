@@ -1806,11 +1806,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Confirm remaining stream-window overflow on a clean sender FIN and validate
+  exactly one Host authority before accepting an h2c upgrade request.
 - Require a target authority or Host fallback for HTTP(S) requests, validate
   generic URI authorities on other schemes, and reject content in TRACE requests.
   Retain invalid priority state on capture-delayed response HEADERS.
 - Retain delayed request messages after invalid early response fields or DATA,
-  while preserving confirmed response failures and rejecting later response activity.
+  while preserving confirmed response failures and rejecting later response activity,
+  including response follow-ups interleaved with a delayed request body.
 - Preserve semantic failures in capture-delayed response headers, reject
   trailers on 204/304 responses, and terminate idle-stream WINDOW_UPDATE errors.
   Keep h2c header settings separate from the mandatory on-wire preface.

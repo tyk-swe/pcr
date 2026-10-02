@@ -850,11 +850,18 @@ impl Conn {
             wire: evidence.wire.clone(), sources: evidence.sources.clone(),
         })?;
         if self.streams.contains_key(&id) {
-            if invalid {
-                self.close_stream(id, Status::Malformed, None, cx)?;
-            } else {
-                self.end_side(SERVER, id, Status::Incomplete, cx)?;
-            }
+            // The provisional response has no message builder to emit. Its
+            // error must not terminate the independently captured request.
+            self.end_side(
+                SERVER,
+                id,
+                if invalid {
+                    Status::Malformed
+                } else {
+                    Status::Incomplete
+                },
+                cx,
+            )?;
         } else if let Some(state) = self.early_response_headers.get_mut(&id) {
             state.ended = true;
         }
@@ -990,18 +997,16 @@ impl Conn {
         result
     }
 
-    pub(crate) fn end_side(
+    pub(crate) fn confirm_stream_window_overflow(
         &mut self,
         side: usize,
         stream_id: u32,
-        status: Status,
         cx: &mut Cx<'_>,
-    ) -> Result<(), Error> {
-        if status == Status::Complete
-            && self
-                .streams
-                .get(&stream_id)
-                .is_some_and(|stream| stream.send_window[side] > super::super::settings::WINDOW_MAX)
+    ) -> Result<bool, Error> {
+        if self
+            .streams
+            .get(&stream_id)
+            .is_some_and(|stream| stream.send_window[side] > super::super::settings::WINDOW_MAX)
         {
             self.issue(cx, Fault {
                 flow: self.dir_flow(side),
@@ -1014,7 +1019,21 @@ impl Conn {
                 wire: Bytes::new(),
                 sources: None,
             })?;
-            return self.close_stream(stream_id, Status::Malformed, None, cx);
+            self.close_stream(stream_id, Status::Malformed, None, cx)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn end_side(
+        &mut self,
+        side: usize,
+        stream_id: u32,
+        status: Status,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        if status == Status::Complete && self.confirm_stream_window_overflow(side, stream_id, cx)? {
+            return Ok(());
         }
         let defer_complete = status == Status::Complete
             && (self.waiting_settings_ack(CLIENT) || self.waiting_settings_ack(SERVER));

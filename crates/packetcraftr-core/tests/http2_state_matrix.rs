@@ -3831,35 +3831,42 @@ fn review_upgrade_settings_do_not_replace_wire_preface() {
 
 #[test]
 fn review_failed_early_response_preserves_delayed_request() {
-    for extra in 0..3 {
-        let events = exercise(|capture, stream| {
-            prior_knowledge_handshake(capture, stream);
-            let mut invalid = RESPONSE_OK.to_vec();
-            review_literal(&mut invalid, b"connection", b"close");
-            capture.server(stream, &headers(1, &invalid, END_HEADERS));
-            if extra == 1 {
-                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
-            } else if extra == 2 {
-                capture.server(stream, &data(1, b"bad", END_STREAM));
-            }
-            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
-            capture.client(stream, &data(1, b"request", END_STREAM));
-        });
-        assert!(
-            messages(&events)
-                .iter()
-                .any(|m| m.kind == MessageKind::Request
-                    && m.http2_stream_id == 1
-                    && m.status == Status::Complete),
-            "extra={extra}"
-        );
-        assert!(
-            !messages(&events)
-                .iter()
-                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
-        );
-        assert_eq!(connection(&events).status, Status::Malformed);
-        assert!(!codes(&events).contains(&"closed_stream_headers"));
+    for during_request in [false, true] {
+        for extra in 0..3 {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                let mut invalid = RESPONSE_OK.to_vec();
+                review_literal(&mut invalid, b"connection", b"close");
+                capture.server(stream, &headers(1, &invalid, END_HEADERS));
+                if during_request {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+                }
+                if extra == 1 {
+                    capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+                } else if extra == 2 {
+                    capture.server(stream, &data(1, b"bad", END_STREAM));
+                }
+                if !during_request {
+                    capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+                }
+                capture.client(stream, &data(1, b"request", END_STREAM));
+            });
+            assert!(
+                messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Request
+                        && m.http2_stream_id == 1
+                        && m.status == Status::Complete),
+                "extra={extra}"
+            );
+            assert!(
+                !messages(&events)
+                    .iter()
+                    .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete)
+            );
+            assert_eq!(connection(&events).status, Status::Malformed);
+            assert!(!codes(&events).contains(&"closed_stream_headers"));
+        }
     }
 }
 
@@ -3964,5 +3971,68 @@ fn review_trace_requests_reject_content_but_allow_empty_data() {
             messages(&events)[0].status == Status::Complete,
             body.is_empty()
         );
+    }
+}
+
+#[test]
+fn review_sender_fin_confirms_stream_overflow_without_http_end() {
+    for delayed_data in 0..3 {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            capture.server(stream, &window_update(1, 0x7fff_ffff - 65535 + 1));
+            if delayed_data == 1 {
+                capture.client(stream, &data(1, b"x", 0));
+            } else if delayed_data == 2 {
+                let partial = data(1, b"xx", 0);
+                capture.client(stream, &partial[..10]);
+            }
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "stream_window_overflow" && i.certainty == Certainty::Confirmed),
+            delayed_data == 0
+        );
+    }
+}
+
+#[test]
+fn review_upgrade_requires_one_valid_host() {
+    for (host, valid) in [
+        ("", false),
+        ("Host: example.com\r\nHost: example.com\r\n", false),
+        ("Host: good.example bad.example\r\n", false),
+        ("Host: example.com:80\r\n", true),
+        ("Host: [::1]:80\r\n", true),
+    ] {
+        let events = exercise(|capture, stream| {
+            let request = format!(
+                "GET / HTTP/1.1\r\n{host}Connection: upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n"
+            );
+            capture.client(stream, request.as_bytes());
+            capture.server(
+                stream,
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+            );
+            capture.server(stream, &settings(&[]));
+            let mut client = common::http2::preface();
+            client.extend_from_slice(&settings(&[]));
+            client.extend_from_slice(&settings_ack());
+            capture.client(stream, &client);
+            capture.server(stream, &settings_ack());
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Request && m.status == Status::Complete),
+            valid
+        );
+        if !valid {
+            // Invalid offers use the existing unsupported-h2c diagnostic path.
+            assert!(codes(&events).contains(&"bad_upgrade_offer"));
+            assert_eq!(connection(&events).status, Status::Unsupported);
+        }
     }
 }

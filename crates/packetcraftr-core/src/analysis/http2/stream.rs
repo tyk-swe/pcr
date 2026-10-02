@@ -230,7 +230,7 @@ fn valid_uri_path(path: &[u8]) -> bool {
     true
 }
 
-fn valid_http_authority(authority: &[u8]) -> bool {
+pub(super) fn valid_http_authority(authority: &[u8]) -> bool {
     valid_authority(authority, true)
 }
 

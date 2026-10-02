@@ -688,6 +688,7 @@ impl Conn {
         };
         if stream.phase != crate::analysis::http2::stream::Phase::Open || stream.ended[side] {
             let reserved = stream.phase == crate::analysis::http2::stream::Phase::Reserved;
+            let preserve_delayed_request = side == SERVER && stream.early_response.is_some();
             let flow = self.dir_flow(side);
             self.issue(
                 cx,
@@ -709,7 +710,7 @@ impl Conn {
             )?;
             if reserved {
                 self.fail(cx, Status::Malformed)?;
-            } else {
+            } else if !preserve_delayed_request {
                 self.close_stream(stream_id, Status::Malformed, None, cx)?;
             }
             return Ok(());

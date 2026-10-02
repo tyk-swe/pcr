@@ -80,6 +80,24 @@ impl Conn {
                 .as_ref()
                 .is_some_and(|dir| dir.buffer.is_empty() && dir.chain.is_none())
         {
+            if side == CLIENT
+                && self.clean_start
+                && let Some(parent) = self.parent_deferred.front().and_then(|msg| msg.promised_by)
+            {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(SERVER),
+                    http2_stream_id: Some(parent),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "push_promise_closed_parent",
+                    detail: "client FIN proves the pending promise has no parent opener; promise evidence is retained in its message".into(),
+                    wire: Bytes::new(),
+                    sources: None,
+                })?;
+                self.fail(cx, Status::Malformed)?;
+                return Ok(());
+            }
             // Check before truncation handling discards any undecoded bytes.
             // A clean sender FIN excludes future DATA that could lower credit.
             let mut cursor = 0;

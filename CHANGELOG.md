@@ -1806,6 +1806,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Reject pushed-stream reuse after PRIORITY errors and impossible delayed
+  parents after a clean client FIN.
 - Retain idle PRIORITY errors and capture-delayed resets, and defer pushed
   requests until their capture-delayed parent opens.
 - Reconcile pending SETTINGS and WINDOW_UPDATE ordering before confirming stream

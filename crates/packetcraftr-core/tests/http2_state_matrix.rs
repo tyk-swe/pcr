@@ -4265,3 +4265,96 @@ fn review_delayed_pushes_reconcile_parent_or_remain_incomplete() {
         }
     }
 }
+
+#[test]
+fn review_push_cannot_reuse_priority_tombstones() {
+    for bad_length in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            let invalid = if bad_length {
+                frame(2, 0, 2, &[0; 4])
+            } else {
+                common::http2::priority(2, 2, 0)
+            };
+            capture.server(stream, &invalid);
+            capture.server(
+                stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+            capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 2 && m.status == Status::Complete)
+        );
+        assert!(codes(&events).contains(&"promised_stream_id"));
+    }
+}
+
+#[test]
+fn review_push_parent_cannot_arrive_after_clean_client_fin() {
+    for promise_first in [false, true] {
+        let (mut capture, mut stream) = setup();
+        prior_knowledge_handshake(&mut capture, &mut stream);
+        if promise_first {
+            capture.server(
+                &mut stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+        }
+        fin(&mut capture, &mut stream, true);
+        if !promise_first {
+            capture.server(
+                &mut stream,
+                &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+            );
+        }
+        capture.server(
+            &mut stream,
+            &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM),
+        );
+        fin(&mut capture, &mut stream, false);
+        let events = collect_events(&capture.frames, collector()).0;
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "push_promise_closed_parent"
+                    && i.certainty == Certainty::Confirmed)
+        );
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 2 && m.status == Status::Complete)
+        );
+    }
+}
+
+#[test]
+fn review_promise_in_flight_after_client_reset_does_not_revive_stream() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.client(stream, &rst(2, 0));
+        capture.server(
+            stream,
+            &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+        );
+        capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        !issues(&events)
+            .iter()
+            .any(|i| i.status == Status::Malformed && i.certainty == Certainty::Confirmed)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 2 && m.kind == MessageKind::Response)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 1
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}

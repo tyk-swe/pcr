@@ -1182,7 +1182,14 @@ impl Conn {
                 return Ok(());
             }
         }
-        if promised.is_multiple_of(2) && promised > self.max_initiated[SERVER] {
+        let promised_reset_in_flight = self
+            .closed
+            .get(&promised)
+            .is_some_and(|closed| closed.reset_by == Some(CLIENT));
+        if promised.is_multiple_of(2)
+            && promised > self.max_initiated[SERVER]
+            && (!self.closed.contains_key(&promised) || promised_reset_in_flight)
+        {
             self.max_initiated[SERVER] = promised;
         } else {
             self.issue(
@@ -1212,7 +1219,12 @@ impl Conn {
             .closed
             .get(&stream_id)
             .is_some_and(|closed| closed.reset_by == Some(peer(side)));
-        let delayed_parent = !stream_id.is_multiple_of(2)
+        let opener_possible = !self.clean_start
+            || !self.dirs[CLIENT]
+                .as_ref()
+                .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none());
+        let delayed_parent = opener_possible
+            && !stream_id.is_multiple_of(2)
             && stream_id > self.max_initiated[CLIENT]
             && !self.streams.contains_key(&stream_id)
             && !self.closed.contains_key(&stream_id)
@@ -1310,6 +1322,11 @@ impl Conn {
             self.parent_deferred.push_back(msg);
         } else {
             self.emit_message(SERVER, msg, Status::Complete, cx)?;
+        }
+        if promised_reset_in_flight {
+            // The promise can precede receipt of a peer reset, but must not
+            // revive the reset stream or emit later in-flight response messages.
+            return Ok(());
         }
         if rejected {
             cx.check_streams()?;

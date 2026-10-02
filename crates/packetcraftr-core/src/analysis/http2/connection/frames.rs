@@ -387,6 +387,13 @@ impl Conn {
         } else {
             9
         };
+        let retained = retained
+            + match &control {
+                Some(wire::Payload::Settings(values)) => {
+                    values.capacity() * size_of::<wire::Setting>()
+                }
+                _ => 0,
+            };
         let sources = sources.ok_or(Error::Application(
             crate::analysis::application::Error::Sources {
                 number: self.number,
@@ -572,6 +579,9 @@ impl Conn {
                 },
             )?;
         }
+        if self.send_window[side] < 0 && self.reconcile_closed_credit(side, Some(stream_id), cx)? {
+            return Ok(());
+        }
         // In-flight peer DATA after a reset still consumes connection credit,
         // but cannot establish a stream error from cross-direction ordering.
         if self
@@ -589,6 +599,31 @@ impl Conn {
             };
             let closed =
                 self.closed.contains_key(&stream_id) || stream_id <= self.max_initiated[owner];
+            if !closed
+                && self.clean_start
+                && side == SERVER
+                && owner == CLIENT
+                && !self.early_response_headers.contains(&stream_id)
+            {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(side), http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
+                    status: Status::Malformed, code: "data_without_headers",
+                    detail: "server DATA preceded any response HEADERS in the same ordered byte stream".into(),
+                    wire: evidence.wire, sources: evidence.sources,
+                })?;
+                cx.check_streams()?;
+                self.admitted_streams += 1;
+                self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                self.closed.insert(
+                    stream_id,
+                    super::ClosedStream {
+                        reset_by: None,
+                        request: None,
+                    },
+                );
+                return Ok(());
+            }
             let uncertain = !closed && (!self.clean_start || side != owner);
             let flow = self.dir_flow(side);
             self.issue(
@@ -659,6 +694,9 @@ impl Conn {
             return Ok(());
         }
         stream.send_window[side] -= i64::from(length);
+        if length > 0 {
+            stream.credit_exceeded[side] = stream.send_window[side] < 0;
+        }
         if stream.send_window[side] < -(1i64 << 31) {
             let flow = self.dir_flow(side);
             self.issue(
@@ -693,6 +731,9 @@ impl Conn {
                     sources: evidence.sources.clone(),
                 },
             )?;
+        }
+        if self.reconcile_closed_credit(side, Some(stream_id), cx)? {
+            return Ok(());
         }
         let stream = self.streams.get_mut(&stream_id).expect("stream");
         if stream.response_bodyless && side == SERVER && data_bytes > 0 {

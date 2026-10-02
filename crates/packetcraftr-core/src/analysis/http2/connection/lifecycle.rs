@@ -53,6 +53,12 @@ impl Conn {
             self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
+        if let Some(grant) = self.side_of(flow) {
+            self.reconcile_closed_credit(1 - grant, None, cx)?;
+            if self.phase == Phase::Dead {
+                return Ok(());
+            }
+        }
         let deferred_ack = self
             .side_of(flow)
             .is_some_and(|side| self.waiting_settings_ack(side));

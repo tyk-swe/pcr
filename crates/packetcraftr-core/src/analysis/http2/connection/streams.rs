@@ -273,8 +273,12 @@ impl Conn {
             self.fail(cx, Status::Limit)?;
             return Ok(());
         }
-        cx.check_streams()?;
-        self.admitted_streams += 1;
+        if self.early_response_headers.remove(&stream_id) {
+            self.release_conn(cx, resources::CLOSED_STREAM_OVERHEAD);
+        } else {
+            cx.check_streams()?;
+            self.admitted_streams += 1;
+        }
         self.charge_conn(cx, resources::STREAM_OVERHEAD)?;
         let windows = [
             i64::from(self.settings[SERVER].acknowledged.initial_window_size),
@@ -416,6 +420,12 @@ impl Conn {
                         sources: block_sources.clone(),
                     },
                 )?;
+                if delayed_opener && !self.early_response_headers.contains(&stream_id) {
+                    cx.check_streams()?;
+                    self.admitted_streams += 1;
+                    self.charge_conn(cx, resources::CLOSED_STREAM_OVERHEAD)?;
+                    self.early_response_headers.insert(stream_id);
+                }
                 // Keep the bounded, sourced header-block evidence without inventing
                 // request correlation. A delayed client opener can still be admitted.
                 if !delayed_opener {
@@ -459,7 +469,7 @@ impl Conn {
                             Fault {
                                 flow: self.dir_flow(side),
                                 http2_stream_id: Some(stream_id),
-                                scope: IssueScope::Stream,
+                                scope: IssueScope::Connection,
                                 certainty: Certainty::Confirmed,
                                 status: Status::Malformed,
                                 code: "reserved_stream_headers",

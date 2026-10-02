@@ -3287,3 +3287,147 @@ fn review_later_settings_do_not_reopen_closed_deferred_streams() {
         );
     }
 }
+
+#[test]
+fn review_credit_exhaustion_after_granting_fin_is_confirmed() {
+    for connection_window in [false, true] {
+        for early_fin in [false, true] {
+            let events = exercise(|capture, stream| {
+                prior_knowledge_handshake(capture, stream);
+                capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+                capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+                if !connection_window {
+                    capture.client(stream, &window_update(0, 100));
+                }
+                if early_fin {
+                    fin(capture, stream, true);
+                }
+                capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+                for _ in 0..4 {
+                    capture.server(stream, &data(1, &[0; 16384], 0));
+                }
+                if !early_fin {
+                    fin(capture, stream, true);
+                }
+                capture.server(stream, &data(1, &[], END_STREAM));
+                capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+            });
+            let code = if connection_window {
+                "connection_window_exceeded"
+            } else {
+                "stream_window_exceeded"
+            };
+            assert!(
+                issues(&events)
+                    .iter()
+                    .any(|i| i.code == code && i.certainty == Certainty::Confirmed),
+                "connection={connection_window}, early_fin={early_fin}"
+            );
+            assert!(!messages(&events).iter().any(|m| m.http2_stream_id == 1
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete));
+            assert_eq!(
+                messages(&events).iter().any(|m| m.http2_stream_id == 3
+                    && m.kind == MessageKind::Response
+                    && m.status == Status::Complete),
+                !connection_window
+            );
+        }
+    }
+}
+
+#[test]
+fn review_closed_granting_direction_preserves_valid_credit_cases() {
+    for pending_increase in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
+            if pending_increase {
+                capture.client(stream, &window_update(0, 100_000));
+                capture.client(stream, &settings(&[(4, 131_070)]));
+                fin(capture, stream, true);
+                for _ in 0..4 {
+                    capture.server(stream, &data(1, &[0; 16384], 0));
+                }
+            } else {
+                capture.server(stream, &data(1, b"ok", 0));
+                capture.client(stream, &settings(&[(4, 0)]));
+                fin(capture, stream, true);
+                capture.server(stream, &settings_ack());
+            }
+            capture.server(stream, &data(1, &[], END_STREAM));
+        });
+        assert!(
+            !issues(&events)
+                .iter()
+                .any(|i| i.code == "stream_window_exceeded" && i.certainty == Certainty::Confirmed)
+        );
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete),
+            "pending_increase={pending_increase}"
+        );
+    }
+}
+
+#[test]
+fn review_early_data_without_response_headers_closes_delayed_stream() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.server(stream, &data(1, b"x", 0));
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "data_without_headers"
+                && i.certainty == Certainty::Confirmed
+                && i.scope == IssueScope::Stream)
+    );
+    assert!(
+        !messages(&events)
+            .iter()
+            .any(|m| m.http2_stream_id == 1 && m.status == Status::Complete)
+    );
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_reserved_headers_are_connection_scoped() {
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(
+            stream,
+            &common::http2::push_promise(1, 2, REQUEST, END_HEADERS),
+        );
+        capture.client(stream, &headers(2, &[], END_HEADERS | END_STREAM));
+    });
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "reserved_stream_headers" && i.scope == IssueScope::Connection)
+    );
+}
+
+#[test]
+fn review_payload_free_reverse_reset_closes_known_connection() {
+    use packetcraftr_core::protocol::transport::Tcp;
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, &common::http2::preface());
+    capture.client(&mut stream, &settings(&[]));
+    capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS));
+    capture.push(capture.server_spec(&stream, Tcp::RST | Tcp::ACK), &[]);
+    let events = collect_events(&capture.frames, collector()).0;
+    assert_eq!(connection(&events).status, Status::Reset);
+    assert!(codes(&events).contains(&"connection_reset"));
+    assert!(!codes(&events).contains(&"capture_end"));
+    assert!(messages(&events).iter().any(|m| m.status == Status::Reset));
+}

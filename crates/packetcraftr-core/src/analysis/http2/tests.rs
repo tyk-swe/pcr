@@ -1426,6 +1426,37 @@ mod owner {
     }
 
     #[test]
+    fn retained_settings_vector_is_charged() {
+        use super::super::connection::resources;
+        for missing_byte in [0, 1] {
+            let mut rig = Rig::new(Limits::default(), application::Limits::default());
+            let tracker = Tracker::new(1 << 20, 64).expect("tracker");
+            let mut conn = Conn::new(1, 0, client_flow());
+            let client = handshake(&mut conn, &mut rig, &tracker);
+            let before = rig.retained;
+            let mut payload = Vec::new();
+            for id in 256u16..768 {
+                payload.extend_from_slice(&id.to_be_bytes());
+                payload.extend_from_slice(&0u32.to_be_bytes());
+            }
+            let wire = frame(SETTINGS, 0, 0, &payload);
+            let expected = wire.len()
+                + 512 * size_of::<wire::Setting>()
+                + resources::EVENT_OVERHEAD
+                + resources::SET_OVERHEAD
+                + resources::SPAN_OVERHEAD;
+            let expected = application::Limits::decoded_charge(expected);
+            rig.app.max_retained_bytes = before + expected - missing_byte;
+            let result = feed(&mut conn, &mut rig, &tracker, &client, 30, &wire);
+            assert_eq!(result.is_ok(), missing_byte == 0);
+            if missing_byte == 0 {
+                assert_eq!(rig.retained - before, expected);
+            }
+            assert!(rig.retained <= rig.app.max_retained_bytes);
+        }
+    }
+
+    #[test]
     fn retained_bound_is_exact() {
         let run = |bound: usize| {
             let app = application::Limits {

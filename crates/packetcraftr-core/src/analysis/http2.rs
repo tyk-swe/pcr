@@ -200,13 +200,22 @@ impl Collector {
                 out,
             ),
             application::Event::Closed { flow, reset, .. } => {
-                let Some(key) = self.flow_index.get(&flow).copied() else {
+                let Some(key) = self
+                    .flow_index
+                    .get(&flow)
+                    .or_else(|| {
+                        reset
+                            .then(|| self.flow_index.get(&flow.reverse()))
+                            .flatten()
+                    })
+                    .copied()
+                else {
                     return Ok(());
                 };
                 let Some(mut conn) = self.connections.remove(&key) else {
                     return Ok(());
                 };
-                if !conn.has_flow(&flow) {
+                if !conn.has_flow(&flow) && !(reset && conn.has_flow(&flow.reverse())) {
                     self.connections.insert(key, conn);
                     return Ok(());
                 }

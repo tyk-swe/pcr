@@ -1806,6 +1806,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Preserve early HTTP/2 response ordering when client openers are capture-delayed,
+  associate payload-free reverse TCP resets, correct reserved-stream issue scope,
+  and charge decoded SETTINGS vectors against retained-output limits.
+
+- Confirm HTTP/2 DATA credit exhaustion after the granting direction cleanly
+  closes, retaining uncertainty for possible pending SETTINGS credit and valid
+  negative windows caused only by a SETTINGS decrease.
+
 - Invalidate retained HTTP/2 messages on stream failure even after their active
   slot has closed while awaiting SETTINGS acknowledgment reconciliation.
 

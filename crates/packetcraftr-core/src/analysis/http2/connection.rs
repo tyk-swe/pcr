@@ -22,7 +22,7 @@ use crate::analysis::provenance::SourceSet;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::http2::hpack;
 use bytes::Bytes;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 pub(crate) const PREFACE_LEN: usize = 24;
 
@@ -143,6 +143,7 @@ pub(crate) struct Conn {
     pub prelude: Option<Prelude>,
     pub streams: BTreeMap<u32, StreamState>,
     pub closed: BTreeMap<u32, ClosedStream>,
+    pub early_response_headers: BTreeSet<u32>,
     pub admitted_streams: u64,
     pub max_initiated: [u32; 2],
     pub active: [usize; 2],
@@ -183,6 +184,7 @@ impl Conn {
             prelude: None,
             streams: BTreeMap::new(),
             closed: BTreeMap::new(),
+            early_response_headers: BTreeSet::new(),
             admitted_streams: 0,
             max_initiated: [0, 0],
             active: [0, 0],
@@ -613,6 +615,7 @@ impl Conn {
         self.live = self.upgrade_charge;
         self.streams.clear();
         self.closed.clear();
+        self.early_response_headers.clear();
         self.prelude = None;
         cx.release_live(bytes);
         *cx.spans = cx.spans.checked_sub(spans).expect("span release");

@@ -105,6 +105,9 @@ impl Conn {
                     {
                         overflow = true;
                     }
+                    if stream.send_window[side] + acked.peak_window_delta.unwrap_or(0).max(0) >= 0 {
+                        stream.credit_exceeded[side] = false;
+                    }
                     stream.send_window[side] += acked.window_delta;
                 }
             }
@@ -143,6 +146,7 @@ impl Conn {
                 }
             }
             self.decoder_sync(side, cx)?;
+            self.reconcile_closed_credit(side, None, cx)?;
             self.release_ack_deferred_messages(cx)?;
             return Ok(());
         }
@@ -284,6 +288,9 @@ impl Conn {
             return Ok(());
         }
         stream.send_window[grant] = stream.send_window[grant].saturating_add(i64::from(increment));
+        if stream.send_window[grant] >= 0 {
+            stream.credit_exceeded[grant] = false;
+        }
         if stream.send_window[grant] > settings::WINDOW_MAX {
             let confirmed = stream.ended[grant];
             self.issue(
@@ -313,6 +320,79 @@ impl Conn {
             }
         }
         Ok(())
+    }
+
+    /// A clean, fully consumed granting direction cannot hide later credit.
+    pub(crate) fn reconcile_closed_credit(
+        &mut self,
+        side: usize,
+        only_stream: Option<u32>,
+        cx: &mut Cx<'_>,
+    ) -> Result<bool, Error> {
+        if self.phase != super::Phase::H2
+            || !self.clean_start
+            || !self.dirs[peer(side)]
+                .as_ref()
+                .is_some_and(|dir| dir.closed && dir.buffer.is_empty() && dir.chain.is_none())
+        {
+            return Ok(false);
+        }
+        if self.send_window[side] < 0 {
+            self.issue(cx, Fault {
+                flow: self.dir_flow(side), http2_stream_id: Some(0),
+                scope: IssueScope::Connection, certainty: Certainty::Confirmed,
+                status: Status::Malformed, code: "connection_window_exceeded",
+                detail: "DATA exhausted connection credit after the granting direction ended; prior DATA evidence is retained".into(),
+                wire: bytes::Bytes::new(), sources: None,
+            })?;
+            self.fail(cx, Status::Malformed)?;
+            return Ok(true);
+        }
+        // A not-yet-ACKed SETTINGS increase may already have supplied credit.
+        let mut delta = 0i64;
+        let mut extra = 0i64;
+        for pending in &self.settings[peer(side)].pending {
+            cx.check_deadline()?;
+            extra = extra.max(delta + pending.peak_window_delta.unwrap_or(0));
+            delta += pending.window_delta;
+            extra = extra.max(delta);
+        }
+        let mut cursor = 0;
+        loop {
+            cx.check_deadline()?;
+            let id = match only_stream {
+                Some(id) if cursor == 0 => Some(id),
+                Some(_) => None,
+                None => self
+                    .streams
+                    .range((
+                        std::ops::Bound::Excluded(cursor),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .next()
+                    .map(|(id, _)| *id),
+            };
+            let Some(id) = id else {
+                break;
+            };
+            cursor = id;
+            if self.streams.get(&id).is_some_and(|stream| {
+                stream.credit_exceeded[side] && stream.send_window[side] + extra < 0
+            }) {
+                self.issue(cx, Fault {
+                    flow: self.dir_flow(side), http2_stream_id: Some(id),
+                    scope: IssueScope::Stream, certainty: Certainty::Confirmed,
+                    status: Status::Malformed, code: "stream_window_exceeded",
+                    detail: "DATA exhausted stream credit after the granting direction ended; prior DATA evidence is retained".into(),
+                    wire: bytes::Bytes::new(), sources: None,
+                })?;
+                self.close_stream(id, Status::Malformed, None, cx)?;
+                if only_stream.is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn goaway_frame(

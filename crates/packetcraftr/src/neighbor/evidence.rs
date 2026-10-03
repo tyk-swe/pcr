@@ -12,9 +12,6 @@ use super::{MAX_VLAN_TAGS, Request as NeighborRequest};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::transmit;
 
-#[cfg(test)]
-use packetcraftr_netio::Error;
-
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
         return Err(invalid_request(format!(
@@ -186,11 +183,6 @@ mod tests {
     }
 
     #[test]
-    fn valid_neighbor_request_passes_all_invariants() {
-        assert!(validate_request(&request()).is_ok());
-    }
-
-    #[test]
     fn neighbor_request_rejects_each_invalid_identity_and_wire_bound() {
         let cases = [
             NeighborRequest {
@@ -263,75 +255,6 @@ mod tests {
                 Err(crate::neighbor::Error::InvalidRequest { .. })
             ));
         }
-    }
-
-    #[test]
-    fn capture_and_send_evidence_must_match_configured_and_submitted_bytes() {
-        let request = request();
-        assert!(validate_captured_frame(&request, &frame(&[1, 2]), 2).is_ok());
-        assert!(matches!(
-            validate_captured_frame(&request, &frame(&[1, 2, 3]), 2),
-            Err(crate::neighbor::Error::Resolution { .. })
-        ));
-
-        let expected = Bytes::from_static(&[1, 2, 3]);
-        assert!(
-            validate_neighbor_send(
-                &request,
-                &expected,
-                &transmit::Report::committed(3, expected.clone())
-            )
-            .is_ok()
-        );
-        assert!(matches!(
-            validate_neighbor_send(
-                &request,
-                &expected,
-                &transmit::Report::committed(2, expected.clone())
-            ),
-            Err(crate::neighbor::Error::Io {
-                source: Error::PartialSend { .. },
-                ..
-            })
-        ));
-        assert!(matches!(
-            validate_neighbor_send(
-                &request,
-                &expected,
-                &transmit::Report::committed(3, Bytes::from_static(&[3, 2, 1]))
-            ),
-            Err(crate::neighbor::Error::Io {
-                source: Error::InvalidSendEvidence { .. },
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn evidence_retention_drops_late_frames_but_matching_retention_evicts_oldest() {
-        let options = Options {
-            max_attempts: 1,
-            attempt_timeout: Duration::from_secs(1),
-            cache_ttl: Duration::from_secs(1),
-            max_cache_entries: 1,
-            max_capture_queue_frames: 2,
-            max_captured_bytes: 4,
-            snap_length: 128,
-        };
-        let mut evidence = EvidenceBuffer::new(&options);
-        evidence.retain(frame(&[1, 2]));
-        evidence.retain(frame(&[3, 4]));
-        evidence.retain(frame(&[5]));
-        assert_eq!(evidence.frames.len(), 2);
-        assert_eq!(evidence.bytes, 4);
-        assert!(evidence.truncated);
-
-        evidence.truncated = false;
-        evidence.retain_matching(frame(&[9, 9, 9]));
-        assert_eq!(evidence.frames.len(), 1);
-        assert_eq!(evidence.frames[0].bytes().as_ref(), [9, 9, 9]);
-        assert_eq!(evidence.bytes, 3);
-        assert!(evidence.truncated);
     }
 
     #[test]

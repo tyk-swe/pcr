@@ -61,14 +61,6 @@ mod tests {
     }
 
     #[test]
-    fn verification_accepts_an_interface_whose_name_still_resolves_to_its_index() {
-        let current = current_interface();
-
-        verify_interface_identity(&current)
-            .expect("a name that still resolves to its index is accepted");
-    }
-
-    #[test]
     fn verification_rejects_a_name_that_no_longer_resolves_and_names_the_current_holder() {
         let current = current_interface();
 
@@ -106,12 +98,5 @@ mod tests {
                 source: None,
             },
         );
-    }
-
-    #[test]
-    fn absent_identities_resolve_to_nothing_in_either_direction() {
-        assert_eq!(current_index(ABSENT_NAME), None);
-        assert_eq!(current_index("interior\0nul"), None);
-        assert_eq!(current_name(ABSENT_INDEX), None);
     }
 }

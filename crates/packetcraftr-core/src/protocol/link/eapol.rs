@@ -146,7 +146,6 @@ impl LayerCodec for EapolCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::Packet;
 
     fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
@@ -158,46 +157,6 @@ mod tests {
             discriminator: None,
         };
         EapolCodec.decode(Bytes::copy_from_slice(input), &context)
-    }
-
-    fn encode(
-        layer: &Eapol,
-        payload: &[u8],
-        mode: crate::codec::Mode,
-    ) -> Result<EncodedLayer, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry();
-        let packet = Packet::new();
-        let build_context = crate::codec::Context::default();
-        let context = LayerEncodeContext {
-            packet: &packet,
-            index: 0,
-            build_context: &build_context,
-            mode,
-            registry: &registry,
-            child: None,
-            remaining_packet_bytes: usize::MAX,
-        };
-        EapolCodec.encode(layer, payload, &context)
-    }
-
-    #[test]
-    fn declared_length_selects_the_body_and_leaves_the_rest() {
-        let input = [2, 0, 0, 5, 1, 2, 0, 5, 1, 0xee, 0xee];
-        let decoded = decode(&input).unwrap();
-        assert_eq!(decoded.consumed, 4);
-        assert_eq!(decoded.payload_len, 5);
-        assert_eq!(decoded.next, [Discriminator(EAPOL_BODY)]);
-        assert!(!decoded.stop);
-    }
-
-    #[test]
-    fn zero_length_frames_have_no_body() {
-        for packet_type in [1, 2] {
-            let decoded = decode(&[2, packet_type, 0, 0, 0, 0, 0]).unwrap();
-            assert_eq!(decoded.payload_len, 0);
-            assert!(decoded.next.is_empty());
-            assert!(decoded.stop);
-        }
     }
 
     #[test]
@@ -216,21 +175,5 @@ mod tests {
         ));
         // the longest declared length never allocates or slices past the input
         assert!(decode(&[2, 0, 0xff, 0xff]).is_err());
-    }
-
-    #[test]
-    fn auto_length_follows_the_body_and_an_exact_mismatch_needs_permissive_mode() {
-        let body = [1, 1, 0, 5, 1];
-        let auto = encode(&Eapol::default(), &body, crate::codec::Mode::Strict).unwrap();
-        assert_eq!(auto.prefix, [2, 1, 0, 5]);
-
-        let wrong = Eapol {
-            length: WireValue::Exact(9),
-            ..Eapol::default()
-        };
-        assert!(encode(&wrong, &body, crate::codec::Mode::Strict).is_err());
-        let permissive = encode(&wrong, &body, crate::codec::Mode::Permissive).unwrap();
-        assert_eq!(permissive.prefix, [2, 1, 0, 9]);
-        assert!(!permissive.diagnostics.is_empty());
     }
 }

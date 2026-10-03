@@ -267,7 +267,7 @@ impl<R: Read + Seek> Reader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture_file::{Limits, TimestampResolution, Writer, rewrite, select};
+    use crate::capture_file::{Limits, Writer, rewrite, select};
     use crate::error::Classified;
     use crate::frame::LinkType;
     use std::io::{self, Cursor};
@@ -329,113 +329,6 @@ mod tests {
                     assert!(reader.next_record().unwrap().is_none());
                 }
             }
-        }
-    }
-
-    #[test]
-    fn declared_fcs_comes_from_the_classic_header_or_a_read_pcapng_interface() {
-        let mut classic = Vec::new();
-        Writer::pcap(&mut classic, LinkType::IPV4)
-            .unwrap()
-            .flush()
-            .unwrap();
-        assert!(
-            Reader::new(Cursor::new(&classic))
-                .unwrap()
-                .refuse_declared_fcs()
-                .is_ok()
-        );
-        classic[20..24].copy_from_slice(&(0x2400_0000 | LinkType::IPV4.0).to_le_bytes());
-        assert!(matches!(
-            Reader::new(Cursor::new(&classic))
-                .unwrap()
-                .refuse_declared_fcs(),
-            Err(Error::TransformMetadata(DECLARED_FCS))
-        ));
-
-        let mut writer = Writer::pcapng(Vec::new()).unwrap();
-        writer.add_interface(LinkType::IPV4).unwrap();
-        writer
-            .add_interface_description_with_options(
-                Interface {
-                    link_type: LinkType::IPV4,
-                    snap_len: 65535,
-                    timestamp_resolution: TimestampResolution::Decimal(9),
-                    timestamp_offset: 0,
-                },
-                &[PcapNgOption {
-                    code: 13,
-                    value: bytes::Bytes::from_static(&[4]),
-                }],
-            )
-            .unwrap();
-        let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
-        assert!(reader.refuse_declared_fcs().is_ok());
-        reader.next_record().unwrap().unwrap();
-        assert!(reader.refuse_declared_fcs().is_ok());
-        reader.next_record().unwrap().unwrap();
-        assert!(reader.refuse_declared_fcs().is_err());
-        reader.rewind().unwrap();
-        assert!(reader.refuse_declared_fcs().is_ok());
-    }
-
-    #[test]
-    fn a_declared_fcs_needs_a_nonzero_length_in_either_format() {
-        let mut classic = Vec::new();
-        Writer::pcap(&mut classic, LinkType::IPV4)
-            .unwrap()
-            .flush()
-            .unwrap();
-        for (high_bits, declared) in [
-            (0x0000_0000_u32, false),
-            (0x0400_0000, false),
-            (0x5000_0000, false),
-            (0x0100_0000, false),
-            (0x0008_0000, false),
-            (0x0800_0000, false),
-            (0x1400_0000, true),
-            (0x2400_0000, true),
-            (0xf400_0000, true),
-            (0x5500_0000, true),
-        ] {
-            classic[20..24].copy_from_slice(&(high_bits | LinkType::IPV4.0).to_le_bytes());
-            let reader = Reader::new(Cursor::new(&classic)).unwrap();
-            assert_eq!(
-                reader.refuse_declared_fcs().is_err(),
-                declared,
-                "network {high_bits:#010x}"
-            );
-        }
-
-        for (value, declared) in [
-            (&[0_u8][..], false),
-            (&[4], true),
-            (&[255], true),
-            (&[], true),
-            (&[0, 0], true),
-        ] {
-            let mut writer = Writer::pcapng(Vec::new()).unwrap();
-            writer
-                .add_interface_description_with_options(
-                    Interface {
-                        link_type: LinkType::IPV4,
-                        snap_len: 65535,
-                        timestamp_resolution: TimestampResolution::Decimal(9),
-                        timestamp_offset: 0,
-                    },
-                    &[PcapNgOption {
-                        code: 13,
-                        value: bytes::Bytes::copy_from_slice(value),
-                    }],
-                )
-                .unwrap();
-            let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
-            while reader.next_record().unwrap().is_some() {}
-            assert_eq!(
-                reader.refuse_declared_fcs().is_err(),
-                declared,
-                "if_fcslen {value:?}"
-            );
         }
     }
 

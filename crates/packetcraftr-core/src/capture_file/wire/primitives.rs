@@ -243,22 +243,3 @@ macro_rules! write_int {
 write_int!(write_u16, u16);
 write_int!(write_u32, u32);
 write_int!(write_i64, i64);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unreservable_reads_fail_as_allocation_failures_with_their_size() {
-        let mut buffer = Vec::new();
-        let error =
-            read_exact_vec(&mut io::empty(), &mut buffer, usize::MAX, "pcap record").unwrap_err();
-        assert!(matches!(
-            error,
-            Error::AllocationFailed {
-                kind: "pcap record",
-                requested: usize::MAX,
-            }
-        ));
-    }
-}

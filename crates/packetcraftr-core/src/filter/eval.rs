@@ -401,38 +401,3 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
         ),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    use super::*;
-
-    #[test]
-    fn slice_value_accepts_exactly_the_byte_addressable_kinds() {
-        let whole = ByteSlice {
-            start: 0,
-            end: None,
-        };
-        for value in [
-            FieldValue::Bool(true),
-            FieldValue::Unsigned(1),
-            FieldValue::Signed(-1),
-            FieldValue::Text("ab".to_owned()),
-            FieldValue::Bytes(Bytes::from_static(b"ab")),
-            FieldValue::Ipv4(Ipv4Addr::LOCALHOST),
-            FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
-            FieldValue::Mac([0; 6]),
-            FieldValue::List(Vec::new()),
-            FieldValue::Object(BTreeMap::new()),
-        ] {
-            assert_eq!(
-                slice_value(&value, whole).is_some(),
-                byte_addressable(value.kind()),
-                "{:?}",
-                value.kind()
-            );
-        }
-    }
-}

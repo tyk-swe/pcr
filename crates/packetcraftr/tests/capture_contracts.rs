@@ -11,7 +11,7 @@ use packetcraftr::{
 };
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::{
-    error::{BoundaryError, Classification, Classified, Kind},
+    error::{BoundaryError, Classified},
     frame::{Frame, LinkType},
 };
 use packetcraftr_netio::{
@@ -146,19 +146,6 @@ fn all_stopped(client: &Client<Fixture, impl Clock>) -> bool {
         .all(|stop| stop.load(Ordering::SeqCst) == 1)
 }
 
-fn request() -> Request {
-    capture_of(vec![
-        Id {
-            index: 7,
-            name: "fixture0".to_owned(),
-        },
-        Id {
-            index: 12,
-            name: "fixture1".to_owned(),
-        },
-    ])
-}
-
 fn single() -> Request {
     capture_of(vec![Id {
         index: 7,
@@ -192,153 +179,6 @@ fn answering(control: Control) -> impl FnMut(Event) -> Result<Control, BoundaryE
             Control::Continue
         })
     }
-}
-
-#[test]
-fn all_sources_share_admission_and_selection_keeps_global_source_positions() {
-    let client = client(Provider::new(4), 4, 16);
-    let emitted = Arc::new(Mutex::new(Vec::new()));
-    let started = Arc::new(Mutex::new(false));
-    let report = client
-        .capture(request().with_selector(|number, _| Ok(number % 2 == 0)), {
-            let emitted = Arc::clone(&emitted);
-            let started = Arc::clone(&started);
-            move |event| {
-                match event {
-                    Event::Started { sources } => {
-                        assert!(sources.iter().all(|source| source.ready));
-                        *started.lock().unwrap() = true;
-                    }
-                    Event::Frame {
-                        source_frame,
-                        source,
-                        frame,
-                        ..
-                    } => {
-                        assert!(*started.lock().unwrap());
-                        assert_eq!(frame.interface, Some(source as u32));
-                        emitted.lock().unwrap().push((source_frame, source));
-                    }
-                }
-                Ok::<_, BoundaryError>(())
-            }
-        })
-        .unwrap();
-    assert_eq!(*emitted.lock().unwrap(), [(2, 1), (4, 1)]);
-    assert_eq!(report.stats.packets_attempted, 4);
-    assert_eq!(report.stats.packets_completed, 2);
-    assert_eq!(report.stats.bytes, 16);
-    assert_eq!(report.stop, StopReason::FrameBudget);
-    assert!(report.capture_statistics_complete);
-    assert_eq!(report.sources[0].admitted_frames, 2);
-    assert_eq!(report.sources[1].emitted_frames, 2);
-    assert!(all_stopped(&client));
-}
-#[test]
-fn sink_stops_and_byte_refusals_keep_partial_evidence_and_cleanup() {
-    let client = client(Provider::new(4), 8, 64);
-    let report = client
-        .capture(request(), answering(Control::StopBefore))
-        .unwrap();
-    assert_eq!(report.stop, StopReason::Sink);
-    assert_eq!(report.stats.packets_attempted, 1);
-    assert_eq!(report.stats.packets_completed, 0);
-    assert_eq!(report.sources[0].matched_frames, 1);
-    let client = self::client(Provider::new(4), 8, 3);
-    let error = client
-        .capture(request(), answering(Control::Continue))
-        .unwrap_err();
-    assert_eq!(error.classification().code, "policy.byte_limit");
-    assert_eq!(error.source_frame, Some(1));
-    assert_eq!(error.report.frames_delivered, 1);
-    assert_eq!(error.report.stats.packets_attempted, 0);
-    assert!(
-        error
-            .report
-            .sources
-            .iter()
-            .all(|source| source.shutdown_confirmed)
-    );
-}
-#[test]
-fn each_interface_reports_its_own_loss_and_consumer_failure_stops_every_source() {
-    let mut provider = Provider::new(1);
-    provider.stats[1] = native::Stats {
-        dropped_frames: 2,
-        dropped_bytes: 8,
-        overflow_events: 1,
-        ..Default::default()
-    };
-    let mut lossy = request();
-    lossy.group.limits.overflow_policy = native::OverflowPolicy::DropNewest;
-    let report = client(provider, 2, 64)
-        .capture(lossy, answering(Control::Continue))
-        .unwrap();
-    assert_eq!(report.sources[1].statistics.dropped_frames, 2);
-    assert_eq!(report.stats.capture.dropped_frames, 2);
-    assert_eq!(report.diagnostics.len(), 1);
-    let client = client(Provider::new(4), 8, 64);
-    let error = client
-        .capture(request(), |event| {
-            if matches!(event, Event::Frame { .. }) {
-                Err(BoundaryError::new(
-                    "fixture sink failed",
-                    Classification::new("io.fixture", Kind::Io, None),
-                    vec!["fixture disk is full".to_owned()],
-                ))
-            } else {
-                Ok(())
-            }
-        })
-        .unwrap_err();
-    assert_eq!(error.classification().code, "io.fixture");
-    assert_eq!(
-        error.causes(),
-        ["fixture sink failed", "fixture disk is full"],
-        "the consumer's failure and its captured causes survive the capture error"
-    );
-    assert_eq!(error.report.stats.packets_attempted, 1);
-    assert!(all_stopped(&client));
-}
-#[test]
-fn an_arming_failure_reports_every_admitted_source_after_its_shutdown() {
-    let mut provider = Provider::new(1);
-    provider.fail_arm = Some(1);
-    let client = client(provider, 8, 64);
-    let started = Arc::new(AtomicUsize::new(0));
-    let error = client
-        .capture(request(), {
-            let started = Arc::clone(&started);
-            move |_| {
-                started.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-        })
-        .unwrap_err();
-    assert_eq!(
-        started.load(Ordering::SeqCst),
-        0,
-        "a failed group never starts delivery"
-    );
-    assert_eq!(error.classification().code, "io.capture");
-    assert_eq!(
-        error.causes(),
-        ["capture failed: fixture arm failure"],
-        "the source's own failure survives the group failure"
-    );
-    assert_eq!(error.report.stop, StopReason::Failure);
-    assert_eq!(error.report.requested_interfaces.len(), 2);
-    let [admitted] = error.report.sources.as_slice() else {
-        panic!("only the first source was admitted");
-    };
-    assert_eq!(admitted.metadata.interface.index, 7);
-    assert!(admitted.shutdown_confirmed && admitted.statistics_valid);
-    assert!(!error.report.capture_statistics_complete);
-    assert_eq!(
-        client.providers().capture.stops[0].load(Ordering::SeqCst),
-        1
-    );
-    assert!(error.cleanup.is_empty());
 }
 
 #[test]

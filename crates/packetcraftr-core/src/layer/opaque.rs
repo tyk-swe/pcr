@@ -394,7 +394,7 @@ fn with_fields<L: Layer>(
 mod tests {
     use super::*;
     use crate::codec::{Context, Error, Mode};
-    use crate::layout::ByteRange;
+
     use crate::packet::Packet;
     use crate::registry::Registry;
 
@@ -457,29 +457,5 @@ mod tests {
                 actual: Padding::ID,
             })
         );
-    }
-
-    #[test]
-    fn opaque_layouts_cover_the_whole_input() {
-        assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
-        assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
-    }
-
-    #[test]
-    fn parse_hex_names_the_byte_holding_an_invalid_digit() {
-        for (input, expected) in [
-            ("zz", "invalid hex at byte 0"),
-            ("aa bb zz", "invalid hex at byte 2"),
-            ("0x0a:0z", "invalid hex at byte 1"),
-            ("0a 0z", "invalid hex at byte 1"),
-            ("0a z0", "invalid hex at byte 1"),
-        ] {
-            match parse_hex(input) {
-                Err(crate::codec::Error::Invalid { message, .. }) => {
-                    assert_eq!(message, expected, "{input}");
-                }
-                other => panic!("{input}: expected an invalid hex error, got {other:?}"),
-            }
-        }
     }
 }

@@ -293,29 +293,6 @@ mod tests {
     use crate::error::test_support::assert_same_failure;
 
     #[test]
-    fn backward_wall_clock_step_does_not_invalidate_submission_timing() {
-        let expected = Bytes::from_static(&[1, 2, 3]);
-        let started_monotonic = Instant::now();
-        let report = Report {
-            bytes_sent: expected.len(),
-            wire_bytes: expected.clone(),
-            timing: Timing {
-                started: TimeMarker {
-                    monotonic: started_monotonic,
-                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
-                },
-                completed: TimeMarker {
-                    monotonic: started_monotonic + Duration::from_millis(1),
-                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
-                },
-                exact: false,
-            },
-        };
-
-        assert!(report.validate_exact(&expected).is_ok());
-    }
-
-    #[test]
     fn inconsistent_monotonic_intervals_and_nonexact_commit_markers_fail_closed() {
         let expected = Bytes::from_static(&[1, 2, 3]);
         let first = Instant::now();

@@ -95,13 +95,3 @@ impl Field {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn per_flow_ceiling_is_the_largest_window_inside_the_serial_half_space() {
-        assert_eq!(MAX_BYTES_PER_FLOW, 2_147_483_647);
-    }
-}

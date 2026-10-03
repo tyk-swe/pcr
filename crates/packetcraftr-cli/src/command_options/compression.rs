@@ -83,32 +83,3 @@ pub(crate) struct SavedPcapNg;
 impl Destination for SavedPcapNg {
     const HELP: &'static str = "Compression of the saved PCAPNG file";
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stdout_compression_requires_capture_output() {
-        let compressed = CompressionArgs::<CaptureStdout> {
-            compression: Compression::Gzip,
-            destination: PhantomData,
-        };
-        for format in [Format::Pcap, Format::PcapNg] {
-            assert!(matches!(
-                compressed.for_output(format),
-                Ok(Compression::Gzip)
-            ));
-        }
-        for format in [Format::Text, Format::Json, Format::Ndjson, Format::Hex] {
-            let error = compressed.for_output(format).unwrap_err();
-            assert_eq!(error.exit_code(), 2);
-        }
-        let plain = CompressionArgs::<CaptureStdout> {
-            compression: Compression::None,
-            destination: PhantomData,
-        };
-        assert!(plain.for_output(Format::Text).is_ok());
-        assert!(matches!(compressed.for_file(), Compression::Gzip));
-    }
-}

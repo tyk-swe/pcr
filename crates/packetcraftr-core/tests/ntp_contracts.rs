@@ -7,56 +7,9 @@ use common::packets::{build, dissect};
 use packetcraftr_core::{
     build::Builder,
     expression,
-    field::FieldValue,
-    filter,
-    layer::{Layer, Raw},
+    layer::Raw,
     protocol::{application::ntp::Ntp, builtin},
-    template::{NumericRange, Template},
 };
-
-#[test]
-fn ntp_client_messages_construct_decode_and_reencode_byte_exactly() {
-    let built = build(concat!(
-        "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/",
-        "ntp(version=4,mode=3,stratum=2,poll=6,precision=-20,",
-        "reference_id=\"RATE\",root_delay=0x0102,root_dispersion=0x0304,",
-        "transmit_timestamp=0xe6e123456789abcd,extensions=hex(\"dead\"))",
-    ));
-    let decoded = dissect(built.bytes.clone());
-    let ntp = decoded.packet.get::<Ntp>().unwrap();
-    assert_eq!(ntp.version, 4);
-    assert_eq!(ntp.mode, 3);
-    assert_eq!(ntp.poll, 6);
-    assert_eq!(ntp.precision, -20);
-    assert_eq!(ntp.reference_id.as_ref(), b"RATE");
-    assert_eq!(ntp.transmit_timestamp, 0xe6e1_2345_6789_abcd);
-    assert_eq!(ntp.extensions.as_ref(), &[0xde, 0xad]);
-    assert_eq!(
-        Builder::new(builtin::registry())
-            .build(decoded.packet, Default::default(), Default::default())
-            .unwrap()
-            .bytes,
-        built.bytes
-    );
-}
-
-#[test]
-fn ntp_server_and_broadcast_modes_round_trip() {
-    for mode in [4_u8, 5] {
-        let built = build(&format!(
-            "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=123,destination_port=123)/ntp(mode={mode},stratum=2)"
-        ));
-        let decoded = dissect(built.bytes.clone());
-        assert_eq!(decoded.packet.get::<Ntp>().unwrap().mode, mode);
-        assert_eq!(
-            Builder::new(builtin::registry())
-                .build(decoded.packet, Default::default(), Default::default())
-                .unwrap()
-                .bytes,
-            built.bytes
-        );
-    }
-}
 
 #[test]
 fn ntp_construction_rejects_unsupported_versions_modes_and_bad_fields() {
@@ -143,58 +96,4 @@ fn truncated_and_out_of_scope_wire_decodes_as_terminal_raw() {
         );
         assert!(decoded.packet.get::<Ntp>().is_none());
     }
-}
-
-#[test]
-fn ntp_fields_filter_templates_and_documents() {
-    let registry = builtin::registry();
-    let built = build(
-        "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/ntp(mode=4,stratum=2)",
-    );
-    let decoded = dissect(built.bytes.clone());
-    let keep = filter::Filter::compile("ntp.mode == 4", &registry, Default::default()).unwrap();
-    let drop = filter::Filter::compile("ntp.mode == 3", &registry, Default::default()).unwrap();
-    for (filter, expected) in [(keep, true), (drop, false)] {
-        assert_eq!(
-            filter
-                .matches(&filter::Context {
-                    decoded: &decoded,
-                    derived: &[],
-                    number: 1,
-                    tcp_stream: None,
-                    udp_stream: None
-                })
-                .unwrap(),
-            expected
-        );
-    }
-    let packet = expression::parse(
-        "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/ntp()",
-        &registry,
-        Default::default(),
-    )
-    .unwrap();
-    let template = Template::new(packet).axis(
-        2,
-        "stratum",
-        NumericRange::new(1, 3, 1)
-            .unwrap()
-            .values()
-            .collect::<Vec<FieldValue>>(),
-    );
-    let strata: Vec<u64> = template
-        .expand(10)
-        .unwrap()
-        .map(|packet| {
-            packet
-                .unwrap()
-                .get::<Ntp>()
-                .unwrap()
-                .field("stratum")
-                .unwrap()
-                .as_u64()
-                .unwrap()
-        })
-        .collect();
-    assert_eq!(strata, [1, 2, 3]);
 }

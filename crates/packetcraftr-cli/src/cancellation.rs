@@ -50,11 +50,6 @@ fn remove_staged() {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn is_staged(path: &Path) -> bool {
-    staged().iter().any(|listed| listed == path)
-}
-
 pub(crate) fn check() -> Result<(), CliError> {
     signal().check().map_err(CliError::classified)?;
     crate::invocation::check()

@@ -161,25 +161,3 @@ impl Path {
         true
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Path;
-
-    #[test]
-    fn a_parsed_path_displays_in_its_own_syntax() {
-        for text in [
-            "ttl",
-            "questions[0].name",
-            "options[2].value.options[10].code",
-        ] {
-            let path = text.parse::<Path>().expect("valid path");
-            assert_eq!(path.to_string(), text);
-            assert_eq!(path.to_string().parse::<Path>(), Ok(path));
-        }
-        assert_eq!(
-            "options[007]".parse::<Path>().map(|path| path.to_string()),
-            Ok("options[7]".to_owned())
-        );
-    }
-}

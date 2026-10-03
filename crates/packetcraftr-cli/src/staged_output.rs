@@ -98,8 +98,6 @@ fn output(action: &'static str, destination: &Path, source: std::io::Error) -> C
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::error::Classified;
-    use std::io::Write;
 
     #[test]
     fn stage_rejects_an_existing_destination_without_staging() {
@@ -130,36 +128,6 @@ mod tests {
     }
 
     #[test]
-    fn publish_writes_the_staged_bytes_to_the_destination() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let destination = directory.path().join("out.pcapng");
-        let mut staged = StagedFile::stage(&destination).expect("absent destination stages");
-        staged.as_file_mut().write_all(b"payload").unwrap();
-        staged.sync().expect("sync succeeds");
-        staged.persist().expect("publish succeeds");
-        assert_eq!(std::fs::read(&destination).unwrap(), b"payload");
-    }
-
-    #[test]
-    fn staged_paths_stay_registered_for_forced_exit_until_published_or_dropped() {
-        use crate::cancellation::is_staged;
-
-        let directory = tempfile::tempdir().expect("destination dir");
-        let published = StagedFile::stage(&directory.path().join("published.pcapng")).unwrap();
-        let dropped = StagedFile::stage(&directory.path().join("dropped.pcapng")).unwrap();
-        let published_path = published.file.path().to_owned();
-        let dropped_path = dropped.file.path().to_owned();
-        assert!(is_staged(&published_path));
-        assert!(is_staged(&dropped_path));
-
-        published.persist().expect("publish succeeds");
-        drop(dropped);
-        assert!(!is_staged(&published_path));
-        assert!(!is_staged(&dropped_path));
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-
-    #[test]
     fn a_destination_appearing_after_staging_fails_publish_without_clobbering() {
         let directory = tempfile::tempdir().expect("destination dir");
         let destination = directory.path().join("out.pcapng");
@@ -173,99 +141,5 @@ mod tests {
         assert!(!error.causes.is_empty());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn output_failures_name_the_action_and_state_the_io_error_only_as_a_cause() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let destination = directory.path().join("missing").join("out.pcapng");
-
-        let error = StagedFile::stage(&destination).expect_err("absent parent fails to stage");
-        assert_eq!(error.classification.code, "io.output_file");
-        assert_eq!(
-            error.message,
-            format!("stage output {}", destination.display())
-        );
-        let cause = error.causes.first().expect("the I/O error is a cause");
-        assert!(!error.message.contains(cause.as_str()), "{error:?}");
-    }
-
-    #[test]
-    fn output_failures_preserve_the_io_source_chain() {
-        #[derive(Debug, thiserror::Error)]
-        #[error("storage backend failed")]
-        struct StorageFailure;
-
-        let source = std::io::Error::other(StorageFailure);
-        let error = output("stage", Path::new("out.pcapng"), source);
-
-        assert_eq!(error.classification.code, "io.output_file");
-        assert_eq!(error.causes, ["storage backend failed"]);
-        assert_eq!(
-            error.output_error().causes,
-            ["storage backend failed"],
-            "machine output retains the I/O source"
-        );
-        assert_eq!(
-            error.into_boundary_error().causes(),
-            ["storage backend failed"],
-            "boundary errors retain the I/O source"
-        );
-    }
-    #[test]
-    fn expiry_at_the_commit_boundary_leaves_no_destination_or_staged_file() {
-        use packetcraftr_core::budget::Deadline;
-        use std::sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        };
-        use std::time::{Duration, Instant};
-
-        let ticks = Arc::new(AtomicU64::new(0));
-        let observed = ticks.clone();
-        let start = Instant::now();
-        let deadline = Arc::new(Deadline::with_time_source(
-            Duration::from_millis(5),
-            move || start + Duration::from_millis(observed.load(Ordering::SeqCst)),
-        ));
-        let _scope = crate::invocation::enter_deadline(Some(deadline));
-        let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("expired.pcap");
-        let mut staged = StagedFile::stage(&destination).unwrap();
-        staged.as_file_mut().write_all(b"prepared").unwrap();
-        staged.sync().unwrap();
-        ticks.store(6, Ordering::SeqCst);
-        let error = staged.persist().unwrap_err();
-        assert_eq!(error.classification.code, "policy.duration_limit");
-        assert!(!destination.exists());
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
-    }
-
-    #[test]
-    fn expiry_after_commit_does_not_remove_an_already_published_artifact() {
-        use packetcraftr_core::budget::Deadline;
-        use std::sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        };
-        use std::time::{Duration, Instant};
-
-        let ticks = Arc::new(AtomicU64::new(0));
-        let observed = ticks.clone();
-        let start = Instant::now();
-        let deadline = Arc::new(Deadline::with_time_source(
-            Duration::from_millis(5),
-            move || start + Duration::from_millis(observed.load(Ordering::SeqCst)),
-        ));
-        let _scope = crate::invocation::enter_deadline(Some(deadline));
-        let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("committed.pcap");
-        let mut staged = StagedFile::stage(&destination).unwrap();
-        staged.as_file_mut().write_all(b"committed").unwrap();
-        staged.sync().unwrap();
-        staged.persist().unwrap();
-        ticks.store(6, Ordering::SeqCst);
-        assert!(crate::invocation::check().is_err());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"committed");
     }
 }

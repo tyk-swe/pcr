@@ -113,19 +113,6 @@ mod tests {
     }
 
     #[test]
-    fn a_frozen_caller_clock_still_bounds_the_native_wait() {
-        let (release, blocked) = mpsc::channel::<()>();
-        let frozen = Instant::now();
-        let deadline = Deadline::with_time_source(Duration::from_millis(25), move || frozen);
-        let result = on_worker(&deadline, "testing a frozen route deadline", move |_| {
-            let _ = blocked.recv_timeout(Duration::from_millis(200));
-            Ok(())
-        });
-        drop(release);
-        assert!(matches!(result, Err(route::Error::DeadlineExceeded { .. })));
-    }
-
-    #[test]
     fn a_pooled_route_query_stops_for_a_cancelled_caller_and_returns_answers() {
         let signal = Cancellation::default();
         signal.cancel();

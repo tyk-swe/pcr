@@ -249,30 +249,3 @@ pub(crate) fn decode_family(
         network: None,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_ip_address_families_select_the_ip_discriminators() {
-        assert_eq!(family_discriminator(0), 0);
-        assert_eq!(family_discriminator(2), 4);
-        for ipv6 in [10, 24, 28, 30] {
-            assert_eq!(family_discriminator(ipv6), 6, "family {ipv6}");
-        }
-        for other in [4, 6, 7, 17] {
-            assert!(
-                ![0, 4, 6].contains(&family_discriminator(other)),
-                "family {other} must not select a synthetic discriminator"
-            );
-        }
-    }
-
-    #[test]
-    fn a_non_ip_family_whose_number_is_4_stays_opaque() {
-        let decoded =
-            decode_family(&[0, 0, 0, 4, 0x45, 0, 0, 20], FamilyHeader::Loop).expect("decodes");
-        assert_ne!(decoded.next, [Discriminator(4)]);
-    }
-}

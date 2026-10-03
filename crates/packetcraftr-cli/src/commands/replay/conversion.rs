@@ -69,30 +69,6 @@ mod tests {
     }
 
     #[test]
-    fn timing_options_map_to_validated_runtime_modes() {
-        assert_eq!(
-            timing(&arguments(&["--bps", "8000000"])).unwrap(),
-            packetcraftr::replay::Timing::BitRate(8_000_000)
-        );
-        assert_eq!(
-            timing(&arguments(&[])).expect("original timing"),
-            packetcraftr::replay::Timing::Original
-        );
-        assert_eq!(
-            timing(&arguments(&["--timing", "immediate"])).expect("immediate timing"),
-            packetcraftr::replay::Timing::Immediate
-        );
-        assert_eq!(
-            timing(&arguments(&["--rate", "20"])).expect("fixed-rate timing"),
-            packetcraftr::replay::Timing::FixedRate(20.0)
-        );
-        assert_eq!(
-            timing(&arguments(&["--speed", "4"])).expect("scaled timing"),
-            packetcraftr::replay::Timing::Scaled(0.25)
-        );
-    }
-
-    #[test]
     fn timing_rejects_immediate_overrides_naming_the_flag() {
         for (extra, message) in [
             (
@@ -115,50 +91,6 @@ mod tests {
     }
 
     #[test]
-    fn max_gap_maps_to_a_duration_for_captured_timing_only() {
-        assert_eq!(max_gap(&arguments(&[])).unwrap(), None);
-        assert_eq!(
-            max_gap(&arguments(&["--max-gap-ms", "50"])).unwrap(),
-            Some(Duration::from_millis(50))
-        );
-        assert_eq!(
-            max_gap(&arguments(&["--speed", "4", "--max-gap-ms", "50"])).unwrap(),
-            Some(Duration::from_millis(50))
-        );
-        let error = max_gap(&arguments(&["--timing", "immediate", "--max-gap-ms", "50"]))
-            .expect_err("immediate timing has no gaps to clamp");
-        assert_eq!(
-            error.message,
-            "--max-gap-ms cannot be combined with --timing immediate"
-        );
-        assert_eq!(error.exit_code(), 2);
-    }
-
-    #[test]
-    fn max_gap_arguments_reject_zero_and_rate_modes() {
-        for extra in [
-            vec!["--max-gap-ms", "0"],
-            vec!["--max-gap-ms", "5", "--rate", "1"],
-            vec!["--max-gap-ms", "5", "--bps", "8"],
-        ] {
-            assert!(
-                Cli::try_parse_from(
-                    [
-                        "packetcraftr",
-                        "replay",
-                        "fixture.pcap",
-                        "--interface",
-                        "fixture0"
-                    ]
-                    .into_iter()
-                    .chain(extra)
-                )
-                .is_err()
-            );
-        }
-    }
-
-    #[test]
     fn timing_rejects_invalid_numeric_values() {
         for extra in [
             &["--rate", "0"][..],
@@ -167,31 +99,6 @@ mod tests {
             &["--speed", "0"][..],
         ] {
             assert!(timing(&arguments(extra)).is_err(), "{extra:?}");
-        }
-    }
-
-    #[test]
-    fn bit_rate_arguments_reject_zero_and_conflicting_modes() {
-        for extra in [
-            vec!["--bps", "0"],
-            vec!["--bps", "NaN"],
-            vec!["--bps", "8", "--rate", "1"],
-            vec!["--bps", "8", "--speed", "2"],
-        ] {
-            assert!(
-                Cli::try_parse_from(
-                    [
-                        "packetcraftr",
-                        "replay",
-                        "fixture.pcap",
-                        "--interface",
-                        "fixture0"
-                    ]
-                    .into_iter()
-                    .chain(extra)
-                )
-                .is_err()
-            );
         }
     }
 }

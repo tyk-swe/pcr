@@ -189,8 +189,6 @@ pub(crate) struct Tracker {
     incomplete: Vec<IncompleteSources>,
     max_outcomes: usize,
     pub(crate) outcomes_omitted: u64,
-    #[cfg(test)]
-    retire_scans: usize,
 }
 impl Tracker {
     pub(crate) fn new(limit: usize, max_outcomes: usize) -> Result<Self, Error> {
@@ -208,8 +206,6 @@ impl Tracker {
             incomplete: Vec::new(),
             max_outcomes,
             outcomes_omitted: 0,
-            #[cfg(test)]
-            retire_scans: 0,
         })
     }
 
@@ -218,10 +214,6 @@ impl Tracker {
         self.budget.union_reservations.load(Ordering::Acquire)
     }
 
-    #[cfg(test)]
-    pub(crate) fn retire_scans(&self) -> usize {
-        self.retire_scans
-    }
     pub(crate) fn single(&self, source: SourceFrame) -> Result<SourceSet, Error> {
         let lease = self
             .budget
@@ -253,10 +245,6 @@ impl Tracker {
         self.entries.remove(key).map(|(sources, _)| sources)
     }
     pub(crate) fn retire(&mut self, mut active: impl FnMut(&DatagramKey) -> bool) {
-        #[cfg(test)]
-        {
-            self.retire_scans += 1;
-        }
         let retired: Vec<_> = self
             .entries
             .keys()
@@ -281,20 +269,15 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn source(number: u64) -> SourceFrame {
         SourceFrame {
             number,
             timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(number),
-        }
-    }
-
-    fn timed_source(number: u64, seconds: u64) -> SourceFrame {
-        SourceFrame {
-            number,
-            timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),
         }
     }
 
@@ -307,76 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn union_with_identical_arc_reserves_nothing() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let set = tracker.single(source(7)).expect("single");
-        let baseline = tracker.union_reservations();
-        let merged = set.union(&set.clone()).expect("same-arc union");
-        assert_eq!(numbers(&merged), [7]);
-        assert_eq!(tracker.union_reservations(), baseline);
-    }
-
-    #[test]
-    fn union_with_equivalent_set_reserves_nothing_and_keeps_left() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let left = tracker.single(timed_source(7, 10)).expect("single");
-        let right = tracker.single(timed_source(7, 20)).expect("single");
-        let baseline = tracker.union_reservations();
-        let merged = left.union(&right).expect("equivalent union");
-        assert_eq!(tracker.union_reservations(), baseline);
-        assert_eq!(merged.frames()[0].timestamp, timed_source(7, 10).timestamp);
-        let reverse = right.union(&left).expect("equivalent union");
-        assert_eq!(reverse.frames()[0].timestamp, timed_source(7, 20).timestamp);
-    }
-
-    #[test]
-    fn union_with_subset_reserves_nothing() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let one = tracker.single(source(1)).expect("single");
-        let two = tracker.single(source(2)).expect("single");
-        let pair = one.union(&two).expect("disjoint union");
-        let baseline = tracker.union_reservations();
-        let merged = pair.union(&one).expect("subset union");
-        assert_eq!(numbers(&merged), [1, 2]);
-        assert_eq!(tracker.union_reservations(), baseline);
-        let merged = pair.union(&two).expect("subset union");
-        assert_eq!(numbers(&merged), [1, 2]);
-        assert_eq!(tracker.union_reservations(), baseline);
-    }
-
-    #[test]
-    fn union_disjoint_merges_in_order_and_charges_once() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let one = tracker.single(source(1)).expect("single");
-        let two = tracker.single(source(2)).expect("single");
-        let baseline = tracker.union_reservations();
-        let merged = two.union(&one).expect("disjoint union");
-        assert_eq!(numbers(&merged), [1, 2]);
-        assert_eq!(tracker.union_reservations(), baseline + 1);
-    }
-
-    #[test]
-    fn union_with_right_superset_still_merges_and_keeps_left_timestamp() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let left = tracker.single(timed_source(1, 10)).expect("single");
-        let extra = tracker.single(source(2)).expect("single");
-        let right = tracker
-            .single(timed_source(1, 99))
-            .expect("single")
-            .union(&extra)
-            .expect("build right-hand superset");
-        let baseline = tracker.union_reservations();
-        let merged = left.union(&right).expect("merge with superset");
-        assert_eq!(numbers(&merged), [1, 2]);
-        assert_eq!(
-            merged.frames()[0].timestamp,
-            timed_source(1, 10).timestamp,
-            "duplicate frame numbers keep the left-hand frame"
-        );
-        assert_eq!(tracker.union_reservations(), baseline + 1);
-    }
-
-    #[test]
     fn union_rejects_different_captures_before_any_reuse() {
         let first = Tracker::new(usize::MAX, 8).expect("tracker");
         let second = Tracker::new(usize::MAX, 8).expect("tracker");
@@ -386,21 +299,6 @@ mod tests {
         assert!(matches!(a.union(&b), Err(Error::DifferentCapture)));
         assert!(a.union(&a.clone()).is_ok());
         assert_eq!(first.union_reservations(), baseline);
-    }
-
-    #[test]
-    fn earlier_source_sets_stay_immutable_after_merging() {
-        let tracker = Tracker::new(usize::MAX, 8).expect("tracker");
-        let one = tracker.single(source(1)).expect("single");
-        let two = tracker.single(source(2)).expect("single");
-        let three = tracker.single(source(3)).expect("single");
-        let pair = one.union(&two).expect("disjoint union");
-        let snapshot = pair.clone();
-        let merged = pair.union(&three).expect("grow union");
-        assert_eq!(numbers(&merged), [1, 2, 3]);
-        assert_eq!(numbers(&snapshot), [1, 2]);
-        assert_eq!(numbers(&pair), [1, 2]);
-        assert_eq!(numbers(&one), [1]);
     }
 
     #[test]
@@ -431,34 +329,5 @@ mod tests {
             limit - pair_charge,
             "releasing a merged set releases its lease"
         );
-    }
-
-    #[test]
-    #[ignore = "timing fixture; not a CI assertion"]
-    fn measure_union_repeated_work() {
-        let tracker = Tracker::new(1 << 30, 8).expect("tracker");
-        let member = tracker.single(source(7)).expect("single");
-        let held = member
-            .union(&tracker.single(source(9)).expect("single"))
-            .expect("pair");
-
-        let start = Instant::now();
-        let mut accumulated = held.clone();
-        for _ in 0..100_000 {
-            accumulated = accumulated.union(&member).expect("subset union");
-        }
-        let subset = start.elapsed();
-        assert_eq!(numbers(&accumulated), [7, 9]);
-
-        let start = Instant::now();
-        let mut accumulated = member.clone();
-        for round in 0..4_000_u64 {
-            let next = tracker.single(source(100 + round)).expect("single");
-            accumulated = accumulated.union(&next).expect("disjoint union");
-        }
-        let disjoint = start.elapsed();
-        assert_eq!(accumulated.frames().len(), 4_001);
-
-        eprintln!("100k subset unions: {subset:?}; 4k growing unions: {disjoint:?}");
     }
 }

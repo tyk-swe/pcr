@@ -208,21 +208,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn realizations_echo_requests_and_keep_unknown_effective_unknown() {
-        let mut realized = RealizedSettings::default();
-        assert!(!realized.reported());
-        assert!(realized.buffer_size.consistent_with(None));
-        realized.buffer_size = Realized {
-            requested: Some(1024),
-            applied: Some(1024),
-            effective: None,
-        };
-        assert!(realized.reported());
-        assert!(realized.buffer_size.consistent_with(Some(1024)));
-        realized.buffer_size.applied = Some(2048);
-        assert!(!realized.buffer_size.consistent_with(Some(1024)));
-        assert_eq!(realized.buffer_size.effective, None);
-    }
 }

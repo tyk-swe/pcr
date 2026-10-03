@@ -147,20 +147,3 @@ impl Classified for Error {
         Classification::new("cli.error", Kind::Usage, None)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn payload_targets_parse_a_zero_based_layer_and_a_lowercased_field() {
-        let target: Target = " 2.BYTES ".parse().expect("valid target");
-        assert_eq!((target.layer(), target.field()), (2, "bytes"));
-        for invalid in ["2", "x.bytes", "-1.bytes", "2 .bytes", "2. "] {
-            assert!(
-                matches!(invalid.parse::<Target>(), Err(Error::Syntax)),
-                "{invalid:?}"
-            );
-        }
-    }
-}

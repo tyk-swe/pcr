@@ -1,0 +1,49 @@
+{
+  "schema": "packetcraftr.output/v6",
+  "command": "http2",
+  "mode": "stream",
+  "sequence": 29,
+  "event": "http2_connection",
+  "status": "success",
+  "result": {
+    "stream": 0,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.1",
+        "source_port": 40000,
+        "destination": "198.51.100.2",
+        "destination_port": 80
+      }
+    },
+    "startup": "prior_knowledge",
+    "status": "complete",
+    "client_settings": {
+      "header_table_size": 4096,
+      "enable_push": true,
+      "max_concurrent_streams": 100,
+      "initial_window_size": 65535,
+      "max_frame_size": 16384,
+      "max_header_list_size": null
+    },
+    "server_settings": {
+      "header_table_size": 4096,
+      "enable_push": true,
+      "max_concurrent_streams": 100,
+      "initial_window_size": 65535,
+      "max_frame_size": 16384,
+      "max_header_list_size": null
+    },
+    "client_window": 65535,
+    "server_window": 65627,
+    "streams": 4,
+    "frames": 22,
+    "issues": 0,
+    "pending_settings": 0,
+    "pending_pings": 0,
+    "upgrade_response": null,
+    "upgrade_sources": []
+  },
+  "diagnostics": []
+}

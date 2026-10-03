@@ -63,7 +63,7 @@ captures.
 Recipe commands such as `build` read a packet expression, JSON, or YAML from
 redirected stdin when neither `--packet` nor `--packet-file` is supplied. The
 capture readers `read`, `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`,
-`export`, `rewrite`, `verify-forwarding`, and `merge` accept `-` as a capture
+`http2`, `export`, `rewrite`, `verify-forwarding`, and `merge` accept `-` as a capture
 path to stream PCAP or PCAPNG from redirected stdin, for example
 `packetcraftr --output ndjson read - < examples/captures/tls-handshake.pcapng`.
 `merge` and `verify-forwarding` accept stdin for at most one input. Files and
@@ -75,7 +75,7 @@ between reads and cannot interrupt one that is waiting for input.
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |
 | Capture transformation | `fragment`, `merge`, `export`, `rewrite` |
-| Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `verify-forwarding`, `fuzz` |
+| Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `http2`, `verify-forwarding`, `fuzz` |
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
 | References and shell integration | `topics`, `documentation` |
@@ -108,8 +108,8 @@ the same selectors, plus `*` for the protocol or the field.
 
 `--decode-as 'udp.port=5300:dns'` binds a port to a codec for decoding and
 display filters. It is accepted by `dissect`, `read`, `follow`, `stats`,
-`expert`, `tls`, `dns-read`, `http`, `export`, `rewrite`, `verify-forwarding`,
-and `capture`. TCP ports support `dns`, `http`, `tls`, and `raw`; UDP ports
+`expert`, `tls`, `dns-read`, `http`, `http2`, `export`, `rewrite`,
+`verify-forwarding`, and `capture`. TCP ports support `dns`, `http`, `tls`, and `raw`; UDP ports
 support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, `gtpu`, `tftp`,
 `syslog`, and `raw`. UDP 53, 5353 (mDNS), and 5355 (LLMNR) already decode as
 DNS, and TFTP transfers, which leave port 69, need `--decode-as
@@ -340,6 +340,7 @@ packetcraftr --output pcap read capture.pcap.gz --compression zstd > capture.pca
 packetcraftr --output csv read capture.pcapng --field frame.number --field ip.src --field udp.source_port
 packetcraftr dns-read capture.pcapng --dns-port 5353 --stream udp:3
 packetcraftr http examples/captures/http-stream.pcap
+packetcraftr http2 examples/captures/http2-multiplexed.pcapng
 packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
 ```
 
@@ -352,9 +353,13 @@ packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
   options conflict). It publishes only a new destination.
 - Capture readers detect gzip and Zstd by magic, including redirected stdin,
   and binary capture output takes `--compression none|gzip|zstd`.
-- `dns-read`, `http`, and `export` select a whole scoped conversation with
-  `--stream tcp:INDEX` (`udp:INDEX` too, except for `http`), including the
-  fragments that rebuilt its packets. `http` covers cleartext HTTP/1 only.
+- `dns-read`, `http`, `http2`, and `export` select a whole scoped conversation with
+  `--stream tcp:INDEX` (`udp:INDEX` too, except for `http` and `http2`), including the
+  fragments that rebuilt its packets. `http` covers cleartext HTTP/1 only;
+  `http2` covers cleartext HTTP/2 and h2c upgrades -- encrypted TLS traffic is
+  unsupported, never decrypted. `python3 scripts/check-http2-oracle.py` checks
+  the two checked-in `http2-*` example captures against a pinned TShark 4.6.4
+  oracle after `cargo build -p packetcraftr-cli`.
 - `dhcpv4` (`dhcp`) and `dhcpv6` (`dhcp6`) build and dissect DHCP below UDP; see
   `examples/documents/packet-dhcpv4-offer.json`,
   `examples/documents/packet-dhcpv6-reply.json`, and

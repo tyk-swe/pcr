@@ -43,10 +43,37 @@ per-section input semantics.
 | Scope paths | `max_scope_bytes` charges both retained path copies and conservative table/header capacity. Output shares immutable paths. Count is also bounded from the physical frame ceiling. This is a retained metadata charge, not allocator accounting. |
 | IP state | `max_ip_reassembly_bytes` covers retained fragments, reconstruction/cascade buffers and charged metadata; per-datagram, fragment and retained-outcome limits also apply. |
 | TCP state | `max_tcp_reassembly_bytes` covers retained payload/history and charged flow/segment metadata. Per-direction byte/segment ceilings and capture-time idle expiry are independent. |
+| HTTP/2 state | Frames and admitted HTTP/2 streams are bounded across the capture; active streams (including reserved streams) per connection; payload bytes per frame; compressed/decoded bytes, fields, and CONTINUATION count per header block; HPACK table bytes and pending SETTINGS per direction; body bytes per message. HPACK decoding reserves finite scratch space for table growth and decoded fields. Application limits separately bound aggregate live state, cumulative retained evidence, and provenance. |
 | TLS state | `max_tls_sessions` bounds live/closed tracking slots; `max_tls_buffer_bytes` bounds logical handshake-buffer lengths and alert charges, not parsed hello summaries or allocation capacity. A direction has a 135,168-byte logical buffer ceiling. Parser and session-count limits bound retained summaries separately. Terminal paths release recorded charges. |
 | Stats | Only the selected table allocates aggregation entries in the CLI. Library `Table::All` intentionally retains all tables. `--top` caps final rows, not keys needed to compute exact counts. The protocols, conversations, endpoints, and ports tables keep their busiest rows by frame count, breaking ties by bytes (protocols: by name), and list them busiest first; `io` keeps its first buckets in time order. |
 | Results | JSON retains selected rows/sessions/chunks according to command limits. TLS output retention is independent of active state. NDJSON holds one prepared line per encoder, at most 16 MiB including newline. |
 | Native/progress work | Offline analysis uses no native capture queue. Live capture can additionally retain its bounded native queue. A blocked output/callback worker retains its permit and captures until cleanup actually ends. `Runtime::snapshot()` exposes active, rejected, and retained capacity from timed-out or cancelled waits. |
+
+HTTP/2 analysis is cleartext-only (prior knowledge or h2c upgrade). TCP
+conversation selectors (`tcp:INDEX`) and HTTP/2 stream IDs are distinct.
+Frame/message evidence is emitted as observed; the final connection record
+reflects late gaps or retransmission conflicts, so earlier complete messages do
+not override a later connection failure. Likewise, a later GOAWAY can add a
+`goaway_unprocessed` issue that corrects the processing assessment of an earlier
+complete request without retracting that message event. `sources` names direct physical
+contributors; `compression_sources` also includes earlier HPACK dictionary
+contributors. Application retained-byte accounting is a conservative cumulative
+charge, not RSS. Decoded DATA bodies are counted and discarded; undecodable or
+truncated wire can be retained as bounded failure evidence. Normal capture EOF
+reports incomplete open connections, not TCP eviction. A later reuse of a
+cleanly closed tuple does not invalidate that earlier generation. Issues with
+wire evidence point to the last contributing physical frame; lifecycle-only
+issues point to the triggering frame or the capture EOF boundary.
+
+Unaccepted h2c requests survive termination as `incomplete_upgrade` issues
+with their exact HTTP/1 header bytes and physical sources, not fabricated
+stream-1 messages. A captured 101 acceptance permits the real request to be
+reported on stream 1, including an incomplete body. Partial response heads
+remain bounded undecoded-wire evidence. The accepted 101 and its sources
+remain on the connection record. The h2c adapter reserves bounded HTTP/1
+head-parsing scratch before parsing and a conservative chunk-line/trailer
+allowance for each live chunked body; it releases those reservations on
+completion or termination.
 
 A useful peak estimate is **input/decode + indexed metadata + IP + TCP + TLS +
 selected collector + retained results + serialization + runtime/native overhead**,
@@ -85,6 +112,27 @@ callback itself, serialization and its destructor may finish later. Generic
 `Read` and providers must return before their next cooperative check. Capture
 polling and cancellable pacing check at intervals of at most 25 ms while
 scheduled, excluding provider overshoot and scheduler delays.
+
+## HTTP/2 limits
+
+| Flag | Default | Hard ceiling | Scope |
+| --- | --- | --- | --- |
+| `--max-http2-frames` | 100,000 | 1,000,000 | Whole run |
+| `--max-http2-streams` | 4,096 | 100,000 | Whole run, including generations |
+| `--max-http2-active-streams` | 128 | 4,096 | Per connection, including reserved and prelude |
+| `--max-http2-frame-bytes` | 1 MiB | 16,777,215 | Per frame payload |
+| `--max-http2-header-block-bytes` | 64 KiB | 16 MiB | Per compressed block |
+| `--max-http2-header-bytes` | 64 KiB | 16 MiB | Per decoded list, including overhead |
+| `--max-http2-headers` | 256 | 16,384 | Per block |
+| `--max-http2-table-bytes` | 64 KiB | 16 MiB | Per direction |
+| `--max-http2-continuations` | 256 | 16,384 | Per block |
+| `--max-http2-pending-settings` | 64 | 4,096 | Per direction |
+| `--max-http2-body-bytes` | 16 MiB | 256 MiB | Per message |
+
+Configuration values must be nonzero. Legal protocol SETTINGS values of zero
+remain legal. These limits supplement, rather than replace, shared
+application/capture/output budgets and do not constitute a process-RSS
+ceiling.
 
 ## Example captures
 

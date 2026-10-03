@@ -61,6 +61,7 @@ pub mod frame;
 pub mod fuzz;
 pub mod hex;
 pub mod http;
+pub mod http2;
 pub mod interfaces;
 pub mod merge;
 pub mod network;

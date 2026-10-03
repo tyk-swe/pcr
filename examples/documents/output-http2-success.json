@@ -1,0 +1,1454 @@
+{
+  "schema": "packetcraftr.output/v6",
+  "command": "http2",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "frames": [
+      {
+        "index": 1,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 12,
+        "frame_type": 4,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "00000c040000000000",
+        "control": {
+          "type": "settings",
+          "settings": [
+            {
+              "id": 1,
+              "value": 4096
+            },
+            {
+              "id": 3,
+              "value": 100
+            }
+          ]
+        },
+        "payload_wire_hex": "000100001000000300000064",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 4,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 3000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 6,
+        "frame_type": 4,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000006040000000000",
+        "control": {
+          "type": "settings",
+          "settings": [
+            {
+              "id": 3,
+              "value": 100
+            }
+          ]
+        },
+        "payload_wire_hex": "000300000064",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 5,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 4000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 0,
+        "frame_type": 4,
+        "flags": 1,
+        "reserved": false,
+        "header_wire_hex": "000000040100000000",
+        "control": {
+          "type": "settings",
+          "settings": []
+        },
+        "payload_wire_hex": "",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 6,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 5000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 0,
+        "frame_type": 4,
+        "flags": 1,
+        "reserved": false,
+        "header_wire_hex": "000000040100000000",
+        "control": {
+          "type": "settings",
+          "settings": []
+        },
+        "payload_wire_hex": "",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 7,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 6000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 1,
+        "length": 20,
+        "frame_type": 1,
+        "flags": 5,
+        "reserved": false,
+        "header_wire_hex": "000014010500000001",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "828684410f7777772e6578616d706c652e636f6d",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "828684410f7777772e6578616d706c652e636f6d",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 8,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 7000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 3,
+        "length": 2,
+        "frame_type": 1,
+        "flags": 1,
+        "reserved": false,
+        "header_wire_hex": "000002010100000003",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "8286",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "8286",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 9,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 8000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 3,
+        "length": 2,
+        "frame_type": 9,
+        "flags": 4,
+        "reserved": false,
+        "header_wire_hex": "000002090400000003",
+        "control": {
+          "type": "continuation",
+          "fragment_hex": "85be"
+        },
+        "payload_wire_hex": "85be",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 10,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 9000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 1,
+        "length": 24,
+        "frame_type": 5,
+        "flags": 4,
+        "reserved": false,
+        "header_wire_hex": "000018050400000001",
+        "control": {
+          "type": "push_promise",
+          "promised_stream_id": 2,
+          "fragment_hex": "828684410f7777772e6578616d706c652e636f6d",
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "00000002828684410f7777772e6578616d706c652e636f6d",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 11,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 10000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 3,
+        "length": 1,
+        "frame_type": 1,
+        "flags": 4,
+        "reserved": false,
+        "header_wire_hex": "000001010400000003",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "88",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "88",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 12,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 11000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 3,
+        "length": 5,
+        "frame_type": 0,
+        "flags": 1,
+        "reserved": false,
+        "header_wire_hex": "000005000100000003",
+        "control": null,
+        "payload_wire_hex": null,
+        "data_bytes": 5,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 13,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 12000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 11,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 1,
+        "length": 1,
+        "frame_type": 1,
+        "flags": 4,
+        "reserved": false,
+        "header_wire_hex": "000001010400000001",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "88",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "88",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 14,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 13000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 12,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 1,
+        "length": 3,
+        "frame_type": 0,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000003000000000001",
+        "control": null,
+        "payload_wire_hex": null,
+        "data_bytes": 3,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 15,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 14000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 13,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 1,
+        "length": 7,
+        "frame_type": 1,
+        "flags": 5,
+        "reserved": false,
+        "header_wire_hex": "000007010500000001",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "00036167650133",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "00036167650133",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 16,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 15000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 14,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 2,
+        "length": 1,
+        "frame_type": 1,
+        "flags": 5,
+        "reserved": false,
+        "header_wire_hex": "000001010500000002",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "89",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "89",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 17,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 16000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 15,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 5,
+        "length": 4,
+        "frame_type": 1,
+        "flags": 5,
+        "reserved": false,
+        "header_wire_hex": "000004010500000005",
+        "control": {
+          "type": "headers",
+          "fragment_hex": "828684be",
+          "priority": null,
+          "padding_hex": ""
+        },
+        "payload_wire_hex": "828684be",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 18,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 17000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 16,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 5,
+        "length": 4,
+        "frame_type": 3,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000004030000000005",
+        "control": {
+          "type": "reset",
+          "error_code": 8
+        },
+        "payload_wire_hex": "00000008",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 19,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 18000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 17,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 8,
+        "frame_type": 6,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000008060000000000",
+        "control": {
+          "type": "ping",
+          "opaque_hex": "0001020304050607"
+        },
+        "payload_wire_hex": "0001020304050607",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 20,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 19000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 18,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 8,
+        "frame_type": 6,
+        "flags": 1,
+        "reserved": false,
+        "header_wire_hex": "000008060100000000",
+        "control": {
+          "type": "ping",
+          "opaque_hex": "0001020304050607"
+        },
+        "payload_wire_hex": "0001020304050607",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 21,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 20000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 19,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 3,
+        "length": 5,
+        "frame_type": 2,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000005020000000003",
+        "control": {
+          "type": "priority",
+          "exclusive": false,
+          "dependency": 1,
+          "weight": 15
+        },
+        "payload_wire_hex": "000000010e",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 22,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 21000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 20,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 4,
+        "frame_type": 8,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000004080000000000",
+        "control": {
+          "type": "window_update",
+          "increment": 100
+        },
+        "payload_wire_hex": "00000064",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 23,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 22000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 21,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 8,
+        "frame_type": 7,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000008070000000000",
+        "control": {
+          "type": "goaway",
+          "last_stream_id": 5,
+          "error_code": 0,
+          "debug_hex": ""
+        },
+        "payload_wire_hex": "0000000500000000",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 24,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 23000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 22,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "http2_stream_id": 0,
+        "length": 8,
+        "frame_type": 7,
+        "flags": 0,
+        "reserved": false,
+        "header_wire_hex": "000008070000000000",
+        "control": {
+          "type": "goaway",
+          "last_stream_id": 2,
+          "error_code": 0,
+          "debug_hex": ""
+        },
+        "payload_wire_hex": "0000000200000000",
+        "data_bytes": 0,
+        "padding_bytes": 0,
+        "sources": [
+          {
+            "number": 25,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 24000000
+            }
+          }
+        ]
+      }
+    ],
+    "messages": [
+      {
+        "index": 1,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 1,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "kind": "request",
+        "request": null,
+        "promised_by": null,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":method",
+            "name_hex": "3a6d6574686f64",
+            "value": "GET",
+            "value_hex": "474554",
+            "never_indexed": false
+          },
+          {
+            "name": ":scheme",
+            "name_hex": "3a736368656d65",
+            "value": "http",
+            "value_hex": "68747470",
+            "never_indexed": false
+          },
+          {
+            "name": ":path",
+            "name_hex": "3a70617468",
+            "value": "/",
+            "value_hex": "2f",
+            "never_indexed": false
+          },
+          {
+            "name": ":authority",
+            "name_hex": "3a617574686f72697479",
+            "value": "www.example.com",
+            "value_hex": "7777772e6578616d706c652e636f6d",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "828684410f7777772e6578616d706c652e636f6d"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 0,
+        "sources": [
+          {
+            "number": 8,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 7000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 8,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 7000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 3,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "kind": "request",
+        "request": null,
+        "promised_by": null,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":method",
+            "name_hex": "3a6d6574686f64",
+            "value": "GET",
+            "value_hex": "474554",
+            "never_indexed": false
+          },
+          {
+            "name": ":scheme",
+            "name_hex": "3a736368656d65",
+            "value": "http",
+            "value_hex": "68747470",
+            "never_indexed": false
+          },
+          {
+            "name": ":path",
+            "name_hex": "3a70617468",
+            "value": "/index.html",
+            "value_hex": "2f696e6465782e68746d6c",
+            "never_indexed": false
+          },
+          {
+            "name": ":authority",
+            "name_hex": "3a617574686f72697479",
+            "value": "www.example.com",
+            "value_hex": "7777772e6578616d706c652e636f6d",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "828685be"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 0,
+        "sources": [
+          {
+            "number": 9,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 8000000
+            }
+          },
+          {
+            "number": 10,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 9000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 8,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 7000000
+            }
+          },
+          {
+            "number": 9,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 8000000
+            }
+          },
+          {
+            "number": 10,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 9000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 2,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "kind": "push_promise",
+        "request": 1,
+        "promised_by": 1,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":method",
+            "name_hex": "3a6d6574686f64",
+            "value": "GET",
+            "value_hex": "474554",
+            "never_indexed": false
+          },
+          {
+            "name": ":scheme",
+            "name_hex": "3a736368656d65",
+            "value": "http",
+            "value_hex": "68747470",
+            "never_indexed": false
+          },
+          {
+            "name": ":path",
+            "name_hex": "3a70617468",
+            "value": "/",
+            "value_hex": "2f",
+            "never_indexed": false
+          },
+          {
+            "name": ":authority",
+            "name_hex": "3a617574686f72697479",
+            "value": "www.example.com",
+            "value_hex": "7777772e6578616d706c652e636f6d",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "828684410f7777772e6578616d706c652e636f6d"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 0,
+        "sources": [
+          {
+            "number": 11,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 10000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 11,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 10000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 3,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "kind": "response",
+        "request": 2,
+        "promised_by": null,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":status",
+            "name_hex": "3a737461747573",
+            "value": "200",
+            "value_hex": "323030",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "88"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 5,
+        "sources": [
+          {
+            "number": 12,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 11000000
+            }
+          },
+          {
+            "number": 13,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 12000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 12,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 11000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 1,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "kind": "response",
+        "request": 1,
+        "promised_by": null,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":status",
+            "name_hex": "3a737461747573",
+            "value": "200",
+            "value_hex": "323030",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [
+          {
+            "name": "age",
+            "name_hex": "616765",
+            "value": "3",
+            "value_hex": "33",
+            "never_indexed": false
+          }
+        ],
+        "header_blocks_hex": [
+          "88",
+          "00036167650133"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 3,
+        "sources": [
+          {
+            "number": 14,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 13000000
+            }
+          },
+          {
+            "number": 15,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 14000000
+            }
+          },
+          {
+            "number": 16,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 15000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 14,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 13000000
+            }
+          },
+          {
+            "number": 16,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 15000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 2,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "kind": "response",
+        "request": 3,
+        "promised_by": 1,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":status",
+            "name_hex": "3a737461747573",
+            "value": "204",
+            "value_hex": "323034",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "89"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 0,
+        "sources": [
+          {
+            "number": 17,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 16000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 17,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 16000000
+            }
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "stream": 0,
+        "generation": 0,
+        "http2_stream_id": 5,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "kind": "request",
+        "request": null,
+        "promised_by": null,
+        "status": "complete",
+        "headers": [
+          {
+            "name": ":method",
+            "name_hex": "3a6d6574686f64",
+            "value": "GET",
+            "value_hex": "474554",
+            "never_indexed": false
+          },
+          {
+            "name": ":scheme",
+            "name_hex": "3a736368656d65",
+            "value": "http",
+            "value_hex": "68747470",
+            "never_indexed": false
+          },
+          {
+            "name": ":path",
+            "name_hex": "3a70617468",
+            "value": "/",
+            "value_hex": "2f",
+            "never_indexed": false
+          },
+          {
+            "name": ":authority",
+            "name_hex": "3a617574686f72697479",
+            "value": "www.example.com",
+            "value_hex": "7777772e6578616d706c652e636f6d",
+            "never_indexed": false
+          }
+        ],
+        "trailers": [],
+        "header_blocks_hex": [
+          "828684be"
+        ],
+        "upgrade_head": null,
+        "body_bytes": 0,
+        "sources": [
+          {
+            "number": 18,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 17000000
+            }
+          }
+        ],
+        "compression_sources": [
+          {
+            "number": 8,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 7000000
+            }
+          },
+          {
+            "number": 18,
+            "timestamp": {
+              "unix_seconds": 0,
+              "nanoseconds": 17000000
+            }
+          }
+        ]
+      }
+    ],
+    "issues": [],
+    "connections": [
+      {
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "startup": "prior_knowledge",
+        "status": "complete",
+        "client_settings": {
+          "header_table_size": 4096,
+          "enable_push": true,
+          "max_concurrent_streams": 100,
+          "initial_window_size": 65535,
+          "max_frame_size": 16384,
+          "max_header_list_size": null
+        },
+        "server_settings": {
+          "header_table_size": 4096,
+          "enable_push": true,
+          "max_concurrent_streams": 100,
+          "initial_window_size": 65535,
+          "max_frame_size": 16384,
+          "max_header_list_size": null
+        },
+        "client_window": 65535,
+        "server_window": 65627,
+        "streams": 4,
+        "frames": 22,
+        "issues": 0,
+        "pending_settings": 0,
+        "pending_pings": 0,
+        "upgrade_response": null,
+        "upgrade_sources": []
+      }
+    ],
+    "frames_read": 27,
+    "frames_matched": 27,
+    "summary": {
+      "connections": 1,
+      "prior_knowledge_connections": 1,
+      "upgraded_connections": 0,
+      "unsupported_connections": 0,
+      "frames": 22,
+      "streams": 4,
+      "messages": 7,
+      "complete_messages": 7,
+      "incomplete_messages": 0,
+      "malformed_messages": 0,
+      "limited_messages": 0,
+      "issues": 0
+    },
+    "scopes": [
+      {
+        "id": 0,
+        "interface": 0,
+        "encapsulation": []
+      }
+    ],
+    "incomplete_datagrams": 0,
+    "source_outcomes_omitted": 0,
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
+  },
+  "diagnostics": []
+}

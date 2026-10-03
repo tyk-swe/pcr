@@ -698,6 +698,25 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr http2` inspects cleartext HTTP/2 and h2c-upgraded TCP streams
+  offline: RFC 9113 frames, stateful HPACK decoding, stream/message lifecycle,
+  and per-connection startup/status evidence, with eleven HTTP/2-specific
+  analysis limits and NDJSON `http2_frame`, `http2_message`, `http2_issue`,
+  `http2_connection`, and `complete` records under `packetcraftr.output/v6`.
+  DATA bodies are counted and discarded, never retained. The public
+  `analysis::http2::Collector` and `Event`/`Message`/`Frame`/`Issue`/
+  `Connection` types expose the same engine. Examples cover
+  `examples/captures/http2-multiplexed.pcapng` and
+  `examples/captures/http2-upgrade.pcapng`. Ordinary capture EOF reports
+  incomplete open connections with bounded partial evidence instead of TCP
+  eviction; a reuse of a cleanly closed tuple emits a new generation without
+  relabelling the earlier one; observer deadlines are enforced at record
+  observation and at connection finalization. An unaccepted h2c offer survives
+  as an `incomplete_upgrade` issue retaining the original HTTP/1 request head
+  and its physical sources without fabricated HTTP/2 stream IDs; an accepted
+  upgrade keeps the real request on stream 1 with `upgrade_head`. Four
+  libfuzzer targets (`http2_wire`, `http2_hpack`, `http2_segmentation`,
+  `http2_pipeline`) run in the scheduled fuzz workflow.
 - `packetcraftr_core::packet::Packet::iter_of` and `iter_of_mut` iterate every
   layer of one concrete type in packet order (double-ended, no allocation).
   The mutable iterator clears cached encoded payload lengths whenever a match
@@ -1792,6 +1811,120 @@ All notable changes to PacketcraftR are documented here. The format follows
   default message-size limit. See `docs/migration-unreleased.md`.
 
 ### Fixed
+
+- Reconcile provisional idle-stream diagnostics at a clean initiator FIN,
+  validate h2c request-target forms, and reject Host routing fields in trailers.
+- Preserve directional END_STREAM state across peer resets before admitting
+  later promises, headers, or DATA as in-flight traffic.
+- Reject pushed-stream reuse after PRIORITY errors and impossible delayed
+  parents after a clean client FIN.
+- Retain idle PRIORITY errors and capture-delayed resets, and defer pushed
+  requests until their capture-delayed parent opens.
+- Reconcile pending SETTINGS and WINDOW_UPDATE ordering before confirming stream
+  overflow, without treating unacknowledged increases as proven; compare Host and
+  :authority using URI host, address and port normalization.
+- Confirm remaining stream-window overflow on a clean sender FIN and validate
+  exactly one Host authority before accepting an h2c upgrade request.
+- Require a target authority or Host fallback for HTTP(S) requests, validate
+  generic URI authorities on other schemes, and reject content in TRACE requests.
+  Retain invalid priority state on capture-delayed response HEADERS.
+- Retain delayed request messages after invalid early response fields or DATA,
+  while preserving confirmed response failures and rejecting later response activity,
+  including response follow-ups interleaved with a delayed request body.
+- Preserve semantic failures in capture-delayed response headers, reject
+  trailers on 204/304 responses, and terminate idle-stream WINDOW_UPDATE errors.
+  Keep h2c header settings separate from the mandatory on-wire preface.
+- Reject malformed fallback Host authorities and duplicate Host fields in
+  HTTP/2 requests while preserving their original header evidence.
+
+- Evaluate HTTP/2 SETTINGS overflow before credit from later peer WINDOW_UPDATE
+  frames, using bounded snapshots rather than cross-direction capture order.
+
+- Validate classic CONNECT host/port targets, preserve delayed-response final and
+  END_STREAM state, reconcile positive concurrency limits after peer FIN, and
+  apply transient SETTINGS changes only to eligible existing streams. Treat
+  skipped stream IDs as closed and retain payload-free reverse FIN evidence.
+
+- Retain bounded unresolved HTTP/2 credit debt after message completion for later
+  FIN reconciliation, and exclude intermediate values inside a SETTINGS frame
+  from usable DATA credit.
+
+- Preserve early HTTP/2 response ordering when client openers are capture-delayed,
+  associate payload-free reverse TCP resets, correct reserved-stream issue scope,
+  and charge decoded SETTINGS vectors against retained-output limits.
+
+- Confirm HTTP/2 DATA credit exhaustion after the granting direction cleanly
+  closes, retaining uncertainty for possible pending SETTINGS credit and valid
+  negative windows caused only by a SETTINGS decrease.
+
+- Invalidate retained HTTP/2 messages on stream failure even after their active
+  slot has closed while awaiting SETTINGS acknowledgment reconciliation.
+
+- Reconcile provisional HTTP/2 flow-window overflow when senders end, retain both
+  unmatched ACK heads at EOF, and correct closed-stream/push-limit diagnostics.
+  Deferred message emission now releases completed push slots and rejects later
+  HEADERS on an already-ended sender.
+
+- Byte-complete HTTP/2 messages now remain in their charged stream state while
+  an early SETTINGS acknowledgment is unresolved, then emit Complete after
+  reconciliation; unresolved ACK failures still prevent complete message output.
+
+- Offline HTTP/2 defers capture-early SETTINGS acknowledgments in bounded
+  directional buffers until peer SETTINGS can reconcile them, preserving
+  incomplete evidence while acknowledgment is unresolved. Flow-window overflow
+  distinguishes delayed DATA from proven violations; URI paths validate their
+  characters and percent escapes, and malformed bodies close affected streams.
+
+- Offline HTTP/2 terminates DATA violations on reserved push streams and closes
+  malformed field-section streams after retaining their decoded evidence. Early
+  peer response blocks/DATA preserve ordering uncertainty without discarding
+  later requests, and HTTP(S) authorities validate URI host/port syntax.
+
+- Offline HTTP/2 keeps capture-delayed peer resets uncertain, closes rejected
+  promised streams, rejects userinfo in HTTP(S) authorities and forbidden field
+  control bytes, and interrupts long HPACK/Huffman decoding at cancellation or
+  deadline checkpoints while preserving the original interruption error.
+
+- Preserve uncertainty for capture-delayed resets, unproven pre-ACK HPACK
+  shrinks, and partial request heads at EOF; known zero concurrency limits and
+  causally established table minima remain enforced. Unsolicited SETTINGS ACKs
+  now stop subsequent message processing. Embedded self-dependent HEADERS priorities
+  close their stream after HPACK decoding, and fully captured unprocessed
+  messages still validate content length.
+- Flush confirmed PRIORITY, stream-window underflow, premature DATA, and
+  concurrency violations without misclassifying uncertain peer closure. Enforce
+  causally proven HPACK decreases before pending increases, retain post-reset
+  push correlation, and classify unmatched midstream HTTP/1 responses at EOF.
+- Terminate confirmed GOAWAY, idle-window, connection-window, and push-parent
+  violations; flush only the affected stream on stream-window overflow. Preserve
+  in-flight push reservations after a peer reset and reject conflicting CONNECT
+  authority/Host values.
+- Retain early HTTP/1 prelude responses in bounded source-tracked buffers until
+  partially captured request heads can be matched across capture ordering.
+- Stop HTTP/2 analysis after confirmed initial-SETTINGS, window-overflow,
+  idle-reset, disabled-push, and invalid h2c-settings connection errors.
+  Preserve unsolicited/interim HTTP/1 prelude errors, method-dependent response
+  semantics after malformed headers, pending frame-size increases, and sourced
+  late-GOAWAY corrections for completed exchanges.
+- Keep malformed HTTP/2 priority status across CONTINUATION, preserve the final
+  response after malformed informational headers, and reject idle-stream DATA,
+  invalid SETTINGS, invalid request-target forms, and content on 205 responses.
+  Bound duplicate SETTINGS diagnostics and compression provenance processing,
+  charge retained message metadata, and emit sourced corrections when a later
+  GOAWAY excludes an already-emitted request.
+
+- Preserve HTTP/2 stream-local frame errors and HPACK state, accept advertised
+  HPACK table increases before ACK, and charge retained frame provenance.
+  Reject unsafe push methods, non-CONNECT `:protocol`, literal path fragments,
+  and forbidden framing fields on h2c 101 responses.
+
+- Coalesce duplicate HTTP/2 SETTINGS window changes so acknowledgment work
+  is linear in active streams while preserving intermediate overflow checks.
+
+- Offline HTTP/2 analysis accepts all HTTP token methods during h2c startup,
+  preserves refused upgrade evidence while allowing later retries, retains
+  pushed HEAD semantics, rejects empty CONNECT authorities, and tolerates
+  peer frames already in flight when a stream reset is observed.
 
 - The forwarding reference consumer rejects malformed retained detail collections
   and typed preservation evidence, including partial evidence, before interpreting

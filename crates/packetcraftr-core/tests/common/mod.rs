@@ -6,6 +6,7 @@
 
 pub(crate) mod decoded;
 pub(crate) mod http;
+pub(crate) mod http2;
 pub(crate) mod ip_fragments;
 pub(crate) mod packets;
 pub(crate) mod pcap;

@@ -53,6 +53,12 @@ idle-expiry settings. The values are conservative starting configurations, not
 benchmark-derived capacity recommendations, and the limits are not a sum that
 guarantees all enabled stages fit in memory together.
 
+`http2` inherits the shared capture, TCP/IP, and application preset values.
+The versioned v1 presets do not override any `--max-http2-*` setting; these
+retain their baseline defaults unless explicitly supplied. Diagnostics report
+those settings as `default` or `override`, not `preset:ci-v1` or
+`preset:workstation-v1`. See [HTTP/2 limits](analysis-resources.md#http2-limits).
+
 Input limits count filtered-out frames, and encoded/decoded source limits
 include container metadata. See [analysis resource
 accounting](analysis-resources.md#what-the-ceilings-cover) for reader-level

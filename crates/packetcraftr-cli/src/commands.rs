@@ -30,6 +30,7 @@ mod follow;
 mod fragment;
 mod fuzz;
 mod http;
+mod http2;
 mod interfaces;
 mod merge;
 mod offline_analysis;

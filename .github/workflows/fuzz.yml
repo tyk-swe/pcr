@@ -48,6 +48,10 @@ jobs:
           - forwarding_semantics
           - http_segmentation
           - http_pipeline
+          - http2_wire
+          - http2_hpack
+          - http2_segmentation
+          - http2_pipeline
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install nightly toolchain for libfuzzer
@@ -86,7 +90,7 @@ jobs:
           # validate packet and output JSON examples against their schemas.
           case "${{ matrix.target }}" in
             packet_document_json|packet_build) corpus+=("../examples/documents") ;;
-            pcap_parse|pcapng_parse|tls_session|compression_pipeline|capture_transform|http_pipeline) corpus+=("../examples/captures") ;;
+            pcap_parse|pcapng_parse|tls_session|compression_pipeline|capture_transform|http_pipeline|http2_pipeline) corpus+=("../examples/captures") ;;
           esac
           case "${{ matrix.target }}" in
             packet_document_json) dictionary+=("-dict=dictionaries/json.dict") ;;

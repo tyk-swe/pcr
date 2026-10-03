@@ -35,6 +35,11 @@ const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
         include_str!("../../../examples/documents/output-http-complete.json"),
     ),
     (
+        output::contract::Command::Http2,
+        false,
+        include_str!("../../../examples/documents/output-http2-complete.json"),
+    ),
+    (
         output::contract::Command::DnsRead,
         false,
         include_str!("../../../examples/documents/output-dns-read-complete.json"),

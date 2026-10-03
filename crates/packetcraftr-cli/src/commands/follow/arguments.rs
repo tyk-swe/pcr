@@ -15,6 +15,8 @@ The conversation index comes from the same first-seen numbering stats reports an
 and TRANSPORT-INDEX-server.bin inside DIR. Files are staged in DIR and published
 atomically; existing files are never overwritten, a direction with no payload
 publishes as an empty file, and --direction narrows which files are written.
+Publication and rollback stay in the directory selected before input is read.
+A parent alias change detected before publication is refused.
 Both files share the single --max-application-output-bytes budget. Publishing is
 not a multi-file transaction: on failure, staged files are removed and files
 this invocation already published are rolled back where possible. Published-file

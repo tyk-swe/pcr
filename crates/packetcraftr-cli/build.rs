@@ -14,6 +14,7 @@ fn main() {
         ("packetcraftr_test_procfs", linux),
         ("packetcraftr_test_util_linux", linux),
         ("packetcraftr_test_dev_full", linux),
+        ("packetcraftr_test_non_utf8_paths", linux),
     ];
     for (name, enabled) in capabilities {
         println!("cargo::rustc-check-cfg=cfg({name})");

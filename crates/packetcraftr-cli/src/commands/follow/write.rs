@@ -47,15 +47,21 @@ impl DirectionFiles {
             Selected::Client => &[PeerDirection::ClientToServer],
             Selected::Server => &[PeerDirection::ServerToClient],
         };
+        let destinations = directions
+            .iter()
+            .map(|direction| {
+                directory.join(format!(
+                    "{}-{}-{}.bin",
+                    selector.transport.as_str(),
+                    selector.index,
+                    direction_name(*direction),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let selected_parent = StagedFile::resolve_parent(&destinations[0])?;
         let mut staged = Vec::with_capacity(directions.len());
-        for direction in directions {
-            let destination = directory.join(format!(
-                "{}-{}-{}.bin",
-                selector.transport.as_str(),
-                selector.index,
-                direction_name(*direction),
-            ));
-            let file = StagedFile::stage(&destination)?;
+        for (direction, destination) in directions.iter().zip(destinations) {
+            let file = StagedFile::stage_in_parent(&destination, &selected_parent)?;
             staged.push(Staged {
                 direction: *direction,
                 file,
@@ -111,6 +117,7 @@ impl DirectionFiles {
         let mut written = Vec::new();
         for staged in self.staged {
             let destination = staged.file.destination().to_owned();
+            let publication_destination = staged.file.publication_destination().to_owned();
             match staged.file.persist() {
                 Ok(()) => {
                     written.push(Written {
@@ -118,19 +125,19 @@ impl DirectionFiles {
                         path: destination.display().to_string(),
                         bytes: staged.bytes,
                     });
-                    published.push(destination);
+                    published.push((publication_destination, destination));
                 }
                 Err(error) => {
                     let mut rolled_back = 0;
                     let mut failures = Vec::new();
-                    for path in &published {
+                    for (path, requested) in &published {
                         match remove(path) {
                             Ok(()) => rolled_back += 1,
                             Err(source) => failures.push(CliError::new(
                                 Kind::Io,
                                 format!(
                                     "remove published follow output {}: {source}",
-                                    path.display(),
+                                    requested.display(),
                                 ),
                             )),
                         }
@@ -245,7 +252,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_parent_alias_retargeted_to_a_collision_rolls_back_the_first_direction() {
+    fn a_parent_alias_retargeted_to_a_collision_is_refused_before_publication() {
         let (_root, original, replacement, alias) = aliased_directories();
         let files = staged_directions(&alias);
         std::fs::write(replacement.join("tcp-7-server.bin"), b"existing payload")
@@ -257,8 +264,10 @@ mod tests {
 
         assert_eq!(error.classification.code, "io.output_file");
         assert_eq!(error.exit_code(), 5);
-        assert!(error.message.contains("rolled back 1 published file(s)"));
+        assert!(error.message.contains("changed since staging"));
+        assert!(error.message.contains("rolled back 0 published file(s)"));
         assert!(!replacement.join("tcp-7-client.bin").exists());
+        assert!(!original.join("tcp-7-client.bin").exists());
         assert_eq!(
             std::fs::read(replacement.join("tcp-7-server.bin")).unwrap(),
             b"existing payload"
@@ -273,13 +282,31 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_parent_alias_retargeted_to_an_empty_directory_publishes_both_directions() {
+    fn a_parent_alias_retargeted_to_an_empty_directory_is_refused_without_publishing() {
         let (_root, original, replacement, alias) = aliased_directories();
         let files = staged_directions(&alias);
         std::fs::remove_file(&alias).expect("remove original alias");
         std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
 
-        let written = files.publish().expect("publish both directions");
+        let error = files.publish().expect_err("refuse retargeted parent");
+
+        assert_eq!(error.classification.code, "io.output_file");
+        assert!(error.message.contains("changed since staging"));
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stable_parent_alias_publishes_both_directions_and_reports_requested_paths() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let written = staged_directions(&alias)
+            .publish()
+            .expect("publish both directions");
 
         assert_eq!(written.len(), 2);
         assert_eq!(
@@ -293,18 +320,56 @@ mod tests {
         assert_eq!(written[0].bytes, 4);
         assert_eq!(written[1].bytes, 4);
         assert_eq!(
-            std::fs::read(replacement.join("tcp-7-client.bin")).unwrap(),
+            std::fs::read(original.join("tcp-7-client.bin")).unwrap(),
             b"ping"
         );
         assert_eq!(
-            std::fs::read(replacement.join("tcp-7-server.bin")).unwrap(),
+            std::fs::read(original.join("tcp-7-server.bin")).unwrap(),
             b"pong"
         );
         assert_eq!(
             std::fs::read(original.join("source.pcap")).unwrap(),
             b"source capture"
         );
-        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
-        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 2);
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 3);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_removes_the_published_file_after_its_parent_alias_is_retargeted() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let files = staged_directions(&alias);
+        std::fs::write(original.join("tcp-7-server.bin"), b"existing server").unwrap();
+        std::fs::write(
+            replacement.join("tcp-7-client.bin"),
+            b"replacement sentinel",
+        )
+        .unwrap();
+
+        let error = files
+            .publish_with(StagedFile::sync, |path| {
+                std::fs::remove_file(&alias)?;
+                std::os::unix::fs::symlink(&replacement, &alias)?;
+                std::fs::remove_file(path)
+            })
+            .expect_err("server collision rolls back the client");
+
+        assert!(error.message.contains("rolled back 1 published file(s)"));
+        assert!(!original.join("tcp-7-client.bin").exists());
+        assert_eq!(
+            std::fs::read(original.join("tcp-7-server.bin")).unwrap(),
+            b"existing server"
+        );
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(
+            std::fs::read(replacement.join("tcp-7-client.bin")).unwrap(),
+            b"replacement sentinel"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 2);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 1);
     }
 }

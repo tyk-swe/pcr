@@ -1789,6 +1789,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Shell completion generation reports write failures as `io.documentation`
   errors (exit 5) instead of panicking, including when the destination is full.
+- Analysis measurement reports distinguish allocator-run exits and produced
+  profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
   consistently with hexadecimal input from files and standard input. All three
   sources reject hexadecimal text that decodes to no bytes as missing input.

@@ -3,8 +3,14 @@
 
 mod common;
 
-#[cfg(not(any(feature = "native-layer2", feature = "native-layer3")))]
+#[cfg(not(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+)))]
 fn assert_capability_failure(arguments: &[&str]) {
+    use common::{parse_json, run};
+
     let text = run(arguments);
     assert_eq!(text.status.code(), Some(4), "{arguments:?}: {text:?}");
     assert!(text.stdout.is_empty(), "text errors leave stdout empty");

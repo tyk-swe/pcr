@@ -387,7 +387,7 @@ fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result
 #[cfg(test)]
 mod tests {
 
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::Ipv4Addr;
 
     use super::*;
 

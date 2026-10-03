@@ -388,16 +388,21 @@ class EvidenceTests(unittest.TestCase):
         for invalid in [False, True]:
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
                 output = pathlib.Path(directory)
-                for kind, report in [(DECODER, decoder_report()), (NATIVE, native_report())]:
-                    if invalid and kind == NATIVE:
-                        del report['parent_namespace']
-                    artifact = output / kind
-                    artifact.mkdir()
-                    (artifact / release.REQUIRED[kind]).write_text(json.dumps(report))
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                if invalid:
+                    del reports[NATIVE]['parent_namespace']
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True)
+                    (artifact / release.REQUIRED[kind]).write_text(json.dumps(reports[kind]))
+
                 argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
                 runs = json.dumps(dict(workflow_runs=[dict(id=1, html_url='ci-run-1'), dict(id=2, html_url='ci-run-2')]))
                 with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs) as listing,
-                      mock.patch.object(release.subprocess, 'run') as download, mock.patch('builtins.print')):
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report) as download,
+                      mock.patch('builtins.print')):
                     if invalid:
                         with self.assertRaises(ValueError):
                             release.main()
@@ -413,6 +418,93 @@ class EvidenceTests(unittest.TestCase):
                     self.assertIn('status=success', listing.call_args.args[0])
                     self.assertEqual(download.call_count, 2)
                     self.assertTrue(all(call.args[0][3] == '2' for call in download.call_args_list))
+
+    def test_release_retry_cannot_attribute_old_reports_to_a_new_run(self):
+        for missing in release.REQUIRED:
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                aggregate = output / 'VALIDATION-EVIDENCE.json'
+                aggregate.write_text('previous aggregate')
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                old_files = {}
+                for kind, report in reports.items():
+                    artifact = output / kind
+                    artifact.mkdir()
+                    report_path = artifact / release.REQUIRED[kind]
+                    report_path.write_text(json.dumps(report))
+                    log_path = artifact / 'old-run.log'
+                    log_path.write_text('previous run diagnostic')
+                    old_files.update({report_path: report_path.read_bytes(), log_path: log_path.read_bytes()})
+                current_logs = []
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True, exist_ok=True)
+                    log_path = artifact / 'current-run.log'
+                    log_path.write_text('current run diagnostic')
+                    current_logs.append(log_path)
+                    if kind != missing:
+                        (artifact / release.REQUIRED[kind]).write_text(json.dumps(reports[kind]))
+
+                argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+                runs = json.dumps(dict(workflow_runs=[dict(id=9, html_url='ci-run-9')]))
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs),
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report), mock.patch('builtins.print')):
+                    with self.assertRaises(FileNotFoundError):
+                        release.main()
+                self.assertFalse(aggregate.exists())
+                self.assertTrue(current_logs)
+                self.assertTrue(all(path.read_text() == 'current run diagnostic' for path in current_logs))
+                for path, data in old_files.items():
+                    self.assertEqual(path.read_bytes(), data)
+
+    def test_release_failed_lookup_invalidates_only_previous_aggregate(self):
+        for result in [json.dumps(dict(workflow_runs=[])), subprocess.TimeoutExpired('gh api', 60)]:
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                aggregate = output / 'VALIDATION-EVIDENCE.json'
+                aggregate.write_text('previous aggregate')
+                previous = output / 'previous-report.json'
+                previous.write_text('previous report')
+                argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+                lookup = dict(side_effect=result) if isinstance(result, Exception) else dict(return_value=result)
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', **lookup),
+                      mock.patch.object(release.subprocess, 'run') as download):
+                    with self.assertRaises(SystemExit):
+                        release.main()
+                self.assertFalse(aggregate.exists())
+                self.assertEqual(previous.read_text(), 'previous report')
+                download.assert_not_called()
+
+    def test_release_successful_retries_publish_and_retain_each_runs_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory)
+            downloaded = {}
+            argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+            for run_id, binary_digest in [(1, 'a' * 64), (2, 'b' * 64)]:
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                for report in reports.values():
+                    report['binary_sha256'] = binary_digest
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True, exist_ok=True)
+                    report_path = artifact / release.REQUIRED[kind]
+                    report_path.write_text(json.dumps(reports[kind]))
+                    downloaded[report_path] = report_path.read_bytes()
+
+                runs = json.dumps(dict(workflow_runs=[dict(id=run_id, html_url=f'ci-run-{run_id}')]))
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs),
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report), mock.patch('builtins.print')):
+                    release.main()
+                evidence = json.loads((output / 'VALIDATION-EVIDENCE.json').read_text())
+                self.assertEqual(evidence['ci_run'], f'ci-run-{run_id}')
+                self.assertEqual(evidence['reports'], reports)
+                self.assertEqual(len(downloaded), run_id * len(release.REQUIRED))
+                for path, data in downloaded.items():
+                    self.assertEqual(path.read_bytes(), data)
 
     def test_metadata_checks_optional_and_target_specific_production_edges(self):
         metadata = dict(workspace_members=['core'], packages=[dict(id='core', name='packetcraftr-core',

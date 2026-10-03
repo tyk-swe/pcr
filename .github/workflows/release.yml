@@ -285,7 +285,9 @@ jobs:
       - if: runner.os == 'Linux' && matrix.variant.name == 'pcap-free'
         name: Verify pcap-free Linux binary does not link libpcap
         shell: bash
-        run: "! ldd \"target/$TARGET/release/packetcraftr\" | grep -Eq 'libpcap\\.so'"
+        run: |
+          ldd "target/$TARGET/release/packetcraftr" > linked-libraries.txt
+          ! grep -Eq 'libpcap\.so' linked-libraries.txt
       - if: runner.os == 'Linux'
         name: Smoke-test the Ubuntu 24.04 runtime baseline
         shell: bash

@@ -1789,6 +1789,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
+- Analysis measurement reports distinguish allocator-run exits and produced
+  profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
   consistently with hexadecimal input from files and standard input. All three
   sources reject hexadecimal text that decodes to no bytes as missing input.

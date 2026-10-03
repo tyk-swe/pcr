@@ -72,6 +72,9 @@ def arguments():
 def main(argv=None):
     parser = arguments()
     args = parser.parse_args(argv)
+    # Path drops a leading './'; subprocess would then search PATH instead of
+    # executing the file we hash. Preserve the supplied basename for metadata.
+    args.binary = args.binary.absolute()
     try:
         binary_digest = digest(args.binary)
     except OSError as error:

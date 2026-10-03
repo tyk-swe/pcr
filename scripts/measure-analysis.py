@@ -13,9 +13,10 @@ import pathlib
 import socket
 import struct
 import subprocess
+import tempfile
 import time
 
-from validation_evidence import checksum, digest
+from validation_evidence import DECODE_PROFILES, checksum, digest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -119,12 +120,21 @@ def measure(binary, args, capture, out, label, pipe, heaptrack):
                   user_seconds=float(values[2]), system_seconds=float(values[3]),
                   harness_seconds=time.monotonic() - started)
     if heaptrack and not pipe:
-        profile = out / f'{label}.heaptrack'
+        profile_directory = pathlib.Path(tempfile.mkdtemp(prefix=f'{label}.heaptrack-', dir=out))
+        profile = profile_directory / 'profile'
+        log_path = profile_directory / 'heaptrack.log'
         # This separate run is intentionally excluded from throughput/RSS numbers.
-        with (out / f'{label}.heaptrack.log').open('wb') as log:
-            subprocess.run(['heaptrack', '-o', str(profile), *command],
-                           stdout=subprocess.DEVNULL, stderr=log, check=False)
-        report['allocator_profile_prefix'] = str(profile)
+        with log_path.open('wb') as log:
+            result = subprocess.run(['heaptrack', '-o', str(profile), *command],
+                                    stdout=log, stderr=subprocess.STDOUT, check=False)
+        report['allocator_exit_code'] = result.returncode
+        report['allocator_log'] = str(log_path)
+        # A fresh directory prevents a previous run's artifacts being reused as evidence.
+        profiles = sorted(str(path) for path in profile_directory.glob('profile*')
+                          if path.is_file() and path.stat().st_size)
+        report['allocator_profile_files'] = profiles
+        if profiles:
+            report['allocator_profile_prefix'] = str(profile)
     return report
 
 
@@ -179,13 +189,20 @@ def main():
                 report['measurements'].append(measured)
             if kind == 'flows':
                 args = ['--output', 'ndjson', 'read', '-', '--max-frames', str(count)]
-                report['measurements'].append(measure(binary, args, path, out, f'{kind}-{size}-pipe-read', True, False))
+                measured = measure(binary, args, path, out, f'{kind}-{size}-pipe-read', True, False)
+                measured.update(workload=kind, cardinality=size, physical_frames=count,
+                                input_bytes=path.stat().st_size)
+                report['measurements'].append(measured)
             (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     # Include a valid assembled handshake and aggregate/stream comparison.
     capture = ROOT / 'examples/captures/tls-handshake.pcapng'
     for output in ['json', 'ndjson']:
-        report['measurements'].append(measure(binary, ['--output', output, 'tls', str(capture)], capture, out,
-                                             f'tls-handshake-{output}', False, options.heaptrack))
+        measured = measure(binary, ['--output', output, 'tls', str(capture)], capture, out,
+                           f'tls-handshake-{output}', False, options.heaptrack)
+        measured.update(workload='tls-handshake', cardinality=1,
+                        physical_frames=DECODE_PROFILES['pull-request']['tls-handshake'],
+                        input_bytes=capture.stat().st_size)
+        report['measurements'].append(measured)
     (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(out / 'report.json')
 

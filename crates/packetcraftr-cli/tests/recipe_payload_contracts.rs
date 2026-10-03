@@ -41,7 +41,10 @@ fn payload_file_preserves_unicode_spaces_and_equals_in_paths() {
     }
 }
 
-#[cfg(unix)]
+// This fixture needs a filesystem that accepts non-UTF-8 filename bytes. Linux
+// exercises that contract; the macOS CI filesystem rejects fixture creation
+// with an illegal-byte-sequence error before the CLI can run.
+#[cfg(packetcraftr_test_non_utf8_paths)]
 #[test]
 fn payload_file_preserves_non_utf8_paths_without_opening_the_lossy_alternative() {
     use std::os::unix::ffi::OsStrExt;

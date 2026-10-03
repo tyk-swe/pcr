@@ -47,10 +47,25 @@ focused CLI builds select the same workflow features and reuse artifacts. After
 changing features, run `cargo build --locked --workspace` and then
 `cargo build --locked -p packetcraftr-cli -v` in the same target directory, and
 confirm that `packetcraftr` and `packetcraftr-cli` are reported `Fresh`. Keep
-full development debug information and release overflow checks. Keep the
-integration-test layout unless clean, incremental and focused compile
+full development debug information and release overflow checks in the repository
+and CI defaults. Keep the integration-test layout unless clean, incremental and focused compile
 measurements justify a change; narrow regressions remain runnable as
 `cargo test --locked -p CRATE --test TEST_NAME`.
+
+For storage-constrained local validation, temporarily omit debug information and
+incremental artifacts as below; use the same environment for the relevant Clippy
+commands above. Tests, debug assertions, and overflow checks remain enabled, but
+debugger/backtrace detail is reduced and incremental build reuse is disabled.
+These overrides do not remove old artifacts; if the disk is already full, first
+reclaim unneeded build outputs.
+
+```sh
+(
+  set -e
+  export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
+  cargo test --locked --workspace --all-features
+)
+```
 
 ## Optional tools
 

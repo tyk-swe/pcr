@@ -1076,13 +1076,15 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
     }
     let started = Instant::now();
     let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(["--output", "ndjson", "follow"])
+        .args(["--output", "ndjson", "--output-timeout-ms", "200", "follow"])
         .arg(capture.path())
         .args([
             "--stream",
             "tcp:0",
             "--max-duration-ms",
-            "200",
+            // Serialization must finish before the operation deadline so this
+            // exercises the stalled writer's independent 200 ms wait budget.
+            "10000",
             "--max-frames",
             "1",
         ])
@@ -1096,6 +1098,10 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
             Ok(Some(status)) => {
                 let output = child.wait_with_output().unwrap();
                 assert_eq!(status.code(), Some(5), "{output:?}");
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("error[io.stdout]"),
+                    "{output:?}"
+                );
                 assert!(
                     String::from_utf8_lossy(&output.stderr).contains("incomplete"),
                     "{output:?}"

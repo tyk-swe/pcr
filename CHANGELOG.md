@@ -1797,6 +1797,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
+- The offline forwarding regression harness accepts relative output directory
+  names beginning with `-` without parsing generated capture paths as CLI options.
 - Analysis measurement reports distinguish allocator-run exits and produced
   profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,

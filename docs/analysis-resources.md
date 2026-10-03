@@ -102,8 +102,8 @@ packetcraftr --output json stats examples/captures/scoped-vxlan.pcap \
 report shows one regression, the largest forward step, and an I/O bucket origin
 with one underflow frame. `scoped-vxlan.pcap` carries TCP conversations under
 two VXLAN network identifiers, so conversation rows expose scope identifiers and
-ordered encapsulation metadata. A CLI contract test keeps both documents equal
-to the current output.
+ordered encapsulation metadata. The release archive verifier runs both examples
+and checks that their output equals the packaged JSON documents.
 
 ## Reproducing measurements
 

@@ -3,13 +3,16 @@
 
 mod common;
 
+use common::probe::{Child, ChildCodec, Probe, ProbeCodec};
 use common::registry;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use packetcraftr_core::layer::{Malformed, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::network::{Fragment, HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{
+    Fragment, HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv6, SegmentRoutingHeader,
+};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{Ah, Gre};
 use packetcraftr_core::protocol::{
@@ -169,6 +172,280 @@ fn quoted_response(network: NetworkVersion, quote: &[u8], icmp_type: u8, code: u
             });
             response
         }
+    }
+}
+
+#[test]
+fn udp_and_echo_matchers_reject_packets_without_ip_envelopes() {
+    let registry = registry();
+    for protocol in ["udp", "icmpv4", "icmpv6"] {
+        let mut request = Packet::new();
+        let mut response = Packet::new();
+        let body = Bytes::from_static(&[0x12, 0x34, 0, 7]);
+        match protocol {
+            "udp" => {
+                request.push(Udp {
+                    source_port: CLIENT_PORT,
+                    destination_port: SERVER_PORT,
+                    ..Udp::default()
+                });
+                response.push(Udp {
+                    source_port: SERVER_PORT,
+                    destination_port: CLIENT_PORT,
+                    ..Udp::default()
+                });
+            }
+            "icmpv4" => {
+                request.push(Icmpv4 {
+                    icmp_type: 8,
+                    body: body.clone(),
+                    ..Icmpv4::default()
+                });
+                response.push(Icmpv4 {
+                    icmp_type: 0,
+                    body,
+                    ..Icmpv4::default()
+                });
+            }
+            _ => {
+                request.push(Icmpv6 {
+                    icmp_type: 128,
+                    body: body.clone(),
+                    ..Icmpv6::default()
+                });
+                response.push(Icmpv6 {
+                    icmp_type: 129,
+                    body,
+                    ..Icmpv6::default()
+                });
+            }
+        }
+        assert!(
+            registry
+                .matcher(protocol)
+                .unwrap()
+                .matches(&request, &response)
+                .is_none(),
+            "{protocol} needs enclosing IP endpoints"
+        );
+    }
+}
+
+fn nested_udp_pair() -> (Packet, Packet) {
+    let mut request = Packet::new();
+    let mut response = Packet::new();
+    for (source, destination) in [
+        (IPV6_CLIENT, IPV6_SERVER),
+        (IPV6_CLIENT, IPV6_ROUTER),
+        (IPV6_SERVER, IPV6_ROUTER),
+    ] {
+        request.push(Ipv6 {
+            source,
+            destination,
+            ..Ipv6::default()
+        });
+        response.push(Ipv6 {
+            source: destination,
+            destination: source,
+            ..Ipv6::default()
+        });
+    }
+    request.push(Udp {
+        source_port: CLIENT_PORT,
+        destination_port: SERVER_PORT,
+        ..Udp::default()
+    });
+    response.push(Udp {
+        source_port: SERVER_PORT,
+        destination_port: CLIENT_PORT,
+        ..Udp::default()
+    });
+    (request, response)
+}
+
+#[test]
+fn reverse_udp_requires_every_ip_envelope_and_encapsulation_protocol() {
+    let registry = registry();
+    let matcher = registry.matcher("udp").unwrap();
+    let (request, response) = nested_udp_pair();
+    let matches = |request: &Packet, response: &Packet| {
+        let matched = matcher.matches(request, response).is_some();
+        assert_eq!(
+            matched,
+            transport_tuple_reversed(request, response, BuiltinProtocol::Udp).is_some(),
+            "transport attribution must enforce the same IP path"
+        );
+        matched
+    };
+    assert!(matches(&request, &response));
+    assert_eq!(
+        matcher.responder(&request, &response),
+        Some(IpAddr::V6(IPV6_ROUTER))
+    );
+
+    for index in 0..3 {
+        let mut wrong_endpoint = response.clone();
+        wrong_endpoint
+            .layer_mut(index)
+            .unwrap()
+            .downcast_mut::<Ipv6>()
+            .unwrap()
+            .source = Ipv6Addr::LOCALHOST;
+        assert!(!matches(&request, &wrong_endpoint), "IP layer {index}");
+
+        let mut missing_envelope = response.clone();
+        missing_envelope.remove(index).unwrap();
+        assert!(!matches(&request, &missing_envelope), "IP layer {index}");
+        assert!(!matches(&missing_envelope, &request), "IP layer {index}");
+    }
+
+    let mut wrong_family = response.clone();
+    wrong_family
+        .replace(
+            1,
+            Ipv4 {
+                source: IPV4_SERVER,
+                destination: IPV4_CLIENT,
+                ..Ipv4::default()
+            },
+        )
+        .unwrap();
+    assert!(!matches(&request, &wrong_family));
+
+    let mut gre_request = request.clone();
+    gre_request.insert(1, Gre::default()).unwrap();
+    assert!(!matches(&gre_request, &response));
+    let mut gre_response = response.clone();
+    gre_response.insert(1, Gre::default()).unwrap();
+    assert!(matches(&gre_request, &gre_response));
+
+    let mut missing_outer_request = request;
+    let mut missing_outer_response = response;
+    missing_outer_request.insert(0, Gre::default()).unwrap();
+    missing_outer_response.insert(0, Gre::default()).unwrap();
+    assert!(!matches(&missing_outer_request, &missing_outer_response));
+}
+
+#[test]
+fn reverse_udp_requires_matching_ah_tunnel_paths_in_both_ip_families() {
+    let registry = registry();
+    let matcher = registry.matcher("udp").unwrap();
+    for network in [NetworkVersion::V4, NetworkVersion::V6] {
+        let (mut request, mut response) = nested_udp_pair();
+        if matches!(network, NetworkVersion::V4) {
+            for index in 0..3 {
+                request
+                    .replace(
+                        index,
+                        Ipv4 {
+                            source: IPV4_CLIENT,
+                            destination: IPV4_SERVER,
+                            ..Ipv4::default()
+                        },
+                    )
+                    .unwrap();
+                response
+                    .replace(
+                        index,
+                        Ipv4 {
+                            source: IPV4_SERVER,
+                            destination: IPV4_CLIENT,
+                            ..Ipv4::default()
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        request.insert(1, Ah::default()).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_none(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_none(),
+            "{network:?}"
+        );
+        response.insert(1, Ah::default()).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_some(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_some(),
+            "{network:?}"
+        );
+        request.remove(1).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_none(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_none(),
+            "{network:?}"
+        );
+    }
+}
+
+#[test]
+fn reverse_udp_compares_registered_tunnel_protocols() {
+    let registry = packetcraftr_core::protocol::builtin::registry_with(|builder| {
+        builder.register_codec(ProbeCodec, &[])?;
+        builder.register_codec(ChildCodec, &[])?;
+        Ok(())
+    })
+    .unwrap();
+    let matcher = registry.matcher("udp").unwrap();
+    let (mut request, mut response) = nested_udp_pair();
+    request.insert(1, Probe::default()).unwrap();
+    let matches = |request: &Packet, response: &Packet| {
+        let matched = matcher.matches(request, response).is_some();
+        assert_eq!(
+            matched,
+            transport_tuple_reversed(request, response, BuiltinProtocol::Udp).is_some()
+        );
+        matched
+    };
+    assert!(!matches(&request, &response), "missing custom tunnel");
+    response.insert(1, Child::default()).unwrap();
+    assert!(!matches(&request, &response), "different custom tunnel");
+    response.replace(1, Probe::default()).unwrap();
+    assert!(matches(&request, &response), "matching custom tunnel");
+    request.remove(1).unwrap();
+    assert!(!matches(&request, &response), "unexpected custom tunnel");
+}
+
+#[test]
+fn reverse_udp_preserves_source_routing_in_every_ip_envelope() {
+    let registry = registry();
+    let matcher = registry.matcher("udp").unwrap();
+    for index in 0..3 {
+        let (mut request, response) = nested_udp_pair();
+        let ip = request
+            .layer_mut(index)
+            .unwrap()
+            .downcast_mut::<Ipv6>()
+            .unwrap();
+        let final_destination = ip.destination;
+        ip.destination = "2001:db8:4::1".parse().unwrap();
+        let active_destination = ip.destination;
+        request
+            .insert(
+                index + 1,
+                SegmentRoutingHeader {
+                    segments: vec![active_destination, final_destination],
+                    ..SegmentRoutingHeader::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_some(),
+            "IP layer {index}"
+        );
+        assert_eq!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp),
+            Some(IpAddr::V6(IPV6_ROUTER)),
+            "IP layer {index}"
+        );
     }
 }
 

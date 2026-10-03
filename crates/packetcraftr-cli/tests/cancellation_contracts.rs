@@ -72,6 +72,45 @@ impl Running {
         );
     }
 
+    fn signal_and_wait(&mut self, name: &str) {
+        let tasks = format!("/proc/{}/task", self.child.id());
+        self.wait_until(|_| {
+            std::fs::read_dir(&tasks).unwrap().any(|entry| {
+                std::fs::read_to_string(entry.unwrap().path().join("comm"))
+                    .is_ok_and(|name| name.trim() == "ctrl-c")
+            })
+        });
+        let worker = std::fs::read_dir(tasks)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|task| {
+                std::fs::read_to_string(task.join("comm")).is_ok_and(|name| name.trim() == "ctrl-c")
+            })
+            .expect("signal worker must exist");
+        let parked = || {
+            std::fs::read_to_string(worker.join("wchan"))
+                .unwrap()
+                .contains("futex")
+        };
+        let switches = || {
+            std::fs::read_to_string(worker.join("status"))
+                .unwrap()
+                .lines()
+                .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+                .expect("worker switch count must exist")
+                .trim()
+                .parse::<u64>()
+                .unwrap()
+        };
+        // ctrlc 3.5.2 parks this dedicated worker in sem_wait between callbacks.
+        // A new voluntary switch back into that wait observes callback completion;
+        // the main thread stays blocked on the input/output controlled by the test.
+        self.wait_until(|_| parked());
+        let before = switches();
+        self.signal(name);
+        self.wait_until(|_| switches() > before && parked());
+    }
+
     fn finish(&mut self) -> Output {
         use std::io::Read;
         let stdout_worker = self.child.stdout.take().map(|mut pipe| {
@@ -159,8 +198,7 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
                 .unwrap()
                 .contains("pipe_write")
         });
-        process.signal(signal);
-        std::thread::sleep(Duration::from_millis(100));
+        process.signal_and_wait(signal);
         let output = process.finish();
         assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
         let document = common::parse_json(&output);
@@ -211,8 +249,7 @@ fn cancellation_during_build_json_publication_keeps_one_complete_document() {
                 .unwrap()
                 .contains("pipe_write")
         });
-        process.signal(signal);
-        std::thread::sleep(Duration::from_millis(100));
+        process.signal_and_wait(signal);
         let output = process.finish();
         assert_eq!(output.status.code(), Some(130), "{signal}");
         let document: serde_json::Value = serde_json::from_slice(&output.stdout)
@@ -267,8 +304,7 @@ fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
                         .windows(6)
                         .any(|bytes| bytes == b"before")
                 });
-                process.signal(if eof { "TERM" } else { "INT" });
-                std::thread::sleep(Duration::from_millis(100));
+                process.signal_and_wait(if eof { "TERM" } else { "INT" });
                 if !eof {
                     let _ = stdin.write_all(&later);
                 }

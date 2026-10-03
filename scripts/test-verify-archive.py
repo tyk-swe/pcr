@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -90,7 +91,11 @@ class ArchiveTests(unittest.TestCase):
             example.write_text(json.dumps({'table': table}), encoding='utf-8')
         self.mode('ok')
         self.binary = self.root / 'packetcraftr'
-        self.binary.write_text(f'#!{sys.executable}\n' + CHILD, encoding='utf-8')
+        # Kernel shebang parsing splits interpreter paths at whitespace. The
+        # shell launcher quotes the exact Python executable and fixture body.
+        self.binary.write_text(
+            f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(CHILD)} "$@"\n',
+            encoding='utf-8')
         self.binary.chmod(0o755)
         self.target = 'x86_64-unknown-linux-gnu'
         self.manifest()
@@ -123,6 +128,15 @@ class ArchiveTests(unittest.TestCase):
         self.target = 'x86_64-pc-windows-msvc'
         self.manifest()
         self.check(success=True)
+
+    def test_interpreter_path_with_spaces_and_quotes(self):
+        interpreter = self.root / "python's interpreter"
+        interpreter.symlink_to(sys.executable)
+        result = subprocess.run([
+            str(interpreter), str(pathlib.Path(__file__).resolve()),
+            'ArchiveTests.test_valid_unix_and_windows_layouts',
+        ], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_missing_and_empty_assets(self):
         # Missing/empty assets fail before manifest or binary subprocess work,

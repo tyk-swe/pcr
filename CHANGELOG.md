@@ -1787,8 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- Release archives include the clock-regression and scoped-VXLAN captures and
-  reference outputs used by the analysis resource guide's runnable examples.
+- Detached consumer validation writes valid UTF-8 Cargo manifests when the
+  checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced
   profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
@@ -2037,6 +2037,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   messages, and exit codes are unchanged.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - TCP pending growth no longer recopies its retained range on adjacent or
   reverse extension. Bounded payload pages and interval metadata are charged
   independently; transient output/history allocations are admitted before commit.

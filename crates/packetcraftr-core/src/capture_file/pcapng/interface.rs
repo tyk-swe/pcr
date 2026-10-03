@@ -17,6 +17,7 @@ use crate::capture_file::{
 pub(in crate::capture_file) fn parse_interface_description(
     body: &[u8],
     endianness: Endianness,
+    max_options: usize,
 ) -> Result<(Interface, Vec<PcapNgOption>), Error> {
     if body.len() < 8 {
         return Err(Error::InvalidData {
@@ -27,7 +28,12 @@ pub(in crate::capture_file) fn parse_interface_description(
     let link_type = LinkType(u32::from(decode_u16(endianness, body)?));
     // the length guard leaves at least eight bytes
     let snap_len = decode_u32(endianness, &body[4..8])?;
-    let options = parse_options(&body[8..], endianness, "pcapng interface options")?;
+    let options = parse_options(
+        &body[8..],
+        endianness,
+        "pcapng interface options",
+        max_options,
+    )?;
     let timestamp_resolution = match unique_option(
         &options,
         PCAPNG_OPTION_IF_TSRESOL,
@@ -72,7 +78,7 @@ mod tests {
     fn parse(options: &[u8]) -> Result<(Interface, Vec<PcapNgOption>), Error> {
         let mut body = vec![1, 0, 0, 0, 0xff, 0xff, 0, 0];
         body.extend_from_slice(options);
-        parse_interface_description(&body, Endianness::Little)
+        parse_interface_description(&body, Endianness::Little, usize::MAX)
     }
 
     #[test]

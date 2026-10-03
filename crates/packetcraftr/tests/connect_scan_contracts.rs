@@ -4,14 +4,19 @@
 //! Native TCP connect admission is process-wide, so these contracts run in
 //! their own test binary rather than beside other connect tests.
 
+mod common;
+
+use std::convert::Infallible;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::sync::{
-    Arc,
+    Arc, Condvar, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use common::clock::VirtualClock;
+use packetcraftr::clock::Clock;
 use packetcraftr::policy::Policy;
 use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
@@ -19,7 +24,19 @@ use packetcraftr::target::{Family, SystemResolver, Target};
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{Classified as _, Kind};
+use packetcraftr_netio::resources::tcp_connect_snapshot;
 use packetcraftr_netio::tcp::{MAX_PENDING_CONNECTIONS, Provider, Stream};
+
+const WATCHDOG: Duration = Duration::from_secs(10);
+static CONNECT_TESTS: Mutex<()> = Mutex::new(());
+
+fn wait_until(description: &str, ready: impl Fn() -> bool) {
+    let until = Instant::now() + WATCHDOG;
+    while !ready() {
+        assert!(Instant::now() < until, "{description}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
 
 struct Socket;
 
@@ -53,18 +70,126 @@ impl Stream for Socket {
     }
 }
 
-struct Silent;
+#[derive(Default)]
+struct GateState {
+    entered: usize,
+    released: usize,
+}
 
-impl Provider for Silent {
+#[derive(Default)]
+struct ConnectGate {
+    state: Mutex<GateState>,
+    changed: Condvar,
+}
+
+impl ConnectGate {
+    fn hold(&self) {
+        let mut state = self.state.lock().unwrap();
+        let ticket = state.entered;
+        state.entered += 1;
+        self.changed.notify_all();
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, WATCHDOG, |state| state.released <= ticket)
+            .unwrap();
+        let released = state.released > ticket;
+        drop(state);
+        assert!(released, "provider cleanup must be released");
+    }
+
+    fn wait_for_entries(&self, expected: usize) {
+        let state = self.state.lock().unwrap();
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, WATCHDOG, |state| state.entered < expected)
+            .unwrap();
+        let entered = state.entered;
+        drop(state);
+        assert_eq!(entered, expected, "every worker enters its provider");
+    }
+
+    fn release(&self, count: usize) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.released = state.released.max(count);
+        self.changed.notify_all();
+    }
+}
+
+struct Cleanup(Arc<ConnectGate>);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        self.0.release(usize::MAX);
+    }
+}
+
+struct Held(Arc<ConnectGate>);
+
+impl Provider for Held {
     type Stream = Socket;
     fn connect(
         &self,
         _: SocketAddr,
-        deadline: &Deadline,
+        _: &Deadline,
     ) -> Result<Socket, packetcraftr_netio::tcp::Error> {
-        let timeout = deadline.remaining().unwrap_or_default();
-        std::thread::sleep(timeout + Duration::from_millis(30));
+        self.0.hold();
         Err(io::Error::from(io::ErrorKind::TimedOut).into())
+    }
+}
+
+enum Stage {
+    FirstProviders,
+    RetainedAdmission,
+    SecondProviders,
+    Finished,
+}
+
+#[derive(Clone)]
+struct AdmissionClock {
+    clock: VirtualClock,
+    gate: Arc<ConnectGate>,
+    stage: Arc<Mutex<Stage>>,
+    timeout: Duration,
+    rejected_before: usize,
+}
+
+impl Clock for AdmissionClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        self.clock.now()
+    }
+
+    fn sleep(&self, _: Duration, _: &Deadline) -> Result<(), Self::Error> {
+        let mut stage = self.stage.lock().unwrap();
+        match *stage {
+            Stage::FirstProviders => {
+                self.gate.wait_for_entries(MAX_PENDING_CONNECTIONS);
+                self.clock.advance(self.timeout);
+                *stage = Stage::RetainedAdmission;
+            }
+            Stage::RetainedAdmission => {
+                let snapshot = tcp_connect_snapshot();
+                assert_eq!(snapshot.active, MAX_PENDING_CONNECTIONS);
+                assert_eq!(snapshot.cleanup_retaining_capacity, MAX_PENDING_CONNECTIONS);
+                assert!(snapshot.rejected_admissions > self.rejected_before);
+                self.gate.release(MAX_PENDING_CONNECTIONS);
+                wait_until("first-wave admission returns", || {
+                    tcp_connect_snapshot().active == 0
+                });
+                *stage = Stage::SecondProviders;
+            }
+            Stage::SecondProviders => {
+                self.gate.wait_for_entries(2 * MAX_PENDING_CONNECTIONS);
+                self.clock.advance(self.timeout);
+                *stage = Stage::Finished;
+            }
+            Stage::Finished => panic!("both waves should expire without another wait"),
+        }
+        Ok(())
     }
 }
 
@@ -88,17 +213,40 @@ fn request() -> scan::Request {
 
 #[test]
 fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
-    let request = request();
+    let _serial = CONNECT_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    wait_until("previous native cleanup completes", || {
+        tcp_connect_snapshot().active == 0
+    });
+    let gate = Arc::new(ConnectGate::default());
+    let _cleanup = Cleanup(Arc::clone(&gate));
+    // Native dispatch gets a bounded watchdog, but the client clock expires
+    // attempts immediately after every provider enters, without a real sleep.
+    let request = scan::Request {
+        timeout: WATCHDOG,
+        ..request()
+    };
+    let clock = AdmissionClock {
+        clock: VirtualClock::default(),
+        gate: Arc::clone(&gate),
+        stage: Arc::new(Mutex::new(Stage::FirstProviders)),
+        timeout: request.timeout,
+        rejected_before: tcp_connect_snapshot().rejected_admissions,
+    };
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         Policy::default(),
-        ProviderSet::tcp(Silent, SystemResolver),
-    );
+        ProviderSet::tcp(Held(Arc::clone(&gate)), SystemResolver),
+    )
+    .with_clock(clock.clone());
     let collector = connect::Collector::default();
     let report = client
         .scan_connect(request, collector.clone())
         .expect("capacity held by cancelled attempts is waited for");
     let aggregate = collector.finish(report).unwrap();
+    assert!(matches!(*clock.stage.lock().unwrap(), Stage::Finished));
+    assert_eq!(aggregate.report.stats.connections_attempted, 32);
     let probes = aggregate
         .endpoints
         .iter()
@@ -106,6 +254,19 @@ fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
         .collect::<Vec<_>>();
     assert_eq!(probes.len(), 32);
     assert!(probes.iter().all(|probe| probe.connect_succeeded.is_none()));
+    assert!(
+        probes
+            .iter()
+            .all(|probe| probe.outcome == connect::Outcome::DeadlineExpired)
+    );
+    assert_eq!(
+        tcp_connect_snapshot().cleanup_retaining_capacity,
+        MAX_PENDING_CONNECTIONS
+    );
+    gate.release(usize::MAX);
+    wait_until("second-wave admission returns", || {
+        tcp_connect_snapshot().active == 0
+    });
 }
 
 #[test]
@@ -125,6 +286,12 @@ fn route_overrides_are_rejected_before_any_tcp_connect() {
         }
     }
 
+    let _serial = CONNECT_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    wait_until("previous native cleanup completes", || {
+        tcp_connect_snapshot().active == 0
+    });
     let calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
@@ -134,6 +301,7 @@ fn route_overrides_are_rejected_before_any_tcp_connect() {
     let request = scan::Request {
         ports: vec![80],
         max_in_flight: 1,
+        timeout: WATCHDOG,
         ..request()
     };
     client

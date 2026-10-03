@@ -51,7 +51,9 @@ impl Launch<'_> {
         match arguments.generate(self.format) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                let _ = emit_stderr_error(&error);
+                if let Err(write_error) = emit_stderr_error(&error) {
+                    return ExitCode::from(write_error.exit_code());
+                }
                 ExitCode::from(error.exit_code())
             }
         }

@@ -11,6 +11,29 @@ const REMEDIATION: &str = "restore the stdout consumer or choose a writable outp
 const NDJSON_REMEDIATION: &str = "inspect the output sink and account for records already written";
 const FULL_DEVICE: &str = "No space left on device";
 
+#[test]
+fn generated_command_errors_report_stderr_write_failures() {
+    common::require_dev_full();
+    let arguments = ["topics", "no-such-topic"];
+    let normal = common::run(&arguments);
+    assert_eq!(normal.status.code(), Some(2), "{normal:?}");
+    assert!(normal.stdout.is_empty(), "{normal:?}");
+    assert!(!normal.stderr.is_empty(), "{normal:?}");
+
+    let failure = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(arguments)
+        .stderr(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .expect("/dev/full must be writable for the write-failure contract"),
+        )
+        .output()
+        .expect("CLI process must start");
+    assert_eq!(failure.status.code(), Some(5), "{failure:?}");
+    assert!(failure.stdout.is_empty(), "{failure:?}");
+}
+
 fn stderr_of_failed_stdout_write(arguments: &[&str]) -> String {
     common::require_dev_full();
     let failure = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))

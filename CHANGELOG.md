@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Generated-command diagnostics return the I/O exit code when writing stderr
+  fails, consistently with workflow and argument-error diagnostics.
 - Analysis measurement reports distinguish allocator-run exits and produced
   profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,

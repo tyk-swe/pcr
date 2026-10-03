@@ -9,9 +9,10 @@
 //! [`OutputDirectory`] opened at staging time: with procfs, staging,
 //! publication, and rollback address the directory handle itself, so a parent
 //! path retargeted by another local actor (symlink swap or a renamed and
-//! replaced directory) cannot redirect the output. Elsewhere the directory's
-//! identity is re-verified immediately before publication and rollback, and a
-//! change is refused.
+//! replaced directory) cannot redirect the output. Elsewhere staging and
+//! publication use the physical directory resolved at staging, its identity is
+//! re-verified immediately before publication and rollback, and a change is
+//! refused.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -76,7 +77,8 @@ struct OutputDirectory {
     _handle: std::fs::File,
     identity: Identity,
     /// Where staged files are created and published: the handle-relative
-    /// procfs path when available, otherwise `requested`.
+    /// procfs path when available, otherwise the physical directory the
+    /// requested path resolved to at staging.
     base: PathBuf,
     handle_relative: bool,
 }
@@ -96,7 +98,10 @@ impl OutputDirectory {
             let identity = Identity::from_metadata(&metadata);
             let (base, handle_relative) = match proc_fd_base(&handle, identity) {
                 Some(base) => (base, true),
-                None => (requested.to_owned(), false),
+                // Without handle-relative paths, stage and publish at the
+                // physical directory resolved now, so a later change to an
+                // alias in the requested path cannot move the staged file.
+                None => (std::fs::canonicalize(requested).map_err(stage)?, false),
             };
             Ok(Self {
                 requested: requested.to_owned(),
@@ -114,10 +119,11 @@ impl OutputDirectory {
                     std::io::ErrorKind::NotADirectory,
                 )));
             }
+            let base = identity.0.clone();
             Ok(Self {
                 requested: requested.to_owned(),
                 identity,
-                base: requested.to_owned(),
+                base,
                 handle_relative: false,
             })
         }

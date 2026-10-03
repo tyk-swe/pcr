@@ -3,13 +3,14 @@
 
 use std::io::{self, Cursor, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr::dns::tcp as dns_tcp;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::deadline::POLL_INTERVAL;
+use packetcraftr_netio::resources::tcp_connect_snapshot;
 use packetcraftr_netio::tcp;
 
 const QUERY: &[u8] = b"bounded query";
@@ -17,6 +18,18 @@ const QUERY: &[u8] = b"bounded query";
 const RESPONSE: &[u8] = &[0x12, 0x34, 0x80, 0, 0, 1, 0, 0, 0, 0, 0, 0];
 
 const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
+const SHORT_ATTEMPT: Duration = Duration::from_millis(20);
+
+const _: () = assert!(SHORT_ATTEMPT.as_millis() < POLL_INTERVAL.as_millis());
+
+// The expiry contract samples process-wide TCP pool state, so queries run serially.
+static TCP_POOL: Mutex<()> = Mutex::new(());
+
+fn exclusive_tcp_pool() -> MutexGuard<'static, ()> {
+    TCP_POOL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn accept_bounded(listener: &TcpListener) -> TcpStream {
     let (stream, _) = listener.accept().expect("loopback accept");
@@ -36,6 +49,7 @@ fn read_query(stream: &mut TcpStream) {
 
 #[test]
 fn ipv4_loopback_handles_fragmented_response_io() {
+    let _pool = exclusive_tcp_pool();
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("IPv4 loopback listener");
     let endpoint = listener.local_addr().expect("listener address");
     let server = thread::spawn(move || {
@@ -71,12 +85,32 @@ fn ipv4_loopback_handles_fragmented_response_io() {
     assert_eq!(&response.frame[2..], RESPONSE);
 }
 
-const SHORT_ATTEMPT: Duration = Duration::from_millis(20);
-
-const _: () = assert!(SHORT_ATTEMPT.as_millis() < POLL_INTERVAL.as_millis());
-
 struct ScriptedConnect {
     written: Arc<Mutex<Vec<u8>>>,
+}
+
+struct HeldConnect {
+    scripted: ScriptedConnect,
+    supplied_budget: Arc<Mutex<Option<Duration>>>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl tcp::Provider for HeldConnect {
+    type Stream = ScriptedStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        deadline: &Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        *self.supplied_budget.lock().unwrap() = Some(deadline.limit());
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(SERVER_TIMEOUT)
+            .map_err(io::Error::other)?;
+        tcp::Provider::connect(&self.scripted, endpoint, deadline)
+    }
 }
 
 struct ScriptedStream {
@@ -93,8 +127,6 @@ impl tcp::Provider for ScriptedConnect {
         endpoint: SocketAddr,
         _deadline: &Deadline,
     ) -> Result<Self::Stream, tcp::Error> {
-        // Ensure the caller waits while the worker is still connecting.
-        thread::sleep(Duration::from_millis(1));
         let mut reply = u16::try_from(RESPONSE.len())
             .unwrap()
             .to_be_bytes()
@@ -144,14 +176,15 @@ impl tcp::Stream for ScriptedStream {
 }
 
 #[test]
-fn a_finished_connect_wakes_an_attempt_shorter_than_the_poll_interval() {
+fn a_scripted_connect_preserves_exact_query_and_response_frames() {
+    let _pool = exclusive_tcp_pool();
     let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
     let written = Arc::new(Mutex::new(Vec::new()));
     let response = dns_tcp::query(
         dns_tcp::Request {
             endpoint,
             query: QUERY,
-            timeout: SHORT_ATTEMPT,
+            timeout: SERVER_TIMEOUT,
             cancellation: None,
             max_message_bytes: 512,
         },
@@ -159,11 +192,72 @@ fn a_finished_connect_wakes_an_attempt_shorter_than_the_poll_interval() {
             written: Arc::clone(&written),
         }),
     )
-    .expect("completion wakes the short DNS attempt");
+    .expect("bounded scripted DNS attempt");
 
     assert_eq!(&response.frame[2..], RESPONSE);
     assert_eq!(response.bytes_written, QUERY.len() + 2);
     let mut expected = u16::try_from(QUERY.len()).unwrap().to_be_bytes().to_vec();
     expected.extend_from_slice(QUERY);
     assert_eq!(*written.lock().unwrap(), expected);
+}
+
+#[test]
+fn a_public_attempt_shorter_than_the_poll_interval_expires_without_writing() {
+    let _pool = exclusive_tcp_pool();
+    let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let supplied_budget = Arc::new(Mutex::new(None));
+    let (release, held) = mpsc::channel();
+    let provider = Arc::new(HeldConnect {
+        scripted: ScriptedConnect {
+            written: Arc::clone(&written),
+        },
+        supplied_budget: Arc::clone(&supplied_budget),
+        release: Mutex::new(held),
+    });
+    let (finished, completion) = mpsc::channel();
+    let caller = thread::spawn(move || {
+        let result = dns_tcp::query(
+            dns_tcp::Request {
+                endpoint,
+                query: QUERY,
+                timeout: SHORT_ATTEMPT,
+                cancellation: None,
+                max_message_bytes: 512,
+            },
+            provider,
+        );
+        let _ = finished.send(result);
+    });
+
+    // Do not wait for provider entry: dispatch itself may exhaust the attempt.
+    // Hold completion until the public query returns, then release before any
+    // assertion so failure paths also let the worker clean up.
+    let result = completion.recv_timeout(SERVER_TIMEOUT);
+    let _ = release.send(());
+    let joined = caller.join();
+    let cleanup_deadline = Instant::now() + SERVER_TIMEOUT;
+    while tcp_connect_snapshot().active != 0 && Instant::now() < cleanup_deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    joined.expect("bounded public DNS query caller");
+    let error = result
+        .expect("the short public attempt returns within the harness watchdog")
+        .expect_err("an unfinished connect must exhaust the short attempt");
+    assert!(matches!(
+        error,
+        dns_tcp::Error::Timeout {
+            phase: dns_tcp::Phase::Connect,
+            transferred: 0,
+        }
+    ));
+    assert!(written.lock().unwrap().is_empty());
+    if let Some(budget) = *supplied_budget.lock().unwrap() {
+        assert!(
+            budget <= SHORT_ATTEMPT,
+            "the provider received {budget:?} for a {SHORT_ATTEMPT:?} attempt"
+        );
+    }
+    assert_eq!(tcp_connect_snapshot().active, 0, "TCP workers cleaned up");
 }

@@ -14,9 +14,11 @@ pub(super) fn write_completions(directory: &Path) -> io::Result<()> {
         let mut command = Cli::command();
         command.set_bin_name("packetcraftr");
         command.build();
-        let mut file = std::fs::File::create(directory.join(shell.file_name("packetcraftr")))?;
-        // generate_to propagates open errors but panics on completion write errors.
-        shell.try_generate(&command, &mut file)?;
+        // Some shell generators panic on write errors even through try_generate.
+        // Render the fixed command tree in memory, then propagate filesystem errors.
+        let mut completion = Vec::new();
+        shell.try_generate(&command, &mut completion)?;
+        std::fs::write(directory.join(shell.file_name("packetcraftr")), completion)?;
     }
     Ok(())
 }

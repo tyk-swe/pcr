@@ -537,6 +537,14 @@ mod tests {
         release_sender
             .send(())
             .expect("release fake capture worker");
+        // Releasing the source only wakes the worker. Synchronize completion
+        // before testing the retry instead of requiring scheduling within 5 ms.
+        session
+            .running
+            .as_ref()
+            .expect("timed-out shutdown retains the worker")
+            .worker
+            .wait_ready(&Deadline::new(Duration::from_secs(5)));
         session.shutdown().expect("released worker shuts down");
         assert!(session.running.is_none());
         session

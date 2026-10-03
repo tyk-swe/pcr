@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::io::{Cursor, Read, Write};
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -245,6 +246,55 @@ fn request(query: &[u8]) -> Request<'_> {
         cancellation: None,
         max_message_bytes: usize::from(u16::MAX),
     }
+}
+
+#[test]
+fn a_short_attempt_waits_for_connect_completion_before_rechecking_its_deadline() {
+    let timeout = Duration::from_millis(20);
+    assert!(timeout < POLL_INTERVAL);
+    let provider = connector(vec![0, 1, 1]);
+    let started = provider.stream.state.lock().unwrap().now;
+    let connecting = Arc::new(AtomicBool::new(false));
+    let waited = Arc::new(AtomicBool::new(false));
+    let begin_connect = Arc::clone(&connecting);
+    let wait_selected = Arc::clone(&waited);
+
+    // Model fast completion when DNS awaits it; bypassing that wait exhausts
+    // the logical attempt independently of when the real worker gets scheduled.
+    let response = query_with_connect_wait(
+        Request {
+            timeout,
+            ..request(b"q")
+        },
+        Arc::new(provider.clone()),
+        || {
+            if !connecting.load(Ordering::SeqCst) {
+                started
+            } else if waited.load(Ordering::SeqCst) {
+                started + Duration::from_millis(1)
+            } else {
+                started + timeout
+            }
+        },
+        move |remaining| {
+            assert_eq!(remaining, timeout);
+            begin_connect.store(true, Ordering::SeqCst);
+            // The DNS attempt uses the logical 20ms clock above. Real worker
+            // scheduling gets a separate finite watchdog, not an attempt budget.
+            Deadline::new(Duration::from_secs(10))
+        },
+        move |pending, deadline| {
+            wait_selected.store(true, Ordering::SeqCst);
+            pending.wait(deadline)
+        },
+    )
+    .expect("completion waiting preserves the short logical DNS attempt");
+
+    assert!(waited.load(Ordering::SeqCst));
+    assert_eq!(response.elapsed, Duration::from_millis(1));
+    assert_eq!(response.frame.as_ref(), [0, 1, 1]);
+    assert_eq!(response.bytes_written, 3);
+    assert_eq!(provider.stream.state.lock().unwrap().output, [0, 1, b'q']);
 }
 
 #[test]

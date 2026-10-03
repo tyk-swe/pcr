@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Analysis measurement reports distinguish allocator-run exits and produced
+  profiles, and include input metadata for pipe and handshake measurements.
 - Response matching and transport attribution require every encapsulated IP
   envelope and intervening tunnel protocol to match the reversed request path,
   including intermediate envelopes, while preserving source-routing endpoints.

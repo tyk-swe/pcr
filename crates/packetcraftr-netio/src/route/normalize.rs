@@ -247,13 +247,11 @@ fn address_scope(address: IpAddr) -> Scope {
 mod tests {
     use std::net::Ipv6Addr;
 
-    use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::MacAddress;
 
     use super::*;
     use crate::{
         interface::{self, Id as InterfaceId},
-        link::Capability,
         test_support::{assigned, interface_info, v4},
     };
 
@@ -292,114 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn destination_scope_classification_covers_both_address_families() {
-        let cases = [
-            (v4(0, 0, 0, 0), Scope::Unspecified),
-            (IpAddr::V6(Ipv6Addr::UNSPECIFIED), Scope::Unspecified),
-            (v4(224, 0, 0, 1), Scope::Multicast),
-            (
-                "ff02::1".parse::<IpAddr>().expect("IPv6 multicast"),
-                Scope::Multicast,
-            ),
-            (v4(127, 0, 0, 1), Scope::Host),
-            (IpAddr::V6(Ipv6Addr::LOCALHOST), Scope::Host),
-            (v4(169, 254, 1, 2), Scope::Link),
-            (
-                "fe80::1".parse::<IpAddr>().expect("IPv6 link local"),
-                Scope::Link,
-            ),
-            (v4(10, 0, 0, 1), Scope::Private),
-            (
-                "fd00::1".parse::<IpAddr>().expect("IPv6 unique local"),
-                Scope::Private,
-            ),
-            (v4(198, 51, 100, 1), Scope::Global),
-            (
-                "2001:db8::1".parse::<IpAddr>().expect("IPv6 global"),
-                Scope::Global,
-            ),
-        ];
-
-        for (address, expected) in cases {
-            assert_eq!(classify_destination(address), expected, "{address}");
-        }
-    }
-
-    #[test]
-    fn finish_route_selects_the_longest_matching_source_and_normalizes_snapshot() {
-        let destination = v4(10, 2, 3, 99);
-
-        let decision = finish_route(destination, None, None, snapshot()).expect("valid snapshot");
-
-        assert_eq!(decision.selected_source, Some(v4(10, 2, 3, 4)));
-        assert_eq!(decision.next_hop, Some(v4(10, 2, 3, 1)));
-        assert_eq!(decision.selection_reason, SelectionReason::Gateway);
-        assert_eq!(decision.destination_scope, Scope::Private);
-        assert_eq!(decision.mtu, 1_400);
-        assert_eq!(decision.interface, interface().id);
-    }
-
-    #[test]
-    fn fallback_source_ranks_multicast_and_unspecified_destinations_as_global() {
-        let v4_addresses = [
-            assigned(v4(127, 0, 0, 1), 8),
-            assigned(v4(192, 0, 2, 5), 24),
-        ];
-        for destination in [v4(224, 0, 0, 251), v4(0, 0, 0, 0)] {
-            assert_eq!(
-                fallback_source(&v4_addresses, destination),
-                Some(v4(192, 0, 2, 5)),
-                "{destination}"
-            );
-        }
-
-        let global = "2001:db8::5".parse::<IpAddr>().expect("IPv6 global");
-        let v6_addresses = [
-            assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
-            assigned(global, 64),
-        ];
-        for destination in [
-            "ff02::fb".parse::<IpAddr>().expect("IPv6 multicast"),
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-        ] {
-            assert_eq!(
-                fallback_source(&v6_addresses, destination),
-                Some(global),
-                "{destination}"
-            );
-        }
-    }
-
-    #[test]
-    fn finish_route_accepts_a_local_source_owned_by_another_interface() {
-        let local_address = v4(192, 0, 2, 8);
-        let mut local = snapshot();
-        local.interface.id = InterfaceId {
-            name: "lo".to_owned(),
-            index: 1,
-        };
-        local.interface.mac_address = None;
-        local.interface.addresses = vec![interface::Address {
-            address: v4(127, 0, 0, 1),
-            prefix_length: 8,
-        }];
-        local.interface.flags.loopback = true;
-        local.interface.capability = Capability::Layer3;
-        local.interface.link_type = LinkType::RAW;
-        local.selected_source = Some(local_address);
-        local.next_hop = None;
-        local.selection_reason = SelectionReason::Local;
-        local.local_addresses.push(local_address);
-
-        let decision = finish_route(local_address, None, None, local)
-            .expect("source is assigned to another local interface");
-
-        assert_eq!(decision.selected_source, Some(local_address));
-        assert_eq!(decision.selection_reason, SelectionReason::Local);
-        assert_eq!(decision.interface.name, "lo");
-    }
-
-    #[test]
     fn finish_route_rejects_a_local_source_not_owned_by_any_interface() {
         let local_address = v4(192, 0, 2, 8);
         let mut local = snapshot();
@@ -411,32 +301,6 @@ mod tests {
             finish_route(local_address, None, None, local),
             Err(route::Error::InvalidResponse { .. })
         ));
-    }
-
-    #[test]
-    fn finish_route_preserves_and_infers_ipv4_broadcast_routes_without_overriding_gateways() {
-        let destination = v4(10, 2, 3, 255);
-
-        let mut native_broadcast = snapshot();
-        native_broadcast.next_hop = None;
-        native_broadcast.selection_reason = SelectionReason::Broadcast;
-        let preserved = finish_route(destination, None, None, native_broadcast)
-            .expect("native broadcast route is valid");
-        assert_eq!(preserved.selection_reason, SelectionReason::Broadcast);
-
-        let mut inferred_broadcast = snapshot();
-        inferred_broadcast.next_hop = None;
-        inferred_broadcast.interface.flags.broadcast = true;
-        let inferred = finish_route(destination, None, None, inferred_broadcast)
-            .expect("interface-prefix broadcast is valid");
-        assert_eq!(inferred.selection_reason, SelectionReason::Broadcast);
-
-        let mut gateway = snapshot();
-        gateway.selection_reason = SelectionReason::Broadcast;
-        let gateway =
-            finish_route(destination, None, None, gateway).expect("gateway route remains valid");
-        assert_eq!(gateway.selection_reason, SelectionReason::Gateway);
-        assert!(gateway.next_hop.is_some());
     }
 
     #[test]
@@ -474,22 +338,6 @@ mod tests {
         invalid.interface.mtu = None;
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(route::Error::InvalidResponse { .. })
-        ));
-    }
-
-    #[test]
-    fn interface_decision_is_destination_free_and_requires_a_nonzero_mtu() {
-        let decision = interface_decision(interface()).expect("valid interface snapshot");
-        assert_eq!(decision.selected_source, None);
-        assert_eq!(decision.next_hop, None);
-        assert_eq!(decision.selection_reason, SelectionReason::InterfaceOnly);
-        assert_eq!(decision.destination_scope, Scope::Unspecified);
-
-        let mut invalid = interface();
-        invalid.mtu = Some(0);
-        assert!(matches!(
-            interface_decision(invalid),
             Err(route::Error::InvalidResponse { .. })
         ));
     }

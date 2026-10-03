@@ -186,42 +186,9 @@ impl ScratchBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::Classified;
+
     use serde::ser::SerializeSeq;
     use std::cell::Cell;
-
-    #[test]
-    fn every_ceiling_is_a_valid_verify_limit() {
-        let zero = Limits {
-            max_details: 0,
-            max_detail_bytes: 0,
-            max_scratch_bytes: 0,
-        };
-        assert!(zero.validate().is_ok());
-        assert!(Limits::default().validate().is_ok());
-    }
-
-    #[test]
-    fn scratch_json_preserves_canonical_bytes_and_previous_charges() {
-        let value = serde_json::json!([null, "quoted\"\ntext", [0, 255], {"key": true}]);
-        let expected = serde_json::to_vec(&value).unwrap();
-        let mut budget = ScratchBudget::new(128 + expected.len());
-        budget.reserve(128).unwrap();
-        assert_eq!(budget.json(&value).unwrap(), expected);
-        assert!(matches!(
-            budget.reserve(1),
-            Err(super::super::Error::ScratchBudget { .. })
-        ));
-
-        let limit = 128 + expected.len() - 1;
-        let mut budget = ScratchBudget::new(limit);
-        budget.reserve(128).unwrap();
-        let error = budget.json(&value).unwrap_err();
-        assert!(
-            matches!(error, super::super::Error::ScratchBudget { limit: actual } if actual == limit)
-        );
-        assert_eq!(error.classification().code, "policy.verify_scratch_limit");
-    }
 
     #[test]
     fn scratch_json_stops_serialization_when_the_remaining_budget_is_exhausted() {

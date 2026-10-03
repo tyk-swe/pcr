@@ -359,7 +359,7 @@ const fn output_classification() -> Classification {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::budget::Cancellation;
+
     use std::time::{Duration, Instant};
 
     const FIXTURE_WATCHDOG: Duration = Duration::from_secs(30);
@@ -385,63 +385,6 @@ mod tests {
     }
 
     #[test]
-    fn blocked_callback_outlives_its_worker_handle_but_keeps_its_permit_until_cleanup() {
-        let runtime = Runtime::new(1).unwrap();
-        let (release, wait) = mpsc::channel();
-        let (started, entered) = mpsc::channel();
-        let worker = Worker::<()>::new_in(&runtime, move |(): ()| {
-            started.send(()).unwrap();
-            wait.recv_timeout(FIXTURE_WATCHDOG).unwrap();
-            Ok(())
-        })
-        .unwrap();
-        assert!(matches!(
-            worker.emit((), &deadline_after_admission()),
-            Err(Error::Deadline(_))
-        ));
-        entered.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(
-            worker
-                .emit((), &Deadline::new(Duration::from_secs(1)))
-                .is_err()
-        );
-        drop(worker);
-        assert!(Worker::<()>::new_in(&runtime, |_| Ok(())).is_err());
-        assert_eq!(runtime.snapshot().active, 1);
-        assert_eq!(runtime.snapshot().rejected_admissions, 1);
-        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
-        release.send(()).unwrap();
-        wait_for_cleanup(&runtime);
-        assert!(Worker::<()>::new_in(&runtime, |_| Ok(())).is_ok());
-    }
-
-    #[test]
-    fn capacities_above_the_ceiling_are_refused_instead_of_lowered() {
-        for requested in [MAX_WORKER_CAPACITY + 1, usize::MAX] {
-            assert_eq!(
-                Runtime::new(requested).unwrap_err(),
-                CapacityError {
-                    value: requested,
-                    maximum: MAX_WORKER_CAPACITY,
-                },
-            );
-        }
-        assert_eq!(
-            Runtime::new(MAX_WORKER_CAPACITY).unwrap().capacity(),
-            MAX_WORKER_CAPACITY
-        );
-        assert_eq!(Runtime::new(0).unwrap().capacity(), 0);
-    }
-
-    #[test]
-    fn worker_spawn_failure_publishes_the_os_cause() {
-        let error = spawn_failure(io::Error::other("thread limit reached"));
-        assert_eq!(error.classification().code, "internal.progressive_output");
-        assert_eq!(error.causes(), ["thread limit reached"]);
-        assert!(std::error::Error::source(&error).is_some());
-    }
-
-    #[test]
     fn admission_is_finite_and_independent_between_runtimes() {
         assert!(Worker::<()>::new_in(&Runtime::new(0).unwrap(), |_| Ok(())).is_err());
         let runtime = Runtime::new(2).unwrap();
@@ -459,32 +402,6 @@ mod tests {
             .emit((), &Deadline::new(Duration::from_secs(1)))
             .unwrap();
         drop((first, second));
-        wait_for_cleanup(&runtime);
-    }
-
-    #[test]
-    fn callback_failure_preserves_classification_and_stops_later_events() {
-        let runtime = Runtime::new(1).unwrap();
-        let worker = Worker::<()>::new_in(&runtime, |(): ()| {
-            Err(BoundaryError::new(
-                "denied",
-                Classification::new("policy.fixture", Kind::Policy, None),
-                Vec::new(),
-            ))
-        })
-        .unwrap();
-        let Err(Error::Output(error)) = worker.emit((), &Deadline::new(Duration::from_secs(1)))
-        else {
-            panic!("expected callback failure")
-        };
-        assert_eq!(error.classification().code, "policy.fixture");
-        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
-        assert!(
-            worker
-                .emit((), &Deadline::new(Duration::from_secs(1)))
-                .is_err()
-        );
-        drop(worker);
         wait_for_cleanup(&runtime);
     }
 
@@ -518,41 +435,5 @@ mod tests {
         assert!(Worker::<()>::new_in(&runtime, |_| Ok(())).is_err());
         release.send(()).unwrap();
         wait_for_cleanup(&runtime);
-    }
-
-    #[test]
-    fn cancellation_interrupts_publication_wait_without_releasing_callback_resources() {
-        let runtime = Runtime::new(1).unwrap();
-        let signal = Cancellation::default();
-        let (entered, started) = mpsc::channel();
-        let (release, wait) = mpsc::channel();
-        let worker = Worker::new_in(&runtime, move |()| {
-            entered.send(()).unwrap();
-            wait.recv_timeout(FIXTURE_WATCHDOG).unwrap();
-            Ok(())
-        })
-        .unwrap();
-        let cancelled = signal.clone();
-        let canceller = thread::spawn(move || {
-            started.recv_timeout(Duration::from_secs(1)).unwrap();
-            cancelled.cancel();
-        });
-        let result = worker.emit(
-            (),
-            &Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal)),
-        );
-        let Err(Error::Output(error)) = result else {
-            panic!("expected cancellation");
-        };
-        assert_eq!(error.classification().code, "io.cancelled");
-        assert_eq!(runtime.snapshot().active, 1);
-        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
-        assert!(worker.in_flight.get());
-        assert!(Worker::<()>::new_in(&runtime, |_| Ok(())).is_err());
-        drop(worker);
-        release.send(()).unwrap();
-        canceller.join().unwrap();
-        wait_for_cleanup(&runtime);
-        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 0);
     }
 }

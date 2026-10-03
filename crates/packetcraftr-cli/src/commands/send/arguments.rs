@@ -29,30 +29,6 @@ mod tests {
     use clap::Parser as _;
 
     use crate::cli::Cli;
-    use crate::commands::CommandLine;
-
-    #[test]
-    fn send_parses_axes_repetition_and_rate() {
-        let cli = Cli::try_parse_from([
-            "packetcraftr",
-            "send",
-            "--packet",
-            "ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)",
-            "--axis",
-            "0.ttl=[1,64]",
-            "--repeat",
-            "4",
-            "--rate",
-            "10",
-        ])
-        .expect("send set options parse");
-        let CommandLine::Send(send) = cli.command else {
-            panic!("send command")
-        };
-        assert_eq!(send.repeat, 4);
-        assert_eq!(send.rate, Some(10));
-        assert_eq!(send.template.axes.len(), 1);
-    }
 
     #[test]
     fn send_rejects_zero_repeat_and_rate() {

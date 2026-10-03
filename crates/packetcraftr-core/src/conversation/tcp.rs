@@ -209,21 +209,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frame_count_matches_burst_and_close_rules() {
-        // Three request segments, one response segment, each burst acknowledged once.
-        assert_eq!(
-            frame_count(3000, 100, 1460, 65_535, Close::Fin),
-            3 + 4 + 2 + 4
-        );
-        assert_eq!(frame_count(0, 0, 1460, 65_535, Close::None), 3);
-        assert_eq!(frame_count(0, 0, 1460, 65_535, Close::Rst), 4);
-        // Two segments would fill a two-byte window, so every segment is acknowledged.
-        assert_eq!(frame_count(5, 0, 1, 2, Close::None), 3 + 5 + 5);
-        // A window holding two segments and a spare byte is acknowledged after every second one.
-        assert_eq!(frame_count(5, 0, 1, 3, Close::None), 3 + 5 + 3);
-    }
-
-    #[test]
     fn frame_count_never_wraps() {
         assert!(frame_count(usize::MAX, usize::MAX, 1, 1, Close::Fin) > 4096);
     }

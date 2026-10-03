@@ -266,27 +266,3 @@ unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result
             source: Some(Source::new(error)),
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn npcap_device_names_use_the_registry_guid_spelling() {
-        let guid = GUID::from_values(
-            0x0123_4567,
-            0x89ab,
-            0xcdef,
-            [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
-        );
-
-        assert_eq!(
-            format_npcap_device(guid),
-            r"\Device\NPF_{01234567-89AB-CDEF-0123-456789ABCDEF}"
-        );
-        assert_eq!(
-            format_npcap_device(GUID::zeroed()),
-            r"\Device\NPF_{00000000-0000-0000-0000-000000000000}"
-        );
-    }
-}

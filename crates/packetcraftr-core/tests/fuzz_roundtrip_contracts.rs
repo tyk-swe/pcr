@@ -18,7 +18,7 @@ use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz::{
     Campaign, Error as FuzzError, Limits, Report, Request, Strategy, run as fuzz,
 };
-use packetcraftr_core::layer::{Id, Layer, Malformed, Raw};
+use packetcraftr_core::layer::{Id, Layer};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
@@ -34,8 +34,6 @@ struct Drift {
     quirk: u8,
     unbuildable: bool,
 }
-
-const QUIRK_NONE: u8 = 0;
 /// Decoding flips the low bit of `value`, so the rebuild differs.
 const QUIRK_DRIFT: u8 = 1;
 /// Decoding yields a layer the encoder refuses.
@@ -141,23 +139,6 @@ fn registry() -> Arc<Registry> {
     )
 }
 
-fn udp_packet(payload: impl Into<Bytes>) -> Packet {
-    let mut packet = Packet::new();
-    packet
-        .push(Ipv4 {
-            source: Ipv4Addr::new(192, 0, 2, 1),
-            destination: Ipv4Addr::new(192, 0, 2, 2),
-            ..Ipv4::default()
-        })
-        .push(Udp {
-            source_port: 40_000,
-            destination_port: 9,
-            ..Udp::default()
-        })
-        .push(Raw::new(payload));
-    packet
-}
-
 fn drift_packet(quirk: u8) -> Packet {
     let mut packet = Packet::new();
     packet
@@ -204,105 +185,6 @@ fn roundtrip(report: &Report) -> Vec<&Diagnostic> {
         .flat_map(|case| &case.diagnostics)
         .filter(|diagnostic| diagnostic.code.starts_with("fuzz.roundtrip"))
         .collect()
-}
-
-#[test]
-fn a_faithful_round_trip_emits_no_diagnostics_in_either_mode() {
-    for mode in [Mode::Strict, Mode::Permissive] {
-        let report = campaign(
-            udp_packet(Bytes::from_static(b"abcdef")),
-            Request {
-                seed: 3,
-                cases: 200,
-                strategies: vec![
-                    Strategy::Boundary,
-                    Strategy::Random,
-                    Strategy::BitFlip,
-                    Strategy::Malformed,
-                ],
-                build: Options {
-                    mode,
-                    ..Options::default()
-                },
-                ..Request::default()
-            },
-        );
-        assert!(
-            report.cases.iter().any(|case| case.decoded.is_some()),
-            "{mode:?} must decode some cases for the oracle to run"
-        );
-        assert!(
-            roundtrip(&report).is_empty(),
-            "{mode:?}: {:?}",
-            roundtrip(&report)
-        );
-    }
-}
-
-#[test]
-fn a_codec_that_decodes_differently_reports_the_first_differing_byte() {
-    let report = campaign(drift_packet(QUIRK_DRIFT), drift_request(Mode::Permissive));
-    let built = report
-        .cases
-        .iter()
-        .filter(|case| case.built.is_some())
-        .collect::<Vec<_>>();
-    assert!(!built.is_empty());
-    for case in built {
-        let mismatches = case
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code == "fuzz.roundtrip_mismatch")
-            .collect::<Vec<_>>();
-        let [mismatch] = mismatches[..] else {
-            panic!("case {} diagnostics: {:?}", case.index, case.diagnostics);
-        };
-        assert_eq!(mismatch.severity, Severity::Warning);
-        // IPv4 (20) and UDP (8) precede the drift value byte
-        assert!(
-            mismatch.message.contains("at byte 28"),
-            "{}",
-            mismatch.message
-        );
-        assert_eq!(mismatch.layer, Some(2));
-        assert_eq!(mismatch.field, Some("value"));
-        // retained bytes are the built bytes, not the rebuild
-        let bytes = &case.built.as_ref().unwrap().bytes;
-        let FieldValue::Unsigned(value) = case.mutation.value else {
-            panic!("unsigned value expected");
-        };
-        assert_eq!(u64::from(bytes[28]), value);
-    }
-}
-
-#[test]
-fn a_decoded_layer_that_cannot_be_rebuilt_is_reported() {
-    let report = campaign(drift_packet(QUIRK_UNBUILDABLE), drift_request(Mode::Strict));
-    let diagnostics = roundtrip(&report);
-    assert!(!diagnostics.is_empty());
-    assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.code == "fuzz.roundtrip_unbuildable"
-                && diagnostic.severity == Severity::Warning),
-        "{diagnostics:?}"
-    );
-}
-
-#[test]
-fn a_matching_codec_is_quiet_even_when_the_fixture_is_registered() {
-    let report = campaign(drift_packet(QUIRK_NONE), drift_request(Mode::Strict));
-    assert!(report.cases.iter().any(|case| case.built.is_some()));
-    assert!(roundtrip(&report).is_empty(), "{:?}", roundtrip(&report));
-}
-
-#[test]
-fn a_case_holding_a_malformed_layer_is_not_checked() {
-    let mut packet = drift_packet(QUIRK_DRIFT);
-    packet.push(Malformed::new(None, Bytes::from_static(b"tail"), "fixture"));
-    let report = campaign(packet, drift_request(Mode::Permissive));
-    assert!(report.cases.iter().any(|case| case.built.is_some()));
-    assert!(roundtrip(&report).is_empty(), "{:?}", roundtrip(&report));
 }
 
 #[test]

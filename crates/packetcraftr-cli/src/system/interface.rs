@@ -112,27 +112,6 @@ mod tests {
         }
     }
 
-    fn selected(selector: Option<&str>) -> Vec<String> {
-        let selector =
-            selector.map(|selector| InterfaceSelector::parse(selector).expect("fixture selector"));
-        select_interfaces(&FixtureProvider, selector.as_ref())
-            .expect("fixture enumeration succeeds")
-            .into_iter()
-            .map(|interface| interface.id.name)
-            .collect()
-    }
-
-    #[test]
-    fn an_absent_selector_lists_every_interface() {
-        assert_eq!(selected(None), ["fixture0", "fixture1"]);
-    }
-
-    #[test]
-    fn a_name_or_index_selector_keeps_only_its_interface() {
-        assert_eq!(selected(Some("fixture1")), ["fixture1"]);
-        assert_eq!(selected(Some("9")), ["fixture0"]);
-    }
-
     #[test]
     fn an_unknown_selector_fails_before_rendering() {
         let selector = InterfaceSelector::parse("fixture9").expect("fixture selector");

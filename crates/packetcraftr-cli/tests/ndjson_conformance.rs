@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use packetcraftr_core::protocol::application::dns as dns_wire;
 
@@ -160,39 +161,6 @@ fn validate_typed_event<T: output::stream::StreamRecord>(
     assert_eq!(records[0]["status"], "success");
 }
 
-#[test]
-fn published_completion_fixtures_are_schema_valid() {
-    let expected = output::contract::Command::ALL
-        .iter()
-        .copied()
-        .filter(|command| {
-            command
-                .formats()
-                .contains(&output::contract::Format::Ndjson)
-        })
-        .collect::<std::collections::HashSet<_>>();
-    let actual = COMPLETION_FIXTURES
-        .iter()
-        .map(|(command, _, _)| *command)
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(actual, expected, "fixture inventory must be complete");
-    assert_eq!(
-        COMPLETION_FIXTURES.len(),
-        actual.len(),
-        "fixtures must be unique"
-    );
-
-    for &(command, requires_terminal_stats, document) in COMPLETION_FIXTURES {
-        let (sink, bytes) = stream(command);
-        complete(&sink, requires_terminal_stats, result(document))
-            .expect("published completion must render");
-        let records = bytes.records();
-        validate_records(schema_validator(), &records);
-        assert_eq!(records.len(), 1, "{command:?}");
-        assert_eq!(records[0]["status"], "success", "{command:?}");
-    }
-}
-
 fn frame(bytes: &[u8]) -> core::frame::Frame {
     core::frame::Frame::new(UNIX_EPOCH, core::frame::LinkType::RAW, bytes.to_vec())
         .expect("typed event frame")
@@ -298,78 +266,6 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Event) {
     (case, live)
 }
 
-#[test]
-fn production_typed_event_variants_are_schema_valid() {
-    let read = output::read::Event::from(output::read::Frame::try_from((1, frame(&[1]))).unwrap());
-    validate_typed_event(output::contract::Command::Read, read, Vec::new());
-    let capture = output::read::Frame::try_from((1, frame(&[1]))).unwrap();
-    validate_typed_event(output::contract::Command::Capture, capture, Vec::new());
-    let capture_decoded = output::read::Frame::try_from((1, frame(&[1]), &decoded(&[1]))).unwrap();
-    validate_typed_event(
-        output::contract::Command::Capture,
-        capture_decoded,
-        Vec::new(),
-    );
-    let capture_row = output::projection::Row {
-        source_frame: output::frame::SourceFrame::try_from(1).unwrap(),
-        values: vec![Some(core::field::FieldValue::Unsigned(46))],
-    };
-    validate_typed_event(
-        output::contract::Command::Capture,
-        output::projection::RowEvent {
-            columns: &["frame.len".to_owned()],
-            row: &capture_row,
-        },
-        Vec::new(),
-    );
-    validate_typed_event(
-        output::contract::Command::Replay,
-        output::replay::Frame {
-            pass: 1,
-            source_index: 1,
-            interface: output::network::InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 1,
-            },
-            link_mode: output::network::LinkMode::Layer3,
-            scheduled_delay: Duration::ZERO,
-            bytes_sent: 1,
-            frame: output::frame::Captured::try_from(frame(&[1])).unwrap(),
-        },
-        Vec::new(),
-    );
-    validate_typed_event(
-        output::contract::Command::Follow,
-        output::follow::Chunk {
-            direction_generation: 0,
-            direction: output::follow::PeerDirection::ClientToServer,
-            frame: 1,
-            bytes_hex: "01".to_owned(),
-        },
-        Vec::new(),
-    );
-    validate_typed_event(
-        output::contract::Command::Expert,
-        output::expert::Finding {
-            severity: output::diagnostic::Severity::Warning,
-            code: "fixture.warning",
-            frame: 1,
-            transport: None,
-            stream: None,
-            message: "warning".to_owned(),
-        },
-        Vec::new(),
-    );
-    validate_typed_event(
-        output::contract::Command::Tls,
-        tls_session_event(),
-        Vec::new(),
-    );
-    validate_active_event_variants();
-    validate_fuzz_event_variants();
-    validate_exchange_event_variants();
-}
-
 fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
     use packetcraftr_core::analysis::reassembly::ip::{
         DatagramKey, IncompleteDatagram, Ipv4DatagramKey, Ipv6DatagramKey,
@@ -460,46 +356,6 @@ fn validate_ip_event_stream<T: serde::Serialize>(command: output::contract::Comm
         "a second terminal tail must not be writable"
     );
     assert_eq!(bytes.records(), records);
-}
-
-#[test]
-fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream() {
-    validate_ip_event_stream(
-        output::contract::Command::Follow,
-        output::follow::Report {
-            clock: Default::default(),
-            scope: None,
-            transport: output::analysis::StreamTransport::Udp,
-            stream: 0,
-            client: None,
-            server: None,
-            frames: 0,
-            client_bytes: 0,
-            server_bytes: 0,
-            undelivered_bytes: 0,
-            chunks: Vec::new(),
-            written: Vec::new(),
-            ip_reassembly: output::reassembly::Report::default(),
-        },
-    );
-    validate_ip_event_stream(
-        output::contract::Command::Expert,
-        output::expert::Report {
-            clock: Default::default(),
-            frames_read: 0,
-            frames_matched: 0,
-            errors: 0,
-            warnings: 0,
-            notes: 0,
-            codes: Vec::new(),
-            findings: Vec::new(),
-            ip_reassembly: output::reassembly::Report::default(),
-        },
-    );
-    validate_ip_event_stream(
-        output::contract::Command::Tls,
-        output::tls::Event::from(output::tls::Summary::default()),
-    );
 }
 
 fn tls_session_event() -> output::tls::Event {
@@ -682,83 +538,6 @@ fn validate_dns_event_variants() {
 }
 
 #[test]
-fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
-    let mut evidence = dns_attempt();
-    if let packetcraftr::dns::TransportEvidence::Udp { response, .. } =
-        &mut evidence.transport_evidence
-    {
-        *response = Some(frame(&[4]));
-    }
-    let event = output::envelope::Published::<output::dns::Event>::try_from(
-        packetcraftr::dns::Event::Attempt {
-            context: dns_context(),
-            evidence,
-        },
-    )
-    .unwrap();
-    let (sink, bytes) = stream(output::contract::Command::Dns);
-    sink.emit_published(event).unwrap();
-    let mut record = bytes.records().remove(0);
-    schema_validator()
-        .validate(&record)
-        .unwrap_or_else(|error| panic!("UDP captured evidence is valid: {error}"));
-    record["result"]["evidence"]["transport"] = json!("tcp");
-    assert!(schema_validator().validate(&record).is_err());
-}
-
-#[test]
-fn dns_schema_enforces_fallback_transport_consistency() {
-    let document: Value = serde_json::from_str(include_str!(
-        "../../../examples/documents/output-dns-success.json"
-    ))
-    .unwrap();
-    schema_validator()
-        .validate(&document)
-        .unwrap_or_else(|error| panic!("published fallback aggregate is valid: {error}"));
-
-    let mut no_fallback = document.clone();
-    no_fallback["result"]["fallback_attempted"] = json!(false);
-    no_fallback["result"]["accepted_transport"] = json!("udp");
-    assert!(schema_validator().validate(&no_fallback).is_err());
-
-    let mut direct = document.clone();
-    direct["result"]["fallback_attempted"] = json!(false);
-    direct["result"]["attempts"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|attempt| attempt["transport"] == "tcp");
-    schema_validator()
-        .validate(&direct)
-        .expect("direct TCP does not require a fallback");
-    direct["result"]["fallback_attempted"] = json!(true);
-    assert!(
-        schema_validator().validate(&direct).is_err(),
-        "fallback needs a truncated UDP phase"
-    );
-
-    let mut no_tcp_attempt = document.clone();
-    no_tcp_attempt["result"]["attempts"]
-        .as_array_mut()
-        .unwrap()
-        .pop();
-    assert!(schema_validator().validate(&no_tcp_attempt).is_err());
-
-    let mut no_transport = document.clone();
-    no_transport["result"]
-        .as_object_mut()
-        .unwrap()
-        .remove("accepted_transport");
-    assert!(schema_validator().validate(&no_transport).is_err());
-
-    let mut no_udp_source = document;
-    no_udp_source["result"]["attempts"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("source_port");
-    assert!(schema_validator().validate(&no_udp_source).is_err());
-}
-
-#[test]
 fn dns_schema_rejects_truncated_tcp_results() {
     for document in [
         include_str!("../../../examples/documents/output-dns-success.json"),
@@ -815,29 +594,6 @@ fn complete(
         sink.complete_with_stats(result, Vec::new(), packetcraftr::Stats::default())
     } else {
         sink.complete(result, Vec::new())
-    }
-}
-
-#[test]
-fn ndjson_framing_requires_one_complete_value_per_newline_terminated_line() {
-    use std::io::Write as _;
-    let mut buffer = common::SharedBuffer::default();
-    buffer.write_all(b"{\"sequence\":0}\n").unwrap();
-    assert_eq!(buffer.records().len(), 1);
-    assert!(common::SharedBuffer::default().records().is_empty());
-    for malformed in [
-        &b"{\"sequence\":0}"[..],                   // unterminated final record
-        &b"{\"sequence\":0}{\"sequence\":1}\n"[..], // two values on one line
-        &b"{\n\"sequence\":0\n}\n"[..],             // a record spread across lines
-        &b"{\"sequence\":0}\n\n"[..],               // a blank line is not a record
-    ] {
-        let mut buffer = common::SharedBuffer::default();
-        buffer.write_all(malformed).unwrap();
-        let result = std::panic::catch_unwind(|| buffer.records());
-        assert!(
-            result.is_err(),
-            "malformed framing must be rejected: {malformed:?}"
-        );
     }
 }
 

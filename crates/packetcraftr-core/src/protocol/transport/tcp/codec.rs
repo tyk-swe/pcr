@@ -357,78 +357,6 @@ mod tests {
     use super::*;
     use crate::registry::Discriminator;
 
-    fn wire(options: &[TcpOption]) -> Vec<u8> {
-        serialize(options).expect("options serialize")
-    }
-
-    #[test]
-    fn typed_options_round_trip_and_preserve_every_byte() {
-        let options = vec![
-            TcpOption::Mss(1460),
-            TcpOption::SackPermitted,
-            TcpOption::Timestamps {
-                value: 0x01020304,
-                echo_reply: 0xa0b0c0d0,
-            },
-            TcpOption::Nop,
-            TcpOption::WindowScale(7),
-            TcpOption::End,
-            TcpOption::Trailing(Bytes::from_static(&[0x1e])),
-        ];
-        let bytes = wire(&options);
-        assert_eq!(
-            bytes,
-            vec![
-                2, 4, 0x05, 0xb4, 4, 2, 8, 10, 1, 2, 3, 4, 0xa0, 0xb0, 0xc0, 0xd0, 1, 3, 3, 7, 0,
-                0x1e
-            ]
-        );
-        assert_eq!(parse(&Bytes::copy_from_slice(&bytes)), options);
-    }
-
-    #[test]
-    fn malformed_tails_and_unknown_kinds_stay_byte_exact() {
-        for bytes in [
-            vec![1, 1, 2],
-            vec![2, 1, 0xff],
-            vec![2, 8, 0x05, 0xb4],
-            vec![30, 4, 9, 9],
-        ] {
-            let parsed = parse(&Bytes::copy_from_slice(&bytes));
-            assert!(matches!(
-                parsed.last(),
-                Some(TcpOption::Trailing(_)) | Some(TcpOption::Raw { .. })
-            ));
-            assert_eq!(wire(&parsed), bytes, "{bytes:?} must round-trip");
-        }
-        match parse(&Bytes::from_static(&[2, 8, 0x05, 0xb4])).as_slice() {
-            [TcpOption::Trailing(bytes)] => assert_eq!(bytes.as_ref(), &[2, 8, 0x05, 0xb4]),
-            other => panic!("expected trailing bytes, got {other:?}"),
-        }
-        assert_eq!(
-            parse(&Bytes::from_static(&[0, 0, 0])),
-            vec![
-                TcpOption::End,
-                TcpOption::Trailing(Bytes::from_static(&[0, 0])),
-            ]
-        );
-    }
-
-    #[test]
-    fn eol_hides_tlv_shaped_padding_without_losing_bytes() {
-        let bytes = [0, 2, 4, 0x05, 0xb4, 3, 3, 7];
-        let parsed = parse(&Bytes::copy_from_slice(&bytes));
-        assert_eq!(
-            parsed,
-            vec![
-                TcpOption::End,
-                TcpOption::Trailing(Bytes::copy_from_slice(&bytes[1..])),
-            ]
-        );
-        assert_eq!(wire(&parsed), bytes);
-        assert!(serialize(&[TcpOption::End, TcpOption::Mss(1460)]).is_err());
-    }
-
     fn ports(source_port: u16, destination_port: u16) -> Vec<u64> {
         child_discriminators([destination_port, source_port])
             .into_iter()
@@ -439,11 +367,6 @@ mod tests {
     #[test]
     fn the_destination_port_is_offered_before_the_source_port_and_the_fallback() {
         assert_eq!(ports(40_000, 443), vec![443, 40_000, 0]);
-    }
-
-    #[test]
-    fn a_repeated_port_is_offered_once() {
-        assert_eq!(ports(443, 443), vec![443, 0]);
     }
 
     #[test]

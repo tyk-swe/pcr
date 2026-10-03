@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

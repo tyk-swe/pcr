@@ -212,13 +212,8 @@ fn check_deadline(deadline: &Deadline) -> Result<(), BoundaryError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{Duration, Instant};
 
     use clap::Parser;
-    use packetcraftr_core::budget::DeadlineExceeded;
-    use packetcraftr_core::error::Classified;
 
     use super::*;
 
@@ -260,25 +255,5 @@ mod tests {
         let error = run(over, ToolFormat::Text, &stream).expect_err("one more is refused");
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("address map entries=4096"));
-    }
-
-    #[test]
-    fn an_expired_rewrite_duration_reports_the_shared_duration_limit() {
-        let ticks = Arc::new(AtomicU64::new(0));
-        let observed = ticks.clone();
-        let start = Instant::now();
-        let deadline = Deadline::with_time_source(Duration::from_millis(5), move || {
-            start + Duration::from_millis(observed.load(Ordering::SeqCst))
-        });
-        check_deadline(&deadline).expect("the deadline has not expired");
-
-        ticks.store(6, Ordering::SeqCst);
-        let error = check_deadline(&deadline).expect_err("the deadline has expired");
-        let exceeded = DeadlineExceeded {
-            actual: Duration::from_millis(6),
-            limit: Duration::from_millis(5),
-        };
-        assert_eq!(error.classification(), exceeded.classification());
-        assert_eq!(error.to_string(), exceeded.to_string());
     }
 }

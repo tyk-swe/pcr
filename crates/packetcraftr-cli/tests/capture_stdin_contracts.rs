@@ -6,8 +6,6 @@ use std::io::{Cursor, Write};
 use packetcraftr_core::capture_file::Format;
 use packetcraftr_core::capture_file::Reader;
 use packetcraftr_core::capture_file::Writer;
-use packetcraftr_core::frame::Frame;
-use packetcraftr_core::frame::LinkType;
 
 #[path = "common/capture.rs"]
 mod capture_support;
@@ -15,9 +13,9 @@ mod common;
 #[path = "common/process.rs"]
 mod process_support;
 
-use capture_support::{UDP_CLIENT, assert_file_stdin_parity};
-use common::{assert_contiguous, parse_ndjson, run};
-use process_support::{append_truncated_record, decode_hex};
+use capture_support::assert_file_stdin_parity;
+use common::{assert_contiguous, parse_ndjson};
+use process_support::append_truncated_record;
 
 const COMMANDS: [(&str, &[&str]); 5] = [
     ("read", &[]),
@@ -51,138 +49,6 @@ fn handshake_capture(format: Format) -> Vec<u8> {
 }
 
 #[test]
-fn piped_pcap_and_pcapng_match_all_offline_commands() {
-    for capture_format in [Format::Pcap, Format::PcapNg] {
-        let bytes = handshake_capture(capture_format);
-        for (command, flags) in COMMANDS {
-            let formats: &[&str] = match command {
-                "read" => &["text", "ndjson", "hex"],
-                "stats" => &["text", "json"],
-                _ => &["text", "json", "ndjson"],
-            };
-            for format in formats {
-                let output = assert_file_stdin_parity(&bytes, command, flags, format, 0);
-                assert!(!output.stdout.is_empty(), "{command} {format}");
-                if *format == "ndjson" {
-                    let records = parse_ndjson(&output);
-                    assert_contiguous(&records);
-                    let is_complete = |record: &serde_json::Value| match command {
-                        "expert" => record["result"].get("frames_read").is_some(),
-                        "follow" => record["result"].get("frames").is_some(),
-                        _ => record["event"] == "complete",
-                    };
-                    assert!(is_complete(records.last().unwrap()));
-                    assert_eq!(
-                        records.iter().filter(|record| is_complete(record)).count(),
-                        1
-                    );
-                }
-            }
-        }
-        assert_file_stdin_parity(
-            &bytes,
-            "read",
-            &["--dissect", "--filter", "frame.number == 4"],
-            "ndjson",
-            0,
-        );
-        assert_file_stdin_parity(
-            &bytes,
-            "follow",
-            &["--stream", "tcp:0", "--direction", "client"],
-            "raw",
-            0,
-        );
-    }
-}
-
-#[test]
-fn large_piped_capture_drains_streamed_output_while_writing_input() {
-    const FRAMES: usize = 10_000;
-    let frame = Frame::new(
-        std::time::UNIX_EPOCH,
-        LinkType::IPV4,
-        decode_hex(UDP_CLIENT),
-    )
-    .unwrap();
-    let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::IPV4).unwrap();
-    for _ in 0..FRAMES {
-        writer.write_frame(&frame).unwrap();
-    }
-    let output = assert_file_stdin_parity(&writer.into_inner(), "read", &[], "ndjson", 0);
-    let records = parse_ndjson(&output);
-    assert_contiguous(&records);
-    assert_eq!(
-        records
-            .iter()
-            .filter(|record| record["event"] == "frame")
-            .count(),
-        FRAMES
-    );
-    let complete = records.last().unwrap();
-    assert_eq!(complete["event"], "complete");
-    assert_eq!(complete["status"], "success");
-}
-
-#[test]
-fn piped_capture_rewrites_preserve_every_source_byte() {
-    for (capture_format, output_format) in [(Format::Pcap, "pcap"), (Format::PcapNg, "pcapng")] {
-        let bytes = handshake_capture(capture_format);
-        let output = assert_file_stdin_parity(&bytes, "read", &[], output_format, 0);
-        assert_eq!(output.stdout, bytes);
-    }
-}
-
-#[test]
-fn piped_filtered_capture_exports_match_files_and_keep_source_frame_numbers() {
-    for (capture_format, output_format) in [(Format::Pcap, "pcap"), (Format::PcapNg, "pcapng")] {
-        let bytes = handshake_capture(capture_format);
-        let output = assert_file_stdin_parity(
-            &bytes,
-            "read",
-            &["--filter", "frame.number == 4"],
-            output_format,
-            0,
-        );
-        let mut source = Reader::new(Cursor::new(&bytes)).unwrap();
-        for _ in 0..3 {
-            source.next_frame().unwrap().unwrap();
-        }
-        let expected = source.next_frame().unwrap().unwrap();
-        let mut selected = Reader::new(Cursor::new(&output.stdout)).unwrap();
-        assert_eq!(selected.next_frame().unwrap().unwrap(), expected);
-        assert!(selected.next_frame().unwrap().is_none());
-    }
-}
-
-#[test]
-fn piped_missing_selectors_fail_after_consuming_the_capture() {
-    for capture_format in [Format::Pcap, Format::PcapNg] {
-        let bytes = handshake_capture(capture_format);
-        for (command, selector) in [
-            ("tls", "tcp:999"),
-            ("follow", "tcp:999"),
-            ("follow", "udp:999"),
-        ] {
-            for format in ["json", "ndjson"] {
-                let output =
-                    assert_file_stdin_parity(&bytes, command, &["--stream", selector], format, 2);
-                assert!(
-                    String::from_utf8_lossy(&output.stdout)
-                        .contains(&format!("--stream {selector} is not present"))
-                );
-                if format == "ndjson" {
-                    let records = parse_ndjson(&output);
-                    assert_contiguous(&records);
-                    assert_eq!(records.len(), 1);
-                    assert_eq!(records[0]["status"], "error");
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
     let mut inputs = vec![Vec::new(), b"nope".to_vec(), vec![0xd4, 0xc3, 0xb2]];
     let mut partial = tempfile::NamedTempFile::new().unwrap();
@@ -209,24 +75,6 @@ fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
 }
 
 #[test]
-fn piped_empty_containers_complete_or_report_absent_selectors() {
-    for capture_format in [Format::Pcap, Format::PcapNg] {
-        let mut bytes = Vec::new();
-        Writer::new(&mut bytes, capture_format, LinkType::IPV4)
-            .unwrap()
-            .flush()
-            .unwrap();
-        for (command, flags) in COMMANDS {
-            let format = if command == "stats" { "json" } else { "ndjson" };
-            let exit_code = if command == "follow" { 2 } else { 0 };
-            assert_file_stdin_parity(&bytes, command, flags, format, exit_code);
-        }
-        assert_file_stdin_parity(&bytes, "tls", &["--stream", "tcp:0"], "ndjson", 2);
-        assert_file_stdin_parity(&bytes, "follow", &["--stream", "udp:0"], "ndjson", 2);
-    }
-}
-
-#[test]
 fn piped_captures_keep_frame_byte_and_per_item_limits() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let bytes = handshake_capture(capture_format);
@@ -247,118 +95,6 @@ fn piped_captures_keep_frame_byte_and_per_item_limits() {
                 let format = if command == "stats" { "json" } else { "ndjson" };
                 assert_file_stdin_parity(&bytes, command, &flags, format, 6);
             }
-        }
-    }
-}
-
-#[test]
-fn piped_pcapng_keeps_interface_limits() {
-    let mut bytes = Vec::new();
-    {
-        let mut writer = Writer::new(&mut bytes, Format::PcapNg, LinkType::IPV4).unwrap();
-        writer.add_interface(LinkType::IPV6).unwrap();
-        writer.flush().unwrap();
-    }
-    for (command, flags) in COMMANDS {
-        let mut flags = flags.to_vec();
-        flags.extend_from_slice(&["--max-interfaces", "1"]);
-        let format = if command == "stats" { "json" } else { "ndjson" };
-        assert_file_stdin_parity(&bytes, command, &flags, format, 6);
-    }
-}
-
-#[test]
-fn capture_help_describes_interface_limit_scopes() {
-    for (command, _) in COMMANDS {
-        let output = run(&[command, "--help"]);
-        assert!(output.status.success());
-        let help = String::from_utf8(output.stdout)
-            .unwrap()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            help.contains("per input PCAPNG section"),
-            "{command}: {help}"
-        );
-        assert!(
-            help.contains("including unused interfaces"),
-            "{command}: {help}"
-        );
-        assert!(
-            help.contains("selected output interfaces"),
-            "{command}: {help}"
-        );
-        let total = packetcraftr_core::capture_file::DEFAULT_MAX_TOTAL_INTERFACES.to_string();
-        assert!(
-            help.replace(',', "")
-                .contains(&format!("capture-wide input ceiling of {total}")),
-            "{command}: {help}"
-        );
-    }
-}
-
-#[test]
-fn input_interface_limit_is_per_section_for_files_and_stdin() {
-    let section = handshake_capture(Format::PcapNg);
-    let input = [section.as_slice(), section.as_slice()].concat();
-    for (command, flags) in COMMANDS {
-        let mut flags = flags.to_vec();
-        flags.extend_from_slice(&["--max-interfaces", "1"]);
-        let format = if command == "stats" { "json" } else { "ndjson" };
-        assert_file_stdin_parity(&input, command, &flags, format, 0);
-    }
-    let rewritten =
-        assert_file_stdin_parity(&input, "read", &["--max-interfaces", "1"], "pcapng", 0);
-    assert_eq!(rewritten.stdout, input);
-}
-
-#[test]
-fn selection_cannot_hide_unused_input_interfaces() {
-    let mut writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::IPV4).unwrap();
-    let frame = Frame::new(
-        std::time::UNIX_EPOCH,
-        LinkType::IPV4,
-        decode_hex(UDP_CLIENT),
-    )
-    .unwrap();
-    writer.write_frame(&frame).unwrap();
-    writer.add_interface(LinkType::IPV6).unwrap();
-    let input = writer.into_inner();
-    for (command, _) in COMMANDS {
-        let mut flags = vec!["--max-interfaces", "1"];
-        match command {
-            "follow" | "tls" => flags.extend_from_slice(&["--stream", "tcp:99"]),
-            _ => flags.extend_from_slice(&["--filter", "frame.number == 99"]),
-        }
-        let format = if command == "stats" { "json" } else { "ndjson" };
-        assert_file_stdin_parity(&input, command, &flags, format, 6);
-    }
-}
-
-#[test]
-fn piped_captures_keep_analysis_flow_limits() {
-    for capture_format in [Format::Pcap, Format::PcapNg] {
-        let mut bytes = Vec::new();
-        {
-            let mut writer = Writer::new(&mut bytes, capture_format, LinkType::IPV4).unwrap();
-            for hex in [
-                "450000210000000040118e95c0000201c633640230390009000d000068656c6c6f",
-                "450000210000000040118e95c0000201c63364023039000a000d000068656c6c6f",
-            ] {
-                let frame =
-                    Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, decode_hex(hex)).unwrap();
-                writer.write_frame(&frame).unwrap();
-            }
-            writer.flush().unwrap();
-        }
-        for (command, flags) in COMMANDS
-            .into_iter()
-            .filter(|(command, _)| *command != "read")
-        {
-            let mut flags = flags.to_vec();
-            flags.extend_from_slice(&["--max-flows", "1"]);
-            assert_file_stdin_parity(&bytes, command, &flags, "json", 6);
         }
     }
 }

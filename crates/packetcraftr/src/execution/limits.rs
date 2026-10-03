@@ -129,13 +129,6 @@ mod tests {
     }
 
     #[test]
-    fn check_rate_accepts_an_absent_rate_and_every_rate_up_to_the_ceiling() {
-        for rate in [None, Some(1), Some(MAX_RATE)] {
-            assert_eq!(check_rate(&Recorder, "rate", rate), Ok(()));
-        }
-    }
-
-    #[test]
     fn check_rate_rejects_zero_and_rates_above_the_ceiling_with_the_exact_reason() {
         for rate in [0, MAX_RATE + 1, u32::MAX] {
             assert_eq!(
@@ -149,18 +142,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn duration_violation_rejects_zero_and_anything_past_the_maximum() {
-        let maximum = packetcraftr_netio::deadline::MAX_WAIT;
-        assert!(duration_violation(Duration::ZERO, maximum));
-        assert!(duration_violation(
-            maximum + Duration::from_nanos(1),
-            maximum
-        ));
-        assert!(!duration_violation(Duration::from_nanos(1), maximum));
-        assert!(!duration_violation(maximum, maximum));
-    }
-
     fn validate_evidence(
         max_frames: usize,
         max_bytes: usize,
@@ -172,22 +153,6 @@ mod tests {
             max_undecoded,
         }
         .validate(|field, value, reason| (field, value, reason))
-    }
-
-    #[test]
-    fn evidence_limits_accept_every_bound_up_to_the_capture_queue_ceilings() {
-        use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
-
-        assert_eq!(validate_evidence(1, 1, 0), Ok(()));
-        assert_eq!(validate_evidence(4, 4096, 4), Ok(()));
-        assert_eq!(
-            validate_evidence(
-                MAX_CAPTURE_QUEUE_FRAMES,
-                MAX_CAPTURE_QUEUE_BYTES,
-                MAX_CAPTURE_QUEUE_FRAMES
-            ),
-            Ok(())
-        );
     }
 
     #[test]

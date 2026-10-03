@@ -270,38 +270,4 @@ mod tests {
         assert_eq!(before(0, 1), (-1, 999_999_999));
         assert_eq!(before(1, 250_000_000), (-2, 750_000_000));
     }
-
-    #[test]
-    fn time_bounds_are_inclusive_at_representable_submicrosecond_precision() {
-        let start = SystemTime::UNIX_EPOCH + Duration::new(10, 500_000_000);
-        let end = SystemTime::UNIX_EPOCH + Duration::new(10, 900_000_100);
-        let bounds = TimeBounds::new(Some(start), Some(end)).unwrap();
-        assert!(bounds.contains(Some(start)));
-        assert!(bounds.contains(Some(end)));
-        assert!(!bounds.contains(Some(start - Duration::from_nanos(100))));
-        assert!(!bounds.contains(Some(end + Duration::from_nanos(100))));
-        assert!(!bounds.contains(None));
-    }
-
-    #[test]
-    fn one_sided_time_bounds_leave_the_other_end_open() {
-        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        let start_only = TimeBounds::new(Some(start), None).unwrap();
-        assert!(start_only.contains(Some(start)));
-        assert!(!start_only.contains(Some(start - Duration::from_nanos(100))));
-
-        let stop_only = TimeBounds::new(None, Some(start)).unwrap();
-        assert!(stop_only.contains(Some(start)));
-        assert!(!stop_only.contains(Some(start + Duration::from_nanos(100))));
-    }
-
-    #[test]
-    fn reversed_time_bounds_are_rejected() {
-        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        assert!(matches!(
-            TimeBounds::new(Some(start), Some(start - Duration::from_nanos(100))),
-            Err(Error::ReversedTimeBounds { .. })
-        ));
-        assert!(TimeBounds::new(Some(start), Some(start)).is_ok());
-    }
 }

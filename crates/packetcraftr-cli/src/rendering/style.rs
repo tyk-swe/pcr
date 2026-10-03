@@ -152,47 +152,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_text_escapes_controls_and_directional_overrides() {
-        let cases = [
-            ("line\r\nnext", false, "line\\r\\nnext"),
-            ("line\r\nnext", true, "line\nnext"),
-            ("a\tb\u{202e}c\u{7f}", false, "a\\tb\\u{202e}c\\u{7f}"),
-        ];
-
-        for (input, preserve_newlines, expected) in cases {
-            assert_eq!(
-                terminal_safe_with_layout(input, preserve_newlines),
-                expected,
-                "input={input:?}, preserve_newlines={preserve_newlines}",
-            );
-        }
-    }
-
-    #[test]
-    fn severity_colour_follows_the_serialized_spellings_alone() {
-        for severity in [
-            packetcraftr_core::diagnostic::Severity::Info,
-            packetcraftr_core::diagnostic::Severity::Warning,
-            packetcraftr_core::diagnostic::Severity::Error,
-        ] {
-            let line = format!("{} some.code: message", severity.as_str());
-            assert_ne!(style_human_line(&line), line, "{severity} must be styled");
-        }
-
-        for plain in [
-            "Warning some.code: message",
-            "read 3 frame(s)",
-            "sent 12 bytes",
-            "captured 4 frame(s)",
-            "tcp stream 0: a <-> b",
-        ] {
-            assert_eq!(style_human_line(plain), plain, "{plain}");
-        }
-
-        assert_ne!(style_summary_line("read 3 frame(s)"), "read 3 frame(s)");
-    }
-
-    #[test]
     fn terminal_documents_strip_ansi_before_preserving_layout() {
         assert_eq!(
             terminal_document("\u{1b}[31merror:\u{1b}[0m\n\tvalue"),

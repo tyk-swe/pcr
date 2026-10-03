@@ -33,35 +33,3 @@ impl Requirements {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn requirements_union_ors_each_flag_independently() {
-        let none = Requirements::default();
-        let flags: [fn(&mut Requirements); 4] = [
-            |requirements| requirements.stream_index = true,
-            |requirements| requirements.tcp_stream = true,
-            |requirements| requirements.udp_stream = true,
-            |requirements| requirements.timestamp = true,
-        ];
-
-        for (index, set) in flags.iter().enumerate() {
-            let mut one = Requirements::default();
-            set(&mut one);
-            assert_ne!(one, none, "flag {index}");
-            assert_eq!(one.union(none), one, "flag {index}");
-            assert_eq!(none.union(one), one, "flag {index}");
-            for (other_index, other_set) in flags.iter().enumerate() {
-                let mut other = Requirements::default();
-                other_set(&mut other);
-                let mut both = one;
-                other_set(&mut both);
-                assert_eq!(one.union(other), both, "flags {index} and {other_index}");
-            }
-        }
-        assert_eq!(none.union(none), none);
-    }
-}

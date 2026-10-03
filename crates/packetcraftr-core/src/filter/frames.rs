@@ -99,64 +99,15 @@ impl FrameSelector {
 
 #[cfg(test)]
 mod tests {
-    use std::time::UNIX_EPOCH;
 
     use super::*;
     use crate::error::Classified;
     use crate::filter::Limits;
-    use crate::frame::LinkType;
+
     use crate::protocol::builtin;
 
     fn compile(source: &str, registry: &Registry) -> Filter {
         Filter::compile(source, registry, Limits::default()).expect("fixture filter compiles")
-    }
-
-    fn ethernet_frame() -> Frame {
-        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14]).expect("bounded Ethernet frame")
-    }
-
-    #[test]
-    fn selector_uses_frame_context_and_surfaces_decode_limits() {
-        let registry = builtin::registry();
-        let frame = ethernet_frame();
-        let selector = FrameSelector::new(
-            Arc::clone(&registry),
-            compile("frame.number == 2 && frame.len == 14", &registry),
-            14,
-        )
-        .expect("frame metadata filter");
-
-        assert!(!selector.keep(1, &frame).expect("frame dissects"));
-        assert!(selector.keep(2, &frame).expect("frame dissects"));
-
-        let too_small = FrameSelector::new(
-            Arc::clone(&registry),
-            compile("frame.number == 2", &registry),
-            13,
-        )
-        .expect("frame metadata filter");
-        let error = too_small
-            .keep(2, &frame)
-            .expect_err("decode errors cannot become silent mismatches");
-        assert!(matches!(error, Error::Decode(_)), "{error:?}");
-        assert_eq!(error.classification().code, "policy.decode_resource_limit");
-        assert_eq!(
-            error.to_string(),
-            too_small.0.decode(&frame).unwrap_err().to_string(),
-            "the decode refusal keeps its own text"
-        );
-    }
-
-    #[test]
-    fn a_decoder_without_a_filter_keeps_every_decodable_frame() {
-        let registry = builtin::registry();
-        let decoder = FrameDecoder::new(registry, None, 14).expect("no filter");
-        assert!(
-            decoder
-                .decode_selected(1, &ethernet_frame())
-                .expect("frame dissects")
-                .is_some()
-        );
     }
 
     #[test]

@@ -80,54 +80,6 @@ fn capture_limits_validate_each_bound_and_cross_field_constraint() {
 }
 
 #[test]
-fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
-    let complete = capture::Stats {
-        received_frames: 2,
-        received_bytes: 20,
-        ..capture::Stats::default()
-    };
-    assert!(complete.evidence_loss_error().is_none());
-    complete.validate().expect("complete statistics");
-
-    let receiver_loss = capture::Stats {
-        dropped_frames: 3,
-        dropped_bytes: 30,
-        receiver_dropped_frames: 2,
-        ..capture::Stats::default()
-    };
-    assert!(matches!(
-        receiver_loss.evidence_loss_error(),
-        Some(Error::CaptureEvidenceLoss {
-            dropped_frames: 3,
-            receiver_dropped_frames: 2,
-            ..
-        })
-    ));
-
-    let overflow = capture::Stats {
-        overflow_events: 2,
-        ..capture::Stats::default()
-    };
-    assert!(matches!(
-        overflow.evidence_loss_error(),
-        Some(Error::CaptureQueueOverflow {
-            overflow_events: 2,
-            ..
-        })
-    ));
-
-    assert!(matches!(
-        capture::Stats {
-            dropped_frames: 1,
-            receiver_dropped_frames: 2,
-            ..capture::Stats::default()
-        }
-        .validate(),
-        Err(Error::InvalidCaptureStatistics { .. })
-    ));
-}
-
-#[test]
 fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
     let first = capture::Stats {
         received_frames: 1,

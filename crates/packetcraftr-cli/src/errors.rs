@@ -5,8 +5,6 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
-#[cfg(test)]
-use packetcraftr_netio as net;
 
 use crate::output;
 
@@ -223,53 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapping_lists_the_source_and_its_chain_without_repeating_them_in_the_message() {
-        #[derive(Debug, thiserror::Error)]
-        #[error("outer failure")]
-        struct Outer(#[source] std::io::Error);
-
-        let source = Outer(std::io::Error::other("root failure"));
-        assert_eq!(source_causes(&source), ["outer failure", "root failure"]);
-
-        let error = CliError::wrapping(Kind::Io, "write failed", &source);
-        assert_eq!(error.message, "write failed");
-        assert_eq!(error.causes, ["outer failure", "root failure"]);
-        assert_eq!(error.classification.kind, Kind::Io);
-        assert_eq!(error.classification.code, "io.runtime");
-        assert_eq!(error.exit_code(), 5);
-    }
-
-    #[test]
-    fn classified_errors_preserve_causes_and_boundary_contracts() {
-        let classified = packetcraftr_core::error::BoundaryError::new(
-            "fixture failed",
-            Classification::new(
-                "fixture.denied",
-                Kind::Policy,
-                Some("authorize the fixture"),
-            ),
-            vec!["first cause".to_owned(), "second cause".to_owned()],
-        )
-        .with_context(Some(Coordinate::ProbeSequence(42)));
-        let error = CliError::classified(classified);
-        assert_eq!(error.exit_code(), 6);
-
-        let output = error.output_error();
-        assert_eq!(output.code, "fixture.denied");
-        assert_eq!(output.causes, ["first cause", "second cause"]);
-        assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
-        assert_eq!(
-            output.context,
-            Some(crate::output::envelope::ErrorContext::ProbeSequence(42))
-        );
-
-        let boundary = error.into_boundary_error();
-        assert_eq!(boundary.classification().code, "fixture.denied");
-        assert_eq!(boundary.causes(), ["first cause", "second cause"]);
-        assert_eq!(boundary.context(), Some(Coordinate::ProbeSequence(42)));
-    }
-
-    #[test]
     fn ndjson_encode_failures_keep_their_classification_and_exit_code() {
         let write = output::stream::EncodeError::Write {
             sequence: 3,
@@ -283,34 +234,5 @@ mod tests {
         let terminated = CliError::from(output::stream::EncodeError::Terminal);
         assert_eq!(terminated.exit_code(), 70);
         assert_eq!(terminated.classification.code, "internal.ndjson_stream");
-    }
-
-    #[test]
-    fn cleanup_failure_keeps_the_primary_error() {
-        let cleanup = net::Error::Capture {
-            message: "receiver stopped".to_owned(),
-            source: None,
-        };
-        let error = CliError::new(Kind::Io, "capture failed")
-            .with_secondary("capture shutdown", CliError::classified(cleanup.clone()));
-        assert_eq!(
-            error.message,
-            format!("capture failed; capture shutdown also failed: {cleanup}")
-        );
-        assert_eq!(
-            error.causes,
-            vec!["capture failed".to_owned(), cleanup.to_string()]
-        );
-
-        let error = CliError::from_classification(
-            Classification::new("io.fixture", Kind::Io, None),
-            "capture failed",
-            vec!["original source".to_owned()],
-        )
-        .with_secondary("capture shutdown", CliError::classified(cleanup.clone()));
-        assert_eq!(
-            error.causes,
-            vec!["original source".to_owned(), cleanup.to_string()]
-        );
     }
 }

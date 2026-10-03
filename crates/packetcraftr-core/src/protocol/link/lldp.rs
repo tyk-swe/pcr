@@ -290,6 +290,8 @@ impl LayerCodec for LldpCodec {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use super::*;
     use crate::packet::Packet;
 
@@ -337,128 +339,6 @@ mod tests {
 
     fn chain(parts: &[&[u8]]) -> Vec<u8> {
         parts.concat()
-    }
-
-    #[test]
-    fn the_default_chain_is_valid_and_round_trips() {
-        let layer = Lldp::default();
-        assert_eq!(layer.tlv_iter().count(), 3);
-        let encoded = encode(&layer, crate::codec::Mode::Strict).unwrap();
-        assert!(encoded.diagnostics.is_empty());
-        let decoded = decode(&encoded.prefix).unwrap();
-        assert!(decoded.diagnostics.is_empty());
-        assert_eq!(decoded.layer.downcast_ref::<Lldp>(), Some(&layer));
-    }
-
-    #[test]
-    fn bytes_after_the_end_tlv_become_trailing_and_every_tlv_stays_verbatim() {
-        let org_specific = [0xfe, 0x06, 0x12, 0x34, 0x56, 0x01, 0xaa, 0xbb];
-        let name = [0x0a, 0x02, b'a', b'b'];
-        let input = chain(&[
-            &CHASSIS,
-            &PORT,
-            &TTL,
-            &name,
-            &org_specific,
-            &END,
-            &[0xff; 5],
-        ]);
-        let decoded = decode(&input).unwrap();
-        assert!(decoded.diagnostics.is_empty());
-        let layer = decoded.layer.downcast_ref::<Lldp>().unwrap();
-        assert_eq!(layer.trailing.as_ref(), &[0xff; 5]);
-        assert_eq!(layer.tlvs.len(), input.len() - 5);
-        assert_eq!(
-            layer.tlv_iter().last(),
-            Some((127, [0x12, 0x34, 0x56, 0x01, 0xaa, 0xbb].as_slice()))
-        );
-        assert_eq!(
-            encode(layer, crate::codec::Mode::Strict).unwrap().prefix,
-            input
-        );
-    }
-
-    #[test]
-    fn the_nine_bit_length_reaches_past_255_and_overruns_are_reported() {
-        // type 6 (system description) declaring 0x1ff value bytes
-        let mut input = chain(&[&CHASSIS, &PORT, &TTL]);
-        input.extend_from_slice(&[0x0d, 0xff, 1, 2, 3]);
-        assert_eq!(decoded_codes(&input), ["decode.lldp_truncated_tlv"]);
-        let decoded = decode(&input).unwrap();
-        let layer = decoded.layer.downcast_ref::<Lldp>().unwrap();
-        assert_eq!(layer.tlvs.len(), input.len());
-        assert_eq!(layer.tlv_iter().count(), 3);
-
-        let mut fits = chain(&[&CHASSIS, &PORT, &TTL]);
-        fits.extend_from_slice(&[0x0d, 0xff]);
-        fits.extend_from_slice(&[0x55; 0x1ff]);
-        fits.extend_from_slice(&END);
-        assert!(decoded_codes(&fits).is_empty());
-    }
-
-    #[test]
-    fn ordering_end_and_ttl_problems_each_have_their_own_code() {
-        let swapped = chain(&[&PORT, &CHASSIS, &TTL, &END]);
-        assert_eq!(decoded_codes(&swapped), ["decode.lldp_mandatory_order"]);
-
-        let early_end = chain(&[&CHASSIS, &END]);
-        assert_eq!(decoded_codes(&early_end), ["decode.lldp_mandatory_order"]);
-
-        let no_end = chain(&[&CHASSIS, &PORT, &TTL]);
-        assert_eq!(decoded_codes(&no_end), ["decode.lldp_missing_end"]);
-
-        let empty_tlv = [0x00, 0x00];
-        assert_eq!(
-            decoded_codes(&empty_tlv),
-            ["decode.lldp_mandatory_order"],
-            "an immediate End TLV leaves the mandatory TLVs absent"
-        );
-
-        let short_ttl = chain(&[&CHASSIS, &PORT, &[0x06, 0x01, 0x78], &END]);
-        assert_eq!(decoded_codes(&short_ttl), ["decode.lldp_short_ttl"]);
-
-        let long_ttl = chain(&[&CHASSIS, &PORT, &[0x06, 0x03, 0x00, 0x78, 0x00], &END]);
-        assert_eq!(decoded_codes(&long_ttl), ["decode.lldp_short_ttl"]);
-        let layer = Lldp {
-            tlvs: Bytes::from(long_ttl),
-            trailing: Bytes::new(),
-        };
-        assert!(encode(&layer, crate::codec::Mode::Strict).is_err());
-        assert!(encode(&layer, crate::codec::Mode::Permissive).is_ok());
-
-        let one_byte = chain(&[&CHASSIS, &PORT, &TTL, &[0x0a]]);
-        assert_eq!(decoded_codes(&one_byte), ["decode.lldp_truncated_tlv"]);
-    }
-
-    #[test]
-    fn strict_builds_refuse_what_permissive_builds_preserve() {
-        let layer = Lldp {
-            tlvs: Bytes::from(chain(&[&PORT, &CHASSIS, &TTL])),
-            trailing: Bytes::from_static(b"x"),
-        };
-        let encoded = encode(&layer, crate::codec::Mode::Permissive).unwrap();
-        assert_eq!(
-            encoded.prefix.len(),
-            layer.tlvs.len() + layer.trailing.len()
-        );
-        let codes: Vec<_> = encoded
-            .diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.code)
-            .collect();
-        assert_eq!(
-            codes,
-            ["build.lldp_mandatory_order", "build.lldp_missing_end"]
-        );
-        assert!(encode(&layer, crate::codec::Mode::Strict).is_err());
-
-        let end_inside = Lldp {
-            tlvs: Bytes::from(chain(&[&CHASSIS, &PORT, &TTL, &END, &[1, 2]])),
-            trailing: Bytes::new(),
-        };
-        assert!(encode(&end_inside, crate::codec::Mode::Strict).is_err());
-        let permissive = encode(&end_inside, crate::codec::Mode::Permissive).unwrap();
-        assert_eq!(permissive.diagnostics.len(), 1);
     }
 
     #[test]

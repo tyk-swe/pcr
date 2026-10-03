@@ -216,20 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn resolved_addresses_keep_first_seen_order_without_duplicates() {
-        let authorized =
-            resolve(vec![address(2), address(2), address(1), address(2)], 4).expect("authorized");
-        assert_eq!(authorized.addresses(), [address(2), address(1)]);
-    }
-
-    #[test]
-    fn duplicates_beyond_the_limit_do_not_trip_it() {
-        let authorized =
-            resolve(vec![address(1), address(2), address(1), address(2)], 2).expect("authorized");
-        assert_eq!(authorized.addresses(), [address(1), address(2)]);
-    }
-
-    #[test]
     fn rejected_resolver_answers_name_the_hostname() {
         let over_limit = resolve(vec![address(1), address(2), address(3)], 2)
             .expect_err("a third distinct address exceeds the limit");

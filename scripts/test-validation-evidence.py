@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Failure-path contracts for release evidence and architecture checks."""
 import copy
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -620,6 +621,96 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             self.run_manifest('--binary', self.root / 'missing', '--verify', self.write_manifest())
         self.assertIn('cannot read binary', str(raised.exception))
+
+
+class MeasurementTests(unittest.TestCase):
+    def test_every_measurement_records_workload_and_input_metadata(self):
+        measurement = module('measure-analysis')
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            binary = root / 'binary'
+            binary.write_bytes(b'fixture identity')
+            output = root / 'report'
+            def fake_measure(binary, args, capture, out, label, pipe, heaptrack):
+                return {'label': label, 'command': [str(binary), *args]}
+            def fake_identity(*args, **kwargs):
+                return 'fixture' if kwargs.get('text') else b'fixture'
+            with (mock.patch.object(sys, 'argv', [
+                    'measure-analysis.py', '--binary', str(binary), '--output', str(output), '--sizes', '1']),
+                  mock.patch.object(measurement, 'measure', side_effect=fake_measure),
+                  mock.patch.object(measurement.subprocess, 'check_output', side_effect=fake_identity),
+                  contextlib.redirect_stdout(io.StringIO())):
+                measurement.main()
+            rows = json.loads((output / 'report.json').read_text())['measurements']
+            for row in rows:
+                with self.subTest(label=row['label']):
+                    self.assertTrue(row['workload'])
+                    for key in ('cardinality', 'physical_frames', 'input_bytes'):
+                        self.assertGreater(row[key], 0)
+            pipe = next(row for row in rows if row['label'] == 'flows-1-pipe-read')
+            self.assertEqual((pipe['workload'], pipe['cardinality'], pipe['physical_frames']),
+                             ('flows', 1, 1))
+            self.assertEqual(pipe['input_bytes'], (output / 'flows-1.pcap').stat().st_size)
+            capture = measurement.ROOT / 'examples/captures/tls-handshake.pcapng'
+            # Independently count the published PCAPNG fixture's enhanced packet blocks.
+            data, offset, frames = capture.read_bytes(), 0, 0
+            while offset < len(data):
+                kind, length = struct.unpack_from('<II', data, offset)
+                self.assertGreaterEqual(length, 12)
+                frames += kind == 6
+                offset += length
+            for label in ('tls-handshake-json', 'tls-handshake-ndjson'):
+                row = next(row for row in rows if row['label'] == label)
+                self.assertEqual((row['workload'], row['cardinality'], row['physical_frames']),
+                                 ('tls-handshake', 1, frames))
+                self.assertEqual(row['input_bytes'], len(data))
+
+    @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+    def test_allocator_outcomes_and_current_artifacts_are_separate_from_timing(self):
+        measurement = module('measure-analysis')
+        real_run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            wrapper = root / 'heaptrack'
+            source = (
+                'import os, pathlib, sys\n'
+                'print("profiler fixture diagnostic")\n'
+                'if os.environ["MEASURE_TEST_PROFILE"] == "yes":\n'
+                '    pathlib.Path(sys.argv[2] + ".zst").write_bytes(b"fixture profile")\n'
+                'sys.exit(int(os.environ["MEASURE_TEST_EXIT"]))\n')
+            wrapper.write_text(
+                f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+                encoding='utf-8')
+            wrapper.chmod(0o755)
+            (root / 'fixture.heaptrack.zst').write_bytes(b'stale prior profile')
+            def timed_fixture(command, **kwargs):
+                if command[0] == '/usr/bin/time':
+                    # GNU time is optional locally: provide fixed timing fields only.
+                    pathlib.Path(command[4]).write_text('1024 0.01 0.00 0.00 0\n')
+                    return real_run(command[5:], **kwargs)
+                return real_run(command, **kwargs)
+            prefixes = []
+            for code, produced, timed_exit in ((0, True, 0), (7, False, 0),
+                                               (7, True, 7), (0, False, 0)):
+                with (self.subTest(code=code, produced=produced, timed_exit=timed_exit),
+                      mock.patch.dict(os.environ, PATH=str(root), MEASURE_TEST_EXIT=str(code),
+                                      MEASURE_TEST_PROFILE='yes' if produced else 'no'),
+                      mock.patch.object(measurement.subprocess, 'run', side_effect=timed_fixture)):
+                    row = measurement.measure(pathlib.Path(sys.executable),
+                                              ['-c', f'raise SystemExit({timed_exit})'],
+                                              root / 'unused', root, 'fixture', False, True)
+                    self.assertEqual(row['exit_code'], timed_exit)
+                    self.assertEqual(row['allocator_exit_code'], code)
+                    self.assertIn('profiler fixture diagnostic',
+                                  pathlib.Path(row['allocator_log']).read_text())
+                    self.assertEqual(bool(row['allocator_profile_files']), produced)
+                    self.assertEqual('allocator_profile_prefix' in row, produced)
+                    if produced:
+                        self.assertEqual(len(row['allocator_profile_files']), 1)
+                        self.assertEqual(pathlib.Path(row['allocator_profile_files'][0]).read_bytes(),
+                                         b'fixture profile')
+                        prefixes.append(row['allocator_profile_prefix'])
+            self.assertEqual(len(prefixes), len(set(prefixes)))
 
 
 if __name__ == '__main__':

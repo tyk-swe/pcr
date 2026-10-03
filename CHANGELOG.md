@@ -1787,6 +1787,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- TCP connect scan regressions coordinate worker admission and logical deadlines
+  so timeout and route checks remain reliable under scheduling load.
+
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced

@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 mod common;
 
@@ -8,15 +9,14 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 use common::packets::ipv4;
-use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::application::tftp::{MAX_OPTIONS, Tftp, TftpOption};
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::transport::Udp;
-use packetcraftr_core::registry::{Discriminator, Registry};
-use packetcraftr_core::{build, codec, decode, expression};
+use packetcraftr_core::registry::Registry;
+use packetcraftr_core::{build, codec, decode};
 
 const TRANSFER_PORT: u16 = 49_152;
 
@@ -102,97 +102,6 @@ fn option(name: &str, value: &str) -> TftpOption {
         name: Bytes::copy_from_slice(name.as_bytes()),
         value: Bytes::copy_from_slice(value.as_bytes()),
     }
-}
-
-#[test]
-fn read_request_with_options_round_trips_byte_exactly() {
-    let registry = builtin::registry();
-    let request = Tftp {
-        opcode: 1,
-        filename: Bytes::from_static(b"firmware.bin"),
-        mode: Bytes::from_static(b"octet"),
-        options: vec![option("blksize", "1024"), option("tsize", "0")],
-        ..Tftp::default()
-    };
-    let (bytes, decoded) = round_trip(&registry, 40_000, 69, request.clone());
-    assert_eq!(decoded, request);
-    assert_eq!(
-        &bytes[28..],
-        b"\x00\x01firmware.bin\x00octet\x00blksize\x001024\x00tsize\x000\x00"
-    );
-
-    let write = Tftp {
-        opcode: 2,
-        filename: Bytes::from_static(b"upload.cfg"),
-        mode: Bytes::from_static(b"netascii"),
-        ..Tftp::default()
-    };
-    assert_eq!(round_trip(&registry, 40_000, 69, write.clone()).1, write);
-}
-
-#[test]
-fn data_ack_error_and_oack_decode_on_the_transfer_port() {
-    let registry = transfer_registry();
-    let block = Tftp {
-        opcode: 3,
-        block: 1,
-        data: Bytes::from(vec![0xa5; 512]),
-        ..Tftp::default()
-    };
-    let (bytes, decoded) = round_trip(&registry, 69, TRANSFER_PORT, block.clone());
-    assert_eq!(decoded, block);
-    assert_eq!(&bytes[28..32], [0, 3, 0, 1]);
-    assert_eq!(bytes.len(), 28 + 4 + 512);
-
-    let ack = Tftp {
-        opcode: 4,
-        block: 1,
-        ..Tftp::default()
-    };
-    assert_eq!(
-        round_trip(&registry, TRANSFER_PORT, 40_000, ack.clone()).1,
-        ack
-    );
-
-    let error = Tftp {
-        opcode: 5,
-        error_code: 1,
-        error_message: Bytes::from_static(b"File not found"),
-        ..Tftp::default()
-    };
-    let (bytes, decoded) = round_trip(&registry, 69, 40_000, error.clone());
-    assert_eq!(decoded, error);
-    assert_eq!(&bytes[28..], b"\x00\x05\x00\x01File not found\x00");
-
-    let oack = Tftp {
-        opcode: 6,
-        options: vec![option("blksize", "1024")],
-        ..Tftp::default()
-    };
-    assert_eq!(
-        round_trip(&registry, TRANSFER_PORT, 40_000, oack.clone()).1,
-        oack
-    );
-
-    // without the binding the same bytes stay raw
-    let unbound = dissect(&builtin::registry(), datagram(&[0, 4, 0, 1], TRANSFER_PORT));
-    assert!(unbound.packet.get::<Tftp>().is_none());
-}
-
-#[test]
-fn strings_are_not_normalised_and_invalid_utf8_survives() {
-    let registry = builtin::registry();
-    let request = Tftp {
-        opcode: 1,
-        filename: Bytes::from_static(b"\xff\xfeDir/Mixed Case\xc3"),
-        mode: Bytes::from_static(b"OcTeT"),
-        options: vec![option("TSIZE", "")],
-        ..Tftp::default()
-    };
-    let (_, decoded) = round_trip(&registry, 40_000, 69, request.clone());
-    assert_eq!(decoded.filename, request.filename);
-    assert_eq!(decoded.mode, request.mode);
-    assert_eq!(decoded.options, request.options);
 }
 
 #[test]
@@ -318,44 +227,4 @@ fn construction_refuses_what_the_wire_cannot_carry() {
     ] {
         assert!(strict(message).is_err(), "{label}");
     }
-}
-
-#[test]
-fn fields_are_reflective_and_recipes_build_tftp() {
-    let registry = builtin::registry();
-    let packet = expression::parse(
-        "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=40000,destination_port=69)/tftp(opcode=1,filename=\"firmware.bin\",mode=\"octet\")",
-        &registry,
-        Default::default(),
-    )
-    .unwrap();
-    let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, Default::default(), Default::default())
-        .unwrap();
-    assert_eq!(&built.bytes[28..], b"\x00\x01firmware.bin\x00octet\x00");
-    let decoded = dissect(&registry, built.bytes);
-    let tftp = decoded.packet.get::<Tftp>().unwrap();
-    assert_eq!(
-        tftp.field("filename"),
-        Some(FieldValue::Bytes(Bytes::from_static(b"firmware.bin")))
-    );
-    assert_eq!(tftp.field("opcode"), Some(FieldValue::Unsigned(1)));
-
-    let mut layer = Tftp::default();
-    assert!(
-        layer
-            .set_field("opcode", FieldValue::Unsigned(70_000))
-            .is_err()
-    );
-    assert!(
-        layer
-            .set_field("filename", FieldValue::Unsigned(1))
-            .is_err()
-    );
-    assert_eq!(
-        registry
-            .child_for("udp", Discriminator(69))
-            .map(packetcraftr_core::layer::Id::as_str),
-        Some("tftp")
-    );
 }

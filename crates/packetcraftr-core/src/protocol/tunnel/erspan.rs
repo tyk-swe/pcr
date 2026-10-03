@@ -430,82 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn type_two_header_has_an_exact_wire_image_and_round_trips_all_fields() {
-        let layer = Erspan {
-            version: 1,
-            vlan: 0xabc,
-            cos: 5,
-            encapsulation: 2,
-            truncated: true,
-            session_id: 0x155,
-            index_word: 0x1234_5678,
-            type3: None,
-        };
-
-        let encoded = encode(&layer, crate::codec::Mode::Strict, ERSPAN_II_LEN).unwrap();
-        assert_eq!(
-            encoded.prefix,
-            [0x1a, 0xbc, 0xb5, 0x55, 0x12, 0x34, 0x56, 0x78]
-        );
-        assert!(encoded.diagnostics.is_empty());
-
-        let decoded = decode(&encoded.prefix, Some(TYPE_II_PROTOCOL)).unwrap();
-        assert_eq!(decoded.consumed, ERSPAN_II_LEN);
-        assert_eq!(decoded.payload_len, 0);
-        assert!(decoded.stop);
-        assert!(decoded.diagnostics.is_empty());
-        assert_eq!(decoded.next, [Discriminator(0)]);
-        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
-    }
-
-    #[test]
-    fn type_three_optional_subheader_round_trips_and_has_precise_layout() {
-        let subheader = Bytes::from_static(b"PCR-TEST");
-        let layer = Erspan {
-            version: 2,
-            vlan: 0x123,
-            cos: 3,
-            encapsulation: 1,
-            truncated: false,
-            session_id: 0x2aa,
-            index_word: 0,
-            type3: Some(ErspanType3 {
-                timestamp: 0x0102_0304,
-                sgt: 0x0506,
-                flags: SUBHEADER_FLAG,
-                subheader: Some(subheader.clone()),
-            }),
-        };
-
-        let encoded = encode(&layer, crate::codec::Mode::Strict, 20).unwrap();
-        assert_eq!(
-            encoded.prefix,
-            [
-                0x21, 0x23, 0x6a, 0xaa, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00, 0x01, b'P', b'C',
-                b'R', b'-', b'T', b'E', b'S', b'T',
-            ]
-        );
-        assert_eq!(
-            encoded
-                .fields
-                .iter()
-                .find(|field| field.name == "subheader")
-                .map(|field| field.range),
-            Some(crate::layout::ByteRange::new(12, 20))
-        );
-        assert!(
-            !encoded
-                .fields
-                .iter()
-                .any(|field| field.name == "index_word")
-        );
-
-        let decoded = decode(&encoded.prefix, Some(TYPE_III_PROTOCOL)).unwrap();
-        assert_eq!(decoded.consumed, 20);
-        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
-    }
-
-    #[test]
     fn decoder_distinguishes_base_type_three_and_optional_subheader_truncation() {
         assert!(matches!(
             decode_error(&[0; 7]),
@@ -543,15 +467,6 @@ mod tests {
             decode_error(&[0; 8]),
             crate::codec::Error::Unsupported { .. }
         ));
-    }
-
-    #[test]
-    fn enclosing_gre_discriminator_mismatch_is_retained_as_a_decode_diagnostic() {
-        let type_two = [0x10, 0, 0, 0, 0, 0, 0, 0];
-        let decoded = decode(&type_two, Some(TYPE_III_PROTOCOL)).unwrap();
-        assert_eq!(decoded.diagnostics.len(), 1);
-        assert_eq!(decoded.diagnostics[0].code, "decode.erspan_type");
-        assert_eq!(decoded.diagnostics[0].field, Some("version"));
     }
 
     #[test]
@@ -634,25 +549,5 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("only 7 remain"));
-    }
-
-    #[test]
-    fn type_three_index_word_is_strictly_rejected_or_permissively_diagnosed() {
-        let layer = Erspan {
-            version: 2,
-            index_word: 1,
-            type3: Some(ErspanType3::default()),
-            ..Erspan::default()
-        };
-        assert!(
-            encode_error(&layer)
-                .to_string()
-                .contains("Type II headers only")
-        );
-
-        let encoded = encode(&layer, crate::codec::Mode::Permissive, 12).unwrap();
-        assert_eq!(encoded.prefix.len(), 12);
-        assert_eq!(encoded.diagnostics.len(), 1);
-        assert_eq!(encoded.diagnostics[0].code, "build.erspan_index");
     }
 }

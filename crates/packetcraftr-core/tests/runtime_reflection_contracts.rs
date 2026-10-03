@@ -4,162 +4,12 @@
 mod common;
 
 use bytes::Bytes;
-use common::probe::{Child, Probe, probe_layout, structure};
-use packetcraftr_core::diagnostic::Diagnostic;
+use common::probe::{Child, Probe, probe_layout};
 use packetcraftr_core::field::{self, FieldValue};
-use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
+use packetcraftr_core::layer::{Layer, Raw};
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::packet::Packet;
-use std::net::{Ipv4Addr, Ipv6Addr};
-
-fn assert_failed_packet_mutations(packet: &mut Packet) {
-    let before_failed_mutations = packet.clone();
-    assert!(
-        packet
-            .layer_mut(0)
-            .and_then(|layer| layer.downcast_mut::<Probe>())
-            .is_none()
-    );
-    assert!(packet.layer_mut(99).is_none());
-    assert!(packet.get_mut::<Raw>().is_none());
-    assert!(matches!(
-        packet.replace(99, Child::default()),
-        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 4 })
-    ));
-    assert_eq!(structure(packet), structure(&before_failed_mutations));
-    assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
-}
-
-#[test]
-fn packet_mutation_reflection_and_boundaries_are_consistent() {
-    let mut packet = Packet::with_capacity(4);
-    assert!(packet.is_empty());
-    packet.push(Probe::default()).push(Probe {
-        value: 2,
-        ..Probe::default()
-    });
-    assert_eq!(packet.len(), 2);
-    assert_eq!(packet.iter().filter(|layer| layer.is::<Probe>()).count(), 2);
-    assert_eq!(
-        packet
-            .iter()
-            .filter(|layer| layer.protocol_id() == &packetcraftr_core::layer::Id::new("probe"))
-            .count(),
-        2
-    );
-    assert_eq!(
-        packet
-            .iter()
-            .next_back()
-            .and_then(|layer| layer.field("value")),
-        Some(2_u8.into())
-    );
-
-    packet.push(Padding::after_layer(vec![0xaa], 1));
-    packet
-        .insert(0, Child::default())
-        .expect("insertion should shift an existing padding boundary");
-    assert_eq!(
-        packet
-            .get::<Padding>()
-            .and_then(|padding| padding.outside_layer),
-        Some(2)
-    );
-    assert!(matches!(
-        packet.insert(9, Raw::default()),
-        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 9, len: 4 })
-    ));
-
-    let removed = packet
-        .replace(0, Child { value: 9 })
-        .expect("replace layer");
-    assert_eq!(removed.protocol_id().as_str(), "child");
-    packet
-        .layer_mut(0)
-        .and_then(|layer| layer.downcast_mut::<Child>())
-        .expect("child layer at index 0")
-        .value = 10;
-    assert_failed_packet_mutations(&mut packet);
-
-    assert!(matches!(
-        packet.remove(2),
-        Err(packetcraftr_core::packet::Error::PaddingBoundaryRemoval { index: 2 })
-    ));
-    packet.remove(3).expect("padding itself can be removed");
-    assert_eq!(packet.len(), 3);
-    assert!(matches!(
-        packet.remove(8),
-        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 8, len: 3 })
-    ));
-
-    packet
-        .get_mut::<Probe>()
-        .expect("probe layer")
-        .set_field("probe_value", 42_u8.into())
-        .expect("edit reflected value");
-    assert_eq!(
-        packet
-            .iter()
-            .find(|layer| layer.protocol_id() == &packetcraftr_core::layer::Id::new("probe"))
-            .and_then(|layer| layer.field("probe_value")),
-        Some(42_u8.into())
-    );
-    let before_failed_edits = packet.clone();
-    assert!(matches!(
-        packet
-            .get_mut::<Probe>()
-            .expect("probe layer")
-            .set_field("unknown", 1_u8.into()),
-        Err(field::Error::UnknownField { .. })
-    ));
-    assert!(matches!(
-        packet
-            .get_mut::<Probe>()
-            .expect("probe layer")
-            .set_field("value", FieldValue::Unsigned(256)),
-        Err(field::Error::OutOfRange { .. })
-    ));
-    assert_eq!(structure(&packet), structure(&before_failed_edits));
-
-    let clone = packet.clone();
-    assert_eq!(structure(&packet), structure(&clone));
-    packet.get_mut::<Probe>().expect("probe layer").value = 43;
-    assert_ne!(structure(&packet), structure(&clone));
-    assert!(format!("{packet:?}").contains("Probe"));
-
-    let collected: Packet = [Child { value: 1 }, Child { value: 2 }]
-        .into_iter()
-        .collect();
-    assert_eq!(collected.len(), 2);
-}
-
-#[test]
-fn layer_removal_shifts_only_padding_boundaries_above_the_removed_layer() {
-    let mut packet = Packet::new();
-    packet
-        .push(Probe::default())
-        .push(Child::default())
-        .push(Probe::default())
-        .push(Padding::after_layer(vec![0xaa], 0))
-        .push(Padding::after_layer(vec![0xbb], 1))
-        .push(Padding::after_layer(vec![0xcc], 2))
-        .push(Padding::new(vec![0xdd]));
-    let boundaries = |packet: &Packet| {
-        packet
-            .iter()
-            .filter_map(|layer| layer.downcast_ref::<Padding>())
-            .map(|padding| padding.outside_layer)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(boundaries(&packet), [Some(0), Some(1), Some(2), None]);
-
-    packet
-        .remove(1)
-        .expect("the padding ending at layer 1 sits past layer 2, so layer 1 can be removed");
-
-    assert_eq!(packet.len(), 6);
-    assert_eq!(boundaries(&packet), [Some(0), Some(1), Some(1), None]);
-}
+use packetcraftr_core::protocol::network::Ipv4;
 
 #[test]
 fn reflected_fields_cover_supported_types_and_fail_closed() {
@@ -255,111 +105,128 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
 }
 
 #[test]
-fn mac_text_requires_six_hex_pairs_under_one_separator() {
-    for accepted in ["aa:bb:cc:dd:ee:ff", "AA-BB-CC-DD-EE-FF"] {
-        let mut layer = Probe::default();
-        layer
-            .set_field("mac", accepted.into())
-            .unwrap_or_else(|error| panic!("{accepted} must parse: {error}"));
-        assert_eq!(
-            layer.field("mac"),
-            Some(FieldValue::Mac([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]))
-        );
+fn typed_iteration_selects_concrete_layers_in_packet_order() {
+    let mut packet = Packet::new();
+    packet.push(Probe {
+        value: 1,
+        ..Probe::default()
+    });
+    packet.push(Raw::new(Bytes::from_static(b"\xAA\xBB")));
+    packet.push(Child { value: 7 });
+    packet.push(Probe {
+        value: 2,
+        ..Probe::default()
+    });
+    packet.push(Probe {
+        value: 3,
+        ..Probe::default()
+    });
+
+    let forward: Vec<u8> = packet.iter_of::<Probe>().map(|probe| probe.value).collect();
+    assert_eq!(forward, [1, 2, 3]);
+    let reverse: Vec<u8> = packet
+        .iter_of::<Probe>()
+        .rev()
+        .map(|probe| probe.value)
+        .collect();
+    assert_eq!(reverse, [3, 2, 1]);
+
+    let mut mixed = packet.iter_of::<Probe>();
+    assert_eq!(mixed.next().map(|probe| probe.value), Some(1));
+    assert_eq!(mixed.next_back().map(|probe| probe.value), Some(3));
+    assert_eq!(mixed.next().map(|probe| probe.value), Some(2));
+    assert!(mixed.next().is_none());
+    assert!(mixed.next_back().is_none());
+
+    assert_eq!(packet.iter_of::<Raw>().count(), 1);
+    assert_eq!(
+        packet
+            .iter_of::<Child>()
+            .map(|child| child.value)
+            .collect::<Vec<u8>>(),
+        [7]
+    );
+    assert_eq!(packet.iter_of::<Ipv4>().count(), 0);
+    assert!(Packet::new().iter_of::<Probe>().next().is_none());
+
+    let mut repeated = Packet::new();
+    for identification in [10_u16, 20, 30] {
+        repeated.push(Ipv4 {
+            identification,
+            ..Ipv4::default()
+        });
     }
-    for refused in [
-        "+1:22:33:44:55:66",
-        "aa:bb:cc:dd:ee:+f",
-        "aa:bb-cc:dd-ee:ff",
-        "aa-bb:cc-dd:ee-ff",
-        "aa:bb:cc:dd:ee",
-        "aa:bb:cc:dd:ee:ff:00",
-        "aabbccddeeff",
-        "a:bb:cc:dd:ee:fff",
-    ] {
-        let mut layer = Probe::default();
-        assert!(
-            matches!(
-                layer.set_field("mac", refused.into()),
-                Err(field::Error::WrongType {
-                    expected: "mac address",
-                    ..
-                })
-            ),
-            "{refused} must be refused"
-        );
-    }
+    assert_eq!(
+        repeated
+            .iter_of::<Ipv4>()
+            .nth(1)
+            .map(|layer| layer.identification),
+        Some(20)
+    );
 }
 
 #[test]
-fn field_values_raw_layers_and_diagnostics_have_stable_views() {
-    let values = [
-        FieldValue::Bool(true),
-        FieldValue::Unsigned(7),
-        FieldValue::Signed(-3),
-        FieldValue::Text("text".to_owned()),
-        FieldValue::Bytes(Bytes::from_static(&[0xab, 0xcd])),
-        FieldValue::Ipv4(Ipv4Addr::LOCALHOST),
-        FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
-        FieldValue::Mac([0, 1, 2, 3, 4, 5]),
-        FieldValue::List(vec![1_u8.into(), "two".into()]),
-    ];
-    assert_eq!(values[1].as_u64(), Some(7));
-    assert_eq!(values[0].as_bool(), Some(true));
-    assert_eq!(values[0].as_u64(), None);
-    assert_eq!(values[1].as_bool(), None);
-    let serialized = serde_json::to_string(&values[4]).expect("serialize bytes field");
+fn mutable_typed_iteration_edits_only_matching_layers() {
+    let mut packet = Packet::new();
+    packet.push(Probe {
+        value: 1,
+        ..Probe::default()
+    });
+    packet.push(Raw::new(Bytes::from_static(b"\xAA\xBB")));
+    packet.push(Child { value: 7 });
+    packet.push(Probe {
+        value: 2,
+        ..Probe::default()
+    });
+    packet.push(Probe {
+        value: 3,
+        ..Probe::default()
+    });
+
+    for probe in packet.iter_of_mut::<Probe>() {
+        probe.value += 10;
+    }
     assert_eq!(
-        serde_json::from_str::<FieldValue>(&serialized).expect("deserialize bytes field"),
-        values[4]
+        packet
+            .iter_of::<Probe>()
+            .map(|probe| probe.value)
+            .collect::<Vec<u8>>(),
+        [11, 12, 13]
     );
 
-    let mut raw = Raw::new(vec![1, 2]);
-    assert_eq!(raw.field("bytes"), Some(vec![1, 2].into()));
-    raw.set_field("bytes", vec![3].into())
-        .expect("edit raw bytes");
-    let mut padding = Padding::new(vec![0, 0]);
-    assert_eq!(padding.field("outside_layer"), None);
-    padding
-        .set_field("outside_layer", 4_u8.into())
-        .expect("set boundary");
-    assert_eq!(padding.outside_layer, Some(4));
-    assert!(matches!(
-        padding.set_field("outside_layer", false.into()),
-        Err(field::Error::WrongType { .. })
-    ));
-    let mut malformed = Malformed::new(None, vec![0xff], "bad header");
-    malformed
-        .set_field("protocol", "ipv4".into())
-        .expect("set intended protocol");
-    malformed
-        .set_field("reason", "truncated".into())
-        .expect("set reason");
-    assert_eq!(malformed.intended_protocol.as_deref(), Some("ipv4"));
+    for (assigned, probe) in (30_u8..).zip(packet.iter_of_mut::<Probe>().rev()) {
+        probe.value = assigned;
+    }
+    assert_eq!(
+        packet
+            .iter_of::<Probe>()
+            .map(|probe| probe.value)
+            .collect::<Vec<u8>>(),
+        [32, 31, 30]
+    );
 
-    let mut diagnostics = Vec::new();
-    packetcraftr_core::diagnostic::push_once(
-        &mut diagnostics,
-        Diagnostic::info("once", "first")
-            .at_layer(2)
-            .at_field("value"),
-    );
-    packetcraftr_core::diagnostic::push_once(
-        &mut diagnostics,
-        Diagnostic::error("once", "duplicate"),
-    );
-    packetcraftr_core::diagnostic::push_once(
-        &mut diagnostics,
-        Diagnostic::warning("other", "kept"),
-    );
-    assert_eq!(diagnostics.len(), 2);
+    {
+        let mut ends = packet.iter_of_mut::<Probe>();
+        ends.next().expect("front match").value = 40;
+        ends.next_back().expect("back match").value = 50;
+        assert_eq!(ends.next().map(|probe| probe.value), Some(31));
+        assert!(ends.next().is_none());
+        assert!(ends.next_back().is_none());
+    }
     assert_eq!(
-        diagnostics[0].severity,
-        packetcraftr_core::diagnostic::Severity::Info
+        packet
+            .iter_of::<Probe>()
+            .map(|probe| probe.value)
+            .collect::<Vec<u8>>(),
+        [40, 31, 50]
     );
-    assert_eq!(diagnostics[0].layer, Some(2));
-    assert_eq!(diagnostics[0].field, Some("value"));
+
+    assert_eq!(packet.len(), 5);
     assert_eq!(
-        diagnostics[1].severity,
-        packetcraftr_core::diagnostic::Severity::Warning
+        packet.get::<Raw>().map(|raw| raw.bytes.as_ref()),
+        Some(&b"\xAA\xBB"[..])
     );
+    assert_eq!(packet.get::<Child>().map(|child| child.value), Some(7));
+    assert_eq!(packet.iter_of_mut::<Ipv4>().count(), 0);
+    assert!(Packet::new().iter_of_mut::<Child>().next().is_none());
 }

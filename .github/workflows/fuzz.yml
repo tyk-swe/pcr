@@ -68,7 +68,9 @@ jobs:
           artifact="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="fuzz-corpus-$FUZZ_TARGET" --jq '[.artifacts[] | select(.expired == false)][0].id // empty')"
           if [[ -n "$artifact" ]]; then
             gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/corpus.zip"
-            unzip -q "$RUNNER_TEMP/corpus.zip" -d "fuzz/corpora/$FUZZ_TARGET"
+            # Keep checked-in seeds when the persisted corpus contains the same names.
+            # Without -n, unzip prompts and fails on the runner's closed stdin.
+            unzip -qn "$RUNNER_TEMP/corpus.zip" -d "fuzz/corpora/$FUZZ_TARGET"
           fi
       - name: Run bounded smoke or campaign
         env:

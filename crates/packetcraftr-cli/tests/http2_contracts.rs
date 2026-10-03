@@ -3,7 +3,6 @@
 mod common;
 #[path = "common/process.rs"]
 mod process_support;
-#[allow(dead_code)]
 #[path = "common/tls_capture.rs"]
 mod tls_capture;
 use std::io::Write as _;

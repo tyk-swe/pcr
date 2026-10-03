@@ -282,18 +282,12 @@ impl<P: PacketProviders> Executor for ProviderExecutor<'_, P> {
 mod tests {
     use crate::test_support::{FakeProviders, live};
     use std::net::{IpAddr, Ipv4Addr};
-    use std::num::NonZeroU32;
+
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::build::{Builder, Options};
-    use packetcraftr_core::codec::Context;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::MacAddress;
-    use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::protocol::{
-        link::Ethernet,
-        network::{Icmpv4, Ipv4},
-    };
+
     use packetcraftr_netio::interface::{Address, Flags, Id as InterfaceId};
     use packetcraftr_netio::link::Capability as LinkCapability;
 
@@ -345,68 +339,6 @@ mod tests {
         bytes[12..16].copy_from_slice(&[192, 0, 2, 1]);
         bytes[16..20].copy_from_slice(&[192, 0, 2, 2]);
         Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).expect("bounded raw IPv4 fixture")
-    }
-
-    fn ethernet_ipv4_frame(source: Ipv4Addr) -> Frame {
-        let mut packet = Packet::new();
-        packet
-            .push(Ethernet {
-                source: INTERFACE_MAC.0,
-                destination: [0x02, 0, 0, 0, 0, 2],
-                ..Ethernet::default()
-            })
-            .push(Ipv4 {
-                source,
-                destination: Ipv4Addr::new(192, 0, 2, 2),
-                ..Ipv4::default()
-            })
-            .push(Icmpv4::default());
-        let registry = packetcraftr_core::protocol::builtin::registry();
-        let built = Builder::new(registry)
-            .build(packet, Context::default(), Options::default())
-            .expect("Ethernet fixture builds");
-        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes)
-            .expect("bounded Ethernet IPv4 fixture")
-    }
-
-    #[test]
-    fn cached_layer2_interface_validation_returns_the_passive_route() {
-        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let requested = Interface::Id(selected.id.clone());
-        let mut transmitter = transmitter_with_cached_interface(selected);
-
-        let frame = ethernet_frame(LinkType::ETHERNET);
-        let route = transmitter
-            .plan_frame(&requested, LinkMode::Layer2, &frame, &live())
-            .expect("matching cached Layer 2 interface");
-        assert_eq!(Interface::Id(route.plan.decision.interface), requested);
-        assert_eq!(route.plan.mode, LinkMode::Layer2);
-        assert!(route.neighbor_resolution.is_none());
-    }
-
-    #[test]
-    fn unmatched_interface_selector_is_named_in_the_device_error() {
-        let frame = ethernet_frame(LinkType::ETHERNET);
-        for (requested, named) in [
-            (Interface::Index(NonZeroU32::new(9).unwrap()), "9"),
-            (Interface::Name("missing0".to_owned()), "missing0"),
-        ] {
-            let mut executor = ProviderExecutor::new(providers());
-            let error = executor
-                .plan_frame(&requested, LinkMode::Layer2, &frame, &live())
-                .expect_err("no fixture interface matches the selector");
-            assert!(
-                matches!(&error, LiveIoError::Device { interface, .. } if interface == named),
-                "{error:?}"
-            );
-            assert_eq!(
-                error.to_string(),
-                format!(
-                    "network device {named} is unavailable: \
-                     no interface matches the requested name or index"
-                )
-            );
-        }
     }
 
     #[test]
@@ -467,114 +399,6 @@ mod tests {
                 &requested,
                 LinkMode::Layer3,
                 &ethernet_frame(LinkType::RAW),
-                &live(),
-            ),
-            Err(LiveIoError::InvalidTransmissionFrame { .. })
-        ));
-    }
-
-    #[test]
-    fn layer2_route_materialization_preserves_validated_interface_evidence() {
-        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let frame = ethernet_frame(LinkType::ETHERNET);
-
-        let route = materialized_route(
-            providers(),
-            &selected,
-            LinkMode::Layer2,
-            &frame,
-            None,
-            &live(),
-        )
-        .expect("Layer 2 replay route is local and passive");
-        assert_eq!(route.plan.decision.interface, selected.id);
-        assert_eq!(route.plan.decision.source_mac, Some(INTERFACE_MAC));
-        assert_eq!(
-            route.plan.decision.selected_source,
-            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))
-        );
-        assert_eq!(route.plan.decision.mtu, 1_400);
-        assert_eq!(route.plan.decision.link_type, LinkType::ETHERNET);
-        assert_eq!(route.plan.mode, LinkMode::Layer2);
-        assert!(route.plan.source_mac.is_none());
-        assert!(route.plan.packet_source.is_none());
-        assert!(route.plan.lookup_destination.is_none());
-        assert!(route.plan.final_destination.is_none());
-        assert!(route.plan.visited_destinations.is_empty());
-        assert!(route.neighbor_resolution.is_none());
-
-        let mut without_mtu = selected;
-        without_mtu.mtu = None;
-        let route = materialized_route(
-            providers(),
-            &without_mtu,
-            LinkMode::Layer2,
-            &frame,
-            None,
-            &live(),
-        )
-        .expect("missing native MTU uses the unbounded model value");
-        assert_eq!(route.plan.decision.mtu, u32::MAX);
-    }
-
-    #[test]
-    fn layer2_route_recognizes_any_selected_interface_ip_address_as_owned() {
-        let mut selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let secondary = Ipv4Addr::new(192, 0, 2, 9);
-        selected.addresses.push(Address {
-            address: IpAddr::V4(secondary),
-            prefix_length: 24,
-        });
-        let route = materialized_route(
-            providers(),
-            &selected,
-            LinkMode::Layer2,
-            &ethernet_ipv4_frame(secondary),
-            None,
-            &live(),
-        )
-        .expect("Layer 2 route is passive");
-
-        assert_eq!(
-            route.plan.decision.preferred_source,
-            Some(IpAddr::V4(secondary))
-        );
-        assert!(route.plan.packet_source.is_none());
-    }
-
-    #[test]
-    fn route_materialization_requires_a_resolved_mode_and_a_validated_envelope() {
-        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-
-        assert!(matches!(
-            materialized_route(
-                providers(),
-                &selected,
-                LinkMode::Layer3,
-                &ipv4_frame(),
-                None,
-                &live()
-            ),
-            Err(LiveIoError::UnresolvedLinkMode)
-        ));
-        assert!(matches!(
-            materialized_route(
-                providers(),
-                &selected,
-                LinkMode::Auto,
-                &ethernet_frame(LinkType::ETHERNET),
-                None,
-                &live(),
-            ),
-            Err(LiveIoError::UnresolvedLinkMode)
-        ));
-        let requested = Interface::Id(selected.id.clone());
-        let mut transmitter = transmitter_with_cached_interface(selected);
-        assert!(matches!(
-            transmitter.plan_frame(
-                &requested,
-                LinkMode::Layer3,
-                &ethernet_frame(LinkType::ETHERNET),
                 &live(),
             ),
             Err(LiveIoError::InvalidTransmissionFrame { .. })

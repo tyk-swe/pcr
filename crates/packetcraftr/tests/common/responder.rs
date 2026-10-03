@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
@@ -20,6 +20,8 @@ use packetcraftr_netio::interface::Id;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::{self as net, capture, route, transmit};
 
+use super::clock::VirtualClock;
+
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) ready: bool,
@@ -32,6 +34,7 @@ pub(crate) struct State {
     pub(crate) fail_after: Option<usize>,
     pub(crate) send_times: Vec<Instant>,
     pub(crate) send_clock: Option<Arc<dyn Fn() -> Instant + Send + Sync>>,
+    pub(crate) idle_clock: Option<VirtualClock>,
     pub(crate) bad_ingress: Option<Option<Instant>>,
     pub(crate) suppress_replies: bool,
     pub(crate) hold_replies_until: usize,
@@ -182,7 +185,7 @@ impl capture::Session for Capture {
     }
     fn next_captured_frame(
         &mut self,
-        _deadline: &Deadline,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         let mut state = self.state.lock().unwrap();
         if state.sends < state.hold_replies_until || state.suppress_replies {
@@ -199,6 +202,9 @@ impl capture::Session for Capture {
         let captured = state.replies.pop_front();
         if captured.is_some() {
             state.pending -= 1;
+        } else if let Some(clock) = &state.idle_clock {
+            // Empty immediate polls still perform work, so logical time must progress.
+            clock.advance(deadline.limit().saturating_add(Duration::from_micros(1)));
         }
         Ok(captured)
     }

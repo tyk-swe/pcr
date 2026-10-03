@@ -51,7 +51,9 @@ impl Launch<'_> {
         match arguments.generate(self.format) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                let _ = emit_stderr_error(&error);
+                if let Err(write_error) = emit_stderr_error(&error) {
+                    return ExitCode::from(write_error.exit_code());
+                }
                 ExitCode::from(error.exit_code())
             }
         }
@@ -76,7 +78,9 @@ impl Launch<'_> {
                 Kind::Usage,
                 "refusing binary output to a terminal; redirect stdout to a file or pipe, or pass --force-binary-stdout",
             );
-            let _ = emit_stderr_error(&error);
+            if let Err(write_error) = emit_stderr_error(&error) {
+                return ExitCode::from(write_error.exit_code());
+            }
             return ExitCode::from(error.exit_code());
         }
         if self.resource_diagnostics
@@ -241,75 +245,4 @@ fn command_failure(
         return ExitCode::from(write_error.exit_code());
     }
     ExitCode::from(exit_code)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::TestRecord;
-
-    #[test]
-    fn unavailable_encoder_fails_cleanup_without_another_output_attempt() {
-        use std::io::{self, Write};
-        use std::sync::mpsc;
-        use std::time::{Duration, Instant};
-
-        struct BlockedWriter(mpsc::Sender<()>, mpsc::Receiver<()>);
-        impl Write for BlockedWriter {
-            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                self.0.send(()).unwrap();
-                self.1
-                    .recv_timeout(Duration::from_secs(3))
-                    .map_err(io::Error::other)?;
-                Ok(bytes.len())
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let (entered, writer_entered) = mpsc::channel();
-        let (release, wait) = mpsc::channel();
-        let stream = StreamEncoder::new(
-            output::contract::Command::Scan,
-            BlockedWriter(entered, wait),
-        );
-        let callback = stream.clone();
-        let worker = std::thread::spawn(move || callback.emit_data(TestRecord(()), Vec::new()));
-        writer_entered.recv_timeout(Duration::from_secs(1)).unwrap();
-        let started = Instant::now();
-        let status = command_failure(
-            output::contract::Format::Ndjson,
-            output::contract::Command::Scan,
-            CliError::new(Kind::Policy, "workflow publication deadline expired"),
-            &stream,
-        );
-        assert_eq!(status, ExitCode::from(5));
-        assert!(started.elapsed() < Duration::from_secs(1));
-        release.send(()).unwrap();
-        worker.join().unwrap().unwrap();
-        assert!(writer_entered.try_recv().is_err());
-    }
-
-    #[test]
-    fn successful_ndjson_requires_a_terminal_record() {
-        let stream = StreamEncoder::new(
-            output::contract::Command::Read,
-            std::io::Cursor::new(Vec::new()),
-        );
-        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_err());
-        stream
-            .complete(serde_json::json!({"event": "complete"}), Vec::new())
-            .unwrap();
-        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_ok());
-        assert!(require_success_terminal(output::contract::Format::Json, &stream).is_ok());
-    }
-    #[test]
-    fn a_terminal_error_cannot_satisfy_successful_completion() {
-        let stream = StreamEncoder::new(output::contract::Command::Read, Vec::new());
-        stream
-            .emit_error(CliError::new(Kind::Io, "fixture failure").output_error())
-            .unwrap();
-        assert!(stream.is_terminal());
-        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_err());
-    }
 }

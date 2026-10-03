@@ -3,13 +3,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Failure-path contracts for release evidence and architecture checks."""
 import copy
+import contextlib
 import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -384,20 +388,72 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(native.main(), 0)
             release.validate(json.loads(path.read_text()), COMMIT, NATIVE)
 
+    def test_native_launcher_retains_only_matching_child_errors_and_still_fails(self):
+        cases = [
+            ('matching failure', 1, 'fixture-run', 'failed', 'specific child failure', True),
+            ('wrong run', 1, 'old-run', 'failed', 'stale child failure', False),
+            ('wrong namespace', 2, 'fixture-run', 'failed', 'foreign child failure', False),
+            ('claimed success', 1, 'fixture-run', 'passed', 'specific child failure', True),
+            ('no child error', 1, 'fixture-run', 'failed', None, False),
+        ]
+        for label, parent, run_id, status, child_error, retained in cases:
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory) / 'native.json'
+                argv = ['native', '--binary', 'fixture-binary', '--native-test-binary', 'fixture-tests',
+                        '--report', str(path), '--run-id', 'fixture-run']
+                original_stat = native.os.stat
+
+                def launch(command, **kwargs):
+                    self.assertEqual(command[0], 'unshare')
+                    child = dict(status=status, run_id=run_id, parent_namespace=parent,
+                                 namespace=3, error=child_error)
+                    path.write_text(json.dumps(child))
+                    return subprocess.CompletedProcess(command, 7, stdout='', stderr='')
+
+                with (mock.patch('sys.argv', argv),
+                      mock.patch.object(native, 'provenance', return_value=provenance_report()),
+                      mock.patch.object(native, 'digest', return_value='d' * 64),
+                      mock.patch.object(native.platform, 'system', return_value='Linux'),
+                      mock.patch.object(native.platform, 'platform', return_value='fixture Linux'),
+                      mock.patch.object(native.os, 'geteuid', return_value=1000),
+                      mock.patch.object(native.os, 'stat', side_effect=lambda *args, **kwargs:
+                          mock.Mock(st_ino=1) if str(args[0]) == '/proc/self/ns/net'
+                          else original_stat(*args, **kwargs)),
+                      mock.patch.object(native.subprocess, 'run', side_effect=launch) as launched,
+                      mock.patch('builtins.print')):
+                    self.assertEqual(native.main(), 1)
+                written = json.loads(path.read_text())
+                self.assertEqual(written['status'], 'failed')
+                self.assertEqual(written['error'],
+                                 'isolated namespace launcher or native scenarios failed; '
+                                 'see namespace_launcher and scenarios')
+                launcher = written['namespace_launcher']
+                self.assertEqual(launcher['exit_code'], 7)
+                self.assertEqual(launcher['stderr'], '')
+                self.assertEqual('child_error' in launcher, retained)
+                if retained:
+                    self.assertEqual(launcher['child_error'], child_error)
+                self.assertEqual(launched.call_count, 1)
+
     def test_release_preflight_validates_downloaded_reports_before_publishing(self):
         for invalid in [False, True]:
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
                 output = pathlib.Path(directory)
-                for kind, report in [(DECODER, decoder_report()), (NATIVE, native_report())]:
-                    if invalid and kind == NATIVE:
-                        del report['parent_namespace']
-                    artifact = output / kind
-                    artifact.mkdir()
-                    (artifact / release.REQUIRED[kind]).write_text(json.dumps(report))
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                if invalid:
+                    del reports[NATIVE]['parent_namespace']
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True)
+                    (artifact / release.REQUIRED[kind]).write_text(json.dumps(reports[kind]))
+
                 argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
                 runs = json.dumps(dict(workflow_runs=[dict(id=1, html_url='ci-run-1'), dict(id=2, html_url='ci-run-2')]))
                 with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs) as listing,
-                      mock.patch.object(release.subprocess, 'run') as download, mock.patch('builtins.print')):
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report) as download,
+                      mock.patch('builtins.print')):
                     if invalid:
                         with self.assertRaises(ValueError):
                             release.main()
@@ -413,6 +469,93 @@ class EvidenceTests(unittest.TestCase):
                     self.assertIn('status=success', listing.call_args.args[0])
                     self.assertEqual(download.call_count, 2)
                     self.assertTrue(all(call.args[0][3] == '2' for call in download.call_args_list))
+
+    def test_release_retry_cannot_attribute_old_reports_to_a_new_run(self):
+        for missing in release.REQUIRED:
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                aggregate = output / 'VALIDATION-EVIDENCE.json'
+                aggregate.write_text('previous aggregate')
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                old_files = {}
+                for kind, report in reports.items():
+                    artifact = output / kind
+                    artifact.mkdir()
+                    report_path = artifact / release.REQUIRED[kind]
+                    report_path.write_text(json.dumps(report))
+                    log_path = artifact / 'old-run.log'
+                    log_path.write_text('previous run diagnostic')
+                    old_files.update({report_path: report_path.read_bytes(), log_path: log_path.read_bytes()})
+                current_logs = []
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True, exist_ok=True)
+                    log_path = artifact / 'current-run.log'
+                    log_path.write_text('current run diagnostic')
+                    current_logs.append(log_path)
+                    if kind != missing:
+                        (artifact / release.REQUIRED[kind]).write_text(json.dumps(reports[kind]))
+
+                argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+                runs = json.dumps(dict(workflow_runs=[dict(id=9, html_url='ci-run-9')]))
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs),
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report), mock.patch('builtins.print')):
+                    with self.assertRaises(FileNotFoundError):
+                        release.main()
+                self.assertFalse(aggregate.exists())
+                self.assertTrue(current_logs)
+                self.assertTrue(all(path.read_text() == 'current run diagnostic' for path in current_logs))
+                for path, data in old_files.items():
+                    self.assertEqual(path.read_bytes(), data)
+
+    def test_release_failed_lookup_invalidates_only_previous_aggregate(self):
+        for result in [json.dumps(dict(workflow_runs=[])), subprocess.TimeoutExpired('gh api', 60)]:
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                aggregate = output / 'VALIDATION-EVIDENCE.json'
+                aggregate.write_text('previous aggregate')
+                previous = output / 'previous-report.json'
+                previous.write_text('previous report')
+                argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+                lookup = dict(side_effect=result) if isinstance(result, Exception) else dict(return_value=result)
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', **lookup),
+                      mock.patch.object(release.subprocess, 'run') as download):
+                    with self.assertRaises(SystemExit):
+                        release.main()
+                self.assertFalse(aggregate.exists())
+                self.assertEqual(previous.read_text(), 'previous report')
+                download.assert_not_called()
+
+    def test_release_successful_retries_publish_and_retain_each_runs_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory)
+            downloaded = {}
+            argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', str(output)]
+            for run_id, binary_digest in [(1, 'a' * 64), (2, 'b' * 64)]:
+                reports = {DECODER: decoder_report(), NATIVE: native_report()}
+                for report in reports.values():
+                    report['binary_sha256'] = binary_digest
+
+                def download_report(command, **kwargs):
+                    kind = command[command.index('--name') + 1]
+                    artifact = pathlib.Path(command[command.index('--dir') + 1])
+                    artifact.mkdir(parents=True, exist_ok=True)
+                    report_path = artifact / release.REQUIRED[kind]
+                    report_path.write_text(json.dumps(reports[kind]))
+                    downloaded[report_path] = report_path.read_bytes()
+
+                runs = json.dumps(dict(workflow_runs=[dict(id=run_id, html_url=f'ci-run-{run_id}')]))
+                with (mock.patch('sys.argv', argv), mock.patch.object(release.subprocess, 'check_output', return_value=runs),
+                      mock.patch.object(release.subprocess, 'run', side_effect=download_report), mock.patch('builtins.print')):
+                    release.main()
+                evidence = json.loads((output / 'VALIDATION-EVIDENCE.json').read_text())
+                self.assertEqual(evidence['ci_run'], f'ci-run-{run_id}')
+                self.assertEqual(evidence['reports'], reports)
+                self.assertEqual(len(downloaded), run_id * len(release.REQUIRED))
+                for path, data in downloaded.items():
+                    self.assertEqual(path.read_bytes(), data)
 
     def test_metadata_checks_optional_and_target_specific_production_edges(self):
         metadata = dict(workspace_members=['core'], packages=[dict(id='core', name='packetcraftr-core',
@@ -555,6 +698,24 @@ class ManifestTests(unittest.TestCase):
                               '--variant', 'pcap-free')
             self.run_manifest('--binary', self.binary, '--verify', path)
 
+    @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+    def test_verify_executes_relative_binary_paths_from_current_directory(self):
+        source = 'print("packetcraftr 9.9.9")\n'
+        self.binary.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+            encoding='utf-8')
+        self.binary.chmod(0o755)
+        self.document['binary_sha256'] = digest(self.binary)
+        self.write_manifest()
+        for binary in (self.binary.name, './' + self.binary.name, str(self.binary)):
+            with self.subTest(binary=binary):
+                result = subprocess.run([
+                    sys.executable, str(ROOT / 'build-manifest.py'),
+                    '--binary', binary, '--verify', self.path.name,
+                ], cwd=self.root, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_verify_rejects_wrong_expected_metadata(self):
         path = self.write_manifest()
         for flag, value in [('--commit', 'b' * 40), ('--target', 'other'),
@@ -599,6 +760,190 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             self.run_manifest('--binary', self.root / 'missing', '--verify', self.write_manifest())
         self.assertIn('cannot read binary', str(raised.exception))
+
+
+class ExternalConsumerManifestTests(unittest.TestCase):
+    def test_checkout_paths_roundtrip_through_utf8_toml(self):
+        import tomllib
+
+        consumer = module('check-external-consumer')
+        checkouts = ['plain checkout', 'checkout é', 'checkout \U0001f980',
+                     'checkout \x7f\U0001f980']
+        if os.name != 'nt':
+            checkouts.append('checkout "\\u007f" \U0001f980')
+        for checkout in checkouts:
+            with self.subTest(checkout=checkout):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory) / checkout
+                    source = root / 'examples/consumers/rust/composition.rs'
+                    source.parent.mkdir(parents=True)
+                    source.write_text('// consumer fixture\n', encoding='utf-8')
+                    (root / 'rust-toolchain.toml').write_text(
+                        '[toolchain]\nchannel = "fixture"\n', encoding='utf-8')
+
+                    def inspect_manifest(command, *, cwd, **kwargs):
+                        document = tomllib.loads((cwd / 'Cargo.toml').read_text(encoding='utf-8'))
+                        for name in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
+                            self.assertEqual(document['dependencies'][name], {
+                                'path': str(root / 'crates' / name), 'default-features': False,
+                            })
+                        self.assertEqual((cwd / 'composition.rs').read_bytes(), source.read_bytes())
+                        return subprocess.CompletedProcess(command, 0)
+
+                    with (mock.patch.object(consumer, 'ROOT', root),
+                          mock.patch.object(sys, 'argv', ['check-external-consumer.py']),
+                          mock.patch.object(consumer.shutil, 'which', return_value=sys.executable),
+                          mock.patch.object(consumer.subprocess, 'run', side_effect=inspect_manifest) as run):
+                        self.assertEqual(consumer.main(), 0)
+                    self.assertEqual(run.call_count, 2)
+
+
+@unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+class ExternalConsumerTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='external consumer fixture ')
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        self.wrapper = self.bin / 'cargo-wrapper'
+        source = (
+            'import json, os, pathlib, sys\n'
+            'with open(os.environ["CONSUMER_TEST_LOG"], "a") as log:\n'
+            '    log.write(json.dumps(dict(args=sys.argv[1:], cwd=os.getcwd(), '
+            'manifest=pathlib.Path("Cargo.toml").is_file(), '
+            'source=pathlib.Path("composition.rs").is_file())) + "\\n")\n'
+            'sys.exit(int(os.environ.get("CONSUMER_TEST_EXIT", "0")))\n')
+        self.wrapper.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+            encoding='utf-8')
+        self.wrapper.chmod(0o755)
+        self.log = self.root / 'calls.jsonl'
+
+    def run_consumer(self, cargo, **environment):
+        env = dict(os.environ, CONSUMER_TEST_LOG=str(self.log))
+        env.update(environment)
+        return subprocess.run([
+            sys.executable, str(ROOT / 'check-external-consumer.py'), '--cargo', cargo,
+        ], cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+
+    def test_relative_cargo_and_path_entries_survive_detached_working_directory(self):
+        for cargo, path in (('./bin/cargo-wrapper', ''), ('cargo-wrapper', 'bin'),
+                            (str(self.wrapper), '')):
+            with self.subTest(cargo=cargo):
+                self.log.unlink(missing_ok=True)
+                result = self.run_consumer(cargo, PATH=path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual([call['args'] for call in calls], [
+                    ['generate-lockfile', '--offline'], ['test', '--locked', '--offline'],
+                ])
+                self.assertEqual(calls[0]['cwd'], calls[1]['cwd'])
+                self.assertNotEqual(pathlib.Path(calls[0]['cwd']), self.root)
+                self.assertTrue(all(call['manifest'] and call['source'] for call in calls))
+
+    def test_cargo_failure_stops_before_running_tests(self):
+        result = self.run_consumer(str(self.wrapper), CONSUMER_TEST_EXIT='7')
+        self.assertNotEqual(result.returncode, 0)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([call['args'] for call in calls], [['generate-lockfile', '--offline']])
+
+    def test_missing_cargo_reports_unexecuted_validation(self):
+        result = self.run_consumer('missing-cargo', PATH=str(self.bin))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('Cargo is required; external-consumer validation was not executed.', result.stderr)
+        self.assertFalse(self.log.exists())
+
+
+class MeasurementTests(unittest.TestCase):
+    def test_every_measurement_records_workload_and_input_metadata(self):
+        measurement = module('measure-analysis')
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            binary = root / 'binary'
+            binary.write_bytes(b'fixture identity')
+            output = root / 'report'
+            def fake_measure(binary, args, capture, out, label, pipe, heaptrack):
+                return {'label': label, 'command': [str(binary), *args]}
+            def fake_identity(*args, **kwargs):
+                return 'fixture' if kwargs.get('text') else b'fixture'
+            with (mock.patch.object(sys, 'argv', [
+                    'measure-analysis.py', '--binary', str(binary), '--output', str(output), '--sizes', '1']),
+                  mock.patch.object(measurement, 'measure', side_effect=fake_measure),
+                  mock.patch.object(measurement.subprocess, 'check_output', side_effect=fake_identity),
+                  contextlib.redirect_stdout(io.StringIO())):
+                measurement.main()
+            rows = json.loads((output / 'report.json').read_text())['measurements']
+            for row in rows:
+                with self.subTest(label=row['label']):
+                    self.assertTrue(row['workload'])
+                    for key in ('cardinality', 'physical_frames', 'input_bytes'):
+                        self.assertGreater(row[key], 0)
+            pipe = next(row for row in rows if row['label'] == 'flows-1-pipe-read')
+            self.assertEqual((pipe['workload'], pipe['cardinality'], pipe['physical_frames']),
+                             ('flows', 1, 1))
+            self.assertEqual(pipe['input_bytes'], (output / 'flows-1.pcap').stat().st_size)
+            capture = measurement.ROOT / 'examples/captures/tls-handshake.pcapng'
+            # Independently count the published PCAPNG fixture's enhanced packet blocks.
+            data, offset, frames = capture.read_bytes(), 0, 0
+            while offset < len(data):
+                kind, length = struct.unpack_from('<II', data, offset)
+                self.assertGreaterEqual(length, 12)
+                frames += kind == 6
+                offset += length
+            for label in ('tls-handshake-json', 'tls-handshake-ndjson'):
+                row = next(row for row in rows if row['label'] == label)
+                self.assertEqual((row['workload'], row['cardinality'], row['physical_frames']),
+                                 ('tls-handshake', 1, frames))
+                self.assertEqual(row['input_bytes'], len(data))
+
+    @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+    def test_allocator_outcomes_and_current_artifacts_are_separate_from_timing(self):
+        measurement = module('measure-analysis')
+        real_run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            wrapper = root / 'heaptrack'
+            source = (
+                'import os, pathlib, sys\n'
+                'print("profiler fixture diagnostic")\n'
+                'if os.environ["MEASURE_TEST_PROFILE"] == "yes":\n'
+                '    pathlib.Path(sys.argv[2] + ".zst").write_bytes(b"fixture profile")\n'
+                'sys.exit(int(os.environ["MEASURE_TEST_EXIT"]))\n')
+            wrapper.write_text(
+                f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+                encoding='utf-8')
+            wrapper.chmod(0o755)
+            (root / 'fixture.heaptrack.zst').write_bytes(b'stale prior profile')
+            def timed_fixture(command, **kwargs):
+                if command[0] == '/usr/bin/time':
+                    # GNU time is optional locally: provide fixed timing fields only.
+                    pathlib.Path(command[4]).write_text('1024 0.01 0.00 0.00 0\n')
+                    return real_run(command[5:], **kwargs)
+                return real_run(command, **kwargs)
+            prefixes = []
+            for code, produced, timed_exit in ((0, True, 0), (7, False, 0),
+                                               (7, True, 7), (0, False, 0)):
+                with (self.subTest(code=code, produced=produced, timed_exit=timed_exit),
+                      mock.patch.dict(os.environ, PATH=str(root), MEASURE_TEST_EXIT=str(code),
+                                      MEASURE_TEST_PROFILE='yes' if produced else 'no'),
+                      mock.patch.object(measurement.subprocess, 'run', side_effect=timed_fixture)):
+                    row = measurement.measure(pathlib.Path(sys.executable),
+                                              ['-c', f'raise SystemExit({timed_exit})'],
+                                              root / 'unused', root, 'fixture', False, True)
+                    self.assertEqual(row['exit_code'], timed_exit)
+                    self.assertEqual(row['allocator_exit_code'], code)
+                    self.assertIn('profiler fixture diagnostic',
+                                  pathlib.Path(row['allocator_log']).read_text())
+                    self.assertEqual(bool(row['allocator_profile_files']), produced)
+                    self.assertEqual('allocator_profile_prefix' in row, produced)
+                    if produced:
+                        self.assertEqual(len(row['allocator_profile_files']), 1)
+                        self.assertEqual(pathlib.Path(row['allocator_profile_files'][0]).read_bytes(),
+                                         b'fixture profile')
+                        prefixes.append(row['allocator_profile_prefix'])
+            self.assertEqual(len(prefixes), len(set(prefixes)))
 
 
 if __name__ == '__main__':

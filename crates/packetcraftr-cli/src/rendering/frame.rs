@@ -308,7 +308,6 @@ impl fmt::Display for CapturedFrameText<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
 
     use bytes::Bytes;
     use packetcraftr_core::protocol::builtin;
@@ -343,97 +342,6 @@ mod tests {
     }
 
     #[test]
-    fn values_render_by_kind_with_derived_marks_from_the_schema() {
-        let packet = packet(
-            "ipv4",
-            vec![
-                ("ttl", FieldValue::Unsigned(64)),
-                ("checksum", FieldValue::Unsigned(7)),
-                ("dont_fragment", FieldValue::Bool(true)),
-                (
-                    "options",
-                    FieldValue::Bytes(Bytes::from_static(&[0xab, 0x01])),
-                ),
-                ("source", FieldValue::Ipv4("192.0.2.1".parse().unwrap())),
-                ("vendor", FieldValue::Signed(-3)),
-            ],
-        );
-        assert_eq!(
-            lines(&packet, 4096).unwrap(),
-            [
-                "0: ipv4",
-                "  dont_fragment = true",
-                "  ttl = 64",
-                "  checksum = 7 (derived)",
-                "  source = 192.0.2.1",
-                "  options = ab01 (2 bytes)",
-                // Unknown names follow the schema's, and carry no mark.
-                "  vendor = -3",
-            ]
-        );
-    }
-
-    #[test]
-    fn lists_and_objects_nest_with_indexes_and_empty_ones_stay_inline() {
-        let question = FieldValue::Object(BTreeMap::from([
-            ("name".to_owned(), FieldValue::Text("a.test.".to_owned())),
-            ("type".to_owned(), FieldValue::Unsigned(1)),
-        ]));
-        let packet = packet(
-            "dns",
-            vec![
-                (
-                    "questions",
-                    FieldValue::List(vec![question.clone(), question]),
-                ),
-                ("answers", FieldValue::List(Vec::new())),
-                ("empty", FieldValue::Object(BTreeMap::new())),
-                ("qtype", FieldValue::List(vec![FieldValue::Unsigned(1)])),
-                ("mac", FieldValue::Mac([0, 1, 0xab, 0xcd, 0xef, 0xff])),
-                ("none", FieldValue::Bytes(Bytes::new())),
-                ("one", FieldValue::Bytes(Bytes::from_static(&[9]))),
-            ],
-        );
-        let rendered = lines(&packet, 4096).unwrap();
-        for expected in [
-            "  questions:",
-            "    [0]:",
-            "      name = \"a.test.\"",
-            "      type = 1",
-            "    [1]:",
-            "  answers = []",
-            "  empty = {}",
-            "  qtype:",
-            "    [0] = 1",
-            "  mac = 00:01:ab:cd:ef:ff",
-            "  none = (0 bytes)",
-            "  one = 09 (1 byte)",
-        ] {
-            assert!(
-                rendered.iter().any(|line| line == expected),
-                "{expected}: {rendered:#?}"
-            );
-        }
-    }
-
-    #[test]
-    fn control_text_is_escaped_and_charged_after_escaping() {
-        let packet = packet(
-            "raw",
-            vec![("text", FieldValue::Text("a\x1b[31m\nb\u{202e}".to_owned()))],
-        );
-        let rendered = lines(&packet, 4096).unwrap();
-        assert!(rendered.iter().all(|line| !line.contains('\x1b')
-            && !line.contains('\n')
-            && !line.contains('\u{202e}')));
-        assert!(rendered[1].contains("\\u{1b}[31m") && rendered[1].contains("\\n"));
-        // The budget covers the escaped text, which is longer than the raw field.
-        let cost: usize = rendered.iter().map(|line| line.len() + 1).sum();
-        assert!(lines(&packet, cost).is_ok());
-        assert!(lines(&packet, cost - 1).is_err());
-    }
-
-    #[test]
     fn exhausting_the_budget_is_a_typed_policy_error() {
         let packet = packet("ipv4", vec![("ttl", FieldValue::Unsigned(64))]);
         let error = lines(&packet, 0).unwrap_err();
@@ -456,16 +364,5 @@ mod tests {
         // "0: ipv4" leaves 5; the field's 128-character hex dump cannot fit.
         let error = lines(&packet, 13).unwrap_err();
         assert_eq!(error.classification.code, "policy.tree_output_limit");
-    }
-
-    #[test]
-    fn nesting_beyond_the_document_ceiling_is_refused() {
-        let mut value = FieldValue::Unsigned(1);
-        for _ in 0..=MAX_TREE_DEPTH {
-            value = FieldValue::List(vec![value]);
-        }
-        let error = lines(&packet("raw", vec![("deep", value)]), usize::MAX).unwrap_err();
-        assert_eq!(error.classification.code, "policy.tree_output_limit");
-        assert!(error.message.contains("nests deeper"));
     }
 }

@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ import json, pathlib, sys
 args = sys.argv[1:]
 mode = pathlib.Path('fixture-mode').read_text()
 expected = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
-command = next((x for x in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls') if x in args), '')
+command = next((x for x in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls', 'stats') if x in args), '')
 if mode == 'exit-' + command or (mode == 'exit-recipe' and '--packet-file' in args):
     sys.exit(7)
 if '--help' in args:
@@ -38,10 +39,22 @@ elif command == 'build' and '--packet-file' in args:
     print('{' if mode == 'bad-recipe' else '{}')
 elif command in ('build', 'dissect'):
     print('00' if mode == 'bytes-' + command else expected)
+elif command == 'stats':
+    capture = args[args.index('stats') + 1]
+    assert pathlib.Path(capture).is_file()
+    table = args[args.index('--table') + 1]
+    if table == 'io':
+        assert args[args.index('--interval-ms') + 1] == '1000'
+    if mode == 'malformed-stats-' + table:
+        print('{')
+    else:
+        print(json.dumps({'table': 'wrong' if mode == 'wrong-stats-' + table else table}))
 elif command == 'read':
     assert pathlib.Path('examples/captures/tls-handshake.pcapng').is_file()
-    records = [dict(schema='packetcraftr.output/v6', sequence=0, event='frame'),
-               dict(schema='packetcraftr.output/v6', sequence=1, event='complete')]
+    frames = {'no-frames': 0, 'missing-frame': 7, 'extra-frame': 9}.get(mode, 8)
+    records = [dict(schema='packetcraftr.output/v6', sequence=index, event='frame')
+               for index in range(frames)]
+    records.append(dict(schema='packetcraftr.output/v6', sequence=frames, event='complete'))
     if mode == 'bad-schema': records[0]['schema'] = 'wrong'
     if mode == 'bad-sequence': records[1]['sequence'] = 3
     if mode == 'boolean-sequence': records[0]['sequence'] = False
@@ -73,9 +86,16 @@ class ArchiveTests(unittest.TestCase):
         for name in ('build', 'protocols'):
             page = self.root / 'man' / f'packetcraftr-{name}.1'
             page.write_text('fixture', encoding='utf-8')
+        for name, table in (('clock', 'io'), ('scopes', 'conversations')):
+            example = self.root / 'examples/documents' / f'output-stats-{name}.json'
+            example.write_text(json.dumps({'table': table}), encoding='utf-8')
         self.mode('ok')
         self.binary = self.root / 'packetcraftr'
-        self.binary.write_text(f'#!{sys.executable}\n' + CHILD, encoding='utf-8')
+        # Kernel shebang parsing splits interpreter paths at whitespace. The
+        # shell launcher quotes the exact Python executable and fixture body.
+        self.binary.write_text(
+            f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(CHILD)} "$@"\n',
+            encoding='utf-8')
         self.binary.chmod(0o755)
         self.target = 'x86_64-unknown-linux-gnu'
         self.manifest()
@@ -108,6 +128,15 @@ class ArchiveTests(unittest.TestCase):
         self.target = 'x86_64-pc-windows-msvc'
         self.manifest()
         self.check(success=True)
+
+    def test_interpreter_path_with_spaces_and_quotes(self):
+        interpreter = self.root / "python's interpreter"
+        interpreter.symlink_to(sys.executable)
+        result = subprocess.run([
+            str(interpreter), str(pathlib.Path(__file__).resolve()),
+            'ArchiveTests.test_valid_unix_and_windows_layouts',
+        ], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_missing_and_empty_assets(self):
         # Missing/empty assets fail before manifest or binary subprocess work,
@@ -147,9 +176,15 @@ class ArchiveTests(unittest.TestCase):
         self.check()
 
     def test_nonzero_commands(self):
-        for command in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls'):
+        for command in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls', 'stats'):
             with self.subTest(command=command):
                 self.mode('exit-' + command)
+                self.check()
+
+    def test_read_must_preserve_the_published_capture_frame_count(self):
+        for mode in ('no-frames', 'missing-frame', 'extra-frame'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
                 self.check()
 
     def test_invalid_outputs(self):
@@ -157,7 +192,9 @@ class ArchiveTests(unittest.TestCase):
                      'bad-recipe', 'bad-schema', 'bad-sequence', 'boolean-sequence',
                      'no-completion', 'early-completion', 'early-error', 'unknown-event',
                      'missing-event', 'non-object',
-                     'unterminated', 'malformed', 'empty-read'):
+                     'unterminated', 'malformed', 'empty-read',
+                     'malformed-stats-io', 'malformed-stats-conversations',
+                     'wrong-stats-io', 'wrong-stats-conversations'):
             with self.subTest(mode=mode):
                 self.mode(mode)
                 self.check()

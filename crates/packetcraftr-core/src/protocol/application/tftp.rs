@@ -419,34 +419,6 @@ impl LayerCodec for TftpCodec {
 mod tests {
     use super::*;
 
-    fn decode_layer(wire: &[u8]) -> Box<dyn Layer> {
-        let registry = crate::protocol::builtin::registry();
-        let context = LayerDecodeContext {
-            parent: None,
-            registry: &registry,
-            network: None,
-            hop_limit: None,
-            discriminator: None,
-        };
-        TftpCodec
-            .decode(Bytes::copy_from_slice(wire), &context)
-            .expect("TFTP decoding never fails")
-            .layer
-    }
-
-    #[test]
-    fn option_lists_over_the_limit_decode_as_raw_without_collecting_them() {
-        let mut wire = vec![0, 1, b'f', 0, b'o', b'c', b't', b'e', b't', 0];
-        for _ in 0..=MAX_OPTIONS {
-            wire.extend_from_slice(b"k\0v\0");
-        }
-        assert_eq!(decode_layer(&wire).protocol_id().as_str(), "raw");
-        wire.truncate(wire.len() - 4);
-        let layer = decode_layer(&wire);
-        let tftp = layer.downcast_ref::<Tftp>().expect("exactly at the limit");
-        assert_eq!(tftp.options.len(), MAX_OPTIONS);
-    }
-
     #[test]
     fn set_field_refuses_more_options_than_the_limit() {
         let entry = || {

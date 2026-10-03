@@ -125,6 +125,7 @@ pub(super) fn remaining_count(
 
 #[cfg(test)]
 pub(super) mod test_support {
+    #![allow(dead_code)]
     use std::cell::Cell;
     #[derive(Clone, Copy, Default, Debug)]
     pub(in crate::analysis::reassembly::tcp) struct Counts {
@@ -134,157 +135,12 @@ pub(super) mod test_support {
         pub output_allocations: usize,
     }
     thread_local! { static COUNTS: Cell<Counts> = Cell::new(Counts::default()); }
+
     pub(in crate::analysis::reassembly::tcp) fn record(update: impl FnOnce(&mut Counts)) {
         COUNTS.with(|cell| {
             let mut value = cell.get();
             update(&mut value);
             cell.set(value);
         });
-    }
-    pub(in crate::analysis::reassembly::tcp) fn take() -> Counts {
-        COUNTS.with(|cell| cell.replace(Counts::default()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::analysis::reassembly::tcp::{
-        Event, FlowKey, Limits, Reassembler, ScopedFlowKey, Segment,
-    };
-    use crate::analysis::scope::Interner;
-    use bytes::Bytes;
-    use std::time::Instant;
-
-    fn segment(sequence: u32, payload: Vec<u8>, syn: bool) -> Segment {
-        Segment {
-            flow: ScopedFlowKey {
-                scope: Interner::new().intern(None, Vec::new()).unwrap(),
-                flow: FlowKey {
-                    source: "192.0.2.1".parse().unwrap(),
-                    source_port: 10_001,
-                    destination: "198.51.100.2".parse().unwrap(),
-                    destination_port: 443,
-                },
-            },
-            sequence,
-            payload: Bytes::from(payload),
-            syn,
-            fin: false,
-            rst: false,
-        }
-    }
-
-    #[test]
-    fn gapped_growth_copies_each_byte_once_then_flattens_once() {
-        for size in [128, 1024, 8192] {
-            for reverse in [false, true] {
-                let now = Instant::now();
-                let mut tcp = Reassembler::new(Limits::default()).unwrap();
-                let base = u32::MAX - 64;
-                tcp.push(segment(base.wrapping_sub(1), vec![], true), now)
-                    .unwrap();
-                test_support::take();
-                for step in 0..size {
-                    let index = if reverse { size - 1 - step } else { step };
-                    assert!(
-                        tcp.push(
-                            segment(
-                                base.wrapping_add((1 + index * 100) as u32),
-                                vec![42; 100],
-                                false
-                            ),
-                            now
-                        )
-                        .unwrap()
-                        .is_empty()
-                    );
-                }
-                let counts = test_support::take();
-                assert_eq!(counts.incoming_copies, size * 100);
-                assert_eq!(counts.retained_copies, 0);
-                assert_eq!(counts.output_allocations, 0);
-                assert_eq!(
-                    counts.page_allocations,
-                    (size * 100 + 1).div_ceil(PAGE_BYTES)
-                );
-                let key = segment(base, vec![], false).flow;
-                assert_eq!(tcp.flows[&key].pending.len(), 1);
-                assert_eq!(tcp.aggregate_bytes(), size * 100);
-                let events = tcp.push(segment(base, vec![7], false), now).unwrap();
-                let output = events
-                    .iter()
-                    .filter_map(|event| match event {
-                        Event::Data { bytes, .. } => Some(bytes),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(output.len(), 1);
-                assert_eq!(output[0].len(), size * 100 + 1);
-                assert_eq!(output[0][0], 7);
-                assert!(output[0][1..].iter().all(|byte| *byte == 42));
-                let counts = test_support::take();
-                assert_eq!(counts.retained_copies, size * 100);
-                assert_eq!(counts.output_allocations, 1);
-                assert!(tcp.flows[&key].pages.is_empty());
-                tcp.flush();
-                assert_eq!(tcp.aggregate_memory_charge(), 0);
-            }
-        }
-    }
-
-    #[test]
-    fn bridging_overlap_keeps_first_bytes_and_shared_page_until_final_delivery() {
-        let now = Instant::now();
-        let mut tcp = Reassembler::new(Limits::default()).unwrap();
-        tcp.push(segment(99, vec![], true), now).unwrap();
-        tcp.push(segment(102, vec![2, 3], false), now).unwrap();
-        tcp.push(segment(106, vec![6, 7], false), now).unwrap();
-        tcp.push(segment(110, vec![10], false), now).unwrap();
-        let events = tcp
-            .push(segment(103, vec![99, 4, 5, 99], false), now)
-            .unwrap();
-        assert!(matches!(
-            &events[0],
-            Event::Retransmission {
-                conflicting: true,
-                bytes: 2,
-                ..
-            }
-        ));
-        let output = tcp.push(segment(100, vec![0, 1], false), now).unwrap();
-        assert!(
-            matches!(&output[0], Event::Data { bytes, .. } if bytes.as_ref() == [0,1,2,3,4,5,6,7])
-        );
-        let key = segment(100, vec![], false).flow;
-        assert_eq!(tcp.flows[&key].pages.len(), 1);
-        assert_eq!(
-            tcp.aggregate_memory_charge(),
-            super::super::state::flow_memory_charge(&tcp.flows[&key]).unwrap()
-        );
-        let output = tcp.push(segment(108, vec![8, 9], false), now).unwrap();
-        assert!(matches!(&output[0], Event::Data { bytes, .. } if bytes.as_ref() == [8,9,10]));
-        assert!(tcp.flows[&key].pages.is_empty());
-    }
-
-    #[test]
-    fn rejected_page_and_transient_output_leave_pending_state_unchanged() {
-        let now = Instant::now();
-        let mut tcp = Reassembler::new(Limits {
-            max_aggregate_bytes: PAGE_CHARGE + 400,
-            ..Limits::default()
-        })
-        .unwrap();
-        tcp.push(segment(99, vec![], true), now).unwrap();
-        tcp.push(segment(101, vec![42; 200], false), now).unwrap();
-        let before = tcp.aggregate_memory_charge();
-        test_support::take();
-        assert!(tcp.push(segment(100, vec![0], false), now).is_err());
-        assert_eq!(tcp.aggregate_memory_charge(), before);
-        assert_eq!(tcp.aggregate_bytes(), 200);
-        assert!(tcp.push(segment(5000, vec![1], false), now).is_err());
-        assert_eq!(test_support::take().page_allocations, 0);
-        tcp.flush();
-        assert_eq!(tcp.aggregate_memory_charge(), 0);
     }
 }

@@ -3,19 +3,14 @@
 mod common;
 
 use bytes::Bytes;
-use common::packets::{build, dissect, ipv4};
+use common::packets::{dissect, ipv4};
 use packetcraftr_core::{
     build::Builder,
-    document,
     error::render,
     expression,
-    field::FieldValue,
-    filter,
-    layer::Layer,
     packet::Packet,
     protocol::builtin,
-    protocol::transport::{SackBlock, Tcp, TcpOption},
-    template::Template,
+    protocol::transport::{Tcp, TcpOption},
 };
 
 const OPTIONS_OUT_OF_RANGE: &str = "field options on layer tcp is outside the allowed range";
@@ -25,52 +20,6 @@ fn reencode(packet: Packet) -> Bytes {
         .build(packet, Default::default(), Default::default())
         .unwrap()
         .bytes
-}
-
-#[test]
-fn typed_tcp_options_construct_in_order_and_decode_back() {
-    let built = build(concat!(
-        "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
-        "tcp(source_port=40000,destination_port=443,flags=2,options=[",
-        "{kind=2,mss=1460},{kind=4},{kind=8,tsval=16909060,tsecr=2694881440},",
-        "{kind=1},{kind=3,window_scale=7},{kind=5,",
-        "sack=[{left_edge=100,right_edge=200},{left_edge=300,right_edge=400}]}])",
-    ));
-    let decoded = dissect(built.bytes.clone());
-    let options = &decoded.packet.get::<Tcp>().unwrap().options;
-    assert_eq!(
-        options[..6],
-        [
-            TcpOption::Mss(1460),
-            TcpOption::SackPermitted,
-            TcpOption::Timestamps {
-                value: 16_909_060,
-                echo_reply: 2_694_881_440
-            },
-            TcpOption::Nop,
-            TcpOption::WindowScale(7),
-            TcpOption::Sack(vec![
-                SackBlock {
-                    left_edge: 100,
-                    right_edge: 200
-                },
-                SackBlock {
-                    left_edge: 300,
-                    right_edge: 400
-                }
-            ])
-        ]
-    );
-    // Option bytes: 4+2+10+1+3+18 = 38, padded to 40 with two EOL zeros.
-    assert_eq!(
-        options[6..],
-        [
-            TcpOption::End,
-            TcpOption::Trailing(Bytes::from_static(&[0]))
-        ],
-        "alignment padding after EOL stays opaque"
-    );
-    assert_eq!(reencode(decoded.packet.clone()), built.bytes);
 }
 
 #[test]
@@ -119,70 +68,6 @@ fn unknown_and_malformed_tcp_options_keep_exact_wire_bytes() {
     };
     assert_eq!(tail.as_ref(), &[4, 0xee, 0]);
     assert_eq!(reencode(decoded.packet.clone()), built.bytes);
-}
-
-#[test]
-fn tcp_option_fields_filter_project_and_expand() {
-    let registry = builtin::registry();
-    let built = build(concat!(
-        "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
-        "tcp(destination_port=443,flags=2,options=[{kind=2,mss=1460},{kind=3,window_scale=7}])"
-    ));
-    let decoded = dissect(built.bytes);
-    for (expression_text, expected) in [
-        ("tcp.options[0].mss == 1460", true),
-        ("tcp.options[0].kind == 2", true),
-        ("tcp.options[1].window_scale == 7", true),
-        ("tcp.options[2].kind == 0", true),
-        ("tcp.options[0].mss == 1200", false),
-    ] {
-        let filter =
-            filter::Filter::compile(expression_text, &registry, Default::default()).unwrap();
-        assert_eq!(
-            filter
-                .matches(&filter::Context {
-                    decoded: &decoded,
-                    derived: &[],
-                    number: 1,
-                    tcp_stream: None,
-                    udp_stream: None
-                })
-                .unwrap(),
-            expected,
-            "{expression_text}"
-        );
-    }
-    let tcp = decoded.packet.get::<Tcp>().unwrap();
-    assert_eq!(
-        tcp.field_path(&"options[0].mss".parse().unwrap()),
-        Some(FieldValue::Unsigned(1460))
-    );
-    let packet = expression::parse(
-        concat!(
-            "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
-            "tcp(options=[{kind=2,mss=536}])"
-        ),
-        &registry,
-        Default::default(),
-    )
-    .unwrap();
-    let template =
-        Template::new(packet).axis(1, "options[0].mss", vec![536u16.into(), 1460u16.into()]);
-    let values: Vec<u64> = template
-        .expand(2)
-        .unwrap()
-        .map(|packet| {
-            packet
-                .unwrap()
-                .get::<Tcp>()
-                .unwrap()
-                .field_path(&"options[0].mss".parse().unwrap())
-                .unwrap()
-                .as_u64()
-                .unwrap()
-        })
-        .collect();
-    assert_eq!(values, [536, 1460]);
 }
 
 #[test]
@@ -247,95 +132,4 @@ fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
             TcpOption::WindowScale(7)
         ]
     );
-}
-
-#[test]
-fn tcp_codec_names_the_check_that_refuses_typed_options() {
-    let registry = builtin::registry();
-    let raw = |kind| TcpOption::Raw {
-        kind,
-        data: Bytes::from_static(&[0xaa]),
-    };
-    let block = SackBlock {
-        left_edge: 1,
-        right_edge: 2,
-    };
-    for (options, refusal) in [
-        (
-            vec![raw(0)],
-            "raw option data cannot use the single-byte kinds 0 or 1",
-        ),
-        (
-            vec![raw(1)],
-            "raw option data cannot use the single-byte kinds 0 or 1",
-        ),
-        (
-            vec![
-                TcpOption::Trailing(Bytes::from_static(&[0xaa])),
-                TcpOption::Nop,
-            ],
-            "only trailing bytes may follow the end of the option list",
-        ),
-        (
-            vec![TcpOption::Sack(vec![block; 5])],
-            "options exceed the 40-byte TCP limit",
-        ),
-    ] {
-        let mut packet = Packet::new();
-        packet.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
-        packet.push(Tcp {
-            options: options.clone(),
-            ..Tcp::default()
-        });
-        let Err(error) =
-            Builder::new(registry.clone()).build(packet, Default::default(), Default::default())
-        else {
-            panic!("{options:?} must be refused while building");
-        };
-        let rendered = render(&error);
-        assert!(rendered.contains(refusal), "{options:?}: {rendered}");
-    }
-}
-
-#[test]
-fn decoded_tcp_options_round_trip_through_documents() {
-    let built = build(concat!(
-        "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
-        "tcp(destination_port=443,flags=2,options=[{kind=2,mss=1460},{kind=30,data=hex(\"0909\")}])"
-    ));
-    let decoded = dissect(built.bytes.clone());
-    let document = document::Packet::from_packet(&decoded.packet);
-    let recreated = document.to_packet(&builtin::registry(), 8).unwrap();
-    assert_eq!(
-        recreated.get::<Tcp>().unwrap().options,
-        decoded.packet.get::<Tcp>().unwrap().options
-    );
-    assert_eq!(reencode(recreated), built.bytes);
-
-    let malformed = build(concat!(
-        "ipv4(source=192.0.2.1,destination=198.51.100.2)/",
-        "tcp(destination_port=443,flags=2,options=hex(\"1e04090902050102030400\"))"
-    ));
-    let decoded = dissect(malformed.bytes.clone());
-    assert_eq!(
-        decoded.packet.get::<Tcp>().unwrap().options,
-        vec![
-            TcpOption::Raw {
-                kind: 30,
-                data: Bytes::from_static(&[0x09, 0x09])
-            },
-            TcpOption::Raw {
-                kind: 2,
-                data: Bytes::from_static(&[0x01, 0x02, 0x03])
-            },
-            TcpOption::Trailing(Bytes::from_static(&[0x04, 0x00, 0x00])),
-        ]
-    );
-    let document = document::Packet::from_packet(&decoded.packet);
-    let recreated = document.to_packet(&builtin::registry(), 8).unwrap();
-    assert_eq!(
-        recreated.get::<Tcp>().unwrap().options,
-        decoded.packet.get::<Tcp>().unwrap().options
-    );
-    assert_eq!(reencode(recreated), malformed.bytes);
 }

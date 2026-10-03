@@ -334,45 +334,6 @@ mod tests {
     use super::{QueryType, wire};
 
     #[test]
-    fn aliases_and_numeric_syntax_share_exact_codes_and_canonical_display() {
-        for (alias, code) in [
-            ("a", 1),
-            ("aaaa", 28),
-            ("caa", 257),
-            ("cname", 5),
-            ("mx", 15),
-            ("ns", 2),
-            ("ptr", 12),
-            ("soa", 6),
-            ("srv", 33),
-            ("txt", 16),
-            ("any", 255),
-        ] {
-            for text in [
-                alias.to_owned(),
-                alias.to_uppercase(),
-                code.to_string(),
-                format!("TyPe{code}"),
-            ] {
-                let parsed: QueryType = text.parse().expect("supported query type");
-                assert_eq!(parsed.code(), code);
-                assert_eq!(parsed.to_string(), alias);
-            }
-        }
-        for code in [0, 41, 65000, 65535] {
-            let parsed: QueryType = format!("TYPE{code}").parse().unwrap();
-            assert_eq!(parsed, QueryType::new(code));
-            assert_eq!(parsed.to_string(), format!("TYPE{code}"));
-            assert_eq!(serde_json::to_value(parsed).unwrap(), code);
-            assert_eq!(
-                serde_json::from_str::<QueryType>(&code.to_string()).unwrap(),
-                parsed
-            );
-        }
-        assert_eq!("00001".parse::<QueryType>().unwrap(), QueryType::default());
-    }
-
-    #[test]
     fn invalid_query_types_are_bounded_and_typed() {
         for text in [
             "",

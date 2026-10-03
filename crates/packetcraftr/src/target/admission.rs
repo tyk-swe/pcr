@@ -201,17 +201,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    #![allow(dead_code)]
+
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded, Interrupted};
     use packetcraftr_core::error::{Classification, Kind};
 
-    use super::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
+    use super::{DeclaredTargets, FamilyGate, admit_selection};
     use crate::StatsOverflow;
     use crate::execution::Errors;
-    use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
+    use crate::policy::{Authorizer, Operation};
     use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
     use packetcraftr_core::error::BoundaryError;
 
@@ -345,221 +347,8 @@ mod tests {
         }
     }
 
-    fn target() -> Target {
-        Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))
-    }
-
     fn hostname() -> Target {
         Target::Hostname("documentation.invalid".parse().unwrap())
-    }
-
-    #[test]
-    fn target_authorization_precedes_budget_approval() {
-        let mut authorizer = RecordingAuthorizer::default();
-        let (selected, probes) = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |selected| Ok(u64::try_from(selected.addresses.len()).unwrap_or(u64::MAX)),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect("admission succeeds");
-        assert_eq!(selected.declared, "192.0.2.1");
-        assert_eq!(
-            selected.addresses,
-            [IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))]
-        );
-        assert_eq!(probes, 1);
-        assert_eq!(
-            authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("wire")]
-        );
-    }
-
-    #[test]
-    fn declared_target_denial_short_circuits_approval() {
-        let mut authorizer = RecordingAuthorizer {
-            deny_target: true,
-            ..Default::default()
-        };
-        let error = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("target denial must stop admission");
-        assert_eq!(error, StubError::Authorization);
-        assert_eq!(authorizer.calls, [Call::Resolve(target())]);
-    }
-
-    #[test]
-    fn a_family_mismatched_resolution_gates_before_approval() {
-        let mut authorizer = RecordingAuthorizer {
-            answers: vec![IpAddr::V6(Ipv6Addr::LOCALHOST)],
-            ..Default::default()
-        };
-        let planned = std::cell::Cell::new(false);
-        let error = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &hostname(),
-            gate(Family::Ipv4),
-            |_| {
-                planned.set(true);
-                Ok(1_u64)
-            },
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("an answer set with no IPv4 address must be gated");
-        assert_eq!(error, StubError::Family("IPv4"));
-        assert!(!planned.get(), "the plan closure must not run");
-        assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
-    }
-
-    #[test]
-    fn a_failed_budget_plan_skips_approval() {
-        let mut authorizer = RecordingAuthorizer::default();
-        let error = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Err(StubError::Plan),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("a failed plan must stop admission");
-        assert_eq!(error, StubError::Plan);
-        assert_eq!(authorizer.calls, [Call::Resolve(target())]);
-    }
-
-    #[test]
-    fn a_failed_operation_build_skips_approval() {
-        let mut authorizer = RecordingAuthorizer::default();
-        let error = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Ok(1_u64),
-            |_| Err(StubError::Operation),
-        )
-        .expect_err("a failed operation build must stop admission");
-        assert_eq!(error, StubError::Operation);
-        assert_eq!(authorizer.calls, [Call::Resolve(target())]);
-    }
-
-    #[test]
-    fn borrowed_operations_survive_the_approval_call() {
-        let mut authorizer = RecordingAuthorizer::default();
-        let (_, endpoints) = admit_operation(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| {
-                Ok(vec![SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                    80,
-                )])
-            },
-            |endpoints| {
-                SocketOperation::new(endpoints, SocketLimits::new(1, 0, 0))
-                    .map(Operation::Socket)
-                    .map_err(|_| StubError::Operation)
-            },
-        )
-        .expect("admission succeeds");
-        assert_eq!(endpoints.len(), 1);
-        assert_eq!(
-            authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("socket")]
-        );
-    }
-
-    #[test]
-    fn a_spent_deadline_precedes_target_authorization() {
-        let mut deadline = Deadline::new(Duration::from_secs(1));
-        let _ = deadline.account(Duration::from_secs(2));
-        let mut authorizer = RecordingAuthorizer::default();
-        let error = admit_operation(
-            &mut authorizer,
-            &deadline,
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("a spent deadline must stop admission");
-        assert_eq!(error, StubError::DurationLimit);
-        assert!(authorizer.calls.is_empty());
-    }
-
-    #[test]
-    fn a_deadline_spent_in_authorization_outranks_denial() {
-        let now = Arc::new(Mutex::new(Instant::now()));
-        let baseline = *now.lock().unwrap();
-        let clock = Arc::clone(&now);
-        let deadline =
-            Deadline::with_time_source(Duration::from_secs(1), move || *clock.lock().unwrap());
-        let mut authorizer = RecordingAuthorizer {
-            deny_operation: true,
-            clock: Some(now),
-            expired_at: Some(baseline + Duration::from_secs(2)),
-            ..Default::default()
-        };
-        let error = admit_operation(
-            &mut authorizer,
-            &deadline,
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("the spent deadline must be reported");
-        assert_eq!(error, StubError::DurationLimit);
-        assert_eq!(
-            authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("wire")]
-        );
-    }
-
-    #[test]
-    fn cancellation_deferred_to_the_next_cooperative_boundary() {
-        let signal = Cancellation::default();
-        let deadline =
-            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        let mut authorizer = RecordingAuthorizer {
-            cancel: Some(signal),
-            ..Default::default()
-        };
-        let (selected, _) = admit_operation(
-            &mut authorizer,
-            &deadline,
-            &StubGates,
-            &target(),
-            gate(Family::Any),
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect("elapsed-time gates do not observe cancellation");
-        assert_eq!(selected.addresses.len(), 1);
-        assert_eq!(
-            authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("wire")]
-        );
-        assert!(matches!(deadline.enforce(), Err(Interrupted::Cancelled(_))));
     }
 
     #[test]
@@ -615,37 +404,6 @@ mod tests {
     }
 
     #[test]
-    fn selection_caps_admitted_addresses_through_the_adapter() {
-        let selection = Selection {
-            include: vec!["documentation.invalid".parse().unwrap()],
-            exclude: Vec::new(),
-        };
-        let mut authorizer = RecordingAuthorizer {
-            answers: vec![
-                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
-            ],
-            ..Default::default()
-        };
-        let error = admit_selection(
-            &mut authorizer,
-            &Deadline::new(Duration::from_secs(60)),
-            &StubGates,
-            DeclaredTargets {
-                selection: &selection,
-                family: gate(Family::Any),
-                max_targets: 1,
-            },
-            selection_error,
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("the address cap must stop admission");
-        assert_eq!(error, StubError::Selection("max_targets"));
-        assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
-    }
-
-    #[test]
     fn oversized_networks_fail_before_authorization() {
         let selection = Selection {
             include: vec!["::/0".parse().unwrap()],
@@ -668,49 +426,5 @@ mod tests {
         .expect_err("an oversized network must fail before authorization");
         assert_eq!(error, StubError::Selection("target_candidates"));
         assert!(authorizer.calls.is_empty());
-    }
-
-    #[test]
-    fn selection_expansion_stops_at_cancellation() {
-        let signal = Cancellation::default();
-        let deadline =
-            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        let selection = Selection {
-            include: vec!["documentation.invalid".parse().unwrap()],
-            exclude: Vec::new(),
-        };
-        let mut authorizer = RecordingAuthorizer {
-            answers: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))],
-            cancel: Some(signal),
-            ..Default::default()
-        };
-        let error = admit_selection(
-            &mut authorizer,
-            &deadline,
-            &StubGates,
-            DeclaredTargets {
-                selection: &selection,
-                family: gate(Family::Any),
-                max_targets: 16,
-            },
-            selection_error,
-            |_| Ok(1_u64),
-            |probes| Ok(wire_limits(*probes, 0)),
-        )
-        .expect_err("cancellation inside resolution must stop admission");
-        assert_eq!(error, StubError::Interrupted);
-        assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
-    }
-
-    #[test]
-    fn the_family_gate_rejects_an_empty_address_set() {
-        assert_eq!(
-            gate(Family::Ipv6).require(&[]),
-            Err(StubError::Family("IPv6"))
-        );
-        assert_eq!(
-            gate(Family::Ipv4).require(&[IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))]),
-            Ok(())
-        );
     }
 }

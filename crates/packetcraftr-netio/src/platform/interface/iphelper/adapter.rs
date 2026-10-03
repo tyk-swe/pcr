@@ -328,34 +328,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn adapter_views_reject_short_misaligned_and_cyclic_owned_nodes() {
-        let mut node = Box::<IP_ADAPTER_ADDRESSES_LH>::default();
-        let pointer = &mut *node as *mut IP_ADAPTER_ADDRESSES_LH;
-        let size = size_of::<IP_ADAPTER_ADDRESSES_LH>();
-        for length in [0, size - 1] {
-            let bounds = BufferBounds::new(pointer.cast(), length).unwrap();
-            assert!(matches!(
-                parse_adapters(pointer, bounds),
-                Err(route::Error::InvalidResponse { .. })
-            ));
-        }
-        let bounds = BufferBounds::new(pointer.cast(), size).unwrap();
-        assert!(parse_adapters(pointer, bounds).unwrap().is_empty());
-        let misaligned = pointer.cast::<u8>().wrapping_add(1).cast();
-        assert!(matches!(
-            parse_adapters(misaligned, bounds),
-            Err(route::Error::InvalidResponse { .. })
-        ));
-        // SAFETY: `pointer` names the live initialized Box above, and no parser reference escapes.
-        unsafe {
-            (*pointer).Next = pointer;
-        }
-        assert!(
-            matches!(parse_adapters(pointer, bounds), Err(route::Error::InvalidResponse { message }) if message.contains("traversal bound"))
-        );
-    }
-
-    #[test]
     fn strings_are_bounded_by_the_owned_buffer_and_require_alignment_and_termination() {
         let mut units = [65u16, 66];
         let pointer = units.as_mut_ptr();

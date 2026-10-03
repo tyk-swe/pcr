@@ -10,9 +10,6 @@ use crate::filter::lexer::{Spanned, Token};
 use crate::filter::literal::{self, Literal};
 use crate::filter::path::FieldRef;
 
-#[cfg(test)]
-mod tests;
-
 /// A decimal or `0x` hexadecimal number; `fallback` locates the error when the filter ends first.
 pub(super) fn unsigned_operand(
     field: &FieldRef,

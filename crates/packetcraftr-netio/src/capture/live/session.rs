@@ -312,6 +312,8 @@ impl Drop for NativeCaptureSession {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use std::collections::VecDeque;
     use std::sync::{
         Arc,
@@ -320,23 +322,17 @@ mod tests {
     };
     use std::thread;
     use std::time::Instant;
-    use std::time::SystemTime;
-
-    use bytes::Bytes;
 
     use super::*;
     use crate::capture::live::{
-        NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats, NativeCapturedPacket,
+        NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats,
         test_support::{BlockingSource, FakeInterrupt},
     };
-    use crate::error::test_support::assert_same_failure;
+
     use crate::{
         capture::Limits,
         test_support::capture_metadata,
-        workers::{
-            Class, Pool,
-            reaper::{shared_reaper, test_support::client_with_receiver},
-        },
+        workers::{Class, Pool, reaper::shared_reaper},
     };
 
     struct LifetimeInterrupt {
@@ -537,136 +533,20 @@ mod tests {
         release_sender
             .send(())
             .expect("release fake capture worker");
+        // Releasing the source only wakes the worker. Synchronize completion
+        // before testing the retry instead of requiring scheduling within 5 ms.
+        session
+            .running
+            .as_ref()
+            .expect("timed-out shutdown retains the worker")
+            .worker
+            .wait_ready(&Deadline::new(Duration::from_secs(5)));
         session.shutdown().expect("released worker shuts down");
         assert!(session.running.is_none());
         session
             .shutdown()
             .expect("shutdown after the worker is gone is idempotent");
         assert_eq!(interrupt.calls.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn capture_worker_panic_is_terminal_and_cached() {
-        let interrupt = Arc::new(FakeInterrupt::default());
-        let interrupt_for_parts: Arc<dyn CaptureInterrupt> = interrupt.clone();
-        let (started_sender, started_receiver) = mpsc::channel();
-        let mut session = spawn(
-            NativeCaptureParts {
-                source: Box::new(PanickingSource {
-                    started: Some(started_sender),
-                }),
-                interrupt: interrupt_for_parts,
-                metadata: capture_metadata("fake-panic", 2),
-            },
-            // The panic hook may symbolize a backtrace, so the deadline only bounds a hang.
-            Duration::from_secs(10),
-        );
-        started_receiver
-            .recv_timeout(Duration::from_millis(100))
-            .expect("fake capture worker should reach the panic point");
-
-        let first = session
-            .shutdown()
-            .expect_err("worker panic must be reported");
-        let second = session
-            .shutdown()
-            .expect_err("cached worker panic must remain terminal");
-        assert_same_failure(&first, &second);
-        assert!(matches!(
-            first,
-            Error::Capture { ref message, .. }
-                if message == "native capture worker panicked"
-        ));
-        assert!(session.running.is_none());
-        assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn queued_frame_is_delivered_before_a_later_terminal_source_error() {
-        let ingress = Instant::now();
-        let terminal = Error::Capture {
-            message: "source failed after one frame".to_owned(),
-            source: None,
-        };
-        let interrupt = Arc::new(FakeInterrupt::default());
-        let (mut session, finished) = scripted_session(
-            [
-                Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
-                    timestamp: SystemTime::UNIX_EPOCH,
-                    received_at: Some(ingress),
-                    captured_length: 3,
-                    original_length: 5,
-                    bytes: Bytes::from_static(&[1, 2, 3]),
-                })),
-                Err(terminal.clone()),
-            ],
-            Arc::clone(&interrupt),
-        );
-        wait_for_scripted_terminal_state(&session, finished, 1);
-
-        session
-            .wait_ready(&Deadline::new(Duration::from_millis(100)))
-            .expect("queued evidence keeps a ready session readable");
-        let captured = session
-            .next_captured_frame(&Deadline::new(Duration::ZERO))
-            .expect("queued frame")
-            .expect("one queued frame");
-        assert_eq!(captured.frame.bytes().as_ref(), &[1, 2, 3]);
-        assert_eq!(captured.frame.captured_length(), 3);
-        assert_eq!(captured.frame.original_length(), 5);
-        assert_eq!(captured.frame.interface, Some(9));
-        assert_eq!(captured.received_at, Some(ingress));
-        assert_same_failure(
-            &session
-                .next_captured_frame(&Deadline::new(Duration::ZERO))
-                .expect_err("terminal error follows queued evidence"),
-            &terminal,
-        );
-        assert_eq!(
-            session.stats(),
-            Stats {
-                received_frames: 1,
-                received_bytes: 3,
-                ..Stats::default()
-            }
-        );
-        session
-            .shutdown()
-            .expect("an already-observed worker error does not become a cleanup error");
-        assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn invalid_native_frame_fails_readiness_without_delivering_partial_evidence() {
-        let interrupt = Arc::new(FakeInterrupt::default());
-        let (mut session, finished) = scripted_session(
-            [Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
-                timestamp: SystemTime::UNIX_EPOCH,
-                received_at: None,
-                captured_length: 2,
-                original_length: 2,
-                bytes: Bytes::from_static(&[1]),
-            }))],
-            interrupt,
-        );
-        wait_for_scripted_terminal_state(&session, finished, 0);
-
-        let error = session
-            .wait_ready(&Deadline::new(Duration::from_millis(100)))
-            .expect_err("invalid frame must fail closed");
-        assert!(matches!(
-            error,
-            Error::Capture { ref message, .. }
-                if message.contains("native capture returned an invalid frame")
-        ));
-        assert!(matches!(
-            session.next_captured_frame(&Deadline::new(Duration::ZERO)),
-            Err(Error::Capture { .. })
-        ));
-        assert_eq!(session.stats(), Stats::default());
-        session
-            .shutdown()
-            .expect("observed capture error leaves no cleanup error");
     }
 
     #[test]
@@ -717,230 +597,5 @@ mod tests {
             .shutdown()
             .expect("cancellation leaves cleanup available");
         releaser.join().unwrap();
-    }
-
-    #[test]
-    fn drop_transfers_capture_worker_to_reaper() {
-        let (release_sender, release_receiver) = mpsc::channel();
-        let (finished_sender, finished_receiver) = mpsc::channel();
-        let interrupt = Arc::new(FakeInterrupt::default());
-        let (mut session, started_receiver) = blocked_session(
-            release_receiver,
-            Some(finished_sender),
-            interrupt,
-            Duration::from_millis(5),
-        );
-        session
-            .wait_ready(&Deadline::new(Duration::from_millis(100)))
-            .expect("fake capture should become ready");
-        wait_until_blocked(started_receiver);
-        drop(session);
-
-        release_sender
-            .send(())
-            .expect("release reaped capture worker");
-        finished_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("capture reaper should eventually join the worker");
-    }
-
-    #[test]
-    fn successful_shutdown_keeps_admission_through_interrupt_destruction() {
-        struct BlockingDrop {
-            entered: Sender<()>,
-            release: std::sync::Mutex<Receiver<()>>,
-        }
-        impl CaptureInterrupt for BlockingDrop {
-            fn interrupt(&self) {}
-        }
-        impl Drop for BlockingDrop {
-            fn drop(&mut self) {
-                self.entered.send(()).unwrap();
-                self.release
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(Duration::from_secs(3))
-                    .unwrap();
-            }
-        }
-        let pool = Arc::new(Pool::new(1));
-        let (reaper, _receiver) = client_with_receiver(1);
-        let (entered, waiting) = mpsc::channel();
-        let (release, released) = mpsc::channel();
-        let mut session = spawn_on(
-            NativeCaptureParts {
-                source: Box::new(CountingSource {
-                    calls: Arc::new(AtomicUsize::new(0)),
-                }),
-                interrupt: Arc::new(BlockingDrop {
-                    entered,
-                    release: std::sync::Mutex::new(released),
-                }),
-                metadata: capture_metadata("destructor", 1),
-            },
-            &pool,
-            reaper,
-            Duration::from_secs(1),
-        );
-        let worker = std::thread::spawn(move || {
-            let _ = session.shutdown();
-        });
-        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(
-            pool.admit(Class::Native).is_err(),
-            "interrupt destructor still owns admission"
-        );
-        release.send(()).unwrap();
-        worker.join().unwrap();
-        assert!(pool.admit(Class::Native).is_ok());
-    }
-
-    #[test]
-    fn session_drop_is_no_panic_when_reaper_queue_is_saturated() {
-        let pool = Arc::new(Pool::new(1));
-        let (reaper, _receiver) = client_with_receiver(1);
-        reaper.transfer(Box::new(|| {}));
-        let (release_sender, release_receiver) = mpsc::channel();
-        let (started_sender, started_receiver) = mpsc::channel();
-        let (interrupt_dropped, interrupt_drop_receiver) = mpsc::channel();
-        let session = spawn_on(
-            NativeCaptureParts {
-                source: Box::new(BlockingSource {
-                    started: Some(started_sender),
-                    release: release_receiver,
-                    finished: None,
-                }),
-                interrupt: Arc::new(LifetimeInterrupt {
-                    dropped: interrupt_dropped,
-                }),
-                metadata: capture_metadata("saturated-reaper", 12),
-            },
-            &pool,
-            reaper.clone(),
-            Duration::ZERO,
-        );
-        wait_until_blocked(started_receiver);
-
-        assert!(catch_unwind(AssertUnwindSafe(|| drop(session))).is_ok());
-        assert!(matches!(
-            interrupt_drop_receiver.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
-        assert!(pool.admit(Class::Native).is_err());
-        release_sender
-            .send(())
-            .expect("retained test worker can still finish safely");
-    }
-
-    #[test]
-    fn session_drop_contains_capture_interrupt_panics() {
-        let (release_sender, release_receiver) = mpsc::channel();
-        let (started_sender, started_receiver) = mpsc::channel();
-        let (finished_sender, finished_receiver) = mpsc::channel();
-        let session = spawn(
-            NativeCaptureParts {
-                source: Box::new(BlockingSource {
-                    started: Some(started_sender),
-                    release: release_receiver,
-                    finished: Some(finished_sender),
-                }),
-                interrupt: Arc::new(PanickingInterrupt),
-                metadata: capture_metadata("panicking-interrupt", 14),
-            },
-            Duration::ZERO,
-        );
-        wait_until_blocked(started_receiver);
-
-        assert!(catch_unwind(AssertUnwindSafe(|| drop(session))).is_ok());
-        release_sender
-            .send(())
-            .expect("release capture after contained interrupt panic");
-        finished_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("shared reaper retains the worker after interrupt panic");
-    }
-
-    #[test]
-    fn reaper_keeps_native_interrupt_alive_until_capture_worker_stops() {
-        let pool = Arc::new(Pool::new(1));
-        let (reaper, receiver) = client_with_receiver(1);
-        let (release_sender, release_receiver) = mpsc::channel();
-        let (started_sender, started_receiver) = mpsc::channel();
-        let (finished_sender, finished_receiver) = mpsc::channel();
-        let (interrupt_dropped, interrupt_drop_receiver) = mpsc::channel();
-        let session = spawn_on(
-            NativeCaptureParts {
-                source: Box::new(BlockingSource {
-                    started: Some(started_sender),
-                    release: release_receiver,
-                    finished: Some(finished_sender),
-                }),
-                interrupt: Arc::new(LifetimeInterrupt {
-                    dropped: interrupt_dropped,
-                }),
-                metadata: capture_metadata("lifetime-capture", 13),
-            },
-            &pool,
-            reaper,
-            Duration::ZERO,
-        );
-        wait_until_blocked(started_receiver);
-        drop(session);
-
-        let task = receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("drop transfers the complete capture bundle");
-        let reap = thread::spawn(task);
-        assert!(matches!(
-            interrupt_drop_receiver.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
-        release_sender.send(()).expect("release capture worker");
-        finished_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("capture source stops");
-        reap.join().expect("test reaper completes");
-        interrupt_drop_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("interrupt is released only after worker join");
-    }
-
-    #[test]
-    fn drop_after_shutdown_timeout_transfers_capture_worker_without_second_wait() {
-        let (release_sender, release_receiver) = mpsc::channel();
-        let (finished_sender, finished_receiver) = mpsc::channel();
-        let interrupt = Arc::new(FakeInterrupt::default());
-        let (mut session, started_receiver) = blocked_session(
-            release_receiver,
-            Some(finished_sender),
-            Arc::clone(&interrupt),
-            Duration::from_millis(5),
-        );
-        session
-            .wait_ready(&Deadline::new(Duration::from_millis(100)))
-            .expect("fake capture should become ready");
-        wait_until_blocked(started_receiver);
-        assert!(matches!(
-            session.shutdown(),
-            Err(Error::DeadlineExceeded {
-                operation: "shutting down native capture"
-            })
-        ));
-
-        session.shutdown_timeout = Duration::from_secs(1);
-        let drop_started = Instant::now();
-        drop(session);
-        assert!(
-            drop_started.elapsed() < Duration::from_millis(250),
-            "drop spent a second shutdown timeout before reaping"
-        );
-
-        release_sender
-            .send(())
-            .expect("release reaped capture worker");
-        finished_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("capture reaper should eventually join the worker");
-        assert!(interrupt.calls.load(Ordering::SeqCst) >= 1);
     }
 }

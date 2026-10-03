@@ -5,7 +5,7 @@
 //!
 //! A line of the form `  @KIND EXAMPLE` is a runnable example: `printable`
 //! indents it like the rest of the topic, and the drift test in `tests.rs`
-//! feeds every one to the parser or compiler that owns its kind, so a topic
+//! feeds every one to its parser, compiler, or strict packet builder, so a topic
 //! cannot describe syntax the tool no longer accepts. Examples use only
 //! documentation addresses (192.0.2.0/24, 198.51.100.0/24, 2001:db8::/32).
 
@@ -25,7 +25,7 @@ Examples:
   @expr raw(text=hello)
   @expr ethernet()/ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=53)
   @expr ipv4(src=192.0.2.1,dst=198.51.100.7,ttl=5)/tcp(dport=443)/raw(bytes=hex("16030100"))
-  @expr ipv6(src=2001:db8::1,dst=2001:db8::2)/udp(dport=5353)/raw(text=ping)
+  @expr ipv6(src=2001:db8::1,dst=2001:db8::2)/udp(dport=9000)/raw(text=ping)
 
 Scalar values:
   Integers are decimal, 0x hexadecimal, 0b binary, or 0o octal, and an
@@ -152,8 +152,9 @@ Byte slices:
   @filter raw.bytes[0] == 0x16
 
 Lists, lengths, and counts:
-  A list field takes [N] for one element, [*] for every element, or [-1] for the
-  last; a path holds when any selected element satisfies the comparison.
+  Protocol schema list fields take [N] for one element, [*] for every element,
+  or [-1] for the last; a path holds when any selected element satisfies the
+  comparison.
   len(path) is the byte length of a bytes, text, MAC, or address value, and
   count(path) is the number of elements in a list; both compare to an
   unsigned number.
@@ -172,6 +173,8 @@ Reserved fields:
   frame.number, frame.time_epoch, frame.time_nsec, frame.len, frame.cap_len,
   frame.interface_id, frame.link_type, frame.direction, frame.truncated,
   frame.layer_count, and frame.protocols describe the captured frame.
+  frame.protocols supports whole-list comparisons and count(frame.protocols),
+  but not element selectors [N], [*], or [-1].
   tcp.stream and udp.stream are the conversation indices stats reports and
   `follow --stream` selects; they never mix transports. Only commands that
   number conversations accept them: `stats`, `expert`, `export`,

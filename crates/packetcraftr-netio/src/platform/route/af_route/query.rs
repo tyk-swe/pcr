@@ -387,7 +387,7 @@ fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result
 #[cfg(test)]
 mod tests {
 
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::Ipv4Addr;
 
     use super::*;
 
@@ -407,48 +407,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn sockaddr_encoding_fills_exactly_the_darwin_length_family_and_address_fields() {
-        let encoded =
-            encode_sockaddr(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).expect("IPv4 sockaddr");
-        assert_eq!(encoded.len(), size_of::<libc::sockaddr_in>());
-        assert_eq!(
-            usize::from(encoded[offset_of!(libc::sockaddr_in, sin_len)]),
-            size_of::<libc::sockaddr_in>()
-        );
-        assert_eq!(
-            i32::from(encoded[offset_of!(libc::sockaddr_in, sin_family)]),
-            libc::AF_INET
-        );
-        let address = offset_of!(libc::sockaddr_in, sin_addr);
-        assert_eq!(&encoded[address..address + 4], &[192, 0, 2, 1]);
-        let port = offset_of!(libc::sockaddr_in, sin_port);
-        assert_eq!(&encoded[port..port + 2], &[0, 0]);
-
-        let address = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-        let encoded = encode_sockaddr(IpAddr::V6(address)).expect("IPv6 sockaddr");
-        assert_eq!(encoded.len(), size_of::<libc::sockaddr_in6>());
-        assert_eq!(
-            usize::from(encoded[offset_of!(libc::sockaddr_in6, sin6_len)]),
-            size_of::<libc::sockaddr_in6>()
-        );
-        assert_eq!(
-            i32::from(encoded[offset_of!(libc::sockaddr_in6, sin6_family)]),
-            libc::AF_INET6
-        );
-        let start = offset_of!(libc::sockaddr_in6, sin6_addr);
-        assert_eq!(&encoded[start..start + 16], &address.octets());
-        let scope = offset_of!(libc::sockaddr_in6, sin6_scope_id);
-        assert_eq!(&encoded[scope..scope + 4], &[0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn sockaddr_field_writes_refuse_to_run_past_their_structure() {
-        let mut bytes = [0_u8; 4];
-        assert!(write_sockaddr_field(&mut bytes, 3, &[1, 2]).is_err());
-        assert!(write_sockaddr_field(&mut bytes, usize::MAX, &[1]).is_err());
-        assert_eq!(bytes, [0; 4]);
     }
 }

@@ -717,6 +717,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   upgrade keeps the real request on stream 1 with `upgrade_head`. Four
   libfuzzer targets (`http2_wire`, `http2_hpack`, `http2_segmentation`,
   `http2_pipeline`) run in the scheduled fuzz workflow.
+- `packetcraftr_core::packet::Packet::iter_of` and `iter_of_mut` iterate every
+  layer of one concrete type in packet order (double-ended, no allocation).
+  The mutable iterator clears cached encoded payload lengths whenever a match
+  exists, even if dropped unconsumed; a no-match call leaves the cache intact.
+- `packetcraftr_core::frame::Frame::is_truncated` reports whether the
+  captured length is below the frame's declared original length.
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own (or, for `cli.worker_capacity`,
   was not a failure):
@@ -1920,8 +1926,32 @@ All notable changes to PacketcraftR are documented here. The format follows
   pushed HEAD semantics, rejects empty CONNECT authorities, and tolerates
   peer frames already in flight when a stream reset is observed.
 
+- The forwarding reference consumer rejects malformed retained detail collections
+  and typed preservation evidence, including partial evidence, before interpreting
+  a verdict. Invalid Unicode
+  rule strings now produce a contract error instead of an unhandled traceback.
+
+- TCP connect scan regressions coordinate worker admission and logical deadlines
+  so timeout and route checks remain reliable under scheduling load.
+
+- Detached consumer validation writes valid UTF-8 Cargo manifests when the
+  checkout path contains non-BMP Unicode characters, including emoji.
+- The offline forwarding regression harness accepts relative output directory
+  names beginning with `-` without parsing generated capture paths as CLI options.
+- Analysis measurement reports distinguish allocator-run exits and produced
+  profiles, and include input metadata for pipe and handshake measurements.
+- `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
+  consistently with hexadecimal input from files and standard input. All three
+  sources reject hexadecimal text that decodes to no bytes as missing input.
+- Shell completion generation reports write failures as `io.documentation`
+  errors (exit 5) instead of panicking, including when the destination is full.
+- Response matching and transport attribution require every encapsulated IP
+  envelope and intervening tunnel protocol to match the reversed request path,
+  including intermediate envelopes, while preserving source-routing endpoints.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
+- Isolated native validation retains a matching child report's specific error
+  alongside the parent launcher failure, preserving diagnostic detail.
 - Library TCP connect scans reject interface, preferred-source, and explicit
   link-mode overrides before scheduling any connections.
 - Detached provider deadlines retain inherited cancellation through every
@@ -1940,6 +1970,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   expiry before reporting an unavailable capability.
 - Send and exchange template failures keep their detailed typed source in
   `causes` without copying its text into the wrapper message.
+- `--payload-file SELECTOR=PATH` preserves non-UTF-8 filenames and parent
+  directories instead of rejecting the entire argument as non-UTF-8. The
+  selector remains text, and spaces, Unicode, and `=` in paths keep their
+  existing behavior.
 - Route lookup honors the caller's deadline and cancellation instead of the
   backends' own timeouts (2 seconds per operation and 3 seconds per response
   on Linux netlink, 2 seconds on macOS routing sockets). A lookup the deadline
@@ -1965,6 +1999,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   strings, or 128 name pointers are refused with `dns::Error::InvalidLimit`
   (`policy.dns_limit`) instead of being silently tightened, and the ceilings
   are public as `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS, MAX_NAME_POINTERS}`.
+- The filter reference distinguishes protocol schema list selectors from
+  reserved `frame.protocols`, which supports whole-list comparisons and
+  `count(frame.protocols)` without element selectors.
 - A strict build accepts link padding inside a packet rooted at `vlan` or
   `vlan8021ad`, as decoding already produces it, instead of failing with
   `PaddingWithoutLinkLayer`.
@@ -2134,6 +2171,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   so an axis can replace a denied recipe destination with permitted addresses.
 - JSON `build` output remains one complete document when interrupted during
   publication; cancellation is reported on stderr with exit code 130.
+- Topic errors and binary-to-terminal refusals return I/O exit 5 if their
+  diagnostic cannot be written to stderr, matching other command errors.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;
@@ -2143,6 +2182,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   matching TLS JA3 evidence, and successful native scenario/launcher exits.
   Missing parent namespace IDs and contradictory or duplicate results are
   rejected. Producers and release validation share the evidence contract.
+- Release evidence preflight keeps each download attempt separate when reusing
+  an output directory, so a missing current report cannot reuse an earlier
+  run's evidence. Failed retries remove only the generated aggregate success
+  report and retain downloaded artifacts for diagnosis.
 - IPv6 destination classification includes the RFC 9637 `3fff::/20`
   documentation prefix under the same policy as `2001:db8::/32`, without
   accepting adjacent addresses or relaxing other destination checks.
@@ -2160,6 +2203,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   messages, and exit codes are unchanged.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - TCP pending growth no longer recopies its retained range on adjacent or
   reverse extension. Bounded payload pages and interval metadata are charged
   independently; transient output/history allocations are admitted before commit.

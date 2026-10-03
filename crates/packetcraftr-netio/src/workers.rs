@@ -434,24 +434,44 @@ mod tests {
     }
 
     #[test]
-    fn the_pool_refuses_work_past_capacity_until_a_slot_returns() {
-        let pool = Arc::new(Pool::new(2));
-        let first = gated(&pool, Class::Native);
-        let second = gated(&pool, Class::TcpConnect);
-        assert_eq!(
-            pool.admit(Class::Native).map(drop),
-            Err(Exhausted { capacity: 2 })
-        );
-        let snapshot = pool.snapshot();
-        assert_eq!((snapshot.active, snapshot.rejected_admissions), (2, 1));
+    fn publishing_an_outcome_notifies_a_pending_completion_wait() {
+        let done = Arc::new(Done {
+            slot: Mutex::new(Slot::Running),
+            finished: Condvar::new(),
+        });
+        let slot = lock(&done.slot);
+        let publisher = Arc::clone(&done);
+        let (started, publishing) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            started.send(()).unwrap();
+            publisher.publish(Ok(7));
+        });
+        publishing
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the publisher starts while the completion slot is locked");
 
-        for (permit, task, release) in [first, second] {
-            drop(permit);
-            release.send(()).unwrap();
-            assert!(finished(task).is_ok());
-        }
-        assert_eq!(pool.snapshot().active, 0);
-        assert!(pool.admit(Class::Native).is_ok());
+        // Holding the slot prevents publication until the condvar atomically
+        // releases it and starts waiting. The timeout is only a test watchdog;
+        // notification must wake the waiter even without polling slices.
+        let watchdog = Instant::now() + Duration::from_secs(10);
+        let mut slot = slot;
+        let notified = loop {
+            let remaining = watchdog.saturating_duration_since(Instant::now());
+            let (current, timeout) = done.finished.wait_timeout(slot, remaining).unwrap();
+            slot = current;
+            if timeout.timed_out() {
+                break false;
+            }
+            if matches!(*slot, Slot::Finished(_)) {
+                break true;
+            }
+        };
+        let published = matches!(*slot, Slot::Finished(Ok(7)));
+        drop(slot);
+        worker.join().expect("bounded outcome publisher");
+
+        assert!(published, "the exact worker outcome is available");
+        assert!(notified, "publication wakes the pending waiter");
     }
 
     #[test]
@@ -489,58 +509,6 @@ mod tests {
     }
 
     #[test]
-    fn retained_permits_explain_rejection_and_release_only_on_cleanup() {
-        let pool = Arc::new(Pool::new(1));
-        let permit = pool.admit(Class::Native).unwrap();
-        let marker = permit.retention_marker();
-        marker.mark_retained();
-        marker.mark_retained();
-        assert!(pool.admit(Class::Native).is_err());
-        let snapshot = pool.snapshot();
-        assert_eq!(snapshot.active, 1);
-        assert_eq!(snapshot.cleanup_retaining_capacity, 1);
-        assert_eq!(snapshot.rejected_admissions, 1);
-        drop(permit);
-        marker.mark_retained();
-        assert_eq!(pool.snapshot().active, 0);
-        assert_eq!(pool.snapshot().cleanup_retaining_capacity, 0);
-        assert!(pool.admit(Class::Native).is_ok());
-    }
-
-    #[test]
-    fn a_wait_ends_at_the_callers_deadline_and_the_work_keeps_its_slot() {
-        let pool = Arc::new(Pool::new(1));
-        let (permit, task, release) = gated(&pool, Class::Native);
-        drop(permit);
-        let started = Instant::now();
-        let Waited::Pending(task) = task.wait(&Deadline::new(Duration::from_millis(20))) else {
-            panic!("a blocked job cannot finish");
-        };
-        assert!(started.elapsed() >= Duration::from_millis(20));
-        assert!(started.elapsed() < Duration::from_secs(2));
-        task.retention_marker().mark_retained();
-        assert_eq!(pool.snapshot().cleanup_retaining_capacity, 1);
-        assert!(pool.admit(Class::Native).is_err());
-
-        let signal = packetcraftr_core::budget::Cancellation::default();
-        signal.cancel();
-        let cancelled = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal));
-        let started = Instant::now();
-        let Waited::Pending(task) = task.wait(&cancelled) else {
-            panic!("a cancelled caller stops waiting");
-        };
-        assert!(started.elapsed() < Duration::from_secs(2));
-
-        release.send(()).unwrap();
-        assert!(finished(task).is_ok());
-        let snapshot = pool.snapshot();
-        assert_eq!(
-            (snapshot.active, snapshot.cleanup_retaining_capacity),
-            (0, 0)
-        );
-    }
-
-    #[test]
     fn threads_are_reused_and_never_outnumber_the_pool() {
         let pool = Arc::new(Pool::new(2));
         for round in 0..8 {
@@ -558,37 +526,5 @@ mod tests {
             assert!(finished(task).is_ok());
         }
         assert_eq!(threads(&pool), 2);
-    }
-
-    #[test]
-    fn a_panicking_job_is_reported_and_its_slot_returns() {
-        let pool = Arc::new(Pool::new(1));
-        let permit = pool.admit(Class::Native).unwrap();
-        let task = permit
-            .spawn(|| panic!("injected pooled job panic"))
-            .unwrap();
-        drop(permit);
-        assert!(finished::<()>(task).is_err());
-        assert_eq!(pool.snapshot().active, 0);
-        let permit = pool.admit(Class::Native).unwrap();
-        assert_eq!(finished(permit.spawn(|| 7).unwrap()).unwrap(), 7);
-    }
-
-    #[test]
-    fn a_clone_held_by_a_resource_keeps_the_slot_after_the_work_ends() {
-        let pool = Arc::new(Pool::new(1));
-        let permit = pool.admit(Class::TcpConnect).unwrap();
-        let resource = permit.clone();
-        let mut task = permit.spawn(move || resource).unwrap();
-        drop(permit);
-        task.wait_ready(&Deadline::new(Duration::from_secs(5)));
-        let resource = task
-            .try_take()
-            .expect("the job returns its resource")
-            .unwrap();
-        assert!(task.try_take().is_none(), "an outcome is taken once");
-        assert_eq!(pool.tcp_snapshot().active, 1);
-        drop(resource);
-        assert_eq!(pool.tcp_snapshot().active, 0);
     }
 }

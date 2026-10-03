@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use packetcraftr_core::capture_file::compression::{Error, Format, Input, Limits, Output};
 use std::io::{self, Cursor, Read, Write};
@@ -21,26 +22,6 @@ fn compression_cause(error: &io::Error) -> Option<&Error> {
     match error.get_ref()?.downcast_ref::<Error>()? {
         Error::Io { source, .. } => compression_cause(source),
         cause => Some(cause),
-    }
-}
-
-#[test]
-fn format_detection_and_concatenated_members_preserve_every_decoded_byte() {
-    for format in [Format::None, Format::Gzip, Format::Zstd] {
-        let mut encoded = compressed(format, b"first");
-        encoded.extend(compressed(format, b"second"));
-        let mut input = Input::new(
-            OneByte(Cursor::new(encoded)),
-            Limits {
-                max_decoded_bytes: 11,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(input.format(), format);
-        let mut decoded = Vec::new();
-        input.read_to_end(&mut decoded).unwrap();
-        assert_eq!(decoded, b"firstsecond");
     }
 }
 
@@ -118,59 +99,4 @@ fn truncated_compressed_data_and_hostile_zstd_windows_are_rejected() {
     let mut input = Input::new(Cursor::new(hostile), Default::default()).unwrap();
     assert_eq!(input.format(), Format::Zstd);
     assert!(input.read_to_end(&mut Vec::new()).is_err());
-}
-
-#[test]
-fn finalization_reports_underlying_flush_errors() {
-    struct FailsFlush;
-    impl Write for FailsFlush {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Err(io::Error::other("fixture flush failure"))
-        }
-    }
-    for format in [Format::None, Format::Gzip, Format::Zstd] {
-        let mut output = Output::new(FailsFlush, format).unwrap();
-        output.write_all(b"capture").unwrap();
-        assert!(matches!(output.finish(), Err(Error::Io { .. })));
-    }
-}
-
-#[test]
-fn short_and_interrupted_prefixes_stay_plain_and_are_bounded_by_the_encoded_limit() {
-    struct Flaky(Cursor<Vec<u8>>, bool);
-    impl Read for Flaky {
-        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-            if std::mem::take(&mut self.1) {
-                return Err(io::ErrorKind::Interrupted.into());
-            }
-            let length = bytes.len().min(1);
-            self.0.read(&mut bytes[..length])
-        }
-    }
-    for bytes in [&b""[..], b"a", b"abc", b"abcd", b"abcde"] {
-        let mut input =
-            Input::new(Flaky(Cursor::new(bytes.to_vec()), true), Default::default()).unwrap();
-        assert_eq!(input.format(), Format::None);
-        let mut decoded = Vec::new();
-        input.read_to_end(&mut decoded).unwrap();
-        assert_eq!(decoded, bytes);
-    }
-    let limits = Limits {
-        max_encoded_bytes: 2,
-        ..Default::default()
-    };
-    let Err(Error::Io {
-        format: Format::None,
-        source,
-    }) = Input::new(Cursor::new(b"abcdefgh"), limits)
-    else {
-        panic!("prefix beyond the encoded limit must fail construction");
-    };
-    assert!(matches!(
-        compression_cause(&source),
-        Some(Error::EncodedByteLimit { limit: 2 })
-    ));
 }

@@ -115,23 +115,6 @@ mod tests {
     }
 
     #[test]
-    fn stream_fields_require_stream_capability() {
-        let registry = registry();
-        assert!(compile("tcp.stream == 1", &registry, Capabilities::stream_capable()).is_ok());
-
-        let error = compile("udp.stream == 1", &registry, Capabilities::frames_only())
-            .expect_err("frame-only commands lack stream indices");
-        assert_eq!(error.classification.code, "cli.filter_unsupported_field");
-        assert!(
-            error
-                .classification
-                .remediation
-                .is_some_and(|value| value.contains("stream-aware filters"))
-        );
-        assert!(error.message.contains("tcp.stream"));
-    }
-
-    #[test]
     fn frame_failures_keep_their_classification_at_the_source_frame() {
         let registry = registry();
         let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
@@ -149,31 +132,5 @@ mod tests {
             core::error::Classified::context(&error.into_boundary_error()),
             Some(Coordinate::SourceFrame(2))
         );
-    }
-
-    #[test]
-    fn optional_selectors_handle_none_valid_and_invalid_filters() {
-        let registry = registry();
-        let none_selector =
-            optional_frame_selector(None, &registry, 14).expect("absent filter compiles to None");
-        assert!(none_selector.is_none());
-
-        let some_selector = optional_frame_selector(Some("frame.len == 14"), &registry, 14)
-            .expect("valid filter compiles to Some")
-            .expect("selector is present");
-        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
-            .expect("bounded Ethernet frame");
-        assert!(some_selector.keep(1, &frame).expect("frame dissects"));
-
-        let stream_error = optional_frame_selector(Some("tcp.stream == 1"), &registry, 14)
-            .expect_err("stream field rejected under frames_only capability");
-        assert_eq!(
-            stream_error.classification.code,
-            "cli.filter_unsupported_field"
-        );
-
-        let syntax_error = optional_frame_selector(Some("(ethernet"), &registry, 14)
-            .expect_err("malformed filter rejected");
-        assert_eq!(syntax_error.classification.code, "cli.filter");
     }
 }

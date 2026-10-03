@@ -35,7 +35,7 @@ fn reversed_protocol_layers<'request, 'response>(
     request: &'request Packet,
     response: &'response Packet,
 ) -> Option<Vec<ReversedProtocolLayers<'request, 'response>>> {
-    if !outer_envelopes_reversed(request, response) {
+    if !network_paths_are_reversed(request, response) {
         return None;
     }
 
@@ -64,15 +64,81 @@ fn reversed_protocol_layers<'request, 'response>(
     (deepest_protocol == Some(protocol) && !reversed.is_empty()).then_some(reversed)
 }
 
-fn outer_envelopes_reversed(request: &Packet, response: &Packet) -> bool {
-    let (Some(request_outer), Some(response_outer)) = (
-        outer_network_endpoints(request),
-        outer_network_endpoints(response),
-    ) else {
+fn network_paths_are_reversed(request: &Packet, response: &Packet) -> bool {
+    let request_networks = network_layers(request);
+    let response_networks = network_layers(response);
+    if request_networks.is_empty()
+        || request_networks.len() != response_networks.len()
+        || request_networks[0].0 >= semantics::outer_scope_len(request)
+        || response_networks[0].0 >= semantics::outer_scope_len(response)
+    {
         return false;
-    };
-    request_outer.source == response_outer.destination
-        && request_outer.destination == response_outer.source
+    }
+
+    request_networks
+        .iter()
+        .zip(&response_networks)
+        .enumerate()
+        .all(
+            |(position, ((_, request_protocol), (_, response_protocol)))| {
+                if request_protocol != response_protocol {
+                    return false;
+                }
+                let request_bound = request_networks
+                    .get(position + 1)
+                    .map_or(request.len(), |(index, _)| *index);
+                let response_bound = response_networks
+                    .get(position + 1)
+                    .map_or(response.len(), |(index, _)| *index);
+                network_endpoints_before(request, request_bound)
+                    .zip(network_endpoints_before(response, response_bound))
+                    .is_some_and(|(request, response)| {
+                        request.source == response.destination
+                            && request.destination == response.source
+                    })
+            },
+        )
+        && request_networks
+            .windows(2)
+            .zip(response_networks.windows(2))
+            .all(|(request_pair, response_pair)| {
+                encapsulation_protocols(request, request_pair[0].0, request_pair[1].0).eq(
+                    encapsulation_protocols(response, response_pair[0].0, response_pair[1].0),
+                )
+            })
+}
+
+fn network_layers(packet: &Packet) -> Vec<(usize, BuiltinProtocol)> {
+    packet
+        .iter()
+        .enumerate()
+        .filter_map(|(index, layer)| {
+            let protocol = BuiltinProtocol::of(layer)?;
+            protocol.is_ip().then_some((index, protocol))
+        })
+        .collect()
+}
+
+fn encapsulation_protocols(
+    packet: &Packet,
+    network_index: usize,
+    next_network_index: usize,
+) -> impl Iterator<Item = (Option<BuiltinProtocol>, crate::layer::Id)> + '_ {
+    packet
+        .iter()
+        .skip(network_index + 1)
+        .take(next_network_index - network_index - 1)
+        .filter_map(|layer| {
+            let protocol = BuiltinProtocol::of(layer);
+            // Only typed IPv6 extensions are optional; AH can identify a tunnel.
+            if protocol.is_some_and(|protocol| {
+                protocol != BuiltinProtocol::Ah && protocol.is_ipv6_extension()
+            }) {
+                None
+            } else {
+                Some((protocol, *layer.protocol_id()))
+            }
+        })
 }
 
 fn reversed_layer_pair(
@@ -108,7 +174,7 @@ pub fn transport_tuple_reversed(
     response: &Packet,
     transport: BuiltinProtocol,
 ) -> Option<std::net::IpAddr> {
-    if !outer_envelopes_reversed(request, response) {
+    if !network_paths_are_reversed(request, response) {
         return None;
     }
     let without_dns =
@@ -137,14 +203,6 @@ fn matchable_layers(
         // including responses consisting solely of an acknowledgment.
         let owns_layer = protocol != BuiltinProtocol::Dns || dns::udp_child(packet, index);
         (protocol.has_matcher() && owns_layer).then_some((index, protocol, layer))
-    })
-}
-
-fn outer_network_endpoints(packet: &Packet) -> Option<NetworkEnvelope> {
-    let path = semantics::outer_ip_path(packet).ok()??;
-    Some(NetworkEnvelope {
-        source: path.source,
-        destination: path.final_destination,
     })
 }
 

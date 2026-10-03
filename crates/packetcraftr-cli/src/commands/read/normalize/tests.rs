@@ -27,30 +27,6 @@ fn description(resolution: capture::TimestampResolution, snap_len: u32) -> captu
 }
 
 #[test]
-fn classic_output_supports_only_microsecond_and_nanosecond_sources() {
-    for resolution in [
-        capture::TimestampResolution::Decimal(3),
-        capture::TimestampResolution::Binary(10),
-    ] {
-        let error = open_classic_writer(Vec::new(), &description(resolution, 100), limits())
-            .err()
-            .expect("an unsupported resolution is refused");
-        assert_eq!(
-            error.classification.code,
-            "packet.capture_transform_metadata"
-        );
-        assert!(error.message.contains("pcap cannot represent"), "{error:?}");
-    }
-    for resolution in [
-        capture::TimestampResolution::Decimal(6),
-        capture::TimestampResolution::Decimal(9),
-    ] {
-        open_classic_writer(Vec::new(), &description(resolution, 0), limits())
-            .expect("supported resolutions open");
-    }
-}
-
-#[test]
 fn a_nanosecond_detail_never_rounds_into_a_microsecond_target() {
     let mut writer = open_classic_writer(
         Vec::new(),

@@ -18,11 +18,14 @@ use packetcraftr_netio::{capture, transmit};
 
 mod common;
 
+use common::clock::VirtualClock;
 use common::{FixedRoutes, SELECTED_SOURCE};
 
 #[derive(Clone, Default)]
 struct SilentLink {
     waits: Arc<Mutex<Vec<Duration>>>,
+    requested_waits: Arc<Mutex<Vec<Duration>>>,
+    clock: VirtualClock,
 }
 
 impl transmit::Provider for SilentLink {
@@ -48,6 +51,8 @@ impl capture::Provider for SilentLink {
                 native: Default::default(),
             },
             waits: Arc::clone(&self.waits),
+            requested_waits: Arc::clone(&self.requested_waits),
+            clock: self.clock.clone(),
         })
     }
 }
@@ -55,6 +60,8 @@ impl capture::Provider for SilentLink {
 struct SilentCapture {
     metadata: capture::Metadata,
     waits: Arc<Mutex<Vec<Duration>>>,
+    requested_waits: Arc<Mutex<Vec<Duration>>>,
+    clock: VirtualClock,
 }
 
 impl capture::Session for SilentCapture {
@@ -65,6 +72,7 @@ impl capture::Session for SilentCapture {
     fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), LiveIoError> {
         let timeout = deadline.remaining().unwrap_or_default();
         self.waits.lock().unwrap().push(timeout);
+        self.requested_waits.lock().unwrap().push(deadline.limit());
         Ok(())
     }
 
@@ -74,7 +82,12 @@ impl capture::Session for SilentCapture {
     ) -> Result<Option<capture::Captured>, LiveIoError> {
         let timeout = deadline.remaining().unwrap_or_default();
         self.waits.lock().unwrap().push(timeout);
-        std::thread::sleep(timeout);
+        let limit = deadline.limit();
+        self.requested_waits.lock().unwrap().push(limit);
+        if !limit.is_zero() {
+            // Charge the requested wait even if real scheduling spent this child deadline.
+            self.clock.advance(limit);
+        }
         Ok(None)
     }
 
@@ -114,6 +127,8 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
         policy::Policy::default(),
         common::providers(FixedRoutes, link.clone()),
     )
+    // Preparation scheduling must not spend the window this fixture gives discovery.
+    .with_clock(link.clock.clone())
     .with_neighbor_options(neighbor::Options {
         attempt_timeout,
         ..neighbor::Options::default()
@@ -135,6 +150,11 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
 
     let waits = link.waits.lock().unwrap();
     assert!(!waits.is_empty(), "discovery waited on its capture");
+    let requested_waits = link.requested_waits.lock().unwrap();
+    assert!(
+        requested_waits.iter().all(|limit| *limit <= timeout),
+        "every requested wait is clipped to the exchange deadline: {requested_waits:?}"
+    );
     assert!(
         waits.iter().all(|wait| *wait <= timeout),
         "every wait is clipped to the exchange deadline: {waits:?}"

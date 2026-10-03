@@ -150,8 +150,8 @@ packetcraftr --output json stats examples/captures/scoped-vxlan.pcap \
 report shows one regression, the largest forward step, and an I/O bucket origin
 with one underflow frame. `scoped-vxlan.pcap` carries TCP conversations under
 two VXLAN network identifiers, so conversation rows expose scope identifiers and
-ordered encapsulation metadata. A CLI contract test keeps both documents equal
-to the current output.
+ordered encapsulation metadata. The release archive verifier runs both examples
+and checks that their output equals the packaged JSON documents.
 
 ## Reproducing measurements
 
@@ -174,6 +174,15 @@ timed child; process startup and output to `/dev/null` are inside.
 Pass `--heaptrack` for **separate** allocator-profile runs, or run a focused
 `heaptrack -o PROFILE target/release/packetcraftr ...` and inspect it with
 `heaptrack_print -f PROFILE.zst`. RSS measurements exclude profiler overhead.
+Each allocator run uses a fresh directory and records its separate
+`allocator_exit_code`, diagnostic `allocator_log`, and nonempty
+`allocator_profile_files`. `allocator_profile_prefix` is present only when
+files were produced; their presence does not certify a complete or readable
+profile. A nonzero allocator exit can also come from an intentional CLI limit
+failure: inspect the log and profile rather than treating the timed command's
+exit code as the allocator run's outcome. Pipe runs have no allocator run.
+The final handshake measurements have cardinality one (one handshake), with
+the fixture's physical frame count recorded separately.
 Allocator “unfreed at exit” includes process-lifetime state and is not proof of
 an operation leak; engine and callback cleanup tests check their own ownership.
 Do not interpret a process that has exited as an in-process heap-retention sample.

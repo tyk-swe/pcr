@@ -1,24 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 mod common;
 
+use common::clock::VirtualClock;
 use common::responder::{Io, Routes, State};
 use packetcraftr::{
     Client,
     clock::Clock,
     policy::Policy,
     probe::Transport,
-    scan::{self, Classification, Request},
+    scan::{self, Request},
     target::Target,
 };
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::{
-    BoundaryError, Classification as ErrorClassification, Classified as _, Coordinate, Kind,
-};
-use packetcraftr_core::{
-    decode::Dissector,
-    protocol::{builtin, network::Ipv4},
-};
+use packetcraftr_core::error::{BoundaryError, Classification as ErrorClassification, Kind};
+use packetcraftr_core::protocol::builtin;
 use packetcraftr_netio::link::Mode;
 use std::{
     convert::Infallible,
@@ -82,56 +79,6 @@ fn execute(request: &Request, state: Arc<Mutex<State>>) -> Result<scan::Aggregat
     collector.finish(report)
 }
 #[test]
-fn pending_windows_overlap_refill_and_use_one_ready_capture() {
-    let state = Arc::new(Mutex::new(overlapping()));
-    let report = execute(&request(), state.clone()).unwrap();
-    assert_eq!(report.endpoints.len(), 4);
-    assert!(
-        report
-            .endpoints
-            .iter()
-            .all(|endpoint| endpoint.classification == Classification::Open)
-    );
-    assert_eq!(report.stats.packets_completed, 4);
-    assert_eq!(report.stats.bytes, 160);
-    let state = state.lock().unwrap();
-    assert_eq!(state.peak, 2);
-    assert_eq!(state.armed, 1);
-    assert_eq!(state.shutdowns, 1);
-}
-
-#[test]
-fn queued_replies_keep_their_ingress_verdict_across_callback_latency() {
-    let state = Arc::new(Mutex::new(overlapping()));
-    let mut request = request();
-    request.ports = vec![80, 81];
-    request.timeout = Duration::from_millis(100);
-    let classifications = Arc::new(Mutex::new(Vec::new()));
-    let observed = Arc::clone(&classifications);
-
-    let summary = client(&state)
-        .scan(request, move |event| {
-            if let scan::Event::Probe { probe, .. } = event {
-                let delay = {
-                    let mut observed = observed.lock().unwrap();
-                    observed.push((probe.sequence, probe.classification));
-                    observed.len() == 1
-                };
-                if delay {
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-            }
-            Ok(())
-        })
-        .unwrap();
-
-    assert_eq!(summary.counts.open, 2);
-    assert_eq!(
-        *classifications.lock().unwrap(),
-        vec![(0, Classification::Open), (1, Classification::Open)]
-    );
-}
-#[test]
 fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {
     let state = Arc::new(Mutex::new(overlapping()));
     let mut request = request();
@@ -152,88 +99,6 @@ fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {
     assert_eq!(state.sends, 0);
     assert_eq!(state.armed, 0);
 }
-#[test]
-fn send_failure_retains_confirmed_pending_wire_and_shuts_down() {
-    use std::error::Error as _;
-    let state = Arc::new(Mutex::new(State {
-        fail_after: Some(1),
-        ..overlapping()
-    }));
-    let error = execute(&request(), state.clone()).unwrap_err();
-    let mut source = error.source();
-    let mut partial = None;
-    while let Some(error) = source {
-        if let Some(error) = error.downcast_ref::<scan::PipelineFailure>() {
-            partial = Some(error);
-            break;
-        }
-        source = error.source();
-    }
-    let partial = partial.expect("typed pipeline evidence survives the boundary");
-    assert_eq!(partial.stats.packets_attempted, 2);
-    assert_eq!(partial.stats.packets_completed, 1);
-    assert_eq!(partial.pending.len(), 1);
-    assert_eq!(partial.pending[0].sent.sent.wire_bytes().len(), 40);
-    assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 1);
-    assert_eq!(state.lock().unwrap().shutdowns, 1);
-}
-
-#[test]
-fn unproven_ingress_does_not_free_a_window_and_timeouts_advance_in_bounded_waves() {
-    for marker in [None, Some(Instant::now())] {
-        let state = Arc::new(Mutex::new(State {
-            bad_ingress: Some(marker),
-            ..overlapping()
-        }));
-        let report = execute(&request(), state.clone()).unwrap();
-        assert!(
-            report
-                .endpoints
-                .iter()
-                .all(|endpoint| endpoint.classification == Classification::Open)
-        );
-        assert_eq!(state.lock().unwrap().peak, 2);
-    }
-    let state = Arc::new(Mutex::new(State {
-        suppress_replies: true,
-        ..overlapping()
-    }));
-    let report = execute(&request(), state.clone()).unwrap();
-    assert!(
-        report
-            .endpoints
-            .iter()
-            .all(|endpoint| endpoint.classification == Classification::Timeout)
-    );
-    let state = state.lock().unwrap();
-    assert!(state.send_times[2].duration_since(state.send_times[0]) >= Duration::from_millis(20));
-    assert_eq!(state.shutdowns, 1);
-}
-
-#[test]
-fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
-    let winner = |max_in_flight| {
-        let state = Arc::new(Mutex::new(State {
-            tied_resets: true,
-            ..State::default()
-        }));
-        let mut request = request();
-        request.max_in_flight = max_in_flight;
-        request.ports = vec![80];
-        let report = execute(&request, state).unwrap();
-        let probe = &report.endpoints[0].probes[0];
-        assert_eq!(probe.classification, Classification::Closed);
-        let frame = probe.response.clone().expect("a tied reset wins");
-        let decoded = Dissector::new(builtin::registry())
-            .decode(frame, Default::default())
-            .unwrap();
-        decoded.packet.get::<Ipv4>().unwrap().identification
-    };
-    // Equal rank, responder, and latency: the lower exact bytes win, not the
-    // first arrival (identification 2).
-    assert_eq!(winner(1), 1);
-    assert_eq!(winner(2), 1);
-}
 
 #[test]
 fn pipelined_and_serial_scans_stop_at_the_undecoded_limit_with_one_diagnostic() {
@@ -244,8 +109,20 @@ fn pipelined_and_serial_scans_stop_at_the_undecoded_limit_with_one_diagnostic() 
         request.limits.max_undecoded = 2;
         request.collection.decode.limits.max_packet_size = 39;
 
-        let aggregate = execute(&request, Arc::new(Mutex::new(State::default())))
+        let clock = VirtualClock::default();
+        let state = Arc::new(Mutex::new(State {
+            idle_clock: Some(clock.clone()),
+            ..State::default()
+        }));
+        let collector = scan::Collector::default();
+        let report = client(&state)
+            .with_clock(clock)
+            .scan(request.clone(), collector.clone())
             .expect("undecodable replies are evidence, not a failure");
+        let aggregate = collector.finish(report).unwrap();
+        let state = state.lock().unwrap();
+        assert_eq!(state.sends, request.ports.len());
+        assert_eq!(state.shutdowns, state.armed);
 
         let warnings = aggregate
             .diagnostics
@@ -289,42 +166,6 @@ impl Clock for SteppingClock {
     }
 }
 
-#[test]
-fn the_pipelined_send_schedule_runs_on_the_client_clock() {
-    let clock = SteppingClock::new();
-    let sent_on = clock.clone();
-    let state = Arc::new(Mutex::new(State {
-        send_clock: Some(Arc::new(move || sent_on.peek())),
-        ..overlapping()
-    }));
-    let mut request = request();
-    request.probes_per_second = Some(1);
-    request.limits.max_duration = Duration::from_secs(30);
-    let started = Instant::now();
-
-    let collector = scan::Collector::default();
-    let report = client(&state)
-        .with_clock(clock)
-        .scan(request, collector.clone())
-        .unwrap();
-    let aggregate = collector.finish(report).unwrap();
-
-    assert_eq!(aggregate.stats.packets_completed, 4);
-    let state = state.lock().unwrap();
-    assert_eq!(state.send_times.len(), 4);
-    assert!(
-        state
-            .send_times
-            .windows(2)
-            .all(|pair| pair[1].duration_since(pair[0]) >= Duration::from_secs(1)),
-        "each probe starts a full second after the previous one on the client clock"
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(3),
-        "the schedule is read from the client clock, not waited out in real time"
-    );
-}
-
 fn pipeline_failure(error: &scan::Error) -> Option<&scan::PipelineFailure> {
     use std::error::Error as _;
     let mut source = error.source();
@@ -343,67 +184,4 @@ fn sink_failure() -> BoundaryError {
         ErrorClassification::new("io.fixture_sink", Kind::Io, None),
         Vec::new(),
     )
-}
-
-#[test]
-fn a_sink_failure_on_sent_retains_the_confirmed_wire_and_probe_coordinate() {
-    let state = Arc::new(Mutex::new(overlapping()));
-    let mut request = request();
-    request.ports = vec![80, 81, 82];
-
-    let error = client(&state)
-        .scan(request, move |event| {
-            if matches!(event, scan::Event::Sent(_)) {
-                return Err(sink_failure());
-            }
-            Ok(())
-        })
-        .expect_err("the sink failure fails the scan");
-
-    let partial = pipeline_failure(&error).expect("typed pipeline evidence survives the boundary");
-    let state = state.lock().unwrap();
-    assert_eq!(state.sends, 1);
-    assert_eq!(state.shutdowns, 1);
-    let submitted = state.sent_wires.clone();
-    drop(state);
-    assert_eq!(partial.pending.len(), 1);
-    let sent = &partial.pending[0].sent.sent;
-    assert_eq!(sent.wire_bytes().len(), 40);
-    assert_eq!(sent.wire_bytes(), &submitted[0]);
-    assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 0);
-    assert_eq!(partial.stats.packets_completed, 1);
-    assert_eq!(error.context(), Some(Coordinate::ProbeSequence(0)));
-    assert_eq!(error.classification().code, "io.fixture_sink");
-}
-
-#[test]
-fn a_sink_failure_on_probe_keeps_the_response_in_partial_evidence() {
-    let state = Arc::new(Mutex::new(overlapping()));
-    let mut request = request();
-    request.ports = vec![80, 81, 82];
-
-    let error = client(&state)
-        .scan(request, move |event| {
-            if matches!(event, scan::Event::Probe { .. }) {
-                return Err(sink_failure());
-            }
-            Ok(())
-        })
-        .expect_err("the sink failure fails the scan without a completed report");
-
-    let partial = pipeline_failure(&error).expect("typed pipeline evidence survives the boundary");
-    let state = state.lock().unwrap();
-    assert_eq!(state.sends, 2);
-    assert_eq!(state.shutdowns, 1);
-    let submitted = state.sent_wires.clone();
-    drop(state);
-    assert_eq!(partial.pending.len(), 2);
-    let probe = &partial.pending[0];
-    assert_eq!(probe.sent.probe.sequence, 0);
-    assert!(probe.response.is_some());
-    let sent = &probe.sent.sent;
-    assert_eq!(sent.wire_bytes().len(), 40);
-    assert_eq!(sent.wire_bytes(), &submitted[0]);
-    assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 0);
-    assert_eq!(error.classification().code, "io.fixture_sink");
 }

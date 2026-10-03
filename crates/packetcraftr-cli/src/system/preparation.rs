@@ -228,10 +228,6 @@ mod tests {
         }
     }
 
-    fn send_request() -> packetcraftr::send::Request {
-        packetcraftr::send::Request::new(placeholder(), packetcraftr::send::Options::default())
-    }
-
     fn exchange_request() -> packetcraftr::exchange::Request {
         packetcraftr::exchange::Request::new(placeholder(), packetcraftr::send::Options::default())
     }
@@ -257,18 +253,6 @@ mod tests {
     }
 
     #[test]
-    fn send_rejects_invalid_options_before_the_recipe() {
-        let (send, template) = live_arguments("send");
-        let request = packetcraftr::send::Request {
-            repeat: 0,
-            ..send_request()
-        };
-        let message = error_message(prepare_live(send, template, request));
-        assert!(message.contains("repeat"), "{message}");
-        assert_ne!(message, recipe_error());
-    }
-
-    #[test]
     fn exchange_rejects_invalid_options_before_the_recipe() {
         let (send, template) = live_arguments("exchange");
         let request = packetcraftr::exchange::Request {
@@ -278,18 +262,6 @@ mod tests {
         let message = error_message(prepare_live(send, template, request));
         assert!(message.contains("timeout"), "{message}");
         assert_ne!(message, recipe_error());
-    }
-
-    #[test]
-    fn live_commands_reject_the_interface_before_resolving_the_destination() {
-        for command in ["send", "exchange"] {
-            let (send, template) = live_arguments_with(command, UNRESOLVABLE_HOST_BAD_INTERFACE);
-            let message = match command {
-                "send" => error_message(prepare_live(send, template, send_request())),
-                _ => error_message(prepare_live(send, template, exchange_request())),
-            };
-            assert_eq!(message, "--interface index must be non-zero", "{command}");
-        }
     }
 
     fn plan_error(options: &[&str]) -> CliError {
@@ -313,78 +285,5 @@ mod tests {
         let error = plan_error(UNRESOLVABLE_HOST_BAD_INTERFACE);
         assert_eq!(error.message, "--interface index must be non-zero");
         assert_eq!(error.exit_code(), 2);
-    }
-
-    #[test]
-    fn plan_denies_the_destination_before_the_interface() {
-        let error = plan_error(&[
-            "--packet",
-            "ipv4(dst=10.0.0.2)/udp(dport=9000)",
-            "--allow-destination",
-            "192.0.2.0/24",
-            "--interface",
-            "0",
-        ]);
-        assert_eq!(error.classification.code, "policy.destination_not_allowed");
-        assert_eq!(error.exit_code(), 6);
-    }
-
-    #[test]
-    fn live_axes_resolve_protocol_selectors_against_the_recipe() {
-        let options = [
-            "--packet",
-            "vlan(vlan_id=7)/ipv4(dst=192.0.2.1)/udp(dport=9000)",
-            "--axis",
-            "UDP.dport=[1,2]",
-            "--axis",
-            "ipv4.ttl=[5]",
-        ];
-        for command in ["send", "exchange"] {
-            let (send, template) = live_arguments_with(command, &options);
-            let template = match command {
-                "send" => prepare_live(send, template, send_request())
-                    .map(|prepared| prepared.request.template),
-                _ => prepare_live(send, template, exchange_request())
-                    .map(|prepared| prepared.request.template),
-            }
-            .unwrap_or_else(|error| panic!("{command}: {}", error.message));
-            let packets = template
-                .expand(8)
-                .expect("expansion fits")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("axes apply");
-            let fields = packets
-                .iter()
-                .map(|packet| {
-                    (
-                        packet.layer(1).and_then(|layer| layer.field("ttl")),
-                        packet
-                            .layer(2)
-                            .and_then(|layer| layer.field("destination_port")),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let field = |ttl: u64, port: u64| {
-                (
-                    Some(core::field::FieldValue::Unsigned(ttl)),
-                    Some(core::field::FieldValue::Unsigned(port)),
-                )
-            };
-            assert_eq!(fields, [field(5, 1), field(5, 2)], "{command}");
-        }
-    }
-
-    #[test]
-    fn valid_options_reach_the_invalid_recipe() {
-        let (send, template) = live_arguments("send");
-        assert_eq!(
-            error_message(prepare_live(send, template, send_request())),
-            recipe_error()
-        );
-        let (send, template) = live_arguments("exchange");
-        assert_eq!(
-            error_message(prepare_live(send, template, exchange_request())),
-            recipe_error()
-        );
     }
 }

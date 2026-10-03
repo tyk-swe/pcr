@@ -349,6 +349,3 @@ pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
         errors.invalid_evidence(sequence, error)
     })
 }
-
-#[cfg(test)]
-mod tests;

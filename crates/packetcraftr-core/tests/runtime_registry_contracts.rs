@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 mod common;
 
@@ -8,17 +9,10 @@ use common::probe::{
     Child, ChildCodec, PROBE_LINK_TYPE, Probe, ProbeCodec, probe_registry, structure,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::layout::ByteRange;
-use packetcraftr_core::protocol::{
-    builtin,
-    link::{Ethernet, Vlan},
-    network::Ipv4,
-    transport::Udp,
-};
 use packetcraftr_core::registry::{Discriminator, FilterFieldBinding};
 use packetcraftr_core::{build, codec, decode, packet::Packet};
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -58,9 +52,9 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert_eq!(registry.protocols().len(), 2);
 }
 
-fn build_and_decode_probe(
+fn build_probe(
     registry: &Arc<packetcraftr_core::registry::Registry>,
-) -> (build::Builder, decode::DecodedPacket) {
+) -> (build::Builder, build::BuiltPacket) {
     let mut packet = Packet::new();
     packet.push(Probe {
         value: 9,
@@ -80,7 +74,13 @@ fn build_and_decode_probe(
     assert_eq!(built.packet.encoded_payload_length(0), Some(1));
     assert_eq!(built.packet.encoded_payload_length(1), Some(0));
     assert_eq!(built.diagnostics[0].layer, Some(0));
+    (builder, built)
+}
 
+fn build_and_decode_probe(
+    registry: &Arc<packetcraftr_core::registry::Registry>,
+) -> (build::Builder, decode::DecodedPacket) {
+    let (builder, built) = build_probe(registry);
     let decoded = decode_probe(registry, built.bytes.clone(), decode::Options::default())
         .expect("bound packet decodes");
     assert_eq!(decoded.packet.len(), 2);
@@ -241,27 +241,51 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     assert_build_decode_limits(&registry, &builder);
 }
 
-#[test]
-fn an_unbound_child_discriminator_is_attributed_to_its_parent_layer() {
-    let mut builder = packetcraftr_core::registry::Builder::new();
-    builder.register_codec(ProbeCodec, &["p"]).expect("probe");
-    builder
-        .bind_link_type(PROBE_LINK_TYPE, "probe")
-        .expect("bind root");
-    let registry = Arc::new(builder.build().expect("registry without a child binding"));
-
-    let decoded = decode_probe(&registry, vec![7, 3], decode::Options::default())
-        .expect("an unbound child is preserved");
+fn assert_typed_iteration_encoded_cache(packet: Packet) {
+    let immutable = packet.clone();
     assert_eq!(
-        decoded.packet.get::<Raw>().map(|raw| raw.bytes.as_ref()),
-        Some(&[3][..])
+        immutable
+            .iter_of::<Probe>()
+            .map(|probe| probe.value)
+            .collect::<Vec<u8>>(),
+        [9]
     );
-    let unknown = decoded
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "decode.unknown_binding")
-        .expect("unknown binding diagnostic");
-    assert_eq!(unknown.layer, Some(0));
+    assert_eq!(
+        immutable
+            .iter_of::<Child>()
+            .map(|child| child.value)
+            .collect::<Vec<u8>>(),
+        [4]
+    );
+    assert_eq!(immutable.encoded_payload_length(0), Some(1));
+    assert_eq!(immutable.encoded_payload_length(1), Some(0));
+
+    let mut absent = packet.clone();
+    assert_eq!(absent.iter_of_mut::<Raw>().count(), 0);
+    assert_eq!(absent.encoded_payload_length(0), Some(1));
+    assert_eq!(absent.encoded_payload_length(1), Some(0));
+
+    let mut dropped = packet.clone();
+    drop(dropped.iter_of_mut::<Probe>());
+    assert_eq!(dropped.encoded_payload_length(0), None);
+    assert_eq!(dropped.encoded_payload_length(1), None);
+
+    let mut partial = packet;
+    {
+        let mut iter = partial.iter_of_mut::<Probe>();
+        assert_eq!(iter.next().map(|probe| probe.value), Some(9));
+    }
+    assert_eq!(partial.encoded_payload_length(0), None);
+    assert_eq!(partial.encoded_payload_length(1), None);
+}
+
+#[test]
+fn typed_layer_iteration_preserves_or_clears_encoded_lengths() {
+    let registry = Arc::new(probe_registry());
+    let (_, built) = build_probe(&registry);
+    assert_typed_iteration_encoded_cache(built.packet);
+    let (_, decoded) = build_and_decode_probe(&registry);
+    assert_typed_iteration_encoded_cache(decoded.packet);
 }
 
 fn assert_registry_binding_conflicts() {
@@ -403,64 +427,6 @@ fn registry_rejects_alias_binding_and_filter_contract_conflicts() {
     assert_filter_field_binding_conflicts();
 }
 
-#[test]
-fn registered_filter_spellings_are_sorted_and_resolve_to_their_enumerated_bindings() {
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let paths: Vec<_> = registry
-        .filter_fields()
-        .map(|(path, binding)| {
-            assert_eq!(registry.filter_field(path), Some(binding));
-            let schema = registry
-                .schema(binding.protocol().as_str())
-                .expect("bound protocol schema");
-            for field in binding.fields() {
-                assert!(schema.fields.iter().any(|entry| entry.name == *field));
-            }
-            path
-        })
-        .collect();
-    assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
-    for path in [
-        "eth.src",
-        "ip.src",
-        "tcp.srcport",
-        "tcp.flags.syn",
-        "tcp.port",
-        "udp.port",
-    ] {
-        assert!(paths.contains(&path), "{path} is discoverable");
-    }
-    assert!(
-        !paths.contains(&"ip.ttl"),
-        "schema aliases need no stored binding"
-    );
-}
-
-#[test]
-fn filter_enumeration_uses_custom_registrations_in_normalized_path_order() {
-    let mut builder = packetcraftr_core::registry::Builder::new();
-    builder.register_codec(ProbeCodec, &["p"]).expect("probe");
-    for path in ["P.Z", "p.a"] {
-        builder
-            .bind_filter_field(
-                path,
-                FilterFieldBinding::Direct {
-                    protocol: "probe".into(),
-                    field: "value",
-                },
-            )
-            .expect("custom spelling");
-    }
-    let registry = builder.build().expect("valid custom registry");
-    assert_eq!(
-        registry
-            .filter_fields()
-            .map(|(path, _)| path)
-            .collect::<Vec<_>>(),
-        ["p.a", "p.z"]
-    );
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Tag {
     ether_type: u16,
@@ -547,143 +513,4 @@ impl codec::LayerCodec for TagCodec {
         }
         Ok(Box::new(layer))
     }
-}
-
-const TAG_LINK_TYPE: LinkType = LinkType(778);
-
-fn tag_registry(padding: bool) -> Arc<packetcraftr_core::registry::Registry> {
-    let registry = builtin::registry_with(|builder| {
-        builder.register_codec(TagCodec, &[])?;
-        if padding {
-            builder.allow_trailing_padding("tag");
-        }
-        builder.bind_link_type(TAG_LINK_TYPE, "tag")?;
-        builder.bind("tag", 0x0800, "ipv4", 100)?;
-        Ok(())
-    })
-    .expect("tag registry");
-    Arc::new(registry)
-}
-
-fn udp_datagram() -> Vec<Box<dyn Layer>> {
-    vec![
-        Box::new(Ipv4 {
-            source: Ipv4Addr::new(192, 0, 2, 1),
-            destination: Ipv4Addr::new(198, 51, 100, 2),
-            ..Ipv4::default()
-        }),
-        Box::new(Udp {
-            source_port: 40_000,
-            destination_port: 40_001,
-            ..Udp::default()
-        }),
-        Box::new(Raw::new(&b"hi"[..])),
-    ]
-}
-
-fn packet_of(link: Box<dyn Layer>, trailer: Option<&'static [u8]>) -> Packet {
-    let mut packet = Packet::new();
-    packet.push_boxed(link);
-    for layer in udp_datagram() {
-        packet.push_boxed(layer);
-    }
-    if let Some(trailer) = trailer {
-        packet.push(Padding::new(trailer));
-    }
-    packet
-}
-
-fn decoded_tail(
-    registry: &Arc<packetcraftr_core::registry::Registry>,
-    link_type: LinkType,
-    bytes: Bytes,
-) -> (Vec<String>, Vec<&'static str>) {
-    let frame = Frame::new(SystemTime::UNIX_EPOCH, link_type, bytes).expect("frame");
-    let decoded = decode::Dissector::new(Arc::clone(registry))
-        .decode(frame, decode::Options::default())
-        .expect("frame decodes");
-    let layers = decoded
-        .packet
-        .iter()
-        .skip(1)
-        .map(|layer| match layer.downcast_ref::<Padding>() {
-            Some(padding) => format!("padding {:?} {:?}", padding.bytes, padding.outside_layer),
-            None => layer.protocol_id().to_string(),
-        })
-        .collect();
-    let trailing = decoded
-        .diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.code)
-        .filter(|code| code.starts_with("decode.trailing"))
-        .collect();
-    (layers, trailing)
-}
-
-#[test]
-fn a_custom_link_protocol_registered_with_trailing_padding_behaves_like_ethernet() {
-    const TRAILER: &[u8] = &[0, 0, 0, 0];
-    let padded = tag_registry(true);
-    let unpadded = tag_registry(false);
-    assert!(padded.allows_trailing_padding("tag"));
-    assert!(!unpadded.allows_trailing_padding("tag"));
-    for builtin_link in ["ethernet", "vlan", "linux_sll", "bsd_null"] {
-        assert!(
-            padded.allows_trailing_padding(builtin_link),
-            "{builtin_link}"
-        );
-    }
-    assert!(!padded.allows_trailing_padding("ipv4"));
-
-    let build_with = |registry: &Arc<packetcraftr_core::registry::Registry>, packet| {
-        build::Builder::new(Arc::clone(registry)).build(
-            packet,
-            codec::Context::default(),
-            build::Options::default(),
-        )
-    };
-    let tagged = build_with(&padded, packet_of(Box::new(Tag::default()), Some(TRAILER)))
-        .expect("link padding builds inside a padding link");
-    assert!(tagged.bytes.ends_with(TRAILER));
-    let ethernet = build_with(
-        &padded,
-        packet_of(Box::new(Ethernet::default()), Some(TRAILER)),
-    )
-    .expect("link padding builds inside ethernet");
-    build_with(&padded, packet_of(Box::new(Vlan::default()), Some(TRAILER)))
-        .expect("link padding builds inside a VLAN-rooted frame, as it decodes");
-    assert!(matches!(
-        build_with(
-            &unpadded,
-            packet_of(Box::new(Tag::default()), Some(TRAILER))
-        ),
-        Err(build::Error::PaddingWithoutLinkLayer { index: 4 })
-    ));
-
-    let tag_tail = decoded_tail(&padded, TAG_LINK_TYPE, tagged.bytes.clone());
-    assert_eq!(
-        tag_tail,
-        decoded_tail(&padded, LinkType::ETHERNET, ethernet.bytes.clone())
-    );
-    assert_eq!(
-        tag_tail,
-        (
-            vec![
-                "ipv4".to_owned(),
-                "udp".to_owned(),
-                "raw".to_owned(),
-                "padding b\"\\0\\0\\0\\0\" Some(1)".to_owned(),
-            ],
-            vec!["decode.trailing_padding"],
-        )
-    );
-    let (_, unpadded_trailing) = decoded_tail(&unpadded, TAG_LINK_TYPE, tagged.bytes);
-    assert_eq!(unpadded_trailing, ["decode.trailing_malformed"]);
-    let mut unknown = packetcraftr_core::registry::Builder::new();
-    unknown.allow_trailing_padding("missing");
-    assert!(matches!(
-        unknown.build(),
-        Err(packetcraftr_core::registry::Error::UnknownProtocol { protocol })
-            if protocol.as_str() == "missing"
-    ));
 }

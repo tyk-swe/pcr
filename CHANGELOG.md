@@ -1787,6 +1787,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Response matching and transport attribution require every encapsulated IP
+  envelope and intervening tunnel protocol to match the reversed request path,
+  including intermediate envelopes, while preserving source-routing endpoints.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
 - Library TCP connect scans reject interface, preferred-source, and explicit

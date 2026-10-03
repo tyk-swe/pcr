@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Shell completion generation reports write failures as `io.documentation`
+  errors (exit 5) instead of panicking, including when the destination is full.
 - Response matching and transport attribution require every encapsulated IP
   envelope and intervening tunnel protocol to match the reversed request path,
   including intermediate envelopes, while preserving source-routing endpoints.

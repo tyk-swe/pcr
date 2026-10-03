@@ -99,6 +99,24 @@ fn documentation_reports_an_io_failure_for_an_unwritable_directory() {
     );
 }
 
+#[cfg(packetcraftr_test_dev_full)]
+#[test]
+fn documentation_reports_completion_write_failures_without_panicking() {
+    common::require_dev_full();
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let completions = temporary.path().join("completions");
+    std::fs::create_dir(&completions).unwrap();
+    std::os::unix::fs::symlink("/dev/full", completions.join("packetcraftr.bash")).unwrap();
+
+    let output = run(&["documentation", "--directory", path_text(temporary.path())]);
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("error[io.documentation]"), "{stderr}");
+    assert!(stderr.contains("No space left on device"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
 #[test]
 fn topics_list_and_print_built_in_references_as_text() {
     let listing = String::from_utf8(run_success(&["topics"]).stdout).unwrap();

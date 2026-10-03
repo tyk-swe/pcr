@@ -8,7 +8,7 @@ mod common;
 mod process_support;
 
 use capture_support::{ethernet_frame, write_pcapng};
-use common::{parse_json, run_success};
+use common::{parse_json, run, run_success};
 
 #[test]
 fn per_section_interface_limit_does_not_bound_the_rewritten_output() {
@@ -95,4 +95,28 @@ fn assert_tcp_checksums(bytes: &[u8]) {
         0,
         "TCP checksum"
     );
+}
+
+#[test]
+fn rewrite_refuses_a_directory_style_destination_before_reading_input() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = tcp_source(directory.path());
+    let mut target = directory.path().join("out").into_os_string();
+    target.push("/");
+    let target = std::path::PathBuf::from(target);
+
+    let output = run(&[
+        "rewrite",
+        source.to_str().unwrap(),
+        "--set",
+        "ipv4.ttl=9",
+        "--write",
+        target.to_str().unwrap(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("requires a file name"), "{stderr}");
+    assert!(!directory.path().join("out").exists());
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
 }

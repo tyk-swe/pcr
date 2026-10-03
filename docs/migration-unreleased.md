@@ -891,6 +891,18 @@ the output/v6 schemas include; it adds no NDJSON events or sequence positions.
 `--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
 cleanup allowance remain one second, and operation deadlines take precedence.
 
+Staged output (`rewrite`, `export`, and `merge --write`, `follow --write`) is
+bound to the parent directory opened before any input is read. On Linux with
+procfs, staging, publication, and rollback address that directory handle, so a
+parent path retargeted during the run (a swapped symlink or a renamed and
+replaced directory) cannot redirect the output or the staged bytes. On other
+platforms the directory's identity is re-verified immediately before
+publication and rollback and a change is refused with `io.output_file`
+("changed since staging"); the remaining window between that check and the
+rename is pathname based, and staged-file cleanup after the actual directory
+moves stays best effort there. Destinations that name a directory (a trailing
+separator or `/.`) are refused at staging with "requires a file name".
+
 TCP memory charges now include payload-page slack and transient allocations, so
 a capture accepted near an aggregate limit before can be rejected earlier;
 raise an explicit budget only after considering the hosting process limit.

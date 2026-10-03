@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Detached consumer validation writes valid UTF-8 Cargo manifests when the
+  checkout path contains non-BMP Unicode characters, including emoji.
 - Response matching and transport attribution require every encapsulated IP
   envelope and intervening tunnel protocol to match the reversed request path,
   including intermediate envelopes, while preserving source-routing endpoints.

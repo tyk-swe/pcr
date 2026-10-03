@@ -1787,6 +1787,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- The forwarding reference consumer rejects malformed retained detail collections
+  and typed preservation evidence before interpreting a verdict. Invalid Unicode
+  rule strings now produce a contract error instead of an unhandled traceback.
+
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 

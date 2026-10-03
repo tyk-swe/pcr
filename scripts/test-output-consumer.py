@@ -6,6 +6,9 @@ import copy
 import importlib.util
 import io
 import json
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -34,6 +37,21 @@ def with_expect(value):
         })
     report["summary"]["checks_evaluated"] += len(report["matches"])
     report["summary"]["checks_satisfied"] += len(report["matches"])
+    return value
+
+
+def with_partial_preservation(value, observed_side):
+    """Keep one readable preservation operand while its opposite side is absent."""
+    report = value["result"]
+    report["verdict"] = "inconclusive"
+    report["summary"].update(checks_evaluated=0, checks_satisfied=0, checks_unevaluable=2)
+    missing_side = "expected" if observed_side == "actual" else "actual"
+    for match in report["matches"]:
+        check = match["checks"][0]
+        check["outcome"] = "unevaluable"
+        check[observed_side + "_state"] = "observed"
+        check[missing_side + "_state"] = "absent"
+        check.pop(missing_side)
     return value
 
 
@@ -235,6 +253,162 @@ class ConsumerTests(unittest.TestCase):
                         encoded(FIXTURE).replace(b'"sequence": 0', b'"sequence": 0, "sequence": 0')):
             with self.assertRaises(consumer.ContractError):
                 consumer.consume(io.BytesIO(invalid), "ndjson", 0)
+
+    def test_malformed_detail_collections_are_rejected(self):
+        for consume in (self.consume, self.consume_json):
+            for name in ("matches", "violations", "ambiguous"):
+                for malformed in ("", {}, 0, True):
+                    invalid = copy.deepcopy(FIXTURE)
+                    invalid["result"][name] = malformed
+                    if name == "matches":
+                        invalid["result"]["omitted"]["matches"] = 2
+                    with self.subTest(name=name, value=malformed), self.assertRaises(consumer.ContractError):
+                        consume(invalid)
+
+    def test_preservation_requires_typed_values_before_equality(self):
+        for consume in (self.consume, self.consume_json):
+            for malformed in (True, -1, 0.5, "1", None, {}, [], 2**64):
+                invalid = copy.deepcopy(FIXTURE)
+                for match in invalid["result"]["matches"]:
+                    check = match["checks"][0]
+                    check["actual"] = {"type": "unsigned", "value": malformed}
+                    check["expected"] = {"type": "unsigned", "value": malformed}
+                with self.subTest(value=malformed), self.assertRaises(consumer.ContractError):
+                    consume(invalid)
+            invalid = copy.deepcopy(FIXTURE)
+            for match in invalid["result"]["matches"]:
+                check = match["checks"][0]
+                check["actual"] = {"type": "unsigned", "value": True}
+                check["expected"] = {"type": "unsigned", "value": 1}
+            with self.assertRaises(consumer.ContractError):
+                consume(invalid)
+
+    def test_unevaluable_preservation_rejects_malformed_present_operands(self):
+        for consume in (self.consume, self.consume_json):
+            for side in ("actual", "expected"):
+                for state in ("observed", "absent", "truncated"):
+                    invalid = with_partial_preservation(copy.deepcopy(FIXTURE), side)
+                    for match in invalid["result"]["matches"]:
+                        check = match["checks"][0]
+                        check[side + "_state"] = state
+                        check[side] = {"type": "unsigned", "value": True}
+                    with self.subTest(side=side, state=state), self.assertRaisesRegex(
+                            consumer.ContractError, "unsigned evidence"):
+                        consume(invalid, code=1)
+
+    def test_valid_partial_preservation_remains_inconclusive(self):
+        for consume in (self.consume, self.consume_json):
+            for observed_side in ("actual", "expected"):
+                for null_missing_side in (False, True):
+                    valid = with_partial_preservation(copy.deepcopy(FIXTURE), observed_side)
+                    missing_side = "expected" if observed_side == "actual" else "actual"
+                    for match in valid["result"]["matches"]:
+                        check = match["checks"][0]
+                        check[observed_side]["future_metadata"] = {"opaque": True}
+                        if null_missing_side:
+                            check[missing_side] = None
+                    with self.subTest(side=observed_side, null=null_missing_side):
+                        self.assertEqual(consume(valid, code=1)["verdict"], "inconclusive")
+
+    def test_typed_values_and_additive_evidence_members_are_supported(self):
+        values = [
+            {"type": "bool", "value": False},
+            {"type": "unsigned", "value": 2**64 - 1},
+            {"type": "signed", "value": -(2**63)},
+            {"type": "text", "value": "café 🌍"},
+            {"type": "bytes", "value": [0, 255]},
+            {"type": "mac", "value": [0, 1, 2, 3, 4, 5]},
+            {"type": "ipv4", "value": "192.0.2.1"},
+            {"type": "ipv6", "value": "2001:db8::1"},
+            {"type": "list", "value": [{"type": "unsigned", "value": 1}]},
+            {"type": "object", "value": {"answer": {"type": "unsigned", "value": 42}}},
+        ]
+        for consume in (self.consume, self.consume_json):
+            for operand in values:
+                valid = copy.deepcopy(FIXTURE)
+                valid["result"]["rules"]["identity"] = ["raw.café"]
+                for match in valid["result"]["matches"]:
+                    check = match["checks"][0]
+                    check["actual"] = copy.deepcopy(operand)
+                    check["expected"] = copy.deepcopy(operand)
+                    check["actual"]["future_metadata"] = {"opaque": True}
+                    check["expected"]["future_metadata"] = {"opaque": False}
+                with self.subTest(operand=operand):
+                    self.assertEqual(consume(valid)["verdict"], "pass")
+
+    def test_nested_preservation_differences_and_equivalent_addresses(self):
+        differences = [
+            ({"type": "list", "value": [{"type": "unsigned", "value": 1}]},
+             {"type": "list", "value": [{"type": "unsigned", "value": 2}]}),
+            ({"type": "object", "value": {"first": {"type": "unsigned", "value": 1}}},
+             {"type": "object", "value": {"second": {"type": "unsigned", "value": 1}}}),
+            ({"type": "bool", "value": True}, {"type": "unsigned", "value": 1}),
+        ]
+        for consume in (self.consume, self.consume_json):
+            for actual, expected in differences:
+                invalid = copy.deepcopy(FIXTURE)
+                for match in invalid["result"]["matches"]:
+                    match["checks"][0].update(actual=actual, expected=expected)
+                with self.subTest(actual=actual), self.assertRaisesRegex(consumer.ContractError, "contradicts values"):
+                    consume(invalid)
+            valid = copy.deepcopy(FIXTURE)
+            for match in valid["result"]["matches"]:
+                match["checks"][0].update(
+                    actual={"type": "ipv6", "value": "2001:0db8:0:0:0:0:0:1"},
+                    expected={"type": "ipv6", "value": "2001:db8::1"},
+                )
+            self.assertEqual(consume(valid)["verdict"], "pass")
+
+    def test_nested_and_unknown_typed_evidence_is_rejected(self):
+        malformed_values = [
+            {"type": "future", "value": 1},
+            {"type": "signed", "value": 2**63},
+            {"type": "bool", "value": 1},
+            {"type": "text", "value": 1},
+            {"type": "bytes", "value": [True]},
+            {"type": "bytes", "value": [256]},
+            {"type": "mac", "value": [0]},
+            {"type": "ipv4", "value": "2001:db8::1"},
+            {"type": "ipv6", "value": "bad address"},
+            {"type": "ipv6", "value": "fe80::1%eth0"},
+            {"type": "list", "value": [{"type": "unsigned", "value": True}]},
+            {"type": "object", "value": {"answer": {"type": "unsigned", "value": True}}},
+            {"type": "unsigned"},
+        ]
+        for consume in (self.consume, self.consume_json):
+            for operand in malformed_values:
+                invalid = copy.deepcopy(FIXTURE)
+                for match in invalid["result"]["matches"]:
+                    match["checks"][0].update(actual=operand, expected=operand)
+                with self.subTest(operand=operand), self.assertRaises(consumer.ContractError):
+                    consume(invalid)
+
+    def test_detached_cli_rejects_surrogate_rules_without_tracebacks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            detached = Path(directory) / "forwarding.py"
+            detached.write_bytes((ROOT / "examples/consumers/forwarding.py").read_bytes())
+            for output_format in ("json", "ndjson"):
+                for field in ("identity", "preserve", "preserve_presence", "expect_absent", "expect_field", "expect_value"):
+                    invalid = copy.deepcopy(FIXTURE)
+                    rules = invalid["result"]["rules"]
+                    if field.startswith("expect_") and field != "expect_absent":
+                        rules["expect"] = [{"field": "ipv4.ttl", "value": "64"}]
+                        rules["expect"][0][field.removeprefix("expect_")] = "\ud800"
+                    else:
+                        rules[field] = ["\ud800"]
+                    if output_format == "json":
+                        invalid["mode"] = "aggregate"
+                        invalid.pop("event")
+                        invalid.pop("sequence")
+                    process = subprocess.run(
+                        [sys.executable, str(detached), "--format", output_format, "--exit-code", "0"],
+                        input=encoded(invalid), capture_output=True, timeout=10, cwd=directory,
+                    )
+                    with self.subTest(format=output_format, field=field):
+                        self.assertEqual(process.returncode, 2, process.stderr.decode())
+                        self.assertIn(b"UTF-8", process.stderr)
+                        self.assertNotIn(b"Traceback", process.stderr)
+                        self.assertEqual(process.stdout, b"")
 
     def test_exit_code_does_not_replace_terminal_contract(self):
         with self.assertRaisesRegex(consumer.ContractError, "exit code"):

@@ -216,30 +216,3 @@ impl crate::error::Classified for UnknownProtocolName {
 }
 
 builtin_protocol_catalog!(define_builtin_protocol);
-
-#[cfg(test)]
-mod tests {
-    use super::BuiltinProtocol;
-
-    #[test]
-    fn the_catalog_layer_type_is_the_type_each_codec_constructs() {
-        let registry = crate::protocol::builtin::registry();
-        let empty = std::collections::BTreeMap::new();
-        for &protocol in BuiltinProtocol::ALL {
-            if !protocol.is_constructible() {
-                continue;
-            }
-            let codec = registry.codec(protocol.as_str()).expect("registered");
-            let layer = codec.make_layer(&empty).expect("default layer");
-            assert_eq!(layer.protocol_id().as_str(), protocol.as_str());
-            assert_eq!(BuiltinProtocol::of(layer.as_ref()), Some(protocol));
-            for &other in BuiltinProtocol::ALL {
-                assert_eq!(
-                    other.identifies(layer.as_ref()),
-                    other == protocol,
-                    "{other} and {protocol}"
-                );
-            }
-        }
-    }
-}

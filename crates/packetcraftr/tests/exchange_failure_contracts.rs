@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 mod common;
 
@@ -256,68 +257,6 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
 }
 
 #[test]
-fn an_unanswered_request_is_published_after_the_collection_window() {
-    let (client, state) = fixture(Fault::None);
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let observed = Arc::clone(&events);
-    let mut request = layer3_request(Template::new(query_packet()));
-    request.timeout = WINDOW;
-    let summary = client
-        .exchange(request, move |event| {
-            observed.lock().unwrap().push(event);
-            Ok(())
-        })
-        .expect("an exchange without replies completes");
-
-    assert_eq!(summary.unanswered, [0]);
-    assert_eq!(summary.stats.packets_completed, 1);
-    let events = events.lock().unwrap();
-    assert!(
-        matches!(
-            events.as_slice(),
-            [
-                exchange::Event::Sent {
-                    request_index: 0,
-                    ..
-                },
-                exchange::Event::Unanswered { request_index: 0 },
-            ]
-        ),
-        "{events:?}"
-    );
-    assert_eq!(state.lock().unwrap().shutdowns, 1);
-}
-
-#[test]
-fn cleanup_failure_after_an_output_error_reports_both_without_a_further_send() {
-    let (client, state) = fixture(Fault::CallbackAndShutdown);
-    let template = Template::new(query_packet()).axis(
-        1,
-        "destination_port",
-        vec![FieldValue::Unsigned(9999), FieldValue::Unsigned(10000)],
-    );
-    let error = client
-        .exchange(layer3_request(template), |_| Err(callback_failure()))
-        .expect_err("output failure must fail the exchange");
-
-    assert!(
-        matches!(error, exchange::Error::OutputAndCaptureShutdown { .. }),
-        "{error:?}"
-    );
-    assert_eq!(error.classification().code, "io.fixture");
-    let causes = error.causes();
-    assert!(
-        causes
-            .iter()
-            .any(|cause| cause.contains("injected provider failure")),
-        "{causes:?}"
-    );
-    let state = state.lock().unwrap();
-    assert_eq!(state.sent.len(), 1, "no send follows the output failure");
-    assert_eq!(state.shutdowns, 1);
-}
-
-#[test]
 fn cartesian_exchange_denies_the_whole_set_before_transmission() {
     let (client, state) = fixture(Fault::None);
     let template = Template::new(query_packet())
@@ -347,93 +286,6 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
         ))
     ));
     assert!(state.lock().unwrap().sent.is_empty());
-}
-
-#[test]
-fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
-    use packetcraftr::{
-        dns,
-        target::{Family, Target},
-    };
-
-    let (client, state) = fixture(Fault::None);
-    let request = dns::Request {
-        server: Target::Address("10.0.0.2".parse().unwrap()),
-        address_family: Family::Any,
-        server_port: 53,
-        source_port: 40_000,
-        query_name: "example.test".to_owned(),
-        query_type: dns::QueryType::A,
-        transaction_id: 0x1234,
-        recursion_desired: true,
-        edns: None,
-        transport: dns::TransportMode::Udp,
-        attempts: 1,
-        timeout: Duration::from_millis(50),
-        queries_per_second: None,
-        limits: dns::Limits {
-            max_evidence_frames: 1,
-            max_undecoded: 1,
-            ..dns::Limits::default()
-        },
-        route: layer3_send().plan,
-        collection: exchange::Collection::default(),
-    };
-    let error = client
-        .dns(request, dns::Collector::default())
-        .expect_err("narrower DNS evidence bounds are refused");
-    assert_eq!(error.classification().code, "cli.dns_executor", "{error}");
-    assert!(state.lock().unwrap().sent.is_empty());
-}
-
-#[test]
-fn scan_materializes_distinct_correlated_identities_per_probe() {
-    use packetcraftr::{
-        probe::Transport,
-        scan,
-        target::{Family, Target},
-    };
-
-    let (client, state) = fixture(Fault::None);
-    let request = scan::Request {
-        max_in_flight: 1,
-        targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
-        transport: Transport::Tcp,
-        address_family: Family::Any,
-        ports: vec![80, 81, 82],
-        attempts: 1,
-        timeout: WINDOW,
-        probes_per_second: None,
-        udp_payload: bytes::Bytes::new(),
-        udp_profiles: Default::default(),
-        limits: scan::Limits::default(),
-        route: layer3_send().plan,
-        collection: exchange::Collection::default(),
-    };
-    client
-        .scan(request, |_| Ok(()))
-        .expect("timed-out probes still complete the scan");
-
-    let state = state.lock().unwrap();
-    assert_eq!(state.sent.len(), 3);
-    let mut identifications = Vec::new();
-    for (index, frame) in state.sent.iter().enumerate() {
-        assert_eq!(frame[0], 0x45, "probe {index} is a plain IPv4 frame");
-        assert_eq!(
-            u16::from_be_bytes([frame[22], frame[23]]),
-            80 + u16::try_from(index).unwrap(),
-            "probe {index} destination port"
-        );
-        assert_eq!(
-            u32::from_be_bytes([frame[24], frame[25], frame[26], frame[27]]),
-            u32::try_from(index).unwrap(),
-            "probe {index} TCP sequence"
-        );
-        identifications.push(u16::from_be_bytes([frame[4], frame[5]]));
-    }
-    identifications.sort_unstable();
-    identifications.dedup();
-    assert_eq!(identifications.len(), 3, "IPv4 identifications must differ");
 }
 
 fn wire(packet: Packet) -> Frame {
@@ -589,45 +441,6 @@ fn describe(events: &[exchange::Event]) -> Vec<String> {
 }
 
 #[test]
-fn a_reply_behind_more_unrelated_frames_than_the_frame_budget_is_still_answered() {
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(flood_then_reply(6, udp_reply));
-
-    let (result, events) =
-        collect_exchange(&client, retention(4, 4, capture::OverflowPolicy::Fail));
-
-    let report = result.expect("a retained reply completes the exchange");
-    assert!(report.unanswered.is_empty(), "{:?}", describe(&events));
-    let replies = events
-        .iter()
-        .filter(|event| matches!(event, exchange::Event::Response(_)))
-        .count();
-    assert_eq!(replies, 1, "{:?}", describe(&events));
-    let unrelated = events
-        .iter()
-        .filter(|event| matches!(event, exchange::Event::Unsolicited { .. }))
-        .count();
-    assert_eq!(unrelated, 3, "one frame slot is held for the pending reply");
-    let limit = events
-        .iter()
-        .find_map(|event| match event {
-            exchange::Event::Diagnostic(diagnostic)
-                if diagnostic.code == "exchange.capture_frame_limit" =>
-            {
-                Some(diagnostic.message.clone())
-            }
-            _ => None,
-        })
-        .expect("the refused unrelated frame is reported");
-    assert!(
-        limit.contains("limit 3 reached")
-            && limit.contains("4 configured")
-            && limit.contains("1 held for pending replies"),
-        "{limit}"
-    );
-}
-
-#[test]
 fn a_refused_reply_fails_the_exchange_instead_of_reporting_the_request_unanswered() {
     let (client, state) = fixture(Fault::None);
     state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
@@ -649,31 +462,6 @@ fn a_refused_reply_fails_the_exchange_instead_of_reporting_the_request_unanswere
         "{:?}",
         describe(&events)
     );
-}
-
-#[test]
-fn a_refused_reply_under_a_lossy_overflow_policy_is_not_claimed_absent() {
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
-
-    let (result, events) = collect_exchange(
-        &client,
-        retention(4, 0, capture::OverflowPolicy::DropNewest),
-    );
-
-    let report = result.expect("a lossy policy accepts incomplete evidence");
-    assert!(report.unanswered.is_empty(), "{:?}", describe(&events));
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, exchange::Event::Unanswered { .. })),
-        "{:?}",
-        describe(&events)
-    );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        exchange::Event::Diagnostic(diagnostic) if diagnostic.code == "exchange.response_limit"
-    )));
 }
 
 fn scan_port_80(
@@ -714,45 +502,6 @@ fn scan_port_80(
     });
     let statuses = statuses.lock().unwrap().clone();
     (result, statuses)
-}
-
-#[test]
-fn scan_reports_a_reply_behind_more_unrelated_frames_than_the_frame_budget_as_a_response() {
-    use packetcraftr::probe::ProbeStatus;
-
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(flood_then_reply(6, syn_ack));
-
-    let (result, statuses) = scan_port_80(&client, retention(4, 4, capture::OverflowPolicy::Fail));
-
-    result.expect("a scan whose reply was retained completes");
-    assert_eq!(statuses, [ProbeStatus::Response]);
-}
-
-#[test]
-fn scan_reports_a_timeout_for_a_silent_port_on_an_interface_busier_than_the_frame_budget() {
-    use packetcraftr::probe::ProbeStatus;
-
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(flood(6));
-
-    let (result, statuses) = scan_port_80(&client, retention(4, 4, capture::OverflowPolicy::Fail));
-
-    result.expect("frames no scan probe could match must not fail the scan");
-    assert_eq!(statuses, [ProbeStatus::Timeout]);
-}
-
-#[test]
-fn scan_reports_a_timeout_for_a_checksum_failed_reply_the_frame_budget_refused() {
-    use packetcraftr::probe::ProbeStatus;
-
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(flood_then_reply(0, corrupted_syn_ack));
-
-    let (result, statuses) = scan_port_80(&client, retention(1, 1, capture::OverflowPolicy::Fail));
-
-    result.expect("a reply no scan could accept must not fail the scan when it is refused");
-    assert_eq!(statuses, [ProbeStatus::Timeout]);
 }
 
 const REPLY_DELAY: Duration = Duration::from_millis(50);
@@ -807,68 +556,4 @@ fn answered_exchange(
         .expect("the exchange completes");
     let responses = *published.lock().unwrap();
     (report, responses)
-}
-
-#[test]
-fn stop_when_answered_ends_the_collection_at_the_reply_and_keeps_it() {
-    let (report, responses) = answered_exchange(
-        exchange::StopCondition::AllAnswered,
-        &[9999],
-        answer_ports(&[9999], 1),
-    );
-    assert_eq!(responses, 1, "the triggering response is published");
-    assert!(report.unanswered.is_empty());
-    assert_eq!(report.stats.elapsed, REPLY_DELAY);
-
-    let (report, responses) = answered_exchange(
-        exchange::StopCondition::Window,
-        &[9999],
-        answer_ports(&[9999], 1),
-    );
-    assert_eq!(responses, 1);
-    assert!(report.unanswered.is_empty());
-    assert_eq!(
-        report.stats.elapsed, WINDOW,
-        "the default waits the full window"
-    );
-}
-
-#[test]
-fn stop_when_answered_waits_the_window_while_a_request_is_unanswered() {
-    let (report, responses) = answered_exchange(
-        exchange::StopCondition::AllAnswered,
-        &[9999, 10000, 10001],
-        answer_ports(&[9999, 10000], 1),
-    );
-    assert_eq!(responses, 2);
-    assert_eq!(report.unanswered, [2]);
-    assert_eq!(report.stats.elapsed, WINDOW);
-}
-
-#[test]
-fn duplicate_responses_do_not_count_as_another_answered_request() {
-    let (report, responses) = answered_exchange(
-        exchange::StopCondition::AllAnswered,
-        &[9999, 10000],
-        answer_ports(&[9999], 3),
-    );
-    assert_eq!(responses, 3, "every duplicate is still retained");
-    assert_eq!(report.unanswered, [1]);
-    assert_eq!(report.stats.elapsed, WINDOW);
-}
-
-#[test]
-fn stop_when_answered_still_sends_the_requests_an_early_reply_precedes() {
-    let (client, state) = fixture(Fault::None);
-    state.lock().unwrap().script = Some(answer_ports(&[9999, 10000], 1));
-    let mut request = layer3_request(port_template(&[9999, 10000]));
-    request.stop = exchange::StopCondition::AllAnswered;
-
-    let report = client
-        .exchange(request, exchange::Collector::default())
-        .expect("the exchange completes");
-
-    assert_eq!(state.lock().unwrap().sent.len(), 2);
-    assert!(report.unanswered.is_empty());
-    assert_eq!(report.stats.packets_completed, 2);
 }

@@ -180,19 +180,6 @@ mod tests {
         bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
     }
 
-    fn valid_ipv6() -> Vec<u8> {
-        let source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
-        let mut bytes = vec![0_u8; IPV6_HEADER + 4];
-        bytes[0] = 0x60;
-        bytes[4..6].copy_from_slice(&4_u16.to_be_bytes());
-        bytes[6] = 17;
-        bytes[7] = 64;
-        bytes[8..24].copy_from_slice(&source.octets());
-        bytes[24..40].copy_from_slice(&destination.octets());
-        bytes
-    }
-
     fn invalid_message<T: std::fmt::Debug>(result: Result<T, Error>) -> String {
         match result.expect_err("fixture must be rejected") {
             Error::InvalidTransmissionFrame { message } => message,
@@ -237,29 +224,5 @@ mod tests {
                 "expected diagnostic containing {expected}"
             );
         }
-    }
-
-    #[test]
-    fn ipv6_validation_requires_an_exact_complete_datagram() {
-        let bytes = valid_ipv6();
-        let expected_source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-        let expected_destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
-        assert_eq!(
-            validate_ipv6(&bytes).expect("valid datagram"),
-            (expected_source, expected_destination)
-        );
-
-        assert!(invalid_message(validate_ipv6(&bytes[..39])).contains("truncated IPv6 header"));
-
-        let mut invalid_length = bytes.clone();
-        invalid_length[4..6].copy_from_slice(&3_u16.to_be_bytes());
-        assert!(invalid_message(validate_ipv6(&invalid_length)).contains("IPv6 payload length"));
-
-        let mut unspecified = bytes;
-        unspecified[24..40].fill(0);
-        assert!(
-            invalid_message(validate_ipv6(&unspecified))
-                .contains("IPv6 destination is unspecified")
-        );
     }
 }

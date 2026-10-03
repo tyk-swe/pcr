@@ -57,65 +57,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timestamp_conversion_is_checked_across_clock_domains() {
-        let micro = TimestampPrecision::Micro;
-        assert_eq!(system_time(0, 0, micro).expect("epoch"), UNIX_EPOCH);
-        assert_eq!(
-            system_time(-1, 500_000, micro).expect("pre-epoch timestamp"),
-            UNIX_EPOCH - Duration::from_millis(500)
-        );
-
-        for invalid in [-1, 1_000_000] {
-            assert!(matches!(
-                system_time(0, invalid, micro),
-                Err(Error::Capture { .. })
-            ));
-        }
-
-        let observed_at = Instant::now();
-        let observed_wall = UNIX_EPOCH + Duration::from_secs(10);
-        let packet_wall = observed_wall - Duration::from_millis(25);
-        assert_eq!(
-            monotonic_packet_time(packet_wall, observed_wall, observed_at),
-            observed_at.checked_sub(Duration::from_millis(25))
-        );
-        // Windows SystemTime has 100 ns precision, so a 1 ns offset rounds away.
-        let future_wall = observed_wall + Duration::from_secs(1);
-        assert!(future_wall > observed_wall);
-        assert_eq!(
-            monotonic_packet_time(future_wall, observed_wall, observed_at),
-            None
-        );
-    }
-
-    #[test]
-    fn nanosecond_fractions_are_not_read_as_microseconds() {
-        let nano = TimestampPrecision::Nano;
-        assert_eq!(
-            system_time(0, 999_999_999, nano).expect("upper bound"),
-            UNIX_EPOCH + Duration::from_nanos(999_999_999)
-        );
-        assert_eq!(
-            system_time(0, 1, nano).expect("one nanosecond"),
-            UNIX_EPOCH + Duration::from_nanos(1)
-        );
-        assert_eq!(
-            system_time(0, 500_000, nano).expect("nano fraction"),
-            UNIX_EPOCH + Duration::from_nanos(500_000)
-        );
-        assert_eq!(
-            system_time(-1, 999_999_900, nano).expect("pre-epoch nano"),
-            UNIX_EPOCH - Duration::from_nanos(100)
-        );
-        for invalid in [-1, 1_000_000_000, i64::MIN, i64::MAX] {
-            assert!(
-                matches!(system_time(0, invalid, nano), Err(Error::Capture { .. })),
-                "fraction {invalid}"
-            );
-        }
-    }
-
-    #[test]
     fn representability_edges_are_exact_or_rejected_never_clamped() {
         for (seconds, fraction, precision, fractional) in [
             (

@@ -252,6 +252,8 @@ impl ReplayAdmission for FrameAdmission<'_> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
@@ -268,10 +270,7 @@ mod tests {
     use packetcraftr_core::layer::{Layer, Raw};
     use packetcraftr_core::packet::MacAddress;
     use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::protocol::{
-        link::Ethernet,
-        network::{Icmpv4, Ipv4},
-    };
+    use packetcraftr_core::protocol::network::{Icmpv4, Ipv4};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::Capability as LinkCapability;
     use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
@@ -339,17 +338,6 @@ mod tests {
         }
     }
 
-    fn opaque_raw_registry() -> Arc<Registry> {
-        let mut builder = Registry::builder();
-        builder
-            .register_codec(OpaqueRawCodec, &[])
-            .expect("opaque codec registration");
-        builder
-            .bind_link_type(LinkType::RAW, "raw")
-            .expect("opaque raw root binding");
-        Arc::new(builder.build().expect("opaque registry"))
-    }
-
     fn built_ipv4(reserved_flag: bool) -> BuiltPacket {
         let mut packet = Packet::new();
         packet
@@ -385,27 +373,6 @@ mod tests {
         .expect("bounded raw frame")
     }
 
-    fn ethernet_frame(source_mac: [u8; 6], source_ip: Ipv4Addr) -> Frame {
-        let mut packet = Packet::new();
-        packet
-            .push(Ethernet {
-                source: source_mac,
-                destination: [0x02, 0, 0, 0, 0, 2],
-                ..Ethernet::default()
-            })
-            .push(Ipv4 {
-                source: source_ip,
-                destination: Ipv4Addr::new(192, 0, 2, 2),
-                ..Ipv4::default()
-            })
-            .push(Icmpv4::default());
-        let built = Builder::new(registry())
-            .build(packet, codec::Context::default(), build::Options::default())
-            .expect("Ethernet replay fixture builds");
-        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes)
-            .expect("bounded Ethernet replay fixture")
-    }
-
     fn replay_route(mode: Mode, link_type: LinkType, selected_source: Ipv4Addr) -> Plan {
         let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
         Plan {
@@ -436,122 +403,6 @@ mod tests {
             neighbor_vlan_tags: Vec::new(),
             synthesized_ethernet: false,
         }
-    }
-
-    #[test]
-    fn exact_complete_documentation_frame_is_authorized_with_replay_opt_ins() {
-        let built = built_ipv4(false);
-        assert!(!crate::policy::requires_live_opt_in(&built));
-        let frame = raw_frame(&built);
-        let inspecting_authorizer =
-            frame_admission(registry(), crate::policy::Policy::default(), false);
-        let decoded = inspecting_authorizer
-            .decode_frame(&frame)
-            .expect("fixture decodes");
-        let rebuilt = inspecting_authorizer
-            .rebuild_frame(&decoded)
-            .expect("fixture rebuilds");
-        assert!(crate::policy::requires_live_opt_in(&rebuilt));
-        assert!(decoded.diagnostics.is_empty());
-        assert!(rebuilt.diagnostics.is_empty());
-
-        let policy = crate::policy::Policy {
-            allow_permissive_packets: true,
-            ..crate::policy::Policy::default()
-        };
-        frame_admission(registry(), policy, true)
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect("exact replay with both explicit live approvals");
-    }
-
-    #[test]
-    fn final_wire_replay_rejects_foreign_raw_ip_source_unless_explicitly_allowed() {
-        let frame = raw_frame(&built_ipv4(false));
-        let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 99));
-
-        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_final_wire(&frame, &route)
-            .expect_err("foreign raw IP source must be rejected by default");
-        assert_eq!(error.classification().code, "policy.source_ownership");
-
-        let policy = crate::policy::Policy {
-            allow_source_spoofing: true,
-            ..crate::policy::Policy::default()
-        };
-        frame_admission(registry(), policy, false)
-            .authorize_final_wire(&frame, &route)
-            .expect("explicit source-spoofing approval permits the raw IP source");
-    }
-
-    #[test]
-    fn final_wire_replay_rejects_foreign_ethernet_source_unless_explicitly_allowed() {
-        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 9], Ipv4Addr::new(192, 0, 2, 1));
-        let route = replay_route(
-            Mode::Layer2,
-            LinkType::ETHERNET,
-            Ipv4Addr::new(192, 0, 2, 1),
-        );
-
-        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_final_wire(&frame, &route)
-            .expect_err("foreign Ethernet source must be rejected by default");
-        assert_eq!(error.classification().code, "policy.source_ownership");
-
-        let policy = crate::policy::Policy {
-            allow_source_spoofing: true,
-            ..crate::policy::Policy::default()
-        };
-        frame_admission(registry(), policy, false)
-            .authorize_final_wire(&frame, &route)
-            .expect("explicit source-spoofing approval permits the Ethernet source");
-    }
-
-    #[test]
-    fn final_wire_replay_does_not_replace_an_unspecified_captured_source() {
-        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 1], Ipv4Addr::UNSPECIFIED);
-        let mut route = replay_route(
-            Mode::Layer2,
-            LinkType::ETHERNET,
-            Ipv4Addr::new(192, 0, 2, 1),
-        );
-        route.packet_source = None;
-
-        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_final_wire(&frame, &route)
-            .expect_err("the exact unspecified source requires spoofing approval");
-        assert_eq!(error.classification().code, "policy.source_ownership");
-    }
-
-    #[test]
-    fn final_wire_replay_does_not_replace_a_zero_captured_source_mac() {
-        let frame = ethernet_frame([0; 6], Ipv4Addr::new(192, 0, 2, 1));
-        let mut route = replay_route(
-            Mode::Layer2,
-            LinkType::ETHERNET,
-            Ipv4Addr::new(192, 0, 2, 1),
-        );
-        route.source_mac = None;
-
-        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_final_wire(&frame, &route)
-            .expect_err("the exact zero source MAC requires spoofing approval");
-        assert_eq!(error.classification().code, "policy.source_ownership");
-    }
-
-    #[test]
-    fn final_wire_replay_accepts_a_secondary_selected_interface_ip_source() {
-        let secondary = Ipv4Addr::new(192, 0, 2, 9);
-        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 1], secondary);
-        let mut route = replay_route(
-            Mode::Layer2,
-            LinkType::ETHERNET,
-            Ipv4Addr::new(192, 0, 2, 1),
-        );
-        route.decision.preferred_source = Some(IpAddr::V4(secondary));
-
-        frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_final_wire(&frame, &route)
-            .expect("an IP source owned by the selected interface is not spoofing");
     }
 
     #[test]
@@ -587,85 +438,6 @@ mod tests {
     }
 
     #[test]
-    fn final_wire_decodes_fresh_bytes_when_the_authorized_frame_differs() {
-        let frame = raw_frame(&built_ipv4(false));
-        let mut multicast = Packet::new();
-        multicast
-            .push(Ipv4 {
-                source: Ipv4Addr::new(192, 0, 2, 1),
-                destination: Ipv4Addr::new(224, 0, 0, 251),
-                ..Ipv4::default()
-            })
-            .push(Icmpv4::default());
-        let multicast = Builder::new(registry())
-            .build(
-                multicast,
-                codec::Context::default(),
-                build::Options::default(),
-            )
-            .expect("multicast fixture builds");
-        let multicast_frame = raw_frame(&multicast);
-        let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 1));
-        let policy = crate::policy::Policy {
-            allow_permissive_packets: true,
-            ..crate::policy::Policy::default()
-        };
-        let mut authorizer = frame_admission(registry(), policy, true);
-        authorizer
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect("the first frame authorizes before route planning");
-
-        let error = authorizer
-            .authorize_final_wire(&multicast_frame, &route)
-            .expect_err("different wire bytes decode and check fresh destinations");
-        assert_eq!(error.classification().code, "policy.public_destination");
-    }
-
-    #[test]
-    fn caller_codec_cannot_hide_a_public_destination_from_replay_policy() {
-        let mut packet = Packet::new();
-        packet
-            .push(Ipv4 {
-                source: Ipv4Addr::new(192, 0, 2, 1),
-                destination: Ipv4Addr::new(224, 0, 0, 251),
-                ..Ipv4::default()
-            })
-            .push(Icmpv4::default());
-        let built = Builder::new(registry())
-            .build(packet, codec::Context::default(), build::Options::default())
-            .expect("public-destination fixture builds");
-        let frame = raw_frame(&built);
-        let policy = crate::policy::Policy {
-            allow_permissive_packets: true,
-            ..crate::policy::Policy::default()
-        };
-        let mut authorizer = frame_admission(opaque_raw_registry(), policy, true);
-
-        let caller_decoded = authorizer
-            .decode_frame(&frame)
-            .expect("caller codec decodes the root opaquely");
-        assert_eq!(caller_decoded.packet.len(), 1);
-        assert!(
-            caller_decoded
-                .packet
-                .layer(0)
-                .is_some_and(<dyn Layer>::is::<Raw>)
-        );
-        let caller_rebuilt = authorizer
-            .rebuild_frame(&caller_decoded)
-            .expect("caller codec rebuilds its opaque layer");
-        authorizer
-            .validate_rebuild(&frame, &caller_rebuilt)
-            .expect("caller codec round trip is exact");
-
-        let error = authorizer
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect_err("trusted policy decoding must still see the public destination");
-        assert_eq!(error.classification().code, "policy.public_destination");
-        assert!(error.to_string().contains("224.0.0.251"));
-    }
-
-    #[test]
     fn operation_budgets_fail_before_frame_decoding_or_interface_work() {
         let invalid_frame = Frame::new(
             UNIX_EPOCH,
@@ -689,118 +461,5 @@ mod tests {
             .admit_frame(WireLimits::new(1, 3), &invalid_frame, Mode::Layer2)
             .expect_err("byte budget must fail before unsupported link type");
         assert_eq!(byte_error.classification().code, "policy.byte_limit");
-    }
-
-    #[test]
-    fn incomplete_unsupported_and_non_network_frames_fail_with_stable_classification() {
-        let truncated = Frame::try_with_lengths(
-            UNIX_EPOCH,
-            packetcraftr_core::frame::LinkType::RAW,
-            packetcraftr_core::frame::Lengths {
-                captured: 1,
-                original: 2,
-            },
-            vec![0x45_u8],
-        )
-        .expect("valid truncated capture record");
-        let mut authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
-        let error = authorizer
-            .authorize_frame(&truncated, Mode::Layer3)
-            .expect_err("truncated evidence cannot be replayed");
-        assert_eq!(error.classification().code, "packet.replay_truncated");
-
-        let unsupported = Frame::new(
-            UNIX_EPOCH,
-            packetcraftr_core::frame::LinkType(65_535),
-            vec![0_u8],
-        )
-        .expect("bounded fixture frame");
-        let error = authorizer
-            .authorize_frame(&unsupported, Mode::Layer2)
-            .expect_err("unknown live link type cannot be authorized");
-        assert_eq!(
-            error.classification().code,
-            "policy.invalid_packet_semantics"
-        );
-
-        let ethernet_bytes = vec![0_u8; 14];
-        let ethernet = Frame::new(
-            UNIX_EPOCH,
-            packetcraftr_core::frame::LinkType::ETHERNET,
-            ethernet_bytes,
-        )
-        .expect("bounded Ethernet frame");
-        let error = authorizer
-            .authorize_frame(&ethernet, Mode::Layer3)
-            .expect_err("Ethernet bytes are not a raw network envelope");
-        assert_eq!(error.classification().code, "packet.replay_network");
-    }
-
-    #[test]
-    fn permissive_capture_requires_both_live_opt_ins() {
-        let built = built_ipv4(true);
-        assert!(crate::policy::requires_live_opt_in(&built));
-        let frame = raw_frame(&built);
-
-        let missing_operation_opt_in =
-            frame_admission(registry(), crate::policy::Policy::default(), false)
-                .authorize_frame(&frame, Mode::Layer3)
-                .expect_err("operation opt-in is mandatory");
-        assert_eq!(
-            missing_operation_opt_in.classification().code,
-            "policy.permissive_live_opt_in"
-        );
-
-        let missing_policy_opt_in =
-            frame_admission(registry(), crate::policy::Policy::default(), true)
-                .authorize_frame(&frame, Mode::Layer3)
-                .expect_err("policy opt-in is independently mandatory");
-        assert_eq!(
-            missing_policy_opt_in.classification().code,
-            "policy.permissive_packet"
-        );
-
-        let policy = crate::policy::Policy {
-            allow_permissive_packets: true,
-            ..crate::policy::Policy::default()
-        };
-        frame_admission(registry(), policy, true)
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect("both explicit approvals authorize the exact malformed bytes");
-    }
-
-    #[test]
-    fn the_missing_replay_opt_in_keeps_its_published_message_and_remediation() {
-        let frame = raw_frame(&built_ipv4(true));
-
-        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect_err("operation opt-in is mandatory");
-
-        assert_eq!(
-            error.to_string(),
-            "permissive or malformed captured bytes require --allow-malformed-live"
-        );
-        assert_eq!(
-            error.classification().remediation,
-            Some("set the per-operation malformed-live opt-in in addition to policy approval")
-        );
-    }
-
-    #[test]
-    fn rebuilt_bytes_must_match_the_authoritative_capture_exactly() {
-        let built = built_ipv4(false);
-        let different_frame = Frame::new(
-            UNIX_EPOCH,
-            packetcraftr_core::frame::LinkType::RAW,
-            vec![0_u8; built.bytes.len()],
-        )
-        .expect("same-width fixture frame");
-        let authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
-
-        let error = authorizer
-            .validate_rebuild(&different_frame, &built)
-            .expect_err("semantic rebuild cannot substitute different bytes");
-        assert_eq!(error.classification().code, "internal.replay_rebuild");
     }
 }

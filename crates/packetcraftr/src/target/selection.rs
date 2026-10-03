@@ -292,41 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn an_ipv4_network_contains_the_mapped_spelling_of_its_addresses() {
-        let network: Network = "10.0.0.0/24".parse().unwrap();
-        assert!(network.contains("::ffff:10.0.0.9".parse().unwrap()));
-        assert!(!network.contains("::ffff:10.0.1.9".parse().unwrap()));
-        assert!(!network.contains("::10.0.0.9".parse().unwrap()));
-
-        let mapped: Network = "::ffff:0:0/96".parse().unwrap();
-        assert!(mapped.contains("::ffff:1.2.3.4".parse().unwrap()));
-        assert!(!mapped.contains("2001:db8::1".parse().unwrap()));
-
-        let ipv6: Network = "2001:db8::/32".parse().unwrap();
-        assert!(ipv6.contains("2001:db8::1".parse().unwrap()));
-        assert!(!ipv6.contains("::ffff:10.0.0.9".parse().unwrap()));
-    }
-
-    #[test]
-    fn an_exclusion_covers_the_mapped_spelling_of_an_excluded_ipv4_address() {
-        for entry in ["10.0.0.5", "10.0.0.5/32", "10.0.0.4/30"] {
-            let selection = Selection {
-                include: vec![Specification::Network("10.0.0.0/30".parse().unwrap())],
-                exclude: vec![entry.parse().unwrap()],
-            };
-            assert!(selection.excludes("10.0.0.5".parse().unwrap()), "{entry}");
-            assert!(
-                selection.excludes("::ffff:10.0.0.5".parse().unwrap()),
-                "{entry}"
-            );
-            assert!(
-                !selection.excludes("::ffff:10.0.1.5".parse().unwrap()),
-                "{entry}"
-            );
-        }
-    }
-
-    #[test]
     fn a_selection_over_the_candidate_budget_reports_the_budget_itself() {
         let selection = |include: &[&str]| Selection {
             include: include

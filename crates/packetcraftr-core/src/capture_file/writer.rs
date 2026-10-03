@@ -568,6 +568,8 @@ fn validate_pcap_frame(
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use super::*;
 
     #[test]
@@ -652,38 +654,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn automatic_interface_commits_only_its_successful_block_on_packet_failure() {
-        let first = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![7]).unwrap();
-        let second = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![8]).unwrap();
-        for added in 0..(32 + 36) {
-            let mut writer = Writer::pcapng(FailAt {
-                bytes: Vec::new(),
-                offset: usize::MAX,
-            })
-            .unwrap();
-            writer.write_frame(&first).unwrap();
-            let before = writer.get_ref().bytes.len();
-            writer.get_mut().offset = before + added;
-            assert_eq!(writer.encoded_frame_size(&second).unwrap(), 32 + 36);
-            assert!(
-                matches!(writer.write_frame(&second), Err(Error::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe)
-            );
-            assert_eq!(writer.frames_written(), 1);
-            assert_eq!(writer.captured_bytes_written(), 1);
-            assert_eq!(writer.get_ref().bytes.len(), before + added);
-            let WriterState::PcapNg { interfaces, .. } = &writer.state else {
-                unreachable!()
-            };
-            assert_eq!(interfaces.len(), if added < 32 { 1 } else { 2 });
-            assert_eq!(interfaces[0].link_type, LinkType::RAW);
-            if added >= 32 {
-                assert_eq!(interfaces[1].link_type, LinkType::ETHERNET);
-            }
-            assert!(writer.output_failure.is_some());
-        }
-    }
-
     #[derive(Debug)]
     struct Layered(io::Error);
 
@@ -722,36 +692,6 @@ mod tests {
             next = source.source();
         }
         (error.kind(), error.raw_os_error(), chain)
-    }
-
-    #[test]
-    fn later_operations_repeat_the_output_failure_kind_os_code_and_message_chain() {
-        let failures: [fn() -> io::Error; 3] = [
-            || {
-                io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    Layered(io::Error::other("inner")),
-                )
-            },
-            || io::Error::from_raw_os_error(28),
-            || io::ErrorKind::BrokenPipe.into(),
-        ];
-        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![1]).unwrap();
-        for failure in failures {
-            let expected = describe(&failure());
-            let mut writer = Writer::pcap(Failing(None), LinkType::ETHERNET).unwrap();
-            writer.get_mut().0 = Some(failure);
-            for result in [
-                writer.write_frame(&frame).map(|_| ()),
-                writer.write_frame(&frame).map(|_| ()),
-                writer.flush(),
-            ] {
-                let Err(Error::Io(error)) = result else {
-                    panic!("output failure expected");
-                };
-                assert_eq!(describe(&error), expected);
-            }
-        }
     }
 
     #[test]

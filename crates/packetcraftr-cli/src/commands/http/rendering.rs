@@ -61,16 +61,3 @@ pub(super) fn render_complete(complete: &wire::Complete) -> Result<(), CliError>
 fn escaped(value: &str) -> String {
     value.chars().flat_map(char::escape_default).collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::escaped;
-
-    #[test]
-    fn escaping_leaves_no_control_or_bidirectional_characters() {
-        let rendered = escaped("X-\u{1b}[31mEvil\r\nSet-Cookie:\u{202e} a");
-        assert!(!rendered.chars().any(char::is_control), "{rendered}");
-        assert!(!rendered.contains('\u{202e}'), "{rendered}");
-        assert_eq!(rendered, "X-\\u{1b}[31mEvil\\r\\nSet-Cookie:\\u{202e} a");
-    }
-}

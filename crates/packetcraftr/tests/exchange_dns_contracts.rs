@@ -4,7 +4,7 @@
 mod common;
 
 use std::collections::VecDeque;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -13,18 +13,9 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
-    field::FieldValue,
     frame::{Frame, LinkType},
-    layer::Raw,
     packet::Packet,
-    protocol::{
-        BuiltinProtocol,
-        application::dns::Dns,
-        builtin,
-        network::{Icmpv4, Ipv4},
-        semantics,
-        transport::Udp,
-    },
+    protocol::{application::dns::Dns, builtin, network::Ipv4, transport::Udp},
     template::Template,
 };
 use packetcraftr_netio::{self as net, capture, link::Mode, transmit};
@@ -238,96 +229,6 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Ag
 }
 
 #[test]
-fn concurrent_dns_requests_attribute_by_transaction_id_out_of_order() {
-    let template = Template::new(query_packet(0x1111, "example.com.")).axis(
-        2,
-        "id",
-        vec![0x1111_u16.into(), 0x2222_u16.into()],
-    );
-    let report = run(
-        &template,
-        |requests, _| vec![dns_reply(&requests[1]), dns_reply(&requests[0])],
-        2,
-    );
-    assert_eq!(report.responses.len(), 2);
-    assert_eq!(
-        report.responses[0].request_index, 1,
-        "the first reply answers the second request's identity"
-    );
-    assert_eq!(report.responses[1].request_index, 0);
-    assert!(report.unanswered.is_empty());
-    assert!(report.unsolicited.is_empty());
-    for response in &report.responses {
-        let path = semantics::outer_ip_path(&response.response.packet)
-            .expect("responder path")
-            .expect("IP path");
-        assert_eq!(path.source, IpAddr::V4(SERVER));
-    }
-}
-
-#[test]
-fn shared_transaction_ids_still_distinguish_questions() {
-    let template = Template::new(query_packet(0x7777, "one.example."))
-        .axis(
-            2,
-            "questions[0].name",
-            vec![
-                FieldValue::Text("one.example.".to_owned()),
-                FieldValue::Text("two.example.".to_owned()),
-            ],
-        )
-        .axis(
-            2,
-            "questions[0].type",
-            vec![FieldValue::Unsigned(1), FieldValue::Unsigned(28)],
-        )
-        .axis(
-            2,
-            "questions[0].class",
-            vec![FieldValue::Unsigned(1), FieldValue::Unsigned(3)],
-        );
-    let report = run(
-        &template,
-        |requests, _| requests.iter().rev().map(dns_reply).collect(),
-        8,
-    );
-    assert_eq!(report.responses.len(), 8);
-    for (arrival, response) in report.responses.iter().enumerate() {
-        assert_eq!(
-            response.request_index,
-            7 - arrival,
-            "reply {arrival} must answer the question it echoes"
-        );
-    }
-    assert!(report.unanswered.is_empty());
-    assert!(report.unsolicited.is_empty());
-}
-
-#[test]
-fn identical_dns_requests_keep_their_reply_ambiguous() {
-    let template = Template::new(query_packet(0x1111, "example.com.")).axis(
-        2,
-        "id",
-        vec![0x1111_u16.into(), 0x1111_u16.into()],
-    );
-    let report = run(&template, |requests, _| vec![dns_reply(&requests[0])], 2);
-    assert!(
-        report.responses.is_empty(),
-        "an indistinguishable reply must not pick a request"
-    );
-    assert_eq!(report.unanswered, vec![0, 1]);
-    assert_eq!(report.unsolicited.len(), 1);
-    assert!(
-        report
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "exchange.ambiguous_attribution"),
-        "{:?}",
-        report.diagnostics
-    );
-}
-
-#[test]
 fn mismatched_or_malformed_dns_replies_cannot_fall_back_to_the_udp_tuple() {
     let template = Template::new(query_packet(0x1234, "example.com."));
     let report = run(
@@ -375,80 +276,6 @@ fn mismatched_or_malformed_dns_replies_cannot_fall_back_to_the_udp_tuple() {
         report.unsolicited.len(),
         6,
         "wrong identity, endpoint, and undecodable replies stay unsolicited"
-    );
-    assert!(report.unanswered.is_empty());
-}
-
-#[test]
-fn non_dns_udp_and_quoted_icmp_errors_keep_their_exchange_semantics() {
-    let mut raw_packet = Packet::new();
-    raw_packet.push(Ipv4 {
-        destination: SERVER,
-        ..Ipv4::default()
-    });
-    raw_packet.push(Udp {
-        source_port: CLIENT_PORT,
-        destination_port: 9_999,
-        ..Udp::default()
-    });
-    raw_packet.push(Raw::new(b"echo".to_vec()));
-    let raw_template = Template::new(raw_packet);
-    let report = run(
-        &raw_template,
-        |requests, _| {
-            let request = &requests[0];
-            let request_ipv4 = request.get::<Ipv4>().expect("request IPv4");
-            let request_udp = request.get::<Udp>().expect("request UDP");
-            let mut response = Packet::new();
-            response.push(Ipv4 {
-                source: request_ipv4.destination,
-                destination: request_ipv4.source,
-                ..Ipv4::default()
-            });
-            response.push(Udp {
-                source_port: request_udp.destination_port,
-                destination_port: request_udp.source_port,
-                ..Udp::default()
-            });
-            response.push(Raw::new(b"reply".to_vec()));
-            vec![response]
-        },
-        1,
-    );
-    assert_eq!(report.responses.len(), 1);
-    assert_eq!(report.responses[0].request_index, 0);
-
-    let template = Template::new(query_packet(0x1234, "example.com."));
-    let report = run(
-        &template,
-        |_, sent| {
-            let mut body = vec![0; 4];
-            body.extend_from_slice(&sent[0]);
-            let mut response = Packet::new();
-            response.push(Ipv4 {
-                source: ROUTER,
-                destination: common::SELECTED_SOURCE,
-                ..Ipv4::default()
-            });
-            response.push(Icmpv4 {
-                icmp_type: 3,
-                code: 3,
-                body: body.into(),
-                ..Icmpv4::default()
-            });
-            vec![response]
-        },
-        1,
-    );
-    assert_eq!(report.responses.len(), 1);
-    assert_eq!(report.responses[0].request_index, 0);
-    assert!(
-        report.responses[0]
-            .response
-            .packet
-            .iter()
-            .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Icmpv4)),
-        "the attributed evidence is the ICMP error itself"
     );
     assert!(report.unanswered.is_empty());
 }

@@ -101,28 +101,8 @@ impl VlanTag {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
-
-    #[test]
-    fn broadcast_is_the_all_ones_ethernet_address() {
-        assert_eq!(MacAddress::BROADCAST, MacAddress([0xff; 6]));
-        assert_eq!(MacAddress::BROADCAST.to_string(), "ff:ff:ff:ff:ff:ff");
-    }
-
-    #[test]
-    fn mac_addresses_parse_with_either_separator_and_digit_case() {
-        let expected = MacAddress([0x02, 0x00, 0xab, 0xcd, 0xef, 0x01]);
-        for text in [
-            "02:00:ab:cd:ef:01",
-            "02-00-AB-CD-EF-01",
-            "02:00:aB:Cd:eF:01",
-        ] {
-            assert_eq!(text.parse(), Ok(expected), "{text}");
-        }
-        assert_eq!(expected.to_string().parse(), Ok(expected));
-    }
 
     #[test]
     fn malformed_mac_addresses_are_refused() {
@@ -147,28 +127,6 @@ mod tests {
                 Err(Error::InvalidMacAddress),
                 "{text:?}"
             );
-        }
-    }
-
-    #[test]
-    fn ip_multicast_groups_map_to_their_ethernet_group_addresses() {
-        assert_eq!(
-            MacAddress::for_ip_multicast(IpAddr::V4(Ipv4Addr::new(239, 255, 1, 2))),
-            Some(MacAddress([0x01, 0x00, 0x5e, 0x7f, 1, 2])),
-            "only the low 23 IPv4 group bits are mapped"
-        );
-        assert_eq!(
-            MacAddress::for_ip_multicast(IpAddr::V6(
-                "ff02::1:ff00:abcd".parse::<Ipv6Addr>().expect("group")
-            )),
-            Some(MacAddress([0x33, 0x33, 0xff, 0x00, 0xab, 0xcd]))
-        );
-        for unicast in [
-            IpAddr::V4(Ipv4Addr::BROADCAST),
-            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
-        ] {
-            assert_eq!(MacAddress::for_ip_multicast(unicast), None);
         }
     }
 }

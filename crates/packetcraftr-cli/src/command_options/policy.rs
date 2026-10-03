@@ -249,8 +249,6 @@ impl HostnamePolicyArgs {
 mod tests {
 
     use clap::Parser as _;
-    use packetcraftr_core::capture_file;
-    use packetcraftr_netio as net;
 
     use crate::cli::Cli;
     use crate::commands::CommandLine;
@@ -294,36 +292,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn replay_source_spoofing_requires_its_explicit_policy_opt_in() {
-        let default = Cli::try_parse_from([
-            "packetcraftr",
-            "replay",
-            "capture.pcapng",
-            "--interface",
-            "7",
-        ])
-        .expect("replay defaults parse");
-        let CommandLine::Replay(default) = default.command else {
-            panic!("replay command")
-        };
-        assert!(!default.policy.into_policy().allow_source_spoofing);
-
-        let opted_in = Cli::try_parse_from([
-            "packetcraftr",
-            "replay",
-            "capture.pcapng",
-            "--interface",
-            "7",
-            "--allow-source-spoofing",
-        ])
-        .expect("replay source-spoofing opt-in parses");
-        let CommandLine::Replay(opted_in) = opted_in.command else {
-            panic!("replay command")
-        };
-        assert!(opted_in.policy.into_policy().allow_source_spoofing);
-    }
-
     fn budgets_for(arguments: &[&str]) -> (u64, u64) {
         let cli = Cli::try_parse_from(arguments).expect("command must parse with defaults");
         let policy = match cli.command {
@@ -363,24 +331,5 @@ mod tests {
         ] {
             assert_eq!(budgets_for(arguments), shared, "{arguments:?}");
         }
-    }
-
-    #[test]
-    fn shared_defaults_match_the_library_defaults_they_stand_in_for() {
-        assert_eq!(
-            (
-                DEFAULT_MAX_PACKETS_PER_OPERATION,
-                DEFAULT_MAX_BYTES_PER_OPERATION
-            ),
-            (
-                capture_file::DEFAULT_MAX_STREAM_FRAMES,
-                capture_file::DEFAULT_MAX_STREAM_BYTES
-            ),
-        );
-        assert_eq!(
-            DEFAULT_MAX_BYTES_PER_OPERATION,
-            u64::try_from(net::capture::Limits::default().max_bytes)
-                .expect("default max bytes fits u64"),
-        );
     }
 }

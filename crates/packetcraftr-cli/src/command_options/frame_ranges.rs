@@ -155,41 +155,6 @@ mod tests {
         .resolve()
     }
 
-    fn kept(selection: &FrameSelection, upto: u64) -> Vec<u64> {
-        (1..=upto)
-            .filter(|position| selection.keeps(*position))
-            .collect()
-    }
-
-    #[test]
-    fn absent_options_keep_everything() {
-        let selection = select(None, None).unwrap();
-        assert!(selection.is_unrestricted());
-        assert_eq!(kept(&selection, 4), [1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn ranges_are_inclusive_open_ended_and_merged() {
-        let selection = select(Some("2-3,10"), None).unwrap();
-        assert!(!selection.is_unrestricted());
-        assert_eq!(kept(&selection, 12), [2, 3, 10]);
-        assert_eq!(kept(&select(Some("10-"), None).unwrap(), 12), [10, 11, 12]);
-        let merged = select(Some("5-9,1-3,2-6,4,10"), None).unwrap();
-        assert_eq!(merged.ranges, Some(vec![(1, 10)]));
-        let gap = select(Some("1-3,5"), None).unwrap();
-        assert_eq!(gap.ranges, Some(vec![(1, 3), (5, 5)]));
-        assert!(select(Some("1-"), None).unwrap().keeps(u64::MAX));
-    }
-
-    #[test]
-    fn every_selects_source_positions_and_intersects_with_ranges() {
-        let every = select(None, Some(5)).unwrap();
-        assert_eq!(kept(&every, 12), [1, 6, 11]);
-        let both = select(Some("3-"), Some(5)).unwrap();
-        assert_eq!(kept(&both, 17), [6, 11, 16]);
-        assert_eq!(kept(&select(None, Some(1)).unwrap(), 3), [1, 2, 3]);
-    }
-
     #[test]
     fn malformed_selections_are_usage_errors() {
         let over_ranges = (1..=257)

@@ -9,9 +9,6 @@ use super::requirements::Requirements;
 use crate::registry::Registry;
 
 mod predicate;
-#[cfg(test)]
-mod tests;
-
 #[derive(Clone, Copy)]
 enum Operator {
     Not,

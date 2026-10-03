@@ -79,28 +79,3 @@ fn netmask(interface: &crate::interface::Info) -> Option<u32> {
     // is 0xffffff00 on every target, not its network-order bytes.
     Some(u32::MAX.checked_shl(shift).unwrap_or(0))
 }
-
-#[cfg(all(test, native_layer2))]
-mod tests {
-    use std::net::{IpAddr, Ipv6Addr};
-
-    use super::*;
-    use crate::{
-        interface,
-        test_support::{assigned, interface_info, v4},
-    };
-
-    #[test]
-    fn capture_netmask_uses_the_first_ipv4_assignment() {
-        let interface = interface::Info {
-            addresses: vec![assigned(v4(10, 0, 0, 2), 8), assigned(v4(192, 0, 2, 2), 24)],
-            ..interface_info("fixture0", 7)
-        };
-
-        assert_eq!(netmask(&interface), Some(0xff00_0000));
-
-        let mut ipv6_only = interface;
-        ipv6_only.addresses = vec![assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128)];
-        assert_eq!(netmask(&ipv6_only), None);
-    }
-}

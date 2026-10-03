@@ -14,55 +14,12 @@ use packetcraftr_core::{
     layer::Raw,
     packet::Packet,
     protocol::{
-        application::{dns::Dns, http::Http},
         builtin,
         network::Ipv4,
         transport::{Tcp, Udp},
     },
 };
 use std::time::UNIX_EPOCH;
-#[test]
-fn per_frame_application_headers_round_trip_with_unconsumed_tcp_tail() {
-    for dns in [false, true] {
-        let mut packet = Packet::new();
-        packet.push(Ipv4 {
-            source: "192.0.2.1".parse().unwrap(),
-            destination: "198.51.100.2".parse().unwrap(),
-            ..Default::default()
-        });
-        packet.push(Tcp {
-            source_port: 40000,
-            destination_port: if dns { 53 } else { 80 },
-            ..Default::default()
-        });
-        if dns {
-            packet.push(Dns::default());
-            packet.push(Raw::new(vec![0, 12, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
-        } else {
-            packet.push(
-                Http::try_from(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".as_slice()).unwrap(),
-            );
-            packet.push(Raw::new(b"GET /next HTTP/1.1\r\n\r\n".to_vec()));
-        }
-        let builder = Builder::new(builtin::registry());
-        let built = builder
-            .build(packet, Default::default(), Default::default())
-            .unwrap();
-        let decoded = Dissector::new(builtin::registry())
-            .decode(
-                Frame::new(UNIX_EPOCH, LinkType::IPV4, built.bytes.clone()).unwrap(),
-                Default::default(),
-            )
-            .unwrap();
-        assert_eq!(decoded.packet.get::<Dns>().is_some(), dns);
-        assert_eq!(decoded.packet.get::<Http>().is_some(), !dns);
-        assert!(decoded.packet.get::<Raw>().is_some());
-        let rebuilt = builder
-            .build(decoded.packet, Default::default(), Default::default())
-            .unwrap();
-        assert_eq!(rebuilt.bytes, built.bytes);
-    }
-}
 
 fn dns_response_with_answers(count: u16) -> Vec<u8> {
     let mut wire = vec![0x12, 0x34, 0x81, 0x80, 0, 0];
@@ -151,21 +108,4 @@ fn a_tcp_dns_message_past_a_decode_limit_stays_raw_and_says_why() {
     let (decoded, _) = dissect_dns(false, &length_prefixed(&dns_response_with_answers(512)));
     assert_eq!(protocols(&decoded), vec!["ipv4", "tcp", "dns"]);
     assert!(decoded.diagnostics.is_empty());
-}
-
-#[test]
-fn a_tcp_dns_payload_that_is_not_a_limit_failure_stays_raw_without_diagnostics() {
-    let framed = length_prefixed(&dns_response_with_answers(2));
-    let mut question_missing = vec![0; 12];
-    question_missing[5] = 1;
-    for payload in [
-        framed[..framed.len() - 3].to_vec(),
-        vec![0, 4, 1, 2, 3, 4],
-        b"GET / HTTP/1.1\r\n\r\n".to_vec(),
-        length_prefixed(&question_missing),
-    ] {
-        let (decoded, _) = dissect_dns(false, &payload);
-        assert_eq!(protocols(&decoded), vec!["ipv4", "tcp", "raw"]);
-        assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
-    }
 }

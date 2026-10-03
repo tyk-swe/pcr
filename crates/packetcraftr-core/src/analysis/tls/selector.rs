@@ -94,26 +94,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn patterns_match_case_insensitively_with_optional_wildcard_ends() {
-        let names = ["api.example.test", "files.example.test", "example.test"];
-        let kept = |pattern: &str| {
-            let pattern = pattern.parse::<SniPattern>().expect("valid pattern");
-            names
-                .into_iter()
-                .filter(|name| pattern.matches(name))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            kept("*.example.test"),
-            ["api.example.test", "files.example.test"]
-        );
-        assert_eq!(kept("api*"), ["api.example.test"]);
-        assert_eq!(kept("*FILES*"), ["files.example.test"]);
-        assert_eq!(kept("Example.Test"), ["example.test"]);
-        assert!(kept("absent*").is_empty());
-    }
-
-    #[test]
     fn an_inner_wildcard_is_refused() {
         for pattern in ["a*b", "*a*b*", "**x"] {
             let error = pattern

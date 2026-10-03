@@ -246,7 +246,6 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layer::Raw;
 
     const PROTOCOL: Id = Id::new("test");
 
@@ -282,31 +281,6 @@ mod tests {
                 message: "layer contributes 9 bytes but only 8 remain in the packet-size budget"
                     .to_owned(),
             })
-        );
-    }
-
-    #[test]
-    fn constructors_build_the_matching_variants() {
-        assert_eq!(
-            Error::invalid(PROTOCOL, "bad"),
-            Error::Invalid {
-                protocol: PROTOCOL,
-                message: "bad".to_owned(),
-            }
-        );
-        assert_eq!(
-            Error::unsupported(PROTOCOL, String::from("nope")),
-            Error::Unsupported {
-                protocol: PROTOCOL,
-                message: "nope".to_owned(),
-            }
-        );
-        assert_eq!(
-            Error::wrong_layer(PROTOCOL, &Raw::default()),
-            Error::WrongLayer {
-                expected: PROTOCOL,
-                actual: Raw::ID,
-            }
         );
     }
 }

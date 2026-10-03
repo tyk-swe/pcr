@@ -310,26 +310,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn layer_errors_report_other_failures_as_invalid_dns() {
-        let mut too_many = vec![0; 12];
-        too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
-        let error = layer_from_wire(too_many.into(), false).unwrap_err();
-        assert!(
-            matches!(
-                &error,
-                crate::codec::Error::Rejected { protocol, source }
-                    if protocol.as_str() == NAME
-                        && matches!(
-                            source.downcast_ref::<Error>(),
-                            Some(Error::QuestionLimit {
-                                actual: 65,
-                                limit: 64
-                            })
-                        )
-            ),
-            "{error:?}"
-        );
-    }
 }

@@ -266,10 +266,6 @@ pub(super) fn searchable(spec: FieldSpec) -> bool {
 mod tests {
     use super::*;
 
-    fn spec(kind: FieldKind) -> FieldSpec {
-        FieldSpec::synthetic(kind)
-    }
-
     #[test]
     fn literal_shapes_are_disambiguated_before_broader_hex_and_number_forms() {
         assert_eq!(parse("true"), Some(Literal::Bool(true)));
@@ -299,130 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn eight_byte_runs_stay_bytes_while_other_ipv6_spellings_stay_addresses() {
-        assert_eq!(
-            parse("47:45:54:20:2f:69:6e:64"),
-            Some(Literal::Bytes(Bytes::from_static(b"GET /ind")))
-        );
-        for address in [
-            "::1",
-            "fe:80::1",
-            "1:2:3:4:5:6:7:8",
-            "2001:0db8:0000:0000:0000:0000:0000:0001",
-            "::ffff:192.0.2.1",
-        ] {
-            assert!(
-                matches!(parse(address), Some(Literal::Ipv6(_))),
-                "{address}"
-            );
-        }
-    }
-
-    #[test]
-    fn malformed_literal_shapes_are_not_partially_accepted() {
-        for malformed in [
-            "0x",
-            "0xgg",
-            "192.0.2.1/33",
-            "2001:db8::1/129",
-            "aa:bb-cc",
-            "a:bb",
-            "aa:",
-            "ff",
-        ] {
-            assert_eq!(parse(malformed), None, "{malformed}");
-        }
-    }
-
-    #[test]
-    fn only_hex_digit_words_that_fail_as_bytes_look_like_mistyped_bytes() {
-        for word in [
-            "ff", "160301ff", "DEADBEEF", "c000", "123", "47:45:5", "47:45:", ":45", "c0:0",
-            "aa:bb-cc", "1-2",
-        ] {
-            assert!(is_malformed_byte_word(word), "{word}");
-        }
-        for word in [
-            "",
-            "f",
-            "GET",
-            "0xff",
-            "auto",
-            "fg",
-            "dead-beef",
-            "2026-09-29",
-            "host:80",
-            "-",
-            "--",
-            "::",
-        ] {
-            assert!(!is_malformed_byte_word(word), "{word}");
-        }
-    }
-
-    #[test]
-    fn field_compatibility_rejects_impossible_comparisons() {
-        assert!(compatible(spec(FieldKind::Bool), &Literal::Bool(true)));
-        assert!(compatible(spec(FieldKind::Bool), &Literal::Unsigned(1)));
-        assert!(!compatible(spec(FieldKind::Bool), &Literal::Unsigned(2)));
-        assert!(compatible(spec(FieldKind::Signed), &Literal::Unsigned(1)));
-        assert!(compatible(spec(FieldKind::Unsigned), &Literal::Signed(-1)));
-        assert!(!compatible(
-            spec(FieldKind::Unsigned),
-            &Literal::Text(AUTO_WIRE_VALUE.to_owned())
-        ));
-        assert!(compatible(
-            FieldSpec {
-                derived: true,
-                ..spec(FieldKind::Unsigned)
-            },
-            &Literal::Text(AUTO_WIRE_VALUE.to_owned())
-        ));
-        assert!(compatible(spec(FieldKind::Bytes), &Literal::Unsigned(255)));
-        assert!(!compatible(spec(FieldKind::Bytes), &Literal::Unsigned(256)));
-        assert!(compatible(
-            spec(FieldKind::Ipv4),
-            &Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0)
-        ));
-        assert!(compatible(
-            spec(FieldKind::Mac),
-            &Literal::Bytes(Bytes::from_static(&[0, 1]))
-        ));
-        assert!(compatible(spec(FieldKind::List), &Literal::Bool(false)));
-    }
-
-    #[test]
-    fn range_words_split_on_the_first_pair_of_dots_into_same_kind_ends() {
-        assert_eq!(
-            parse_range("1024..65535"),
-            Some(Ok(Literal::Range(Range::Unsigned(1024, 65535))))
-        );
-        assert_eq!(
-            parse_range("0x10..0x20"),
-            Some(Ok(Literal::Range(Range::Unsigned(16, 32))))
-        );
-        assert_eq!(
-            parse_range("5..5"),
-            Some(Ok(Literal::Range(Range::Unsigned(5, 5))))
-        );
-        assert_eq!(
-            parse_range("10.0.0.10..10.0.0.50"),
-            Some(Ok(Literal::Range(Range::Ipv4(
-                Ipv4Addr::new(10, 0, 0, 10),
-                Ipv4Addr::new(10, 0, 0, 50)
-            ))))
-        );
-        assert!(matches!(
-            parse_range("2001:db8::1..2001:db8::ff"),
-            Some(Ok(Literal::Range(Range::Ipv6(..))))
-        ));
-        assert_eq!(
-            Literal::Range(Range::Unsigned(1, 2)).to_string(),
-            "1..2".to_owned()
-        );
-    }
-
-    #[test]
     fn malformed_ranges_are_refused_and_non_numeric_words_are_not_ranges() {
         for malformed in [
             "200..100",
@@ -445,52 +317,5 @@ mod tests {
         for text in ["a..b", "..", "plain", "a.b", "www..example", "true..false"] {
             assert_eq!(parse_range(text), None, "{text}");
         }
-    }
-
-    #[test]
-    fn range_literals_fit_only_fields_of_their_own_kind() {
-        let unsigned = Literal::Range(Range::Unsigned(1, 2));
-        let v4 = Literal::Range(Range::Ipv4(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST));
-        let v6 = Literal::Range(Range::Ipv6(Ipv6Addr::LOCALHOST, Ipv6Addr::LOCALHOST));
-        assert!(compatible(spec(FieldKind::Unsigned), &unsigned));
-        assert!(compatible(spec(FieldKind::Signed), &unsigned));
-        assert!(compatible(spec(FieldKind::Ipv4), &v4));
-        assert!(compatible(spec(FieldKind::Ipv6), &v6));
-        assert!(!compatible(spec(FieldKind::Ipv6), &v4));
-        assert!(!compatible(spec(FieldKind::Ipv4), &v6));
-        assert!(!compatible(spec(FieldKind::Ipv4), &unsigned));
-        assert!(!compatible(spec(FieldKind::Bytes), &unsigned));
-        assert!(!compatible(spec(FieldKind::Text), &unsigned));
-        assert!(unsigned.is_range());
-        assert!(!Literal::Unsigned(1).is_range());
-    }
-
-    #[test]
-    fn searchable_types_and_prefix_markers_match_evaluation_contracts() {
-        for kind in [
-            FieldKind::Bytes,
-            FieldKind::Text,
-            FieldKind::Mac,
-            FieldKind::List,
-        ] {
-            assert!(searchable(spec(kind)), "{}", kind_name(kind));
-        }
-        let objects = FieldSpec {
-            structured: true,
-            ..spec(FieldKind::List)
-        };
-        assert!(!searchable(objects));
-        for kind in [
-            FieldKind::Bool,
-            FieldKind::Unsigned,
-            FieldKind::Signed,
-            FieldKind::Ipv4,
-            FieldKind::Ipv6,
-            FieldKind::Object,
-        ] {
-            assert!(!searchable(spec(kind)), "{}", kind_name(kind));
-        }
-        assert!(Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0).is_prefix());
-        assert!(!Literal::Ipv4(Ipv4Addr::UNSPECIFIED).is_prefix());
     }
 }

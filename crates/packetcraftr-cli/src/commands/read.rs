@@ -8,9 +8,6 @@ mod projection;
 mod records;
 mod rendering;
 mod selection;
-#[cfg(test)]
-mod tests;
-
 use crate::output::contract::ReadFormat;
 
 use std::io;

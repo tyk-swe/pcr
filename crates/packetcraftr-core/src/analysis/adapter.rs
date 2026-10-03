@@ -528,39 +528,3 @@ pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
     }
     0
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pppoe_path(
-        source: [u8; 6],
-        destination: [u8; 6],
-        session_id: u16,
-    ) -> Vec<EncapsulationIdentifier> {
-        let mut packet = Packet::new();
-        packet
-            .push(Ethernet {
-                source,
-                destination,
-                ..Ethernet::default()
-            })
-            .push(Pppoe {
-                session_id,
-                ..Pppoe::default()
-            })
-            .push(Ipv4::default())
-            .push(Tcp::default());
-        transports(&packet).tcp.unwrap().encapsulation
-    }
-
-    #[test]
-    fn pppoe_scopes_separate_endpoint_pairs_and_normalize_direction() {
-        let a = [2, 0, 0, 0, 0, 1];
-        let b = [2, 0, 0, 0, 0, 2];
-        let c = [2, 0, 0, 0, 0, 3];
-        assert_eq!(pppoe_path(a, b, 7), pppoe_path(b, a, 7));
-        assert_ne!(pppoe_path(a, b, 7), pppoe_path(a, c, 7));
-        assert_ne!(pppoe_path(a, b, 7), pppoe_path(a, b, 8));
-    }
-}

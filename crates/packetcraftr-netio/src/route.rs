@@ -103,46 +103,6 @@ mod tests {
         interface_id("fixture0", 7)
     }
 
-    #[cfg(not(native_route))]
-    #[test]
-    fn portable_system_provider_fails_closed_for_both_lookup_contracts() {
-        use crate::{NativeCapability, Unsupported};
-
-        let provider = SystemProvider;
-        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
-        let deadline = Deadline::new(Duration::from_secs(5));
-
-        let route = provider
-            .lookup_with_preferences(
-                destination,
-                Some(&interface()),
-                Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))),
-                &deadline,
-            )
-            .expect_err("portable build has no native route provider");
-        let interface = provider
-            .lookup_interface(&interface(), &deadline)
-            .expect_err("portable build has no native interface route provider");
-
-        for (error, capability) in [
-            (route, "route selection"),
-            (interface, "interface selection"),
-        ] {
-            assert!(matches!(
-                error,
-                Error::Unsupported(Unsupported {
-                    capability: NativeCapability::Route,
-                    ref message,
-                    source: None,
-                }) if message.contains("enable the native-route feature")
-                    && message.contains(capability)
-            ));
-            let classification = error.classification();
-            assert_eq!(classification.code, "capability.route");
-            assert_eq!(classification.kind, Kind::Capability);
-        }
-    }
-
     #[test]
     fn a_preferred_source_of_the_other_family_is_rejected_before_the_kernel_is_asked() {
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));

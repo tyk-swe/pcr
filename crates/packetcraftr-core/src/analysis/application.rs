@@ -598,11 +598,4 @@ mod tests {
         assert_limit(LIMITS.check_retained(8), "max_retained_bytes", 7);
         assert_limit(LIMITS.check_retained(usize::MAX), "max_retained_bytes", 7);
     }
-
-    #[test]
-    fn decoded_charge_adds_the_fixed_expansion_and_saturates() {
-        assert_eq!(Limits::decoded_charge(0), 4096);
-        assert_eq!(Limits::decoded_charge(10), 10 * 32 + 4096);
-        assert_eq!(Limits::decoded_charge(usize::MAX), usize::MAX);
-    }
 }

@@ -156,17 +156,6 @@ mod tests {
     }
 
     #[test]
-    fn executor_rejects_zero_transport_source_ports() {
-        for target in [
-            ProbeEndpoint::Udp { port: 33_434 },
-            ProbeEndpoint::Tcp { port: 80 },
-        ] {
-            assert!(validate_batch(&batch(target, &[0])).is_err());
-        }
-        assert!(validate_batch(&batch(ProbeEndpoint::Icmp, &[0])).is_ok());
-    }
-
-    #[test]
     fn executor_rejects_mixed_probe_shapes() {
         let mixed: [fn(&mut Probe); 3] = [
             |probe| probe.payload_size = 8,

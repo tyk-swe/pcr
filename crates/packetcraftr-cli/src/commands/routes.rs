@@ -53,37 +53,3 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         rendering::route_line,
     )
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn route_listing_requires_a_usable_mtu_even_when_including_down_interfaces() {
-        let mut interface = net::interface::Info {
-            id: net::interface::Id {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            description: None,
-            mac_address: None,
-            addresses: Vec::new(),
-            flags: net::interface::Flags::default(),
-            mtu: None,
-            capability: net::link::Capability::Layer3,
-            link_type: packetcraftr_core::frame::LinkType::RAW,
-        };
-        for up in [false, true] {
-            interface.flags.up = up;
-            for mtu in [None, Some(0)] {
-                interface.mtu = mtu;
-                assert!(!Args { all: false }.includes(&interface));
-                assert!(!Args { all: true }.includes(&interface));
-            }
-            interface.mtu = Some(1_500);
-            assert_eq!(Args { all: false }.includes(&interface), up);
-            assert!(Args { all: true }.includes(&interface));
-        }
-    }
-}

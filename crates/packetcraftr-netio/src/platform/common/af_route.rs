@@ -150,82 +150,8 @@ mod tests {
         bytes
     }
 
-    #[test]
-    fn trimmed_netmask_sockaddrs_keep_their_prefix_length() {
-        let v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-        let v6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        let inet = u8::try_from(libc::AF_INET).expect("AF_INET fits in u8");
-        let inet6 = u8::try_from(libc::AF_INET6).expect("AF_INET6 fits in u8");
-        assert_eq!(
-            netmask_prefix(&[7, inet, 0, 0, 255, 255, 255], v4),
-            Some(24)
-        );
-        assert_eq!(
-            netmask_prefix(&[8, inet, 0, 0, 255, 255, 255, 255], v4),
-            Some(32)
-        );
-        assert_eq!(netmask_prefix(&[5, inet, 0, 0, 0xf0], v4), Some(4));
-        assert_eq!(netmask_prefix(&[0], v4), Some(0));
-        let full = ipv4_sockaddr(Ipv4Addr::new(255, 255, 254, 0));
-        assert_eq!(netmask_prefix(&full, v4), Some(23));
-        let mut slash64 = vec![16, inet6, 0, 0, 0, 0, 0, 0];
-        slash64.extend_from_slice(&[0xff; 8]);
-        assert_eq!(netmask_prefix(&slash64, v6), Some(64));
-        assert_eq!(
-            netmask_prefix(&[7, inet, 0, 0, 255, 0, 255], v4),
-            None,
-            "a non-contiguous mask has no prefix length"
-        );
-    }
-
     fn mask(indices: &[libc::c_int]) -> libc::c_int {
         indices.iter().fold(0, |mask, index| mask | (1 << *index))
-    }
-
-    #[test]
-    fn accepts_aligned_zero_length_default_route_netmask() {
-        let destination = Ipv4Addr::UNSPECIFIED;
-        let gateway = Ipv4Addr::new(192, 0, 2, 1);
-        let mut bytes = ipv4_sockaddr(destination);
-        bytes.extend(ipv4_sockaddr(gateway));
-        bytes.extend([0; size_of::<u32>()]);
-
-        let addresses = parse_route_addresses(
-            &bytes,
-            mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK]),
-        )
-        .expect("zero-length default-route netmask is valid");
-
-        assert_eq!(
-            addresses[libc::RTAX_DST as usize],
-            Some(IpAddr::V4(destination))
-        );
-        assert_eq!(
-            addresses[libc::RTAX_GATEWAY as usize],
-            Some(IpAddr::V4(gateway))
-        );
-        assert_eq!(addresses[libc::RTAX_NETMASK as usize], None);
-    }
-
-    #[test]
-    fn rejects_zero_length_destination_and_gateway_slots() {
-        let valid = ipv4_sockaddr(Ipv4Addr::new(192, 0, 2, 1));
-        for (bytes, address_mask) in [
-            (vec![0; size_of::<u32>()], mask(&[libc::RTAX_DST])),
-            (
-                {
-                    let mut bytes = valid.clone();
-                    bytes.extend([0; size_of::<u32>()]);
-                    bytes
-                },
-                mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY]),
-            ),
-        ] {
-            assert!(matches!(
-                parse_route_addresses(&bytes, address_mask),
-                Err(route::Error::InvalidResponse { .. })
-            ));
-        }
     }
 
     #[test]

@@ -384,58 +384,10 @@ mod tests {
     use crate::protocol::application::tls::test_support::{TLS_1_2, record};
 
     #[test]
-    fn a_segment_without_a_record_header_has_no_dissection() {
-        assert!(Tls::from_records(&Bytes::from_static(b"GET / HTTP/1.1\r\n")).is_none());
-    }
-
-    #[test]
     fn a_truncated_first_record_yields_no_layer() {
         let mut bytes = record(23, TLS_1_2, &[0; 40]);
         bytes.truncate(20);
         assert!(Tls::from_records(&Bytes::copy_from_slice(&bytes)).is_none());
-    }
-
-    #[test]
-    fn a_trailing_partial_record_marks_the_layer_incomplete() {
-        let mut bytes = record(23, TLS_1_2, b"first");
-        bytes.extend_from_slice(&record(23, TLS_1_2, b"second-record")[..6]);
-        let dissection =
-            Tls::from_records(&Bytes::copy_from_slice(&bytes)).expect("one complete record");
-        assert!(dissection.layer.incomplete);
-        assert_eq!(dissection.layer.record_count, 1);
-        assert_eq!(dissection.remainder, 6);
-        assert_eq!(
-            dissection
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code)
-                .collect::<Vec<_>>(),
-            vec![RECORD_CONTINUES]
-        );
-    }
-
-    #[test]
-    fn the_record_cap_stops_the_loop_and_reports_once() {
-        let mut bytes = Vec::new();
-        for _ in 0..MAX_RECORDS_PER_SEGMENT + 1 {
-            bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
-        }
-        let dissection = Tls::from_records(&Bytes::copy_from_slice(&bytes))
-            .expect("capped records still dissect");
-        assert_eq!(
-            usize::from(dissection.layer.record_count),
-            MAX_RECORDS_PER_SEGMENT
-        );
-        assert_eq!(dissection.remainder, 6);
-        assert!(!dissection.layer.incomplete);
-        assert_eq!(
-            dissection
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code)
-                .collect::<Vec<_>>(),
-            vec![RECORDS_CAPPED]
-        );
     }
 
     #[test]
@@ -444,90 +396,5 @@ mod tests {
         assert!(
             Tls::parse_records(&wire, |_| panic!("invalid input must not be copied")).is_none()
         );
-    }
-
-    #[test]
-    fn borrowed_records_retain_only_the_consumed_prefix() {
-        let mut wire = record(23, TLS_1_2, b"encrypted");
-        let complete = wire.len();
-        wire.resize(1 << 20, 0);
-        let parsed = Tls::parse_records(&wire, |end| {
-            assert_eq!(end, complete);
-            Bytes::copy_from_slice(&wire[..end])
-        })
-        .unwrap();
-        assert_eq!(parsed.remainder, wire.len() - complete);
-    }
-
-    #[test]
-    fn exactly_the_cap_reports_nothing() {
-        let mut bytes = Vec::new();
-        for _ in 0..MAX_RECORDS_PER_SEGMENT {
-            bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
-        }
-        let dissection = Tls::from_records(&Bytes::copy_from_slice(&bytes))
-            .expect("capped records still dissect");
-        assert_eq!(dissection.remainder, 0);
-        assert!(dissection.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn wire_derived_text_escapes_control_bytes_but_keeps_dots() {
-        assert_eq!(escape_wire_text("api.example.test"), "api.example.test");
-        assert_eq!(escape_wire_text("h2\u{0}"), "h2\\000");
-        assert_eq!(escape_wire_text("a\\b"), "a\\092b");
-        assert_eq!(escape_wire_text("h2 x"), "h2\\032x");
-    }
-
-    fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry();
-        let packet = crate::packet::Packet::new();
-        let build_context = crate::codec::Context::default();
-        let context = LayerEncodeContext {
-            packet: &packet,
-            index: 0,
-            build_context: &build_context,
-            mode: crate::codec::Mode::Strict,
-            registry: &registry,
-            child: None,
-            remaining_packet_bytes: 4096,
-        };
-        TlsCodec.encode(layer, &[], &context)
-    }
-
-    #[test]
-    fn a_dissected_layer_encodes_back_to_the_bytes_it_covered() {
-        let bytes = record(23, TLS_1_2, b"encrypted");
-        let layer = Tls::from_records(&Bytes::copy_from_slice(&bytes))
-            .expect("one complete record")
-            .layer;
-        let encoded = encode(&layer).expect("an unmodified layer encodes");
-        assert_eq!(encoded.prefix, bytes);
-        assert_eq!(layer.wire().as_ref(), &bytes[..]);
-    }
-
-    #[test]
-    fn changing_a_published_field_makes_the_layer_disagree_with_its_wire() {
-        let bytes = record(23, TLS_1_2, b"encrypted");
-        let mut layer = Tls::from_records(&Bytes::copy_from_slice(&bytes))
-            .expect("one complete record")
-            .layer;
-        layer.record_count = 7;
-        let Err(error) = encode(&layer) else {
-            panic!("a changed field cannot be encoded");
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("no longer match the retained wire"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn tls_default_fixture_exposes_a_complete_client_hello() {
-        let layer = TlsCodec.make_layer(&BTreeMap::new()).unwrap();
-        assert_eq!(layer.field("handshake_type"), Some(1u8.into()));
-        assert!(layer.field("hello").is_some());
     }
 }

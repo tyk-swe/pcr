@@ -1787,13 +1787,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- The offline forwarding regression harness accepts relative output directory
-  names beginning with `-` without parsing generated capture paths as CLI options.
+- The forwarding reference consumer rejects malformed retained detail collections
+  and typed preservation evidence, including partial evidence, before interpreting
+  a verdict. Invalid Unicode
+  rule strings now produce a contract error instead of an unhandled traceback.
+
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
+- The offline forwarding regression harness accepts relative output directory
+  names beginning with `-` without parsing generated capture paths as CLI options.
 - Analysis measurement reports distinguish allocator-run exits and produced
   profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
@@ -2016,6 +2021,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   so an axis can replace a denied recipe destination with permitted addresses.
 - JSON `build` output remains one complete document when interrupted during
   publication; cancellation is reported on stderr with exit code 130.
+- Topic errors and binary-to-terminal refusals return I/O exit 5 if their
+  diagnostic cannot be written to stderr, matching other command errors.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;
@@ -2042,6 +2049,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   messages, and exit codes are unchanged.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - TCP pending growth no longer recopies its retained range on adjacent or
   reverse extension. Bounded payload pages and interval metadata are charged
   independently; transient output/history allocations are admitted before commit.

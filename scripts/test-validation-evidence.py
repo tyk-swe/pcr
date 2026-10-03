@@ -605,33 +605,39 @@ class ManifestTests(unittest.TestCase):
 
 
 class ExternalConsumerManifestTests(unittest.TestCase):
-    def test_non_bmp_checkout_paths_generate_valid_utf8_toml(self):
+    def test_checkout_paths_roundtrip_through_utf8_toml(self):
         import tomllib
 
         consumer = module('check-external-consumer')
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory) / 'checkout \U0001f980'
-            source = root / 'examples/consumers/rust/composition.rs'
-            source.parent.mkdir(parents=True)
-            source.write_text('// consumer fixture\n', encoding='utf-8')
-            (root / 'rust-toolchain.toml').write_text(
-                '[toolchain]\nchannel = "fixture"\n', encoding='utf-8')
+        checkouts = ['plain checkout', 'checkout é', 'checkout \U0001f980',
+                     'checkout \x7f\U0001f980']
+        if os.name != 'nt':
+            checkouts.append('checkout "\\u007f" \U0001f980')
+        for checkout in checkouts:
+            with self.subTest(checkout=checkout):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory) / checkout
+                    source = root / 'examples/consumers/rust/composition.rs'
+                    source.parent.mkdir(parents=True)
+                    source.write_text('// consumer fixture\n', encoding='utf-8')
+                    (root / 'rust-toolchain.toml').write_text(
+                        '[toolchain]\nchannel = "fixture"\n', encoding='utf-8')
 
-            def inspect_manifest(command, *, cwd, **kwargs):
-                document = tomllib.loads((cwd / 'Cargo.toml').read_text(encoding='utf-8'))
-                for name in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
-                    self.assertEqual(document['dependencies'][name], {
-                        'path': str(root / 'crates' / name), 'default-features': False,
-                    })
-                self.assertEqual((cwd / 'composition.rs').read_bytes(), source.read_bytes())
-                return subprocess.CompletedProcess(command, 0)
+                    def inspect_manifest(command, *, cwd, **kwargs):
+                        document = tomllib.loads((cwd / 'Cargo.toml').read_text(encoding='utf-8'))
+                        for name in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
+                            self.assertEqual(document['dependencies'][name], {
+                                'path': str(root / 'crates' / name), 'default-features': False,
+                            })
+                        self.assertEqual((cwd / 'composition.rs').read_bytes(), source.read_bytes())
+                        return subprocess.CompletedProcess(command, 0)
 
-            with (mock.patch.object(consumer, 'ROOT', root),
-                  mock.patch.object(sys, 'argv', ['check-external-consumer.py']),
-                  mock.patch.object(consumer.shutil, 'which', return_value=sys.executable),
-                  mock.patch.object(consumer.subprocess, 'run', side_effect=inspect_manifest) as run):
-                self.assertEqual(consumer.main(), 0)
-            self.assertEqual(run.call_count, 2)
+                    with (mock.patch.object(consumer, 'ROOT', root),
+                          mock.patch.object(sys, 'argv', ['check-external-consumer.py']),
+                          mock.patch.object(consumer.shutil, 'which', return_value=sys.executable),
+                          mock.patch.object(consumer.subprocess, 'run', side_effect=inspect_manifest) as run):
+                        self.assertEqual(consumer.main(), 0)
+                    self.assertEqual(run.call_count, 2)
 
 
 @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')

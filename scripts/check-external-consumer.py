@@ -30,14 +30,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="packetcraftr-external-") as directory:
         project = Path(directory)
         # TOML accepts literal Unicode, but not JSON's non-BMP surrogate escapes.
-        dependencies = "\n".join(
-            f'{name} = {{ path = {json.dumps(str(ROOT / "crates" / name), ensure_ascii=False)}, default-features = false }}'
-            for name in ("packetcraftr", "packetcraftr-core", "packetcraftr-netio")
-        )
+        # DEL must still be escaped because TOML forbids it in basic strings.
+        dependencies = []
+        for name in ("packetcraftr", "packetcraftr-core", "packetcraftr-netio"):
+            path = json.dumps(str(ROOT / "crates" / name), ensure_ascii=False).replace('\x7f', '\\u007f')
+            dependencies.append(f'{name} = {{ path = {path}, default-features = false }}')
         (project / "Cargo.toml").write_text(
             '[package]\nname = "packetcraftr-external-consumer"\nversion = "0.0.0"\n'
             'edition = "2024"\npublish = false\n\n[workspace]\n\n[dependencies]\n'
-            + dependencies + '\n\n[[test]]\nname = "composition"\npath = "composition.rs"\n',
+            + '\n'.join(dependencies) + '\n\n[[test]]\nname = "composition"\npath = "composition.rs"\n',
             encoding='utf-8',
         )
         shutil.copyfile(ROOT / "examples/consumers/rust/composition.rs", project / "composition.rs")

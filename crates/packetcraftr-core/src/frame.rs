@@ -163,6 +163,10 @@ impl Frame {
         self.original_length
     }
 
+    pub fn is_truncated(&self) -> bool {
+        self.captured_length < self.original_length
+    }
+
     pub fn bytes(&self) -> &Bytes {
         &self.bytes
     }

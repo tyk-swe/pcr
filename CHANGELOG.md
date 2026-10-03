@@ -698,6 +698,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr_core::packet::Packet::iter_of` and `iter_of_mut` iterate every
+  layer of one concrete type in packet order (double-ended, no allocation).
+  The mutable iterator clears cached encoded payload lengths whenever a match
+  exists, even if dropped unconsumed; a no-match call leaves the cache intact.
+- `packetcraftr_core::frame::Frame::is_truncated` reports whether the
+  captured length is below the frame's declared original length.
 - Classification codes new in this release, each for a failure that
   previously had no classified error of its own (or, for `cli.worker_capacity`,
   was not a failure):

@@ -412,6 +412,16 @@ the client's `tcp` provider; the CLI composes
 `packetcraftr_netio::tcp::SystemProvider`, which is available independently of
 the native packet-I/O feature flags.
 
+`Packet` accessors match concrete layer types: `get::<T>` returns the first
+match while `iter_of::<T>` walks every match in packet order (double-ended, no
+allocation), so `packet.iter_of::<Ipv4>().nth(1)` selects a later occurrence.
+`iter_of_mut::<T>` edits all matches in place and, like the other mutable
+accessors, clears cached encoded payload lengths when a match exists, even if
+the iterator is dropped unconsumed; a no-match call leaves the cache intact.
+`Frame::is_truncated()` reports capture metadata — the captured length is
+below the declared original length — not whether protocol decoding succeeded
+or is complete.
+
 Runnable examples live in their owning crates and use only documentation
 addresses and in-memory fixtures, so they need no native features or network
 access:

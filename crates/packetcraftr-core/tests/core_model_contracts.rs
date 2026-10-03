@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{
     budget::Deadline,
     error::{BoundaryError, Classification, Classified, Kind},
-    frame::{Frame, Lengths, LinkType},
+    frame::{Direction, Frame, Lengths, LinkType},
 };
 
 #[derive(Debug)]
@@ -111,6 +111,70 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
     let error = serde_json::from_value::<Frame>(invalid)
         .expect_err("deserialization must revalidate capture lengths");
     assert!(error.to_string().contains("says 2 bytes but contains 1"));
+}
+
+#[test]
+fn frame_truncation_reflects_capture_lengths_only() {
+    let frame = |captured, original, bytes| {
+        Frame::try_with_lengths(
+            SystemTime::UNIX_EPOCH,
+            LinkType::ETHERNET,
+            Lengths { captured, original },
+            bytes,
+        )
+        .expect("valid capture lengths")
+    };
+
+    assert!(!frame(2, 2, vec![0, 1]).is_truncated());
+    assert!(!frame(0, 0, Vec::new()).is_truncated());
+    assert!(frame(1, 2, vec![0]).is_truncated());
+    assert!(frame(0, u32::MAX, Vec::new()).is_truncated());
+
+    assert!(
+        !Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0, 1])
+            .expect("inferred lengths")
+            .is_truncated()
+    );
+    assert!(
+        !Frame::without_timestamp(LinkType::ETHERNET, Vec::new())
+            .expect("inferred lengths")
+            .is_truncated()
+    );
+
+    let mut decorated = frame(1, 3, vec![0]);
+    decorated.interface = Some(2);
+    decorated.direction = Some(Direction::Outbound);
+    assert!(decorated.is_truncated());
+
+    let untimestamped = Frame::try_with_optional_timestamp(
+        None,
+        LinkType(0xFFFF_0001),
+        Lengths {
+            captured: 1,
+            original: 2,
+        },
+        vec![0],
+    )
+    .expect("link types are open");
+    assert!(untimestamped.is_truncated());
+    let untruncated_unknown = Frame::try_with_optional_timestamp(
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
+        LinkType(0xFFFF_0001),
+        Lengths {
+            captured: 2,
+            original: 2,
+        },
+        vec![0, 1],
+    )
+    .expect("valid capture lengths");
+    assert!(!untruncated_unknown.is_truncated());
+
+    for truncated in [true, false] {
+        let frame = frame(1, if truncated { 2 } else { 1 }, vec![0]);
+        let value = serde_json::to_value(&frame).expect("frame serializes");
+        let restored = serde_json::from_value::<Frame>(value).expect("frame round-trips");
+        assert_eq!(restored.is_truncated(), truncated);
+    }
 }
 
 #[test]

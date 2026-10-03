@@ -52,9 +52,9 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert_eq!(registry.protocols().len(), 2);
 }
 
-fn build_and_decode_probe(
+fn build_probe(
     registry: &Arc<packetcraftr_core::registry::Registry>,
-) -> (build::Builder, decode::DecodedPacket) {
+) -> (build::Builder, build::BuiltPacket) {
     let mut packet = Packet::new();
     packet.push(Probe {
         value: 9,
@@ -74,7 +74,13 @@ fn build_and_decode_probe(
     assert_eq!(built.packet.encoded_payload_length(0), Some(1));
     assert_eq!(built.packet.encoded_payload_length(1), Some(0));
     assert_eq!(built.diagnostics[0].layer, Some(0));
+    (builder, built)
+}
 
+fn build_and_decode_probe(
+    registry: &Arc<packetcraftr_core::registry::Registry>,
+) -> (build::Builder, decode::DecodedPacket) {
+    let (builder, built) = build_probe(registry);
     let decoded = decode_probe(registry, built.bytes.clone(), decode::Options::default())
         .expect("bound packet decodes");
     assert_eq!(decoded.packet.len(), 2);
@@ -233,6 +239,53 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     assert_failed_packet_lookups(decoded);
     assert_root_decode_behavior(&registry);
     assert_build_decode_limits(&registry, &builder);
+}
+
+fn assert_typed_iteration_encoded_cache(packet: Packet) {
+    let immutable = packet.clone();
+    assert_eq!(
+        immutable
+            .iter_of::<Probe>()
+            .map(|probe| probe.value)
+            .collect::<Vec<u8>>(),
+        [9]
+    );
+    assert_eq!(
+        immutable
+            .iter_of::<Child>()
+            .map(|child| child.value)
+            .collect::<Vec<u8>>(),
+        [4]
+    );
+    assert_eq!(immutable.encoded_payload_length(0), Some(1));
+    assert_eq!(immutable.encoded_payload_length(1), Some(0));
+
+    let mut absent = packet.clone();
+    assert_eq!(absent.iter_of_mut::<Raw>().count(), 0);
+    assert_eq!(absent.encoded_payload_length(0), Some(1));
+    assert_eq!(absent.encoded_payload_length(1), Some(0));
+
+    let mut dropped = packet.clone();
+    drop(dropped.iter_of_mut::<Probe>());
+    assert_eq!(dropped.encoded_payload_length(0), None);
+    assert_eq!(dropped.encoded_payload_length(1), None);
+
+    let mut partial = packet;
+    {
+        let mut iter = partial.iter_of_mut::<Probe>();
+        assert_eq!(iter.next().map(|probe| probe.value), Some(9));
+    }
+    assert_eq!(partial.encoded_payload_length(0), None);
+    assert_eq!(partial.encoded_payload_length(1), None);
+}
+
+#[test]
+fn typed_layer_iteration_preserves_or_clears_encoded_lengths() {
+    let registry = Arc::new(probe_registry());
+    let (_, built) = build_probe(&registry);
+    assert_typed_iteration_encoded_cache(built.packet);
+    let (_, decoded) = build_and_decode_probe(&registry);
+    assert_typed_iteration_encoded_cache(decoded.packet);
 }
 
 fn assert_registry_binding_conflicts() {

@@ -63,7 +63,7 @@ fn built_hex_pipes_into_dissect_over_stdin() {
 }
 
 #[test]
-fn hex_files_tolerate_separators_prefixes_and_newlines() {
+fn hex_sources_tolerate_separators_prefixes_and_newlines() {
     let separated = DNS_QUERY
         .as_bytes()
         .chunks(2)
@@ -77,8 +77,11 @@ fn hex_files_tolerate_separators_prefixes_and_newlines() {
     for text in [
         format!("{separated}\n"),
         format!("\n  0x{DNS_QUERY}\r\n"),
+        format!("\t 0X{DNS_QUERY}\n"),
         DNS_QUERY.to_ascii_uppercase(),
     ] {
+        let argument = run_success(&["dissect", "--link-type", "ipv4", "--hex", &text]);
+        assert_eq!(argument.stdout, inline.stdout, "{text:?}");
         let file = hex_file(&text);
         let output = run_success(&[
             "dissect",

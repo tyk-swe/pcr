@@ -145,14 +145,14 @@ pub(super) fn run(
 }
 
 fn parse_hex_text(text: &str) -> Result<bytes::Bytes, CliError> {
-    core::layer::parse_hex(text).map_err(|source| CliError::caused(Kind::Usage, &source))
+    core::layer::parse_hex(text.trim_start())
+        .map_err(|source| CliError::caused(Kind::Usage, &source))
 }
 
 /// Decodes bounded hexadecimal text, keeping the decoded size inside the packet budget.
 fn hex_frame_bytes(text: &[u8], max_packet_size: usize) -> Result<Vec<u8>, CliError> {
-    let text = std::str::from_utf8(text)
-        .map_err(|source| CliError::caused(Kind::Usage, &source))?
-        .trim_start();
+    let text =
+        std::str::from_utf8(text).map_err(|source| CliError::caused(Kind::Usage, &source))?;
     let bytes = parse_hex_text(text)?;
     if bytes.is_empty() {
         return Err(missing_input_error(InputKind::FrameHex));

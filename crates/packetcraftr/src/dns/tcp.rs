@@ -277,6 +277,28 @@ fn query_with_clock<P>(
 where
     P: Provider<Stream: 'static> + 'static,
 {
+    query_with_connect_wait(
+        request,
+        connector,
+        now,
+        Deadline::new,
+        tcp::PendingConnect::wait,
+    )
+}
+
+fn query_with_connect_wait<P>(
+    request: Request<'_>,
+    connector: Arc<P>,
+    now: impl Fn() -> Instant,
+    connect_deadline: impl FnOnce(Duration) -> Deadline,
+    wait: impl FnOnce(
+        &mut tcp::PendingConnect<P::Stream>,
+        &Deadline,
+    ) -> Result<Option<tcp::ConnectOutcome<P::Stream>>, tcp::Error>,
+) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
     let query_frame = query_frame(&request)?;
     let started = now();
     let deadline = started
@@ -284,7 +306,8 @@ where
         .ok_or(Error::DeadlineOverflow {
             value: request.timeout,
         })?;
-    let (mut stream, peer_address, local_address) = connect(connector, &request, deadline, &now)?;
+    let (mut stream, peer_address, local_address) =
+        connect(connector, &request, deadline, &now, connect_deadline, wait)?;
 
     let mut bytes_written = 0usize;
     write_exact(
@@ -357,17 +380,21 @@ fn connect<P>(
     request: &Request<'_>,
     deadline: Instant,
     now: &impl Fn() -> Instant,
+    connect_deadline: impl FnOnce(Duration) -> Deadline,
+    wait: impl FnOnce(
+        &mut tcp::PendingConnect<P::Stream>,
+        &Deadline,
+    ) -> Result<Option<tcp::ConnectOutcome<P::Stream>>, tcp::Error>,
 ) -> Result<(tcp::Connection<P::Stream>, SocketAddr, SocketAddr), Error>
 where
     P: Provider<Stream: 'static> + 'static,
 {
     let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
     let connect_deadline =
-        Deadline::new(connect_timeout).with_cancellation(request.cancellation.cloned());
+        connect_deadline(connect_timeout).with_cancellation(request.cancellation.cloned());
     let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
-    let outcome = pending
-        .wait(&connect_deadline)
+    let outcome = wait(&mut pending, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     packetcraftr_netio::deadline::remaining(&connect_deadline).map_err(|interrupted| {
         match interrupted {

@@ -1176,6 +1176,28 @@ fn binary_stdout_requires_deliberate_override_on_a_terminal() {
     }
 }
 
+#[cfg(all(packetcraftr_test_util_linux, packetcraftr_test_dev_full))]
+#[test]
+fn binary_terminal_refusal_reports_stderr_write_failures() {
+    common::require_util_linux_script();
+    common::require_dev_full();
+    let mut command = Command::new("script");
+    command.env(
+        "BINARY_STDOUT_TEST_BINARY",
+        env!("CARGO_BIN_EXE_packetcraftr"),
+    );
+    command.args([
+        "--quiet",
+        "--return",
+        "--command",
+        "exec \"$BINARY_STDOUT_TEST_BINARY\" --output raw build --packet 'raw(text=a)' 2>/dev/full",
+        "/dev/null",
+    ]);
+    let output = run_command_with_open_stdin(command);
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
 #[test]
 fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
     for query_type in [

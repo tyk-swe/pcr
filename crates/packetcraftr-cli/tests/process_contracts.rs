@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::{Cursor, Write};
+#[cfg(packetcraftr_test_util_linux)]
 use std::process::{Command, Output, Stdio};
+#[cfg(packetcraftr_test_util_linux)]
 use std::time::{Duration, Instant};
 
 use packetcraftr_core::capture_file::Format as CaptureFormat;
@@ -14,6 +16,7 @@ mod process_support;
 
 use common::{assert_contiguous, parse_json, parse_ndjson, run};
 
+#[cfg(packetcraftr_test_util_linux)]
 fn run_command_with_open_stdin(mut command: Command) -> Output {
     let mut child = command
         .stdin(Stdio::piped())

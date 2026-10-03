@@ -1787,6 +1787,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `--payload-file SELECTOR=PATH` preserves non-UTF-8 filenames and parent
+  directories instead of rejecting the entire argument as non-UTF-8. The
+  selector remains text, and spaces, Unicode, and `=` in paths keep their
+  existing behavior.
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced

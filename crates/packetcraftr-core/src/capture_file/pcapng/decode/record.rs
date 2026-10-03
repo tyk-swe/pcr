@@ -46,7 +46,8 @@ fn decode_interface(
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
-    let (description, options) = parse_interface_description(body, state.endianness)?;
+    let (description, options) =
+        parse_interface_description(body, state.endianness, limits.max_options_per_block)?;
     let local_id = u32::try_from(state.section_interfaces(all_interfaces).len()).map_err(|_| {
         Error::InterfaceLimit {
             limit: limits.max_interfaces_per_section,
@@ -86,6 +87,7 @@ fn decode_packet(
         state.section_interfaces(all_interfaces),
         state.interface_base,
         limits.max_size,
+        limits.max_options_per_block,
     )?;
     state.reset_metadata();
     Ok(record(

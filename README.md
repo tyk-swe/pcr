@@ -161,11 +161,11 @@ and byte limits. An empty selection is a valid capture, errors can leave partial
 output, and without `--filter` or `--normalize` output is a byte-for-byte
 rewrite.
 
-`read`, `stats`, `expert`, `follow`, `tls`, `dns-read`, `http`, `export`, and
-`verify-forwarding` accept `--start-epoch` and `--stop-epoch`, an inclusive
-epoch-second window written `SECONDS[.FRACTION]` with up to nanosecond
-precision and compared exactly. Frames without timestamps are never kept, and
-skipped frames still count toward the read limits.
+`read`, `stats`, `expert`, `follow`, `tls`, `dns-read`, `http`, `http2`,
+`export`, and `verify-forwarding` accept `--start-epoch` and `--stop-epoch`,
+an inclusive epoch-second window written `SECONDS[.FRACTION]` with up to
+nanosecond precision and compared exactly. Frames without timestamps are never
+kept, and skipped frames still count toward the read limits.
 
 `read --dissect` and `dissect` decode DNS answer, authority, and additional
 records, including EDNS and exact unknown RDATA; malformed or truncated DNS
@@ -312,7 +312,8 @@ and every retained-state limit explicit.
 `follow --stream tcp:N` or `udp:N` exits 2 when the selected conversation is
 absent, and `follow --write DIR` requires an existing writable directory and
 publishes each selected direction atomically as
-`TRANSPORT-INDEX-client.bin` or `-server.bin` without overwriting. Every `stats`
+`TRANSPORT-INDEX-client.bin` or `-server.bin` without overwriting, bound to the
+directory selected before input is read. Every `stats`
 report carries a capture summary (`duration`, `average_packet_size`, packet and
 byte rates, and the declared `interfaces`), and `expert` also reports the
 capture-level warnings `capture.frame_truncated` and `capture.clock_regression`.

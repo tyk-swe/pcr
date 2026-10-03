@@ -40,17 +40,19 @@ pub(in crate::capture_file) fn read_pcapng_block_header<R: Read>(
 pub(in crate::capture_file) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
+    max_options: usize,
     scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
-    read_section_header_with_length(reader, length, max_size, None, scratch)
+    read_section_header_with_length(reader, length, max_size, max_options, None, scratch)
 }
 
 pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
+    max_options: usize,
     metadata_budget: Option<(usize, usize)>,
     scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
@@ -123,7 +125,12 @@ pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
             reason: "section length is not a multiple of four",
         });
     }
-    let options = parse_options(&fields[12..], endianness, "pcapng section options")?;
+    let options = parse_options(
+        &fields[12..],
+        endianness,
+        "pcapng section options",
+        max_options,
+    )?;
     let mut raw = Vec::new();
     raw.try_reserve_exact(block_length_usize)
         .map_err(|_| Error::AllocationFailed {

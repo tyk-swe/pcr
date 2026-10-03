@@ -24,8 +24,8 @@ pub use format::{Endianness, Format, PcapNgOptions, PcapOptions, TimestampResolu
 pub use header::{CaptureHeader, Interface, PcapHeader, PcapNgOption, Section};
 pub use limits::{
     Budget, DEFAULT_MAX_INTERFACES_PER_SECTION, DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME,
-    DEFAULT_MAX_METADATA_BYTES_PER_FRAME, DEFAULT_MAX_STREAM_BYTES, DEFAULT_MAX_STREAM_FRAMES,
-    DEFAULT_MAX_TOTAL_INTERFACES, Limits, ReaderLimits,
+    DEFAULT_MAX_METADATA_BYTES_PER_FRAME, DEFAULT_MAX_OPTIONS_PER_BLOCK, DEFAULT_MAX_STREAM_BYTES,
+    DEFAULT_MAX_STREAM_FRAMES, DEFAULT_MAX_TOTAL_INTERFACES, Limits, ReaderLimits,
 };
 pub use map::{MapReport, map_frames};
 pub use merge::{

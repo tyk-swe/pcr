@@ -86,6 +86,8 @@ pub enum Error {
     MetadataBlockLimit { limit: usize },
     #[error("pcapng stream exceeded {limit} metadata bytes before the next packet")]
     MetadataByteLimit { limit: usize },
+    #[error("pcapng block exceeded {limit} options")]
+    OptionLimit { limit: usize },
     #[error("frame link type {actual} does not match interface {interface} link type {expected}")]
     InterfaceLinkTypeMismatch {
         interface: u32,
@@ -228,6 +230,7 @@ impl Classified for Error {
             | Self::TotalInterfaceLimit { .. }
             | Self::MetadataBlockLimit { .. }
             | Self::MetadataByteLimit { .. }
+            | Self::OptionLimit { .. }
             | Self::FrameLimitExceeded { .. }
             | Self::StreamByteLimitExceeded { .. } => Classification::new(
                 "policy.capture_stream_limit",

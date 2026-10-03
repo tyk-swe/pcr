@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
@@ -37,7 +37,6 @@ use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
 use packetcraftr_netio::tcp;
 use packetcraftr_netio::transmit;
-use serde_json::Value;
 
 pub(crate) const INTERFACE_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
 pub(crate) const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
@@ -390,15 +389,4 @@ impl capture::Session for IdleCapture {
     fn stats(&self) -> capture::Stats {
         capture::Stats::default()
     }
-}
-
-pub(crate) fn packet_schema_validator() -> &'static jsonschema::Validator {
-    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.packet.v2.schema.json"
-        ))
-        .expect("published packet schema must be JSON");
-        jsonschema::validator_for(&schema).expect("published packet schema must compile")
-    })
 }

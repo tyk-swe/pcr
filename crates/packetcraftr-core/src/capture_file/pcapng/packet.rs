@@ -26,6 +26,7 @@ pub(in crate::capture_file) fn parse_enhanced_packet(
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
+    max_options: usize,
 ) -> Result<ParsedPacket, Error> {
     parse(
         body,
@@ -33,6 +34,7 @@ pub(in crate::capture_file) fn parse_enhanced_packet(
         interfaces,
         interface_base,
         max_size,
+        max_options,
         false,
     )
 }
@@ -43,8 +45,17 @@ pub(in crate::capture_file) fn parse_obsolete_packet(
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
+    max_options: usize,
 ) -> Result<ParsedPacket, Error> {
-    parse(body, endianness, interfaces, interface_base, max_size, true)
+    parse(
+        body,
+        endianness,
+        interfaces,
+        interface_base,
+        max_size,
+        max_options,
+        true,
+    )
 }
 
 fn parse(
@@ -53,6 +64,7 @@ fn parse(
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
+    max_options: usize,
     obsolete_layout: bool,
 ) -> Result<ParsedPacket, Error> {
     const HEADER_LENGTH: usize = 20;
@@ -107,7 +119,12 @@ fn parse(
         });
     }
     // `captured_length <= padded_length`, so the data ends at or before `data_end <= body.len()`
-    let options = parse_options(&body[data_end..], endianness, "pcapng packet options")?;
+    let options = parse_options(
+        &body[data_end..],
+        endianness,
+        "pcapng packet options",
+        max_options,
+    )?;
     let direction = packet_direction(&options, endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
@@ -136,12 +153,15 @@ fn parse(
     })
 }
 
+/// Simple packet blocks carry no options; `max_options` keeps the packet
+/// parsers signature-compatible for the block-kind dispatch table.
 pub(in crate::capture_file) fn parse_simple_packet(
     body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
+    _max_options: usize,
 ) -> Result<ParsedPacket, Error> {
     if body.len() < 4 {
         return Err(Error::InvalidData {
@@ -274,6 +294,7 @@ mod tests {
                 std::slice::from_ref(&interface),
                 0,
                 1500,
+                usize::MAX,
             )
         };
         let cases = [

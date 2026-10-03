@@ -1,12 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
 use std::io::Cursor;
 use std::time::{Duration, UNIX_EPOCH};
 
+use common::pcap::{enhanced_packet_block, interface_block, option, section_header};
 use packetcraftr_core::capture_file::{
-    self, Budget, Error, Limits, MAX_MERGE_SOURCES, MergeLimits, MergeSource, PcapNgOptions,
-    PcapOptions, Reader, Writer, compression,
+    self, Budget, Endianness, Error, Limits, MAX_MERGE_SOURCES, MergeLimits, MergeSource,
+    PcapNgOptions, PcapOptions, Reader, ReaderLimits, Writer, compression,
 };
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -192,4 +195,89 @@ fn compressed_input_refuses_a_window_outside_the_decoder_range() {
         );
     }
     assert!(compression::Limits::default().validate().is_ok());
+}
+
+/// `count` zero-length comment options: four wire bytes each, the cheapest
+/// way to inflate a block's retained option list.
+fn empty_options(endianness: Endianness, count: usize) -> Vec<u8> {
+    (0..count)
+        .flat_map(|_| option(endianness, 1, &[]))
+        .collect()
+}
+
+fn pcapng_with_options(
+    endianness: Endianness,
+    section_options: &[u8],
+    interface_options: &[u8],
+    packet_options: &[u8],
+) -> Vec<u8> {
+    let mut bytes = section_header(endianness, 1, 0, -1, section_options);
+    bytes.extend_from_slice(&interface_block(endianness, 1, 64, interface_options));
+    bytes.extend_from_slice(&enhanced_packet_block(
+        endianness,
+        0,
+        0,
+        1,
+        b"x",
+        packet_options,
+    ));
+    bytes
+}
+
+#[test]
+fn pcapng_blocks_refuse_options_above_the_per_block_ceiling() {
+    const LIMIT: usize = 8;
+    let endianness = Endianness::Little;
+    let limits = ReaderLimits {
+        max_options_per_block: LIMIT,
+        ..ReaderLimits::default()
+    };
+    let at_limit = empty_options(endianness, LIMIT);
+    let over_limit = empty_options(endianness, LIMIT + 1);
+
+    let mut reader = Reader::with_limits(
+        Cursor::new(pcapng_with_options(
+            endianness, &at_limit, &at_limit, &at_limit,
+        )),
+        limits,
+    )
+    .expect("a section with exactly the ceiling opens");
+    let frame = reader
+        .next_frame()
+        .expect("interface and packet at the ceiling decode")
+        .expect("one frame");
+    assert_eq!(frame.bytes().as_ref(), b"x");
+
+    let error = Reader::with_limits(
+        Cursor::new(pcapng_with_options(endianness, &over_limit, &[], &[])),
+        limits,
+    )
+    .err()
+    .expect("section options above the ceiling fail before any frame");
+    assert!(
+        matches!(error, Error::OptionLimit { limit: LIMIT }),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().code, "policy.capture_stream_limit");
+
+    for (interface_options, packet_options) in [(&over_limit, &at_limit), (&at_limit, &over_limit)]
+    {
+        let mut reader = Reader::with_limits(
+            Cursor::new(pcapng_with_options(
+                endianness,
+                &[],
+                interface_options,
+                packet_options,
+            )),
+            limits,
+        )
+        .expect("section opens");
+        let error = reader
+            .next_frame()
+            .expect_err("a block above the option ceiling fails");
+        assert!(
+            matches!(error, Error::OptionLimit { limit: LIMIT }),
+            "{error:?}"
+        );
+    }
 }

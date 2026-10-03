@@ -10,10 +10,12 @@ use crate::capture_file::{
     wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},
 };
 
+/// Decodes a block's option list, retaining at most `max_options` entries.
 pub(super) fn parse_options(
     options: &[u8],
     endianness: Endianness,
     context: &'static str,
+    max_options: usize,
 ) -> Result<Vec<PcapNgOption>, Error> {
     let mut parsed = Vec::new();
     let mut offset = 0_usize;
@@ -64,6 +66,9 @@ pub(super) fn parse_options(
                 expected: end,
                 actual: options.len(),
             });
+        }
+        if parsed.len() >= max_options {
+            return Err(Error::OptionLimit { limit: max_options });
         }
         // `length <= padded_length`, so the value ends at or before `end`, within `options`
         let value = &options[offset..offset + length];

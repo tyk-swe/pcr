@@ -185,7 +185,7 @@ def compare(name, pdml, document):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", type=Path, default=ROOT / "target/debug/packetcraftr")
+    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/packetcraftr")
     parser.add_argument("--tshark", default="tshark")
     parser.add_argument("--directory", type=Path, default=ROOT / "target/http2-oracle")
     args = parser.parse_args()

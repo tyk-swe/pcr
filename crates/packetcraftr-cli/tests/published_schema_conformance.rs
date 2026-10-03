@@ -63,3 +63,70 @@ fn rewrite_v2_schema_rejects_unknown_assignment_properties() {
     });
     assert!(!rewrite_v2_validator().is_valid(&document));
 }
+
+/// Every published example document validates against the schema it names,
+/// so an example cannot drift from a contract without failing here. The YAML
+/// packet example is parsed by the document parser and validated through its
+/// serialized form, since the schema describes the JSON representation.
+#[test]
+fn every_published_example_document_matches_its_declared_schema() {
+    use packetcraftr_core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
+
+    let packet_validator = validator(include_str!(
+        "../../../schemas/packetcraftr.packet.v2.schema.json"
+    ));
+    let udp_profiles_validator = validator(include_str!(
+        "../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
+    ));
+    let rewrite_v1 = rewrite_v1_validator();
+    let rewrite_v2 = rewrite_v2_validator();
+    let output_validator = schema_validator();
+
+    let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
+    let mut paths: Vec<_> = std::fs::read_dir(directory)
+        .expect("published examples directory")
+        .map(|entry| entry.expect("example entry").path())
+        .collect();
+    paths.sort();
+
+    let mut validated = 0_usize;
+    let mut failures = Vec::new();
+    for path in &paths {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(path).expect("example must be UTF-8");
+        let document: Value = match path.extension().and_then(|e| e.to_str()) {
+            Some("json") => serde_json::from_str(&text)
+                .unwrap_or_else(|error| panic!("{name} must be JSON: {error}")),
+            Some("yaml") => {
+                let packet = Packet::parse(&text, Format::Yaml, DEFAULT_MAX_DOCUMENT_BYTES)
+                    .unwrap_or_else(|error| panic!("{name} must be a packet document: {error}"));
+                serde_json::to_value(packet).expect("packet documents serialize")
+            }
+            other => panic!("{name}: unexpected example extension {other:?}"),
+        };
+        let schema = document["schema"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name} must declare a schema"));
+        let validator = match schema {
+            "packetcraftr.output/v6" => output_validator,
+            "packetcraftr.packet/v2" => &packet_validator,
+            "packetcraftr.rewrite/v1" => &rewrite_v1,
+            "packetcraftr.rewrite/v2" => &rewrite_v2,
+            "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
+            other => panic!("{name} declares an unknown schema {other}"),
+        };
+        if let Err(error) = validator.validate(&document) {
+            failures.push(format!("{name}: {error}"));
+        }
+        validated += 1;
+    }
+    assert!(
+        failures.is_empty(),
+        "invalid examples:\n{}",
+        failures.join("\n")
+    );
+    assert!(
+        validated > 100,
+        "expected every published example to be validated, saw {validated}"
+    );
+}

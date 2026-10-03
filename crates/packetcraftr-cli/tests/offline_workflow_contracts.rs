@@ -216,3 +216,45 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
         assert_eq!(value["error"]["code"], "policy.public_destination");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn follow_write_through_a_parent_alias_reports_requested_paths() {
+    let capture = write_capture();
+    let root = tempfile::tempdir().expect("output root");
+    let original = root.path().join("original");
+    let alias = root.path().join("alias");
+    std::fs::create_dir(&original).expect("output directory");
+    std::os::unix::fs::symlink(&original, &alias).expect("directory alias");
+
+    let output = run(&[
+        "--output",
+        "json",
+        "follow",
+        path_text(capture.path()),
+        "--stream",
+        "tcp:0",
+        "--write",
+        path_text(&alias),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let report = parse_json(&output);
+
+    let written = report["result"]["written"]
+        .as_array()
+        .expect("written files");
+    assert_eq!(written.len(), 2, "{report}");
+    for (file, name) in written.iter().zip(["tcp-0-client.bin", "tcp-0-server.bin"]) {
+        assert_eq!(file["path"], alias.join(name).display().to_string());
+        assert!(
+            original.join(name).is_file(),
+            "{name} published in the target"
+        );
+    }
+    assert!(
+        !std::fs::read(original.join("tcp-0-client.bin"))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(std::fs::read_dir(&original).unwrap().count(), 2);
+}

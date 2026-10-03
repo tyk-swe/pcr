@@ -36,6 +36,12 @@ capture-wide input ceiling is `ReaderLimits::max_total_interfaces`. Under
 never either input count. Non-normalizing reads and rewrites keep the
 per-section input semantics.
 
+`ReaderLimits::max_options_per_block` (default 1,024) bounds the options
+retained from one PCAPNG section, interface, or packet block. A four-byte
+empty option costs far more once decoded, so the block size ceiling alone does
+not bound decoded option memory; a block above the ceiling fails with
+`policy.capture_stream_limit` like the interface and metadata ceilings.
+
 | Retention | Bound and lifetime |
 | --- | --- |
 | Physical input | `max_frames` and `max_bytes` count all physical frames/payload bytes, including filtered frames. Reader block/frame and interface limits apply separately. |

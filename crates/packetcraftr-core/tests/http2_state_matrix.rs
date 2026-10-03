@@ -4616,3 +4616,357 @@ fn review_provisional_controls_reconcile_both_initiator_directions() {
         }
     }
 }
+
+#[test]
+fn review_h2c_lists_reject_invalid_members() {
+    let offer = |connection: &str| {
+        format!(
+            "GET / HTTP/1.1\r\nHost: www.example.com\r\nConnection: {connection}\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n"
+        )
+    };
+    let events = exercise(|capture, stream| {
+        capture.client(
+            stream,
+            offer("upgrade, HTTP2-Settings, bad token").as_bytes(),
+        );
+        capture.server(stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    });
+    assert!(codes(&events).contains(&"bad_upgrade_offer"));
+    assert_eq!(connection(&events).startup, Startup::Unknown);
+
+    let events = exercise(|capture, stream| {
+        capture.client(
+            stream,
+            offer("keep-alive, upgrade, HTTP2-Settings").as_bytes(),
+        );
+        capture.server(
+            stream,
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+        );
+        capture.server(stream, &settings(&[]));
+        let mut client = common::http2::preface();
+        client.extend_from_slice(&settings(&[]));
+        client.extend_from_slice(&settings_ack());
+        capture.client(stream, &client);
+        capture.server(stream, &settings_ack());
+        capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert_eq!(connection(&events).startup, Startup::H2c);
+    assert_eq!(
+        connection(&events).status,
+        Status::Complete,
+        "{:?}",
+        codes(&events)
+    );
+
+    let events = exercise(|capture, stream| {
+        capture.client(stream, &common::http2::upgrade_request(&[]));
+        capture.server(
+            stream,
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c, bad token\r\n\r\n",
+        );
+        capture.server(stream, &settings(&[]));
+    });
+    assert_ne!(connection(&events).startup, Startup::H2c);
+    assert_ne!(connection(&events).status, Status::Complete);
+}
+
+#[test]
+fn review_h2c_host_must_match_absolute_form_target() {
+    let offer = |target: &str, host: &str| {
+        format!(
+            "GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n"
+        )
+    };
+    let events = exercise(|capture, stream| {
+        capture.client(
+            stream,
+            offer("http://good.example/", "evil.example").as_bytes(),
+        );
+        capture.server(stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    });
+    assert!(codes(&events).contains(&"bad_upgrade_offer"));
+    assert_eq!(connection(&events).startup, Startup::Unknown);
+
+    for (target, host) in [
+        ("http://WWW.example.com:80/path?q=1", "www.example.com"),
+        ("https://www.example.com/", "www.example.com:443"),
+    ] {
+        let events = exercise(|capture, stream| {
+            capture.client(stream, offer(target, host).as_bytes());
+            capture.server(
+                stream,
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+            );
+            capture.server(stream, &settings(&[]));
+            let mut client = common::http2::preface();
+            client.extend_from_slice(&settings(&[]));
+            client.extend_from_slice(&settings_ack());
+            capture.client(stream, &client);
+            capture.server(stream, &settings_ack());
+            capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(connection(&events).startup, Startup::H2c, "{target}");
+        assert_eq!(
+            connection(&events).status,
+            Status::Complete,
+            "{target}: {:?}",
+            codes(&events)
+        );
+    }
+}
+
+#[test]
+fn review_protocol_pseudo_header_must_be_a_token() {
+    for (protocol, malformed) in [
+        (b"web socket".as_slice(), true),
+        (b"".as_slice(), true),
+        (b"websocket".as_slice(), false),
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            let mut request = Vec::new();
+            review_literal(&mut request, b":method", b"CONNECT");
+            review_literal(&mut request, b":scheme", b"https");
+            review_literal(&mut request, b":path", b"/chat");
+            review_literal(&mut request, b":authority", b"www.example.com:443");
+            review_literal(&mut request, b":protocol", protocol);
+            capture.client(stream, &headers(1, &request, END_HEADERS | END_STREAM));
+        });
+        let request = messages(&events)
+            .into_iter()
+            .find(|m| m.kind == MessageKind::Request)
+            .expect("request message");
+        assert_eq!(
+            request.status == Status::Malformed,
+            malformed,
+            "{protocol:?}: {:?}",
+            codes(&events)
+        );
+        assert_eq!(
+            codes(&events).contains(&"header_semantics"),
+            malformed,
+            "{protocol:?}"
+        );
+    }
+}
+
+#[test]
+fn review_prohibited_trailer_fields_are_malformed() {
+    for name in [
+        b"content-type".as_slice(),
+        b"authorization",
+        b"cache-control",
+        b"content-encoding",
+        b"trailer",
+        b"te",
+    ] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS));
+            let mut trailer = Vec::new();
+            review_literal(&mut trailer, name, b"x");
+            capture.client(stream, &headers(1, &trailer, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            messages(&events)[0].status,
+            Status::Malformed,
+            "{}",
+            String::from_utf8_lossy(name)
+        );
+    }
+}
+
+#[test]
+fn review_response_above_servers_own_goaway_is_confirmed_malformed() {
+    for delayed in [false, true] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+            if !delayed {
+                capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            }
+            capture.server(stream, &goaway(1, 0));
+            capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+            if delayed {
+                capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+            }
+        });
+        assert!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "response_after_goaway"
+                    && i.scope == IssueScope::Stream
+                    && i.certainty == Certainty::Confirmed
+                    && i.status == Status::Malformed
+                    && i.http2_stream_id == Some(3)),
+            "delayed={delayed}: {:?}",
+            codes(&events)
+        );
+        assert_eq!(
+            codes(&events).contains(&"response_without_stream"),
+            delayed,
+            "delayed={delayed}"
+        );
+        assert!(
+            !messages(&events).iter().any(|m| m.http2_stream_id == 3
+                && m.kind == MessageKind::Response
+                && m.status == Status::Complete),
+            "delayed={delayed}"
+        );
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 3 && m.kind == MessageKind::Request),
+            "delayed={delayed}"
+        );
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Request),
+            "delayed={delayed}"
+        );
+    }
+    // A response within the GOAWAY bound remains an ordinary complete response.
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        capture.server(stream, &goaway(3, 0));
+        capture.server(stream, &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM));
+    });
+    assert!(!codes(&events).contains(&"response_after_goaway"));
+    assert!(messages(&events).iter().any(|m| m.http2_stream_id == 3
+        && m.kind == MessageKind::Response
+        && m.status == Status::Complete));
+}
+
+#[test]
+fn review_later_client_stream_confirms_pending_opener_without_fin() {
+    for kind in 0..3 {
+        let (mut capture, mut stream) = setup();
+        prior_knowledge_handshake(&mut capture, &mut stream);
+        let bytes = match kind {
+            0 => headers(1, RESPONSE_OK, END_HEADERS | END_STREAM),
+            1 => rst(1, 0),
+            _ => window_update(1, 1),
+        };
+        capture.server(&mut stream, &bytes);
+        capture.client(&mut stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+        // No TCP FIN: the later client opener alone proves stream 1 stayed idle.
+        let events = collect_events(&capture.frames, collector()).0;
+        let code = match kind {
+            0 => "response_without_stream",
+            1 => "reset_idle_stream",
+            _ => "window_update_unknown_stream",
+        };
+        assert!(
+            issues(&events).iter().any(|i| i.code == code
+                && i.certainty == Certainty::Confirmed
+                && i.scope == IssueScope::Connection
+                && i.http2_stream_id == Some(1)),
+            "kind={kind}: {:?}",
+            codes(&events)
+        );
+        assert_eq!(connection(&events).status, Status::Malformed, "kind={kind}");
+    }
+    // The h2c watermark starts at stream 1, so stream 3 is provisional until 5.
+    let (mut capture, mut stream) = setup();
+    common::http2::h2c_handshake(&mut capture, &mut stream);
+    capture.client(&mut stream, &settings_ack());
+    capture.server(
+        &mut stream,
+        &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM),
+    );
+    capture.server(
+        &mut stream,
+        &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM),
+    );
+    capture.client(&mut stream, &headers(5, REQUEST, END_HEADERS | END_STREAM));
+    let events = collect_events(&capture.frames, collector()).0;
+    assert!(
+        issues(&events)
+            .iter()
+            .any(|i| i.code == "response_without_stream"
+                && i.certainty == Certainty::Confirmed
+                && i.http2_stream_id == Some(3)),
+        "{:?}",
+        codes(&events)
+    );
+    // The pending id itself resolves when its opener arrives late.
+    let (mut capture, mut stream) = setup();
+    prior_knowledge_handshake(&mut capture, &mut stream);
+    capture.server(
+        &mut stream,
+        &headers(3, RESPONSE_OK, END_HEADERS | END_STREAM),
+    );
+    capture.client(&mut stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
+    let events = collect_events(&capture.frames, collector()).0;
+    assert!(
+        !issues(&events)
+            .iter()
+            .any(|i| i.code == "response_without_stream" && i.certainty == Certainty::Confirmed)
+    );
+}
+
+#[test]
+fn review_frame_header_errors_retain_only_the_malformed_frame() {
+    // Bytes following an accepted 101 arrive in the same buffer, so a
+    // connection-fatal frame error must not absorb the frames behind it.
+    let events = exercise(|capture, stream| {
+        capture.client(stream, &common::http2::upgrade_request(&[]));
+        let mut server =
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"
+                .to_vec();
+        server.extend_from_slice(&frame(0x6, 0, 1, &[0; 8]));
+        server.extend_from_slice(&settings(&[(3, 100)]));
+        capture.server(stream, &server);
+    });
+    let issue = issues(&events)
+        .into_iter()
+        .find(|i| i.code == "frame_invalid" && i.scope == IssueScope::Connection)
+        .expect("connection-scoped frame error");
+    assert_eq!(issue.wire.len(), 9 + 8, "{:?}", issue.wire);
+    assert_eq!(connection(&events).status, Status::Malformed);
+}
+
+#[test]
+fn review_capture_delayed_bodyless_response_rejects_data() {
+    for (block, bodyless) in [(&[0x89u8][..], true), (RESPONSE_OK, false)] {
+        let events = exercise(|capture, stream| {
+            prior_knowledge_handshake(capture, stream);
+            capture.server(stream, &headers(1, block, END_HEADERS));
+            capture.server(stream, &data(1, b"hello", 0));
+            capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
+        });
+        assert_eq!(
+            issues(&events)
+                .iter()
+                .any(|i| i.code == "bodyless_response_body"
+                    && i.scope == IssueScope::Stream
+                    && i.certainty == Certainty::Confirmed
+                    && i.http2_stream_id == Some(1)),
+            bodyless,
+            "bodyless={bodyless}: {:?}",
+            codes(&events)
+        );
+        assert_eq!(
+            issues(&events).iter().any(|i| i.code == "data_unknown_stream"
+                && i.certainty == Certainty::Indeterminate),
+            !bodyless,
+            "bodyless={bodyless}: {:?}",
+            codes(&events)
+        );
+        assert!(
+            messages(&events)
+                .iter()
+                .any(|m| m.http2_stream_id == 1 && m.kind == MessageKind::Request),
+            "bodyless={bodyless}"
+        );
+        assert!(
+            !messages(&events)
+                .iter()
+                .any(|m| m.kind == MessageKind::Response && m.status == Status::Complete),
+            "bodyless={bodyless}"
+        );
+    }
+}

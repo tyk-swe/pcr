@@ -17,6 +17,8 @@ pub const DEFAULT_MAX_TOTAL_INTERFACES: usize = 65_536;
 pub const DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME: usize = 4_096;
 /// Default maximum metadata bytes consumed before one packet is returned.
 pub const DEFAULT_MAX_METADATA_BYTES_PER_FRAME: usize = 64 * 1024 * 1024;
+/// Default maximum options retained from one PCAPNG block.
+pub const DEFAULT_MAX_OPTIONS_PER_BLOCK: usize = 1_024;
 /// Default maximum frames accepted by one streaming capture writer or copy.
 pub const DEFAULT_MAX_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
@@ -185,6 +187,10 @@ pub struct ReaderLimits {
     pub max_total_interfaces: usize,
     pub max_metadata_blocks_per_frame: usize,
     pub max_metadata_bytes_per_frame: usize,
+    /// Maximum options retained from one PCAPNG section, interface, or packet
+    /// block. Each retained option costs more than its four-byte wire header,
+    /// so this bounds the block's decoded size independently of `max_size`.
+    pub max_options_per_block: usize,
 }
 
 impl Default for ReaderLimits {
@@ -195,6 +201,7 @@ impl Default for ReaderLimits {
             max_total_interfaces: DEFAULT_MAX_TOTAL_INTERFACES,
             max_metadata_blocks_per_frame: DEFAULT_MAX_METADATA_BLOCKS_PER_FRAME,
             max_metadata_bytes_per_frame: DEFAULT_MAX_METADATA_BYTES_PER_FRAME,
+            max_options_per_block: DEFAULT_MAX_OPTIONS_PER_BLOCK,
         }
     }
 }

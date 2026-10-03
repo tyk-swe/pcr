@@ -141,8 +141,10 @@ impl Conn {
         let stream_error = priority_length_error && !interrupted_chain;
         let stream_id = stream_error
             .then(|| u32::from_be_bytes([bytes[5] & 0x7f, bytes[6], bytes[7], bytes[8]]));
+        let declared = (bytes.len() >= 9)
+            .then(|| 9 + u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) as usize);
         let take = if stream_error {
-            let total = 9 + u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) as usize;
+            let total = declared.expect("header length checked");
             if bytes.len() < total {
                 return Ok(false);
             }
@@ -150,7 +152,12 @@ impl Conn {
             self.frames += 1;
             total
         } else {
-            dir.buffer.len()
+            // Attribute only the malformed frame to the issue when its declared
+            // length is buffered; coalesced later frames stay terminal evidence.
+            match declared {
+                Some(total) if total <= bytes.len() => total,
+                _ => dir.buffer.len(),
+            }
         };
         let sets = dir.buffer.contributors(take);
         let (wire, dropped) = dir.buffer.take(take);
@@ -637,6 +644,37 @@ impl Conn {
                     .entry(stream_id)
                     .or_default()
                     .ended = true;
+                return Ok(());
+            }
+            // A capture-early final response that cannot carry content is
+            // contradicted by content in the server's own ordered bytes.
+            if !closed
+                && self.clean_start
+                && side == SERVER
+                && owner == CLIENT
+                && data_bytes > 0
+                && let Some(early) = self.early_response_headers.get_mut(&stream_id)
+                && early.final_seen
+                && early.bodyless
+                && !early.ended
+            {
+                early.ended = true;
+                self.issue(
+                    cx,
+                    Fault {
+                        flow: self.dir_flow(side),
+                        http2_stream_id: Some(stream_id),
+                        scope: IssueScope::Stream,
+                        certainty: Certainty::Confirmed,
+                        status: Status::Malformed,
+                        code: "bodyless_response_body",
+                        detail:
+                            "a capture-delayed response that must not carry content carried DATA"
+                                .into(),
+                        wire: evidence.wire,
+                        sources: evidence.sources,
+                    },
+                )?;
                 return Ok(());
             }
             let uncertain = !closed && (!self.clean_start || side != owner);

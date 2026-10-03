@@ -139,6 +139,7 @@ fn read_section_record<R: Read>(
         reader,
         raw_header[4..8].try_into().expect("four-byte slice"),
         limits.max_size,
+        limits.max_options_per_block,
         Some((state.metadata_bytes, limits.max_metadata_bytes_per_frame)),
         scratch,
     )?;

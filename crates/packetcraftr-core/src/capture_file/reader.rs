@@ -52,7 +52,12 @@ impl<R: Read> Reader<R> {
 
         let (state, header) = match magic {
             PCAPNG_SECTION_HEADER => {
-                let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
+                let header = read_section_header_after_type(
+                    &mut inner,
+                    max_size,
+                    limits.max_options_per_block,
+                    &mut scratch,
+                )?;
                 let section = Section {
                     index: 0,
                     endianness: header.endianness,

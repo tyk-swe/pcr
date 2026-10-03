@@ -70,6 +70,8 @@ impl MsgBuild {
 pub(crate) struct EarlyResponse {
     pub final_seen: bool,
     pub forbids_trailers: bool,
+    /// The final status cannot carry content, so later DATA is a violation.
+    pub bodyless: bool,
     pub ended: bool,
 }
 
@@ -142,6 +144,36 @@ const FORBIDDEN: &[&[u8]] = &[
     b"transfer-encoding",
     b"upgrade",
     b"http2-settings",
+];
+
+/// Fields that RFC 9110 §6.5.1 forbids in trailers: message framing, routing,
+/// request modifiers and conditionals, authentication, cache control, and the
+/// fields that determine how to process the content.
+const FORBIDDEN_TRAILERS: &[&[u8]] = &[
+    b"authorization",
+    b"cache-control",
+    b"content-encoding",
+    b"content-length",
+    b"content-location",
+    b"content-range",
+    b"content-type",
+    b"cookie",
+    b"expect",
+    b"host",
+    b"if-match",
+    b"if-modified-since",
+    b"if-none-match",
+    b"if-range",
+    b"if-unmodified-since",
+    b"max-forwards",
+    b"proxy-authenticate",
+    b"proxy-authorization",
+    b"range",
+    b"set-cookie",
+    b"te",
+    b"trailer",
+    b"transfer-encoding",
+    b"www-authenticate",
 ];
 
 fn token(b: u8) -> bool {
@@ -335,7 +367,7 @@ pub(super) fn valid_authority(authority: &[u8], http: bool) -> bool {
     true
 }
 
-fn authorities_equal(a: &[u8], b: &[u8], default_port: Option<&'static [u8]>) -> bool {
+pub(super) fn authorities_equal(a: &[u8], b: &[u8], default_port: Option<&'static [u8]>) -> bool {
     fn normalized(value: &[u8], fold_case: bool) -> impl Iterator<Item = u8> + '_ {
         let mut pos = 0;
         std::iter::from_fn(move || {
@@ -483,7 +515,12 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     meta.path = true;
                 }
                 (FieldRole::Request, b":authority") => meta.authority = Some(field.value.clone()),
-                (FieldRole::Request, b":protocol") => meta.protocol = true,
+                (FieldRole::Request, b":protocol") => {
+                    if value.is_empty() || !value.iter().all(|b| token(*b)) {
+                        return Err(":protocol is not a protocol token");
+                    }
+                    meta.protocol = true;
+                }
                 (FieldRole::Response, b":status") => {
                     if value.len() != 3 {
                         return Err(":status is not a three-digit code");
@@ -518,8 +555,8 @@ pub(crate) fn validate(role: FieldRole, fields: &[Header]) -> Result<Meta, &'sta
                     return Err("te field may only carry 'trailers'");
                 }
             }
-            if name == b"host" && role == FieldRole::Trailer {
-                return Err("Host routing information is invalid in trailers");
+            if role == FieldRole::Trailer && FORBIDDEN_TRAILERS.contains(&name) {
+                return Err("field is prohibited in trailers");
             }
             if name == b"host" && role == FieldRole::Request {
                 if meta.host.is_some() {

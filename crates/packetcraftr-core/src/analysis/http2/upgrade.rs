@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::protocol::application::http::{Head, StartLine};
+use crate::protocol::application::http::{self, Head, StartLine};
 use crate::protocol::application::http2::Setting;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -62,6 +62,32 @@ fn tokens<'a>(head: &'a Head, name: &'a str) -> impl Iterator<Item = &'a [u8]> +
 
 fn has_token(head: &Head, name: &str, want: &[u8]) -> bool {
     tokens(head, name).any(|token| token.eq_ignore_ascii_case(want))
+}
+
+/// Every non-empty list member of the field satisfies the HTTP token grammar,
+/// so a matching member cannot be admitted beside a malformed one.
+fn list_members_are_tokens(head: &Head, name: &str) -> bool {
+    tokens(head, name).all(|member| member.iter().all(|b| http::token(*b)))
+}
+
+/// The authority of an absolute-form `http`/`https` target, with the scheme's
+/// default port for comparison against the `Host` field.
+fn absolute_form_authority(target: &[u8]) -> Option<(&[u8], &'static [u8])> {
+    let colon = target.iter().position(|b| *b == b':')?;
+    let scheme = &target[..colon];
+    let default_port: &'static [u8] = if scheme.eq_ignore_ascii_case(b"http") {
+        b"80"
+    } else if scheme.eq_ignore_ascii_case(b"https") {
+        b"443"
+    } else {
+        return None;
+    };
+    let rest = target[colon + 1..].strip_prefix(b"//")?;
+    let end = rest
+        .iter()
+        .position(|b| matches!(b, b'/' | b'?' | b'#'))
+        .unwrap_or(rest.len());
+    Some((&rest[..end], default_port))
 }
 
 fn http11(head: &Head) -> bool {
@@ -127,6 +153,15 @@ pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'stati
     if hosts.next().is_some() || !super::stream::valid_http_authority(host) {
         return Err("h2c request requires exactly one valid Host authority");
     }
+    if let StartLine::Request { target, .. } = &head.start
+        && let Some((authority, default_port)) = absolute_form_authority(target)
+        && !super::stream::authorities_equal(authority, host, Some(default_port))
+    {
+        return Err("h2c Host does not match the absolute-form target authority");
+    }
+    if !list_members_are_tokens(head, "connection") || !list_members_are_tokens(head, "upgrade") {
+        return Err("Connection or Upgrade list carries an invalid member");
+    }
     if !has_token(head, "connection", b"upgrade")
         || !has_token(head, "connection", b"http2-settings")
     {
@@ -154,6 +189,8 @@ pub(crate) fn upgrade_offer(head: &Head) -> Result<Option<Vec<Setting>>, &'stati
 pub(crate) fn accepts_upgrade(head: &Head) -> bool {
     http11(head)
         && head.status() == Some(101)
+        && list_members_are_tokens(head, "connection")
+        && list_members_are_tokens(head, "upgrade")
         && has_token(head, "connection", b"upgrade")
         && has_token(head, "upgrade", b"h2c")
 }

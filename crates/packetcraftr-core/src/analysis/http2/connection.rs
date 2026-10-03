@@ -632,6 +632,7 @@ impl Conn {
         self.streams.clear();
         self.closed.clear();
         self.early_response_headers.clear();
+        self.pending_openers.clear();
         self.closed_credit.clear();
         self.prelude = None;
         cx.release_live(bytes);

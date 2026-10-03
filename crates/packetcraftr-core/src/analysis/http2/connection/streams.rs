@@ -11,6 +11,9 @@ use super::{ChainHead, Conn, Cx, Decoded, Evidence, Fault, Head, Phase, resource
 use crate::analysis::application;
 use bytes::Bytes;
 
+const RESPONSE_AFTER_GOAWAY: &str =
+    "the server responded on a client stream above its own GOAWAY last_stream_id";
+
 impl Conn {
     pub(crate) fn opener_exhausted(&self, owner: usize) -> bool {
         self.clean_start
@@ -43,25 +46,60 @@ impl Conn {
         owner: usize,
         cx: &mut Cx<'_>,
     ) -> Result<(), Error> {
+        self.confirm_pending_openers(
+            owner,
+            None,
+            "clean initiator FIN proves no opener exists; original frame evidence is retained in the earlier issue",
+            cx,
+        )
+    }
+
+    /// A later stream id from the initiator proves that every lower same-parity
+    /// id it never opened will stay idle: initiators use ids in increasing order.
+    pub(crate) fn reconcile_pending_openers_below(
+        &mut self,
+        owner: usize,
+        bound: u32,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
+        self.confirm_pending_openers(
+            owner,
+            Some(bound),
+            "a later stream id from the initiator proves no opener exists; original frame evidence is retained in the earlier issue",
+            cx,
+        )
+    }
+
+    fn confirm_pending_openers(
+        &mut self,
+        owner: usize,
+        below: Option<u32>,
+        detail: &'static str,
+        cx: &mut Cx<'_>,
+    ) -> Result<(), Error> {
         let mut fault = None;
         for (&id, &code) in &self.pending_openers {
             cx.check_deadline()?;
-            if id.is_multiple_of(2) == (owner == SERVER) {
+            if id.is_multiple_of(2) == (owner == SERVER) && below.is_none_or(|bound| id < bound) {
                 fault = Some((id, code));
                 break;
             }
         }
         if let Some((id, code)) = fault {
-            self.issue(cx, Fault {
-                flow: self.dir_flow(peer(owner)),
-                http2_stream_id: Some(id),
-                scope: IssueScope::Connection,
-                certainty: Certainty::Confirmed,
-                status: Status::Malformed,
-                code,
-                detail: "clean initiator FIN proves no opener exists; original frame evidence is retained in the earlier issue".into(),
-                wire: Bytes::new(), sources: None,
-            })?;
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(peer(owner)),
+                    http2_stream_id: Some(id),
+                    scope: IssueScope::Connection,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code,
+                    detail: detail.into(),
+                    wire: Bytes::new(),
+                    sources: None,
+                },
+            )?;
             self.fail(cx, Status::Malformed)?;
         }
         Ok(())
@@ -301,6 +339,14 @@ impl Conn {
         }
         if initiator == CLIENT {
             self.max_initiated[CLIENT] = stream_id;
+            // Only a connection observed from its start proves lower ids were
+            // never opened; a mid-capture start may have missed their openers.
+            if self.clean_start {
+                self.reconcile_pending_openers_below(CLIENT, stream_id, cx)?;
+                if matches!(self.phase, Phase::Dead) {
+                    return Ok(());
+                }
+            }
         }
         let open_count = self
             .streams
@@ -516,17 +562,24 @@ impl Conn {
                         .insert(stream_id, Default::default());
                 }
                 if delayed_opener {
-                    let validation = validate(FieldRole::Response, &headers).and_then(|meta| {
-                        if end_stream
-                            && meta
-                                .status
-                                .is_some_and(|status| (100..200).contains(&status))
-                        {
-                            Err("a 1xx response must not end the stream")
-                        } else {
-                            Ok(meta)
-                        }
-                    });
+                    // The server's own ordered bytes place this response after
+                    // its GOAWAY, which promised the stream was not processed.
+                    let above_goaway = self.goaway[SERVER].is_some_and(|last| stream_id > last);
+                    let validation = validate(FieldRole::Response, &headers)
+                        .map_err(|detail| ("header_semantics", detail))
+                        .and_then(|meta| {
+                            if end_stream
+                                && meta
+                                    .status
+                                    .is_some_and(|status| (100..200).contains(&status))
+                            {
+                                Err(("header_semantics", "a 1xx response must not end the stream"))
+                            } else if above_goaway {
+                                Err(("response_after_goaway", RESPONSE_AFTER_GOAWAY))
+                            } else {
+                                Ok(meta)
+                            }
+                        });
                     match validation {
                         Ok(meta) => {
                             let early = self
@@ -537,9 +590,10 @@ impl Conn {
                                 .status
                                 .is_none_or(|status| !(100..200).contains(&status));
                             early.forbids_trailers = matches!(meta.status, Some(204 | 304));
+                            early.bodyless = matches!(meta.status, Some(204 | 205 | 304));
                             early.ended = end_stream || malformed;
                         }
-                        Err(detail) => {
+                        Err((code, detail)) => {
                             self.issue(
                                 cx,
                                 Fault {
@@ -548,7 +602,7 @@ impl Conn {
                                     scope: IssueScope::Stream,
                                     certainty: Certainty::Confirmed,
                                     status: Status::Malformed,
-                                    code: "header_semantics",
+                                    code,
                                     detail: detail.into(),
                                     wire: block.clone(),
                                     sources: block_sources.clone(),
@@ -679,6 +733,27 @@ impl Conn {
                 }
             }
         };
+        if side == SERVER
+            && role == FieldRole::Response
+            && client_initiated
+            && self.goaway[SERVER].is_some_and(|last| stream_id > last)
+        {
+            self.issue(
+                cx,
+                Fault {
+                    flow: self.dir_flow(side),
+                    http2_stream_id: Some(stream_id),
+                    scope: IssueScope::Stream,
+                    certainty: Certainty::Confirmed,
+                    status: Status::Malformed,
+                    code: "response_after_goaway",
+                    detail: RESPONSE_AFTER_GOAWAY.into(),
+                    wire: block.clone(),
+                    sources: block_sources.clone(),
+                },
+            )?;
+            failure = Some(Status::Malformed);
+        }
         if role == FieldRole::Trailer
             && self
                 .streams
@@ -1270,7 +1345,6 @@ impl Conn {
             self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
-        self.resolve_pending_opener(promised, cx);
         let parent_open = self
             .streams
             .get(&stream_id)
@@ -1308,6 +1382,9 @@ impl Conn {
             self.fail(cx, Status::Malformed)?;
             return Ok(());
         }
+        // A rejected promise never opens the promised stream, so provisional
+        // idle-stream evidence for that id is only released once it is admitted.
+        self.resolve_pending_opener(promised, cx);
         let meta = validate(FieldRole::Request, &headers).and_then(|meta| {
             if !matches!(meta.method.as_deref(), Some(b"GET" | b"HEAD")) {
                 return Err("a pushed request must use a known safe and cacheable method");

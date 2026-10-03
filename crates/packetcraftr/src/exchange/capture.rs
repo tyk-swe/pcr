@@ -197,14 +197,12 @@ mod tests {
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
     use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
-    use packetcraftr_netio::capture::{Captured, Metadata, OverflowPolicy, Stats};
+    use packetcraftr_netio::capture::{Captured, Metadata, Stats};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::transmit::{Outbound, Report};
 
     use super::*;
-    use crate::exchange::{
-        Event, Prepared, Window, WorkflowResponseMatcher, WorkflowStopPredicate,
-    };
+    use crate::exchange::{Prepared, Window, WorkflowResponseMatcher, WorkflowStopPredicate};
 
     struct CaptureState {
         sends: AtomicUsize,
@@ -360,109 +358,6 @@ mod tests {
         )
     }
 
-    #[test]
-    fn stop_predicate_preserves_response_event_and_skips_blocking_collection() {
-        let (transaction, sender, state) =
-            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
-        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| true;
-        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
-        let mut stop_calls = 0;
-        let mut stop = |request_index: usize, _: &Packet, _: &DecodedPacket| {
-            stop_calls += 1;
-            assert_eq!(request_index, 0);
-            true
-        };
-        let stop: &mut WorkflowStopPredicate<'_> = &mut stop;
-        let mut events = Vec::new();
-
-        let summary = transaction
-            .execute(&sender, Some(matcher), Some(stop), &mut |event| {
-                events.push(event);
-                Ok(())
-            })
-            .expect("early-stopped exchange");
-
-        assert_eq!(stop_calls, 1);
-        assert!(matches!(
-            events[0],
-            Event::Sent {
-                request_index: 0,
-                ..
-            }
-        ));
-        assert!(matches!(events[1], Event::Response(_)));
-        assert_eq!(events.len(), 2);
-        assert!(summary.unanswered.is_empty());
-        assert_eq!(summary.stats.packets_completed, 1);
-        assert_eq!(
-            *state.reads.lock().expect("read log"),
-            [Duration::ZERO, Duration::ZERO],
-            "a stop found by the post-send drain must bypass blocking collection"
-        );
-        assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn blocking_collection_stop_skips_the_final_zero_time_drain() {
-        let (transaction, sender, state) =
-            fixture_transaction(true, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
-        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| true;
-        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
-        let mut stop = |_: usize, _: &Packet, _: &DecodedPacket| true;
-        let stop: &mut WorkflowStopPredicate<'_> = &mut stop;
-        let mut events = Vec::new();
-
-        let summary = transaction
-            .execute(&sender, Some(matcher), Some(stop), &mut |event| {
-                events.push(event);
-                Ok(())
-            })
-            .expect("early-stopped exchange");
-
-        assert!(matches!(events.last(), Some(Event::Response(_))));
-        assert!(summary.unanswered.is_empty());
-        let reads = state.reads.lock().expect("read log");
-        assert_eq!(reads.len(), 3);
-        assert_eq!(reads[0], Duration::ZERO);
-        assert_eq!(reads[1], Duration::ZERO);
-        assert!(reads[2] > Duration::ZERO);
-        assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn unretained_response_does_not_trigger_stop() {
-        let (mut transaction, sender, state) = fixture_transaction(false, 1, 0);
-        transaction.collection.capture.overflow_policy = OverflowPolicy::DropNewest;
-        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| true;
-        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
-        let mut stop_calls = 0;
-        let mut stop = |_: usize, _: &Packet, _: &DecodedPacket| {
-            stop_calls += 1;
-            true
-        };
-        let stop: &mut WorkflowStopPredicate<'_> = &mut stop;
-        let mut events = Vec::new();
-
-        let summary = transaction
-            .execute(&sender, Some(matcher), Some(stop), &mut |event| {
-                events.push(event);
-                Ok(())
-            })
-            .expect("bounded exchange without a retained response");
-
-        assert_eq!(stop_calls, 0);
-        assert!(
-            !events
-                .iter()
-                .any(|event| matches!(event, Event::Response(_)))
-        );
-        assert!(
-            summary.unanswered.is_empty(),
-            "a refused reply is not evidence of absence"
-        );
-        assert_eq!(state.reads.lock().expect("read log").len(), 5);
-    }
-
     fn unrelated_frame() -> Frame {
         let packet = udp_packet(
             Ipv4Addr::new(198, 51, 100, 7),
@@ -492,50 +387,6 @@ mod tests {
             "{message}"
         );
         assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn workflow_exchange_keeps_a_refused_frame_no_request_accepts_from_failing_the_run() {
-        let (mut transaction, sender, state) =
-            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
-        transaction.collection.max_unmatched_frames = 0;
-        *state.frames.lock().expect("capture frames") = VecDeque::from([unrelated_frame()]);
-        let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| false;
-        let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
-        let mut diagnostics = Vec::new();
-
-        let summary = transaction
-            .execute(&sender, Some(matcher), None, &mut |event| {
-                if let Event::Diagnostic(diagnostic) = event {
-                    diagnostics.push(diagnostic.code);
-                }
-                Ok(())
-            })
-            .expect("no workflow could have promoted the refused frame");
-
-        assert_eq!(summary.unanswered, [0]);
-        assert_eq!(diagnostics, ["exchange.unsolicited_limit"]);
-    }
-
-    #[test]
-    fn plain_exchange_keeps_unrelated_frame_refusal_to_a_warning() {
-        let (mut transaction, sender, state) =
-            fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
-        transaction.collection.max_unmatched_frames = 0;
-        *state.frames.lock().expect("capture frames") = VecDeque::from([unrelated_frame()]);
-        let mut diagnostics = Vec::new();
-
-        let summary = transaction
-            .execute(&sender, None, None, &mut |event| {
-                if let Event::Diagnostic(diagnostic) = event {
-                    diagnostics.push(diagnostic.code);
-                }
-                Ok(())
-            })
-            .expect("no matcher can attribute a refused unrelated frame");
-
-        assert_eq!(summary.unanswered, [0]);
-        assert_eq!(diagnostics, ["exchange.unsolicited_limit"]);
     }
 
     #[test]

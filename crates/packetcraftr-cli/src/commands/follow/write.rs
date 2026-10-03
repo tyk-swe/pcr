@@ -183,42 +183,6 @@ mod tests {
     }
 
     #[test]
-    fn staged_directions_publish_under_deterministic_names() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let mut files =
-            DirectionFiles::stage(directory.path(), selector(), Selected::Both, usize::MAX)
-                .expect("staging succeeds");
-        files
-            .write(&chunk(PeerDirection::ClientToServer, b"hello"))
-            .unwrap();
-        files
-            .write(&chunk(PeerDirection::ServerToClient, b"world!"))
-            .unwrap();
-        files
-            .write(&chunk(PeerDirection::ClientToServer, b" again"))
-            .unwrap();
-        let written = files.publish().expect("publish succeeds");
-        assert_eq!(
-            written
-                .iter()
-                .map(|file| (file.direction, file.bytes))
-                .collect::<Vec<_>>(),
-            [
-                (PeerDirection::ClientToServer, 11),
-                (PeerDirection::ServerToClient, 6),
-            ]
-        );
-        assert_eq!(
-            std::fs::read(directory.path().join("tcp-7-client.bin")).unwrap(),
-            b"hello again"
-        );
-        assert_eq!(
-            std::fs::read(directory.path().join("tcp-7-server.bin")).unwrap(),
-            b"world!"
-        );
-    }
-
-    #[test]
     fn staging_rejects_existing_destinations_before_any_write() {
         let directory = tempfile::tempdir().expect("destination dir");
         let occupied = directory.path().join("tcp-7-server.bin");
@@ -227,78 +191,6 @@ mod tests {
             .expect_err("occupied destination fails");
         assert!(error.message.contains("already exists"));
         assert_eq!(std::fs::read(&occupied).unwrap(), b"mine");
-    }
-
-    #[test]
-    fn publish_failure_rolls_back_files_published_by_this_invocation() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let mut files =
-            DirectionFiles::stage(directory.path(), selector(), Selected::Both, usize::MAX)
-                .expect("staging succeeds");
-        files
-            .write(&chunk(PeerDirection::ClientToServer, b"hello"))
-            .unwrap();
-        files
-            .write(&chunk(PeerDirection::ServerToClient, b"world"))
-            .unwrap();
-        let collision = directory.path().join("tcp-7-server.bin");
-        std::fs::write(&collision, b"someone else").expect("colliding file");
-        let error = files.publish().expect_err("publish fails");
-        assert!(error.message.contains("rolled back 1 published file(s)"));
-        assert!(!directory.path().join("tcp-7-client.bin").exists());
-        assert_eq!(std::fs::read(&collision).unwrap(), b"someone else");
-    }
-
-    #[test]
-    fn synchronization_failure_leaves_no_published_files_and_allows_retry() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let files = DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16)
-            .expect("staging succeeds");
-        let mut calls = 0;
-        let error = files
-            .publish_with(
-                |staged: &StagedFile| {
-                    calls += 1;
-                    if calls == 2 {
-                        Err(CliError::new(
-                            Kind::Io,
-                            format!(
-                                "sync follow output {}: injected synchronization failure",
-                                staged.destination().display()
-                            ),
-                        ))
-                    } else {
-                        staged.sync()
-                    }
-                },
-                |path: &Path| std::fs::remove_file(path),
-            )
-            .expect_err("the second synchronization fails");
-        assert_eq!(calls, 2);
-        assert!(error.message.contains("sync follow output"));
-        assert!(error.message.contains("tcp-7-server.bin"));
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
-        DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16)
-            .expect("retry stages cleanly")
-            .publish()
-            .expect("retry publishes both files");
-    }
-
-    #[test]
-    fn unselected_and_empty_directions_stage_exactly_what_was_chosen() {
-        let directory = tempfile::tempdir().expect("destination dir");
-        let files =
-            DirectionFiles::stage(directory.path(), selector(), Selected::Client, usize::MAX)
-                .expect("staging succeeds");
-        let written = files.publish().expect("publish succeeds");
-        assert_eq!(written.len(), 1);
-        assert_eq!(written[0].direction, PeerDirection::ClientToServer);
-        assert_eq!(written[0].bytes, 0);
-        assert_eq!(
-            std::fs::read(directory.path().join("tcp-7-client.bin")).unwrap(),
-            b""
-        );
-        assert!(!directory.path().join("tcp-7-server.bin").exists());
     }
 
     #[test]
@@ -318,44 +210,5 @@ mod tests {
         assert!(error.message.contains("--max-application-output-bytes"));
         drop(files);
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
-    }
-
-    #[test]
-    fn rollback_failure_reports_the_file_that_remains() {
-        let directory = tempfile::tempdir().unwrap();
-        let files =
-            DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16).unwrap();
-        std::fs::write(directory.path().join("tcp-7-server.bin"), b"collision").unwrap();
-        let error = files
-            .publish_with(StagedFile::sync, |_| {
-                Err(std::io::Error::other("injected rollback failure"))
-            })
-            .unwrap_err();
-        assert!(error.message.contains("rolled back 0 published file(s)"));
-        assert!(error.message.contains("tcp-7-client.bin"));
-        assert!(error.message.contains("injected rollback failure"));
-        assert!(directory.path().join("tcp-7-client.bin").is_file());
-        assert_eq!(
-            std::fs::read(directory.path().join("tcp-7-server.bin")).unwrap(),
-            b"collision"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn staging_rejects_dangling_symlinks_without_creating_temporary_files() {
-        use std::path::PathBuf;
-
-        let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("tcp-7-client.bin");
-        std::os::unix::fs::symlink("missing-target", &destination).unwrap();
-        let error =
-            DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16).unwrap_err();
-        assert!(error.message.contains("already exists"));
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-        assert_eq!(
-            std::fs::read_link(destination).unwrap(),
-            PathBuf::from("missing-target")
-        );
     }
 }

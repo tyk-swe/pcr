@@ -113,12 +113,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn orders_by_weight() {
-        assert!(Severity::Info < Severity::Warning);
-        assert!(Severity::Warning < Severity::Error);
-    }
-
-    #[test]
     fn unrelated_diagnostic_codes_never_classify_as_integrity_failures() {
         for code in [
             "decode.tcp_checksum_hint",

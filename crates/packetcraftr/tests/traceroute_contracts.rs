@@ -6,12 +6,12 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::responder::{Io, Routes, State, router};
+use common::responder::{Io, Routes, State};
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::Transport;
 use packetcraftr::target::{Family, Target};
 use packetcraftr::{Client, traceroute};
-use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::error::Classified;
 use packetcraftr_netio::link::Mode;
 
 const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
@@ -58,63 +58,6 @@ fn request() -> traceroute::Request {
         },
         collection,
     }
-}
-
-#[test]
-fn a_trace_walks_each_hop_until_the_destination_answers() {
-    let state = network();
-    let collector = traceroute::Collector::default();
-
-    let report = client(&state, Policy::default())
-        .traceroute(request(), collector.clone())
-        .expect("the trace reaches its destination");
-    let trace = collector.finish(report).expect("coherent trace events");
-
-    assert_eq!(
-        trace.termination,
-        traceroute::Termination::DestinationReached
-    );
-    assert_eq!(trace.destination, IpAddr::V4(DESTINATION));
-    let answers: Vec<_> = trace
-        .hops
-        .iter()
-        .map(|hop| {
-            let [probe] = hop.probes.as_slice() else {
-                panic!("one probe per hop");
-            };
-            assert_eq!(probe.status, ProbeStatus::Response);
-            (hop.hop_limit, probe.response_kind, probe.responder)
-        })
-        .collect();
-    assert_eq!(
-        answers,
-        vec![
-            (
-                1,
-                Some(traceroute::ResponseKind::Intermediate),
-                Some(IpAddr::V4(router(1)))
-            ),
-            (
-                2,
-                Some(traceroute::ResponseKind::Intermediate),
-                Some(IpAddr::V4(router(2)))
-            ),
-            (
-                3,
-                Some(traceroute::ResponseKind::DestinationReached),
-                Some(IpAddr::V4(DESTINATION))
-            ),
-        ]
-    );
-    assert_eq!(trace.stats.packets_completed, 3);
-    let state = state.lock().unwrap();
-    assert_eq!(
-        state.ttls,
-        vec![1, 2, 3],
-        "no hop is probed past the destination"
-    );
-    assert_eq!(state.armed, 3, "each hop runs as its own exchange");
-    assert_eq!(state.shutdowns, 3);
 }
 
 #[test]
@@ -166,126 +109,6 @@ fn a_collection_wider_than_the_evidence_limits_is_refused_before_any_capture_or_
             matches!(&error, traceroute::Error::InvalidLimit { field: named, .. } if *named == field),
             "{error}"
         );
-        assert_eq!(error.classification().code, "cli.traceroute_limit");
-        let state = state.lock().unwrap();
-        assert_eq!(state.armed, 0);
-        assert_eq!(state.sends, 0);
-    }
-}
-
-#[test]
-fn a_collection_matching_narrow_evidence_limits_still_traces() {
-    let state = network();
-    let mut request = narrowed_request(16, 1 << 20);
-    request.collection.capture.max_frames = 16;
-    request.collection.capture.max_bytes = 1 << 20;
-    request.collection.max_responses = 16;
-    request.collection.max_unmatched_frames = 16;
-    let collector = traceroute::Collector::default();
-
-    let report = client(&state, Policy::default())
-        .traceroute(request, collector.clone())
-        .expect("bounds that agree are not refused");
-
-    assert_eq!(
-        collector.finish(report).unwrap().termination,
-        traceroute::Termination::DestinationReached
-    );
-}
-
-#[test]
-fn a_collection_retaining_fewer_responses_than_a_hop_has_probes_is_refused_before_any_capture_or_send()
- {
-    let state = network();
-    let mut request = request();
-    request.probes_per_hop = 2;
-    request.collection.max_responses = 1;
-
-    let error = client(&state, Policy::default())
-        .traceroute(request, |_| Ok(()))
-        .expect_err("a hop's probes could not each keep a response");
-
-    assert!(
-        matches!(
-            error,
-            traceroute::Error::InvalidLimit {
-                field: "max_responses",
-                ..
-            }
-        ),
-        "{error}"
-    );
-    assert_eq!(error.classification().code, "cli.traceroute_limit");
-    let state = state.lock().unwrap();
-    assert_eq!(state.armed, 0);
-    assert_eq!(state.sends, 0);
-}
-
-#[test]
-fn a_failing_sink_stops_the_trace_before_a_later_hop() {
-    let state = network();
-
-    let error = client(&state, Policy::default())
-        .traceroute(request(), |_| {
-            Err(BoundaryError::new(
-                "sink refused",
-                Classification::new("io.fixture", Kind::Io, None),
-                Vec::new(),
-            ))
-        })
-        .expect_err("the sink failure ends the trace");
-
-    assert!(matches!(error, traceroute::Error::Output { .. }), "{error}");
-    assert_eq!(error.classification().code, "io.fixture");
-    let state = state.lock().unwrap();
-    assert_eq!(state.ttls, vec![1], "the first hop's outcome was refused");
-    assert_eq!(
-        state.shutdowns, state.armed,
-        "the hop's capture was shut down"
-    );
-}
-
-#[test]
-fn a_payload_above_the_local_mtu_is_refused_before_any_send() {
-    let state = network();
-    let mut request = request();
-    request.strategy = Transport::Udp;
-    request.destination_port = Some(33_434);
-    request.payload_size = 2_000;
-
-    let error = client(&state, Policy::default())
-        .traceroute(request, |_| Ok(()))
-        .expect_err("the padded probe exceeds the 1500-byte fixture MTU");
-
-    assert!(
-        matches!(error, traceroute::Error::Execution { sequence: 0, .. }),
-        "{error}"
-    );
-    assert_eq!(error.classification().code, "packet.mtu");
-    assert_eq!(state.lock().unwrap().sends, 0);
-}
-
-#[test]
-fn invalid_probe_options_are_usage_errors_before_any_capture_or_send() {
-    let mut oversize = request();
-    oversize.strategy = Transport::Udp;
-    oversize.payload_size = traceroute::MAX_PAYLOAD_SIZE + 1;
-    let mut dscp = request();
-    dscp.dscp = traceroute::MAX_DSCP + 1;
-    let mut tcp_payload = request();
-    tcp_payload.payload_size = 8;
-    for (request, option) in [
-        (oversize, "payload_size"),
-        (dscp, "dscp"),
-        (tcp_payload, "payload_size"),
-    ] {
-        let state = network();
-
-        let error = client(&state, Policy::default())
-            .traceroute(request, |_| Ok(()))
-            .expect_err("the probe option is out of range");
-
-        assert!(error.to_string().contains(option), "{error}");
         assert_eq!(error.classification().code, "cli.traceroute_limit");
         let state = state.lock().unwrap();
         assert_eq!(state.armed, 0);

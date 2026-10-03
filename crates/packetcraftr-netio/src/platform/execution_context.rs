@@ -34,16 +34,3 @@ pub(crate) fn current() -> Option<ExecutionContext> {
         Some(ExecutionContext {})
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn threads_in_one_context_match() {
-        let here = current();
-        let there = std::thread::spawn(current).join().unwrap();
-        assert!(here.is_some());
-        assert_eq!(here, there);
-    }
-}

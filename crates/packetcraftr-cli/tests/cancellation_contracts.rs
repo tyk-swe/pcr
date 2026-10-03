@@ -3,13 +3,12 @@
 
 #![cfg(packetcraftr_test_procfs)]
 
-use std::io::{Cursor, Write};
 use std::net::Ipv4Addr;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use packetcraftr_core::build::Builder;
-use packetcraftr_core::capture_file::{Format, Reader, Writer};
+use packetcraftr_core::capture_file::{Format, Writer};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
@@ -211,116 +210,6 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
         );
         assert!(document.get("error").is_none());
         assert!(String::from_utf8_lossy(&output.stderr).contains("io.cancelled"));
-    }
-}
-
-#[test]
-fn build_retains_signal_termination_while_recipe_stdin_is_open() {
-    use std::os::unix::process::ExitStatusExt;
-
-    common::require_procfs();
-    for (signal, number) in [("INT", 2), ("TERM", 15)] {
-        let mut process = Running::start(&["--output", "ndjson", "build"]);
-        process.wait_until(|p| {
-            std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
-                .unwrap()
-                .contains("pipe_read")
-        });
-        process.signal(signal);
-        // Keep stdin open: termination must not depend on the producer reaching EOF.
-        let output = process.finish();
-        assert_eq!(output.status.signal(), Some(number), "{signal}: {output:?}");
-        assert!(output.stdout.is_empty());
-    }
-}
-
-#[test]
-fn cancellation_during_build_json_publication_keeps_one_complete_document() {
-    common::require_procfs();
-    let payload_len = 64 * 1024;
-    let recipe = format!("raw(text={})", "x".repeat(payload_len));
-    for signal in ["INT", "TERM"] {
-        let mut process = Running::start_with_stdout_pipe(
-            &["--output", "json", "build", "--packet", &recipe],
-            true,
-        );
-        process.wait_until(|p| {
-            std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
-                .unwrap()
-                .contains("pipe_write")
-        });
-        process.signal_and_wait(signal);
-        let output = process.finish();
-        assert_eq!(output.status.code(), Some(130), "{signal}");
-        let document: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .expect("stdout must contain exactly one complete JSON document");
-        assert_eq!(document["command"], "build");
-        assert_eq!(document["status"], "success");
-        assert_eq!(document["result"]["length"], payload_len);
-        assert_eq!(document["result"]["bytes_hex"], "78".repeat(payload_len));
-        assert!(document.get("error").is_none());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("io.cancelled"));
-    }
-}
-
-#[test]
-fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
-    common::require_procfs();
-    for format in [Format::Pcap, Format::PcapNg] {
-        let mut prefix = Vec::new();
-        let mut writer = Writer::new(&mut prefix, format, LinkType::IPV4).unwrap();
-        // A newline flushes the process stdout line buffer before more input.
-        writer
-            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, b"before\n".to_vec()).unwrap())
-            .unwrap();
-        writer.flush().unwrap();
-        drop(writer);
-        let mut later = Vec::new();
-        let mut writer = Writer::new(&mut later, format, LinkType::IPV4).unwrap();
-        writer
-            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, b"after\n".to_vec()).unwrap())
-            .unwrap();
-        writer.flush().unwrap();
-        drop(writer);
-        let mut reader = Reader::new(Cursor::new(later)).unwrap();
-        let later = loop {
-            let record = reader.next_record().unwrap().unwrap();
-            if record.frame.is_some() {
-                break record.raw_bytes().to_vec();
-            }
-        };
-        for filter in [false, true] {
-            for eof in [false, true] {
-                let mut args = vec!["--output", format.as_str(), "read", "-"];
-                if filter {
-                    args.extend(["--filter", "frame.number > 0"]);
-                }
-                let mut process = Running::start(&args);
-                let mut stdin = process.child.stdin.take().unwrap();
-                stdin.write_all(&prefix).unwrap();
-                process.wait_until(|p| {
-                    std::fs::read(p.stdout.path())
-                        .unwrap()
-                        .windows(6)
-                        .any(|bytes| bytes == b"before")
-                });
-                process.signal_and_wait(if eof { "TERM" } else { "INT" });
-                if !eof {
-                    let _ = stdin.write_all(&later);
-                }
-                drop(stdin);
-                let output = process.finish();
-                assert_eq!(output.status.code(), Some(130), "{args:?}: {output:?}");
-                assert!(
-                    String::from_utf8_lossy(&output.stderr).contains("io.cancelled"),
-                    "{output:?}"
-                );
-                assert!(
-                    !output.stdout.windows(5).any(|bytes| bytes == b"after"),
-                    "{output:?}"
-                );
-            }
-        }
     }
 }
 

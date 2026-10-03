@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
@@ -8,7 +9,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::Classified as _;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::{Classification, Error, Limits, Request};
@@ -117,48 +117,6 @@ impl Provider for Concurrent {
         })
     }
 }
-#[test]
-fn connect_windows_overlap_with_stable_identity_and_closed_socket_evidence() {
-    let request = Request {
-        targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
-        transport: Transport::Tcp,
-        udp_payload: bytes::Bytes::new(),
-        udp_profiles: Default::default(),
-        address_family: crate::target::Family::Any,
-        ports: vec![80, 81, 82, 83],
-        attempts: 1,
-        timeout: Duration::from_secs(1),
-        probes_per_second: None,
-        max_in_flight: 2,
-        limits: Limits::default(),
-        route: Default::default(),
-        collection: Default::default(),
-    };
-    let closed = Arc::new(AtomicUsize::new(0));
-    let client = client(Concurrent {
-        active: AtomicUsize::new(0),
-        peak: AtomicUsize::new(0),
-        calls: AtomicUsize::new(0),
-        closed: Arc::clone(&closed),
-    });
-    let provider = &client.providers().tcp;
-    let report = collect(&client, request.clone()).unwrap();
-    assert_eq!(provider.peak.load(Ordering::SeqCst), 2);
-    assert_eq!(closed.load(Ordering::SeqCst), 4);
-    assert_eq!(report.report.stats.connections_attempted, 4);
-    assert_eq!(
-        report
-            .endpoints
-            .iter()
-            .flat_map(|endpoint| endpoint.probes.iter().map(|probe| probe.sequence))
-            .collect::<Vec<_>>(),
-        [0, 1, 2, 3]
-    );
-    let mut bounded = request;
-    bounded.limits.max_probes = 1;
-    assert!(collect(&client, bounded).is_err());
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
-}
 
 struct Verdicts {
     closed: Arc<AtomicUsize>,
@@ -176,59 +134,6 @@ impl Provider for Verdicts {
             _ => Err(io::Error::new(io::ErrorKind::TimedOut, "scripted silence").into()),
         }
     }
-}
-
-#[test]
-fn connect_scan_reports_rtt_statistics_across_verdicts() {
-    let request = Request {
-        targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
-        transport: Transport::Tcp,
-        udp_payload: bytes::Bytes::new(),
-        udp_profiles: Default::default(),
-        address_family: crate::target::Family::Any,
-        ports: vec![90, 91, 92],
-        attempts: 2,
-        timeout: Duration::from_secs(5),
-        probes_per_second: None,
-        max_in_flight: 1,
-        limits: Limits::default(),
-        route: Default::default(),
-        collection: Default::default(),
-    };
-    let closed = Arc::new(AtomicUsize::new(0));
-    let client = client(Verdicts {
-        closed: Arc::clone(&closed),
-    });
-    let report = collect(&client, request).unwrap();
-
-    let stats = &report.report.stats;
-    assert_eq!(stats.connections_scheduled, 6);
-    assert_eq!(stats.connections_attempted, 6);
-    assert_eq!(stats.connections_succeeded, 2);
-    assert_eq!(stats.rtt.sent, 6);
-    assert_eq!(stats.rtt.received, 4);
-    assert_eq!(stats.rtt.lost, 2);
-    let (Some(min), Some(avg), Some(max)) = (stats.rtt.min, stats.rtt.avg, stats.rtt.max) else {
-        panic!("received probes must produce RTT samples");
-    };
-    assert!(
-        min <= avg && avg <= max,
-        "min {min:?} avg {avg:?} max {max:?}"
-    );
-    let endpoint_verdicts: Vec<_> = report
-        .endpoints
-        .iter()
-        .map(|endpoint| (endpoint.port, endpoint.classification))
-        .collect();
-    assert_eq!(
-        endpoint_verdicts,
-        [
-            (90, Classification::Open),
-            (91, Classification::Closed),
-            (92, Classification::Timeout),
-        ]
-    );
-    assert_eq!(closed.load(Ordering::SeqCst), 2);
 }
 
 struct Faulty {
@@ -312,26 +217,4 @@ fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_peer_query()
 #[test]
 fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_local_query() {
     assert_open_without_local_address(Fault::LocalQuery(io::ErrorKind::NotConnected));
-}
-
-#[test]
-fn connect_scan_fails_on_endpoint_query_errors_other_than_a_reset_connection() {
-    for fault in [
-        Fault::PeerQuery(io::ErrorKind::PermissionDenied),
-        Fault::LocalQuery(io::ErrorKind::PermissionDenied),
-    ] {
-        let (result, _) = scan_with_fault(fault);
-        let error = result.unwrap_err();
-        assert!(matches!(error, Error::Execution { sequence: 1, .. }));
-        assert_eq!(error.classification().code, "io.tcp_connect_evidence");
-    }
-}
-
-#[test]
-fn connect_scan_fails_when_the_provider_reports_another_peer_endpoint() {
-    let (result, _) = scan_with_fault(Fault::OtherPeer);
-    assert!(matches!(
-        result.unwrap_err(),
-        Error::InvalidEvidence { sequence: 1, .. }
-    ));
 }

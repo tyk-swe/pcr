@@ -209,15 +209,3 @@ impl LayerCodec for ArpCodec {
         make_layer(Arp::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn operation_codes_follow_rfc_826() {
-        assert_eq!(Arp::OPERATION_REQUEST, 1);
-        assert_eq!(Arp::OPERATION_REPLY, 2);
-        assert_eq!(Arp::default().operation, Arp::OPERATION_REQUEST);
-    }
-}

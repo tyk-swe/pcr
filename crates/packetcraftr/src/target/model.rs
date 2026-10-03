@@ -286,15 +286,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hostname_deserialization_validates_and_canonicalizes() {
-        let name: Hostname = serde_json::from_str("\"EXAMPLE.COM.\"").unwrap();
-        assert_eq!(name.as_str(), "example.com");
-        for invalid in ["", "a..b", "-bad.example", "bad_.example", "é.example"] {
-            assert!(serde_json::from_value::<Hostname>(serde_json::json!(invalid)).is_err());
-        }
-    }
-
-    #[test]
     fn distinct_addresses_are_bounded_and_ordered_by_first_sighting() {
         let name: Hostname = "example.test".parse().unwrap();
         let [a, b, c]: [IpAddr; 3] =

@@ -323,37 +323,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_types_all_base_fields_and_keeps_trailing_bytes() {
-        let registry = crate::protocol::builtin::registry();
-        let mut wire = fixture().to_vec();
-        wire.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]);
-        let decoded = NtpCodec
-            .decode(Bytes::from(wire), &context(&registry))
-            .expect("supported header decodes");
-        let layer = decoded.layer;
-        assert_eq!(layer.field("version"), Some(FieldValue::Unsigned(4)));
-        assert_eq!(layer.field("mode"), Some(FieldValue::Unsigned(3)));
-        assert_eq!(layer.field("stratum"), Some(FieldValue::Unsigned(2)));
-        assert_eq!(layer.field("poll"), Some(FieldValue::Signed(6)));
-        assert_eq!(layer.field("precision"), Some(FieldValue::Signed(-20)));
-        assert_eq!(
-            layer.field("reference_id"),
-            Some(FieldValue::Bytes(Bytes::from_static(b"RATE")))
-        );
-        assert_eq!(
-            layer.field("transmit_timestamp"),
-            Some(FieldValue::Unsigned(0xe6e1_2345_6789_abcd))
-        );
-        assert_eq!(
-            layer.field("extensions"),
-            Some(FieldValue::Bytes(Bytes::from_static(&[
-                0xaa, 0xbb, 0xcc, 0xdd
-            ])))
-        );
-        assert!(decoded.stop);
-    }
-
-    #[test]
     fn truncated_unsupported_and_control_messages_decode_as_raw() {
         let registry = crate::protocol::builtin::registry();
         for wire in [

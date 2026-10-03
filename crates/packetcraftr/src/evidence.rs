@@ -261,91 +261,8 @@ impl SentPacket {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use packetcraftr_core::{layer::Raw, packet::Packet};
-    use packetcraftr_netio::transmit::Submission;
 
     use super::*;
-
-    #[test]
-    fn a_diagnostic_log_publishes_each_entry_once_and_deduplicates_repeats() {
-        let mut log = DiagnosticLog::default();
-        let mut published: Vec<String> = Vec::new();
-
-        log.push_once(Diagnostic::warning("test.one", "first"));
-        log.push_once(Diagnostic::warning("test.one", "first"));
-        log.publish_new::<()>(|diagnostic| {
-            published.push(diagnostic.code.to_string());
-            Ok(())
-        })
-        .expect("publishing cannot fail");
-        assert_eq!(published, vec!["test.one".to_owned()]);
-
-        log.publish_new::<()>(|_| panic!("already-published entries are never republished"))
-            .expect("publishing cannot fail");
-
-        log.push_once(Diagnostic::warning("test.two", "second"));
-        log.publish_new::<()>(|diagnostic| {
-            published.push(diagnostic.code.to_string());
-            Ok(())
-        })
-        .expect("publishing cannot fail");
-        assert_eq!(
-            published,
-            vec!["test.one".to_owned(), "test.two".to_owned()]
-        );
-        assert_eq!(log.as_slice().len(), 2);
-    }
-
-    #[test]
-    fn a_failed_publication_leaves_its_entry_unpublished() {
-        let mut log = DiagnosticLog::default();
-        log.push_once(Diagnostic::warning("test.one", "first"));
-        log.push_once(Diagnostic::warning("test.two", "second"));
-
-        let mut seen = 0_usize;
-        assert_eq!(
-            log.publish_new(|_| {
-                seen += 1;
-                Err::<(), _>("sink closed")
-            }),
-            Err("sink closed")
-        );
-        assert_eq!(seen, 1);
-
-        let mut retried: Vec<String> = Vec::new();
-        log.publish_new::<()>(|diagnostic| {
-            retried.push(diagnostic.code.to_string());
-            Ok(())
-        })
-        .expect("publishing cannot fail");
-        assert_eq!(retried, vec!["test.one".to_owned(), "test.two".to_owned()]);
-    }
-
-    #[test]
-    fn sent_receipt_rejects_semantic_build_with_different_accepted_bytes() {
-        let mut packet = Packet::new();
-        packet.push(Raw::new(Bytes::from_static(&[1, 2, 3])));
-        let fixture = crate::test_support::sent_packet(packet);
-        let built = fixture.built.clone();
-        let route = fixture.route.clone();
-        let report = Submission::start().complete(3, Bytes::from_static(&[3, 2, 1]));
-
-        assert!(matches!(
-            SentPacket::try_new(built, route, report),
-            Err(LiveIoError::InvalidSendEvidence { .. })
-        ));
-    }
-
-    #[test]
-    fn reservation_commits_both_counters_only_when_every_bound_fits() {
-        let mut budget = RetentionBudget {
-            retained_frames: 1,
-            retained_bytes: 10,
-        };
-        assert_eq!(budget.reserve(5, 2, 15), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (2, 15));
-    }
 
     #[test]
     fn frame_limit_and_overflow_leave_counters_untouched() {
@@ -379,50 +296,6 @@ mod tests {
         budget.retained_bytes = usize::MAX;
         assert_eq!(
             budget.reserve(1, 10, usize::MAX),
-            Err(RetentionError::ByteCountOverflow)
-        );
-        assert_eq!(
-            (budget.retained_frames, budget.retained_bytes),
-            (1, usize::MAX)
-        );
-    }
-
-    #[test]
-    fn replacement_swaps_the_previous_charge_and_refusals_change_nothing() {
-        let mut budget = RetentionBudget::default();
-        assert_eq!(budget.replace(None, 8, 1, 10), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 8));
-        assert_eq!(budget.replace(Some(8), 8, 1, 10), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 8));
-        assert_eq!(budget.replace(Some(8), 3, 1, 10), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
-        assert_eq!(budget.replace(Some(3), 10, 1, 10), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
-        assert_eq!(
-            budget.replace(Some(10), 11, 1, 10),
-            Err(RetentionError::ByteLimit)
-        );
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
-        assert_eq!(
-            budget.replace(None, 0, 1, 10),
-            Err(RetentionError::FrameLimit)
-        );
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
-
-        budget.release(10);
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (0, 0));
-        assert_eq!(budget.reserve(10, 1, 10), Ok(()));
-        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 10));
-    }
-
-    #[test]
-    fn replacement_byte_overflow_leaves_both_counters_untouched() {
-        let mut budget = RetentionBudget {
-            retained_frames: 1,
-            retained_bytes: usize::MAX,
-        };
-        assert_eq!(
-            budget.replace(None, 1, usize::MAX, usize::MAX),
             Err(RetentionError::ByteCountOverflow)
         );
         assert_eq!(

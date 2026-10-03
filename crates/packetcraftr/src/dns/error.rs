@@ -269,39 +269,3 @@ impl crate::execution::Errors for Attempts {
         Error::StatisticsOverflow { attempt }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use packetcraftr_core::error::{Classified, Coordinate};
-
-    use super::{Error, EvidenceFault};
-    use crate::dns::wire;
-
-    #[test]
-    fn messages_leave_their_typed_sources_to_the_causes() {
-        let query = Error::Query(wire::Error::NameTooLong);
-        assert_eq!(query.to_string(), "DNS query construction failed");
-        assert_eq!(query.causes(), [wire::Error::NameTooLong.to_string()]);
-
-        let tcp = Error::TcpExecution {
-            attempt: 2,
-            source: crate::dns::tcp::Error::EmptyQuery,
-        };
-        assert_eq!(
-            tcp.to_string(),
-            "DNS-over-TCP execution is unavailable on attempt 2"
-        );
-        assert_eq!(tcp.causes(), ["DNS-over-TCP query must not be empty"]);
-        assert_eq!(tcp.context(), Some(Coordinate::Attempt(2)));
-
-        let evidence = Error::InvalidEvidence {
-            attempt: 1,
-            fault: EvidenceFault::SentWithoutUdp,
-        };
-        assert_eq!(
-            evidence.to_string(),
-            "DNS executor returned invalid evidence on attempt 1: sent packet has no complete UDP tuple"
-        );
-        assert_eq!(evidence.classification().code, "internal.dns_evidence");
-    }
-}

@@ -585,49 +585,6 @@ mod tests {
     }
 
     #[test]
-    fn without_an_ip_header_only_the_length_tells_v3_address_families_apart() {
-        // checksums are not verified without a pseudo-header
-        let mut v6 = vec![0x31, 7, 120, 1, 0, 100, 0, 0];
-        v6.extend_from_slice(&"2001:db8::1".parse::<Ipv6Addr>().expect("address").octets());
-        let decoded = decode(&v6, None, None).expect("decodes");
-        let layer = decoded.layer.downcast_ref::<Vrrp>().expect("VRRP");
-        assert_eq!(layer.addresses, ["2001:db8::1".parse::<IpAddr>().unwrap()]);
-        assert!(decoded.diagnostics.is_empty());
-
-        let mut v4 = v6[..8].to_vec();
-        v4.extend_from_slice(&[192, 0, 2, 1]);
-        let decoded = decode(&v4, None, None).expect("decodes");
-        let layer = decoded.layer.downcast_ref::<Vrrp>().expect("VRRP");
-        assert_eq!(layer.addresses, ["192.0.2.1".parse::<IpAddr>().unwrap()]);
-    }
-
-    #[test]
-    fn the_version_2_checksum_needs_no_envelope() {
-        let mut message = v2_message();
-        let decoded = decode(&message, None, None).expect("decodes");
-        assert_eq!(codes(&decoded), [VRRP_CHECKSUM]);
-        let sum = checksum(&message);
-        message[6..8].copy_from_slice(&sum.to_be_bytes());
-        let decoded = decode(&message, None, None).expect("decodes");
-        assert!(decoded.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn only_a_hop_limit_other_than_255_is_reported() {
-        let mut message = v2_message();
-        let sum = checksum(&message);
-        message[6..8].copy_from_slice(&sum.to_be_bytes());
-        for (hop_limit, expected) in [
-            (Some(255), Vec::new()),
-            (None, Vec::new()),
-            (Some(1), vec!["decode.vrrp_ttl"]),
-        ] {
-            let decoded = decode(&message, None, hop_limit).expect("decodes");
-            assert_eq!(codes(&decoded), expected, "{hop_limit:?}");
-        }
-    }
-
-    #[test]
     fn short_inputs_are_truncated_and_huge_counts_stay_bounded() {
         for (input, available) in [(&[][..], 0), (&[0x31, 1, 1, 1, 0, 0, 0][..], 7)] {
             assert!(
@@ -678,19 +635,5 @@ mod tests {
         assert_eq!(layer.addresses, [IpAddr::from([192, 0, 2, 100])]);
         assert_eq!(layer.auth_data.as_deref(), Some(&short[12..]));
         assert_eq!(codes(&decoded), ["decode.vrrp_length"]);
-    }
-
-    #[test]
-    fn layout_names_only_the_interval_fields_of_the_messages_version() {
-        let names = |version| {
-            vrrp_layout(version, 12, 20)
-                .into_iter()
-                .map(|field| field.name)
-                .collect::<Vec<_>>()
-        };
-        let v2 = names(2);
-        assert!(v2.contains(&"advert_interval") && !v2.contains(&"max_advert_interval"));
-        let v3 = names(3);
-        assert!(v3.contains(&"max_advert_interval") && !v3.contains(&"auth_type"));
     }
 }

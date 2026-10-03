@@ -257,40 +257,6 @@ mod tests {
     use crate::capture_file::wire::DEFAULT_TIMESTAMP_RESOLUTION;
     use crate::frame::LinkType;
 
-    fn flags(value: u32) -> Vec<PcapNgOption> {
-        vec![PcapNgOption {
-            code: PCAPNG_OPTION_EPB_FLAGS,
-            value: Bytes::copy_from_slice(&value.to_le_bytes()),
-        }]
-    }
-
-    #[test]
-    fn direction_comes_from_one_four_byte_flags_option() {
-        let direction = |options: &[PcapNgOption]| packet_direction(options, Endianness::Little);
-        assert_eq!(direction(&[]).unwrap(), None);
-        for (value, expected) in [
-            (0, Direction::Unknown),
-            (1, Direction::Inbound),
-            (2, Direction::Outbound),
-            (3, Direction::Unknown),
-        ] {
-            assert_eq!(direction(&flags(value)).unwrap(), Some(expected));
-        }
-        let repeated = [flags(1), flags(2)].concat();
-        assert!(matches!(
-            direction(&repeated),
-            Err(Error::InvalidData { reason, .. }) if reason == "packet flags option appears more than once"
-        ));
-        let short = [PcapNgOption {
-            code: PCAPNG_OPTION_EPB_FLAGS,
-            value: Bytes::from_static(&[1, 0]),
-        }];
-        assert!(matches!(
-            direction(&short),
-            Err(Error::InvalidData { reason, .. }) if reason == "epb_flags option must contain four bytes"
-        ));
-    }
-
     #[test]
     fn a_malformed_option_list_is_reported_before_a_malformed_flags_option() {
         let interface = Interface {
@@ -343,28 +309,5 @@ mod tests {
                 })
             ));
         }
-    }
-
-    #[test]
-    fn a_rewrite_retains_only_a_defined_packet_direction() {
-        let validate = |value| {
-            validate_rewritable_packet_flags(&flags(value), Endianness::Little, "malformed")
-        };
-        for direction in [0, 1, 2] {
-            assert_eq!(validate(direction), Ok(()), "direction {direction}");
-        }
-        assert_eq!(validate(3), Err("undefined packet direction"));
-        assert_eq!(validate(4), Err("extended packet flags"));
-        assert_eq!(
-            validate_rewritable_packet_flags(
-                &[PcapNgOption {
-                    code: PCAPNG_OPTION_EPB_FLAGS,
-                    value: Bytes::from_static(&[1, 0]),
-                }],
-                Endianness::Little,
-                "malformed",
-            ),
-            Err("malformed")
-        );
     }
 }

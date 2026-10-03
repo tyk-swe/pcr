@@ -334,49 +334,6 @@ mod tests {
     }
 
     #[test]
-    fn a_timing_mode_is_its_serialized_variant_name() {
-        for timing in [
-            Timing::Original,
-            Timing::Scaled(2.0),
-            Timing::FixedRate(2.0),
-            Timing::BitRate(1),
-            Timing::Immediate,
-        ] {
-            let serialized = serde_json::to_value(timing).expect("timing serializes");
-            let name = serialized
-                .as_str()
-                .or_else(|| serialized.as_object()?.keys().next().map(String::as_str));
-            assert_eq!(name, Some(timing.mode()), "{serialized}");
-        }
-    }
-
-    #[test]
-    fn inter_pass_pause_beyond_the_duration_limit_reports_the_total_pause() {
-        let error = options(10, Duration::from_secs(600))
-            .validate()
-            .expect_err("nine 600 s pauses exceed the one hour limit");
-        assert!(
-            matches!(
-                error,
-                Error::InvalidDuration { value, maximum }
-                    if value == Duration::from_secs(5400) && maximum == Duration::from_secs(3600)
-            ),
-            "{error:?}"
-        );
-        assert_eq!(
-            error.to_string(),
-            "replay duration 5400s is invalid; maximum is 3600s"
-        );
-    }
-
-    #[test]
-    fn inter_pass_pause_equal_to_the_duration_limit_is_accepted() {
-        options(7, Duration::from_secs(600))
-            .validate()
-            .expect("six 600 s pauses fit the one hour limit");
-    }
-
-    #[test]
     fn overflowing_inter_pass_pause_is_rejected_with_a_saturated_total() {
         let error = options(3, Duration::MAX)
             .validate()

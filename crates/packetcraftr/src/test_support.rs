@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -365,11 +366,6 @@ pub(crate) fn sent_packet(packet: Packet) -> SentPacket {
     let built = built_packet(packet);
     let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
     SentPacket::try_new(built, materialized_route(), report).expect("valid trusted sent fixture")
-}
-
-pub(crate) fn sent_packet_with_report(packet: Packet, report: TransmissionReport) -> SentPacket {
-    SentPacket::try_new(built_packet(packet), materialized_route(), report)
-        .expect("valid trusted sent fixture")
 }
 
 fn built_packet(packet: Packet) -> BuiltPacket {

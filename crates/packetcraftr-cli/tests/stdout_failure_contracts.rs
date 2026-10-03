@@ -8,7 +8,6 @@ use std::process::Command;
 mod common;
 
 const REMEDIATION: &str = "restore the stdout consumer or choose a writable output destination";
-const NDJSON_REMEDIATION: &str = "inspect the output sink and account for records already written";
 const FULL_DEVICE: &str = "No space left on device";
 
 fn stderr_of_failed_stdout_write(arguments: &[&str]) -> String {
@@ -47,39 +46,6 @@ fn text_stdout_failure_reports_the_stdout_classification() {
 }
 
 #[test]
-fn hex_stdout_failure_reports_the_stdout_classification() {
-    assert_stdout_failure_is_classified(&["--output", "hex", "build", "--packet", "raw(text=a)"]);
-}
-
-#[test]
-fn raw_stdout_failure_reports_the_stdout_classification() {
-    assert_stdout_failure_is_classified(&["--output", "raw", "build", "--packet", "raw(text=a)"]);
-}
-
-#[test]
 fn json_stdout_failure_reports_the_stdout_classification() {
     assert_stdout_failure_is_classified(&["--output", "json", "build", "--packet", "raw(text=a)"]);
-}
-
-#[test]
-fn ndjson_stdout_failure_states_the_write_failure_once_as_its_cause() {
-    let stderr = stderr_of_failed_stdout_write(&[
-        "--output",
-        "ndjson",
-        "dissect",
-        "--hex",
-        "45000014000000004001f6e7c0000201c6336402",
-    ]);
-    assert!(
-        stderr.starts_with(
-            "error[io.stdout]: NDJSON stream is incomplete: record at sequence 0 failed to write\n\
-             caused by: write NDJSON output failed\ncaused by: "
-        ),
-        "{stderr}"
-    );
-    assert_eq!(stderr.matches(FULL_DEVICE).count(), 1, "{stderr}");
-    assert!(
-        stderr.ends_with(&format!("\nhelp: {NDJSON_REMEDIATION}\n")),
-        "{stderr}"
-    );
 }

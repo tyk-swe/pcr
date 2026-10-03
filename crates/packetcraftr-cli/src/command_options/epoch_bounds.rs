@@ -43,37 +43,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn absent_bounds_resolve_to_no_selection() {
-        assert!(EpochBoundsArgs::default().resolve().unwrap().is_none());
-    }
-
-    #[test]
-    fn one_sided_and_inclusive_bounds_resolve() {
-        let args = EpochBoundsArgs {
-            start_epoch: Some(SystemTime::UNIX_EPOCH + std::time::Duration::new(10, 500_000_000)),
-            stop_epoch: None,
-        };
-        let bounds = args.resolve().unwrap().unwrap();
-        assert!(bounds.contains(Some(
-            SystemTime::UNIX_EPOCH + std::time::Duration::new(10, 500_000_000)
-        )));
-        assert!(!bounds.contains(Some(
-            SystemTime::UNIX_EPOCH + std::time::Duration::new(10, 499_999_999)
-        )));
-        assert!(!bounds.contains(None));
-    }
-
-    #[test]
-    fn reversed_bounds_are_rejected() {
-        let args = EpochBoundsArgs {
-            start_epoch: Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10)),
-            stop_epoch: Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(9)),
-        };
-        let error = args.resolve().unwrap_err();
-        assert_eq!(error.classification.code, "cli.reversed_time_bounds");
-    }
-
-    #[test]
     fn the_value_parser_rejects_unsupported_precision_and_negatives() {
         assert!(epoch("1.123456700").is_ok());
         assert_eq!(

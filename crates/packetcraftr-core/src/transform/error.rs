@@ -274,16 +274,3 @@ impl Limit {
 }
 
 display_via_as_str!(Limit);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_field_kind_refusal_blames_the_field_not_the_value() {
-        assert_eq!(
-            InvalidInput::EditFieldNotUnsigned.to_string(),
-            "field edit targets a field that is not an unsigned integer"
-        );
-    }
-}

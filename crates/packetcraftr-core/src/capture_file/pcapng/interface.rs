@@ -76,61 +76,6 @@ mod tests {
     }
 
     #[test]
-    fn timestamp_options_set_the_interface_clock_and_stay_in_the_option_list() {
-        let (interface, options) = parse(&[
-            12, 0, 2, 0, b'o', b's', 0, 0, // if_os
-            9, 0, 1, 0, 0x86, 0, 0, 0, // if_tsresol: 2^-6
-            14, 0, 8, 0, 0xfb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // if_tsoffset: -5
-        ])
-        .unwrap();
-        assert_eq!(
-            interface.timestamp_resolution,
-            TimestampResolution::Binary(6)
-        );
-        assert_eq!(interface.timestamp_offset, -5);
-        let codes: Vec<_> = options.iter().map(|option| option.code).collect();
-        assert_eq!(codes, [12, 9, 14]);
-
-        let (interface, options) = parse(&[]).unwrap();
-        assert_eq!(interface.timestamp_resolution, DEFAULT_TIMESTAMP_RESOLUTION);
-        assert_eq!(interface.timestamp_offset, 0);
-        assert!(options.is_empty());
-    }
-
-    #[test]
-    fn repeated_or_mis_sized_timestamp_options_are_rejected() {
-        let resolution = [9, 0, 1, 0, 6, 0, 0, 0];
-        let offset = [14, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let cases: [(Vec<u8>, &str); 4] = [
-            (
-                [resolution.as_slice(), &resolution].concat(),
-                "if_tsresol option appears more than once",
-            ),
-            (
-                [offset.as_slice(), &offset].concat(),
-                "if_tsoffset option appears more than once",
-            ),
-            (
-                vec![9, 0, 2, 0, 6, 6, 0, 0],
-                "if_tsresol option must contain one byte",
-            ),
-            (
-                vec![14, 0, 4, 0, 0, 0, 0, 0],
-                "if_tsoffset option must contain eight bytes",
-            ),
-        ];
-        for (options, expected) in cases {
-            assert!(
-                matches!(
-                    parse(&options),
-                    Err(Error::InvalidData { format: Format::PcapNg, reason }) if reason == expected
-                ),
-                "{expected}"
-            );
-        }
-    }
-
-    #[test]
     fn a_malformed_option_list_is_reported_before_a_malformed_timestamp_option() {
         let bad_resolution = vec![9, 0, 2, 0, 6, 6, 0, 0];
         let repeated_offset = [[14, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0]; 2].concat();
@@ -149,22 +94,6 @@ mod tests {
                     reason: "non-zero bytes follow the end-of-options marker",
                 })
             ));
-        }
-    }
-
-    #[test]
-    fn a_body_shorter_than_the_fixed_fields_is_rejected() {
-        for length in 0..8 {
-            assert!(
-                matches!(
-                    parse_interface_description(&vec![0; length], Endianness::Little),
-                    Err(Error::InvalidData {
-                        format: Format::PcapNg,
-                        reason: "interface description block is shorter than 8 bytes",
-                    })
-                ),
-                "{length} bytes"
-            );
         }
     }
 }

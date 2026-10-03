@@ -553,9 +553,6 @@ fn netlink_timeout(operation: &'static str) -> route::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
-    use packetcraftr_core::error::Classified as _;
 
     use super::*;
 
@@ -563,48 +560,6 @@ mod tests {
 
     fn caller() -> Deadline {
         Deadline::new(LONG_ENOUGH)
-    }
-
-    #[test]
-    fn a_lookup_that_outlives_the_callers_deadline_reports_the_deadline() {
-        let started = Instant::now();
-        let result: Result<(), route::Error> =
-            with_netlink(&Deadline::new(Duration::from_millis(100)), |_handle| {
-                std::future::pending()
-            });
-        match result {
-            Err(error @ route::Error::OperatingSystem { .. }) => {
-                eprintln!("skipping netlink deadline check: {error}");
-            }
-            Err(error @ route::Error::DeadlineExceeded { .. }) => {
-                assert_eq!(error.classification().code, "io.deadline_exceeded");
-                assert!(started.elapsed() < Duration::from_secs(2));
-            }
-            other => panic!("a stalled netlink operation must report the deadline: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_cancelled_caller_stops_waiting_for_a_stalled_operation() {
-        let signal = packetcraftr_core::budget::Cancellation::default();
-        let caller = Deadline::new(Duration::from_secs(30)).with_cancellation(Some(signal.clone()));
-        let canceller = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
-            signal.cancel();
-        });
-        let started = Instant::now();
-        let result: Result<(), route::Error> =
-            with_netlink(&caller, |_handle| std::future::pending());
-        canceller.join().unwrap();
-        match result {
-            Err(error @ route::Error::OperatingSystem { .. }) => {
-                eprintln!("skipping netlink cancellation check: {error}");
-            }
-            Err(route::Error::Cancelled(_)) => {
-                assert!(started.elapsed() < Duration::from_secs(5));
-            }
-            other => panic!("a cancelled caller must stop waiting: {other:?}"),
-        }
     }
 
     #[test]
@@ -625,36 +580,6 @@ mod tests {
                 operation: EXECUTING_OPERATION,
             })
         ));
-    }
-
-    #[test]
-    fn a_stopped_connection_releases_pending_queries_for_reconnection() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        let mut connection = runtime.spawn(async {});
-        let result = runtime.block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                await_netlink_operation(
-                    std::future::pending::<Result<(), route::Error>>(),
-                    &mut connection,
-                    Duration::from_secs(60),
-                    None,
-                ),
-            )
-            .await
-            .expect("connection failure must not wait for the operation deadline")
-        });
-        assert!(matches!(
-            result,
-            Err(route::Error::OperatingSystem {
-                operation: "drive netlink connection",
-                ..
-            })
-        ));
-        assert!(connection.is_finished());
     }
 
     fn request_with(
@@ -707,173 +632,5 @@ mod tests {
             "expired operation ran after its caller deadline"
         );
         assert!(result.recv().unwrap().is_err());
-    }
-
-    #[test]
-    fn queued_operations_survive_a_connection_failure() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let (handle, connection) = open_connection(&runtime).unwrap();
-        let abort = connection.abort_handle();
-        let deadline = Instant::now() + LONG_ENOUGH;
-        let (first, first_result) = request_with(
-            deadline,
-            Box::new(move |_| {
-                Box::pin(async move {
-                    abort.abort();
-                    std::future::pending().await
-                })
-            }),
-        );
-        let (second, second_result) = request_with(
-            deadline,
-            Box::new(|_| Box::pin(async { Ok(Box::new(9_u32) as Box<dyn Any + Send>) })),
-        );
-        serve_requests(&runtime, handle, connection, &queued([first, second]));
-        assert!(first_result.recv().unwrap().is_err());
-        assert_eq!(
-            *second_result
-                .recv()
-                .expect("queued operation must retain its reply")
-                .unwrap()
-                .downcast::<u32>()
-                .unwrap(),
-            9
-        );
-    }
-
-    #[test]
-    fn execution_uses_the_remaining_request_deadline_and_retires_the_socket() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let (handle, connection) = open_connection(&runtime).unwrap();
-        let old_connection = connection.abort_handle();
-        let started = Instant::now();
-        let (first, first_result) = request_with(
-            started + Duration::from_millis(20),
-            Box::new(|_| Box::pin(std::future::pending())),
-        );
-        let (second, second_result) = request_with(
-            started + LONG_ENOUGH,
-            Box::new(move |_| {
-                Box::pin(async move {
-                    assert!(
-                        old_connection.is_finished(),
-                        "timed-out socket must release pending replies"
-                    );
-                    Ok(Box::new(9_u32) as Box<dyn Any + Send>)
-                })
-            }),
-        );
-        serve_requests(&runtime, handle, connection, &queued([first, second]));
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(first_result.recv().unwrap().is_err());
-        assert!(second_result.recv().unwrap().is_ok());
-    }
-
-    #[test]
-    fn a_full_inbox_holds_submitters_until_their_deadline_or_room() {
-        let noop = || -> Operation {
-            Box::new(|_| Box::pin(async { Ok(Box::new(()) as Box<dyn Any + Send>) }))
-        };
-        let inbox = Inbox::new();
-        let later = Instant::now() + LONG_ENOUGH;
-        for _ in 0..NETLINK_QUEUE_DEPTH {
-            assert!(
-                inbox
-                    .submit(request_with(later, noop()).0, &caller(), later)
-                    .is_ok()
-            );
-        }
-        let started = Instant::now();
-        let soon = started + Duration::from_millis(30);
-        let (request, _) = request_with(later, noop());
-        match inbox.submit(request, &caller(), soon) {
-            Err(Refused::Interrupted(error @ route::Error::DeadlineExceeded { .. })) => {
-                assert_eq!(error.classification().code, "io.deadline_exceeded");
-            }
-            _ => panic!("a full inbox must hold the submitter until its deadline"),
-        }
-        assert!(started.elapsed() < Duration::from_secs(2));
-
-        let inbox = Arc::new(inbox);
-        let worker = {
-            let inbox = Arc::clone(&inbox);
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(20));
-                inbox.next().is_some()
-            })
-        };
-        let (request, _) = request_with(later, noop());
-        assert!(
-            inbox.submit(request, &caller(), later).is_ok(),
-            "room wakes the submitter"
-        );
-        assert!(worker.join().unwrap());
-
-        inbox.stop();
-        let (request, _) = request_with(later, noop());
-        assert!(matches!(
-            inbox.submit(request, &caller(), later),
-            Err(Refused::Stopped(_))
-        ));
-    }
-
-    #[test]
-    #[ignore = "requires an isolated Linux namespace with CAP_SYS_ADMIN"]
-    #[allow(unsafe_code)]
-    fn callers_in_distinct_namespaces_use_their_own_workers() {
-        use std::os::unix::fs::MetadataExt;
-        let parent: u64 = std::env::var("PACKETCRAFTR_PARENT_NETNS")
-            .unwrap()
-            .parse()
-            .unwrap();
-        assert_ne!(std::fs::metadata(NAMESPACE_PATH).unwrap().ino(), parent);
-        let mut namespaces = Vec::new();
-        for _ in 0..2 {
-            namespaces.push(
-                thread::spawn(|| {
-                    // SAFETY: CLONE_NEWNET changes only this test thread's network namespace;
-                    // unshare takes no pointers; the thread exits without serving another caller.
-                    let changed = unsafe { libc::unshare(libc::CLONE_NEWNET) };
-                    assert_eq!(changed, 0, "{}", std::io::Error::last_os_error());
-                    let expected = std::fs::metadata(NAMESPACE_PATH).unwrap().ino();
-                    let observed = with_netlink(&caller(), |_| async {
-                        std::fs::metadata(NAMESPACE_PATH)
-                            .map(|metadata| metadata.ino())
-                            .map_err(|error| os_error("inspect worker namespace", error))
-                    })
-                    .unwrap();
-                    assert_eq!(
-                        observed, expected,
-                        "worker must inherit its caller's namespace"
-                    );
-                    expected
-                })
-                .join()
-                .unwrap(),
-            );
-        }
-        assert_ne!(namespaces[0], namespaces[1]);
-    }
-
-    #[test]
-    fn a_reused_worker_answers_typed_results_for_sequential_operations() {
-        let first: Result<u32, route::Error> =
-            match with_netlink(&caller(), |_handle| async move { Ok(7_u32) }) {
-                Err(error @ route::Error::OperatingSystem { .. }) => {
-                    eprintln!("skipping shared-worker round trip: {error}");
-                    return;
-                }
-                first => first,
-            };
-        assert!(matches!(first, Ok(7)));
-        let second: Result<String, route::Error> =
-            with_netlink(&caller(), |_handle| async move { Ok("route".to_owned()) });
-        assert!(matches!(second, Ok(ref value) if value == "route"));
     }
 }

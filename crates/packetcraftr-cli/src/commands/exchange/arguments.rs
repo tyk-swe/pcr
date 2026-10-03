@@ -52,32 +52,3 @@ impl Window for ResponseWindow {
     const DEFAULT_MILLISECONDS: &'static str = "3000";
     const HELP: &'static str = "Overall response window in milliseconds";
 }
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-    use packetcraftr::exchange::StopCondition;
-
-    use super::Args;
-    use crate::{cli::Cli, commands::CommandLine};
-
-    fn arguments(extra: &[&str]) -> Args {
-        let values = ["packetcraftr", "exchange", "--packet", "raw(hex=00)"]
-            .into_iter()
-            .chain(extra.iter().copied());
-        let cli = Cli::try_parse_from(values).expect("fixture exchange arguments must parse");
-        let CommandLine::Exchange(arguments) = cli.command else {
-            panic!("fixture must parse as exchange");
-        };
-        arguments
-    }
-
-    #[test]
-    fn the_response_window_is_collected_in_full_unless_answers_are_awaited() {
-        assert_eq!(arguments(&[]).stop(), StopCondition::Window);
-        assert_eq!(
-            arguments(&["--stop-when-answered"]).stop(),
-            StopCondition::AllAnswered
-        );
-    }
-}

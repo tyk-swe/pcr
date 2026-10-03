@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 mod common;
 
+use common::clock::VirtualClock;
 use common::responder::{Io, Routes, State};
 use packetcraftr::{
     Client,
@@ -108,8 +109,20 @@ fn pipelined_and_serial_scans_stop_at_the_undecoded_limit_with_one_diagnostic() 
         request.limits.max_undecoded = 2;
         request.collection.decode.limits.max_packet_size = 39;
 
-        let aggregate = execute(&request, Arc::new(Mutex::new(State::default())))
+        let clock = VirtualClock::default();
+        let state = Arc::new(Mutex::new(State {
+            idle_clock: Some(clock.clone()),
+            ..State::default()
+        }));
+        let collector = scan::Collector::default();
+        let report = client(&state)
+            .with_clock(clock)
+            .scan(request.clone(), collector.clone())
             .expect("undecodable replies are evidence, not a failure");
+        let aggregate = collector.finish(report).unwrap();
+        let state = state.lock().unwrap();
+        assert_eq!(state.sends, request.ports.len());
+        assert_eq!(state.shutdowns, state.armed);
 
         let warnings = aggregate
             .diagnostics

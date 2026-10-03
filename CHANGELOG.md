@@ -1787,8 +1787,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- Isolated native validation retains a matching child report's specific error
-  alongside the parent launcher failure, preserving diagnostic detail.
+- The forwarding reference consumer rejects malformed retained detail collections
+  and typed preservation evidence, including partial evidence, before interpreting
+  a verdict. Invalid Unicode
+  rule strings now produce a contract error instead of an unhandled traceback.
+
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 
@@ -1804,6 +1807,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   including intermediate envelopes, while preserving source-routing endpoints.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
+- Isolated native validation retains a matching child report's specific error
+  alongside the parent launcher failure, preserving diagnostic detail.
 - Library TCP connect scans reject interface, preferred-source, and explicit
   link-mode overrides before scheduling any connections.
 - Detached provider deadlines retain inherited cancellation through every
@@ -2016,6 +2021,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   so an axis can replace a denied recipe destination with permitted addresses.
 - JSON `build` output remains one complete document when interrupted during
   publication; cancellation is reported on stderr with exit code 130.
+- Topic errors and binary-to-terminal refusals return I/O exit 5 if their
+  diagnostic cannot be written to stderr, matching other command errors.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;
@@ -2042,6 +2049,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   messages, and exit codes are unchanged.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - TCP pending growth no longer recopies its retained range on adjacent or
   reverse extension. Bounded payload pages and interval metadata are charged
   independently; transient output/history allocations are admitted before commit.

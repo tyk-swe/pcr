@@ -10,6 +10,7 @@ An error envelope is an execution failure, not a forwarding verdict.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import sys
 from typing import BinaryIO, Any
@@ -34,6 +35,61 @@ def require(condition: bool, message: str) -> None:
 def integer(value: Any, name: str) -> int:
     require(type(value) is int and 0 <= value <= 2**64 - 1, f"invalid counter: {name}")
     return value
+
+
+def utf8_size(value: str) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ContractError("contract string is not valid UTF-8") from error
+
+
+def field_value(value: Any) -> Any:
+    """Validate the typed operand we compare, ignoring additive wrapper metadata."""
+    try:
+        return _field_value(value)
+    except RecursionError as error:
+        raise ContractError("typed evidence nesting is too deep") from error
+
+
+def _field_value(value: Any) -> Any:
+    require(isinstance(value, dict) and "type" in value and "value" in value,
+            "typed evidence must contain type and value")
+    kind, operand = value["type"], value["value"]
+    require(isinstance(kind, str), "typed evidence kind must be a string")
+    if kind == "bool":
+        require(type(operand) is bool, "invalid boolean evidence")
+    elif kind == "unsigned":
+        integer(operand, "unsigned evidence")
+    elif kind == "signed":
+        require(type(operand) is int and -(2**63) <= operand < 2**63,
+                "invalid signed evidence")
+    elif kind == "text":
+        require(isinstance(operand, str), "invalid text evidence")
+        utf8_size(operand)
+    elif kind in {"bytes", "mac"}:
+        require(isinstance(operand, list), "byte evidence must be a list")
+        require(all(type(byte) is int and 0 <= byte <= 255 for byte in operand),
+                "invalid byte evidence")
+        require(kind != "mac" or len(operand) == 6, "MAC evidence must have six bytes")
+    elif kind in {"ipv4", "ipv6"}:
+        require(isinstance(operand, str) and "%" not in operand, "invalid IP address evidence")
+        address_type = ipaddress.IPv4Address if kind == "ipv4" else ipaddress.IPv6Address
+        try:
+            operand = address_type(operand)
+        except ipaddress.AddressValueError as error:
+            raise ContractError("invalid IP address evidence") from error
+    elif kind == "list":
+        require(isinstance(operand, list), "list evidence must be a list")
+        operand = [_field_value(item) for item in operand]
+    elif kind == "object":
+        require(isinstance(operand, dict), "object evidence must be an object")
+        for key in operand:
+            utf8_size(key)
+        operand = {key: _field_value(item) for key, item in operand.items()}
+    else:
+        raise ContractError("unknown typed evidence kind")
+    return kind, operand
 
 
 def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -93,13 +149,13 @@ def validate_rule_budget(rules: dict[str, Any]) -> None:
     for name in ("identity", "preserve", "preserve_presence", "expect_absent"):
         for field in rules[name]:
             require(isinstance(field, str), f"rules.{name} entries must be strings")
-            byte_count += len(field.encode("utf-8"))
+            byte_count += utf8_size(field)
     for rule in rules["expect"]:
         require(isinstance(rule, dict), "rules.expect entries must be objects")
         field, value = rule["field"], rule["value"]
         require(isinstance(field, str) and isinstance(value, str),
                 "expectation field and literal must be strings")
-        byte_count += len(field.encode("utf-8")) + 1 + len(value.encode("utf-8"))
+        byte_count += utf8_size(field) + 1 + utf8_size(value)
     require(byte_count <= MAX_RULE_DECLARATION_BYTES,
             "rule declarations exceed producer byte budget")
 
@@ -129,13 +185,16 @@ def validate_check(check: dict[str, Any]) -> None:
     require(kind in {"preserve", "preserve_presence", "expect", "expect_absent"}, "unknown check kind")
     require(outcome in {"satisfied", "violated", "unevaluable"}, "unknown check outcome")
     require(actual in STATES and (expected is None or expected in STATES), "unknown evidence state")
+    if kind == "preserve":
+        actual_value = None if check.get("actual") is None else field_value(check["actual"])
+        expected_value = None if check.get("expected") is None else field_value(check["expected"])
     if outcome == "unevaluable":
         return
     if kind == "preserve":
         require(actual == expected == "observed", "value check without readable evidence")
         require(check.get("actual") is not None and check.get("expected") is not None,
                 "value check with missing values")
-        require((check["actual"] == check["expected"]) == (outcome == "satisfied"),
+        require((actual_value == expected_value) == (outcome == "satisfied"),
                 "preservation outcome contradicts values")
     elif kind == "preserve_presence":
         require(actual in {"observed", "absent"} and expected in {"observed", "absent"},
@@ -203,6 +262,7 @@ def validate_report(report: dict[str, Any]) -> str:
     require(verdict == expected_verdict, "verdict contradicts summary")
     for name, total in (("matches", "unique_matches"), ("violations", "checks_violated"),
                         ("ambiguous", "ambiguous_groups")):
+        require(isinstance(report[name], list), f"{name} must be a list")
         omitted_name = "ambiguous_groups" if name == "ambiguous" else name
         omitted = integer(report["omitted"][omitted_name], omitted_name)
         require(len(report[name]) + omitted == summary[total], f"{name} omission count does not sum")

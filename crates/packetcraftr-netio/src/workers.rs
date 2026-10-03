@@ -434,6 +434,47 @@ mod tests {
     }
 
     #[test]
+    fn publishing_an_outcome_notifies_a_pending_completion_wait() {
+        let done = Arc::new(Done {
+            slot: Mutex::new(Slot::Running),
+            finished: Condvar::new(),
+        });
+        let slot = lock(&done.slot);
+        let publisher = Arc::clone(&done);
+        let (started, publishing) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            started.send(()).unwrap();
+            publisher.publish(Ok(7));
+        });
+        publishing
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the publisher starts while the completion slot is locked");
+
+        // Holding the slot prevents publication until the condvar atomically
+        // releases it and starts waiting. The timeout is only a test watchdog;
+        // notification must wake the waiter even without polling slices.
+        let watchdog = Instant::now() + Duration::from_secs(10);
+        let mut slot = slot;
+        let notified = loop {
+            let remaining = watchdog.saturating_duration_since(Instant::now());
+            let (current, timeout) = done.finished.wait_timeout(slot, remaining).unwrap();
+            slot = current;
+            if timeout.timed_out() {
+                break false;
+            }
+            if matches!(*slot, Slot::Finished(_)) {
+                break true;
+            }
+        };
+        let published = matches!(*slot, Slot::Finished(Ok(7)));
+        drop(slot);
+        worker.join().expect("bounded outcome publisher");
+
+        assert!(published, "the exact worker outcome is available");
+        assert!(notified, "publication wakes the pending waiter");
+    }
+
+    #[test]
     fn the_pool_refuses_work_past_capacity_until_a_slot_returns() {
         let pool = Arc::new(Pool::new(2));
         let first = gated(&pool, Class::Native);

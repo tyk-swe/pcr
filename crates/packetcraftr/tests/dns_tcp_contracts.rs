@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use packetcraftr::dns::tcp as dns_tcp;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_netio::deadline::POLL_INTERVAL;
 use packetcraftr_netio::tcp;
 
 const QUERY: &[u8] = b"bounded query";
@@ -71,10 +70,6 @@ fn ipv4_loopback_handles_fragmented_response_io() {
     assert_eq!(&response.frame[2..], RESPONSE);
 }
 
-const SHORT_ATTEMPT: Duration = Duration::from_millis(20);
-
-const _: () = assert!(SHORT_ATTEMPT.as_millis() < POLL_INTERVAL.as_millis());
-
 struct ScriptedConnect {
     written: Arc<Mutex<Vec<u8>>>,
 }
@@ -93,8 +88,6 @@ impl tcp::Provider for ScriptedConnect {
         endpoint: SocketAddr,
         _deadline: &Deadline,
     ) -> Result<Self::Stream, tcp::Error> {
-        // Ensure the caller waits while the worker is still connecting.
-        thread::sleep(Duration::from_millis(1));
         let mut reply = u16::try_from(RESPONSE.len())
             .unwrap()
             .to_be_bytes()
@@ -144,14 +137,14 @@ impl tcp::Stream for ScriptedStream {
 }
 
 #[test]
-fn a_finished_connect_wakes_an_attempt_shorter_than_the_poll_interval() {
+fn a_scripted_connect_preserves_exact_query_and_response_frames() {
     let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
     let written = Arc::new(Mutex::new(Vec::new()));
     let response = dns_tcp::query(
         dns_tcp::Request {
             endpoint,
             query: QUERY,
-            timeout: SHORT_ATTEMPT,
+            timeout: SERVER_TIMEOUT,
             cancellation: None,
             max_message_bytes: 512,
         },
@@ -159,7 +152,7 @@ fn a_finished_connect_wakes_an_attempt_shorter_than_the_poll_interval() {
             written: Arc::clone(&written),
         }),
     )
-    .expect("completion wakes the short DNS attempt");
+    .expect("bounded scripted DNS attempt");
 
     assert_eq!(&response.frame[2..], RESPONSE);
     assert_eq!(response.bytes_written, QUERY.len() + 2);

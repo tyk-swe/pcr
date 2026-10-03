@@ -185,14 +185,15 @@ def validate_check(check: dict[str, Any]) -> None:
     require(kind in {"preserve", "preserve_presence", "expect", "expect_absent"}, "unknown check kind")
     require(outcome in {"satisfied", "violated", "unevaluable"}, "unknown check outcome")
     require(actual in STATES and (expected is None or expected in STATES), "unknown evidence state")
+    if kind == "preserve":
+        actual_value = None if check.get("actual") is None else field_value(check["actual"])
+        expected_value = None if check.get("expected") is None else field_value(check["expected"])
     if outcome == "unevaluable":
         return
     if kind == "preserve":
         require(actual == expected == "observed", "value check without readable evidence")
         require(check.get("actual") is not None and check.get("expected") is not None,
                 "value check with missing values")
-        actual_value = field_value(check["actual"])
-        expected_value = field_value(check["expected"])
         require((actual_value == expected_value) == (outcome == "satisfied"),
                 "preservation outcome contradicts values")
     elif kind == "preserve_presence":

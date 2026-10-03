@@ -40,6 +40,21 @@ def with_expect(value):
     return value
 
 
+def with_partial_preservation(value, observed_side):
+    """Keep one readable preservation operand while its opposite side is absent."""
+    report = value["result"]
+    report["verdict"] = "inconclusive"
+    report["summary"].update(checks_evaluated=0, checks_satisfied=0, checks_unevaluable=2)
+    missing_side = "expected" if observed_side == "actual" else "actual"
+    for match in report["matches"]:
+        check = match["checks"][0]
+        check["outcome"] = "unevaluable"
+        check[observed_side + "_state"] = "observed"
+        check[missing_side + "_state"] = "absent"
+        check.pop(missing_side)
+    return value
+
+
 class ConsumerTests(unittest.TestCase):
     def consume(self, value=FIXTURE, code=0):
         return consumer.consume(io.BytesIO(encoded(value)), "ndjson", code)
@@ -267,6 +282,33 @@ class ConsumerTests(unittest.TestCase):
                 check["expected"] = {"type": "unsigned", "value": 1}
             with self.assertRaises(consumer.ContractError):
                 consume(invalid)
+
+    def test_unevaluable_preservation_rejects_malformed_present_operands(self):
+        for consume in (self.consume, self.consume_json):
+            for side in ("actual", "expected"):
+                for state in ("observed", "absent", "truncated"):
+                    invalid = with_partial_preservation(copy.deepcopy(FIXTURE), side)
+                    for match in invalid["result"]["matches"]:
+                        check = match["checks"][0]
+                        check[side + "_state"] = state
+                        check[side] = {"type": "unsigned", "value": True}
+                    with self.subTest(side=side, state=state), self.assertRaisesRegex(
+                            consumer.ContractError, "unsigned evidence"):
+                        consume(invalid, code=1)
+
+    def test_valid_partial_preservation_remains_inconclusive(self):
+        for consume in (self.consume, self.consume_json):
+            for observed_side in ("actual", "expected"):
+                for null_missing_side in (False, True):
+                    valid = with_partial_preservation(copy.deepcopy(FIXTURE), observed_side)
+                    missing_side = "expected" if observed_side == "actual" else "actual"
+                    for match in valid["result"]["matches"]:
+                        check = match["checks"][0]
+                        check[observed_side]["future_metadata"] = {"opaque": True}
+                        if null_missing_side:
+                            check[missing_side] = None
+                    with self.subTest(side=observed_side, null=null_missing_side):
+                        self.assertEqual(consume(valid, code=1)["verdict"], "inconclusive")
 
     def test_typed_values_and_additive_evidence_members_are_supported(self):
         values = [

@@ -502,7 +502,7 @@ mod tests {
 
     fn wait_until_blocked(started: Receiver<()>) {
         started
-            .recv_timeout(Duration::from_millis(100))
+            .recv_timeout(Duration::from_secs(5))
             .expect("fake capture worker should enter its blocking read");
     }
 
@@ -516,10 +516,12 @@ mod tests {
             Arc::clone(&interrupt),
             Duration::from_millis(5),
         );
+        // The worker marks readiness before entering the fake blocking read.
+        // Synchronize fixture startup before opening the readiness deadline.
+        wait_until_blocked(started_receiver);
         session
             .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("fake capture should become ready");
-        wait_until_blocked(started_receiver);
 
         assert!(matches!(
             session.shutdown(),
@@ -559,10 +561,10 @@ mod tests {
             Arc::clone(&interrupt),
             Duration::from_secs(1),
         );
+        wait_until_blocked(started_receiver);
         session
             .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("fake capture should become ready");
-        wait_until_blocked(started_receiver);
 
         let signal = packetcraftr_core::budget::Cancellation::default();
         let caller = Deadline::new(Duration::from_secs(30)).with_cancellation(Some(signal.clone()));

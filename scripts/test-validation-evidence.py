@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pathlib
+import shlex
 import struct
 import subprocess
 import sys
@@ -653,13 +654,15 @@ class MeasurementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             wrapper = root / 'heaptrack'
-            wrapper.write_text(
-                f'#!{sys.executable}\n'
+            source = (
                 'import os, pathlib, sys\n'
                 'print("profiler fixture diagnostic")\n'
                 'if os.environ["MEASURE_TEST_PROFILE"] == "yes":\n'
                 '    pathlib.Path(sys.argv[2] + ".zst").write_bytes(b"fixture profile")\n'
-                'sys.exit(int(os.environ["MEASURE_TEST_EXIT"]))\n', encoding='utf-8')
+                'sys.exit(int(os.environ["MEASURE_TEST_EXIT"]))\n')
+            wrapper.write_text(
+                f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+                encoding='utf-8')
             wrapper.chmod(0o755)
             (root / 'fixture.heaptrack.zst').write_bytes(b'stale prior profile')
             def timed_fixture(command, **kwargs):

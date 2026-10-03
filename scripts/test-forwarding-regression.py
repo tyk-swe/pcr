@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import importlib.util
 import json
+import os
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location("regression", Path(__file__).with_name("forwarding-regression.py"))
 REGRESSION = importlib.util.module_from_spec(SPEC)
@@ -55,6 +57,63 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(
                 json.loads((root / "bundle/manifest.json").read_text())["execution"], "failed",
             )
+
+    def test_relative_bundle_paths_are_unambiguous_child_capture_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous = Path.cwd()
+            os.chdir(directory)
+            try:
+                for name in ("bundle", "bundle space 🐙", "-bundle"):
+                    with self.subTest(name=name):
+                        root = Path(name)
+                        current = {}
+
+                        def child(argv, output, errors, seconds=60):
+                            errors.write_bytes(b"")
+                            if argv[1:] == ["--version"]:
+                                output.write_text("packetcraftr fixture\n")
+                            else:
+                                ingress, egress = map(Path, argv[5:7])
+                                self.assertFalse(str(ingress).startswith("-"), argv)
+                                self.assertFalse(str(egress).startswith("-"), argv)
+                                self.assertEqual(ingress.parent.resolve(), root.resolve())
+                                self.assertEqual(egress.parent.resolve(), root.resolve())
+                                self.assertTrue(ingress.is_file())
+                                self.assertTrue(egress.is_file())
+                                current.update(ingress=ingress, egress=egress, name=output.stem)
+                                output.write_bytes(b"fixture\n")
+                            return 0, 0.01
+
+                        def consume(source, format, code):
+                            verdict = {"intentional-violation": "fail", "insufficient-evidence": "inconclusive",
+                                       "missing-field": "inconclusive"}.get(current["name"], "pass")
+                            return {"execution": "complete", "verdict": verdict,
+                                    "report": {"captures": {
+                                        side: {"source": {"sha256": REGRESSION.digest(current[side])}}
+                                        for side in ("ingress", "egress")}}}
+
+                        with mock.patch.object(REGRESSION, "run_bounded", side_effect=child), \
+                                mock.patch.object(REGRESSION.CONSUMER, "consume", side_effect=consume):
+                            result = REGRESSION.run_bundle(root, Path(sys.executable))
+                        self.assertEqual(result["execution"], "complete")
+                        self.assertTrue(all(case["test_contract"] == "pass" for case in result["cases"]))
+                        self.assertEqual(json.loads((root / "manifest.json").read_text()), result)
+            finally:
+                os.chdir(previous)
+
+    def test_dangling_output_symlink_is_not_used_as_a_new_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "bundle"
+            target = root / "missing"
+            try:
+                output.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlink fixture unavailable: {error}")
+            with self.assertRaises(FileExistsError):
+                REGRESSION.run_bundle(output, None)
+            self.assertTrue(output.is_symlink())
+            self.assertFalse(target.exists())
 
     def test_child_time_budget_cleans_up_and_reports_failure(self):
         with tempfile.TemporaryDirectory() as directory:

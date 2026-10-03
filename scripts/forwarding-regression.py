@@ -152,6 +152,8 @@ def run_bounded(argv: list[str], output: Path, errors: Path, seconds: float = 60
 
 
 def run_bundle(root: Path, binary: Path | None, large: bool = False) -> dict:
+    # Capture arguments must remain paths even when the relative bundle name starts with '-'.
+    root = root.absolute()
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
     cases = create_cases(root, large)
     manifest = {

@@ -326,6 +326,66 @@ fn reverse_udp_requires_every_ip_envelope_and_encapsulation_protocol() {
 }
 
 #[test]
+fn reverse_udp_requires_matching_ah_tunnel_paths_in_both_ip_families() {
+    let registry = registry();
+    let matcher = registry.matcher("udp").unwrap();
+    for network in [NetworkVersion::V4, NetworkVersion::V6] {
+        let (mut request, mut response) = nested_udp_pair();
+        if matches!(network, NetworkVersion::V4) {
+            for index in 0..3 {
+                request
+                    .replace(
+                        index,
+                        Ipv4 {
+                            source: IPV4_CLIENT,
+                            destination: IPV4_SERVER,
+                            ..Ipv4::default()
+                        },
+                    )
+                    .unwrap();
+                response
+                    .replace(
+                        index,
+                        Ipv4 {
+                            source: IPV4_SERVER,
+                            destination: IPV4_CLIENT,
+                            ..Ipv4::default()
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        request.insert(1, Ah::default()).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_none(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_none(),
+            "{network:?}"
+        );
+        response.insert(1, Ah::default()).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_some(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_some(),
+            "{network:?}"
+        );
+        request.remove(1).unwrap();
+        assert!(
+            matcher.matches(&request, &response).is_none(),
+            "{network:?}"
+        );
+        assert!(
+            transport_tuple_reversed(&request, &response, BuiltinProtocol::Udp).is_none(),
+            "{network:?}"
+        );
+    }
+}
+
+#[test]
 fn reverse_udp_preserves_source_routing_in_every_ip_envelope() {
     let registry = registry();
     let matcher = registry.matcher("udp").unwrap();

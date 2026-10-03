@@ -123,14 +123,22 @@ fn encapsulation_protocols(
     packet: &Packet,
     network_index: usize,
     next_network_index: usize,
-) -> impl Iterator<Item = BuiltinProtocol> + '_ {
+) -> impl Iterator<Item = (Option<BuiltinProtocol>, crate::layer::Id)> + '_ {
     packet
         .iter()
         .skip(network_index + 1)
         .take(next_network_index - network_index - 1)
-        .filter_map(BuiltinProtocol::of)
-        // AH can identify an IPsec tunnel in either IP family.
-        .filter(|protocol| *protocol == BuiltinProtocol::Ah || !protocol.is_ipv6_extension())
+        .filter_map(|layer| {
+            let protocol = BuiltinProtocol::of(layer);
+            // Only typed IPv6 extensions are optional; AH can identify a tunnel.
+            if protocol.is_some_and(|protocol| {
+                protocol != BuiltinProtocol::Ah && protocol.is_ipv6_extension()
+            }) {
+                None
+            } else {
+                Some((protocol, *layer.protocol_id()))
+            }
+        })
 }
 
 fn reversed_layer_pair(

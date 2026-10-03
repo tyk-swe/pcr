@@ -3,6 +3,7 @@
 
 mod common;
 
+use common::probe::{Child, ChildCodec, Probe, ProbeCodec};
 use common::registry;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -383,6 +384,34 @@ fn reverse_udp_requires_matching_ah_tunnel_paths_in_both_ip_families() {
             "{network:?}"
         );
     }
+}
+
+#[test]
+fn reverse_udp_compares_registered_tunnel_protocols() {
+    let registry = packetcraftr_core::protocol::builtin::registry_with(|builder| {
+        builder.register_codec(ProbeCodec, &[])?;
+        builder.register_codec(ChildCodec, &[])?;
+        Ok(())
+    })
+    .unwrap();
+    let matcher = registry.matcher("udp").unwrap();
+    let (mut request, mut response) = nested_udp_pair();
+    request.insert(1, Probe::default()).unwrap();
+    let matches = |request: &Packet, response: &Packet| {
+        let matched = matcher.matches(request, response).is_some();
+        assert_eq!(
+            matched,
+            transport_tuple_reversed(request, response, BuiltinProtocol::Udp).is_some()
+        );
+        matched
+    };
+    assert!(!matches(&request, &response), "missing custom tunnel");
+    response.insert(1, Child::default()).unwrap();
+    assert!(!matches(&request, &response), "different custom tunnel");
+    response.replace(1, Probe::default()).unwrap();
+    assert!(matches(&request, &response), "matching custom tunnel");
+    request.remove(1).unwrap();
+    assert!(!matches(&request, &response), "unexpected custom tunnel");
 }
 
 #[test]

@@ -9,6 +9,7 @@ import io
 import json
 import os
 import pathlib
+import shlex
 import struct
 import subprocess
 import sys
@@ -559,8 +560,11 @@ class ManifestTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
     def test_verify_executes_relative_binary_paths_from_current_directory(self):
-        self.binary.write_text(f'#!{sys.executable}\nprint("packetcraftr 9.9.9")\n',
-                               encoding='utf-8')
+        source = 'print("packetcraftr 9.9.9")\n'
+        self.binary.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+            encoding='utf-8')
         self.binary.chmod(0o755)
         self.document['binary_sha256'] = digest(self.binary)
         self.write_manifest()

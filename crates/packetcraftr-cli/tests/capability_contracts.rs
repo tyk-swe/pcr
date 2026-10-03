@@ -3,7 +3,11 @@
 
 mod common;
 
-#[cfg(not(any(feature = "native-layer2", feature = "native-layer3")))]
+#[cfg(not(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+)))]
 fn assert_capability_failure(arguments: &[&str]) {
     use common::{parse_json, run};
 

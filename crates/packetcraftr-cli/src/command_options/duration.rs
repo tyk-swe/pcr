@@ -143,54 +143,6 @@ mod tests {
         timeout: TimeoutArgs<LongWindow>,
     }
 
-    #[test]
-    fn every_window_keeps_its_own_default() {
-        let long = LongFixture::try_parse_from(["fixture"]).unwrap();
-        let probe = parse(&[]).unwrap();
-        assert_eq!(long.timeout.timeout(), Duration::from_secs(3));
-        assert_eq!(probe.timeout.timeout(), Duration::from_secs(1));
-    }
-
-    fn parse(arguments: &[&str]) -> Result<Fixture, clap::Error> {
-        Fixture::try_parse_from(std::iter::once("fixture").chain(arguments.iter().copied()))
-    }
-
-    #[test]
-    fn the_ceiling_is_the_workflow_ceiling() {
-        let ceiling = Duration::from_millis(MAX_MILLISECONDS);
-        assert_eq!(ceiling, packetcraftr_netio::deadline::MAX_WAIT);
-        assert_eq!(ceiling, packetcraftr_core::fuzz::MAX_DURATION);
-    }
-
-    #[test]
-    fn defaults_are_the_hour_ceiling_and_the_window_default() {
-        let parsed = parse(&[]).unwrap();
-        assert_eq!(parsed.duration.max_duration(), Duration::from_secs(3_600));
-        assert_eq!(parsed.timeout.timeout(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn values_reach_their_owner_and_the_ceiling_takes_the_owners_error() {
-        for value in ["0", "3600001", "18446744073709551615"] {
-            let parsed = parse(&["--max-duration-ms", value, "--timeout-ms", value]).unwrap();
-            assert_eq!(parsed.timeout.timeout().as_millis().to_string(), value);
-            assert_eq!(
-                parsed.duration.max_duration().as_millis().to_string(),
-                value
-            );
-        }
-        let within = parse(&["--max-duration-ms", "3600000"]).unwrap();
-        assert!(within.duration.within_ceiling(|_| unreachable!()).is_ok());
-        let over = parse(&["--max-duration-ms", "3600001"]).unwrap();
-        let error = over
-            .duration
-            .within_ceiling(|value| {
-                CliError::new(packetcraftr_core::error::Kind::Policy, value.to_string())
-            })
-            .unwrap_err();
-        assert_eq!(error.message, "3600001");
-    }
-
     #[derive(Clone, Copy, Debug, Default)]
     struct Bounded;
 

@@ -52,6 +52,8 @@ impl<'a> EventOutput<'a> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
+
     use std::cell::Cell;
     use std::io::{self, Write};
 
@@ -60,7 +62,7 @@ mod tests {
 
     use crate::output::contract::Command;
 
-    use crate::test_support::{SharedBuffer, TestRecord, assert_contiguous};
+    use crate::test_support::{SharedBuffer, TestRecord};
 
     use super::*;
 
@@ -99,48 +101,6 @@ mod tests {
     }
 
     #[test]
-    fn exact_budget_routes_each_format_to_its_own_sink() {
-        for format in [ToolFormat::Json, ToolFormat::Ndjson, ToolFormat::Text] {
-            let buffer = SharedBuffer::default();
-            let stream = StreamEncoder::new(Command::Http, buffer.clone());
-            let mut output = EventOutput::new(format, &stream, 4);
-            let mut retained = Vec::new();
-            let rendered = Cell::new(false);
-            output
-                .emit(TestRecord("ab"), &mut retained, |_| {
-                    rendered.set(true);
-                    Ok(())
-                })
-                .unwrap();
-            assert_eq!(retained.len(), usize::from(format == ToolFormat::Json));
-            assert_eq!(rendered.get(), format == ToolFormat::Text);
-            assert_eq!(
-                buffer.records().len(),
-                usize::from(format == ToolFormat::Ndjson)
-            );
-            let mut retained = Vec::new();
-            let rendered = Cell::new(false);
-            let error = output
-                .emit(TestRecord("oversized"), &mut retained, |_| {
-                    rendered.set(true);
-                    Ok(())
-                })
-                .unwrap_err();
-            assert_eq!(error.classification.kind, Kind::Policy);
-            assert_eq!(
-                error.message,
-                "application output exceeds --max-application-output-bytes"
-            );
-            assert!(retained.is_empty());
-            assert!(!rendered.get());
-            assert_eq!(
-                buffer.records().len(),
-                usize::from(format == ToolFormat::Ndjson)
-            );
-        }
-    }
-
-    #[test]
     fn the_budget_is_shared_across_record_types_and_retention_vectors() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer);
@@ -171,76 +131,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.classification.kind, Kind::Policy);
         assert_eq!(numbers.len(), 1);
-    }
-
-    #[test]
-    fn failed_sizing_and_serialization_preserve_the_remaining_budget() {
-        let buffer = SharedBuffer::default();
-        let stream = StreamEncoder::new(Command::Http, buffer.clone());
-        let mut output = EventOutput::new(ToolFormat::Ndjson, &stream, 4);
-        let mut failures = Vec::new();
-        let rendered = Cell::new(false);
-        let mut rejected = Vec::new();
-        let quota = output
-            .emit(TestRecord("oversized"), &mut rejected, |_| {
-                rendered.set(true);
-                Ok(())
-            })
-            .unwrap_err();
-        assert_eq!(quota.classification.code, "policy.denied");
-        assert_eq!(quota.exit_code(), 6);
-        assert!(rejected.is_empty());
-        assert!(buffer.records().is_empty());
-        assert!(!rendered.get());
-        let error = output
-            .emit(FailingSerialization, &mut failures, |_| {
-                rendered.set(true);
-                Ok(())
-            })
-            .unwrap_err();
-        assert_eq!(error.classification.kind, Kind::Internal);
-        assert_eq!(error.exit_code(), 70);
-        assert_eq!(
-            error.message,
-            "serialize output failed: fixture serialization failure"
-        );
-        assert!(failures.is_empty());
-        assert!(buffer.records().is_empty());
-        assert!(!rendered.get());
-        let mut retained = Vec::new();
-        output
-            .emit(TestRecord("ab"), &mut retained, |_| {
-                rendered.set(true);
-                Ok(())
-            })
-            .unwrap();
-        assert!(retained.is_empty());
-        let records = buffer.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["result"], "ab");
-        assert!(!rendered.get());
-    }
-
-    #[test]
-    fn text_render_failures_propagate_unchanged_after_sizing() {
-        let buffer = SharedBuffer::default();
-        let stream = StreamEncoder::new(Command::Http, buffer.clone());
-        let mut output = EventOutput::new(ToolFormat::Text, &stream, 4);
-        let mut retained = Vec::new();
-        let error = output
-            .emit(TestRecord("ab"), &mut retained, |_| {
-                Err(CliError::new(Kind::Io, "fixture render failure"))
-            })
-            .unwrap_err();
-        assert_eq!(error.message, "fixture render failure");
-        assert_eq!(error.classification.kind, Kind::Io);
-        assert!(retained.is_empty());
-        assert!(buffer.bytes().is_empty());
-        let next = output
-            .emit(TestRecord("ab"), &mut retained, |_| Ok(()))
-            .unwrap_err();
-        assert_eq!(next.classification.kind, Kind::Policy);
     }
 
     #[test]

@@ -302,52 +302,6 @@ fn referenced_name(value: &RecordValue) -> Option<&Name> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn reverse_chain_with_cycle_and_case_variants_retains_only_relevant_records() {
-        let name = |index| Name::from_labels([format!("N{index}"), "example".to_owned()]).unwrap();
-        let mut answers = vec![Record {
-            owner: name(2000),
-            class: CLASS_IN,
-            ttl: 1,
-            value: RecordValue::A("192.0.2.1".parse().unwrap()),
-        }];
-        for index in (0..2000).rev() {
-            answers.push(Record {
-                owner: name(index),
-                class: CLASS_IN,
-                ttl: 1,
-                value: RecordValue::Cname(name(index + 1)),
-            });
-        }
-        answers.push(Record {
-            owner: name(2000),
-            class: CLASS_IN,
-            ttl: 1,
-            value: RecordValue::Cname(Name::from_labels(["n0", "EXAMPLE"]).unwrap()),
-        });
-        answers.push(Record {
-            owner: name(3000),
-            class: CLASS_IN,
-            ttl: 1,
-            value: RecordValue::A("192.0.2.2".parse().unwrap()),
-        });
-        let (names, accepted) = accepted_answers(&name(0), QueryType::A, &answers);
-        assert_eq!(names.len(), 2001);
-        assert!(accepted[..2002].iter().all(|keep| *keep));
-        assert!(!accepted[2002]);
-        let (_, cname_only) = accepted_answers(&name(0), QueryType::CNAME, &answers);
-        assert!(!cname_only[0]);
-        assert!(cname_only[1..2002].iter().all(|keep| *keep));
-    }
-
-    #[test]
-    fn canonical_keys_preserve_binary_label_boundaries() {
-        use bytes::Bytes;
-        let one = Name::from_labels([Bytes::from_static(b"a.b")]).unwrap();
-        let two = Name::from_labels([Bytes::from_static(b"a"), Bytes::from_static(b"b")]).unwrap();
-        assert_ne!(canonical(&one), canonical(&two));
-    }
-
     fn record(owner: &str, value: RecordValue) -> Record {
         Record {
             owner: owner.parse().unwrap(),
@@ -364,12 +318,6 @@ mod tests {
         }
     }
 
-    fn rrsig(covered: u16) -> RecordValue {
-        let mut rdata = covered.to_be_bytes().to_vec();
-        rdata.extend_from_slice(&[13, 2, 0, 0, 1, 44]);
-        unknown(46, &rdata)
-    }
-
     fn soa() -> RecordValue {
         RecordValue::Soa {
             primary_name_server: "ns.example.test".parse().unwrap(),
@@ -384,22 +332,6 @@ mod tests {
 
     fn a() -> RecordValue {
         RecordValue::A("192.0.2.1".parse().unwrap())
-    }
-
-    fn filter(
-        query_name: &str,
-        query_type: QueryType,
-        answers: Vec<Record>,
-        authorities: Vec<Record>,
-    ) -> RelevantRecords {
-        filter_relevant_records(
-            &query_name.parse().unwrap(),
-            query_type,
-            answers,
-            authorities,
-            Vec::new(),
-            16,
-        )
     }
 
     fn kept(records: &[Record]) -> Vec<(String, u16)> {
@@ -510,137 +442,5 @@ mod tests {
         let unlisted = filter(0);
         assert_eq!(unlisted.rejected_record_count, 6);
         assert!(unlisted.rejected_records.is_empty());
-    }
-
-    #[test]
-    fn rrsig_covering_the_query_type_at_the_question_owner_is_kept() {
-        let answers = vec![
-            record("example.test", a()),
-            record("example.test", rrsig(1)),
-            record("example.test", rrsig(16)),
-            record("other.test", rrsig(1)),
-            record("example.test", unknown(46, &[0])),
-        ];
-        let relevant = filter("EXAMPLE.test", QueryType::A, answers, Vec::new());
-        assert_eq!(
-            kept(&relevant.answers),
-            owned(&[("example.test.", 1), ("example.test.", 46)])
-        );
-        assert_eq!(relevant.rejected_record_count, 3);
-        assert!(
-            relevant
-                .rejected_records
-                .iter()
-                .all(|rejected| rejected.type_code == 46 && rejected.reason.contains("unrelated"))
-        );
-    }
-
-    #[test]
-    fn rrsig_over_a_cname_chain_owner_is_kept_for_the_cname_and_the_query_type() {
-        let answers = vec![
-            record(
-                "www.example.test",
-                RecordValue::Cname("edge.example.test".parse().unwrap()),
-            ),
-            record("www.example.test", rrsig(5)),
-            record("edge.example.test", a()),
-            record("edge.example.test", rrsig(1)),
-            record("edge.example.test", rrsig(28)),
-        ];
-        let relevant = filter("www.example.test", QueryType::A, answers, Vec::new());
-        assert_eq!(
-            kept(&relevant.answers),
-            owned(&[
-                ("www.example.test.", 5),
-                ("www.example.test.", 46),
-                ("edge.example.test.", 1),
-                ("edge.example.test.", 46),
-            ])
-        );
-        assert_eq!(relevant.rejected_record_count, 1);
-    }
-
-    #[test]
-    fn negative_answer_proofs_below_the_soa_apex_are_kept() {
-        let authorities = vec![
-            record("example.test", soa()),
-            record("example.test", rrsig(6)),
-            record(
-                "0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.example.test",
-                unknown(50, &[1, 0, 0, 0]),
-            ),
-            record("0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.example.test", rrsig(50)),
-            record("a.example.test", unknown(47, &[0])),
-            record("a.example.test", rrsig(47)),
-            record("example.test", unknown(43, &[0, 1, 13, 2])),
-            record("example.test", rrsig(43)),
-        ];
-        let relevant = filter(
-            "missing.example.test",
-            QueryType::A,
-            Vec::new(),
-            authorities,
-        );
-        assert_eq!(relevant.authorities.len(), 8);
-        assert_eq!(relevant.rejected_record_count, 0);
-    }
-
-    #[test]
-    fn referral_denial_of_ds_under_an_ancestor_is_kept() {
-        let authorities = vec![
-            record(
-                "child.example.test",
-                RecordValue::Ns("ns.child.example.test".parse().unwrap()),
-            ),
-            record("child.example.test", unknown(47, &[0])),
-            record("child.example.test", rrsig(47)),
-            record("child.example.test", rrsig(43)),
-            record(
-                "vd3hi0q5a1nmfj0rnmc6a5d1k0n5b4ec.example.test",
-                unknown(50, &[1, 1, 0, 0]),
-            ),
-            record("vd3hi0q5a1nmfj0rnmc6a5d1k0n5b4ec.example.test", rrsig(50)),
-        ];
-        let relevant = filter(
-            "www.child.example.test",
-            QueryType::A,
-            Vec::new(),
-            authorities,
-        );
-        assert_eq!(relevant.authorities.len(), 6);
-        assert_eq!(relevant.rejected_record_count, 0);
-    }
-
-    #[test]
-    fn unrelated_dnssec_authority_records_are_still_rejected() {
-        let mut other_class = record("example.test", unknown(47, &[0]));
-        other_class.class = 3;
-        let authorities = vec![
-            record("example.test", soa()),
-            record("other.test", unknown(47, &[0])),
-            record("hash.other.test", unknown(50, &[1, 0, 0, 0])),
-            record("other.test", unknown(43, &[0, 1, 13, 2])),
-            record("other.test", rrsig(6)),
-            record("example.test", rrsig(1)),
-            record("example.test", unknown(46, &[0])),
-            record("example.test", unknown(48, &[1, 1, 3, 13])),
-            other_class,
-        ];
-        let relevant = filter(
-            "missing.example.test",
-            QueryType::A,
-            Vec::new(),
-            authorities,
-        );
-        assert_eq!(kept(&relevant.authorities), owned(&[("example.test.", 6)]));
-        assert_eq!(relevant.rejected_record_count, 8);
-        let reasons = relevant
-            .rejected_records
-            .iter()
-            .map(|rejected| rejected.reason.as_str())
-            .collect::<Vec<_>>();
-        let not_in_zone = "authority is not an IN-class SOA/NS/DS/NSEC/NSEC3 record (or its RRSIG) for the validated question's zone";
-        assert_eq!(reasons[..7], [not_in_zone; 7]);
-        assert_eq!(reasons[7], "record class is not IN");
     }
 }

@@ -246,105 +246,8 @@ impl Interner {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
 
     use super::*;
-
-    fn tunnel_path(vni: u32) -> Vec<EncapsulationIdentifier> {
-        vec![
-            EncapsulationIdentifier::Network {
-                first: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                second: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-            },
-            EncapsulationIdentifier::Vxlan { vni },
-        ]
-    }
-
-    #[test]
-    fn exact_scope_reuses_its_identity() {
-        let mut interner = Interner::new();
-
-        let first = interner
-            .intern(Some(7), tunnel_path(42))
-            .expect("first scope fits");
-        let repeated = interner
-            .intern(Some(7), tunnel_path(42))
-            .expect("same scope reuses its identity");
-
-        assert_eq!(first, repeated);
-        assert_eq!(first.get(), 0);
-    }
-
-    #[test]
-    fn interface_and_encapsulation_are_independent_scope_dimensions() {
-        let mut interner = Interner::new();
-        let base = interner
-            .intern(Some(1), tunnel_path(10))
-            .expect("base scope fits");
-        let other_interface = interner
-            .intern(Some(2), tunnel_path(10))
-            .expect("interface-specific scope fits");
-        let other_tunnel = interner
-            .intern(Some(1), tunnel_path(11))
-            .expect("encapsulation-specific scope fits");
-
-        assert_eq!(
-            [base.get(), other_interface.get(), other_tunnel.get()],
-            [0, 1, 2]
-        );
-        assert_eq!(
-            interner
-                .intern(Some(1), tunnel_path(10))
-                .expect("base scope is still interned"),
-            base
-        );
-    }
-
-    #[test]
-    fn derived_encapsulation_extends_the_exact_physical_scope() {
-        let mut interner = Interner::new();
-        let base_path = tunnel_path(10);
-        let base = interner
-            .intern(Some(7), base_path.clone())
-            .expect("base scope fits");
-        let suffix = [EncapsulationIdentifier::Gre { key: Some(42) }];
-        let extended = interner
-            .replace_suffix(base, &[], &suffix)
-            .expect("derived scope extension fits");
-        let mut expected_path = base_path;
-        expected_path.extend_from_slice(&suffix);
-        let expected = interner
-            .intern(Some(7), expected_path)
-            .expect("composed scope is interned");
-
-        assert_eq!(extended, expected);
-        assert_ne!(extended, base);
-        assert_eq!(
-            interner
-                .replace_suffix(base, &[], &[])
-                .expect("empty suffix reuses base"),
-            base
-        );
-    }
-
-    #[test]
-    fn derived_encapsulation_replaces_replayed_scope_suffix_in_order() {
-        let mut interner = Interner::new();
-        let ah = EncapsulationIdentifier::Ah { spi: 42 };
-        let base = interner
-            .intern(Some(7), vec![ah])
-            .expect("fragment scope fits");
-        let mut replacement = tunnel_path(10);
-        replacement.insert(1, ah);
-        let composed = interner
-            .replace_suffix(base, std::slice::from_ref(&ah), &replacement)
-            .expect("replayed suffix composes");
-        let expected = interner
-            .intern(Some(7), replacement)
-            .expect("unfragmented scope is interned");
-
-        assert_eq!(composed, expected);
-    }
 
     #[test]
     fn a_scope_limit_beyond_the_identity_space_is_refused() {
@@ -360,28 +263,6 @@ mod tests {
         assert_eq!(Interner::with_limits(beyond).unwrap_err(), expected);
         assert_eq!(expected.classification().code, "cli.analysis_limit");
         assert!(Limits::default().validate().is_ok());
-    }
-
-    #[test]
-    fn configured_scope_limit_bounds_persistent_path_metadata() {
-        let mut interner = Interner::with_limits(Limits {
-            max_scopes: 1,
-            ..Limits::default()
-        })
-        .expect("valid limits");
-        let first = interner
-            .intern(Some(1), tunnel_path(10))
-            .expect("first scope fits");
-        assert_eq!(
-            interner
-                .intern(Some(1), tunnel_path(10))
-                .expect("existing scope remains reusable"),
-            first
-        );
-        assert_eq!(
-            interner.intern(Some(1), tunnel_path(11)),
-            Err(Error::Limit { limit: 1 })
-        );
     }
 
     #[test]

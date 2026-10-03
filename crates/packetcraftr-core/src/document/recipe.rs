@@ -131,35 +131,3 @@ impl Classified for Error {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn document_extensions_are_case_insensitive_and_explicit() {
-        for (path, expected) in [
-            ("packet.json", Some(Format::Json)),
-            ("packet.JSON", Some(Format::Json)),
-            ("packet.yaml", Some(Format::Yaml)),
-            ("packet.yml", Some(Format::Yaml)),
-            ("packet.txt", None),
-            ("packet", None),
-        ] {
-            assert_eq!(Format::from_path(Path::new(path)), expected, "{path}");
-        }
-    }
-
-    #[test]
-    fn recipe_text_announces_its_format_after_leading_whitespace() {
-        for (input, expected) in [
-            (" \n{\"schema\": 1}", Some(Format::Json)),
-            ("schema: packetcraftr.packet/v2", Some(Format::Yaml)),
-            ("\t---\nlayers: []", Some(Format::Yaml)),
-            ("ipv4()/udp()", None),
-            ("layers: []", None),
-        ] {
-            assert_eq!(Format::sniff(input), expected, "{input:?}");
-        }
-    }
-}

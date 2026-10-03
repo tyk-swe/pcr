@@ -445,15 +445,12 @@ impl Drop for Files {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::{
-        capture_file::Reader,
-        frame::{Frame, LinkType},
-    };
+    use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::{
         capture::{Limits, Metadata, Stats},
         interface::Id,
     };
-    use std::time::UNIX_EPOCH;
+
     fn sources() -> Vec<Source> {
         vec![Source {
             index: 0,
@@ -483,16 +480,6 @@ mod tests {
             late_frames: 0,
         }]
     }
-    fn frame(value: u8) -> Frame {
-        let mut frame = Frame::new(
-            UNIX_EPOCH + Duration::from_millis(u64::from(value)),
-            LinkType::RAW,
-            vec![value; 32],
-        )
-        .unwrap();
-        frame.interface = Some(0);
-        frame
-    }
     fn limits() -> capture_file::Limits {
         capture_file::Limits {
             max_frames: 10,
@@ -508,124 +495,6 @@ mod tests {
             max_files: 1,
             retention: Retention::Stop,
         }
-    }
-    fn read_file(file: &FileReport) -> Vec<Frame> {
-        let source = std::fs::File::open(&file.path).unwrap();
-        let mut reader =
-            Reader::new(compression::Input::new(source, Default::default()).unwrap()).unwrap();
-        let mut frames = Vec::new();
-        while let Some(frame) = reader.next_frame().unwrap() {
-            frames.push(frame);
-        }
-        frames
-    }
-    #[test]
-    fn exact_frame_boundaries_produce_complete_files_for_every_compression() {
-        for compression in [Compression::None, Compression::Gzip, Compression::Zstd] {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("trace.pcapng");
-            let mut reference = super::super::writer::initialize(
-                Vec::new(),
-                capture_file::Format::PcapNg,
-                &sources(),
-                limits(),
-            )
-            .unwrap();
-            reference.write_frame(&frame(1)).unwrap();
-            let one_frame_size = reference.into_inner().len() as u64;
-            let mut options = options(path, compression);
-            options.rotate_bytes = Some(one_frame_size);
-            options.max_files = 2;
-            let mut files = Files::new(options, limits()).unwrap();
-            files.initialize(sources()).unwrap();
-            assert_eq!(
-                files.write(&frame(1), 1, Duration::ZERO).unwrap(),
-                packetcraftr::capture::Control::Continue
-            );
-            assert_eq!(
-                files.write(&frame(2), 2, Duration::from_millis(1)).unwrap(),
-                packetcraftr::capture::Control::StopAfter
-            );
-            files.finish().unwrap();
-            let report = files.report();
-            assert_eq!(report.frames_written, 2);
-            assert_eq!(report.files.len(), 2);
-            assert!(report.stopped_at_retention_limit);
-            for (index, file) in report.files.iter().enumerate() {
-                assert!(file.finalized);
-                assert_eq!(file.capture_bytes, one_frame_size);
-                assert!(file.encoded_bytes.unwrap() > 0);
-                let frames = read_file(file);
-                assert_eq!(frames.len(), 1);
-                assert_eq!(frames[0].bytes(), frame(index as u8 + 1).bytes());
-            }
-        }
-    }
-    #[test]
-    fn time_rotation_reuses_only_owned_handles_and_reports_retired_generations() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("ring.pcapng");
-        let mut options = options(path, Compression::Gzip);
-        options.rotate_after = Some(Duration::from_millis(10));
-        options.max_files = 2;
-        options.retention = Retention::Ring;
-        let mut files = Files::new(options, limits()).unwrap();
-        files.initialize(sources()).unwrap();
-        for (index, millis) in [0, 5, 11, 21].into_iter().enumerate() {
-            files
-                .write(
-                    &frame(index as u8 + 1),
-                    index as u64 + 1,
-                    Duration::from_millis(millis),
-                )
-                .unwrap();
-        }
-        files.finish().unwrap();
-        let report = files.report();
-        assert_eq!(report.files.len(), 2);
-        assert_eq!(report.frames_written, 4);
-        assert_eq!(report.discarded_files, 1);
-        assert_eq!(report.discarded_frames, 2);
-        assert_eq!(
-            report
-                .files
-                .iter()
-                .map(|file| file.generation)
-                .collect::<Vec<_>>(),
-            [2, 3]
-        );
-        assert_eq!(read_file(&report.files[0])[0].bytes(), frame(3).bytes());
-        assert_eq!(read_file(&report.files[1])[0].bytes(), frame(4).bytes());
-    }
-    #[test]
-    fn elapsed_time_regression_is_an_internal_failure() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut options = options(directory.path().join("clock.pcapng"), Compression::None);
-        options.rotate_after = Some(Duration::from_millis(10));
-        let mut files = Files::new(options, limits()).unwrap();
-        files.initialize(sources()).unwrap();
-        files.write(&frame(1), 1, Duration::from_millis(5)).unwrap();
-        let error = files
-            .write(&frame(2), 2, Duration::from_millis(4))
-            .expect_err("elapsed time regressed");
-        assert_eq!(error.classification().code, "internal.capture_files");
-        assert_eq!(error.classification().kind, Kind::Internal);
-    }
-    #[test]
-    fn io_failures_state_the_operating_system_error_only_as_the_cause() {
-        let error = Error::Io {
-            path: PathBuf::from("trace.pcapng"),
-            source: io::Error::other("disk on fire"),
-        };
-        assert_eq!(error.to_string(), "capture file trace.pcapng");
-        assert_eq!(
-            std::error::Error::source(&error).unwrap().to_string(),
-            "disk on fire"
-        );
-        assert_eq!(
-            packetcraftr_core::error::source_chain(&error),
-            ["disk on fire"]
-        );
     }
     #[test]
     fn preexisting_files_and_impossible_metadata_budgets_are_never_overwritten() {

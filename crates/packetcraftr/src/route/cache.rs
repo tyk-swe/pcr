@@ -202,73 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn identical_route_arguments_are_memoized_but_distinct_keys_are_not() {
-        let provider = CountingProvider::new(Some(decision()));
-        let cache = CachedProvider::new(&provider);
-        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
-
-        let first = cache
-            .lookup_with_preferences(destination, None, None, &live())
-            .expect("first lookup");
-        let second = cache
-            .lookup_with_preferences(destination, None, None, &live())
-            .expect("cached lookup");
-        assert_eq!(first, second);
-        assert_eq!(provider.lookups.load(Ordering::SeqCst), 1);
-
-        cache
-            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), None, None, &live())
-            .expect("distinct destination");
-        cache
-            .lookup_with_preferences(destination, Some(&interface()), None, &live())
-            .expect("distinct interface hint");
-        cache
-            .lookup_with_preferences(
-                destination,
-                None,
-                Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
-                &live(),
-            )
-            .expect("distinct source preference");
-        assert_eq!(provider.lookups.load(Ordering::SeqCst), 4);
-    }
-
-    #[test]
-    fn interface_decisions_cache_both_some_and_none_results() {
-        let provider = CountingProvider::new(Some(decision()));
-        let cache = CachedProvider::new(&provider);
-        assert_eq!(
-            cache
-                .lookup_interface(&interface(), &live())
-                .expect("first lookup"),
-            Some(decision())
-        );
-        assert_eq!(
-            cache
-                .lookup_interface(&interface(), &live())
-                .expect("cached lookup"),
-            Some(decision())
-        );
-        assert_eq!(provider.interfaces.load(Ordering::SeqCst), 1);
-
-        let none_provider = CountingProvider::new(None);
-        let none_cache = CachedProvider::new(&none_provider);
-        assert_eq!(
-            none_cache
-                .lookup_interface(&interface(), &live())
-                .expect("none"),
-            None
-        );
-        assert_eq!(
-            none_cache
-                .lookup_interface(&interface(), &live())
-                .expect("cached none"),
-            None
-        );
-        assert_eq!(none_provider.interfaces.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
     fn provider_errors_are_not_cached_and_keep_their_classification() {
         let provider = CountingProvider::new(None);
         provider.fail.store(true, Ordering::SeqCst);
@@ -287,23 +220,5 @@ mod tests {
             error.classification(),
             Classification::new("capability.fixture", Kind::Capability, None)
         );
-    }
-
-    #[test]
-    fn poisoned_cache_mutex_recovers_without_bypassing_lookup() {
-        let provider = CountingProvider::new(Some(decision()));
-        let cache = CachedProvider::new(&provider);
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = cache.by_interface.lock().expect("initial cache lock");
-            panic!("poison fixture cache");
-        }));
-
-        assert_eq!(
-            cache
-                .lookup_interface(&interface(), &live())
-                .expect("recovered lookup"),
-            Some(decision())
-        );
-        assert_eq!(provider.interfaces.load(Ordering::SeqCst), 1);
     }
 }

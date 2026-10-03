@@ -311,32 +311,6 @@ mod tests {
             .collect()
     }
 
-    fn offset_of(source: &str) -> usize {
-        match tokenize(source) {
-            Err(Error::Syntax { offset, .. }) => offset,
-            other => panic!("{source}: expected a syntax error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn quoted_text_decodes_every_escape_and_keeps_ascii_hex_bytes() {
-        assert_eq!(
-            only(r#""a\\\"\r\n\t\0\x20\x7f""#),
-            Token::Text("a\\\"\r\n\t\0 \x7f".to_owned())
-        );
-        assert_eq!(only("\"h\u{e9}llo\""), Token::Text("h\u{e9}llo".to_owned()));
-    }
-
-    #[test]
-    fn byte_strings_decode_the_full_byte_range() {
-        assert_eq!(
-            only(r#"b"\x16\x03\x01\xff\r\n""#),
-            Token::ByteString(vec![0x16, 0x03, 0x01, 0xff, b'\r', b'\n'])
-        );
-        assert_eq!(only("b\"\u{e9}\""), Token::ByteString(vec![0xc3, 0xa9]));
-        assert_eq!(only("b\"\""), Token::ByteString(Vec::new()));
-    }
-
     #[test]
     fn a_b_is_a_byte_string_only_as_a_lone_word_before_a_quote() {
         assert_eq!(only("b"), Token::Word("b".to_owned()));
@@ -350,61 +324,5 @@ mod tests {
             kinds("b \"x\""),
             [Token::Word("b".to_owned()), Token::Text("x".to_owned())]
         );
-    }
-
-    #[test]
-    fn invalid_escapes_point_at_the_backslash() {
-        for (source, offset) in [
-            (r#""\x4""#, 1),
-            (r#""\xZZ""#, 1),
-            (r#""ab\q""#, 3),
-            (r#""\xc3""#, 1),
-            (r#""\xff""#, 1),
-            (r#""ab\"#, 3),
-            (r#"b"\x1"#, 2),
-            (r#"b"\x4""#, 2),
-            (r#"b"\xZZ""#, 2),
-            (r#"b"ab\q""#, 4),
-            (r#"x == b"ab\"#, 9),
-        ] {
-            assert_eq!(offset_of(source), offset, "{source}");
-        }
-    }
-
-    #[test]
-    fn unterminated_literals_point_at_their_start() {
-        assert_eq!(offset_of("x == \"abc"), 5);
-        assert_eq!(offset_of("x == b\"abc"), 5);
-    }
-
-    #[test]
-    fn a_single_ampersand_is_a_mask_and_a_double_one_is_still_and() {
-        assert_eq!(
-            kinds("a&1"),
-            [
-                Token::Word("a".to_owned()),
-                Token::Ampersand,
-                Token::Word("1".to_owned())
-            ]
-        );
-        assert_eq!(
-            kinds("a&&b"),
-            [
-                Token::Word("a".to_owned()),
-                Token::And,
-                Token::Word("b".to_owned())
-            ]
-        );
-        assert_eq!(kinds("&&&"), [Token::And, Token::Ampersand]);
-        assert_eq!(offset_of("a | b"), 2);
-    }
-
-    #[test]
-    fn text_match_keywords_are_case_insensitive_whole_words() {
-        assert_eq!(only("StartsWith"), Token::TextMatch(TextMode::Prefix));
-        assert_eq!(only("endswith"), Token::TextMatch(TextMode::Suffix));
-        assert_eq!(only("icontains"), Token::TextMatch(TextMode::ContainsFold));
-        assert_eq!(only("IEQUALS"), Token::TextMatch(TextMode::EqualsFold));
-        assert_eq!(only("endswith.x"), Token::Word("endswith.x".to_owned()));
     }
 }

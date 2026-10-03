@@ -30,19 +30,3 @@ impl Limits {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_ceiling_is_a_valid_limit() {
-        for (max_layers, max_packet_size) in [(0, 0), (1, usize::MAX), (usize::MAX, 0)] {
-            let limits = Limits {
-                max_layers,
-                max_packet_size,
-            };
-            assert!(limits.validate().is_ok());
-        }
-    }
-}

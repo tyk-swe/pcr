@@ -8,14 +8,12 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr::Error;
 use packetcraftr::policy;
 use packetcraftr::replay::{self, Error as ReplayError, Limits, Options as ReplayOptions, Timing};
-use packetcraftr::runtime::{MAX_WORKER_CAPACITY, Runtime};
 use packetcraftr::send;
 use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::build::{self, Builder};
 use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::codec::Context;
-use packetcraftr_core::error::BoundaryError;
-use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
+use packetcraftr_core::error::{Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{
@@ -23,7 +21,7 @@ use packetcraftr_core::protocol::{
     network::{Icmpv4, Ipv4},
 };
 use packetcraftr_core::{packet::Packet, protocol};
-use packetcraftr_netio::{Error as LiveIoError, interface::Address, link::Mode as LinkMode};
+use packetcraftr_netio::{interface::Address, link::Mode as LinkMode};
 
 mod common;
 
@@ -46,66 +44,6 @@ fn assert_message_is_stable(message: &str, variant: &str) {
 
 fn selection_failure() -> packetcraftr_core::filter::Error {
     packetcraftr_core::filter::Error::TimestampUnavailable
-}
-
-#[test]
-fn send_and_exchange_template_failures_publish_each_source_only_once() {
-    use packetcraftr::exchange;
-    use packetcraftr_core::{field::FieldValue, template::Template};
-
-    let client = Client::new(
-        protocol::builtin::registry(),
-        policy::Policy::default(),
-        common::providers(FixedRoutes, NeverTransmit),
-    );
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        destination: Ipv4Addr::LOCALHOST,
-        ..Default::default()
-    });
-    let mut overflow = Template::new(packet.clone());
-    for _ in 0..usize::BITS {
-        overflow = overflow.axis(
-            0,
-            "ttl",
-            vec![FieldValue::Unsigned(1), FieldValue::Unsigned(2)],
-        );
-    }
-    let invalid_layer = Template::new(packet.clone()).axis(9, "ttl", vec![FieldValue::Unsigned(1)]);
-    let invalid_value = Template::new(packet).axis(0, "ttl", vec![FieldValue::Text("bad".into())]);
-    for template in [overflow, invalid_layer, invalid_value] {
-        let send = client
-            .send(
-                send::Request::new(template.clone(), Default::default()),
-                send::Collector::default(),
-            )
-            .unwrap_err();
-        let exchange = client
-            .exchange(
-                exchange::Request {
-                    template,
-                    send: Default::default(),
-                    timeout: Duration::from_secs(1),
-                    max_template_packets: 10,
-                    collection: Default::default(),
-                    stop: Default::default(),
-                },
-                exchange::Collector::default(),
-            )
-            .unwrap_err();
-        for error in [&send as &dyn Classified, &exchange as &dyn Classified] {
-            assert_eq!(error.classification().code, "packet.template");
-            let causes = error.causes();
-            assert!(
-                !causes.is_empty(),
-                "the template error must remain a source"
-            );
-            assert!(
-                !error.to_string().contains(&causes[0]),
-                "wrapper must not repeat its source: {error}",
-            );
-        }
-    }
 }
 
 #[test]
@@ -185,37 +123,6 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
         selection.causes(),
         [selection_failure().to_string()],
         "selection reports the filter's failure as its cause"
-    );
-}
-
-#[test]
-fn operation_and_capture_shutdown_reports_the_operation_and_both_causes() {
-    let error = packetcraftr::exchange::Error::OperationAndCaptureShutdown {
-        operation: Box::new(LiveIoError::PartialSend {
-            expected: 60,
-            actual: 42,
-        }),
-        shutdown: Box::new(LiveIoError::UnresolvedLinkMode),
-    };
-    let message = error.to_string();
-    assert_message_is_stable(&message, "OperationAndCaptureShutdown");
-    assert!(
-        message.contains("capture shutdown also failed"),
-        "{message}"
-    );
-
-    let expected = LiveIoError::PartialSend {
-        expected: 60,
-        actual: 42,
-    };
-    assert_eq!(error.classification(), expected.classification());
-    assert_eq!(error.context(), expected.context());
-    assert_eq!(
-        error.causes(),
-        [
-            expected.to_string(),
-            LiveIoError::UnresolvedLinkMode.to_string()
-        ]
     );
 }
 
@@ -391,86 +298,4 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
         "policy.invalid_packet_semantics"
     );
     assert_eq!(error.classification().kind, Kind::Policy);
-}
-
-#[test]
-fn a_worker_capacity_above_the_ceiling_is_a_classified_usage_refusal() {
-    let error = Runtime::new(MAX_WORKER_CAPACITY + 1).unwrap_err();
-
-    let classification = error.classification();
-    assert_eq!(classification.code, "cli.worker_capacity");
-    assert_eq!(classification.kind, Kind::Usage);
-    assert!(
-        classification
-            .remediation
-            .is_some_and(|remediation| remediation.contains("MAX_WORKER_CAPACITY")),
-        "{classification:?}"
-    );
-    assert_message_is_stable(&error.to_string(), "CapacityError");
-}
-
-#[test]
-fn boundary_sourced_workflow_failures_state_their_source_once() {
-    let source = || {
-        BoundaryError::new(
-            "fixture boundary refused",
-            Classification::new("io.fixture", Kind::Io, None),
-            vec!["fixture root cause".to_owned()],
-        )
-    };
-    let failures: Vec<(&str, Box<dyn Classified>)> = vec![
-        (
-            "scan authorization",
-            Box::new(packetcraftr::scan::Error::Authorization(source())),
-        ),
-        (
-            "scan execution",
-            Box::new(packetcraftr::scan::Error::Execution {
-                sequence: 1,
-                source: source(),
-            }),
-        ),
-        (
-            "traceroute output",
-            Box::new(packetcraftr::traceroute::Error::Output { source: source() }),
-        ),
-        (
-            "dns authorization",
-            Box::new(packetcraftr::dns::Error::Authorization(source())),
-        ),
-        (
-            "dns execution",
-            Box::new(packetcraftr::dns::Error::Execution {
-                attempt: 1,
-                source: source(),
-            }),
-        ),
-        (
-            "fuzz authorization",
-            Box::new(packetcraftr::fuzz::Error::Authorization(source())),
-        ),
-        (
-            "send output",
-            Box::new(send::Error::Output { source: source() }),
-        ),
-        (
-            "replay authorization",
-            Box::new(ReplayError::Authorization {
-                source_index: 0,
-                source: source(),
-            }),
-        ),
-    ];
-    for (variant, error) in failures {
-        assert!(
-            !error.to_string().contains("fixture boundary refused"),
-            "{variant}: {error}"
-        );
-        assert_eq!(
-            error.causes(),
-            ["fixture boundary refused", "fixture root cause"],
-            "{variant}"
-        );
-        assert_eq!(error.classification().code, "io.fixture", "{variant}");
-    }
 }

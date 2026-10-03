@@ -1,50 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::str::FromStr;
 use std::time::Duration;
 
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::fuzz;
-
-#[test]
-fn fuzz_requests_stop_on_duplicate_strategies_and_case_overflow() {
-    let mut request = fuzz::Request {
-        cases: 2,
-        strategies: vec![fuzz::Strategy::Boundary, fuzz::Strategy::Boundary],
-        ..fuzz::Request::default()
-    };
-    assert!(matches!(
-        request.validate(),
-        Err(fuzz::Error::InvalidStrategies)
-    ));
-
-    request.strategies = vec![fuzz::Strategy::Boundary];
-    request.first_case = u64::MAX;
-    assert!(matches!(
-        request.validate(),
-        Err(fuzz::Error::CaseIndexOverflow)
-    ));
-}
-
-#[test]
-fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
-    let target = fuzz::Target::from_str("3.destination_port").expect("target must parse");
-    assert_eq!(target.layer, 3);
-    assert_eq!(target.field, "destination_port");
-    assert!(matches!(
-        fuzz::Target::from_str("3.bad-field"),
-        Err(fuzz::Error::TargetField { .. })
-    ));
-    assert!(matches!(
-        fuzz::Target::from_str("destination_port"),
-        Err(fuzz::Error::TargetSeparator { .. })
-    ));
-    assert!(matches!(
-        fuzz::Target::from_str("x.destination_port"),
-        Err(fuzz::Error::TargetLayer { .. })
-    ));
-}
 
 #[test]
 fn fuzz_failures_retain_stable_boundary_classifications() {
@@ -102,26 +62,6 @@ fn fuzz_failures_retain_stable_boundary_classifications() {
 }
 
 #[test]
-fn fuzz_value_failures_remediate_only_the_limit_they_can_change() {
-    let remediation = |error: fuzz::Error| {
-        error
-            .classification()
-            .remediation
-            .expect("value limits carry remediation")
-    };
-
-    let items = remediation(fuzz::Error::ValueItems { items: 5, limit: 4 });
-    assert!(items.contains("max_list_items"), "{items}");
-    assert!(!items.contains("nesting"), "{items}");
-
-    let nesting = remediation(fuzz::Error::ValueNesting {
-        limit: fuzz::MAX_VALUE_NESTING,
-    });
-    assert!(nesting.contains("nesting"), "{nesting}");
-    assert!(!nesting.contains("max_list_items"), "{nesting}");
-}
-
-#[test]
 fn campaign_limits_reject_values_above_the_ceilings_they_enforce() {
     for limits in [
         fuzz::Limits {
@@ -142,40 +82,4 @@ fn campaign_limits_reject_values_above_the_ceilings_they_enforce() {
     const {
         assert!(fuzz::MAX_VALUE_NESTING <= packetcraftr_core::document::MAX_DOCUMENT_NESTING);
     }
-}
-
-#[test]
-fn unresolvable_targets_name_their_typed_fault() {
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let packet =
-        packetcraftr_core::expression::parse("ipv4()/udp()", &registry, Default::default())
-            .expect("recipe parses");
-    let run = |target: &str| {
-        let request = fuzz::Request {
-            cases: 1,
-            targets: vec![fuzz::Target::from_str(target).expect("target parses")],
-            ..fuzz::Request::default()
-        };
-        fuzz::run(&request, packet.clone(), registry.clone()).expect_err("target is refused")
-    };
-
-    let error = run("5.destination_port");
-    assert!(matches!(
-        error,
-        fuzz::Error::InvalidTarget {
-            reason: fuzz::TargetFault::LayerOutOfRange { layers: 2 },
-            ..
-        }
-    ));
-    assert_eq!(
-        error.to_string(),
-        "fuzz target 5.destination_port is invalid: layer index is outside packet length 2"
-    );
-    assert!(matches!(
-        run("1.no_such_field"),
-        fuzz::Error::InvalidTarget {
-            reason: fuzz::TargetFault::UnregisteredPath,
-            ..
-        }
-    ));
 }

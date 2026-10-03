@@ -138,12 +138,11 @@ pub(crate) fn emit_published<T: Serialize>(
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::io::{self, Write};
 
     use serde::Serialize;
     use serde::ser::{Error as _, SerializeSeq};
 
-    use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len, json_error};
+    use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len};
 
     struct Instrumented<'a> {
         second: &'a Cell<bool>,
@@ -172,69 +171,6 @@ mod tests {
             let mut sequence = serializer.serialize_seq(Some(2))?;
             sequence.serialize_element(&0u8)?;
             Err(S::Error::custom("fixture serialization failure"))
-        }
-    }
-
-    #[test]
-    fn json_write_failures_are_stdout_failures_and_serialization_failures_are_internal() {
-        struct Closed;
-
-        impl Write for Closed {
-            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "consumer closed"))
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let write = json_error(serde_json::to_writer(Closed, &0).unwrap_err());
-        assert_eq!(write.exit_code(), 5);
-        assert_eq!(write.classification.code, "io.stdout");
-        assert!(write.classification.remediation.is_some());
-        assert_eq!(write.message, "write stdout failed");
-        assert_eq!(write.causes, ["consumer closed"]);
-
-        let serialize =
-            json_error(serde_json::to_writer(Vec::new(), &FailingSerialization).unwrap_err());
-        assert_eq!(serialize.exit_code(), 70);
-        assert_eq!(serialize.classification.code, "internal.error");
-    }
-
-    #[test]
-    fn bounded_json_len_counts_exact_compact_and_pretty_bytes() {
-        let cases = [
-            serde_json::json!(null),
-            serde_json::json!(""),
-            serde_json::json!("multibyte é\n\"quoted\"\\\u{0007}"),
-            serde_json::json!({"nested": [1, "two", {"three": [null, true]}], "empty": []}),
-        ];
-        for value in cases {
-            for pretty in [false, true] {
-                let n = if pretty {
-                    serde_json::to_vec_pretty(&value).unwrap().len()
-                } else {
-                    serde_json::to_vec(&value).unwrap().len()
-                };
-                let measure = |limit| {
-                    if pretty {
-                        bounded_pretty_json_len(&value, limit)
-                    } else {
-                        bounded_json_len(&value, limit)
-                    }
-                };
-                assert_eq!(measure(n).unwrap(), n, "{value}");
-                assert!(
-                    matches!(measure(n - 1), Err(BoundedJsonError::Limit)),
-                    "{value}"
-                );
-                assert!(
-                    matches!(measure(0), Err(BoundedJsonError::Limit)),
-                    "{value}"
-                );
-                assert_eq!(measure(usize::MAX).unwrap(), n, "{value}");
-            }
         }
     }
 

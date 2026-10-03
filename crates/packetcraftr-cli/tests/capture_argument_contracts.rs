@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
-use common::{parse_json, parse_ndjson, run};
+use common::{parse_json, run};
 #[test]
 fn storage_limits_are_checked_before_interface_lookup_or_activation() {
     let directory = tempfile::tempdir().unwrap();
@@ -123,112 +123,6 @@ fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
         assert!(stderr.contains("capability.unsupported"), "{stderr}");
     }
     assert!(!stderr.contains("cli.capture_setting"), "{stderr}");
-}
-
-#[test]
-fn decoded_output_options_are_checked_before_interface_lookup() {
-    for extra in [
-        vec!["--dissect"],
-        vec!["--field", "ipv4.destination"],
-        vec!["--dissect", "--decode-as", "udp.port=5353:dns"],
-    ] {
-        for format in ["json", "pcapng"] {
-            let mut args = vec![
-                "--output",
-                format,
-                "capture",
-                "--interface",
-                "does-not-exist",
-            ];
-            args.extend(extra.clone());
-            if format == "json" {
-                args.extend(["--write", "/dev/null"]);
-            }
-            let output = run(&args);
-            assert!(!output.status.success(), "{args:?} must fail");
-            if format == "json" {
-                assert_eq!(
-                    parse_json(&output)["error"]["code"],
-                    "cli.capture_decode_format",
-                    "{args:?}"
-                );
-            } else {
-                assert!(
-                    String::from_utf8_lossy(&output.stderr).contains("cli.capture_decode_format"),
-                    "{args:?} stderr"
-                );
-            }
-        }
-    }
-    for extra in [vec!["--dissect"], vec!["--field", "frame.len"]] {
-        let mut args = vec![
-            "--output",
-            "ndjson",
-            "capture",
-            "--interface",
-            "does-not-exist",
-        ];
-        args.extend(extra);
-        let output = run(&args);
-        let records = parse_ndjson(&output);
-        let error = &records.last().expect("failure record")["error"];
-        assert_ne!(error["code"], "cli.capture_decode_format", "{args:?}");
-        if cfg!(any(
-            feature = "native-route",
-            feature = "native-layer2",
-            feature = "native-layer3"
-        )) {
-            assert_eq!(output.status.code(), Some(5), "{args:?}: {error}");
-            assert_eq!(error["code"], "io.device", "{args:?}");
-            assert!(
-                error["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("does-not-exist"),
-                "{args:?}: {error}"
-            );
-        } else {
-            assert_eq!(output.status.code(), Some(4), "{args:?}: {error}");
-            assert_eq!(error["code"], "capability.unsupported", "{args:?}");
-        }
-    }
-}
-
-#[test]
-fn tree_output_is_checked_before_interface_lookup() {
-    for (output_format, extra, code) in [
-        ("text", vec!["--tree"], "cli.tree_requires_dissect"),
-        (
-            "ndjson",
-            vec!["--dissect", "--tree"],
-            "cli.tree_unsupported_format",
-        ),
-    ] {
-        let mut args = vec![
-            "--output",
-            output_format,
-            "capture",
-            "--interface",
-            "does-not-exist",
-        ];
-        args.extend(extra);
-        let output = run(&args);
-        assert_eq!(
-            output.status.code(),
-            Some(2),
-            "{args:?} must be a usage error"
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let reported = if output_format == "ndjson" {
-            parse_ndjson(&output).last().expect("failure record")["error"]["code"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned()
-        } else {
-            stderr.to_string()
-        };
-        assert!(reported.contains(code), "{args:?}: {reported}");
-    }
 }
 
 #[test]

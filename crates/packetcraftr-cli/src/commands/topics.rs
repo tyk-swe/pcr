@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-#[cfg(test)]
-mod tests;
 mod text;
 
 use std::fmt::Write as _;

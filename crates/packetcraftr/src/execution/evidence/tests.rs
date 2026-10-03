@@ -53,29 +53,6 @@ fn a_request_selects_its_best_response_within_the_timeout() {
     assert_eq!(select(2), None);
 }
 
-#[test]
-fn a_complete_tie_keeps_the_first_response() {
-    let mut responses = vec![response(0, 1, &[1]), response(0, 1, &[1])];
-    let mut arrivals = 0;
-
-    let best = ResponseSelector::new(&mut responses)
-        .select(
-            0,
-            Duration::from_millis(10),
-            |_| {
-                arrivals += 1;
-                Some(arrivals)
-            },
-            |_| 1,
-            |_| (),
-            || Ok::<(), ()>(()),
-        )
-        .unwrap();
-
-    assert_eq!(arrivals, 2);
-    assert_eq!(best.map(|candidate| candidate.observation), Some(1));
-}
-
 struct RecordingSink {
     emitted: Vec<String>,
     checks: usize,

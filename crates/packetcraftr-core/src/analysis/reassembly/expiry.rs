@@ -65,9 +65,4 @@ impl<K: Ord> ExpiryIndex<K> {
             }
         }
     }
-
-    #[cfg(test)]
-    pub(super) fn len(&self) -> usize {
-        self.entries.values().map(BTreeSet::len).sum()
-    }
 }

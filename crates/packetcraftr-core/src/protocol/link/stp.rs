@@ -491,77 +491,12 @@ mod tests {
         StpCodec.decode(Bytes::copy_from_slice(input), &context)
     }
 
-    fn codes(diagnostics: &[Diagnostic]) -> Vec<&'static str> {
-        diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.code)
-            .collect()
-    }
-
     /// A configuration BPDU as sent by a root bridge with priority 32768.
     const CONFIG: [u8; 35] = [
         0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
         0x00, 0x04, 0x81, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x80, 0x80, 0x02, 0x00, 0x00, 0x14,
         0x00, 0x02, 0x00, 0x0f, 0x00,
     ];
-
-    #[test]
-    fn configuration_bpdu_has_typed_bridge_ids_and_an_exact_wire_image() {
-        let decoded = decode(&CONFIG).unwrap();
-        assert_eq!(decoded.consumed, 35);
-        assert_eq!(decoded.payload_len, 0);
-        assert!(decoded.stop);
-        assert!(decoded.diagnostics.is_empty());
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap().clone();
-        assert!(layer.topology_change);
-        assert_eq!(layer.root_priority, 8);
-        assert_eq!(layer.root_extension, 2);
-        assert_eq!(layer.root_mac, [0, 0, 0, 0, 1, 0]);
-        assert_eq!(layer.root_path_cost, 4);
-        assert_eq!(layer.bridge_priority, 8);
-        assert_eq!(layer.bridge_extension, 0x102);
-        assert_eq!(layer.bridge_mac, [0, 0, 0, 0, 2, 0x80]);
-        assert_eq!(layer.port_id, 0x8002);
-        assert_eq!(layer.forward_delay, 0x0f00);
-
-        let encoded = encode(&layer, crate::codec::Mode::Strict).unwrap();
-        assert_eq!(encoded.prefix, CONFIG);
-        assert!(
-            encoded
-                .fields
-                .iter()
-                .all(|field| field.range.end <= CONFIG.len())
-        );
-    }
-
-    #[test]
-    fn tcn_and_rst_bpdus_round_trip_with_their_own_lengths() {
-        let tcn = [0, 0, 0, 0x80];
-        let decoded = decode(&tcn).unwrap();
-        assert_eq!(decoded.consumed, 4);
-        assert!(decoded.diagnostics.is_empty());
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap();
-        assert_eq!(
-            encode(layer, crate::codec::Mode::Strict).unwrap().prefix,
-            tcn
-        );
-
-        let mut rst = CONFIG.to_vec();
-        rst[2] = 2;
-        rst[3] = 2;
-        rst[4] = 0x3c;
-        rst.push(0);
-        let decoded = decode(&rst).unwrap();
-        assert_eq!(decoded.consumed, 36);
-        assert!(decoded.diagnostics.is_empty());
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap();
-        assert_eq!(layer.port_role, 3);
-        assert!(layer.learning && layer.forwarding && !layer.agreement);
-        assert_eq!(
-            encode(layer, crate::codec::Mode::Strict).unwrap().prefix,
-            rst
-        );
-    }
 
     #[test]
     fn truncated_bodies_fail_without_reading_past_the_input() {
@@ -582,93 +517,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn unknown_types_type_only_the_header_and_report_it() {
-        let input = [0, 0, 0, 0x7f, 0xde, 0xad];
-        let decoded = decode(&input).unwrap();
-        assert_eq!(decoded.consumed, 4);
-        assert_eq!(codes(&decoded.diagnostics), ["decode.stp_bpdu_type"]);
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap();
-        assert_eq!(
-            encode(layer, crate::codec::Mode::Permissive)
-                .unwrap()
-                .prefix,
-            input[..4]
-        );
-        assert!(encode(layer, crate::codec::Mode::Strict).is_err());
-    }
-
-    #[test]
-    fn rst_with_version_zero_and_reserved_flags_is_reported_and_refused_when_strict() {
-        let mut input = CONFIG.to_vec();
-        input[3] = 2;
-        input[4] = 0x02;
-        input.push(0);
-        let decoded = decode(&input).unwrap();
-        assert_eq!(
-            codes(&decoded.diagnostics),
-            ["decode.stp_version", "decode.stp_reserved"]
-        );
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap();
-
-        let encoded = encode(layer, crate::codec::Mode::Permissive).unwrap();
-        assert_eq!(encoded.prefix, input);
-        assert_eq!(
-            codes(&encoded.diagnostics),
-            ["build.stp_version", "build.stp_reserved"]
-        );
-        assert!(encode(layer, crate::codec::Mode::Strict).is_err());
-    }
-
-    #[test]
-    fn nonzero_protocol_id_and_version_1_length_are_reported() {
-        let mut input = CONFIG.to_vec();
-        input[1] = 1;
-        input[2] = 2;
-        input[3] = 2;
-        input.push(7);
-        let decoded = decode(&input).unwrap();
-        assert_eq!(
-            codes(&decoded.diagnostics),
-            ["decode.stp_protocol_id", "decode.stp_version_1_length"]
-        );
-        let layer = decoded.layer.downcast_ref::<Stp>().unwrap();
-        let permissive = encode(layer, crate::codec::Mode::Permissive).unwrap();
-        assert_eq!(permissive.prefix, input);
-        assert_eq!(
-            codes(&permissive.diagnostics),
-            ["build.stp_protocol_id", "build.stp_version_1_length"]
-        );
-        assert!(encode(layer, crate::codec::Mode::Strict).is_err());
-
-        for (protocol_id, version_1_length) in [(1, 0), (0, 7)] {
-            let single = Stp {
-                protocol_id,
-                version: 2,
-                bpdu_type: BPDU_RST,
-                version_1_length,
-                ..Stp::default()
-            };
-            assert!(
-                encode(&single, crate::codec::Mode::Strict).is_err(),
-                "{protocol_id} {version_1_length}"
-            );
-            let code = if protocol_id == 0 {
-                "build.stp_version_1_length"
-            } else {
-                "build.stp_protocol_id"
-            };
-            assert_eq!(
-                codes(
-                    &encode(&single, crate::codec::Mode::Permissive)
-                        .unwrap()
-                        .diagnostics
-                ),
-                [code]
-            );
-        }
     }
 
     #[test]

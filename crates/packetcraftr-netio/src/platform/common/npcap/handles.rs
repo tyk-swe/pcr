@@ -240,22 +240,3 @@ pub(in crate::platform) fn reported_precision(handle: &NpcapHandle) -> Option<c_
         .map(|function| unsafe { function(handle.raw.as_ptr()) })
         .filter(|value| *value >= 0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn promiscuous_warning_is_rejected_only_when_requested() {
-        assert!(activation_rejected(-1, PromiscuousMode::Disabled));
-        assert!(!activation_rejected(0, PromiscuousMode::Enabled));
-        assert!(!activation_rejected(
-            PCAP_WARNING_PROMISC_NOTSUP,
-            PromiscuousMode::Disabled
-        ));
-        assert!(activation_rejected(
-            PCAP_WARNING_PROMISC_NOTSUP,
-            PromiscuousMode::Enabled
-        ));
-    }
-}

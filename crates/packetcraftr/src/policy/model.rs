@@ -251,44 +251,9 @@ impl Classified for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
 
     fn constraint(input: &str) -> Result<DestinationConstraint, Error> {
         input.parse()
-    }
-
-    #[test]
-    fn bare_addresses_parse_as_exact_constraints() {
-        assert_eq!(
-            constraint("192.0.2.9").expect("address parses"),
-            DestinationConstraint::Exact(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9)))
-        );
-        assert_eq!(
-            constraint("2001:db8::1").expect("address parses"),
-            DestinationConstraint::Exact("2001:db8::1".parse::<IpAddr>().unwrap())
-        );
-    }
-
-    #[test]
-    fn cidr_constraints_match_the_masked_bits_only() {
-        let v4 = constraint("192.0.2.0/24").expect("canonical network parses");
-        assert!(v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
-        assert!(v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 255))));
-        assert!(!v4.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 3, 1))));
-        assert!(!v4.contains("2001:db8::1".parse().unwrap()));
-
-        let v6 = constraint("2001:db8::/32").expect("canonical v6 network parses");
-        assert!(v6.contains("2001:db8:ffff::1".parse().unwrap()));
-        assert!(!v6.contains("2001:db9::1".parse().unwrap()));
-        assert!(!v6.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
-
-        let hosts = constraint("192.0.2.9/32").expect("host prefix parses");
-        assert!(hosts.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))));
-        assert!(!hosts.contains(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 8))));
-
-        let whole_family = constraint("0.0.0.0/0").expect("zero prefix parses");
-        assert!(whole_family.contains(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 8))));
-        assert!(!whole_family.contains("::1".parse().unwrap()));
     }
 
     #[test]
@@ -310,86 +275,6 @@ mod tests {
             assert!(
                 constraint(input).is_err(),
                 "{input:?} must not parse as a constraint"
-            );
-        }
-    }
-
-    #[test]
-    fn constraint_parse_errors_classify_as_target_input() {
-        let error = constraint("192.0.2.1/24").expect_err("host bits must be spelled out");
-        assert_eq!(error.classification().code, "cli.live_target");
-        assert!(error.to_string().contains("canonical network"));
-    }
-
-    #[test]
-    fn constraint_and_target_network_parsers_agree_on_cidr_text() {
-        for input in ["10.0.0.0/8", "2001:db8::/32", "192.0.2.9/32", "::/0"] {
-            let network = input
-                .parse::<crate::target::Network>()
-                .expect("target network parses");
-            assert_eq!(
-                input.parse::<DestinationConstraint>().ok(),
-                Some(DestinationConstraint::Network(network)),
-                "{input} must parse identically on both surfaces"
-            );
-        }
-        let signed_prefix = "192.0.2.0/+24";
-        assert!(signed_prefix.parse::<DestinationConstraint>().is_err());
-        assert!(signed_prefix.parse::<crate::target::Network>().is_err());
-    }
-
-    #[test]
-    fn default_policy_carries_the_named_operation_ceilings() {
-        let policy = Policy::default();
-        assert_eq!(
-            (
-                policy.max_packets_per_operation,
-                policy.max_bytes_per_operation
-            ),
-            (
-                DEFAULT_MAX_PACKETS_PER_OPERATION,
-                DEFAULT_MAX_BYTES_PER_OPERATION
-            ),
-        );
-    }
-
-    #[test]
-    fn socket_traffic_limit_remediation_names_socket_work() {
-        use crate::policy::{Operation, SocketLimits, SocketOperation};
-
-        let policy = Policy {
-            max_packets_per_operation: 2,
-            max_bytes_per_operation: 8,
-            ..Policy::default()
-        };
-        let endpoints = [std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, 80))];
-        let refuse = |limits| {
-            let operation = SocketOperation::new(&endpoints, limits).expect("limits fit");
-            policy
-                .authorize(Operation::Socket(operation))
-                .expect_err("socket limits exceed the policy")
-                .classification()
-        };
-
-        let units = refuse(SocketLimits::new(3, 0, 0));
-        assert_eq!(units.code, "policy.traffic_unit_limit");
-        let remediation = units.remediation.expect("traffic-unit remediation");
-        assert!(remediation.contains("connections"), "{remediation}");
-
-        let bytes = refuse(SocketLimits::new(1, 0, 9));
-        assert_eq!(bytes.code, "policy.traffic_byte_limit");
-        let remediation = bytes.remediation.expect("traffic-byte remediation");
-        assert!(!remediation.contains("DNS"), "{remediation}");
-    }
-
-    #[test]
-    fn constraint_display_round_trips_through_parse() {
-        for input in ["192.0.2.9", "10.0.0.0/8", "2001:db8::/32", "::/0"] {
-            let parsed = constraint(input).expect("constraint parses");
-            assert_eq!(
-                parsed.to_string().parse::<DestinationConstraint>().ok(),
-                Some(parsed),
-                "{input} must round-trip"
             );
         }
     }

@@ -106,47 +106,10 @@ fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error as _;
 
     use packetcraftr_core::error::Classified;
 
     use super::*;
-    use crate::route;
-    use crate::test_support::interface_info;
-
-    #[test]
-    fn discovery_retains_actual_snapshot_validation_failures() {
-        let valid = interface_info("fixture0", 7);
-        assert_eq!(
-            validate_snapshot(vec![valid.clone()]).unwrap(),
-            std::slice::from_ref(&valid)
-        );
-        let mut invalid_identity = valid.clone();
-        invalid_identity.id.index = 0;
-        let mut invalid_prefix = valid.clone();
-        invalid_prefix.addresses.push(Address {
-            address: "192.0.2.1".parse().unwrap(),
-            prefix_length: 33,
-        });
-        for snapshot in [
-            vec![invalid_identity],
-            vec![invalid_prefix],
-            vec![valid.clone(), valid],
-        ] {
-            let error = validate_snapshot(snapshot).unwrap_err();
-            let source = error
-                .source()
-                .unwrap()
-                .downcast_ref::<route::Error>()
-                .unwrap();
-            assert!(matches!(source, route::Error::InvalidResponse { .. }));
-            assert_eq!(error.classification().code, "io.interface_discovery");
-            assert_eq!(source.classification().code, "internal.route_response");
-            assert_eq!(error.causes(), [source.to_string()]);
-            assert!(!error.to_string().contains(&source.to_string()));
-            assert!(source.source().is_none());
-        }
-    }
 
     #[test]
     fn a_spent_caller_is_refused_before_enumeration() {

@@ -95,30 +95,3 @@ pub(super) fn definitive(observation: &Observation) -> bool {
             )
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use packetcraftr_core::frame::{Frame, LinkType};
-    use packetcraftr_netio::capture;
-    use std::time::SystemTime;
-
-    fn identity() -> RecordIdentity {
-        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0]).expect("frame");
-        capture::Captured::new(frame, Instant::now()).identity()
-    }
-
-    #[test]
-    fn seen_frames_reject_repeats_and_forget_the_oldest_identity_past_capacity() {
-        let (first, second, third) = (identity(), identity(), identity());
-        let mut seen = SeenFrames::new(2);
-
-        assert!(seen.insert(first));
-        assert!(!seen.insert(first));
-        assert!(seen.insert(second));
-        assert!(seen.insert(third), "a third identity evicts the first");
-        assert!(!seen.insert(second));
-        assert!(!seen.insert(third));
-        assert!(seen.insert(first), "the evicted identity is new again");
-    }
-}

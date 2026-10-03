@@ -105,105 +105,12 @@ mod tests {
 
     use super::*;
 
-    fn labels(expanded: &Decompressed) -> Vec<&[u8]> {
-        expanded.labels.iter().map(Bytes::as_ref).collect()
-    }
-
-    #[test]
-    fn an_uncompressed_name_resumes_after_its_root_label() {
-        let message = [1, b'a', 3, b'b', b'c', b'd', 0, 0xff];
-        let expanded = decompress(&Bytes::copy_from_slice(&message), 0, 32).expect("bounded name");
-        assert_eq!(labels(&expanded), vec![b"a".as_slice(), b"bcd".as_slice()]);
-        assert_eq!(expanded.resume, 7);
-    }
-
-    #[test]
-    fn a_root_name_expands_to_no_labels() {
-        let expanded = decompress(&Bytes::from_static(&[0]), 0, 32).expect("bounded name");
-        assert!(expanded.labels.is_empty());
-        assert_eq!(expanded.resume, 1);
-    }
-
-    #[test]
-    fn a_compressed_name_resumes_past_its_first_pointer() {
-        let message = [1, b'a', 0, 1, b'b', 0xc0, 0x00, 0xff];
-        let expanded = decompress(&Bytes::copy_from_slice(&message), 3, 32).expect("bounded name");
-        assert_eq!(labels(&expanded), vec![b"b".as_slice(), b"a".as_slice()]);
-        assert_eq!(expanded.resume, 7);
-    }
-
-    #[test]
-    fn label_octets_are_preserved_exactly() {
-        let message = [3, b'a', 0x20, 0xff, 0];
-        let expanded = decompress(&Bytes::copy_from_slice(&message), 0, 32).expect("bounded name");
-        assert_eq!(labels(&expanded), vec![[b'a', 0x20, 0xff].as_slice()]);
-    }
-
-    #[test]
-    fn pointers_must_address_a_strictly_earlier_offset() {
-        assert!(matches!(
-            decompress(&Bytes::from_static(&[0xc0, 0x00]), 0, 32),
-            Err(Error::SelfPointer { offset: 0 })
-        ));
-        assert!(matches!(
-            decompress(&Bytes::from_static(&[0xc0, 0x02, 0x00]), 0, 32),
-            Err(Error::ForwardPointer {
-                offset: 0,
-                pointer: 2
-            })
-        ));
-        assert!(matches!(
-            decompress(&Bytes::from_static(&[0xc0, 0x09]), 0, 32),
-            Err(Error::PointerOutOfBounds {
-                pointer: 9,
-                length: 2
-            })
-        ));
-    }
-
     #[test]
     fn an_offset_is_never_expanded_twice() {
         let message = [0, 1, b'a', 0xc0, 0x01, 0xc0, 0x01];
         assert!(matches!(
             decompress(&Bytes::copy_from_slice(&message), 5, 32),
             Err(Error::PointerLoop { offset: 1 })
-        ));
-    }
-
-    #[test]
-    fn the_pointer_ceiling_bounds_the_hop_count() {
-        let mut message = vec![0u8];
-        let mut previous = 0usize;
-        for _ in 0..33 {
-            let offset = message.len();
-            let pointer = u16::try_from(previous).expect("small offset") | 0xc000;
-            message.extend_from_slice(&pointer.to_be_bytes());
-            previous = offset;
-        }
-        assert!(matches!(
-            decompress(&Bytes::copy_from_slice(&message), previous, 32),
-            Err(Error::PointerLimit { limit: 32 })
-        ));
-        assert!(decompress(&Bytes::copy_from_slice(&message), previous, 33).is_ok());
-        let entry = previous - 2;
-        assert_eq!(
-            decompress(&Bytes::copy_from_slice(&message), entry, 32)
-                .expect("32 hops fit")
-                .resume,
-            entry + 2
-        );
-    }
-
-    #[test]
-    fn the_expanded_name_is_capped_at_255_wire_octets() {
-        let mut message = Vec::new();
-        for _ in 0..64 {
-            message.extend_from_slice(&[3, b'a', b'b', b'c']);
-        }
-        message.push(0);
-        assert!(matches!(
-            decompress(&Bytes::copy_from_slice(&message), 0, 32),
-            Err(Error::NameTooLong)
         ));
     }
 

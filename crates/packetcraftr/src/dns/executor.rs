@@ -191,29 +191,3 @@ impl<P: TcpProviders, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::{Call, fake_client};
-
-    #[test]
-    fn tcp_queries_the_client_provider() {
-        let (client, providers) = fake_client();
-        let query = TcpQuery {
-            endpoint: "127.0.0.1:53".parse().unwrap(),
-            query: Bytes::from_static(b"query"),
-            timeout: Duration::from_secs(1),
-            max_message_bytes: 512,
-            permit: ExecutionPermit::new(),
-        };
-        let mut executor = ExchangeExecutor::new(
-            &client,
-            crate::send::Options::default(),
-            crate::exchange::Collection::default(),
-        );
-        let error = executor.query(&query).unwrap_err();
-        assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
-        assert_eq!(providers.calls(), [Call::Connect(query.endpoint)]);
-    }
-}

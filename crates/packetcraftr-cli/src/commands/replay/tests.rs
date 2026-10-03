@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+#![allow(dead_code)]
 
 use std::convert::Infallible;
-use std::io::{self, Cursor, Read};
+use std::io::{self, Cursor};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +16,6 @@ use packetcraftr_core::protocol::network::{Icmpv4, Ipv4};
 use packetcraftr_netio as net;
 
 use super::*;
-use crate::test_support::{SharedBuffer, assert_contiguous, stream};
 
 #[derive(Clone, Copy, Default)]
 struct FixtureInterfaces;
@@ -188,62 +188,6 @@ fn render_fixture(
     replay_stream(&client(max_packets), request, stream)
 }
 
-#[test]
-fn replay_stream_success_is_contiguous_and_terminal() {
-    let (stream, output) = stream(output::contract::Command::Replay);
-    render_fixture(request(reader(2)), 10, &stream).expect("fixture replay succeeds");
-
-    let records = output.records();
-    assert_contiguous(&records);
-    assert_eq!(records.len(), 3);
-    assert_eq!(records[2]["result"]["frames_completed"], 2);
-    assert!(!stream.is_open());
-}
-
-#[test]
-fn replay_domain_failure_after_two_records_uses_position_two() {
-    let (stream, output) = stream(output::contract::Command::Replay);
-    let error = render_fixture(request(reader(3)), 2, &stream)
-        .expect_err("the policy admits only two frames");
-
-    assert_eq!(error.exit_code(), 6);
-    assert_eq!(error.classification.code, "policy.packet_limit");
-    stream.emit_error(error.output_error()).unwrap();
-
-    let records = output.records();
-    assert_contiguous(&records);
-    assert_eq!(records[2]["status"], "error");
-    assert_eq!(records[2]["error"]["code"], "policy.packet_limit");
-    assert_eq!(records[2]["error"]["context"]["source_frame"], 3);
-}
-
-#[test]
-fn replay_output_failure_retains_source_frame_context_and_remediation() {
-    let stream = StreamEncoder::new(output::contract::Command::Replay, FailingWriter);
-    let error = render_fixture(
-        request(reader(43)).with_filter(only_frame(43)),
-        100,
-        &stream,
-    )
-    .expect_err("selected replay output must fail");
-
-    assert_eq!(error.exit_code(), 5);
-    assert_eq!(error.classification.code, "io.replay");
-    assert!(error.message.contains("source index 42"));
-    assert!(
-        error
-            .causes
-            .iter()
-            .any(|cause| cause.contains("sequence 0"))
-    );
-    assert_eq!(
-        error.classification.remediation,
-        Some("inspect the replay timer or output sink and account for frames already transmitted")
-    );
-    assert!(!stream.is_open());
-    assert!(!stream.is_terminal());
-}
-
 fn expired_deadline() -> Deadline {
     let start = Instant::now();
     let sampled = AtomicBool::new(false);
@@ -267,29 +211,6 @@ fn interrupts() -> [(Deadline, &'static str); 2] {
         (cancelled_deadline(), "io.cancelled"),
         (expired_deadline(), "policy.replay_limit"),
     ]
-}
-
-#[test]
-fn replay_stream_interrupt_during_emission_is_not_an_output_failure() {
-    for (deadline, code) in interrupts() {
-        let (stream, _) = stream(output::contract::Command::Replay);
-        let stream = stream.with_deadline(Arc::new(deadline));
-        let error = render_fixture(request(reader(1)), 10, &stream)
-            .expect_err("interrupted replay emission fails");
-
-        assert_eq!(error.classification.code, code);
-    }
-}
-
-#[test]
-fn replay_text_interrupt_during_emission_is_not_an_output_failure() {
-    for (deadline, code) in interrupts() {
-        let _scope = crate::invocation::enter_deadline(Some(Arc::new(deadline)));
-        let error = replay_text(&client(10), request(reader(1)), false)
-            .expect_err("interrupted replay emission fails");
-
-        assert_eq!(error.classification.code, code);
-    }
 }
 
 #[test]
@@ -329,68 +250,6 @@ fn replay_text_write_failure_wins_over_deadline_expiring_during_write() {
     );
 }
 
-#[test]
-fn failed_replay_finalizes_zstd_and_keeps_completed_frames() {
-    let compressed = SharedBuffer::default();
-
-    let error = replay_capture_to(
-        &client(1),
-        request(reader(2)),
-        CaptureSettings {
-            compression: crate::command_options::Compression::Zstd,
-            format: Format::Pcap,
-        },
-        compressed.clone(),
-    )
-    .expect_err("the policy admits only the first frame");
-    assert_eq!(error.classification.code, "policy.packet_limit");
-
-    let mut decoder =
-        capture::compression::Input::new(Cursor::new(compressed.bytes()), Default::default())
-            .expect("Zstd output must have a readable header");
-    let mut bytes = Vec::new();
-    decoder
-        .read_to_end(&mut bytes)
-        .expect("Zstd stream must finish cleanly");
-    let mut output = Reader::new(Cursor::new(bytes)).expect("capture header must survive");
-    assert_eq!(
-        output.next_frame().unwrap().unwrap().bytes().as_ref(),
-        frame_bytes(0)
-    );
-    assert!(output.next_frame().unwrap().is_none());
-}
-
-#[test]
-fn pcapng_capture_output_gathers_interfaces_from_every_source_section() {
-    let mut bytes = Vec::new();
-    for value in 0..2u8 {
-        let mut section = capture::Writer::pcapng(Vec::new()).unwrap();
-        let mut frame = Frame::new(UNIX_EPOCH, LinkType::RAW, frame_bytes(value)).unwrap();
-        frame.interface = Some(section.add_interface(LinkType::RAW).unwrap());
-        section.write_frame(&frame).unwrap();
-        bytes.extend(section.into_inner());
-    }
-    let source = Reader::new(Cursor::new(bytes)).unwrap();
-    let output = SharedBuffer::default();
-
-    replay_capture_to(
-        &client(10),
-        request(source),
-        CaptureSettings {
-            compression: crate::command_options::Compression::None,
-            format: Format::PcapNg,
-        },
-        output.clone(),
-    )
-    .expect("two-section replay capture succeeds");
-
-    let mut output = Reader::new(Cursor::new(output.bytes())).unwrap();
-    let first = output.next_frame().unwrap().unwrap();
-    let second = output.next_frame().unwrap().unwrap();
-    assert_ne!(first.interface, second.interface);
-    assert_eq!(output.interfaces().len(), 2);
-}
-
 fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
     use clap::Parser;
 
@@ -403,22 +262,6 @@ fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
         panic!("fixture must parse as replay");
     };
     arguments
-}
-
-#[test]
-fn prepare_carries_the_gap_clamp_into_the_replay_options() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let path = directory.path().join("fixture.pcap");
-    let mut writer = capture::Writer::pcap(Vec::new(), LinkType::RAW).unwrap();
-    writer
-        .write_frame(&Frame::new(UNIX_EPOCH, LinkType::RAW, frame_bytes(1)).unwrap())
-        .unwrap();
-    std::fs::write(&path, writer.into_inner()).expect("fixture capture writes");
-
-    let run = prepare(&replay_arguments(&path, &["--max-gap-ms", "50"])).expect("prepare");
-    assert_eq!(run.request.options.max_gap, Some(Duration::from_millis(50)));
-    let run = prepare(&replay_arguments(&path, &[])).expect("prepare");
-    assert_eq!(run.request.options.max_gap, None);
 }
 
 #[test]

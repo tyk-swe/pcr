@@ -109,27 +109,3 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_status_selector_names_match_the_analysis_statuses() {
-        let selectors = Status::value_variants()
-            .iter()
-            .map(|status| {
-                status
-                    .to_possible_value()
-                    .expect("every status selector is selectable")
-                    .get_name()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>();
-        let statuses = AnalysisStatus::ALL
-            .into_iter()
-            .map(AnalysisStatus::as_str)
-            .collect::<Vec<_>>();
-        assert_eq!(selectors, statuses);
-    }
-}

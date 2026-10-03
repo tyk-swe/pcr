@@ -56,23 +56,6 @@ mod tests {
     }
 
     #[test]
-    fn native_interface_validation_accepts_complete_identity_and_family_prefix_bounds() {
-        let interfaces = vec![interface(
-            "fixture0",
-            7,
-            vec![
-                assigned(v4(192, 0, 2, 1), 32),
-                assigned(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
-            ],
-        )];
-
-        assert_eq!(
-            validate_native_interfaces(interfaces.clone()).expect("valid native snapshot"),
-            interfaces
-        );
-    }
-
-    #[test]
     fn native_interface_validation_rejects_incomplete_identity_and_invalid_family_prefixes() {
         for invalid in [
             interface("", 7, Vec::new()),

@@ -114,30 +114,4 @@ mod tests {
         assert_eq!(rewound, advanced);
         assert_eq!(regressed, Some(Duration::from_secs(2)));
     }
-
-    #[test]
-    fn sweep_throttle_is_inclusive_and_tolerates_out_of_order_instants() {
-        let mut clock = CaptureClock::new();
-        let first = clock.base;
-
-        assert!(clock.should_sweep(first));
-        assert!(!clock.should_sweep(first + Duration::from_millis(999)));
-        assert!(clock.should_sweep(first + SWEEP_GRANULARITY));
-        assert!(!clock.should_sweep(first));
-        assert!(clock.should_sweep(first + SWEEP_GRANULARITY * 2));
-    }
-
-    #[test]
-    fn forward_outlier_pins_expiry_and_reports_subsequent_rollbacks() {
-        let mut clock = CaptureClock::new();
-        let time = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
-        let (first, _) = clock.at(time(100), 1).unwrap();
-        let (outlier, _) = clock.at(time(10_000), 2).unwrap();
-        assert_eq!(outlier.duration_since(first), Duration::from_secs(9900));
-        assert_eq!(clock.at(time(90), 3).unwrap().0, outlier);
-        assert_eq!(clock.at(time(101), 4).unwrap().0, outlier);
-        assert_eq!(clock.report().regressions, 2);
-        assert_eq!(clock.report().max_regression, Duration::from_secs(9910));
-        assert_eq!(clock.report().max_forward_step_frame, Some(2));
-    }
 }

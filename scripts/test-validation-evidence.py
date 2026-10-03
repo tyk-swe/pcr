@@ -715,6 +715,100 @@ class ManifestTests(unittest.TestCase):
         self.assertIn('cannot read binary', str(raised.exception))
 
 
+class ExternalConsumerManifestTests(unittest.TestCase):
+    def test_checkout_paths_roundtrip_through_utf8_toml(self):
+        import tomllib
+
+        consumer = module('check-external-consumer')
+        checkouts = ['plain checkout', 'checkout é', 'checkout \U0001f980',
+                     'checkout \x7f\U0001f980']
+        if os.name != 'nt':
+            checkouts.append('checkout "\\u007f" \U0001f980')
+        for checkout in checkouts:
+            with self.subTest(checkout=checkout):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory) / checkout
+                    source = root / 'examples/consumers/rust/composition.rs'
+                    source.parent.mkdir(parents=True)
+                    source.write_text('// consumer fixture\n', encoding='utf-8')
+                    (root / 'rust-toolchain.toml').write_text(
+                        '[toolchain]\nchannel = "fixture"\n', encoding='utf-8')
+
+                    def inspect_manifest(command, *, cwd, **kwargs):
+                        document = tomllib.loads((cwd / 'Cargo.toml').read_text(encoding='utf-8'))
+                        for name in ('packetcraftr', 'packetcraftr-core', 'packetcraftr-netio'):
+                            self.assertEqual(document['dependencies'][name], {
+                                'path': str(root / 'crates' / name), 'default-features': False,
+                            })
+                        self.assertEqual((cwd / 'composition.rs').read_bytes(), source.read_bytes())
+                        return subprocess.CompletedProcess(command, 0)
+
+                    with (mock.patch.object(consumer, 'ROOT', root),
+                          mock.patch.object(sys, 'argv', ['check-external-consumer.py']),
+                          mock.patch.object(consumer.shutil, 'which', return_value=sys.executable),
+                          mock.patch.object(consumer.subprocess, 'run', side_effect=inspect_manifest) as run):
+                        self.assertEqual(consumer.main(), 0)
+                    self.assertEqual(run.call_count, 2)
+
+
+@unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+class ExternalConsumerTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='external consumer fixture ')
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        self.wrapper = self.bin / 'cargo-wrapper'
+        source = (
+            'import json, os, pathlib, sys\n'
+            'with open(os.environ["CONSUMER_TEST_LOG"], "a") as log:\n'
+            '    log.write(json.dumps(dict(args=sys.argv[1:], cwd=os.getcwd(), '
+            'manifest=pathlib.Path("Cargo.toml").is_file(), '
+            'source=pathlib.Path("composition.rs").is_file())) + "\\n")\n'
+            'sys.exit(int(os.environ.get("CONSUMER_TEST_EXIT", "0")))\n')
+        self.wrapper.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+            encoding='utf-8')
+        self.wrapper.chmod(0o755)
+        self.log = self.root / 'calls.jsonl'
+
+    def run_consumer(self, cargo, **environment):
+        env = dict(os.environ, CONSUMER_TEST_LOG=str(self.log))
+        env.update(environment)
+        return subprocess.run([
+            sys.executable, str(ROOT / 'check-external-consumer.py'), '--cargo', cargo,
+        ], cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+
+    def test_relative_cargo_and_path_entries_survive_detached_working_directory(self):
+        for cargo, path in (('./bin/cargo-wrapper', ''), ('cargo-wrapper', 'bin'),
+                            (str(self.wrapper), '')):
+            with self.subTest(cargo=cargo):
+                self.log.unlink(missing_ok=True)
+                result = self.run_consumer(cargo, PATH=path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual([call['args'] for call in calls], [
+                    ['generate-lockfile', '--offline'], ['test', '--locked', '--offline'],
+                ])
+                self.assertEqual(calls[0]['cwd'], calls[1]['cwd'])
+                self.assertNotEqual(pathlib.Path(calls[0]['cwd']), self.root)
+                self.assertTrue(all(call['manifest'] and call['source'] for call in calls))
+
+    def test_cargo_failure_stops_before_running_tests(self):
+        result = self.run_consumer(str(self.wrapper), CONSUMER_TEST_EXIT='7')
+        self.assertNotEqual(result.returncode, 0)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([call['args'] for call in calls], [['generate-lockfile', '--offline']])
+
+    def test_missing_cargo_reports_unexecuted_validation(self):
+        result = self.run_consumer('missing-cargo', PATH=str(self.bin))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('Cargo is required; external-consumer validation was not executed.', result.stderr)
+        self.assertFalse(self.log.exists())
+
+
 class MeasurementTests(unittest.TestCase):
     def test_every_measurement_records_workload_and_input_metadata(self):
         measurement = module('measure-analysis')

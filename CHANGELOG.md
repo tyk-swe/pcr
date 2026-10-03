@@ -1787,10 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- Release evidence preflight keeps each download attempt separate when reusing
-  an output directory, so a missing current report cannot reuse an earlier
-  run's evidence. Failed retries remove only the generated aggregate success
-  report and retain downloaded artifacts for diagnosis.
+- Detached consumer validation writes valid UTF-8 Cargo manifests when the
+  checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced
   profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
@@ -2022,6 +2020,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   matching TLS JA3 evidence, and successful native scenario/launcher exits.
   Missing parent namespace IDs and contradictory or duplicate results are
   rejected. Producers and release validation share the evidence contract.
+- Release evidence preflight keeps each download attempt separate when reusing
+  an output directory, so a missing current report cannot reuse an earlier
+  run's evidence. Failed retries remove only the generated aggregate success
+  report and retain downloaded artifacts for diagnosis.
 - IPv6 destination classification includes the RFC 9637 `3fff::/20`
   documentation prefix under the same policy as `2001:db8::/32`, without
   accepting adjacent addresses or relaxing other destination checks.

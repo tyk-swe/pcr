@@ -2,10 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #![allow(dead_code)]
 
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::io::{self, Write};
+use std::process::{ChildStdin, Command, Output, Stdio};
+use std::sync::mpsc;
 
 pub(crate) fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
+    run_with_stdin_writer(arguments, input, |mut stdin, input, _| {
+        stdin.write_all(input)
+    })
+}
+
+pub(crate) fn run_with_stdin_writer(
+    arguments: &[&str],
+    input: &[u8],
+    write_input: impl FnOnce(ChildStdin, &[u8], mpsc::Receiver<()>) -> io::Result<()> + Send,
+) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(arguments)
         .stdin(Stdio::piped())
@@ -13,16 +24,24 @@ pub(crate) fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("CLI process must start");
-    let mut stdin = child.stdin.take().expect("stdin must be piped");
+    let stdin = child.stdin.take().expect("stdin must be piped");
+    let (exited, child_exited) = mpsc::channel();
     std::thread::scope(|scope| {
         // Stream input while wait_with_output drains both output pipes. Writing
         // everything first can block on a child waiting for stdout capacity.
-        let writer = scope.spawn(move || stdin.write_all(input));
+        let writer = scope.spawn(move || write_input(stdin, input, child_exited));
         let output = child.wait_with_output().expect("CLI process must finish");
+        // Controlled writers can hold input until the child has refused it.
+        let _ = exited.send(());
         writer
             .join()
             .expect("stdin writer must finish")
             .unwrap_or_else(|error| {
+                // Input validation may reject a prefix without consuming stdin.
+                // Callers must still assert the child's expected failure status.
+                if error.kind() == io::ErrorKind::BrokenPipe && !output.status.success() {
+                    return;
+                }
                 panic!("stdin must accept input: {error}; CLI output: {output:?}")
             });
         output

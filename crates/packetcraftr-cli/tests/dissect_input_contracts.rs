@@ -4,7 +4,9 @@
 // Hexadecimal text input, shared link-type names, and the field tree view of `dissect` and
 // `read --dissect`.
 
-use std::io::Write;
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[path = "common/capture.rs"]
 mod capture_support;
@@ -13,7 +15,7 @@ mod common;
 mod process_support;
 
 use common::{path_text, run};
-use process_support::run_with_stdin;
+use process_support::{run_with_stdin, run_with_stdin_writer};
 
 /// 192.0.2.1:40000 to 192.0.2.2:53 carrying a DNS question for example.test.
 const DNS_QUERY: &str = "4500003a000000004011f6afc0000201c00002029c4000350026a7a1\
@@ -47,7 +49,8 @@ fn hex_text_and_decoded_bytes_are_bounded_by_the_packet_budget() {
     assert!(stderr(&output).contains("frame hex text input exceeds"));
     assert!(output.stdout.is_empty());
 
-    let piped = run_with_stdin(
+    let refused_tail = AtomicBool::new(false);
+    let piped = run_with_stdin_writer(
         &[
             "dissect",
             "--link-type",
@@ -58,8 +61,28 @@ fn hex_text_and_decoded_bytes_are_bounded_by_the_packet_budget() {
             "-",
         ],
         "00".repeat(4096 + 4 * 8).as_bytes(),
+        |mut stdin, input, child_exited| {
+            // The bounded reader rejects this prefix without needing EOF. Hold
+            // the unused tail until the child exits to exercise its refusal
+            // independently of scheduling and the OS pipe's capacity.
+            stdin.write_all(&input[..4096 + 4 * 8 + 1])?;
+            child_exited
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(io::Error::other)?;
+            let result = stdin.write_all(&input[4096 + 4 * 8 + 1..]);
+            refused_tail.store(
+                result
+                    .as_ref()
+                    .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe),
+                Ordering::Relaxed,
+            );
+            result
+        },
     );
     assert_eq!(piped.status.code(), Some(6));
+    assert!(stderr(&piped).contains("frame hex text input exceeds"));
+    assert!(piped.stdout.is_empty());
+    assert!(refused_tail.load(Ordering::Relaxed));
 
     // The text fits its bound, but the decoded frame does not fit the packet budget.
     let output = run_with_stdin(
@@ -77,6 +100,50 @@ fn hex_text_and_decoded_bytes_are_bounded_by_the_packet_budget() {
     assert_eq!(output.status.code(), Some(6), "{}", stderr(&output));
     assert!(stderr(&output).contains("policy.decode_resource_limit"));
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn stdin_write_failures_remain_errors_unless_a_failed_child_refused_input() {
+    let refused_input = AtomicBool::new(false);
+    let successful_child = std::panic::catch_unwind(|| {
+        run_with_stdin_writer(&["--help"], b"unused", |mut stdin, input, child_exited| {
+            child_exited
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(io::Error::other)?;
+            let result = stdin.write_all(input);
+            refused_input.store(
+                result
+                    .as_ref()
+                    .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe),
+                Ordering::Relaxed,
+            );
+            result
+        })
+    });
+    assert!(refused_input.load(Ordering::Relaxed));
+    assert_stdin_writer_panic(successful_child);
+
+    let other_write_error = std::panic::catch_unwind(|| {
+        run_with_stdin_writer(&["--invalid-test-option"], b"unused", |_, _, _| {
+            Err(io::Error::other("injected stdin write failure"))
+        })
+    });
+    let message = assert_stdin_writer_panic(other_write_error);
+    assert!(
+        message.contains("injected stdin write failure"),
+        "{message}"
+    );
+}
+
+fn assert_stdin_writer_panic(result: std::thread::Result<std::process::Output>) -> String {
+    let panic = result.expect_err("the stdin writer failure must remain an error");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .expect("the stdin writer panic must have a message");
+    assert!(message.contains("stdin must accept input"), "{message}");
+    message.to_owned()
 }
 
 #[test]

@@ -232,6 +232,8 @@ jobs:
           assets = (
               "LICENSE", "README.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md",
               "examples/captures/tls-handshake.pcapng",
+              "examples/captures/clock-regression.pcap",
+              "examples/captures/scoped-vxlan.pcap",
               "examples/captures/http-stream.pcap",
               "examples/documents/packet-dns-response.json",
               "examples/documents/packet-tls-client-hello.json",
@@ -241,6 +243,8 @@ jobs:
               "examples/documents/udp-profiles.json",
               "examples/documents/packet-ipv4-udp.json",
               "examples/documents/output-stats-resources.json",
+              "examples/documents/output-stats-clock.json",
+              "examples/documents/output-stats-scopes.json",
               "examples/documents/output-read-resources.json",
               "examples/documents/output-build-event.json",
               "examples/documents/output-build-complete.json",

@@ -7,9 +7,12 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -554,6 +557,24 @@ class ManifestTests(unittest.TestCase):
                               '--commit', COMMIT, '--target', 'x86_64-fixture',
                               '--variant', 'pcap-free')
             self.run_manifest('--binary', self.binary, '--verify', path)
+
+    @unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+    def test_verify_executes_relative_binary_paths_from_current_directory(self):
+        source = 'print("packetcraftr 9.9.9")\n'
+        self.binary.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
+            encoding='utf-8')
+        self.binary.chmod(0o755)
+        self.document['binary_sha256'] = digest(self.binary)
+        self.write_manifest()
+        for binary in (self.binary.name, './' + self.binary.name, str(self.binary)):
+            with self.subTest(binary=binary):
+                result = subprocess.run([
+                    sys.executable, str(ROOT / 'build-manifest.py'),
+                    '--binary', binary, '--verify', self.path.name,
+                ], cwd=self.root, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_verify_rejects_wrong_expected_metadata(self):
         path = self.write_manifest()

@@ -9,6 +9,7 @@ import io
 import json
 import os
 import pathlib
+import shlex
 import struct
 import subprocess
 import sys
@@ -612,14 +613,16 @@ class ExternalConsumerTests(unittest.TestCase):
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.wrapper = self.bin / 'cargo-wrapper'
-        self.wrapper.write_text(
-            f'#!{sys.executable}\n'
+        source = (
             'import json, os, pathlib, sys\n'
             'with open(os.environ["CONSUMER_TEST_LOG"], "a") as log:\n'
             '    log.write(json.dumps(dict(args=sys.argv[1:], cwd=os.getcwd(), '
             'manifest=pathlib.Path("Cargo.toml").is_file(), '
             'source=pathlib.Path("composition.rs").is_file())) + "\\n")\n'
-            'sys.exit(int(os.environ.get("CONSUMER_TEST_EXIT", "0")))\n',
+            'sys.exit(int(os.environ.get("CONSUMER_TEST_EXIT", "0")))\n')
+        self.wrapper.write_text(
+            '#!/bin/sh\n'
+            f'exec {shlex.quote(sys.executable)} -c {shlex.quote(source)} "$@"\n',
             encoding='utf-8')
         self.wrapper.chmod(0o755)
         self.log = self.root / 'calls.jsonl'

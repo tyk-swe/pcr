@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - Response matching and transport attribution require every encapsulated IP
   envelope and intervening tunnel protocol to match the reversed request path,
   including intermediate envelopes, while preserving source-routing endpoints.

@@ -1791,6 +1791,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   an output directory, so a missing current report cannot reuse an earlier
   run's evidence. Failed retries remove only the generated aggregate success
   report and retain downloaded artifacts for diagnosis.
+- Analysis measurement reports distinguish allocator-run exits and produced
+  profiles, and include input metadata for pipe and handshake measurements.
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
   consistently with hexadecimal input from files and standard input. All three
   sources reject hexadecimal text that decodes to no bytes as missing input.

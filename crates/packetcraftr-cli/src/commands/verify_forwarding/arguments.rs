@@ -16,7 +16,7 @@ Identity matching is exact equality of the declared field values. Groups that ar
 
 Examples:
   packetcraftr verify-forwarding pre.pcap post.pcap --identity ipv4.identification --identity udp.source_port
-  packetcraftr verify-forwarding pre.pcap post.pcap --identity raw.bytes --preserve ipv4.payload_length
+  packetcraftr verify-forwarding pre.pcap post.pcap --identity raw.bytes --preserve ipv4.total_length
   packetcraftr verify-forwarding pre.pcap post.pcap --identity ipv4.identification --expect ipv4.destination=198.51.100.2
   packetcraftr verify-forwarding pre.pcap post.pcap --identity raw.bytes --ingress-filter 'udp.destination_port == 9000'
   packetcraftr --output json verify-forwarding pre.pcap post.pcap --identity raw.bytes";

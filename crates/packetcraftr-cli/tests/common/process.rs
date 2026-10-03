@@ -13,13 +13,20 @@ pub(crate) fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("CLI process must start");
-    child
-        .stdin
-        .take()
-        .expect("stdin must be piped")
-        .write_all(input)
-        .expect("stdin must accept input");
-    child.wait_with_output().expect("CLI process must finish")
+    let mut stdin = child.stdin.take().expect("stdin must be piped");
+    std::thread::scope(|scope| {
+        // Stream input while wait_with_output drains both output pipes. Writing
+        // everything first can block on a child waiting for stdout capacity.
+        let writer = scope.spawn(move || stdin.write_all(input));
+        let output = child.wait_with_output().expect("CLI process must finish");
+        writer
+            .join()
+            .expect("stdin writer must finish")
+            .unwrap_or_else(|error| {
+                panic!("stdin must accept input: {error}; CLI output: {output:?}")
+            });
+        output
+    })
 }
 
 pub(crate) fn decode_hex(value: &str) -> Vec<u8> {

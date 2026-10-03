@@ -2014,6 +2014,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   so an axis can replace a denied recipe destination with permitted addresses.
 - JSON `build` output remains one complete document when interrupted during
   publication; cancellation is reported on stderr with exit code 130.
+- Topic errors and binary-to-terminal refusals return I/O exit 5 if their
+  diagnostic cannot be written to stderr, matching other command errors.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;

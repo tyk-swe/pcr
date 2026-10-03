@@ -183,7 +183,8 @@ fn malformed_hex_text_keeps_the_inline_usage_errors() {
     assert_eq!(empty.status.code(), Some(2));
     assert!(stderr(&empty).contains("frame hex text input is required"));
     // Text that decodes to no bytes is as missing as no text.
-    for blank in ["\n  \n", "0x", " 0x\n"] {
+    for blank in ["", "\n  \n", "0x", " 0x\n", "\t0X\r\n", " : - "] {
+        let inline = run(&["dissect", "--link-type", "ipv4", "--hex", blank]);
         let piped = run_with_stdin(
             &["dissect", "--link-type", "ipv4", "--hex", "-"],
             blank.as_bytes(),
@@ -196,7 +197,7 @@ fn malformed_hex_text_keeps_the_inline_usage_errors() {
             "--hex-file",
             path_text(file.path()),
         ]);
-        for output in [&piped, &from_file] {
+        for output in [&inline, &piped, &from_file] {
             assert_eq!(output.status.code(), Some(2), "{blank:?}");
             assert!(stderr(output).contains("cli.input_source"), "{blank:?}");
             assert!(stderr(output).contains("frame hex text input is required"));

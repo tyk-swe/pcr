@@ -1788,7 +1788,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 ### Fixed
 
 - `dissect --hex` accepts leading whitespace before a `0x` or `0X` prefix,
-  consistently with hexadecimal input from files and standard input.
+  consistently with hexadecimal input from files and standard input. All three
+  sources reject hexadecimal text that decodes to no bytes as missing input.
 - Response matching and transport attribution require every encapsulated IP
   envelope and intervening tunnel protocol to match the reversed request path,
   including intermediate envelopes, while preserving source-routing endpoints.

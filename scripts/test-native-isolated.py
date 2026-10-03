@@ -99,11 +99,15 @@ def run(args, report):
                    '--native-test-binary', str(args.native_test_binary),
                    '--report', str(args.report), '--parent-namespace', str(namespace), '--run-id', report['run_id']]
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        launcher = dict(command=command, exit_code=result.returncode, stderr=result.stderr)
         if args.report.exists():
             child = json.loads(args.report.read_text())
             if child.get('parent_namespace') == namespace and child.get('run_id') == report['run_id']:
                 report.update(child)
-        report['namespace_launcher'] = dict(command=command, exit_code=result.returncode, stderr=result.stderr)
+                child_error = child.get('error')
+                if isinstance(child_error, str) and child_error:
+                    launcher['child_error'] = child_error
+        report['namespace_launcher'] = launcher
         if result.returncode:
             raise RuntimeError('isolated namespace launcher or native scenarios failed; see namespace_launcher and scenarios')
         return

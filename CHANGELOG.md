@@ -1787,6 +1787,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Isolated native validation retains a matching child report's specific error
+  alongside the parent launcher failure, preserving diagnostic detail.
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced

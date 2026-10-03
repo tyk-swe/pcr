@@ -6,6 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use crate::{
+    builtin,
     ipv6::SegmentRoutingHeader,
     network::Ipv6,
     transport::{Tcp, Udp},
@@ -16,6 +17,26 @@ use packetcraftr_packet::{
 
 use super::super::ReverseFlowMatcher;
 use super::super::tests::{address, reflective_udp_packet, sctp_init, sctp_init_ack, tcp_packet};
+
+#[test]
+fn udp_matcher_rejects_packets_without_ip_envelopes() {
+    let registry = builtin::registry().unwrap();
+    let matcher = registry.matcher("udp").unwrap();
+    let mut request = Packet::new();
+    request.push(Udp {
+        source_port: 12_345,
+        destination_port: 9,
+        ..Udp::default()
+    });
+    let mut response = Packet::new();
+    response.push(Udp {
+        source_port: 9,
+        destination_port: 12_345,
+        ..Udp::default()
+    });
+
+    assert!(!matcher.matches(&request, &response).matched);
+}
 
 #[test]
 fn sctp_init_matcher_requires_reversed_tuple_and_initiate_tag() {

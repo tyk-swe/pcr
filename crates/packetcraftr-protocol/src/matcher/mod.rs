@@ -61,7 +61,7 @@ fn network_paths_are_reversed(
 ) -> bool {
     let request_networks = network_layers_before(request, request_upper_bound);
     let response_networks = network_layers_before(response, response_upper_bound);
-    if request_networks.len() != response_networks.len() {
+    if request_networks.is_empty() || request_networks.len() != response_networks.len() {
         return false;
     }
 

@@ -8,6 +8,8 @@ import pathlib
 import subprocess
 import sys
 
+from validation_evidence import DECODE_PROFILES
+
 ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD_PARTY_NOTICES.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
@@ -90,6 +92,9 @@ def verify(root, version, commit, target, variant):
         raise ValueError('expected NDJSON objects')
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
+    expected_frames = DECODE_PROFILES['pull-request']['tls-handshake']
+    if len(records) != expected_frames + 1:
+        raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
         if (record.get('schema') != 'packetcraftr.output/v6'
                 or type(record.get('sequence')) is not int

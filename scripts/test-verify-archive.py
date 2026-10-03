@@ -50,8 +50,10 @@ elif command == 'stats':
         print(json.dumps({'table': 'wrong' if mode == 'wrong-stats-' + table else table}))
 elif command == 'read':
     assert pathlib.Path('examples/captures/tls-handshake.pcapng').is_file()
-    records = [dict(schema='packetcraftr.output/v6', sequence=0, event='frame'),
-               dict(schema='packetcraftr.output/v6', sequence=1, event='complete')]
+    frames = {'no-frames': 0, 'missing-frame': 7, 'extra-frame': 9}.get(mode, 8)
+    records = [dict(schema='packetcraftr.output/v6', sequence=index, event='frame')
+               for index in range(frames)]
+    records.append(dict(schema='packetcraftr.output/v6', sequence=frames, event='complete'))
     if mode == 'bad-schema': records[0]['schema'] = 'wrong'
     if mode == 'bad-sequence': records[1]['sequence'] = 3
     if mode == 'boolean-sequence': records[0]['sequence'] = False
@@ -163,6 +165,12 @@ class ArchiveTests(unittest.TestCase):
         for command in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls', 'stats'):
             with self.subTest(command=command):
                 self.mode('exit-' + command)
+                self.check()
+
+    def test_read_must_preserve_the_published_capture_frame_count(self):
+        for mode in ('no-frames', 'missing-frame', 'extra-frame'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
                 self.check()
 
     def test_invalid_outputs(self):

@@ -5,7 +5,7 @@
 //!
 //! A line of the form `  @KIND EXAMPLE` is a runnable example: `printable`
 //! indents it like the rest of the topic, and the drift test in `tests.rs`
-//! feeds every one to the parser or compiler that owns its kind, so a topic
+//! feeds every one to its parser, compiler, or strict packet builder, so a topic
 //! cannot describe syntax the tool no longer accepts. Examples use only
 //! documentation addresses (192.0.2.0/24, 198.51.100.0/24, 2001:db8::/32).
 
@@ -25,7 +25,7 @@ Examples:
   @expr raw(text=hello)
   @expr ethernet()/ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=53)
   @expr ipv4(src=192.0.2.1,dst=198.51.100.7,ttl=5)/tcp(dport=443)/raw(bytes=hex("16030100"))
-  @expr ipv6(src=2001:db8::1,dst=2001:db8::2)/udp(dport=5353)/raw(text=ping)
+  @expr ipv6(src=2001:db8::1,dst=2001:db8::2)/udp(dport=9000)/raw(text=ping)
 
 Scalar values:
   Integers are decimal, 0x hexadecimal, 0b binary, or 0o octal, and an

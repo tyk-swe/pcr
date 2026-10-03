@@ -24,16 +24,22 @@ def main():
     cargo = shutil.which(args.cargo)
     if not cargo:
         parser.exit(2, "Cargo is required; external-consumer validation was not executed.\n")
+    # Explicit relative paths and relative PATH entries belong to the caller's
+    # directory, not the detached project's subprocess working directory.
+    cargo = str(Path(cargo).absolute())
     with tempfile.TemporaryDirectory(prefix="packetcraftr-external-") as directory:
         project = Path(directory)
-        dependencies = "\n".join(
-            f'{name} = {{ path = {json.dumps(str(ROOT / "crates" / name))}, default-features = false }}'
-            for name in ("packetcraftr", "packetcraftr-core", "packetcraftr-netio")
-        )
+        # TOML accepts literal Unicode, but not JSON's non-BMP surrogate escapes.
+        # DEL must still be escaped because TOML forbids it in basic strings.
+        dependencies = []
+        for name in ("packetcraftr", "packetcraftr-core", "packetcraftr-netio"):
+            path = json.dumps(str(ROOT / "crates" / name), ensure_ascii=False).replace('\x7f', '\\u007f')
+            dependencies.append(f'{name} = {{ path = {path}, default-features = false }}')
         (project / "Cargo.toml").write_text(
             '[package]\nname = "packetcraftr-external-consumer"\nversion = "0.0.0"\n'
             'edition = "2024"\npublish = false\n\n[workspace]\n\n[dependencies]\n'
-            + dependencies + '\n\n[[test]]\nname = "composition"\npath = "composition.rs"\n'
+            + '\n'.join(dependencies) + '\n\n[[test]]\nname = "composition"\npath = "composition.rs"\n',
+            encoding='utf-8',
         )
         shutil.copyfile(ROOT / "examples/consumers/rust/composition.rs", project / "composition.rs")
         env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "target/external-consumer"))

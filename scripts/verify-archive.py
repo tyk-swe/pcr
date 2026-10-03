@@ -8,6 +8,8 @@ import pathlib
 import subprocess
 import sys
 
+from validation_evidence import DECODE_PROFILES
+
 ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD_PARTY_NOTICES.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
@@ -21,6 +23,8 @@ ASSETS = (
     'schemas/packetcraftr.rewrite.v2.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'examples/captures/tls-handshake.pcapng',
+    'examples/captures/clock-regression.pcap',
+    'examples/captures/scoped-vxlan.pcap',
     'examples/captures/http-stream.pcap',
     'examples/documents/packet-dns-response.json',
     'examples/documents/packet-tls-client-hello.json',
@@ -30,6 +34,8 @@ ASSETS = (
     'examples/documents/udp-profiles.json',
     'examples/documents/packet-ipv4-udp.json',
     'examples/documents/output-stats-resources.json',
+    'examples/documents/output-stats-clock.json',
+    'examples/documents/output-stats-scopes.json',
     'examples/documents/output-read-resources.json',
     'examples/documents/output-build-event.json',
     'examples/documents/output-build-complete.json',
@@ -86,6 +92,9 @@ def verify(root, version, commit, target, variant):
         raise ValueError('expected NDJSON objects')
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
+    expected_frames = DECODE_PROFILES['pull-request']['tls-handshake']
+    if len(records) != expected_frames + 1:
+        raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
         if (record.get('schema') != 'packetcraftr.output/v6'
                 or type(record.get('sequence')) is not int
@@ -95,6 +104,20 @@ def verify(root, version, commit, target, variant):
     cli('tls', 'examples/captures/tls-handshake.pcapng')
     json.loads(cli('--output', 'json', 'build', '--packet-file',
                    'examples/documents/packet-ipv4-udp.json'))
+
+    # Run the commands published in docs/analysis-resources.md from the archive,
+    # and keep their clock and encapsulation evidence equal to the shipped examples.
+    for capture, example, options in (
+        ('clock-regression.pcap', 'output-stats-clock.json',
+         ('--table', 'io', '--interval-ms', '1000')),
+        ('scoped-vxlan.pcap', 'output-stats-scopes.json',
+         ('--table', 'conversations')),
+    ):
+        actual = json.loads(cli('--output', 'json', 'stats',
+                                f'examples/captures/{capture}', *options))
+        expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
+        if actual != expected:
+            raise ValueError(f'packaged stats output differs from {example}')
 
     # The generated man tree must cover every shipped subcommand; `help` is
     # clap's implicit subcommand and gets no page.

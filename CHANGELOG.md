@@ -1787,12 +1787,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- Offline file outputs bind staging, publication, and rollback to the parent
-  selected before reading input. A detected parent-alias retarget is refused,
-  without redirecting output or leaving staged captures or follow payloads behind.
-  Requested paths remain in reports and diagnostics, and existing files are never
-  overwritten. Moving the actual directory or its parents can still prevent
-  staged-file cleanup, as follow help documents.
+- The forwarding reference consumer rejects malformed retained detail collections
+  and typed preservation evidence, including partial evidence, before interpreting
+  a verdict. Invalid Unicode
+  rule strings now produce a contract error instead of an unhandled traceback.
+
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 
@@ -1843,6 +1842,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   it is reported once, as a cause. The message now reads "discovery frame does
   not build" or "neighbor solicitation does not encode"; the code stays
   `internal.neighbor_invariant`.
+- Offline file outputs bind staging, publication, and rollback to the parent
+  selected before reading input. A detected parent-alias retarget is refused,
+  without redirecting output or leaving staged captures or follow payloads behind.
+  Requested paths remain in reports and diagnostics, and existing files are never
+  overwritten. Moving the actual directory or its parents can still prevent
+  staged-file cleanup, as follow help documents.
 - DHCP limits above 65535 message bytes, 4096 options, or nesting depth 8 are
   refused with `dhcp::Error::InvalidLimit` (`policy.dhcp_limit`) instead of
   being silently lowered to those ceilings, which are now public as
@@ -2020,6 +2025,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   so an axis can replace a denied recipe destination with permitted addresses.
 - JSON `build` output remains one complete document when interrupted during
   publication; cancellation is reported on stderr with exit code 130.
+- Topic errors and binary-to-terminal refusals return I/O exit 5 if their
+  diagnostic cannot be written to stderr, matching other command errors.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;
@@ -2046,6 +2053,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   messages, and exit codes are unchanged.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
+- Release archives include the clock-regression and scoped-VXLAN captures and
+  reference outputs used by the analysis resource guide's runnable examples.
 - TCP pending growth no longer recopies its retained range on adjacent or
   reverse extension. Bounded payload pages and interval metadata are charged
   independently; transient output/history allocations are admitted before commit.

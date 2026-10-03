@@ -1856,6 +1856,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   strings, or 128 name pointers are refused with `dns::Error::InvalidLimit`
   (`policy.dns_limit`) instead of being silently tightened, and the ceilings
   are public as `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS, MAX_NAME_POINTERS}`.
+- The filter reference distinguishes protocol schema list selectors from
+  reserved `frame.protocols`, which supports whole-list comparisons and
+  `count(frame.protocols)` without element selectors.
 - A strict build accepts link padding inside a packet rooted at `vlan` or
   `vlan8021ad`, as decoding already produces it, instead of failing with
   `PaddingWithoutLinkLayer`.

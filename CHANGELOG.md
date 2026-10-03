@@ -372,10 +372,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - The per-workflow duration ceilings `scan`, `traceroute`, `dns`, and `fuzz`
   `MAX_DURATION`, `replay::MAX_REPLAY_DURATION`, `send::MAX_SEND_DURATION`, and
   `exchange::MAX_EXCHANGE_TIMEOUT` are removed. Each equaled
-  `packetcraftr_netio::capture::MAX_TIMEOUT`, which every workflow now checks
-  directly.
-
-  See `docs/migration-unreleased.md`.
+  `packetcraftr_netio::deadline::MAX_WAIT`, which every workflow now checks
+  directly. See `docs/migration-unreleased.md`.
 - Scan and traceroute each have their own error. `probe::Error { workflow,
   kind }`, `probe::ErrorKind`, and `probe::Workflow` are replaced by the
   `scan::Error` and `traceroute::Error` enums, whose variants are the former
@@ -698,6 +696,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `ReaderLimits::max_options_per_block` (default 1,024) bounds the options
+  retained from one PCAPNG section, interface, or packet block; a block above
+  the ceiling fails with `policy.capture_stream_limit`. Exhaustive
+  `ReaderLimits` literals need the new field.
 - `packetcraftr http2` inspects cleartext HTTP/2 and h2c-upgraded TCP streams
   offline: RFC 9113 frames, stateful HPACK decoding, stream/message lifecycle,
   and per-connection startup/status evidence, with eleven HTTP/2-specific
@@ -1604,9 +1606,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `dns` retry delays, the wait between `dns` batch questions, and `replay`
   source-timing and inter-pass waits use the shared execution context's
   pacing order: check, start accounting the delay, sleep, check both
-  cancellation and `--max-duration`, surface a clock failure, account the
+  cancellation and `--max-duration-ms`, surface a clock failure, account the
   delay, then add it to elapsed statistics. A wait that overruns
-  `--max-duration` while the clock also fails now reports the duration limit
+  `--max-duration-ms` while the clock also fails now reports the duration limit
   instead of the clock failure, and a batch question stopped that way is
   unattempted rather than failed. `dns` elapsed statistics include a retry
   delay only once that delay has been accounted.
@@ -1616,7 +1618,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   an interruption observed after that batch surfaces, and time is accounted
   after validation. When a batch execution fails while the operation is
   cancelled or out of time, the run now reports the cancellation or
-  `--max-duration` limit instead of the executor failure.
+  `--max-duration-ms` limit instead of the executor failure.
 - Live `fuzz` paces and executes cases through the same execution context.
   After a `--rate` delay it checks both `--max-duration-ms` and cancellation
   before it reports a failed rate timer, so a delay that fails its timer and
@@ -1812,6 +1814,37 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
+  and rollback to the parent directory opened before input is read. On Linux
+  with procfs they address the directory handle, so a parent path retargeted
+  during the run (a swapped symlink or a renamed and replaced directory) cannot
+  redirect the output or its staged bytes; elsewhere the directory identity is
+  re-verified before publication and rollback, and a change is refused with
+  `io.output_file` ("changed since staging"). Follow rollback removes exactly
+  the files it published and keeps reporting the requested paths. Destinations
+  naming a directory (a trailing separator or `/.`) are refused at staging
+  ("requires a file name").
+- Offline HTTP/2 validates every `Connection` and `Upgrade` list member of an
+  h2c offer or 101 response, requires an absolute-form h2c target authority to
+  match `Host`, requires `:protocol` to be a non-empty token, and rejects the
+  fields RFC 9110 prohibits in trailers (framing, routing, request modifiers,
+  authentication, cache control, and content processing fields).
+- Offline HTTP/2 reports a server response on a client stream above the
+  server's own earlier GOAWAY `last_stream_id` as a Confirmed stream-scoped
+  `response_after_goaway` instead of an unprocessed response, confirms
+  provisional idle-stream diagnostics as soon as a later client stream id
+  proves the lower id was never opened (not only at a clean FIN), and releases
+  provisional idle-stream evidence for a promised id only after the promise is
+  admitted.
+- Offline HTTP/2 attributes a connection-fatal frame error to the malformed
+  frame alone when its declared length is buffered, leaving later coalesced
+  frames as terminal evidence, reports positive-length DATA after a
+  capture-early 204/205/304 response as a Confirmed `bodyless_response_body`
+  violation instead of an indeterminate unknown-stream issue, and clears
+  retained pending-opener entries when a connection drains.
+- Release archives ship the HTTP/2 example captures and `output-http2-*`
+  documents that the README and docs reference, and every published example
+  document is validated against its declared schema.
 - Reconcile provisional idle-stream diagnostics at a clean initiator FIN,
   validate h2c request-target forms, and reject Host routing fields in trailers.
 - Preserve directional END_STREAM state across peer resets before admitting

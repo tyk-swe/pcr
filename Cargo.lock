@@ -1046,7 +1046,6 @@ version = "0.5.0-beta.3"
 dependencies = [
  "bytes",
  "getrandom 0.4.3",
- "jsonschema",
  "packetcraftr-core",
  "packetcraftr-netio",
  "serde",

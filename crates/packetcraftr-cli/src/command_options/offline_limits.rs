@@ -169,7 +169,7 @@ impl AnalysisStages {
     }
 }
 
-/// Capture and analysis bounds shared by stats, expert, follow, and TLS.
+/// Capture and analysis bounds shared by the offline analysis commands.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineLimitsArgs {
     /// Maximum physical-frame provenance allocations retained by analysis consumers.

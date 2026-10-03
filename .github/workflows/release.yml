@@ -235,6 +235,8 @@ jobs:
               "examples/captures/clock-regression.pcap",
               "examples/captures/scoped-vxlan.pcap",
               "examples/captures/http-stream.pcap",
+              "examples/captures/http2-multiplexed.pcapng",
+              "examples/captures/http2-upgrade.pcapng",
               "examples/documents/packet-dns-response.json",
               "examples/documents/packet-tls-client-hello.json",
               "examples/documents/packet-dhcpv4-offer.json",
@@ -251,6 +253,9 @@ jobs:
               "examples/documents/output-dns-tcp-success.json",
               "examples/documents/output-dns-tcp-complete.json",
               "examples/documents/output-replay-bit-rate-success.json",
+              "examples/documents/output-http2-success.json",
+              "examples/documents/output-http2-issue-event.json",
+              "examples/documents/output-http2-connection-event.json",
               "examples/consumers/forwarding.py",
               "examples/consumers/fixtures/v6-forwarding.json",
           )

@@ -7,9 +7,11 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -599,6 +601,62 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             self.run_manifest('--binary', self.root / 'missing', '--verify', self.write_manifest())
         self.assertIn('cannot read binary', str(raised.exception))
+
+
+@unittest.skipIf(os.name == 'nt', 'fixture uses a Unix executable script')
+class ExternalConsumerTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='external consumer fixture ')
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        self.wrapper = self.bin / 'cargo-wrapper'
+        self.wrapper.write_text(
+            f'#!{sys.executable}\n'
+            'import json, os, pathlib, sys\n'
+            'with open(os.environ["CONSUMER_TEST_LOG"], "a") as log:\n'
+            '    log.write(json.dumps(dict(args=sys.argv[1:], cwd=os.getcwd(), '
+            'manifest=pathlib.Path("Cargo.toml").is_file(), '
+            'source=pathlib.Path("composition.rs").is_file())) + "\\n")\n'
+            'sys.exit(int(os.environ.get("CONSUMER_TEST_EXIT", "0")))\n',
+            encoding='utf-8')
+        self.wrapper.chmod(0o755)
+        self.log = self.root / 'calls.jsonl'
+
+    def run_consumer(self, cargo, **environment):
+        env = dict(os.environ, CONSUMER_TEST_LOG=str(self.log))
+        env.update(environment)
+        return subprocess.run([
+            sys.executable, str(ROOT / 'check-external-consumer.py'), '--cargo', cargo,
+        ], cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+
+    def test_relative_cargo_and_path_entries_survive_detached_working_directory(self):
+        for cargo, path in (('./bin/cargo-wrapper', ''), ('cargo-wrapper', 'bin'),
+                            (str(self.wrapper), '')):
+            with self.subTest(cargo=cargo):
+                self.log.unlink(missing_ok=True)
+                result = self.run_consumer(cargo, PATH=path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+                self.assertEqual([call['args'] for call in calls], [
+                    ['generate-lockfile', '--offline'], ['test', '--locked', '--offline'],
+                ])
+                self.assertEqual(calls[0]['cwd'], calls[1]['cwd'])
+                self.assertNotEqual(pathlib.Path(calls[0]['cwd']), self.root)
+                self.assertTrue(all(call['manifest'] and call['source'] for call in calls))
+
+    def test_cargo_failure_stops_before_running_tests(self):
+        result = self.run_consumer(str(self.wrapper), CONSUMER_TEST_EXIT='7')
+        self.assertNotEqual(result.returncode, 0)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([call['args'] for call in calls], [['generate-lockfile', '--offline']])
+
+    def test_missing_cargo_reports_unexecuted_validation(self):
+        result = self.run_consumer('missing-cargo', PATH=str(self.bin))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('Cargo is required; external-consumer validation was not executed.', result.stderr)
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == '__main__':

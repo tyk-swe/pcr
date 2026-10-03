@@ -24,6 +24,9 @@ def main():
     cargo = shutil.which(args.cargo)
     if not cargo:
         parser.exit(2, "Cargo is required; external-consumer validation was not executed.\n")
+    # Explicit relative paths and relative PATH entries belong to the caller's
+    # directory, not the detached project's subprocess working directory.
+    cargo = str(Path(cargo).absolute())
     with tempfile.TemporaryDirectory(prefix="packetcraftr-external-") as directory:
         project = Path(directory)
         dependencies = "\n".join(

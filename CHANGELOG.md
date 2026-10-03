@@ -1787,6 +1787,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Offline file outputs resolve the staging parent before creating temporary files,
+  so retargeting a parent symlink does not leave staged captures or follow payloads
+  behind. Publication keeps the requested destination and refuses existing files.
+  Follow help documents that moving the actual output directory or its parents
+  can still prevent staged-file cleanup.
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 

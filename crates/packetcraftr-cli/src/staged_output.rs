@@ -45,6 +45,10 @@ impl StagedFile {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
+        // Resolve parent aliases so temporary-file cleanup keeps its original path.
+        // Publication continues to use the requested destination.
+        let parent =
+            std::fs::canonicalize(parent).map_err(|source| output("stage", destination, source))?;
         let file = tempfile::NamedTempFile::new_in(parent)
             .map_err(|source| output("stage", destination, source))?;
         let registration = StagedRegistration::new(file.path());
@@ -97,7 +101,23 @@ fn output(action: &'static str, destination: &Path, source: std::io::Error) -> C
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::io::Write;
+
     use super::*;
+
+    #[cfg(unix)]
+    fn aliased_directories() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let root = tempfile::tempdir().expect("root directory");
+        let original = root.path().join("original");
+        let replacement = root.path().join("replacement");
+        let alias = root.path().join("alias");
+        std::fs::create_dir(&original).expect("original directory");
+        std::fs::create_dir(&replacement).expect("replacement directory");
+        std::os::unix::fs::symlink(&original, &alias).expect("parent alias");
+        std::fs::write(original.join("source.pcap"), b"source capture").expect("source sentinel");
+        (root, original, replacement, alias)
+    }
 
     #[test]
     fn stage_rejects_an_existing_destination_without_staging() {
@@ -141,5 +161,63 @@ mod tests {
         assert!(!error.causes.is_empty());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_alias_retargeted_to_a_collision_preserves_files_and_cleans_staging() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let destination = alias.join("out.pcapng");
+        let mut staged = StagedFile::stage(&destination).expect("stage through alias");
+        staged
+            .as_file_mut()
+            .write_all(b"new capture")
+            .expect("write staged capture");
+        std::fs::write(replacement.join("out.pcapng"), b"existing capture")
+            .expect("destination sentinel");
+        std::fs::remove_file(&alias).expect("remove original alias");
+        std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
+
+        staged.sync().expect("sync original staged file");
+        let error = staged.persist().expect_err("refuse existing destination");
+
+        assert_eq!(error.classification.code, "io.output_file");
+        assert_eq!(error.exit_code(), 5);
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(
+            std::fs::read(replacement.join("out.pcapng")).unwrap(),
+            b"existing capture"
+        );
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_alias_retargeted_to_an_empty_directory_publishes_at_the_requested_path() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let destination = alias.join("out.pcapng");
+        let mut staged = StagedFile::stage(&destination).expect("stage through alias");
+        staged
+            .as_file_mut()
+            .write_all(b"new capture")
+            .expect("write staged capture");
+        std::fs::remove_file(&alias).expect("remove original alias");
+        std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
+
+        staged.sync().expect("sync original staged file");
+        staged.persist().expect("publish at retargeted destination");
+
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new capture");
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 1);
     }
 }

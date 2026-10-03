@@ -16,9 +16,10 @@ and TRANSPORT-INDEX-server.bin inside DIR. Files are staged in DIR and published
 atomically; existing files are never overwritten, a direction with no payload
 publishes as an empty file, and --direction narrows which files are written.
 Both files share the single --max-application-output-bytes budget. Publishing is
-not a multi-file transaction: on failure, staged bytes are discarded and files
-this invocation already published are rolled back where possible. Cleanup failures
-report the paths that could not be removed.
+not a multi-file transaction: on failure, staged files are removed and files
+this invocation already published are rolled back where possible. Published-file
+rollback failures report the paths that could not be removed. Staged-file cleanup
+is best effort if the actual output directory or its parents move during execution.
 
 Examples:
   packetcraftr follow capture.pcapng --stream tcp:0

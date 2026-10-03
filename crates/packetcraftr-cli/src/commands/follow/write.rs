@@ -182,6 +182,37 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    fn aliased_directories() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let root = tempfile::tempdir().expect("root directory");
+        let original = root.path().join("original");
+        let replacement = root.path().join("replacement");
+        let alias = root.path().join("alias");
+        std::fs::create_dir(&original).expect("original directory");
+        std::fs::create_dir(&replacement).expect("replacement directory");
+        std::os::unix::fs::symlink(&original, &alias).expect("parent alias");
+        std::fs::write(original.join("source.pcap"), b"source capture").expect("source sentinel");
+        (root, original, replacement, alias)
+    }
+
+    #[cfg(unix)]
+    fn staged_directions(alias: &Path) -> DirectionFiles {
+        let mut files = DirectionFiles::stage(alias, selector(), Selected::Both, 8)
+            .expect("stage both directions through alias");
+        files
+            .write(&chunk(PeerDirection::ClientToServer, b"ping"))
+            .expect("write client");
+        files
+            .write(&chunk(PeerDirection::ServerToClient, b"pong"))
+            .expect("write server");
+        files
+    }
+
     #[test]
     fn staging_rejects_existing_destinations_before_any_write() {
         let directory = tempfile::tempdir().expect("destination dir");
@@ -210,5 +241,70 @@ mod tests {
         assert!(error.message.contains("--max-application-output-bytes"));
         drop(files);
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_alias_retargeted_to_a_collision_rolls_back_the_first_direction() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let files = staged_directions(&alias);
+        std::fs::write(replacement.join("tcp-7-server.bin"), b"existing payload")
+            .expect("server sentinel");
+        std::fs::remove_file(&alias).expect("remove original alias");
+        std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
+
+        let error = files.publish().expect_err("refuse server collision");
+
+        assert_eq!(error.classification.code, "io.output_file");
+        assert_eq!(error.exit_code(), 5);
+        assert!(error.message.contains("rolled back 1 published file(s)"));
+        assert!(!replacement.join("tcp-7-client.bin").exists());
+        assert_eq!(
+            std::fs::read(replacement.join("tcp-7-server.bin")).unwrap(),
+            b"existing payload"
+        );
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_alias_retargeted_to_an_empty_directory_publishes_both_directions() {
+        let (_root, original, replacement, alias) = aliased_directories();
+        let files = staged_directions(&alias);
+        std::fs::remove_file(&alias).expect("remove original alias");
+        std::os::unix::fs::symlink(&replacement, &alias).expect("retarget parent alias");
+
+        let written = files.publish().expect("publish both directions");
+
+        assert_eq!(written.len(), 2);
+        assert_eq!(
+            written[0].path,
+            alias.join("tcp-7-client.bin").display().to_string()
+        );
+        assert_eq!(
+            written[1].path,
+            alias.join("tcp-7-server.bin").display().to_string()
+        );
+        assert_eq!(written[0].bytes, 4);
+        assert_eq!(written[1].bytes, 4);
+        assert_eq!(
+            std::fs::read(replacement.join("tcp-7-client.bin")).unwrap(),
+            b"ping"
+        );
+        assert_eq!(
+            std::fs::read(replacement.join("tcp-7-server.bin")).unwrap(),
+            b"pong"
+        );
+        assert_eq!(
+            std::fs::read(original.join("source.pcap")).unwrap(),
+            b"source capture"
+        );
+        assert_eq!(std::fs::read_dir(&original).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&replacement).unwrap().count(), 2);
     }
 }

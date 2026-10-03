@@ -1062,6 +1062,7 @@ dependencies = [
  "bytes",
  "clap",
  "clap_complete",
+ "clap_lex",
  "clap_mangen",
  "ctrlc",
  "jsonschema",

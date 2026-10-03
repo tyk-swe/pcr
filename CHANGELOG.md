@@ -1831,6 +1831,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   expiry before reporting an unavailable capability.
 - Send and exchange template failures keep their detailed typed source in
   `causes` without copying its text into the wrapper message.
+- `--payload-file SELECTOR=PATH` preserves non-UTF-8 filenames and parent
+  directories instead of rejecting the entire argument as non-UTF-8. The
+  selector remains text, and spaces, Unicode, and `=` in paths keep their
+  existing behavior.
 - Route lookup honors the caller's deadline and cancellation instead of the
   backends' own timeouts (2 seconds per operation and 3 seconds per response
   on Linux netlink, 2 seconds on macOS routing sockets). A lookup the deadline

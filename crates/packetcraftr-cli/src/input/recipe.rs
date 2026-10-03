@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+
+use clap_lex::OsStrExt;
 
 use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
@@ -70,11 +73,14 @@ fn resolve_recipe(
 
 fn apply_payload_file(
     packet: &mut Packet,
-    spec: &str,
+    spec: &OsStr,
     registry: &core::registry::Registry,
 ) -> Result<(), CliError> {
     let (target, path) = spec
-        .split_once('=')
+        .split_once("=")
+        .ok_or_else(|| CliError::new(Kind::Usage, PAYLOAD_FILE_SYNTAX))?;
+    let target = target
+        .to_str()
         .ok_or_else(|| CliError::new(Kind::Usage, PAYLOAD_FILE_SYNTAX))?;
     let selector = target
         .parse::<Selector>()

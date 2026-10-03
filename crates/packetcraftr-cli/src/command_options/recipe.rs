@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
@@ -21,7 +22,7 @@ pub(crate) struct RecipeArgs {
     /// bytes-typed and empty in the recipe; the file stays inside the packet
     /// input limit.
     #[arg(long, value_name = "SELECTOR=PATH")]
-    pub(crate) payload_file: Option<String>,
+    pub(crate) payload_file: Option<OsString>,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

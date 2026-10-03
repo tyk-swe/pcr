@@ -1787,6 +1787,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- The filter reference distinguishes protocol schema list selectors from
+  reserved `frame.protocols`, which supports whole-list comparisons and
+  `count(frame.protocols)` without element selectors.
+
 - TCP connect scan regressions coordinate worker admission and logical deadlines
   so timeout and route checks remain reliable under scheduling load.
 

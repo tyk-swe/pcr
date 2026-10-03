@@ -5,18 +5,25 @@ mod common;
 
 #[cfg(not(all(native_layer2, native_layer3)))]
 mod missing_layer {
+    use bytes::Bytes;
     use packetcraftr_core::error::{Classified, Kind};
     use packetcraftr_netio::{
-        NativeCapability, Unsupported,
-        transmit::{self, Provider as _},
+        Error, NativeCapability, Unsupported,
+        link::{Capability, Mode},
+        transmit::{self, Outbound, Provider as _, Route},
     };
 
-    use super::*;
+    use super::common;
 
     fn send(mode: Mode) -> Error {
         let decision = common::decision(Capability::Layer2AndLayer3);
         let bytes = Bytes::from_static(&[0x45, 0, 0, 20]);
-        let outbound = Outbound::try_new(&bytes, route(&decision, mode)).expect("mode is resolved");
+        let route = Route {
+            decision: &decision,
+            mode,
+            lookup_destination: Some(common::lookup_destination()),
+        };
+        let outbound = Outbound::try_new(&bytes, route).expect("mode is resolved");
         transmit::SystemProvider
             .send(outbound)
             .expect_err("this build has no backend for the layer")

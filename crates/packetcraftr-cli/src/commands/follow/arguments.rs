@@ -11,8 +11,9 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Following is computed offline over di
 
 The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. Completed IP-fragmented datagrams join their transport conversation on the fragment that completes them. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
 
---write DIR saves each selected direction's payload as TRANSPORT-INDEX-client.bin
-and TRANSPORT-INDEX-server.bin inside DIR. Files are staged in DIR and published
+--write DIR requires an existing writable directory and saves each selected
+direction's payload as TRANSPORT-INDEX-client.bin and TRANSPORT-INDEX-server.bin
+inside DIR. Files are staged in DIR and published
 atomically; existing files are never overwritten, a direction with no payload
 publishes as an empty file, and --direction narrows which files are written.
 Both files share the single --max-application-output-bytes budget. Publishing is
@@ -23,6 +24,7 @@ report the paths that could not be removed.
 Examples:
   packetcraftr follow capture.pcapng --stream tcp:0
   packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
+  mkdir -p ./directions
   packetcraftr follow capture.pcapng --stream tcp:0 --write ./directions
   packetcraftr --output json follow capture.pcapng --stream udp:2
   packetcraftr --output ndjson follow capture.pcapng --stream tcp:7";
@@ -49,7 +51,7 @@ pub(crate) struct Args {
     /// Which sender's bytes to emit.
     #[arg(long, value_enum, default_value_t = Direction::Both)]
     pub(crate) direction: Direction,
-    /// Save each selected direction's payload into DIR as
+    /// Save each selected direction's payload into an existing writable DIR as
     /// `TRANSPORT-INDEX-client.bin` and `TRANSPORT-INDEX-server.bin`, staged
     /// and published atomically without overwriting existing files. An empty
     /// direction produces an empty file.

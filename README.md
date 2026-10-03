@@ -310,7 +310,8 @@ fragments and derived datagrams separately, and the shared `--ip-overlap`,
 and every retained-state limit explicit.
 
 `follow --stream tcp:N` or `udp:N` exits 2 when the selected conversation is
-absent, and `follow --write DIR` publishes each selected direction atomically as
+absent, and `follow --write DIR` requires an existing writable directory and
+publishes each selected direction atomically as
 `TRANSPORT-INDEX-client.bin` or `-server.bin` without overwriting. Every `stats`
 report carries a capture summary (`duration`, `average_packet_size`, packet and
 byte rates, and the declared `interfaces`), and `expert` also reports the

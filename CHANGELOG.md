@@ -1789,6 +1789,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - The offline forwarding regression harness accepts relative output directory
   names beginning with `-` without parsing generated capture paths as CLI options.
+- TCP connect scan regressions coordinate worker admission and logical deadlines
+  so timeout and route checks remain reliable under scheduling load.
+
 - Detached consumer validation writes valid UTF-8 Cargo manifests when the
   checkout path contains non-BMP Unicode characters, including emoji.
 - Analysis measurement reports distinguish allocator-run exits and produced

@@ -388,6 +388,53 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(native.main(), 0)
             release.validate(json.loads(path.read_text()), COMMIT, NATIVE)
 
+    def test_native_launcher_retains_only_matching_child_errors_and_still_fails(self):
+        cases = [
+            ('matching failure', 1, 'fixture-run', 'failed', 'specific child failure', True),
+            ('wrong run', 1, 'old-run', 'failed', 'stale child failure', False),
+            ('wrong namespace', 2, 'fixture-run', 'failed', 'foreign child failure', False),
+            ('claimed success', 1, 'fixture-run', 'passed', 'specific child failure', True),
+            ('no child error', 1, 'fixture-run', 'failed', None, False),
+        ]
+        for label, parent, run_id, status, child_error, retained in cases:
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory) / 'native.json'
+                argv = ['native', '--binary', 'fixture-binary', '--native-test-binary', 'fixture-tests',
+                        '--report', str(path), '--run-id', 'fixture-run']
+                original_stat = native.os.stat
+
+                def launch(command, **kwargs):
+                    self.assertEqual(command[0], 'unshare')
+                    child = dict(status=status, run_id=run_id, parent_namespace=parent,
+                                 namespace=3, error=child_error)
+                    path.write_text(json.dumps(child))
+                    return subprocess.CompletedProcess(command, 7, stdout='', stderr='')
+
+                with (mock.patch('sys.argv', argv),
+                      mock.patch.object(native, 'provenance', return_value=provenance_report()),
+                      mock.patch.object(native, 'digest', return_value='d' * 64),
+                      mock.patch.object(native.platform, 'system', return_value='Linux'),
+                      mock.patch.object(native.platform, 'platform', return_value='fixture Linux'),
+                      mock.patch.object(native.os, 'geteuid', return_value=1000),
+                      mock.patch.object(native.os, 'stat', side_effect=lambda *args, **kwargs:
+                          mock.Mock(st_ino=1) if str(args[0]) == '/proc/self/ns/net'
+                          else original_stat(*args, **kwargs)),
+                      mock.patch.object(native.subprocess, 'run', side_effect=launch) as launched,
+                      mock.patch('builtins.print')):
+                    self.assertEqual(native.main(), 1)
+                written = json.loads(path.read_text())
+                self.assertEqual(written['status'], 'failed')
+                self.assertEqual(written['error'],
+                                 'isolated namespace launcher or native scenarios failed; '
+                                 'see namespace_launcher and scenarios')
+                launcher = written['namespace_launcher']
+                self.assertEqual(launcher['exit_code'], 7)
+                self.assertEqual(launcher['stderr'], '')
+                self.assertEqual('child_error' in launcher, retained)
+                if retained:
+                    self.assertEqual(launcher['child_error'], child_error)
+                self.assertEqual(launched.call_count, 1)
+
     def test_release_preflight_validates_downloaded_reports_before_publishing(self):
         for invalid in [False, True]:
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:

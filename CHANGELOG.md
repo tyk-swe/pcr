@@ -1809,6 +1809,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   including intermediate envelopes, while preserving source-routing endpoints.
 - Native capture activation honors the caller's deadline and cancellation while
   libpcap or Npcap is blocked, retaining worker admission until cleanup finishes.
+- Isolated native validation retains a matching child report's specific error
+  alongside the parent launcher failure, preserving diagnostic detail.
 - Library TCP connect scans reject interface, preferred-source, and explicit
   link-mode overrides before scheduling any connections.
 - Detached provider deadlines retain inherited cancellation through every

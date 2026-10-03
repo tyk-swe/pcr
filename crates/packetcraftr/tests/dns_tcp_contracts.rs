@@ -3,7 +3,7 @@
 
 use std::io::{self, Cursor, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,15 @@ const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
 const SHORT_ATTEMPT: Duration = Duration::from_millis(20);
 
 const _: () = assert!(SHORT_ATTEMPT.as_millis() < POLL_INTERVAL.as_millis());
+
+// The expiry contract samples process-wide TCP pool state, so queries run serially.
+static TCP_POOL: Mutex<()> = Mutex::new(());
+
+fn exclusive_tcp_pool() -> MutexGuard<'static, ()> {
+    TCP_POOL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn accept_bounded(listener: &TcpListener) -> TcpStream {
     let (stream, _) = listener.accept().expect("loopback accept");
@@ -40,6 +49,7 @@ fn read_query(stream: &mut TcpStream) {
 
 #[test]
 fn ipv4_loopback_handles_fragmented_response_io() {
+    let _pool = exclusive_tcp_pool();
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("IPv4 loopback listener");
     let endpoint = listener.local_addr().expect("listener address");
     let server = thread::spawn(move || {
@@ -167,6 +177,7 @@ impl tcp::Stream for ScriptedStream {
 
 #[test]
 fn a_scripted_connect_preserves_exact_query_and_response_frames() {
+    let _pool = exclusive_tcp_pool();
     let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
     let written = Arc::new(Mutex::new(Vec::new()));
     let response = dns_tcp::query(
@@ -192,6 +203,7 @@ fn a_scripted_connect_preserves_exact_query_and_response_frames() {
 
 #[test]
 fn a_public_attempt_shorter_than_the_poll_interval_expires_without_writing() {
+    let _pool = exclusive_tcp_pool();
     let endpoint = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 53), 53));
     let written = Arc::new(Mutex::new(Vec::new()));
     let supplied_budget = Arc::new(Mutex::new(None));

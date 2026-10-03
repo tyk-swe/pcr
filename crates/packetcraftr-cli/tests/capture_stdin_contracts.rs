@@ -97,6 +97,34 @@ fn piped_pcap_and_pcapng_match_all_offline_commands() {
 }
 
 #[test]
+fn large_piped_capture_drains_streamed_output_while_writing_input() {
+    const FRAMES: usize = 10_000;
+    let frame = Frame::new(
+        std::time::UNIX_EPOCH,
+        LinkType::IPV4,
+        decode_hex(UDP_CLIENT),
+    )
+    .unwrap();
+    let mut writer = Writer::new(Vec::new(), Format::Pcap, LinkType::IPV4).unwrap();
+    for _ in 0..FRAMES {
+        writer.write_frame(&frame).unwrap();
+    }
+    let output = assert_file_stdin_parity(&writer.into_inner(), "read", &[], "ndjson", 0);
+    let records = parse_ndjson(&output);
+    assert_contiguous(&records);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["event"] == "frame")
+            .count(),
+        FRAMES
+    );
+    let complete = records.last().unwrap();
+    assert_eq!(complete["event"], "complete");
+    assert_eq!(complete["status"], "success");
+}
+
+#[test]
 fn piped_capture_rewrites_preserve_every_source_byte() {
     for (capture_format, output_format) in [(Format::Pcap, "pcap"), (Format::PcapNg, "pcapng")] {
         let bytes = handshake_capture(capture_format);

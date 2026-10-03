@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 
 use packetcraftr_core::expression;
 use packetcraftr_core::filter::{self, Filter};
@@ -14,7 +15,7 @@ use crate::command_options::TemplateArgs;
 use crate::errors::KINDS;
 use crate::input::apply_overrides;
 
-/// Runs one embedded example through the parser or compiler that owns its kind.
+/// Runs one embedded example through its parser, compiler, or strict packet builder.
 fn check(kind: &str, source: &str) -> Result<(), String> {
     let registry = builtin::registry();
     let recipe = || {
@@ -26,9 +27,14 @@ fn check(kind: &str, source: &str) -> Result<(), String> {
         .expect("fixture recipe")
     };
     match kind {
-        "expr" => expression::parse(source, &registry, expression::Limits::default())
-            .map(drop)
-            .map_err(|error| error.to_string()),
+        "expr" => {
+            let packet = expression::parse(source, &registry, expression::Limits::default())
+                .map_err(|error| error.to_string())?;
+            packetcraftr_core::build::Builder::new(Arc::clone(&registry))
+                .build(packet, Default::default(), Default::default())
+                .map(drop)
+                .map_err(|error| error.to_string())
+        }
         "value" => expression::parse_value(source, expression::Limits::default())
             .map(drop)
             .map_err(|error| error.to_string()),
@@ -87,6 +93,7 @@ fn a_broken_example_fails_the_drift_check() {
     for (kind, source) in [
         ("expr", "ipv4(nosuchfield=1)"),
         ("expr", "nosuchprotocol()"),
+        ("expr", "ipv6()/udp(dport=5353)/raw(text=ping)"),
         ("value", "hex(\"0\")"),
         ("selector", "ipv4"),
         ("set", "ipv4#9.ttl=5"),

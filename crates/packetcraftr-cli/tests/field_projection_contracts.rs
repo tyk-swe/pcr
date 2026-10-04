@@ -69,3 +69,24 @@ fn projection_byte_limit_counts_the_rendered_json_payload() {
     assert_eq!(records[0]["sequence"], 0);
     assert_eq!(records[0]["error"]["code"], "policy.projection_limit");
 }
+
+#[test]
+fn byte_slice_headers_canonicalize_untrusted_whitespace() {
+    for (field, expected) in [
+        ("raw.bytes[\n0\r]", "raw.bytes[0]"),
+        ("raw.bytes[\t0:\n2]", "raw.bytes[0:2]"),
+    ] {
+        let output = run_success(&[
+            "dissect",
+            "--hex",
+            IP,
+            "--link-type",
+            "228",
+            "--field",
+            field,
+        ]);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains(expected), "{text}");
+        assert!(!text.contains(field), "{text}");
+    }
+}

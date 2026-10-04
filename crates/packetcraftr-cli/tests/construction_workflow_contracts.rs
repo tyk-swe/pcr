@@ -120,3 +120,41 @@ fn build_session_refuses_oversized_or_conflicting_requests_before_output() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("--session tcp"));
 }
+
+#[test]
+fn build_enforces_layer_limit_before_decoding_later_layers() {
+    let output = run(&[
+        "--output",
+        "json",
+        "build",
+        "--max-layers",
+        "1",
+        "--packet",
+        "raw()/not_a_protocol()",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let report = common::parse_json(&output);
+    assert_eq!(report["error"]["code"], "cli.expression_limit");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("unknown protocol"));
+}
+
+#[test]
+fn build_document_enforces_layer_limit_before_protocol_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let recipe = directory.path().join("packet.json");
+    std::fs::write(&recipe, r#"{"schema":"packetcraftr.packet/v2","layers":[{"protocol":"raw","fields":{}},{"protocol":"not_a_protocol","fields":{}}]}"#).unwrap();
+    let output = run(&[
+        "--output",
+        "json",
+        "build",
+        "--max-layers",
+        "1",
+        "--packet-file",
+        path_text(&recipe),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        common::parse_json(&output)["error"]["code"],
+        "cli.document_limit"
+    );
+}

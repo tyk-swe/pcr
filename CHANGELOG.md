@@ -6,6 +6,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Bound scan port input expansion to 65,536 entries, including duplicates,
+  and bound the number of port specifications to the same limit.
+- Escape line breaks in CLI usage errors and canonicalize numeric byte-slice
+  projection headers so argument values cannot forge output lines.
+- Enforce build layer budgets during recipe parsing. Over-limit recipes now
+  report the parser's `cli.expression_limit` or `cli.document_limit` error
+  before allocating or decoding later layers.
+
 ### Breaking
 
 - `packetcraftr::Providers` is now a blanket marker over the capability

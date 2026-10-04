@@ -10,7 +10,7 @@ use crate::errors::{CliError, exit_code_for};
 use crate::output;
 use crate::rendering::{
     emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document, terminal_document,
-    write_unattributed_error,
+    terminal_safe, write_unattributed_error,
 };
 
 pub(crate) fn run() -> ExitCode {
@@ -27,7 +27,13 @@ pub(crate) fn run() -> ExitCode {
 
 fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
     let code = u8::try_from(error.exit_code()).unwrap_or(exit_code_for(Kind::Internal));
-    let raw_message = error.to_string();
+    // Usage errors interpolate untrusted argument values. Treat the whole
+    // diagnostic as text; only generated help/version documents retain layout.
+    let raw_message = if error.use_stderr() {
+        terminal_safe(&error.to_string())
+    } else {
+        error.to_string()
+    };
     let message = terminal_document(&raw_message);
     if error.use_stderr()
         && let Some(format) = context.format

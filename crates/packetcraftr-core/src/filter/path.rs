@@ -531,6 +531,14 @@ pub(super) fn attach_slice(
     }
     field.slice = Some(slice);
     field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
-    field.path = format!("{}[{contents}]", field.path);
+    let suffix = if contents.contains(':') {
+        match slice.end {
+            Some(end) => format!("{}:{end}", slice.start),
+            None => format!("{}:", slice.start),
+        }
+    } else {
+        slice.start.to_string()
+    };
+    field.path = format!("{}[{suffix}]", field.path);
     Ok(())
 }

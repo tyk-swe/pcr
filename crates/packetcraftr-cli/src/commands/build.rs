@@ -61,8 +61,8 @@ pub(super) fn run(
             "--session-step-ns requires PCAP or PCAPNG output",
         ));
     }
-    // Recipe byte limits bound parsing; the builder owns the requested layer budget.
-    let mut packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
+    // Enforce the layer budget before allocating the complete recipe.
+    let mut packet = read_recipe(arguments.recipe, &registry, arguments.budget.max_layers)?;
     apply_overrides(&mut packet, &registry, &arguments.set)?;
     if let Some(capture) = &capture {
         capture.validate_root(&packet)?;

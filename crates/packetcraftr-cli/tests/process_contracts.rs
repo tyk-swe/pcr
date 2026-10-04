@@ -267,3 +267,16 @@ fn binary_terminal_refusal_reports_stderr_write_failures() {
     assert_eq!(output.status.code(), Some(5), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
 }
+
+#[test]
+fn clap_usage_errors_escape_injected_diagnostic_lines() {
+    let output = run(&["--output", "bad\nerror: forged\r\nwarning: forged"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains("\nerror: forged"), "{stderr}");
+    assert!(!stderr.contains("\nwarning: forged"), "{stderr}");
+    assert!(stderr.contains("\\nerror: forged"), "{stderr}");
+    let help = run(&["--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8(help.stdout).unwrap().lines().count() > 5);
+}

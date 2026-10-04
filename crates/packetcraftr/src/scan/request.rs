@@ -109,18 +109,41 @@ pub enum PortSpec {
 }
 
 /// Expands selections in first-seen order, deduplicating without charging
-/// repeats. Stops before adding a distinct port beyond `max_ports`.
+/// repeats toward the distinct-port budget. At most 65,536 specs and expanded
+/// input ports are processed, including duplicates, to bound construction work.
 pub fn select_ports(
     specs: impl IntoIterator<Item = PortSpec>,
     max_ports: usize,
 ) -> Result<Vec<u16>, Error> {
+    const MAX_INPUT_PORTS: usize = 65_536;
     let mut ports: Vec<u16> = Vec::new();
     let mut seen: HashSet<u16> = HashSet::new();
-    for spec in specs {
+    let mut processed = 0usize;
+    for (index, spec) in specs.into_iter().enumerate() {
+        if index >= MAX_INPUT_PORTS {
+            return Err(Error::InvalidLimit {
+                field: "ports",
+                value: index as u64 + 1,
+                reason: "too many port specifications".into(),
+            });
+        }
         let (start, end) = match spec {
             PortSpec::Single(port) => (port, port),
             PortSpec::RangeInclusive { start, end } => (start, end),
         };
+        let count = if end >= start {
+            usize::from(end) - usize::from(start) + 1
+        } else {
+            0
+        };
+        processed = processed.saturating_add(count);
+        if processed > MAX_INPUT_PORTS {
+            return Err(Error::InvalidLimit {
+                field: "ports",
+                value: processed as u64,
+                reason: "expanded port input exceeds 65536 entries, including duplicates".into(),
+            });
+        }
         for port in start..=end {
             if !seen.insert(port) {
                 continue;
@@ -241,5 +264,27 @@ impl Request {
             self.ports.iter().copied().map(PortSpec::Single),
             self.limits.max_ports,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_ranges_and_infinite_duplicate_specs_are_bounded() {
+        let full = PortSpec::RangeInclusive {
+            start: 0,
+            end: u16::MAX,
+        };
+        assert_eq!(select_ports([full], 65_536).unwrap().len(), 65_536);
+        assert!(select_ports([full, full], 65_536).is_err());
+        assert!(select_ports(std::iter::repeat(PortSpec::Single(53)), 1).is_err());
+        let empty = PortSpec::RangeInclusive { start: 2, end: 1 };
+        assert!(select_ports(std::iter::repeat(empty), 1).is_err());
+        assert_eq!(
+            select_ports([PortSpec::Single(53), PortSpec::Single(53)], 1).unwrap(),
+            [53]
+        );
     }
 }

@@ -180,3 +180,32 @@ fn two_missing_values_never_satisfy_ordinary_preservation() {
         forwarding::ValueState::Absent
     );
 }
+
+#[test]
+fn expired_invocation_deadline_stops_forwarding_before_indexing() {
+    let rules = rules(&["raw.bytes"], &[], &[]);
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40_000, 9_000),
+        b"identity",
+    )];
+    let ingress = collect(&rules, Side::Ingress, &frames, None);
+    let egress = collect(&rules, Side::Egress, &frames, None);
+    let deadline = packetcraftr_core::budget::Deadline::new(Duration::ZERO);
+    let error = forwarding::verify_with_limits(
+        &rules,
+        ingress,
+        egress,
+        forwarding::Limits::default(),
+        None,
+        Some(&deadline),
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().kind, Kind::Policy);
+    assert!(
+        matches!(error, forwarding::Error::Interrupted(_)),
+        "{error}"
+    );
+}

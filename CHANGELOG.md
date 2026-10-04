@@ -1814,6 +1814,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Scan arming failures retain admitted capture source status and any cleanup
+  failure, including when a later interface fails before probes are sent.
+
 - `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
   and rollback to the parent directory opened before input is read. On Linux
   with procfs they address the directory handle, so a parent path retargeted

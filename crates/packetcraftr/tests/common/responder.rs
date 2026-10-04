@@ -27,6 +27,8 @@ pub(crate) struct State {
     pub(crate) ready: bool,
     pub(crate) armed: usize,
     pub(crate) shutdowns: usize,
+    pub(crate) fail_arm_after: Option<usize>,
+    pub(crate) fail_shutdown: bool,
     pub(crate) sends: usize,
     pub(crate) pending: usize,
     pub(crate) peak: usize,
@@ -209,7 +211,14 @@ impl capture::Session for Capture {
         Ok(captured)
     }
     fn shutdown(&mut self) -> Result<(), net::Error> {
-        self.state.lock().unwrap().shutdowns += 1;
+        let mut state = self.state.lock().unwrap();
+        state.shutdowns += 1;
+        if state.fail_shutdown {
+            return Err(net::Error::Capture {
+                message: "fixture cleanup failure".to_owned(),
+                source: None,
+            });
+        }
         Ok(())
     }
     fn stats(&self) -> capture::Stats {
@@ -229,7 +238,14 @@ impl capture::Provider for Io {
         request: &capture::Request,
         _deadline: &Deadline,
     ) -> Result<Capture, net::Error> {
-        self.0.lock().unwrap().armed += 1;
+        let mut state = self.0.lock().unwrap();
+        if state.fail_arm_after == Some(state.armed) {
+            return Err(net::Error::Capture {
+                message: "fixture arm failure".to_owned(),
+                source: None,
+            });
+        }
+        state.armed += 1;
         Ok(Capture {
             state: self.0.clone(),
             metadata: capture::Metadata {

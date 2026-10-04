@@ -185,3 +185,65 @@ fn sink_failure() -> BoundaryError {
         Vec::new(),
     )
 }
+
+#[derive(Clone, Copy)]
+struct SplitRoutes;
+
+impl packetcraftr_netio::route::Provider for SplitRoutes {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: std::net::IpAddr,
+        interface: Option<&packetcraftr_netio::interface::Id>,
+        source: Option<std::net::IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<packetcraftr_netio::route::Decision, Infallible> {
+        let mut route = Routes.lookup_with_preferences(destination, interface, source, deadline)?;
+        if destination == "192.0.2.3".parse::<std::net::IpAddr>().unwrap() {
+            route.interface.index = 2;
+            route.interface.name = "fixture1".to_owned();
+        }
+        Ok(route)
+    }
+}
+
+#[test]
+fn partial_capture_arm_failure_preserves_cleanup_and_source_evidence() {
+    use packetcraftr_core::error::Classified;
+
+    for fail_shutdown in [false, true] {
+        let state = Arc::new(Mutex::new(State {
+            fail_arm_after: Some(1),
+            fail_shutdown,
+            ..State::default()
+        }));
+        let client = Client::new(
+            builtin::registry(),
+            policy(),
+            common::providers(SplitRoutes, Io(state.clone())),
+        );
+        let mut request = request();
+        request.targets.include = vec!["192.0.2.2/31".parse().unwrap()];
+        request.ports = vec![80];
+        let error = client
+            .scan(request, scan::Collector::default())
+            .unwrap_err();
+        let failure = pipeline_failure(&error).expect("arming failure retains pipeline evidence");
+        let causes = error.causes().join("\n");
+        assert!(causes.contains("fixture arm failure"), "{causes}");
+        assert_eq!(causes.contains("fixture cleanup failure"), fail_shutdown);
+        assert_eq!(failure.cleanup.is_some(), fail_shutdown);
+        assert_eq!(failure.capture_sources.len(), 1);
+        let source = &failure.capture_sources[0];
+        assert_eq!(source.metadata.interface.name, "fixture0");
+        assert_eq!(source.shutdown_confirmed, !fail_shutdown);
+        assert!(!source.ready);
+        assert!(failure.pending.is_empty());
+        assert_eq!(failure.stats.packets_attempted, 0);
+        let state = state.lock().unwrap();
+        assert_eq!(state.armed, 1);
+        assert_eq!(state.shutdowns, 1);
+        assert_eq!(state.sends, 0);
+    }
+}

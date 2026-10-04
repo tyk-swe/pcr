@@ -217,12 +217,25 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             native: Default::default(),
         };
         let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
-        group
-            .arm(
-                executor.client.providers.capture(),
-                &until(executor.client, deadline),
-            )
-            .map_err(BoundaryError::from_error)?;
+        if let Err(source) = group.arm(
+            executor.client.providers.capture(),
+            &until(executor.client, deadline),
+        ) {
+            // Arming may already have admitted sources. Retrieve the group's
+            // retained cleanup failure and source status before dropping it.
+            let cleanup = group.shutdown().err().map(Box::new);
+            return Err(BoundaryError::from_error(PipelineFailure {
+                source: BoundaryError::from_error(source),
+                stats: Stats {
+                    elapsed: executor.client.now().saturating_duration_since(started),
+                    ..Stats::default()
+                },
+                pending: Vec::new(),
+                failed_probe: None,
+                capture_sources: group.snapshot(),
+                cleanup,
+            }));
+        }
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()

@@ -9,10 +9,13 @@ use packetcraftr_core::{
 use std::sync::Arc;
 
 pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
+    // Build membership once: duplicate request ports must not multiply the
+    // work for each profile before the engine validates the request.
+    let selected: std::collections::HashSet<_> = request.ports.iter().copied().collect();
     request
         .udp_profiles
         .iter()
-        .filter(|(port, _)| request.ports.contains(port))
+        .filter(|(port, _)| selected.contains(port))
         .map(|(port, profile)| {
             (
                 *port,

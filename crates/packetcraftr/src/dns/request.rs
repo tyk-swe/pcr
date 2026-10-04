@@ -228,11 +228,8 @@ pub struct EdnsRequest {
 impl EdnsRequest {
     pub fn validate(&self) -> Result<(), wire::Error> {
         if self.udp_payload_size < 512 {
-            return Err(wire::Error::InvalidEdns {
-                message: format!(
-                    "request UDP payload size {} must be within 512..=65535",
-                    self.udp_payload_size
-                ),
+            return Err(wire::Error::InvalidEdnsPayloadSize {
+                value: self.udp_payload_size,
             });
         }
         Ok(())

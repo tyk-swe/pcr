@@ -41,6 +41,8 @@ pub enum Error {
     UnsupportedEdnsVersion { version: u8 },
     #[error("DNS EDNS metadata is invalid: {message}")]
     InvalidEdns { message: String },
+    #[error("DNS query EDNS UDP payload size {value} must be within 512..=65535")]
+    InvalidEdnsPayloadSize { value: u16 },
     #[error(
         "DNS name exceeds the {}-byte wire limit",
         packetcraftr_core::protocol::application::dns::MAX_NAME_LEN
@@ -72,6 +74,7 @@ impl Classified for Error {
             Self::Encode(source) => source.classification(),
             Self::Decode(source) => source.classification(),
             Self::InvalidName { .. }
+            | Self::InvalidEdnsPayloadSize { .. }
             | Self::NameTooLong
             | Self::QueryTypeSyntax
             | Self::QueryTypeRange(_) => Classification::new(
@@ -87,5 +90,40 @@ impl Classified for Error {
                 Some("inspect the DNS message that breaks a wire rule"),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_edns_validation_is_distinct_from_malformed_response_metadata() {
+        for value in [0, 511] {
+            let error = crate::dns::EdnsRequest {
+                udp_payload_size: value,
+                dnssec_ok: false,
+            }
+            .validate()
+            .unwrap_err();
+            assert_eq!(error, Error::InvalidEdnsPayloadSize { value });
+            assert_eq!(error.classification().code, "packet.dns_query");
+        }
+        assert!(
+            crate::dns::EdnsRequest {
+                udp_payload_size: 512,
+                dnssec_ok: false,
+            }
+            .validate()
+            .is_ok()
+        );
+        assert_eq!(
+            Error::InvalidEdns {
+                message: "malformed response OPT".into(),
+            }
+            .classification()
+            .code,
+            "packet.dns"
+        );
     }
 }

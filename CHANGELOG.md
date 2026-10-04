@@ -1814,6 +1814,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Direct DNS wire errors classify an invalid query EDNS payload size as
+  `packet.dns_query`, using `InvalidEdnsPayloadSize`; malformed response EDNS
+  retains `InvalidEdns` and `packet.dns`.
+- Scan profile binding builds port membership once, so repeated requested ports
+  cannot multiply preparation work by the number of profiles.
+- The scope-limit regression handles 32-bit `usize` without overflowing when
+  constructing an out-of-range limit.
+
 - `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
   and rollback to the parent directory opened before input is read. On Linux
   with procfs they address the directory handle, so a parent path retargeted

@@ -251,18 +251,22 @@ mod tests {
 
     #[test]
     fn a_scope_limit_beyond_the_identity_space_is_refused() {
+        assert!(Limits::default().validate().is_ok());
+        let Some(max_scopes) = MAX_SCOPES.checked_add(1) else {
+            // On 32-bit targets every representable limit fits the identity space.
+            return;
+        };
         let beyond = Limits {
-            max_scopes: MAX_SCOPES + 1,
+            max_scopes,
             ..Limits::default()
         };
         let expected = Error::InvalidLimit {
-            value: MAX_SCOPES + 1,
+            value: max_scopes,
             maximum: MAX_SCOPES,
         };
         assert_eq!(beyond.validate(), Err(expected.clone()));
         assert_eq!(Interner::with_limits(beyond).unwrap_err(), expected);
         assert_eq!(expected.classification().code, "cli.analysis_limit");
-        assert!(Limits::default().validate().is_ok());
     }
 
     #[test]

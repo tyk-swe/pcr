@@ -894,7 +894,7 @@ fn edns_validation_precedes_authorization_and_execution() {
         .unwrap_err();
         assert!(matches!(
             error,
-            super::Error::Query(super::wire::Error::InvalidEdns { .. })
+            super::Error::Query(super::wire::Error::InvalidEdnsPayloadSize { .. })
         ));
         assert!(
             std::error::Error::source(&error).is_some(),

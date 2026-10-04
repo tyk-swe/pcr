@@ -197,4 +197,39 @@ mod tests {
         assert_eq!(error.classification().code, "cli.scan_executor");
         assert!(providers.calls().is_empty());
     }
+
+    #[test]
+    fn profile_bindings_handle_repeated_ports_and_exclude_unselected_profiles() {
+        use packetcraftr_core::document::udp_profiles::{Config, Payload, ResponseCheck};
+        let (client, _) = fake_client();
+        let profile = Arc::new(
+            crate::scan::profile::UdpProfile::new(Config {
+                name: "fixture".into(),
+                request: Payload::Bytes {
+                    data: bytes::Bytes::new(),
+                },
+                response: ResponseCheck::Any {},
+            })
+            .unwrap(),
+        );
+        let mut request = Request {
+            max_in_flight: 1,
+            targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
+            transport: Transport::Udp,
+            udp_payload: bytes::Bytes::new(),
+            udp_profiles: (0..4096).map(|port| (port, profile.clone())).collect(),
+            address_family: Family::Any,
+            ports: vec![65535; 1_000_000],
+            attempts: 1,
+            timeout: Duration::from_millis(20),
+            probes_per_second: None,
+            limits: Limits::default(),
+            route: Default::default(),
+            collection: Default::default(),
+        };
+        assert!(ClientExecutor::new(&client, &request).bindings.is_empty());
+        request.ports.extend([53, 53, 4095]);
+        let bindings = ClientExecutor::new(&client, &request).bindings;
+        assert_eq!(bindings, [(53, "raw".into()), (4095, "raw".into())]);
+    }
 }

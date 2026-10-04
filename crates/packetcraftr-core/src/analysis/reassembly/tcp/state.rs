@@ -103,10 +103,9 @@ pub(super) fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, paylo
     else {
         return true;
     };
-    !state
-        .emitted_history
-        .range(history_start..history_end)
-        .eq(payload_overlap.iter())
+    let (head, tail) = state.emitted_history.slices(history_start..history_end);
+    let (payload_head, payload_tail) = payload_overlap.split_at(head.len());
+    head != payload_head || tail != payload_tail
 }
 
 pub(super) fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
@@ -132,7 +131,9 @@ pub(super) fn prepare_emitted_history(
         .emitted_history
         .len()
         .saturating_sub(retained_capacity);
-    resized.extend(state.emitted_history.range(skip..).copied());
+    let (head, tail) = state.emitted_history.slices(skip..);
+    resized.extend(head);
+    resized.extend(tail);
     Ok(Some(resized))
 }
 
@@ -169,12 +170,8 @@ pub(super) fn append_emitted_history(
         state.emitted_history.clear();
     }
     let output_skip = history_start_offset.saturating_sub(output_start) as usize;
-    state.emitted_history.extend(
-        output
-            .get(output_skip..)
-            .unwrap_or_default()
-            .iter()
-            .copied(),
-    );
+    state
+        .emitted_history
+        .extend(output.get(output_skip..).unwrap_or_default());
     state.history_start_offset = history_start_offset;
 }

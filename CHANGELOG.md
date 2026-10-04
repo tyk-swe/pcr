@@ -6,6 +6,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The event-driven Claude workflow now uses only a read-only GitHub token,
+  checks out the default branch without persisted credentials, and performs
+  analysis without publishing comments, reviews, or repository changes.
+
 ### Breaking
 
 - `packetcraftr::Providers` is now a blanket marker over the capability

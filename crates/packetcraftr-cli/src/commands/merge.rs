@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-mod rendering;
 
 use self::arguments::{Args, OrderArg};
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate},
+    rendering::{StreamEncoder, emit_aggregate, write_summary_line},
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
@@ -110,7 +109,13 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     match format {
         Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => rendering::render_text(&report),
+        Format::Text => write_summary_line(format_args!(
+            "merged {} frames ({} bytes) across {} interfaces into {}",
+            report.frames,
+            report.captured_bytes,
+            report.interfaces.len(),
+            report.path
+        )),
         other => other.unreachable(),
     }
 }

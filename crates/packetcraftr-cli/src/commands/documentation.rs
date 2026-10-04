@@ -1,16 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub(super) mod arguments;
 mod rendering;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use self::arguments::Args;
 use crate::errors::{CliError, source_causes};
 use crate::output::contract::Format;
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
+    /// Write `completions/` and `man/` trees under this directory.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) directory: PathBuf,
+}
 
 impl super::Generate for Args {
     fn generate(self, _format: Format) -> Result<(), CliError> {

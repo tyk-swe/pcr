@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-mod rendering;
 
 use self::arguments::Args;
 use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_hex_line},
+    rendering::{
+        StreamEncoder, emit_aggregate, write_capture_file, write_hex_line, write_stdout_line,
+    },
 };
 use packetcraftr_core::{self as core, frame::Frame};
 
@@ -87,7 +88,12 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             Format::Json => records.push(record),
             Format::Ndjson => stream.emit_data(record, Vec::new())?,
             Format::Hex => write_hex_line(record.frame.bytes())?,
-            Format::Text => rendering::render_fragment(&record)?,
+            Format::Text => write_stdout_line(format_args!(
+                "fragment {}: {} bytes {}",
+                record.fragment_index,
+                record.frame.captured_length,
+                record.frame.bytes_hex()
+            ))?,
             Format::Pcap | Format::PcapNg => {
                 return Err(CliError::new(
                     core::error::Kind::Internal,

@@ -126,8 +126,8 @@ commands! {
     #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
     Dissect(dissect::arguments::Args) = "dissect",
     /// List built-in protocols or describe one protocol.
-    #[command(after_long_help = protocols::arguments::AFTER_LONG_HELP)]
-    Protocols(protocols::arguments::Args) = "protocols",
+    #[command(after_long_help = protocols::AFTER_LONG_HELP)]
+    Protocols(protocols::Args) = "protocols",
     /// Stream frames from a classic PCAP or PCAPNG file.
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
     Read(read::arguments::Args) = "read",
@@ -197,14 +197,14 @@ commands! {
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
     Fuzz(fuzz::arguments::Args) = "fuzz",
     /// Enumerate passive interface-bound route decisions.
-    #[command(after_long_help = routes::arguments::AFTER_LONG_HELP)]
-    Routes(routes::arguments::Args) = "routes",
+    #[command(after_long_help = routes::AFTER_LONG_HELP)]
+    Routes(routes::Args) = "routes",
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
-    Documentation(documentation::arguments::Args),
+    Documentation(documentation::Args),
     /// Print built-in references for packet expressions, filters, formats, and exit codes.
-    #[command(after_long_help = topics::arguments::AFTER_LONG_HELP)]
-    Topics(topics::arguments::Args),
+    #[command(after_long_help = topics::AFTER_LONG_HELP)]
+    Topics(topics::Args),
 }

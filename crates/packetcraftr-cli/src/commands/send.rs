@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
-mod rendering;
 
 use crate::output::contract::Format;
 
@@ -97,7 +96,7 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
                         for diagnostic in &frame.packet.built().diagnostics {
                             core::diagnostic::push_once(&mut collected, diagnostic.clone());
                         }
-                        write_summary_line(format_args!("{}", rendering::sent_line(frame)))
+                        write_summary_line(format_args!("{}", sent_line(frame)))
                     }),
                 )
                 .map_err(CliError::classified)?;
@@ -151,4 +150,15 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         }
         other => other.unreachable(),
     }
+}
+
+fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
+    let route = frame.packet.route();
+    format!(
+        "sent {} bytes via {} (index {}, {})",
+        frame.packet.wire_bytes().len(),
+        route.plan.decision.interface.name,
+        route.plan.decision.interface.index,
+        route.plan.mode
+    )
 }

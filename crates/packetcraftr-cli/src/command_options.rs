@@ -44,11 +44,16 @@ pub(crate) use duration::{Bounded, LongTimeoutArgs, MaxDurationArgs, TimeoutArgs
 mod selectors;
 pub(crate) use selectors::{InterfaceSelector, Selector, interface_selector, stream_selector};
 
-mod target;
-pub(crate) use target::parse_target;
-
 mod timestamp;
 pub(crate) use timestamp::parse_timestamp;
 
 mod application;
 pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};
+
+pub(crate) fn parse_target(
+    target: String,
+) -> Result<packetcraftr::target::Target, crate::errors::CliError> {
+    target
+        .parse::<packetcraftr::target::Target>()
+        .map_err(crate::errors::CliError::classified)
+}

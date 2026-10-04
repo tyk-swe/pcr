@@ -30,8 +30,9 @@ pub(crate) use frame::{
 pub(crate) use human::{
     HumanWriteError, comma_separated, document_spelling, duration_text, emit_stderr_document,
     emit_stderr_error, emit_stderr_message, emit_stdout_document, encapsulation_text,
-    optional_display, optional_duration, render_diagnostics_stderr, render_diagnostics_text,
-    spaced_hex, write_stdout_line, write_stdout_line_with_interrupt, write_summary_line,
+    optional_display, optional_duration, push_stdout_line, render_diagnostics_stderr,
+    render_diagnostics_text, spaced_hex, write_stdout_block, write_stdout_line,
+    write_stdout_line_with_interrupt, write_summary_line,
 };
 
 pub(crate) use machine::{

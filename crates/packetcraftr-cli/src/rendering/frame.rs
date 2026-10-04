@@ -14,7 +14,10 @@ use crate::errors::CliError;
 use crate::output;
 
 use super::style::terminal_safe;
-use super::{render_diagnostics_text, render_dns_records, spaced_hex, write_stdout_line};
+use super::{
+    push_stdout_line, render_diagnostics_text, render_dns_records, spaced_hex, write_stdout_block,
+    write_stdout_line,
+};
 
 /// Registered decoders nest far less; this is the document nesting ceiling.
 const MAX_TREE_DEPTH: usize = document::MAX_DOCUMENT_NESTING;
@@ -110,9 +113,14 @@ impl FieldTree {
         packet: &document::Packet,
         header: impl Fn(usize, &str) -> String,
     ) -> Result<(), CliError> {
-        self.walk(packet, &header, &mut |line| {
-            write_stdout_line(format_args!("{line}"))
-        })
+        // One write per packet; lines rendered before a failure are still written.
+        let mut block = String::new();
+        let walked = self.walk(packet, &header, &mut |line| {
+            push_stdout_line(&mut block, format_args!("{line}"));
+            Ok(())
+        });
+        write_stdout_block(&block)?;
+        walked
     }
 
     fn walk(

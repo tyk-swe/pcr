@@ -18,6 +18,24 @@ struct Staged {
     direction: PeerDirection,
     file: StagedFile,
     bytes: u64,
+    /// Payload not yet written, so small chunks reach the file in larger writes.
+    pending: Vec<u8>,
+}
+
+impl Staged {
+    const WRITE_SIZE: usize = 64 * 1024;
+
+    fn write_pending(&mut self) -> Result<(), CliError> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        self.file
+            .as_file_mut()
+            .write_all(&self.pending)
+            .map_err(|source| CliError::wrapping(Kind::Io, "write follow payload", &source))?;
+        self.pending.clear();
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +78,7 @@ impl DirectionFiles {
                 direction: *direction,
                 file,
                 bytes: 0,
+                pending: Vec::new(),
             });
         }
         Ok(Self {
@@ -83,11 +102,18 @@ impl DirectionFiles {
             ));
         }
         self.remaining -= chunk.bytes.len();
-        staged
-            .file
-            .as_file_mut()
-            .write_all(&chunk.bytes)
-            .map_err(|source| CliError::wrapping(Kind::Io, "write follow payload", &source))?;
+        if staged.pending.len() + chunk.bytes.len() > Staged::WRITE_SIZE {
+            staged.write_pending()?;
+        }
+        if chunk.bytes.len() >= Staged::WRITE_SIZE {
+            staged
+                .file
+                .as_file_mut()
+                .write_all(&chunk.bytes)
+                .map_err(|source| CliError::wrapping(Kind::Io, "write follow payload", &source))?;
+        } else {
+            staged.pending.extend_from_slice(&chunk.bytes);
+        }
         staged.bytes = staged
             .bytes
             .saturating_add(u64::try_from(chunk.bytes.len()).unwrap_or(u64::MAX));
@@ -101,12 +127,13 @@ impl DirectionFiles {
     /// Rollback removes each published file through the directory it was
     /// published into, never through a re-resolved requested path.
     fn publish_with(
-        self,
+        mut self,
         mut sync: impl FnMut(&StagedFile) -> Result<(), CliError>,
         mut remove: impl FnMut(&Published) -> std::io::Result<()>,
     ) -> Result<Vec<Written>, CliError> {
-        // No destination is published until every staged file is synchronized.
-        for staged in &self.staged {
+        // No destination is published until every staged file is written and synchronized.
+        for staged in &mut self.staged {
+            staged.write_pending()?;
             sync(&staged.file)?;
         }
         let mut published: Vec<Published> = Vec::new();

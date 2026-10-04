@@ -19,7 +19,12 @@ use packetcraftr_core::analysis::reassembly::tcp::{
     Event, FlowKey, Reassembler, ScopedFlowKey, Segment,
 };
 use packetcraftr_core::analysis::scope::Interner;
+use packetcraftr_core::analysis::{self, Options as AnalysisOptions};
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::capture_file::compression::{
+    Format as CompressionFormat, Input as CompressedInput, Limits as CompressionLimits,
+    Output as CompressedOutput,
+};
 use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
@@ -28,6 +33,7 @@ use packetcraftr_core::filter::{Context as FilterContext, Filter, Limits as Filt
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
+use packetcraftr_core::protocol::application::http2::CLIENT_PREFACE;
 use packetcraftr_core::protocol::application::tls::{
     Handshake, Outcome, Transport, ja3, ja4, parse_handshake, parse_record,
 };
@@ -544,6 +550,297 @@ fn bench_filter_evaluation(c: &mut Criterion) {
             black_box(matched);
         });
     });
+
+    let members = (0..256_u32)
+        .map(|index| format!("10.0.{}.{}", index / 256, index % 256))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let set_filter = Filter::compile(
+        &format!("ip.addr in {{{members}}}"),
+        &registry,
+        FilterLimits::default(),
+    )
+    .expect("compile set filter");
+    c.bench_function("filter_evaluation_set_256", |b| {
+        b.iter(|| {
+            let matched = set_filter.matches(black_box(&context)).expect("match");
+            assert!(!matched);
+            black_box(matched);
+        });
+    });
+}
+
+fn tcp_frame(
+    builder: &Builder,
+    tick: u64,
+    client: bool,
+    sequence: u32,
+    acknowledgment: u32,
+    flags: u16,
+    payload: &[u8],
+) -> Frame {
+    let (source, destination) = (Ipv4Addr::new(192, 0, 2, 1), Ipv4Addr::new(198, 51, 100, 2));
+    let (source, destination, source_port, destination_port) = if client {
+        (source, destination, 40_000, 80)
+    } else {
+        (destination, source, 80, 40_000)
+    };
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source,
+        destination,
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port,
+        destination_port,
+        sequence,
+        acknowledgment,
+        flags,
+        window: 65_535,
+        ..Tcp::default()
+    });
+    if !payload.is_empty() {
+        packet.push(Raw::new(payload.to_vec()));
+    }
+    let built = builder
+        .build(packet, Context::default(), BuildOptions::default())
+        .expect("benchmark TCP frame builds");
+    let timestamp = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(tick);
+    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("benchmark frame")
+}
+
+fn http2_frame(ty: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+    let length = u32::try_from(payload.len()).expect("benchmark payload fits 24 bits");
+    let mut bytes = Vec::with_capacity(9 + payload.len());
+    bytes.extend_from_slice(&length.to_be_bytes()[1..]);
+    bytes.push(ty);
+    bytes.push(flags);
+    bytes.extend_from_slice(&stream.to_be_bytes());
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+/// A prior-knowledge HTTP/2 connection carrying 32 request/response exchanges,
+/// with the client byte stream split into MSS-sized TCP segments.
+fn http2_connection_capture() -> Vec<u8> {
+    const STREAMS: u32 = 32;
+    const SEGMENT: usize = 1_448;
+    const END_STREAM: u8 = 0x1;
+    const END_HEADERS: u8 = 0x4;
+    const REQUEST: &[u8] = &[
+        0x82, 0x86, 0x84, 0x41, 0x0f, 0x77, 0x77, 0x77, 0x2e, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c,
+        0x65, 0x2e, 0x63, 0x6f, 0x6d,
+    ];
+    let builder = Builder::new(bench_registry());
+    let mut client = CLIENT_PREFACE.to_vec();
+    client.extend(http2_frame(0x4, 0, 0, &[]));
+    let mut server = http2_frame(0x4, 0, 0, &[]);
+    server.extend(http2_frame(0x4, 0x1, 0, &[]));
+    client.extend(http2_frame(0x4, 0x1, 0, &[]));
+    for index in 0..STREAMS {
+        let stream = index * 2 + 1;
+        client.extend(http2_frame(0x1, END_HEADERS, stream, REQUEST));
+        client.extend(http2_frame(0x0, END_STREAM, stream, &[0x61; 1_024]));
+        server.extend(http2_frame(0x1, END_HEADERS, stream, &[0x88]));
+        server.extend(http2_frame(0x0, END_STREAM, stream, &[0x62; 512]));
+    }
+
+    let (mut client_sequence, mut server_sequence) = (1_000_u32, 5_000_u32);
+    let mut tick = 0;
+    let mut frames = Vec::new();
+    let mut push = |frame: Frame| frames.push(frame);
+    let mut next_tick = || {
+        tick += 1;
+        tick
+    };
+    push(tcp_frame(
+        &builder,
+        next_tick(),
+        true,
+        client_sequence,
+        0,
+        0x02,
+        &[],
+    ));
+    client_sequence += 1;
+    push(tcp_frame(
+        &builder,
+        next_tick(),
+        false,
+        server_sequence,
+        client_sequence,
+        0x12,
+        &[],
+    ));
+    server_sequence += 1;
+    push(tcp_frame(
+        &builder,
+        next_tick(),
+        true,
+        client_sequence,
+        server_sequence,
+        0x10,
+        &[],
+    ));
+    for chunk in client.chunks(SEGMENT) {
+        push(tcp_frame(
+            &builder,
+            next_tick(),
+            true,
+            client_sequence,
+            server_sequence,
+            0x18,
+            chunk,
+        ));
+        client_sequence += u32::try_from(chunk.len()).expect("segment fits u32");
+    }
+    for chunk in server.chunks(SEGMENT) {
+        push(tcp_frame(
+            &builder,
+            next_tick(),
+            false,
+            server_sequence,
+            client_sequence,
+            0x18,
+            chunk,
+        ));
+        server_sequence += u32::try_from(chunk.len()).expect("segment fits u32");
+    }
+    push(tcp_frame(
+        &builder,
+        next_tick(),
+        true,
+        client_sequence,
+        server_sequence,
+        0x11,
+        &[],
+    ));
+    push(tcp_frame(
+        &builder,
+        next_tick(),
+        false,
+        server_sequence,
+        client_sequence + 1,
+        0x11,
+        &[],
+    ));
+
+    let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("pcap writer");
+    for frame in &frames {
+        writer.write_frame(frame).expect("write frame");
+    }
+    writer.into_inner()
+}
+
+fn bench_http2_analysis(c: &mut Criterion) {
+    use packetcraftr_core::analysis::application::Limits as ApplicationLimits;
+    use packetcraftr_core::analysis::http2::{Collector, Event, Limits as Http2Limits};
+
+    let capture = http2_connection_capture();
+    let registry = bench_registry();
+    let mut group = c.benchmark_group("http2_analysis");
+    group.throughput(Throughput::Bytes(
+        u64::try_from(capture.len()).expect("capture size fits"),
+    ));
+    group.bench_function("32_streams", |b| {
+        b.iter(|| {
+            let mut reader =
+                Reader::new(Cursor::new(black_box(capture.as_slice()))).expect("reader");
+            let mut collector =
+                Collector::new(ApplicationLimits::default(), [80], Http2Limits::default())
+                    .expect("collector");
+            let mut messages = 0_usize;
+            let run = analysis::run(
+                &mut reader,
+                Arc::clone(&registry),
+                &AnalysisOptions {
+                    track_sources: true,
+                    tcp_events: true,
+                    ..Default::default()
+                },
+                |record| {
+                    for event in collector
+                        .observe(&record)
+                        .map_err(packetcraftr_core::error::BoundaryError::from_error)?
+                    {
+                        if matches!(event, Event::Message(_)) {
+                            messages += 1;
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .expect("analysis");
+            let (trailing, summary) = collector.finish(&run).expect("finish");
+            assert_eq!(messages, 64, "every request and response completes");
+            black_box((trailing, summary));
+        });
+    });
+    group.finish();
+}
+
+fn bench_tls_application_data_decode(c: &mut Criterion) {
+    let registry = bench_registry();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut record = vec![0x17, 0x03, 0x03];
+    record.extend_from_slice(&1_400_u16.to_be_bytes());
+    record.extend_from_slice(&[0xa5; 1_400]);
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: Ipv4Addr::new(192, 0, 2, 1),
+        destination: Ipv4Addr::new(198, 51, 100, 2),
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port: 443,
+        destination_port: 40_000,
+        flags: 0x0018,
+        ..Tcp::default()
+    });
+    packet.push(Raw::new(record));
+    let built = builder
+        .build(packet, Context::default(), BuildOptions::default())
+        .expect("build");
+    let frame = Frame::new(SystemTime::now(), LinkType::IPV4, built.bytes).expect("frame");
+
+    c.bench_function("tls_application_data_decode", |b| {
+        b.iter(|| {
+            let decoded = dissector
+                .decode(black_box(frame.clone()), DecodeOptions::default())
+                .expect("decode");
+            black_box(decoded);
+        });
+    });
+}
+
+fn bench_compressed_capture_read(c: &mut Criterion) {
+    let frame_payload = Bytes::from(vec![0x5a; 512]);
+    let frame = Frame::new(SystemTime::now(), LinkType::IPV4, frame_payload).expect("frame");
+    let output = CompressedOutput::new(Vec::new(), CompressionFormat::Gzip).expect("gzip output");
+    let mut writer = Writer::pcap(output, LinkType::IPV4).expect("pcap writer");
+    for _ in 0..1_000 {
+        writer.write_frame(&frame).expect("write frame");
+    }
+    let compressed = writer.into_inner().finish().expect("finish gzip");
+
+    c.bench_function("capture_read_gzip_pcap_frames", |b| {
+        b.iter(|| {
+            let input = CompressedInput::new(
+                Cursor::new(black_box(compressed.as_slice())),
+                CompressionLimits::default(),
+            )
+            .expect("gzip input");
+            let mut reader = Reader::with_limits(input, ReaderLimits::default()).expect("reader");
+            let mut count = 0_usize;
+            while let Some(f) = reader.next_frame().expect("valid benchmark frame") {
+                black_box(f);
+                count += 1;
+            }
+            assert_eq!(count, 1_000);
+        });
+    });
 }
 
 criterion_group!(
@@ -556,5 +853,8 @@ criterion_group!(
     bench_checksum,
     bench_tls_assembly,
     bench_filter_evaluation,
+    bench_http2_analysis,
+    bench_tls_application_data_decode,
+    bench_compressed_capture_read,
 );
 criterion_main!(benches);

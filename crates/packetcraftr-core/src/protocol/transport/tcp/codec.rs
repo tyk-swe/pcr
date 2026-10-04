@@ -110,7 +110,7 @@ impl LayerCodec for TcpCodec {
         }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        materialized.options = parse(&Bytes::copy_from_slice(&options));
+        materialized.options = parse(&Bytes::from(options));
         Ok(EncodedLayer::header(prefix, Box::new(materialized))
             .with_fields(tcp_layout(header_len))
             .with_diagnostics(diagnostics))
@@ -251,6 +251,9 @@ impl TcpOption {
 }
 
 pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, crate::codec::Error> {
+    if options.is_empty() {
+        return Ok(Vec::new());
+    }
     let invalid = |message: &str| invalid(NAME, message);
     let mut output = Vec::with_capacity(MAX_OPTION_BYTES);
     let mut seen_end = false;

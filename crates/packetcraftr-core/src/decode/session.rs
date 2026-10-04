@@ -53,6 +53,8 @@ pub(super) struct DecodeSession<'registry> {
     diagnostics: Vec<Diagnostic>,
     trailing: Vec<TrailingBytes>,
     traversal: TraversalScope,
+    /// TTL or hop limit of the most recently committed IP header.
+    last_hop_limit: Option<u8>,
 }
 
 impl<'registry> DecodeSession<'registry> {
@@ -73,6 +75,7 @@ impl<'registry> DecodeSession<'registry> {
             diagnostics: Vec::new(),
             trailing: Vec::new(),
             traversal,
+            last_hop_limit: None,
         }
     }
 
@@ -127,7 +130,11 @@ impl<'registry> DecodeSession<'registry> {
         codec.decode(
             input,
             &LayerDecodeContext {
-                parent: self.packet.iter().last().map(|layer| *layer.protocol_id()),
+                parent: self
+                    .packet
+                    .iter()
+                    .next_back()
+                    .map(|layer| *layer.protocol_id()),
                 registry: self.registry,
                 network: self.traversal.network(),
                 hop_limit: self.enclosing_hop_limit(),
@@ -139,13 +146,7 @@ impl<'registry> DecodeSession<'registry> {
     /// The TTL or hop limit of the IP header whose envelope is in scope.
     fn enclosing_hop_limit(&self) -> Option<u8> {
         self.traversal.network()?;
-        self.packet.iter().rev().find_map(|layer| {
-            if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
-                Some(ipv4.ttl)
-            } else {
-                layer.downcast_ref::<Ipv6>().map(|ipv6| ipv6.hop_limit)
-            }
-        })
+        self.last_hop_limit
     }
 
     fn preserve_missing_codec(&mut self, cursor: &DecodeCursor) -> Result<(), Error> {
@@ -273,11 +274,9 @@ impl<'registry> DecodeSession<'registry> {
     }
 
     fn select_child(&self, layer: &ValidatedLayer) -> ChildSelection {
-        let selected = layer.decoded.next.iter().find_map(|value| {
-            self.registry
-                .child_for(layer.protocol.as_str(), *value)
-                .map(|protocol| (*value, protocol))
-        });
+        let selected = self
+            .registry
+            .first_child_for(layer.protocol.as_str(), &layer.decoded.next);
         ChildSelection {
             discriminator: selected.as_ref().map(|(value, _)| *value),
             protocol: selected.map(|(_, protocol)| protocol),
@@ -303,6 +302,12 @@ impl<'registry> DecodeSession<'registry> {
             range: ByteRange::new(cursor.bytes.start, layer_end),
             fields: decoded.fields,
         });
+        let committed = decoded.layer.as_ref();
+        if let Some(ipv4) = committed.downcast_ref::<Ipv4>() {
+            self.last_hop_limit = Some(ipv4.ttl);
+        } else if let Some(ipv6) = committed.downcast_ref::<Ipv6>() {
+            self.last_hop_limit = Some(ipv6.hop_limit);
+        }
         self.traversal.accept_network(decoded.network);
         self.traversal
             .enter_child(self.registry, &decoded_protocol, child.protocol.as_ref());

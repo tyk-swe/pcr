@@ -94,21 +94,7 @@ where
 }
 
 pub(crate) fn spaced_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
-    SpacedHex(bytes)
-}
-
-struct SpacedHex<'a>(&'a [u8]);
-
-impl fmt::Display for SpacedHex<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, byte) in self.0.iter().enumerate() {
-            if index != 0 {
-                formatter.write_str(" ")?;
-            }
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
-    }
+    crate::output::hex::SpacedHex(bytes)
 }
 
 pub(crate) fn write_stdout_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
@@ -134,6 +120,20 @@ pub(crate) fn write_stdout_line_with_interrupt(
 ) -> Result<(), HumanWriteError> {
     let rendered = style_human_line(&terminal_safe(&arguments.to_string()));
     write_human_stdout(&rendered, true)
+}
+
+/// Appends a line styled as [`write_stdout_line`] would print it.
+pub(crate) fn push_stdout_line(block: &mut String, arguments: fmt::Arguments<'_>) {
+    block.push_str(&style_human_line(&terminal_safe(&arguments.to_string())));
+    block.push('\n');
+}
+
+/// Writes lines from [`push_stdout_line`] with one interruption check and flush.
+pub(crate) fn write_stdout_block(block: &str) -> Result<(), CliError> {
+    if block.is_empty() {
+        return Ok(());
+    }
+    write_human_stdout(block, false).map_err(HumanWriteError::into_cli_error)
 }
 
 pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {

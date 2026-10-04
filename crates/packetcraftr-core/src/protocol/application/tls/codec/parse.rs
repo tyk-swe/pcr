@@ -32,6 +32,28 @@ pub fn looks_like_record_start(input: &[u8]) -> bool {
 }
 
 pub fn parse_record(input: &[u8]) -> Outcome<Record> {
+    match parse_record_ref(input) {
+        Outcome::Complete { consumed, value } => Outcome::Complete {
+            consumed,
+            value: Record {
+                content_type: value.content_type,
+                legacy_version: value.legacy_version,
+                body: Bytes::copy_from_slice(value.body),
+            },
+        },
+        Outcome::NeedMore { minimum } => Outcome::NeedMore { minimum },
+        Outcome::Malformed(error) => Outcome::Malformed(error),
+    }
+}
+
+/// A record whose body borrows the parsed input.
+pub(super) struct RecordRef<'a> {
+    pub(super) content_type: u8,
+    pub(super) legacy_version: u16,
+    pub(super) body: &'a [u8],
+}
+
+pub(super) fn parse_record_ref(input: &[u8]) -> Outcome<RecordRef<'_>> {
     let Some(header) = input.first_chunk::<RECORD_HEADER_LEN>() else {
         return Outcome::NeedMore {
             minimum: RECORD_HEADER_LEN,
@@ -47,10 +69,10 @@ pub fn parse_record(input: &[u8]) -> Outcome<Record> {
     };
     Outcome::Complete {
         consumed: total,
-        value: Record {
+        value: RecordRef {
             content_type: header.content_type,
             legacy_version: header.legacy_version,
-            body: Bytes::copy_from_slice(body),
+            body,
         },
     }
 }

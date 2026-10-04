@@ -50,11 +50,12 @@ impl History {
         if self.len == 0 {
             self.start = 0;
         } else {
-            self.start = (self.start + count) % self.capacity();
+            self.start = self.wrap(self.start + count);
         }
         true
     }
-    pub(super) fn range(&self, range: impl RangeBounds<usize>) -> impl Iterator<Item = &u8> {
+    /// The bytes of `range` as at most two contiguous pieces, in stream order.
+    pub(super) fn slices(&self, range: impl RangeBounds<usize>) -> (&[u8], &[u8]) {
         let first = match range.start_bound() {
             Bound::Included(value) => *value,
             Bound::Excluded(value) => value + 1,
@@ -69,17 +70,39 @@ impl History {
             first <= end && end <= self.len,
             "history range was validated"
         );
-        (first..end).map(|index| &self.storage[(self.start + index) % self.capacity()])
+        if first == end {
+            return (&[], &[]);
+        }
+        let head = self.wrap(self.start + first);
+        let length = end - first;
+        let contiguous = (self.capacity() - head).min(length);
+        (
+            &self.storage[head..head + contiguous],
+            &self.storage[..length - contiguous],
+        )
     }
-    pub(super) fn extend(&mut self, bytes: impl IntoIterator<Item = u8>) {
-        for byte in bytes {
-            assert!(
-                self.len < self.capacity(),
-                "history storage admitted before commit"
-            );
-            let index = (self.start + self.len) % self.capacity();
-            self.storage[index] = byte;
-            self.len += 1;
+    pub(super) fn extend(&mut self, bytes: &[u8]) {
+        assert!(
+            bytes.len() <= self.capacity() - self.len,
+            "history storage admitted before commit"
+        );
+        if bytes.is_empty() {
+            return;
+        }
+        let tail = self.wrap(self.start + self.len);
+        let contiguous = (self.capacity() - tail).min(bytes.len());
+        let (head, wrapped) = bytes.split_at(contiguous);
+        self.storage[tail..tail + contiguous].copy_from_slice(head);
+        self.storage[..wrapped.len()].copy_from_slice(wrapped);
+        self.len += bytes.len();
+    }
+    // `index` stays below twice the capacity because `start < capacity` and
+    // every offset added to it is at most `len <= capacity`.
+    fn wrap(&self, index: usize) -> usize {
+        if index >= self.capacity() {
+            index - self.capacity()
+        } else {
+            index
         }
     }
 }
@@ -87,18 +110,26 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn contents(ring: &History, range: impl RangeBounds<usize>) -> Vec<u8> {
+        let (head, tail) = ring.slices(range);
+        [head, tail].concat()
+    }
+
     #[test]
     fn ring_wrap_preserves_order_and_rejects_invalid_drain() {
         let mut ring = History::new(3).unwrap();
-        ring.extend([1, 2, 3]);
+        ring.extend(&[1, 2, 3]);
         assert!(!ring.drain_prefix(4));
-        assert_eq!(ring.range(..).copied().collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(contents(&ring, ..), [1, 2, 3]);
         assert!(ring.drain_prefix(2));
-        ring.extend([4, 5]);
-        assert_eq!(ring.range(..).copied().collect::<Vec<_>>(), [3, 4, 5]);
+        ring.extend(&[4, 5]);
+        assert_eq!(contents(&ring, ..), [3, 4, 5]);
+        assert_eq!(contents(&ring, 1..3), [4, 5]);
+        assert_eq!(contents(&ring, 0..=1), [3, 4]);
         assert_eq!(ring.capacity(), 3);
         assert!(ring.drain_prefix(3));
         assert!(ring.is_empty());
-        assert!(History::new(0).unwrap().range(..).next().is_none());
+        assert_eq!(History::new(0).unwrap().slices(..), (&[][..], &[][..]));
     }
 }

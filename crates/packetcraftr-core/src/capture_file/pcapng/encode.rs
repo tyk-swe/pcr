@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Write;
+use std::io::{self, Write};
 
 use crate::frame::{Direction, Frame, LinkType};
 
@@ -13,8 +13,8 @@ use crate::capture_file::{
         PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
         PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS, PCAPNG_OPTION_IF_TSOFFSET,
         PCAPNG_OPTION_IF_TSRESOL, PCAPNG_SECTION_HEADER_BLOCK, WRITER_TIMESTAMP_RESOLUTION,
-        usize_to_u32_limit, validate_timestamp_resolution, write_i64, write_padding, write_u16,
-        write_u32,
+        usize_to_u32_limit, validate_timestamp_resolution, write_all_parts, write_i64,
+        write_padding, write_u16, write_u32,
     },
 };
 
@@ -145,9 +145,14 @@ pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
     }
     write_u32(&mut fields, endianness, block_length)?;
     let tail_length = capacity - fields.len();
-    writer.write_all(&header)?;
-    writer.write_all(frame.bytes())?;
-    writer.write_all(&tail[..tail_length])?;
+    write_all_parts(
+        writer,
+        &mut [
+            io::IoSlice::new(&header),
+            io::IoSlice::new(frame.bytes()),
+            io::IoSlice::new(&tail[..tail_length]),
+        ],
+    )?;
     Ok(())
 }
 

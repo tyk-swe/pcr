@@ -1,13 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Write;
+use std::io::{self, Write};
 
 use crate::frame::{Frame, LinkType};
 
 use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, TimestampPrecision};
-use crate::capture_file::wire::{PCAP_RECORD_HEADER_LEN, write_u16, write_u32};
+use crate::capture_file::wire::{PCAP_RECORD_HEADER_LEN, write_all_parts, write_u16, write_u32};
 
 pub(super) fn magic(endianness: Endianness, precision: TimestampPrecision) -> [u8; 4] {
     match (endianness, precision) {
@@ -53,7 +53,9 @@ pub(in crate::capture_file) fn write_pcap_frame<W: Write>(
     ] {
         write_u32(&mut fields, endianness, value)?;
     }
-    writer.write_all(&header)?;
-    writer.write_all(frame.bytes())?;
+    write_all_parts(
+        writer,
+        &mut [io::IoSlice::new(&header), io::IoSlice::new(frame.bytes())],
+    )?;
     Ok(())
 }

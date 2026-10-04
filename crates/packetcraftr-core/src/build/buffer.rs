@@ -14,6 +14,35 @@ pub(super) struct PacketBuffer {
 
 impl PacketBuffer {
     const MINIMUM_CAPACITY: usize = 64;
+    /// Room reserved ahead of the payload for each layer's header.
+    const HEADER_ROOM: usize = 96;
+    /// Room reserved behind the payload for trailers such as padding.
+    const SUFFIX_ROOM: usize = 64;
+    /// Unused storage a built packet may keep instead of being copied out.
+    const MAX_SHARED_SLACK: usize = 1024;
+
+    /// An empty buffer sized so that `layers` headers can usually wrap
+    /// `payload` pass-through bytes without growing.
+    pub(super) fn with_estimate(
+        payload: usize,
+        layers: usize,
+        maximum: usize,
+    ) -> Result<Self, Error> {
+        let capacity = layers
+            .saturating_mul(Self::HEADER_ROOM)
+            .saturating_add(payload)
+            .saturating_add(Self::SUFFIX_ROOM)
+            .min(maximum);
+        if capacity == 0 {
+            return Ok(Self::default());
+        }
+        let end = capacity - Self::SUFFIX_ROOM.min(capacity);
+        Ok(Self {
+            storage: allocate_zeroed(capacity)?,
+            start: end,
+            end,
+        })
+    }
 
     pub(super) fn len(&self) -> usize {
         self.end.saturating_sub(self.start)
@@ -127,6 +156,9 @@ impl PacketBuffer {
     pub(super) fn into_bytes(self) -> Bytes {
         if self.start == 0 && self.end == self.storage.len() {
             return Bytes::from(self.storage);
+        }
+        if self.storage.len() - self.len() <= Self::MAX_SHARED_SLACK {
+            return Bytes::from(self.storage).slice(self.start..self.end);
         }
         Bytes::copy_from_slice(&self.storage[self.start..self.end])
     }

@@ -24,14 +24,9 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     let aggregate_bytes = plan.aggregate_bytes;
     let aggregate_memory_charge = plan.aggregate_memory_charge;
     let max_bytes_per_flow = reassembler.limits.max_bytes_per_flow;
-    let previous_deadline = reassembler
-        .flows
-        .get(&segment.flow)
-        .and_then(|state| state.deadline);
-    let last_update = reassembler
-        .flows
-        .get(&segment.flow)
-        .map_or(now, |state| state.last_update.max(now));
+    let previous = reassembler.flows.get(&segment.flow);
+    let previous_deadline = previous.and_then(|state| state.deadline);
+    let last_update = previous.map_or(now, |state| state.last_update.max(now));
     let deadline = last_update.checked_add(reassembler.limits.idle_expiry);
     let Segment {
         flow, rst, payload, ..
@@ -72,15 +67,18 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
 
     reassembler.aggregate_bytes = aggregate_bytes;
     reassembler.aggregate_memory_charge = aggregate_memory_charge;
-    reassembler.expiry.remove(previous_deadline, &flow);
     if closed {
+        reassembler.expiry.remove(previous_deadline, &flow);
         reassembler.flows.remove(&flow);
         events.push(Event::Closed { flow, reset: rst });
     } else {
         if let Some(state) = replacement {
             reassembler.flows.insert(flow.clone(), state);
         }
-        reassembler.expiry.insert(deadline, flow);
+        if previous_deadline != deadline {
+            reassembler.expiry.remove(previous_deadline, &flow);
+            reassembler.expiry.insert(deadline, flow);
+        }
     }
     events
 }

@@ -123,12 +123,18 @@ impl Entry {
         self.size() + self.name_origins.len() * ORIGIN_BYTES + ENTRY_STRUCT_BYTES
     }
     fn origins(&self) -> Vec<u64> {
-        let mut origins = self.name_origins.clone();
-        origins.push(self.insert_origin);
-        origins.sort_unstable();
-        origins.dedup();
-        origins
+        with_origin(&self.name_origins, self.insert_origin)
     }
+}
+
+/// `lineage` plus `origin`; lineages stay ascending and duplicate-free.
+fn with_origin(lineage: &[u64], origin: u64) -> Vec<u64> {
+    let mut origins = Vec::with_capacity(lineage.len() + 1);
+    origins.extend_from_slice(lineage);
+    if let Err(position) = origins.binary_search(&origin) {
+        origins.insert(position, origin);
+    }
+    origins
 }
 
 /// Keep caller interruption distinct from malformed compressed input.
@@ -407,10 +413,7 @@ impl Decoder {
             return Err(Error::Limit(Limit::HeaderBytes));
         }
         self.charge_origins(resolved.origins_len(), charge)?;
-        let mut origins = resolved.origins();
-        origins.push(origin);
-        origins.sort_unstable();
-        origins.dedup();
+        let origins = with_origin(&resolved.origins(), origin);
         Ok(Field {
             name: resolved.name_bytes(),
             value: resolved.value_bytes(),
@@ -441,10 +444,7 @@ impl Decoder {
             (resolved.name_bytes(), resolved.origins())
         };
         let value = self.string(block, pos, charge.remaining - name.len(), check)?;
-        let mut origins = lineage.clone();
-        origins.push(origin);
-        origins.sort_unstable();
-        origins.dedup();
+        let origins = with_origin(&lineage, origin);
         Ok((
             Field {
                 name,

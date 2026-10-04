@@ -143,10 +143,12 @@ impl<R: Read> Read for Bounded<R> {
     }
 }
 
+// Decompressors sit behind a read buffer so small record-header reads do not
+// each enter the decoder; the decoded-byte limit still counts consumed bytes.
 enum Decoder<R: Read> {
     Plain(Source<R>),
-    Gzip(flate2::bufread::MultiGzDecoder<Source<R>>),
-    Zstd(zstd::stream::read::Decoder<'static, Source<R>>),
+    Gzip(BufReader<flate2::bufread::MultiGzDecoder<Source<R>>>),
+    Zstd(BufReader<zstd::stream::read::Decoder<'static, Source<R>>>),
 }
 impl<R: Read> Decoder<R> {
     fn format(&self) -> Format {
@@ -198,14 +200,16 @@ impl<R: Read> Input<R> {
         let source = BufReader::new(Cursor::new(prefix).chain(source));
         let decoder = match format {
             Format::None => Decoder::Plain(source),
-            Format::Gzip => Decoder::Gzip(flate2::bufread::MultiGzDecoder::new(source)),
+            Format::Gzip => {
+                Decoder::Gzip(BufReader::new(flate2::bufread::MultiGzDecoder::new(source)))
+            }
             Format::Zstd => {
                 let mut decoder = zstd::stream::read::Decoder::with_buffer(source)
                     .map_err(|source| Error::Io { format, source })?;
                 decoder
                     .window_log_max(limits.max_window_log)
                     .map_err(|source| Error::Io { format, source })?;
-                Decoder::Zstd(decoder)
+                Decoder::Zstd(BufReader::new(decoder))
             }
         };
         Ok(Self {

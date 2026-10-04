@@ -7,7 +7,6 @@ use bytes::Bytes;
 
 use super::ast::{Measure, Predicate};
 use super::comparison;
-use super::lexer::CompareOperator;
 use super::literal::Literal;
 use super::path::{
     ByteSlice, FieldRef, FieldSource, FrameField, ListSelection, Occurrence, Selector,
@@ -54,11 +53,9 @@ pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
         } => any_value(context, field, |candidate| {
             comparison::matches(candidate, *operator, value)
         }),
-        Predicate::Membership { field, values } => any_value(context, field, |candidate| {
-            values
-                .iter()
-                .any(|value| comparison::matches(candidate, CompareOperator::Equal, value))
-        }),
+        Predicate::Membership { field, values } => {
+            any_value(context, field, |candidate| values.contains(candidate))
+        }
         Predicate::Contains { field, needle } => any_value(context, field, |candidate| {
             comparison::contains(candidate, needle)
         }),

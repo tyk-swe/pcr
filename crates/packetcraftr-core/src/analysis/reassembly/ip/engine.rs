@@ -357,8 +357,10 @@ impl Reassembler {
                 self.datagrams.insert(key.clone(), new_state);
             }
         }
-        self.expiry.remove(previous_deadline, &key);
-        self.expiry.insert(deadline, key);
+        if previous_deadline != deadline {
+            self.expiry.remove(previous_deadline, &key);
+            self.expiry.insert(deadline, key);
+        }
         if new_slot_charge != 0 {
             self.retained.datagram_slots = self.retained.datagram_slots.saturating_add(1);
         }

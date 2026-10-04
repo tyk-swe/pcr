@@ -4,6 +4,7 @@
 mod binding;
 mod builder;
 mod error;
+mod hasher;
 mod lookup;
 mod validation;
 

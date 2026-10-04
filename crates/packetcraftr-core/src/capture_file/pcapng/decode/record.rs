@@ -23,18 +23,20 @@ use crate::capture_file::{
 };
 
 pub(super) fn decode(
-    block: FramedBlock<'_>,
+    block: FramedBlock,
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
     limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
     match block.block_type {
         PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
-            decode_interface(block.body, block.raw, state, all_interfaces, limits)
+            decode_interface(&block.body, block.raw, state, all_interfaces, limits)
         }
         block_type => match packet_block_kind(block_type) {
-            Some(kind) => decode_packet(kind, block.body, block.raw, state, all_interfaces, limits),
-            None => decode_metadata(block_type, block.body, block.raw, state, all_interfaces),
+            Some(kind) => {
+                decode_packet(kind, &block.body, block.raw, state, all_interfaces, limits)
+            }
+            None => decode_metadata(block_type, &block.body, block.raw, state, all_interfaces),
         },
     }
 }
@@ -69,7 +71,7 @@ fn decode_interface(
 
 fn decode_packet(
     kind: PacketBlockKind,
-    body: &[u8],
+    body: &Bytes,
     raw: Bytes,
     state: &mut PcapNgState,
     all_interfaces: &[Interface],

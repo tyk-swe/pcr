@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::binding::{FilterFieldBinding, ReverseBinding};
 
 use super::error::Error;
+use super::hasher::FixedState;
 
 use crate::codec::LayerCodec;
 use crate::field::FieldKind;
@@ -22,8 +23,9 @@ impl super::builder::Builder {
         }
         let mut reverse_bindings: HashMap<
             crate::layer::Id,
-            HashMap<crate::layer::Id, Vec<ReverseBinding>>,
-        > = HashMap::new();
+            HashMap<crate::layer::Id, Vec<ReverseBinding>, FixedState>,
+            FixedState,
+        > = HashMap::default();
         for (parent, discriminators) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
                 return Err(Error::UnknownProtocol { protocol: *parent });

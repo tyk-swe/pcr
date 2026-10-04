@@ -393,11 +393,15 @@ impl TcpSources {
     fn insert(&mut self, flow: ScopedFlowKey, span: Span) -> Result<(), Error> {
         let mut pieces = vec![span];
         if let Some(previous) = self.spans.get(&flow) {
+            let mut next = Vec::new();
             for old in previous {
-                pieces = pieces
-                    .into_iter()
-                    .flat_map(|piece| subtract(piece, old.sequence, old.length))
-                    .collect();
+                if pieces.is_empty() {
+                    break;
+                }
+                for piece in pieces.drain(..) {
+                    subtract_into(piece, old.sequence, old.length, &mut next);
+                }
+                std::mem::swap(&mut pieces, &mut next);
             }
         }
         self.limits
@@ -511,10 +515,10 @@ impl TcpSources {
             return Ok(());
         };
         self.span_count -= previous.len();
-        let mut remaining = Vec::new();
+        let mut remaining = Vec::with_capacity(previous.len());
         for span in previous {
             if number.is_none_or(|number| span.number == number) {
-                remaining.extend(subtract(span, sequence, length));
+                subtract_into(span, sequence, length, &mut remaining);
             } else {
                 remaining.push(span);
             }
@@ -536,11 +540,12 @@ fn intersection(base: u32, length: u32, other: u32, other_length: u32) -> Option
     let hi = (offset + i64::from(other_length)).min(i64::from(length));
     (lo < hi).then_some((lo as usize, hi as usize))
 }
-fn subtract(span: Span, sequence: u32, length: u32) -> Vec<Span> {
+/// Pushes what remains of `span` outside `sequence..sequence + length`.
+fn subtract_into(span: Span, sequence: u32, length: u32, output: &mut Vec<Span>) {
     let Some((lo, hi)) = intersection(span.sequence, span.length, sequence, length) else {
-        return vec![span];
+        output.push(span);
+        return;
     };
-    let mut output = Vec::new();
     if lo > 0 {
         output.push(Span {
             length: lo as u32,
@@ -554,7 +559,6 @@ fn subtract(span: Span, sequence: u32, length: u32) -> Vec<Span> {
             ..span
         });
     }
-    output
 }
 
 #[cfg(test)]

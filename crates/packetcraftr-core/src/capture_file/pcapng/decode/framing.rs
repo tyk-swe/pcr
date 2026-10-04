@@ -13,13 +13,14 @@ use crate::capture_file::{
     record::PacketBlockKind,
     wire::{
         PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_PACKET_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32,
-        read_exact_vec,
+        read_exact_append,
     },
 };
 
-pub(super) struct FramedBlock<'a> {
+pub(super) struct FramedBlock {
     pub(super) block_type: u32,
-    pub(super) body: &'a [u8],
+    /// The block between its length fields, sharing `raw`'s storage.
+    pub(super) body: Bytes,
     pub(super) raw: Bytes,
 }
 
@@ -32,13 +33,12 @@ pub(super) const fn packet_block_kind(block_type: u32) -> Option<PacketBlockKind
     }
 }
 
-pub(super) fn read<'a, R: Read>(
+pub(super) fn read<R: Read>(
     reader: &mut R,
     raw_header: [u8; 8],
     state: &mut PcapNgState,
     limits: &ReaderLimits,
-    scratch: &'a mut Vec<u8>,
-) -> Result<FramedBlock<'a>, Error> {
+) -> Result<FramedBlock, Error> {
     let block_type = decode_u32(state.endianness, &raw_header[..4])?;
     let block_length = decode_u32(state.endianness, &raw_header[4..8])?;
     validate_pcapng_block_length(block_length, limits.max_size)?;
@@ -58,10 +58,17 @@ pub(super) fn read<'a, R: Read>(
         state.account_metadata(block_length_usize, limits)?;
     }
 
-    // `block_length >= 12` was validated, so `scratch` holds at least the trailing length
-    read_exact_vec(reader, scratch, block_length_usize - 8, "pcapng block")?;
-    let body_length = scratch.len() - 4;
-    let trailing_length = decode_u32(state.endianness, &scratch[body_length..])?;
+    let mut raw = Vec::new();
+    raw.try_reserve_exact(block_length_usize)
+        .map_err(|_| Error::AllocationFailed {
+            kind: "pcapng source block",
+            requested: block_length_usize,
+        })?;
+    raw.extend_from_slice(&raw_header);
+    // `block_length >= 12` was validated, so `raw` holds at least the trailing length
+    read_exact_append(reader, &mut raw, block_length_usize - 8, "pcapng block")?;
+    let body_end = raw.len() - 4;
+    let trailing_length = decode_u32(state.endianness, &raw[body_end..])?;
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {
             leading: block_length,
@@ -69,23 +76,10 @@ pub(super) fn read<'a, R: Read>(
         });
     }
     state.commit_block(block_length);
-    let raw = raw_block(&raw_header, scratch, block_length_usize)?;
-    let body = &scratch[..body_length];
+    let raw = Bytes::from(raw);
     Ok(FramedBlock {
         block_type,
-        body,
+        body: raw.slice(8..body_end),
         raw,
     })
-}
-
-fn raw_block(header: &[u8; 8], tail: &[u8], length: usize) -> Result<Bytes, Error> {
-    let mut raw = Vec::new();
-    raw.try_reserve_exact(length)
-        .map_err(|_| Error::AllocationFailed {
-            kind: "pcapng source block",
-            requested: length,
-        })?;
-    raw.extend_from_slice(header);
-    raw.extend_from_slice(tail);
-    Ok(Bytes::from(raw))
 }

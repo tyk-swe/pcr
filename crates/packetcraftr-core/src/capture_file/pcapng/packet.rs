@@ -10,7 +10,7 @@ use crate::capture_file::error::Error;
 use crate::capture_file::format::{Endianness, Format};
 use crate::capture_file::header::{Interface, PcapNgOption};
 use crate::capture_file::wire::{
-    PCAPNG_OPTION_EPB_FLAGS, align_to_usize, copy_bytes_fallibly, decode_u16, decode_u32,
+    PCAPNG_OPTION_EPB_FLAGS, align_to_usize, decode_u16, decode_u32, pcapng_packet_bytes,
     timestamp_from_ticks, validate_declared_lengths,
 };
 
@@ -21,7 +21,7 @@ pub(in crate::capture_file) struct ParsedPacket {
 }
 
 pub(in crate::capture_file) fn parse_enhanced_packet(
-    body: &[u8],
+    body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
@@ -40,7 +40,7 @@ pub(in crate::capture_file) fn parse_enhanced_packet(
 }
 
 pub(in crate::capture_file) fn parse_obsolete_packet(
-    body: &[u8],
+    body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
@@ -59,7 +59,7 @@ pub(in crate::capture_file) fn parse_obsolete_packet(
 }
 
 fn parse(
-    body: &[u8],
+    body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
@@ -134,7 +134,6 @@ fn parse(
     let global_interface = interface_base
         .checked_add(interface_id)
         .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
-    let data = &body[HEADER_LENGTH..HEADER_LENGTH + captured_length as usize];
     let mut frame = Frame::try_with_lengths(
         timestamp,
         interface.link_type,
@@ -142,7 +141,11 @@ fn parse(
             captured: captured_length,
             original: original_length,
         },
-        Bytes::from(copy_bytes_fallibly(data)?),
+        pcapng_packet_bytes(
+            body,
+            HEADER_LENGTH,
+            HEADER_LENGTH + captured_length as usize,
+        )?,
     )?;
     frame.interface = Some(global_interface);
     frame.direction = direction;
@@ -156,7 +159,7 @@ fn parse(
 /// Simple packet blocks carry no options; `max_options` keeps the packet
 /// parsers signature-compatible for the block-kind dispatch table.
 pub(in crate::capture_file) fn parse_simple_packet(
-    body: &[u8],
+    body: &Bytes,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
@@ -199,7 +202,6 @@ pub(in crate::capture_file) fn parse_simple_packet(
         });
     }
     // `body.len() == 4 + padded_length`, and `captured_length <= padded_length`
-    let data = &body[4..4 + captured_length as usize];
     let mut frame = Frame::try_with_optional_timestamp(
         None,
         interface.link_type,
@@ -207,7 +209,7 @@ pub(in crate::capture_file) fn parse_simple_packet(
             captured: captured_length,
             original: original_length,
         },
-        Bytes::from(copy_bytes_fallibly(data)?),
+        pcapng_packet_bytes(body, 4, 4 + captured_length as usize)?,
     )?;
     frame.interface = Some(interface_base);
     Ok(ParsedPacket {
@@ -289,7 +291,7 @@ mod tests {
             let mut body = vec![0; 20];
             body.extend_from_slice(options);
             parse_enhanced_packet(
-                &body,
+                &Bytes::from(body),
                 Endianness::Little,
                 std::slice::from_ref(&interface),
                 0,

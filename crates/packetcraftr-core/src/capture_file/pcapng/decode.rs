@@ -186,6 +186,6 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
         return read_section_record(reader, raw_header, state, all_interfaces, limits, scratch)
             .map(Some);
     }
-    let block = framing::read(reader, raw_header, state, limits, scratch)?;
+    let block = framing::read(reader, raw_header, state, limits)?;
     record::decode(block, state, all_interfaces, limits).map(Some)
 }

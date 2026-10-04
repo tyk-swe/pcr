@@ -3,6 +3,8 @@
 
 use std::io::{self, Read, Write};
 
+use bytes::Bytes;
+
 use crate::frame::Frame;
 
 use crate::capture_file::error::Error;
@@ -117,6 +119,16 @@ pub(in crate::capture_file) fn read_exact_vec<R: Read>(
     context: &'static str,
 ) -> Result<(), Error> {
     buffer.clear();
+    read_exact_append(reader, buffer, length, context)
+}
+
+/// Appends exactly `length` bytes to `buffer`, reserving them fallibly first.
+pub(in crate::capture_file) fn read_exact_append<R: Read>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+    length: usize,
+    context: &'static str,
+) -> Result<(), Error> {
     buffer
         .try_reserve_exact(length)
         .map_err(|_| Error::AllocationFailed {
@@ -138,15 +150,46 @@ pub(in crate::capture_file) fn read_exact_vec<R: Read>(
     }
 }
 
-pub(in crate::capture_file) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+/// The packet bytes at `start..end` of a pcapng block body. They share the
+/// block's storage only while the block adds little beyond them, so a frame
+/// retained after its record cannot pin a much larger allocation of options.
+pub(in crate::capture_file) fn pcapng_packet_bytes(
+    body: &Bytes,
+    start: usize,
+    end: usize,
+) -> Result<Bytes, Error> {
+    // Leading and trailing block-length fields surround the body.
+    const MAX_SHARED_OVERHEAD: usize = 12 + 64;
+    let data = body.slice(start..end);
+    if body.len() - data.len() <= MAX_SHARED_OVERHEAD {
+        return Ok(data);
+    }
     let mut copy = Vec::new();
-    copy.try_reserve_exact(bytes.len())
+    copy.try_reserve_exact(data.len())
         .map_err(|_| Error::AllocationFailed {
             kind: "pcapng packet data",
-            requested: bytes.len(),
+            requested: data.len(),
         })?;
-    copy.extend_from_slice(bytes);
-    Ok(copy)
+    copy.extend_from_slice(&data);
+    Ok(Bytes::from(copy))
+}
+
+/// Writes every part in order, handing them to the writer together so an
+/// unbuffered sink can take a whole record in one call.
+pub(in crate::capture_file) fn write_all_parts<W: Write>(
+    writer: &mut W,
+    parts: &mut [io::IoSlice<'_>],
+) -> io::Result<()> {
+    let mut parts = parts;
+    while !parts.is_empty() {
+        match writer.write_vectored(parts) {
+            Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
+            Ok(written) => io::IoSlice::advance_slices(&mut parts, written),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 pub(in crate::capture_file) fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {

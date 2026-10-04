@@ -13,8 +13,8 @@ use crate::capture_file::format::{Endianness, Format, TimestampPrecision, Timest
 use crate::capture_file::header::{Interface, PcapHeader};
 use crate::capture_file::record::{CaptureRecord, PacketBlockKind, RecordKind};
 use crate::capture_file::wire::{
-    PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
-    read_exact_or_eof, read_exact_vec, validate_declared_lengths,
+    PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_append,
+    read_exact_counted, read_exact_or_eof, validate_declared_lengths,
 };
 
 use super::encode;
@@ -147,13 +147,22 @@ pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
         });
     }
 
-    let mut bytes = Vec::new();
-    read_exact_vec(
+    // One buffer holds the record as read; the frame shares its packet bytes.
+    let record_length = PCAP_RECORD_HEADER_LEN.saturating_add(captured_length as usize);
+    let mut raw = Vec::new();
+    raw.try_reserve_exact(record_length)
+        .map_err(|_| Error::AllocationFailed {
+            kind: "pcap packet data",
+            requested: record_length,
+        })?;
+    raw.extend_from_slice(&header);
+    read_exact_append(
         reader,
-        &mut bytes,
+        &mut raw,
         captured_length as usize,
         "pcap packet data",
     )?;
+    let raw = Bytes::from(raw);
     // the microsecond fraction is rejected above unless it is below 1_000_000, so scaling it by 1_000 stays within u32
     let nanoseconds = match precision {
         TimestampPrecision::Microseconds => fraction * 1_000,
@@ -172,11 +181,8 @@ pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
             captured: captured_length,
             original: original_length,
         },
-        Bytes::copy_from_slice(&bytes),
+        raw.slice(PCAP_RECORD_HEADER_LEN..),
     )?;
-    let mut raw = Vec::with_capacity(PCAP_RECORD_HEADER_LEN.saturating_add(bytes.len()));
-    raw.extend_from_slice(&header);
-    raw.extend_from_slice(&bytes);
     Ok(Some(CaptureRecord {
         kind: RecordKind::Packet {
             block: PacketBlockKind::Classic,
@@ -186,6 +192,6 @@ pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
         },
         frame: Some(frame),
         format: Format::Pcap,
-        raw: Bytes::from(raw),
+        raw,
     }))
 }

@@ -42,8 +42,13 @@ impl Builder {
         context: Context,
         options: Options,
     ) -> Result<BuiltPacket, Error> {
-        let diagnostics = self.validate_packet(&packet, &options)?;
-        let encoding = self.encode_layers(&packet, &context, &options, diagnostics)?;
+        let (diagnostics, pass_through_bytes) = self.validate_packet(&packet, &options)?;
+        let bytes = PacketBuffer::with_estimate(
+            pass_through_bytes,
+            packet.len(),
+            options.limits.max_packet_size,
+        )?;
+        let encoding = self.encode_layers(&packet, &context, &options, bytes, diagnostics)?;
         Self::finalize(encoding, options.mode)
     }
 
@@ -51,7 +56,7 @@ impl Builder {
         &self,
         packet: &Packet,
         options: &Options,
-    ) -> Result<Vec<crate::diagnostic::Diagnostic>, Error> {
+    ) -> Result<(Vec<crate::diagnostic::Diagnostic>, usize), Error> {
         if packet.is_empty() {
             return Err(Error::EmptyPacket);
         }
@@ -81,7 +86,7 @@ impl Builder {
         }
         let mut diagnostics = Vec::new();
         validation::validate_bindings(&self.registry, packet, options.mode, &mut diagnostics)?;
-        Ok(diagnostics)
+        Ok((diagnostics, pass_through_bytes))
     }
 
     fn encode_layers(
@@ -89,9 +94,9 @@ impl Builder {
         packet: &Packet,
         context: &Context,
         options: &Options,
+        mut bytes: PacketBuffer,
         mut diagnostics: Vec<crate::diagnostic::Diagnostic>,
     ) -> Result<Encoding, Error> {
-        let mut bytes = PacketBuffer::default();
         let mut layouts = Vec::with_capacity(packet.len());
         let mut layers = Vec::with_capacity(packet.len());
         let mut payload_lengths = Vec::with_capacity(packet.len());

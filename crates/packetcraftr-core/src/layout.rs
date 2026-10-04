@@ -53,25 +53,22 @@ pub struct LayerLayout {
 }
 
 impl LayerLayout {
+    /// Shifts the layer and its fields together, or leaves both unchanged.
     pub(crate) fn checked_shift(&mut self, amount: usize) -> bool {
         let Some(range) = self.range.shifted(amount) else {
             return false;
         };
-        let Some(fields) = self
+        if !self
             .fields
             .iter()
-            .map(|field| {
-                Some(FieldLayout {
-                    name: field.name,
-                    range: field.range.shifted(amount)?,
-                })
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
+            .all(|field| field.range.shifted(amount).is_some())
+        {
             return false;
-        };
+        }
         self.range = range;
-        self.fields = fields;
+        for field in &mut self.fields {
+            field.range.checked_shift(amount);
+        }
         true
     }
 }

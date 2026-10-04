@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::Error;
+use super::hasher::FixedState;
 use crate::codec::LayerCodec;
 use crate::frame::LinkType;
 
@@ -16,7 +17,11 @@ pub struct Builder {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<LinkType, crate::layer::Id>,
-    pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
+    pub(super) bindings: HashMap<
+        crate::layer::Id,
+        HashMap<Discriminator, Vec<ChildBinding>, FixedState>,
+        FixedState,
+    >,
     pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
     pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,

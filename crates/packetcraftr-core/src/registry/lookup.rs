@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
 use super::builder::Builder;
+use super::hasher::FixedState;
 use crate::codec::LayerCodec;
 use crate::frame::LinkType;
 
@@ -17,9 +18,16 @@ pub struct Registry {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<LinkType, crate::layer::Id>,
-    pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
-    pub(super) reverse_bindings:
-        HashMap<crate::layer::Id, HashMap<crate::layer::Id, Vec<ReverseBinding>>>,
+    pub(super) bindings: HashMap<
+        crate::layer::Id,
+        HashMap<Discriminator, Vec<ChildBinding>, FixedState>,
+        FixedState,
+    >,
+    pub(super) reverse_bindings: HashMap<
+        crate::layer::Id,
+        HashMap<crate::layer::Id, Vec<ReverseBinding>, FixedState>,
+        FixedState,
+    >,
     pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
     pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) schemas: BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
@@ -68,7 +76,11 @@ impl Registry {
     }
 
     pub fn protocol_named(&self, name: &str) -> Option<crate::layer::Id> {
-        self.aliases.get(&name.trim().to_ascii_lowercase()).copied()
+        let name = name.trim();
+        if let Some(protocol) = self.aliases.get(name) {
+            return Some(*protocol);
+        }
+        self.aliases.get(&name.to_ascii_lowercase()).copied()
     }
 
     pub fn root_for_link_type(&self, link_type: LinkType) -> Option<crate::layer::Id> {
@@ -85,6 +97,19 @@ impl Registry {
             .get(&discriminator)
             .and_then(|bindings| bindings.first())
             .map(|binding| binding.child)
+    }
+
+    /// The first candidate discriminator bound under `parent`, with its child.
+    pub(crate) fn first_child_for(
+        &self,
+        parent: &str,
+        candidates: &[Discriminator],
+    ) -> Option<(Discriminator, crate::layer::Id)> {
+        let children = self.bindings.get(parent)?;
+        candidates.iter().find_map(|discriminator| {
+            let binding = children.get(discriminator)?.first()?;
+            Some((*discriminator, binding.child))
+        })
     }
 
     pub fn discriminator_for(&self, parent: &str, child: &str) -> Option<Discriminator> {

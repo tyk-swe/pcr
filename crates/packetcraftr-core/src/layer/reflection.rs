@@ -140,13 +140,17 @@ macro_rules! reflective_layer {
         $vis fn $layout($($layout_arg: $layout_ty),*)
             -> Vec<$crate::layout::FieldLayout>
         {
-            let mut fields: Vec<$crate::layout::FieldLayout> = vec![
+            let candidates: [Option<$crate::layout::FieldLayout>; _] = [
                 $(
                     $crate::reflective_layer!(@layout $field $(, $start, $end)?)
                 ),*
-            ].into_iter().flatten().collect();
+            ];
+            let mut fields = Vec::with_capacity(candidates.len());
+            fields.extend(candidates.into_iter().flatten());
             // Stable sorting preserves the declaration order of fields sharing the same bytes.
-            fields.sort_by_key(|field| field.range.start);
+            if !fields.is_sorted_by_key(|field| field.range.start) {
+                fields.sort_by_key(|field| field.range.start);
+            }
             fields
         }
     };

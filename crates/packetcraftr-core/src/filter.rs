@@ -47,6 +47,7 @@ mod frames;
 mod lexer;
 mod limits;
 mod literal;
+mod membership;
 mod model;
 mod parser;
 mod path;

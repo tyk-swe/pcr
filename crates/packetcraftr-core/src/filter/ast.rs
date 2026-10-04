@@ -4,6 +4,7 @@
 use super::comparison::{Needle, TextMode};
 use super::lexer::CompareOperator;
 use super::literal::Literal;
+use super::membership::MemberSet;
 use super::path::{FieldRef, Occurrence};
 
 /// What `len(..)` and `count(..)` measure.
@@ -33,7 +34,7 @@ pub(super) enum Predicate {
     },
     Membership {
         field: FieldRef,
-        values: Vec<Literal>,
+        values: MemberSet,
     },
     Contains {
         field: FieldRef,

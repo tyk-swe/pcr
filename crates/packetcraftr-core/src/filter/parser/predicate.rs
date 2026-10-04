@@ -8,6 +8,7 @@ use crate::filter::error::Error;
 use crate::filter::lexer::{CompareOperator, Spanned, Token};
 use crate::filter::limits::Limits;
 use crate::filter::literal;
+use crate::filter::membership::MemberSet;
 use crate::filter::path::{self, FieldRef, FieldSource, FrameField, Resolved};
 use crate::filter::requirements::Requirements;
 use crate::registry::Registry;
@@ -315,7 +316,7 @@ fn parse_membership(
         return Ok((
             Predicate::Membership {
                 field,
-                values: vec![value],
+                values: MemberSet::new(vec![value]),
             },
             next,
         ));
@@ -359,5 +360,11 @@ fn parse_membership(
             message: "a set needs at least one member".to_owned(),
         });
     }
-    Ok((Predicate::Membership { field, values }, index))
+    Ok((
+        Predicate::Membership {
+            field,
+            values: MemberSet::new(values),
+        },
+        index,
+    ))
 }

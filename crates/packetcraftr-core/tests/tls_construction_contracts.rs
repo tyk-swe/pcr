@@ -8,7 +8,7 @@ use packetcraftr_core::{
 };
 
 #[test]
-fn oversized_fields_invalid_extensions_and_failed_edits_are_rejected_atomically() {
+fn bad_fields_and_edits_rejected_atomically() {
     let mut layer = Tls::try_from(Hello::default()).unwrap();
     let original = layer.clone();
     assert!(

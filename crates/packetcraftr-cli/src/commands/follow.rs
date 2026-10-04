@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::FollowFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::error::Kind;
 
@@ -21,7 +21,13 @@ use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::FollowFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Raw,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -41,20 +47,16 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: FollowFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let selector = arguments.stream.get()?;
-    if format == FollowFormat::Raw && arguments.direction == Direction::Both {
+    if format == Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             Kind::Usage,
             "raw output interleaves both directions indistinguishably; \
@@ -123,25 +125,26 @@ pub(super) fn run(
         .unwrap_or_default();
 
     match format {
-        FollowFormat::Text => rendering::render_text(selector, &summary, &written),
-        FollowFormat::Json => rendering::render_aggregate(
+        Format::Text => rendering::render_text(selector, &summary, &written),
+        Format::Json => rendering::render_aggregate(
             selector,
             summary,
             state,
             &run_summary.ip_reassembly,
             written,
         ),
-        FollowFormat::Ndjson => rendering::render_stream(
+        Format::Ndjson => rendering::render_stream(
             selector,
             summary,
             &run_summary.ip_reassembly,
             stream,
             written,
         ),
-        FollowFormat::Hex | FollowFormat::Raw => {
+        Format::Hex | Format::Raw => {
             rendering::render_written(&written)?;
             rendering::render_payload_warning(&summary)
         }
+        other => other.unreachable(),
     }
 }
 

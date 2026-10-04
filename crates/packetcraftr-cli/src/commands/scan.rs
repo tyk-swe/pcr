@@ -7,7 +7,7 @@ mod payload;
 mod profiles;
 mod rendering;
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 
 use crate::output;
 
@@ -18,7 +18,11 @@ use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -42,18 +46,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ToolFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     if arguments.connect && !matches!(arguments.transport, arguments::Transport::Tcp) {
         return Err(CliError::new(
             packetcraftr_core::error::Kind::Usage,

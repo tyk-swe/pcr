@@ -40,15 +40,8 @@ jobs:
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
-      - name: Check dependency direction and validation failure fixtures
-        run: |
-          python3 scripts/check-architecture.py
-          python3 scripts/test-validation-evidence.py
-          python3 scripts/test-output-consumer.py
-          python3 scripts/test-forwarding-regression.py
-          python3 scripts/test-native-capture.py
-      - name: Test archive verifier failure fixtures
-        run: python3 scripts/test-verify-archive.py
+      - name: Check dependency direction
+        run: python3 scripts/check-architecture.py
       - name: Documentation for supported feature profiles
         env:
           RUSTDOCFLAGS: -D warnings

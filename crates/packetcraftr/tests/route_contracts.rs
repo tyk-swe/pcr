@@ -270,7 +270,7 @@ impl Provider for StalledBackend {
 }
 
 #[test]
-fn route_lookup_fails_with_the_deadline_classification_when_the_callers_deadline_passes() {
+fn route_lookup_reports_caller_deadline() {
     let mut packet = Packet::new();
     packet.push(Ipv4 {
         destination: "192.0.2.9".parse().unwrap(),

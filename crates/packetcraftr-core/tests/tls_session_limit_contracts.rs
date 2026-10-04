@@ -55,7 +55,7 @@ fn a_direction_buffer_ceiling_reports_malformed_without_buffering_past_it() {
 }
 
 #[test]
-fn mutated_handshake_bytes_never_panic_and_yield_at_most_one_ordered_session() {
+fn mutated_handshake_never_panics_yields_one_session() {
     let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
     let answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
     let mut seed = 0x2545_f491_4f6c_dd1d_u64;

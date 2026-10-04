@@ -5,7 +5,7 @@
   "status": "error",
   "error": {
     "code": "cli.error",
-    "kind": "cli",
+    "kind": "usage",
     "message": "invalid --stream 'udp:3': TLS sessions are assembled from TCP streams only; UDP port 443 is QUIC, which this command does not read",
     "causes": []
   },

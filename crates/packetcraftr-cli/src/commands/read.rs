@@ -8,7 +8,7 @@ mod projection;
 mod records;
 mod rendering;
 mod selection;
-use crate::output::contract::ReadFormat;
+use crate::output::contract::Format;
 
 use std::io;
 use std::sync::Arc;
@@ -25,7 +25,14 @@ use capture_output::CaptureOutput;
 use selection::{Selection, prepare_decoding};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ReadFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -37,23 +44,19 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ReadFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let compression = arguments.compression.for_output(format.as_format())?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let compression = arguments.compression.for_output(format)?;
     if !arguments.fields.is_empty() {
-        return projection::run(arguments, format.as_format(), stream);
+        return projection::run(arguments, format, stream);
     }
-    if matches!(format, ReadFormat::Json | ReadFormat::Csv | ReadFormat::Tsv) {
+    if matches!(format, Format::Json) {
         return Err(crate::rendering::missing_fields_error());
     }
     let Args {
@@ -85,7 +88,7 @@ pub(super) fn run(
             Vec::new(),
         ));
     }
-    tree.validate_format(format == ReadFormat::Text, format)?;
+    tree.validate_format(format == Format::Text, format)?;
     let capture_output = CaptureOutput::resolve(normalize, format)?;
     let registry = decode.registry()?;
     let decoding = prepare_decoding(
@@ -120,8 +123,8 @@ pub(super) fn run(
     )
 }
 
-fn validate_dissect_format(dissect: bool, format: ReadFormat) -> Result<(), CliError> {
-    if dissect && !matches!(format, ReadFormat::Text | ReadFormat::Ndjson) {
+fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {
+    if dissect && !matches!(format, Format::Text | Format::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",

@@ -104,7 +104,7 @@ Codes follow the failure's own classification:
   `--max-application-buffer-bytes`, `--max-application-retained-bytes`, or
   `--max-application-source-spans` (ceilings 100,000, 100,000, 256 MiB, 256 MiB,
   and 100,000), and more than 256 distinct service ports counting the built-in
-  ones, as `cli.analysis_limit` (exit 2, published kind `cli`, for example
+  ones, as `cli.analysis_limit` (exit 2, published kind `usage`, for example
   `invalid analysis limit max_messages=0: must be non-zero`) instead of
   `policy.application_limit` (exit 6). `--http-port 0`, `--dns-port 0`, and
   `--max-http-body-bytes` outside `1..=268435456` never reach analysis:
@@ -165,10 +165,9 @@ kinds, remediations, and exit codes are unchanged.
 `packetcraftr_core::error::Kind::Cli` is renamed `Kind::Usage`; replace every
 `Kind::Cli` match arm and constructor. `Kind::Usage.as_str()` and its serde
 name are `"usage"`. Classification codes keep their frozen strings (for example
-`cli.capture_filter`), and machine output still publishes a usage failure as
-`"kind": "cli"` with exit code 2. In the CLI crate,
-`output::envelope::Error.kind` is now the CLI-owned `envelope::ErrorKind`;
-convert with `ErrorKind::from(kind)`.
+`cli.capture_filter`). Machine output publishes a usage failure as
+`"kind": "usage"` with exit code 2. `output::envelope::Error.kind` is
+`packetcraftr_core::error::Kind`.
 
 `packetcraftr::route::Error::InvalidSourceRouting` and `InvalidSegmentRouting`
 carry `source: Option<Box<dyn std::error::Error + Send + Sync>>`. Provide
@@ -724,9 +723,8 @@ is unchanged.
 
 ## Header rewriting, DHCP, and protocol discovery
 
-Capture header rewriting is new. `rewrite` (`transform::HeaderRewrite`) reads
-`packetcraftr.rewrite/v1` rule documents (`schemas/packetcraftr.rewrite.v1.schema.json`),
-and fixed-width field assignments (`transform::FieldEdits`, `--set
+Capture header rewriting is new. `rewrite` (`transform::HeaderRewrite`) takes
+CLI header flags. Fixed-width field assignments (`transform::FieldEdits`, `--set
 <protocol>[#occurrence].<field>=<value>`, or `packetcraftr.rewrite/v2` documents
 under `schemas/packetcraftr.rewrite.v2.schema.json`) add `--checksum-mode
 repair|preserve` and `--dry-run`, whose bounded per-frame `changes` never create
@@ -1447,39 +1445,30 @@ command line, so its variants, serialized names, and `formats()` cannot drift
 from the commands the binary accepts. Serialized names and each command's
 formats are unchanged. `Command::ALL` lists commands in `--help` order; code
 that relied on the previous canonical order sorts by `Command::as_str()`.
-`Command::require_format::<F>(format) -> Result<F, contract::Error>` is generic
-over `F: FormatSubset` and narrows `Format` to one of the per-command proof
-enums (`AggregateFormat`, `ToolFormat`, `BuildFormat`, `CaptureFormat`,
-`DissectFormat`, `SendFormat`, `ExchangeFormat`, `ReadFormat`, `FollowFormat`)
-instead of returning `()`, so a command that cannot emit a format fails at
-dispatch and dead rendering arms surface typed `internal` errors instead of
-panicking. Each proof enum exposes `as_format()` and implements `Display`,
-`From` into `Format`, and `output::contract::FormatSubset`, which carries
-`FORMATS` in place of the former inherent constant; import the trait to read it:
+`Command::require_format(format) -> Result<Format, contract::Error>` returns
+the validated `Format` instead of `()`, so a command that cannot emit a format
+fails at dispatch and dead rendering arms surface typed `internal` errors
+instead of panicking.
 
-```rust
-use packetcraftr_cli::output::contract::{FormatSubset as _, ToolFormat};
+## Output field types
 
-let formats = ToolFormat::FORMATS;
-```
-
-## CLI-owned output types
-
-`packetcraftr_cli::output` types no longer embed library types, except the
-versioned `packetcraftr.packet` document (`document::Packet`) and its
-`FieldValue`s. Every other field is a CLI-owned type with the same JSON shape,
-so the published JSON is unchanged. Common replacements:
+`packetcraftr_cli::output` fields embed the library type directly wherever the
+library already serializes to the published shape — `packetcraftr::Stats`
+(`output::envelope::Stats`), `packetcraftr::capture::StopReason`,
+`packetcraftr::probe::{Transport, ProbeStatus}`, core
+`diagnostic::{Diagnostic, Severity}` and `frame::Direction`, netio
+`capture::{Stats, TimestampSource, TimestampPrecision, Realized,
+RealizedSettings}`, and the capture-file compression `Format` are re-exported
+from their output modules, and `output::diagnostic` and `output::probe` are
+removed. CLI-owned types remain where the contract's field names or variants
+differ from the library's. Common replacements:
 
 | Library type | Output type |
 | --- | --- |
-| `packetcraftr::Stats` | `output::envelope::Stats` |
-| `core::diagnostic::{Diagnostic, Severity}` | `output::diagnostic::{Diagnostic, Severity}` |
 | `core::error::Coordinate` (in `envelope::Error.context`) | `output::envelope::ErrorContext` |
-| `core::layout::PacketLayout`, `core::frame::Direction` | `output::frame::{Layout, Direction}` |
+| `core::layout::PacketLayout` | `output::frame::Layout` |
 | `netio::interface::Id`, `link::Mode`, `route::{Scope, SelectionReason}` | `output::network::{InterfaceId, LinkMode, Scope, SelectionReason}` |
-| `netio::capture::Stats` | `output::capture::Stats` |
 | `core::analysis::{scope::Definition, ClockReport, StreamTransport, Endpoint, StreamRef}` | `output::analysis::{Scope, Clock, StreamTransport, Endpoint, StreamRef}` |
-| `packetcraftr::probe::{Transport, ProbeStatus}` | `output::probe::{Transport, ProbeStatus}` |
 | `packetcraftr::fuzz::Outcome`, `core::fuzz::{CaseOutcome, Strategy}` | `output::fuzz::{Outcome, Strategy}` |
 
 Every conversion is a `From` or `TryFrom` impl, and the `from_*`, `try_from_*`,
@@ -1666,10 +1655,9 @@ for a row are in the sections above.
 | 0.5.0-beta.3 | Final |
 | --- | --- |
 | `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V6` |
-| `output::envelope::Error.kind: core::error::Kind` | the CLI-owned `envelope::ErrorKind` (`ErrorKind::from(kind)`) |
-| `Command::require_format(format) -> Result<(), Error>` | `require_format::<F: FormatSubset>(format) -> Result<F, Error>` |
+| `Command::require_format(format) -> Result<(), Error>` | `require_format(format) -> Result<Format, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |
-| `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [CLI-owned output types](#cli-owned-output-types)) |
+| `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [Output field types](#output-field-types)) |
 
 ## Unreleased-only changes
 
@@ -1697,6 +1685,14 @@ after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
 - Names renamed again before release: `dns::DecodeError` (now `dns::Error`),
   `dns::QueryTypeParseError` (now `dns::wire::Error`), `dns::DecodeLimits` and
   `forwarding::VerifyLimits` (now `Limits`), and `output::dns_analysis`.
+- Types added and pruned again before release: the per-command output format
+  proof enums (`AggregateFormat`, `ToolFormat`, `BuildFormat`,
+  `CaptureFormat`, `DissectFormat`, `SendFormat`, `ExchangeFormat`,
+  `ReadFormat`, `FollowFormat`) and their `output::contract::FormatSubset`
+  trait — `Command::require_format` returns the shared `Format` — the
+  `output::diagnostic` and `output::probe` modules (their fields carry the
+  library types directly), and `output::envelope::ErrorKind`
+  (`envelope::Error.kind` stays `core::error::Kind`).
 - Entry points that existed only between beta.3 and the client model:
   `send_set`, `send_set_with_events`, `send_set_driven`, `send::SetOptions`,
   `send::SetReport`, `Error::SendOutput`, `Error::InvalidSendOption`,

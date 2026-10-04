@@ -306,7 +306,7 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 }
 
 #[test]
-fn a_serial_scan_refuses_a_collection_wider_than_its_evidence_limits_before_any_execution() {
+fn serial_scan_refuses_over_wide_collection() {
     let address = "192.0.2.1".parse().unwrap();
     let mut frames = tcp_scan_request(Target::Address(address));
     frames.limits.max_evidence_frames = 16;

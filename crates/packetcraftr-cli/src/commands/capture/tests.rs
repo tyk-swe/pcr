@@ -155,14 +155,14 @@ fn projection_streams_bounded_fields_records() {
         4096,
         &registry(),
         Command::Capture,
-        CaptureFormat::Ndjson.as_format(),
+        Format::Ndjson,
     )
     .unwrap();
     drive(
         &client(provider, 1),
         workflow::Request::new(request, Duration::from_secs(1)),
         Output {
-            format: CaptureFormat::Ndjson,
+            format: Format::Ndjson,
             compression: Compression::None,
             selector: None,
             decoding: Decoding::prepare(false, true, None, &registry(), 256).unwrap(),

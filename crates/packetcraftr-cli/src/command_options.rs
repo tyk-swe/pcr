@@ -11,8 +11,8 @@ pub(crate) use offline_limits::{
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
-    Budget, DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs,
-    NumericPolicyArgs, PublicDestinationArgs, SendPolicyArgs, TrafficBudgetArgs, Transmitted,
+    DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs, NumericPolicyArgs,
+    PublicDestinationArgs, SendPolicyArgs, TrafficBudgetArgs,
 };
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
@@ -36,15 +36,10 @@ mod template;
 mod tree;
 
 mod compression;
-pub(crate) use compression::{
-    CaptureStdout, Compression, CompressionArgs, Destination, SavedPcapNg,
-};
+pub(crate) use compression::{Compression, CompressionArgs};
 
 mod duration;
-pub(crate) use duration::{
-    Bounded, MAX_MILLISECONDS as MAX_DURATION_MILLISECONDS, MaxDurationArgs, ProbeWindow, Probing,
-    RunTime, TimeoutArgs, Window,
-};
+pub(crate) use duration::{Bounded, LongTimeoutArgs, MaxDurationArgs, TimeoutArgs};
 
 mod selectors;
 pub(crate) use selectors::{InterfaceSelector, Selector, interface_selector, stream_selector};

@@ -3,8 +3,7 @@
 
 use crate::command_options::InterfaceSelector;
 use crate::command_options::{
-    Budget, CaptureLimitsArgs, CompressionArgs, DecodeArgs, Destination, TimeoutArgs,
-    TrafficBudgetArgs, TreeArgs, Window,
+    CaptureLimitsArgs, CompressionArgs, DecodeArgs, LongTimeoutArgs, TrafficBudgetArgs, TreeArgs,
 };
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
@@ -75,7 +74,7 @@ Examples:
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<CaptureDestination>,
+    pub(crate) compression: CompressionArgs,
 
     /// Interface names or numeric indexes; repeat to capture an explicit set.
     #[arg(
@@ -117,7 +116,7 @@ pub(crate) struct Args {
     #[arg(long, value_enum)]
     pub(crate) timestamp_precision: Option<TimestampPrecisionArg>,
     #[command(flatten)]
-    pub(crate) timeout: TimeoutArgs<CaptureWindow>,
+    pub(crate) timeout: LongTimeoutArgs,
     /// Resolver-free core libpcap/Npcap BPF, applied before capture.
     #[arg(long, value_name = "BPF")]
     pub(crate) capture_filter: Option<String>,
@@ -140,7 +139,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) budgets: TrafficBudgetArgs<Captured>,
+    pub(crate) budgets: TrafficBudgetArgs,
 }
 
 /// The timestamp sources the capture contract can represent, spelled the same
@@ -213,27 +212,4 @@ impl From<Retention> for crate::output::capture::Retention {
             Retention::Ring => Self::Ring,
         }
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Captured;
-
-impl Budget for Captured {
-    const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
-    const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CaptureWindow;
-
-impl Window for CaptureWindow {
-    const DEFAULT_MILLISECONDS: &'static str = "3000";
-    const HELP: &'static str = "Overall capture window in milliseconds";
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CaptureDestination;
-
-impl Destination for CaptureDestination {
-    const HELP: &'static str = "Compress binary stdout or saved PCAPNG files";
 }

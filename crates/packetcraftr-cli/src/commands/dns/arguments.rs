@@ -5,7 +5,7 @@ use packetcraftr::dns::QueryType;
 
 use crate::command_options::{
     AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, RouteSelectionArgs,
-    RunTime, TimeoutArgs, Window,
+    TimeoutArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -68,12 +68,12 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
     #[command(flatten)]
-    pub(crate) timeout: TimeoutArgs<AttemptWindow>,
+    pub(crate) timeout: TimeoutArgs,
     /// Optional retry-rate ceiling; a UDP-to-TCP continuation is immediate.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<Resolution>,
+    pub(crate) duration: MaxDurationArgs,
     /// Maximum complete DNS message bytes decoded.
     #[arg(long, default_value_t = packetcraftr::dns::MessageLimits::default().max_message_bytes)]
     pub(crate) max_message_bytes: usize,
@@ -101,20 +101,4 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnamePolicyArgs,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct AttemptWindow;
-
-impl Window for AttemptWindow {
-    const DEFAULT_MILLISECONDS: &'static str = "1000";
-    const HELP: &'static str = "Response window for each attempt, shared with any TCP continuation";
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Resolution;
-
-impl RunTime for Resolution {
-    const HELP: &'static str =
-        "Maximum worst-case timeout plus intentional retry delay in milliseconds";
 }

@@ -3,7 +3,7 @@
 mod common;
 use common::{parse_json, run};
 #[test]
-fn a_selected_frame_limit_that_is_zero_or_above_its_ceiling_is_a_usage_error() {
+fn zero_or_over_ceiling_frame_limit_is_usage_error() {
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let source = source.to_str().unwrap();
@@ -25,7 +25,7 @@ fn a_selected_frame_limit_that_is_zero_or_above_its_ceiling_is_a_usage_error() {
         assert_eq!(output.status.code(), Some(2), "{limit}");
         let error = &parse_json(&output)["error"];
         assert_eq!(error["code"], "cli.analysis_limit", "{limit}");
-        assert_eq!(error["kind"], "cli", "{limit}");
+        assert_eq!(error["kind"], "usage", "{limit}");
         assert!(
             error["message"]
                 .as_str()

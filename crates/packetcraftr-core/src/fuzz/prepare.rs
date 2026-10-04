@@ -515,7 +515,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
-    fn cancellation_precedes_expired_preparation_budget_between_cases_and_at_completion() {
+    fn cancellation_beats_expired_preparation_budget() {
         for cases in [1, 2] {
             let signal = Cancellation::default();
             let expired = Arc::new(AtomicBool::new(false));

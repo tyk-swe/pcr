@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use packetcraftr_core::analysis::StreamRef;
 
 use crate::command_options::{
-    CompressionArgs, DecodeArgs, Destination, OfflineLimitsArgs, Selector, stream_selector,
+    CompressionArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Export selects whole conversations (--stream), IP datagrams by a physical frame they contain (--datagram-frame), or frames a --filter matches, and writes the selected physical frames together with every frame they depend on, such as the other fragments of a reassembled datagram. The destination keeps the source capture format and metadata and is published only after every frame was written.
@@ -36,16 +36,9 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 100_000)]
     pub(crate) max_selected_frames: usize,
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<SavedCapture>,
+    pub(crate) compression: CompressionArgs,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct SavedCapture;
-
-impl Destination for SavedCapture {
-    const HELP: &'static str = "Compression of the saved capture file";
 }

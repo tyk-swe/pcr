@@ -7,7 +7,7 @@ mod rendering;
 use self::arguments::Args;
 use crate::output::{
     self,
-    contract::{Command, ToolFormat},
+    contract::{Command, Format},
     rewrite::MAX_REPORTED_CHANGES,
 };
 use crate::{
@@ -27,7 +27,11 @@ use packetcraftr_core::{
 };
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -42,14 +46,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     args.limits.validate()?;
     let checksum_mode = args
         .checksum_mode
@@ -200,9 +204,10 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         changes_omitted,
     ));
     match format {
-        ToolFormat::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
-        ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => rendering::render_text(&report),
+        Format::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
+        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        Format::Text => rendering::render_text(&report),
+        other => other.unreachable(),
     }
 }
 
@@ -252,7 +257,7 @@ mod tests {
         AddressMap::new(&full.map_ips, &full.map_macs).expect("the table holds 4096");
         let over = rewrite(&entries(transform::MAX_ADDRESS_MAP_ENTRIES + 1));
         let (stream, _) = crate::test_support::stream(Command::Rewrite);
-        let error = run(over, ToolFormat::Text, &stream).expect_err("one more is refused");
+        let error = run(over, Format::Text, &stream).expect_err("one more is refused");
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("address map entries=4096"));
     }

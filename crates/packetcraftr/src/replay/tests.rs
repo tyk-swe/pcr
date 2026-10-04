@@ -291,7 +291,7 @@ fn replay<S: Selector, C: Clock>(
 }
 
 #[test]
-fn replay_refuses_a_fixed_rate_it_cannot_schedule_before_transmitting_any_frame() {
+fn replay_refuses_unschedulable_fixed_rate() {
     let frames = [(Duration::ZERO, &[1_u8][..]), (Duration::ZERO, &[2_u8][..])];
     for rate in [1e10, 1e300, f64::MIN_POSITIVE, 1e-300] {
         let mut authorizer = RecordingAuthorizer::default();

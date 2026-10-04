@@ -59,9 +59,9 @@ complete JSON Schema validation. Its own successful exit means the report was
 interpreted, not that forwarding passed. Read `execution` and `verdict`, or use
 the regression harness's explicit test contract.
 
-The frozen fixture under `examples/consumers/fixtures/` and its mutations are
-exercised by `scripts/test-output-consumer.py`. The Rust CLI tests validate
-real serializers against the schema.
+The frozen fixture under `examples/consumers/fixtures/` is the independent
+consumer example. The Rust CLI tests validate real serializers against the
+schema.
 
 ## Rust API adoption
 

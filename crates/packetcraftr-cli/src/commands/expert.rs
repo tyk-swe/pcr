@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::analysis;
 
@@ -15,7 +15,11 @@ use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -33,18 +37,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ToolFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
@@ -80,8 +80,9 @@ pub(super) fn run(
     let summary = outcome.run;
 
     match format {
-        ToolFormat::Text => rendering::render_text(&summary, &state),
-        ToolFormat::Json => rendering::render_aggregate(&summary, state),
-        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream),
+        Format::Text => rendering::render_text(&summary, &state),
+        Format::Json => rendering::render_aggregate(&summary, state),
+        Format::Ndjson => rendering::render_stream(&summary, state, stream),
+        other => other.unreachable(),
     }
 }

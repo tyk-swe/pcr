@@ -16,7 +16,7 @@ use packetcraftr_core::error::Kind;
 use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 use crate::rendering::{EventOutput, StreamEncoder, ip_event_sink};
 
 pub(super) struct AnalysisSetup {
@@ -84,13 +84,6 @@ pub(super) fn prepare(
         max_duration: duration.max_duration(),
     };
     limits.validate().map_err(CliError::classified)?;
-    duration.within_ceiling(|value| {
-        CliError::classified(analysis::Error::InvalidLimit {
-            field: "max_duration",
-            value,
-            reason: analysis::Constraint::AtMostOneHour,
-        })
-    })?;
 
     Ok(AnalysisSetup {
         registry,
@@ -112,7 +105,7 @@ pub(super) struct Inspection<'a> {
 pub(super) fn inspect<C: analysis::Collector>(
     inspection: Inspection<'_>,
     collector: C,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
     mut publish: impl FnMut(&mut EventOutput<'_>, C::Event) -> Result<(), CliError>,
 ) -> Result<analysis::Outcome<C>, CliError> {

@@ -14,14 +14,14 @@ use crate::commands::increment_counter;
 use crate::errors::CliError;
 use crate::filtering;
 use crate::output;
-use crate::output::contract::ReadFormat;
+use crate::output::contract::Format;
 use crate::rendering::{FieldTree, StreamEncoder};
 
 pub(super) fn run(
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     selection: Selection<'_>,
-    format: ReadFormat,
+    format: Format,
     stream: &StreamEncoder,
     mut tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
@@ -38,7 +38,7 @@ pub(super) fn run(
         render_record(record, format, stream, tree.as_deref_mut())?;
         frames_matched = increment_counter(frames_matched, "read matched-frame count")?;
     }
-    if format == ReadFormat::Ndjson {
+    if format == Format::Ndjson {
         stream.complete(
             output::read::Event::from(output::read::Totals::from((&budget, frames_matched))),
             Vec::new(),

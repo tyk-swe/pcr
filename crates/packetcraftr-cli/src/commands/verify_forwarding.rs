@@ -6,7 +6,7 @@ mod rendering;
 
 use std::path::Path;
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 use packetcraftr_core::analysis::{self, forwarding};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::filter::Filter;
@@ -24,7 +24,11 @@ use crate::rendering::StreamEncoder;
 const VERDICT_NOT_PASS: u8 = 1;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -52,7 +56,7 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream)
@@ -61,7 +65,7 @@ impl super::Spec for Args {
 
 pub(super) fn run(
     arguments: Args,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<CommandExit, CliError> {
     let stdin = Path::new("-");

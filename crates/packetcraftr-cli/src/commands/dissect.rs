@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::DissectFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::error::Kind;
 
@@ -25,7 +25,13 @@ use crate::input::{
 use crate::rendering::{FieldTree, emit_published, emit_stderr_message, write_hex_line, write_raw};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::DissectFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Raw,
+    ];
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -36,7 +42,7 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
@@ -45,19 +51,14 @@ impl super::Spec for Args {
 
 pub(super) fn run(
     arguments: Args,
-    format: DissectFormat,
+    format: Format,
     stream: &crate::rendering::StreamEncoder,
 ) -> Result<(), CliError> {
     arguments
         .tree
-        .validate_format(format == DissectFormat::Text, format)?;
+        .validate_format(format == Format::Text, format)?;
     let registry = arguments.decode.registry()?;
-    if arguments.fields.is_empty()
-        && matches!(
-            format,
-            DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv
-        )
-    {
+    if arguments.fields.is_empty() && matches!(format, Format::Ndjson) {
         return Err(crate::rendering::missing_fields_error());
     }
     let projector = crate::rendering::Projector::prepare(
@@ -65,7 +66,7 @@ pub(super) fn run(
         arguments.max_projection_bytes,
         &registry,
         output::contract::Command::Dissect,
-        format.as_format(),
+        format,
     )?;
     if projector
         .as_ref()
@@ -126,21 +127,22 @@ pub(super) fn run(
         return projector.finish(1, u64::from(decoded.frame.captured_length()), stream);
     }
     // An unmatched frame keeps byte-oriented stdout empty on success.
-    if !kept && !matches!(format, DissectFormat::Json) {
+    if !kept && !matches!(format, Format::Json) {
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        DissectFormat::Text => rendering::render_text(&decoded, tree.as_mut()),
-        DissectFormat::Hex => write_hex_line(decoded.frame.bytes()),
-        DissectFormat::Raw => write_raw(decoded.frame.bytes()),
-        DissectFormat::Json => emit_published(
+        Format::Text => rendering::render_text(&decoded, tree.as_mut()),
+        Format::Hex => write_hex_line(decoded.frame.bytes()),
+        Format::Raw => write_raw(decoded.frame.bytes()),
+        Format::Json => emit_published(
             output::contract::Command::Dissect,
             output::envelope::Published::<output::dissect::AggregateResult>::from((kept, decoded)),
         ),
-        DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv => Err(CliError::new(
+        Format::Ndjson => Err(CliError::new(
             Kind::Internal,
             "--field output returned before dissection rendering",
         )),
+        other => other.unreachable(),
     }
 }
 

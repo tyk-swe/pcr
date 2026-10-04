@@ -12,12 +12,6 @@ fn validator(schema: &str) -> jsonschema::Validator {
     jsonschema::validator_for(&schema).expect("published schema must compile")
 }
 
-fn rewrite_v1_validator() -> jsonschema::Validator {
-    validator(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v1.schema.json"
-    ))
-}
-
 fn rewrite_v2_validator() -> jsonschema::Validator {
     validator(include_str!(
         "../../../schemas/packetcraftr.rewrite.v2.schema.json"
@@ -43,19 +37,6 @@ fn schema_accepts_one_based_source_frames_and_rejects_zero() {
 }
 
 #[test]
-fn rewrite_v1_schema_accepts_the_published_rules_and_rejects_an_empty_patch() {
-    let validator = rewrite_v1_validator();
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../examples/documents/rewrite-lab-host.json"
-    ))
-    .unwrap();
-    assert!(validator.is_valid(&fixture));
-    let mut invalid = fixture.clone();
-    invalid["rules"][0]["patch"] = json!({});
-    assert!(!validator.is_valid(&invalid));
-}
-
-#[test]
 fn rewrite_v2_schema_rejects_unknown_assignment_properties() {
     let document = json!({
         "schema": "packetcraftr.rewrite/v2",
@@ -78,7 +59,6 @@ fn every_published_example_document_matches_its_declared_schema() {
     let udp_profiles_validator = validator(include_str!(
         "../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
     ));
-    let rewrite_v1 = rewrite_v1_validator();
     let rewrite_v2 = rewrite_v2_validator();
     let output_validator = schema_validator();
 
@@ -110,7 +90,6 @@ fn every_published_example_document_matches_its_declared_schema() {
         let validator = match schema {
             "packetcraftr.output/v6" => output_validator,
             "packetcraftr.packet/v2" => &packet_validator,
-            "packetcraftr.rewrite/v1" => &rewrite_v1,
             "packetcraftr.rewrite/v2" => &rewrite_v2,
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
             other => panic!("{name} declares an unknown schema {other}"),

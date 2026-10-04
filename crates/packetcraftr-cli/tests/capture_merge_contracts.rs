@@ -55,7 +55,7 @@ fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
 }
 
 #[test]
-fn source_count_and_repeated_stdin_are_usage_errors_before_any_output_is_staged() {
+fn source_count_and_stdin_repeats_are_usage_errors() {
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("merged.pcapng");
     let absent = directory.path().join("absent.pcap");
@@ -66,7 +66,7 @@ fn source_count_and_repeated_stdin_are_usage_errors_before_any_output_is_staged(
         let output = run(&arguments);
         assert_eq!(output.status.code(), Some(2), "{output:?}");
         let error = parse_json(&output)["error"].clone();
-        assert_eq!(error["kind"], "cli");
+        assert_eq!(error["kind"], "usage");
         assert_eq!(
             error["message"],
             "merge accepts at most 64 captures and one stdin source"

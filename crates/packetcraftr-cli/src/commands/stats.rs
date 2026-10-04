@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::AggregateFormat;
+use crate::output::contract::Format;
 
 use std::time::Duration;
 
@@ -22,7 +22,10 @@ use crate::rendering::emit_aggregate;
 use crate::rendering::omitted_diagnostic;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::AggregateFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -40,14 +43,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         _stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
     let aggregation = analysis::stats::Table::from(arguments.table);
     let prepared = prepare(
@@ -74,12 +77,13 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     let diagnostics = cap_table(&mut report, table, arguments.top);
 
     match format {
-        AggregateFormat::Text => rendering::render_text(table, &report, frames_read, &diagnostics),
-        AggregateFormat::Json => {
+        Format::Text => rendering::render_text(table, &report, frames_read, &diagnostics),
+        Format::Json => {
             let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }
+        other => other.unreachable(),
     }
 }
 

@@ -9,7 +9,7 @@ use serde::Serialize;
 use super::contract::Error;
 use super::envelope::Published;
 use super::frame::{Captured, Timestamp};
-use super::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{ProbeStatus, Transport};
 
 use packetcraftr::traceroute as library;
 
@@ -122,7 +122,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
                 target,
                 resolved_addresses,
                 destination,
-                strategy: strategy.into(),
+                strategy,
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
@@ -190,7 +190,7 @@ impl From<library::Report> for Published<Event> {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 destination: summary.destination,
-                strategy: summary.strategy.into(),
+                strategy: summary.strategy,
                 destination_port: summary.destination_port,
                 completion: summary.termination.into(),
             },
@@ -208,10 +208,10 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             sequence: probe.sequence,
             hop_limit: probe.hop_limit,
             attempt: probe.attempt,
-            strategy: probe.strategy.into(),
+            strategy: probe.strategy,
             destination: probe.destination,
             destination_port: probe.destination_port,
-            status: probe.status.into(),
+            status: probe.status,
             response_kind: probe.response_kind.map(Into::into),
             responder: probe.responder,
             sent_at: probe.sent_at.try_into()?,

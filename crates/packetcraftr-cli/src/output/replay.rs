@@ -51,15 +51,13 @@ impl TryFrom<library::Timing> for Timing {
     }
 }
 
-impl From<(&library::Report, Duration)> for Stats {
-    fn from((summary, elapsed): (&library::Report, Duration)) -> Self {
-        Self {
-            packets_attempted: summary.frames_read,
-            packets_completed: summary.frames_transmitted,
-            bytes: summary.bytes_transmitted,
-            elapsed,
-            capture: Default::default(),
-        }
+pub(crate) fn stats(summary: &library::Report, elapsed: Duration) -> Stats {
+    Stats {
+        packets_attempted: summary.frames_read,
+        packets_completed: summary.frames_transmitted,
+        bytes: summary.bytes_transmitted,
+        elapsed,
+        capture: Default::default(),
     }
 }
 

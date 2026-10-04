@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::ExchangeFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::error::Kind;
@@ -18,7 +18,13 @@ use crate::rendering::StreamEncoder;
 use crate::system::{Prepared, placeholder, prepare_live};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ExchangeFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -34,19 +40,15 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ExchangeFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let compression = arguments.send.compression.for_output(format.as_format())?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let compression = arguments.send.compression.for_output(format)?;
     let stop = arguments.stop();
     let Args {
         send,
@@ -99,17 +101,18 @@ pub(super) fn run(
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(move |report, format| match format {
-                ExchangeFormat::Text => rendering::render_text(&report),
-                ExchangeFormat::Pcap => {
+                Format::Text => rendering::render_text(&report),
+                Format::Pcap => {
                     rendering::render_capture(&report, capture::Format::Pcap, compression)
                 }
-                ExchangeFormat::PcapNg => {
+                Format::PcapNg => {
                     rendering::render_capture(&report, capture::Format::PcapNg, compression)
                 }
-                ExchangeFormat::Json | ExchangeFormat::Ndjson => Err(CliError::new(
+                Format::Json | Format::Ndjson => Err(CliError::new(
                     Kind::Internal,
                     "exchange machine formats dispatch before text rendering",
                 )),
+                other => other.unreachable(),
             }),
             complete: rendering::render_complete,
         },

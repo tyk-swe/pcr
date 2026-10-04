@@ -6,7 +6,7 @@ use packetcraftr_core::analysis;
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::error::{Classification, Kind};
 
-use super::{MaxDurationArgs, RunTime};
+use super::MaxDurationArgs;
 use crate::errors::CliError;
 use crate::output::resources::Value;
 use crate::resources::{Enabled, SettingValue, Settings, declare, policy_value};
@@ -235,14 +235,7 @@ pub(crate) struct OfflineLimitsArgs {
     #[arg(long, default_value_t = default_ip_idle_expiry_ms())]
     pub(crate) ip_idle_expiry_ms: u64,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<Analysis>,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Analysis;
-
-impl RunTime for Analysis {
-    const HELP: &'static str = "Maximum analysis run time in milliseconds";
+    pub(crate) duration: MaxDurationArgs,
 }
 
 impl super::Bounded for OfflineLimitsArgs {

@@ -3,12 +3,12 @@
 
 use clap::Args;
 
-use super::{BuildMode, CaptureStdout, CompressionArgs, RouteArgs, SendPolicyArgs};
+use super::{BuildMode, CompressionArgs, RouteArgs, SendPolicyArgs};
 
 #[derive(Debug, Args)]
 pub(crate) struct SendArgs {
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<CaptureStdout>,
+    pub(crate) compression: CompressionArgs,
 
     #[command(flatten)]
     pub(crate) route: RouteArgs,

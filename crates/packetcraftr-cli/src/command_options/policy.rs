@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-use std::marker::PhantomData;
-
 use clap::Args;
 
 use crate::resources::{Settings, declare};
@@ -48,39 +45,20 @@ pub(crate) struct DestinationAllowlistArgs {
     allow_destination: Vec<packetcraftr::policy::DestinationConstraint>,
 }
 
-pub(crate) trait Budget: Clone + fmt::Debug + Default {
-    const PACKETS_HELP: &'static str;
-    const BYTES_HELP: &'static str;
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Transmitted;
-
-impl Budget for Transmitted {
-    const PACKETS_HELP: &'static str =
-        "Maximum transmitted packets or bounded socket traffic units authorized";
-    const BYTES_HELP: &'static str =
-        "Maximum wire or socket application bytes authorized for one operation";
-}
-
-// clap shares one `default_value_t` static across every `TrafficBudgetArgs<B>`,
-// so these defaults cannot vary by `B`.
 #[derive(Clone, Debug, Args)]
-pub(crate) struct TrafficBudgetArgs<B: Budget> {
+pub(crate) struct TrafficBudgetArgs {
+    /// Maximum packets authorized for one operation.
     #[arg(
         long,
-        default_value_t = packetcraftr::policy::DEFAULT_MAX_PACKETS_PER_OPERATION,
-        help = B::PACKETS_HELP
+        default_value_t = packetcraftr::policy::DEFAULT_MAX_PACKETS_PER_OPERATION
     )]
     max_packets: u64,
+    /// Maximum wire or captured bytes authorized for one operation.
     #[arg(
         long,
-        default_value_t = packetcraftr::policy::DEFAULT_MAX_BYTES_PER_OPERATION,
-        help = B::BYTES_HELP
+        default_value_t = packetcraftr::policy::DEFAULT_MAX_BYTES_PER_OPERATION
     )]
     max_bytes: u64,
-    #[arg(skip)]
-    budget: PhantomData<B>,
 }
 
 /// `send` and `exchange`: everything a hand-built packet can ask for.
@@ -97,13 +75,13 @@ pub(crate) struct SendPolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs<Transmitted>,
+    budgets: TrafficBudgetArgs,
 }
 
 /// `fuzz` and `replay`: packets addressed numerically, so no hostname
 /// resolution.
 #[derive(Clone, Debug, Args)]
-pub(crate) struct NumericPolicyArgs<B: Budget> {
+pub(crate) struct NumericPolicyArgs {
     #[command(flatten)]
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
@@ -113,7 +91,7 @@ pub(crate) struct NumericPolicyArgs<B: Budget> {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs<B>,
+    budgets: TrafficBudgetArgs,
 }
 
 /// `scan`, `traceroute`, and `dns`: a named target, packets built by the
@@ -127,7 +105,7 @@ pub(crate) struct HostnamePolicyArgs {
     #[command(flatten)]
     destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
-    budgets: TrafficBudgetArgs<Transmitted>,
+    budgets: TrafficBudgetArgs,
 }
 
 impl HostnameResolutionArgs {
@@ -136,7 +114,7 @@ impl HostnameResolutionArgs {
     }
 }
 
-impl<B: Budget> TrafficBudgetArgs<B> {
+impl TrafficBudgetArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
             max_packets: Count @ Operation,
@@ -152,7 +130,7 @@ impl SendPolicyArgs {
     }
 }
 
-impl<B: Budget> NumericPolicyArgs<B> {
+impl NumericPolicyArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         self.budgets.resources(settings);
     }
@@ -196,7 +174,7 @@ impl DestinationAllowlistArgs {
     }
 }
 
-impl<B: Budget> TrafficBudgetArgs<B> {
+impl TrafficBudgetArgs {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
         policy.max_packets_per_operation = self.max_packets;
         policy.max_bytes_per_operation = self.max_bytes;
@@ -222,7 +200,7 @@ impl SendPolicyArgs {
     }
 }
 
-impl<B: Budget> NumericPolicyArgs<B> {
+impl NumericPolicyArgs {
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);

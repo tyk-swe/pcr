@@ -5,7 +5,7 @@ pub(super) mod arguments;
 mod rendering;
 
 use self::arguments::Args;
-use crate::output::{self, contract::CaptureFormat};
+use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_hex_line},
@@ -13,7 +13,14 @@ use crate::{
 use packetcraftr_core::{self as core, frame::Frame};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::CaptureFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -26,19 +33,15 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(
-    args: Args,
-    format: CaptureFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let compression = args.compression.for_output(format.as_format())?;
+pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let compression = args.compression.for_output(format)?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
     crate::cancellation::check()?;
@@ -63,9 +66,9 @@ pub(crate) fn run(
     )
     .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
+    if matches!(format, Format::Pcap | Format::PcapNg) {
         return write_capture_file(
-            if format == CaptureFormat::Pcap {
+            if format == Format::Pcap {
                 core::capture_file::Format::Pcap
             } else {
                 core::capture_file::Format::PcapNg
@@ -81,29 +84,29 @@ pub(crate) fn run(
         let record = output::fragment::Fragment::try_from((index as u64, frame))
             .map_err(CliError::classified)?;
         match format {
-            CaptureFormat::Json => records.push(record),
-            CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
-            CaptureFormat::Hex => write_hex_line(record.frame.bytes())?,
-            CaptureFormat::Text => rendering::render_fragment(&record)?,
-            CaptureFormat::Pcap | CaptureFormat::PcapNg => {
+            Format::Json => records.push(record),
+            Format::Ndjson => stream.emit_data(record, Vec::new())?,
+            Format::Hex => write_hex_line(record.frame.bytes())?,
+            Format::Text => rendering::render_fragment(&record)?,
+            Format::Pcap | Format::PcapNg => {
                 return Err(CliError::new(
                     core::error::Kind::Internal,
                     "capture output returned before fragment rendering",
                 ));
             }
+            other => other.unreachable(),
         }
     }
     match format {
-        CaptureFormat::Json => emit_aggregate(
+        Format::Json => emit_aggregate(
             output::contract::Command::Fragment,
             output::fragment::Report::from((summary, records)),
             built.diagnostics,
         ),
-        CaptureFormat::Ndjson => stream
+        Format::Ndjson => stream
             .complete(summary, built.diagnostics)
             .map_err(Into::into),
-        CaptureFormat::Text | CaptureFormat::Hex | CaptureFormat::Pcap | CaptureFormat::PcapNg => {
-            Ok(())
-        }
+        Format::Text | Format::Hex | Format::Pcap | Format::PcapNg => Ok(()),
+        other => other.unreachable(),
     }
 }

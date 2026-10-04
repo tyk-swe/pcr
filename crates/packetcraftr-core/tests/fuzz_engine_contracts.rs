@@ -76,7 +76,7 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
 }
 
 #[test]
-fn fuzz_malformed_derived_fields_are_strictly_rejected_and_permissively_built() {
+fn malformed_derived_fields_strict_reject_permissive_build() {
     let base = udp_fuzz_packet();
     let strict = fuzz(
         &Request {

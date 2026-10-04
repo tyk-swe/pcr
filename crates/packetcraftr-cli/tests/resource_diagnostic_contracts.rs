@@ -25,7 +25,7 @@ fn failure_reports_effective_settings_and_invalid_options_fail_before_work() {
             "missing-capture.pcap",
         ]);
         assert_eq!(output.status.code(), Some(2));
-        assert_eq!(parse_ndjson(&output)[0]["error"]["kind"], "cli");
+        assert_eq!(parse_ndjson(&output)[0]["error"]["kind"], "usage");
     }
     assert_eq!(
         run(&["--resource-diagnostics", "protocols"]).status.code(),
@@ -38,5 +38,5 @@ fn failure_reports_effective_settings_and_invalid_options_fail_before_work() {
         "1",
         "protocols",
     ]));
-    assert_eq!(error["error"]["kind"], "cli");
+    assert_eq!(error["error"]["kind"], "usage");
 }

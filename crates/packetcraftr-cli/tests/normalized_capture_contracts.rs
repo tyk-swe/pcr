@@ -62,7 +62,7 @@ fn read_frames(bytes: &[u8]) -> (Vec<Frame>, Vec<Interface>) {
 }
 
 #[test]
-fn normalization_enforces_input_accounting_and_output_block_and_interface_limits() {
+fn normalization_enforces_io_limits() {
     let input = capture(Format::Pcap, &[frame(FIRST_FRAGMENT), frame(LAST_FRAGMENT)]);
     for flags in [
         vec!["--filter", "frame.number == 99", "--max-frames", "1"],
@@ -94,7 +94,7 @@ fn normalization_enforces_input_accounting_and_output_block_and_interface_limits
 }
 
 #[test]
-fn normalization_fails_on_a_truncated_input_trailer_after_preserving_prior_frames() {
+fn normalization_fails_on_truncated_trailer() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(&capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]))
         .unwrap();

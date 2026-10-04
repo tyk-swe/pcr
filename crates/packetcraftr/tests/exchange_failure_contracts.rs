@@ -441,7 +441,7 @@ fn describe(events: &[exchange::Event]) -> Vec<String> {
 }
 
 #[test]
-fn a_refused_reply_fails_the_exchange_instead_of_reporting_the_request_unanswered() {
+fn refused_reply_fails_exchange_not_unanswered() {
     let (client, state) = fixture(Fault::None);
     state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
 

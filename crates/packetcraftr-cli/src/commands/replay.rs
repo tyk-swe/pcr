@@ -19,7 +19,7 @@ use packetcraftr::replay::{
 };
 use packetcraftr::route;
 use packetcraftr_core::capture_file as capture;
-use packetcraftr_core::capture_file::{Format, Limits, Reader, Writer, compression};
+use packetcraftr_core::capture_file::{Limits, Reader, Writer, compression};
 use packetcraftr_core::error::{BoundaryError, Kind};
 
 use self::arguments::Args;
@@ -27,7 +27,7 @@ use crate::command_options::{InterfaceSelector, OfflineCaptureLimitsArgs};
 use crate::errors::{CliError, source_causes};
 use crate::filtering;
 use crate::input::open_capture_file;
-use crate::output::{self, contract::ExchangeFormat, stream::EncodeError};
+use crate::output::{self, contract::Format, stream::EncodeError};
 use crate::rendering::{
     HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
     finish_compressed_output, stream_capture_error, write_stdout_line_with_interrupt,
@@ -41,7 +41,13 @@ struct ReplayRun {
 }
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ExchangeFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -57,29 +63,25 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ExchangeFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let compression = arguments.compression.for_output(format.as_format())?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let compression = arguments.compression.for_output(format)?;
     let ReplayRun {
         client,
         request,
         filtered,
     } = prepare(&arguments)?;
     match format {
-        ExchangeFormat::Text => replay_text(&client, request, filtered),
-        ExchangeFormat::Json => replay_aggregate(&client, request),
-        ExchangeFormat::Ndjson => replay_stream(&client, request, stream),
-        ExchangeFormat::Pcap => replay_capture(
+        Format::Text => replay_text(&client, request, filtered),
+        Format::Json => replay_aggregate(&client, request),
+        Format::Ndjson => replay_stream(&client, request, stream),
+        Format::Pcap => replay_capture(
             &client,
             request,
             CaptureSettings {
@@ -87,7 +89,7 @@ pub(super) fn run(
                 compression,
             },
         ),
-        ExchangeFormat::PcapNg => replay_capture(
+        Format::PcapNg => replay_capture(
             &client,
             request,
             CaptureSettings {
@@ -95,6 +97,7 @@ pub(super) fn run(
                 compression,
             },
         ),
+        other => other.unreachable(),
     }
 }
 
@@ -201,7 +204,7 @@ fn requested_interface<R>(request: &Request<R>) -> Option<route::Interface> {
 
 struct CaptureSettings {
     compression: crate::command_options::Compression,
-    format: Format,
+    format: capture::Format,
 }
 
 fn drive<P, K, R>(
@@ -249,7 +252,7 @@ fn replay_aggregate<P: PacketProviders, K: Clock, R: Read>(
         Ok(())
     })?;
     let frames = std::mem::take(&mut *frames.lock().unwrap_or_else(PoisonError::into_inner));
-    let stats = output::envelope::Stats::from((&report, started.elapsed()));
+    let stats = output::replay::stats(&report, started.elapsed());
     let result = output::replay::Report::try_from((report, requested_interface, link_mode, frames))
         .map_err(CliError::classified)?;
     emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
@@ -267,7 +270,7 @@ fn replay_stream<P: PacketProviders, K: Clock, R: Read>(
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
         render_stream_record(&records, evidence)
     })?;
-    let stats = output::envelope::Stats::from((&report, started.elapsed()));
+    let stats = output::replay::stats(&report, started.elapsed());
     let result = output::replay::Report::try_from((report, interface, link_mode, Vec::new()))
         .map_err(CliError::classified)?;
     Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
@@ -330,7 +333,9 @@ where
     W: Write + Send + 'static,
 {
     // Rejected before the destination is wrapped, so no compressed container is written.
-    if settings.format == Format::Pcap && request.source.reader().format() != Format::Pcap {
+    if settings.format == capture::Format::Pcap
+        && request.source.reader().format() != capture::Format::Pcap
+    {
         return Err(CliError::classified(
             capture::Error::MetadataNotRepresentable {
                 format: settings.format,
@@ -417,12 +422,12 @@ fn render_stream_record(
 fn capture_writer<R: Read, W: Write>(
     reader: &Reader<R>,
     destination: W,
-    format: Format,
+    format: capture::Format,
     limits: packetcraftr::replay::Limits,
 ) -> Result<SourceCaptureWriter<W>, CliError> {
     let writer = match format {
-        Format::Pcap => classic_writer(reader, destination, limits)?,
-        Format::PcapNg => Writer::pcapng_with_options(
+        capture::Format::Pcap => classic_writer(reader, destination, limits)?,
+        capture::Format::PcapNg => Writer::pcapng_with_options(
             destination,
             capture::PcapNgOptions {
                 endianness: reader.endianness(),

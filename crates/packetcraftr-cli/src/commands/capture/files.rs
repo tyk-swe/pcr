@@ -419,7 +419,7 @@ impl Files {
         files.sort_by_key(|file| file.generation);
         FilesReport {
             retention: self.options.retention,
-            compression: self.options.compression.format().into(),
+            compression: self.options.compression.format(),
             rotate_bytes: self.options.rotate_bytes,
             rotate_interval_ms: self
                 .options

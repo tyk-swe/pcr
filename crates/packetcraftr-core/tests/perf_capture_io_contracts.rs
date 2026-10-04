@@ -191,7 +191,7 @@ impl Write for FaultWriter {
 }
 
 #[test]
-fn short_writes_interruptions_and_byte_offset_failures_preserve_prefixes_and_poisoning() {
+fn partial_writes_preserve_prefix_and_poison() {
     for order in [Endianness::Little, Endianness::Big] {
         for format in [Format::Pcap, Format::PcapNg] {
             let open = || match format {

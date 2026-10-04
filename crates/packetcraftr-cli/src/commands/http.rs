@@ -16,13 +16,17 @@ use self::arguments::Args;
 use super::offline_analysis::{Inspection, inspect};
 use crate::errors::CliError;
 use crate::output::{
-    contract::{Command, ToolFormat},
+    contract::{Command, Format},
     http as wire,
 };
 use crate::rendering::{StreamEncoder, emit_aggregate};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -41,14 +45,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
+fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
@@ -93,12 +97,13 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
     match format {
-        ToolFormat::Json => emit_aggregate(
+        Format::Json => emit_aggregate(
             Command::Http,
             wire::Report::from((messages, issues, complete)),
             Vec::new(),
         ),
-        ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => rendering::render_complete(&complete),
+        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+        Format::Text => rendering::render_complete(&complete),
+        other => other.unreachable(),
     }
 }

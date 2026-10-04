@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::SendFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core as core;
 use packetcraftr_core::capture_file as capture;
@@ -55,7 +55,14 @@ fn collect(
 }
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::SendFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Raw,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -65,18 +72,18 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         _stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
-    let compression = arguments.send.compression.for_output(format.as_format())?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+    let compression = arguments.send.compression.for_output(format)?;
     let prepared = prepare(arguments)?;
     match format {
-        SendFormat::Text => {
+        Format::Text => {
             let diagnostics = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let collected = std::sync::Arc::clone(&diagnostics);
             let report = prepared
@@ -107,13 +114,13 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             );
             render_diagnostics_text(&diagnostics)
         }
-        SendFormat::Json => {
+        Format::Json => {
             let report = collect(prepared)?;
             let published = output::envelope::Published::<output::send::Report>::try_from(report)
                 .map_err(CliError::classified)?;
             emit_published(output::contract::Command::Send, published)
         }
-        SendFormat::Hex => prepared
+        Format::Hex => prepared
             .client
             .send(
                 prepared.request,
@@ -121,7 +128,7 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             )
             .map_err(CliError::classified)
             .map(|_| ()),
-        SendFormat::Raw => prepared
+        Format::Raw => prepared
             .client
             .send(
                 prepared.request,
@@ -129,9 +136,9 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             )
             .map_err(CliError::classified)
             .map(|_| ()),
-        SendFormat::Pcap | SendFormat::PcapNg => {
+        Format::Pcap | Format::PcapNg => {
             let report = collect(prepared)?;
-            let capture_format = if format == SendFormat::Pcap {
+            let capture_format = if format == Format::Pcap {
                 capture::Format::Pcap
             } else {
                 capture::Format::PcapNg
@@ -142,5 +149,6 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
                 .map(|frame| frame.packet.frame().clone());
             write_capture_file(capture_format, frames, compression)
         }
+        other => other.unreachable(),
     }
 }

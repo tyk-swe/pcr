@@ -16,7 +16,7 @@ use super::style::{
 use crate::errors::CliError;
 use crate::output;
 
-fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> String {
+fn diagnostic_line(diagnostic: impl Into<packetcraftr_core::diagnostic::Diagnostic>) -> String {
     let diagnostic = diagnostic.into();
     format!(
         "{} {}: {}",
@@ -26,7 +26,9 @@ fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> Str
     )
 }
 
-pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagnostic>>(
+pub(crate) fn render_diagnostics_text<
+    D: Clone + Into<packetcraftr_core::diagnostic::Diagnostic>,
+>(
     diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
@@ -35,7 +37,9 @@ pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagno
     Ok(())
 }
 
-pub(crate) fn render_diagnostics_stderr<D: Clone + Into<output::diagnostic::Diagnostic>>(
+pub(crate) fn render_diagnostics_stderr<
+    D: Clone + Into<packetcraftr_core::diagnostic::Diagnostic>,
+>(
     diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {

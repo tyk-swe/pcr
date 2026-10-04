@@ -7,18 +7,19 @@ use crate::output;
 
 pub(crate) fn render_aggregate_rows<T, R: serde::Serialize>(
     command: output::contract::Command,
-    format: output::contract::AggregateFormat,
+    format: output::contract::Format,
     result: &R,
     rows: &[T],
     line: impl Fn(&T) -> String,
 ) -> Result<(), CliError> {
     match format {
-        output::contract::AggregateFormat::Text => {
+        output::contract::Format::Text => {
             for row in rows {
                 write_stdout_line(format_args!("{}", line(row)))?;
             }
             Ok(())
         }
-        output::contract::AggregateFormat::Json => emit_aggregate(command, result, Vec::new()),
+        output::contract::Format::Json => emit_aggregate(command, result, Vec::new()),
+        other => other.unreachable(),
     }
 }

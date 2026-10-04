@@ -14,7 +14,7 @@ use packetcraftr_core::{
 };
 
 #[test]
-fn a_connection_beyond_the_stream_limit_fails_the_run_after_the_tracked_one_is_delivered() {
+fn over_limit_connection_fails_run_after_delivery() {
     let (mut capture, mut first) = setup();
     capture.client(&mut first, b"GET / HTTP/1.1\r\n\r\n");
     capture.server(&mut first, b"HTTP/1.1 204 No Content\r\n\r\n");

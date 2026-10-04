@@ -137,7 +137,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
 }
 
 #[test]
-fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state() {
+fn malformed_lengths_fail_closed_preserving_state() {
     let key = ipv4_key();
     let now = Instant::now();
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();

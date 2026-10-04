@@ -241,7 +241,7 @@ jobs:
               "examples/documents/packet-tls-client-hello.json",
               "examples/documents/packet-dhcpv4-offer.json",
               "examples/documents/packet-dhcpv6-reply.json",
-              "examples/documents/rewrite-lab-host.json",
+              "examples/documents/rewrite-field-edits.json",
               "examples/documents/udp-profiles.json",
               "examples/documents/packet-ipv4-udp.json",
               "examples/documents/output-stats-resources.json",

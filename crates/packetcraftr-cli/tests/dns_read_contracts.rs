@@ -47,7 +47,7 @@ fn zero_application_message_limit_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2));
     let error = &parse_json(&output)["error"];
     assert_eq!(error["code"], "cli.analysis_limit");
-    assert_eq!(error["kind"], "cli");
+    assert_eq!(error["kind"], "usage");
     assert!(
         error["message"].as_str().unwrap().contains("max_messages"),
         "{error}"

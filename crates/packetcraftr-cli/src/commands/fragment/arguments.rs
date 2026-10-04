@@ -3,7 +3,7 @@
 
 use packetcraftr_core::transform::FragmentOptions;
 
-use crate::command_options::{CaptureStdout, CompressionArgs, PacketBudgetArgs, RecipeArgs};
+use crate::command_options::{CompressionArgs, PacketBudgetArgs, RecipeArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Fragmentation is explicit and offline: the recipe is built strictly, then split at --mtu, which excludes the link header. IPv6 requires --identification; IPv4 uses the header's own unless --identification replaces it.
 
@@ -16,7 +16,7 @@ Examples:
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<CaptureStdout>,
+    pub(crate) compression: CompressionArgs,
 
     #[command(flatten)]
     pub(crate) recipe: RecipeArgs,

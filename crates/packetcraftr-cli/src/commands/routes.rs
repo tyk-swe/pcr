@@ -5,7 +5,7 @@ pub(super) mod arguments;
 mod rendering;
 
 use self::arguments::Args;
-use crate::output::contract::AggregateFormat;
+use crate::output::contract::Format;
 
 use crate::output;
 use packetcraftr_netio as net;
@@ -19,19 +19,22 @@ impl Args {
 }
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::AggregateFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+    ];
     const CANCELLATION: bool = false;
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         _stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let interfaces = crate::system::interfaces(None)?;
     let mut routes = Vec::new();
     for interface in interfaces

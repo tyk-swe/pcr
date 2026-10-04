@@ -40,7 +40,7 @@ impl Drop for BlockedWriter {
 }
 
 #[test]
-fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_worker() {
+fn terminal_write_failure_is_incomplete_no_retry() {
     for terminal_error in [false, true] {
         let (entered, writer_entered) = mpsc::channel();
         let (release, wait) = mpsc::channel();

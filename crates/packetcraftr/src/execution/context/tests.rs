@@ -103,7 +103,7 @@ fn run_step(
 }
 
 #[test]
-fn cancellation_during_a_sleep_stops_before_the_delay_is_charged_or_work_runs() {
+fn cancelled_sleep_stops_before_charge_and_work() {
     let signal = Cancellation::default();
     let time = Time::new();
     let mut deadline = time

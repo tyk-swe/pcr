@@ -33,7 +33,7 @@ fn decoded_evidence(bytes: &'static [u8]) -> DecodedPacket {
 }
 
 #[test]
-fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness() {
+fn deadline_expiry_preserves_unsolicited_order() {
     let received_at = Instant::now();
     let mut accumulator = Accumulator::new(0);
     accumulator.unsolicited = vec![

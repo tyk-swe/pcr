@@ -182,7 +182,7 @@ fn answering(control: Control) -> impl FnMut(Event) -> Result<Control, BoundaryE
 }
 
 #[test]
-fn the_window_closes_on_the_client_clock_and_cancellation_stops_every_source() {
+fn client_clock_closes_window_and_cancellation_stops() {
     // Every read takes 300 ms on the client's clock, so a one-second window
     // publishes three frames and counts the fourth, read after it closed, as
     // late.

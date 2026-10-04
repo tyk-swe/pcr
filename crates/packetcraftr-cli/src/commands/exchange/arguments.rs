@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, SendArgs, TemplateArgs, TimeoutArgs, Window};
+use crate::command_options::{CaptureLimitsArgs, LongTimeoutArgs, SendArgs, TemplateArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live exchange is policy-gated and may require native features, dependencies, and privileges. NDJSON publishes provider-confirmed sends and definitively classified capture evidence during the single exchange; unanswered records follow capture completion and one complete record terminates success.
 
@@ -15,7 +15,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) template: TemplateArgs,
     #[command(flatten)]
-    pub(crate) timeout: TimeoutArgs<ResponseWindow>,
+    pub(crate) timeout: LongTimeoutArgs,
     /// End the response window as soon as every request has at least one
     /// retained response, instead of waiting out the full --timeout-ms.
     #[arg(long)]
@@ -43,12 +43,4 @@ impl Args {
             packetcraftr::exchange::StopCondition::Window
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ResponseWindow;
-
-impl Window for ResponseWindow {
-    const DEFAULT_MILLISECONDS: &'static str = "3000";
-    const HELP: &'static str = "Overall response window in milliseconds";
 }

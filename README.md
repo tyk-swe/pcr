@@ -245,8 +245,7 @@ shell completion and `man1` directories of the platform.
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
 - Structured command output: [`packetcraftr.output/v6`](schemas/packetcraftr.output.v6.schema.json)
-- Capture rewrite rules: `packetcraftr.rewrite/v1` ([schema](schemas/packetcraftr.rewrite.v1.schema.json))
-  and `packetcraftr.rewrite/v2` ([schema](schemas/packetcraftr.rewrite.v2.schema.json))
+- Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
@@ -262,7 +261,7 @@ fields, enum vocabularies, and embedded packet documents remain strict.
 Put the global `--output` option before the command, for example
 `packetcraftr --output json stats capture.pcapng`. Supported formats depend on
 the command and include `text`, `json`, `ndjson`, `hex`, `raw`, `pcap`,
-`pcapng`, `csv`, and `tsv`; invalid combinations fail explicitly, and
+and `pcapng`; invalid combinations fail explicitly, and
 `packetcraftr topics formats` lists which commands offer each. Every NDJSON
 envelope has an `event` discriminator, and the schema enumerates the per-command
 event names. `complete` and `error` are the terminal records, with the payload
@@ -338,7 +337,7 @@ packetcraftr merge --write merged.pcapng.zst --compression zstd first.pcapng sec
 packetcraftr merge --write all.pcapng --order append first.pcapng second.pcapng
 packetcraftr merge --write sorted.pcapng --max-reorder-frames 64 multiqueue.pcapng
 packetcraftr --output pcap read capture.pcap.gz --compression zstd > capture.pcap.zst
-packetcraftr --output csv read capture.pcapng --field frame.number --field ip.src --field udp.source_port
+packetcraftr --output json read capture.pcapng --field frame.number --field ip.src --field udp.source_port
 packetcraftr dns-read capture.pcapng --dns-port 5353 --stream udp:3
 packetcraftr http examples/captures/http-stream.pcap
 packetcraftr http2 examples/captures/http2-multiplexed.pcapng
@@ -383,8 +382,7 @@ remap addresses many-to-many instead: an IP side may be an address or an
 equal-length prefix whose host bits carry over, the outer source and
 destination are matched independently, at most 4096 entries are accepted, and
 overlapping prefixes are refused. `--rules-file` applies ordered conditional
-rules: `packetcraftr.rewrite/v1` documents patch headers and
-`packetcraftr.rewrite/v2` documents assign fields, with at most 1 MiB and 64
+`packetcraftr.rewrite/v2` field-assignment rules, with at most 1 MiB and 64
 rules. The output is one PCAPNG section that keeps application bytes, capture
 time, direction, and interface identity, published only when every frame
 rewrote cleanly.
@@ -395,7 +393,7 @@ packetcraftr rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filte
 packetcraftr rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run
 packetcraftr rewrite capture.pcapng --write out.pcapng --set icmp.identifier=7 --set icmp.sequence=9
 packetcraftr rewrite capture.pcapng --write out.pcapng --map-ip 192.0.2.0/24=198.51.100.0/24 --map-mac 02:00:00:00:00:01=02:00:00:00:00:02
-packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file examples/documents/rewrite-lab-host.json
+packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file examples/documents/rewrite-field-edits.json
 ```
 
 ## Library

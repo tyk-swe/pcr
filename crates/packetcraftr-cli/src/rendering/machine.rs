@@ -117,7 +117,7 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: impl Into<output::envelope::Stats>,
+    stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
     emit_json(&crate::resources::decorate(

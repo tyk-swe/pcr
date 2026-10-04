@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 
 pub(super) mod arguments;
 mod rendering;
@@ -27,7 +27,11 @@ struct PreparedLive {
 }
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
 
     fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
@@ -51,18 +55,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ToolFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let (mut request, selectors) = prepare_request(&arguments)?;
     let mut live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
@@ -153,7 +153,7 @@ fn execute_and_render(
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
@@ -167,7 +167,7 @@ fn execute_offline(
     request: core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
@@ -221,7 +221,7 @@ fn execute_offline(
 fn execute_live(
     packet: core::packet::Packet,
     live: PreparedLive,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let PreparedLive { request, workflow } = live;

@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn kinds_map_to_stable_exit_codes_and_classifications() {
         let cases = [
-            (Kind::Usage, 2, "cli.error", "cli"),
+            (Kind::Usage, 2, "cli.error", "usage"),
             (Kind::Packet, 3, "packet.error", "packet"),
             (Kind::Capability, 4, "capability.unavailable", "capability"),
             (Kind::Io, 5, "io.runtime", "io"),

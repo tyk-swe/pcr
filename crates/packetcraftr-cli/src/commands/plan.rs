@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::AggregateFormat;
+use crate::output::contract::Format;
 
 use crate::output;
 
@@ -14,7 +14,10 @@ use crate::rendering::emit_aggregate;
 use crate::system::prepare_plan;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::AggregateFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+    ];
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -23,14 +26,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         _stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
     let plan = prepare_plan(route, policy.into_policy())?;
     let route = plan
@@ -44,9 +47,8 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         .map_err(CliError::classified)?;
     let result = output::plan::Report::from(route);
     match format {
-        AggregateFormat::Text => rendering::render_text(&result.plan),
-        AggregateFormat::Json => {
-            emit_aggregate(output::contract::Command::Plan, result, Vec::new())
-        }
+        Format::Text => rendering::render_text(&result.plan),
+        Format::Json => emit_aggregate(output::contract::Command::Plan, result, Vec::new()),
+        other => other.unreachable(),
     }
 }

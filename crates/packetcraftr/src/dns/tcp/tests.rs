@@ -250,7 +250,7 @@ fn request(query: &[u8]) -> Request<'_> {
 }
 
 #[test]
-fn a_short_attempt_waits_for_connect_completion_before_rechecking_its_deadline() {
+fn short_attempt_waits_for_connect_then_deadline() {
     let timeout = Duration::from_millis(20);
     assert!(timeout < POLL_INTERVAL);
     let provider = connector(vec![0, 1, 1]);

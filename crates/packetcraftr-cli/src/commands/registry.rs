@@ -10,7 +10,7 @@ use super::{
     fragment, fuzz, http, http2, interfaces, merge, plan, protocols, read, replay, rewrite, routes,
     scan, send, stats, tls, topics, traceroute, verify_forwarding,
 };
-use crate::output::contract::{Format, FormatSubset};
+use crate::output::contract::Format;
 use crate::resources::Settings;
 
 /// Declares every command once, in `--help` order.
@@ -102,7 +102,7 @@ macro_rules! commands {
                         $(
                             Self::$variant => commands!(
                                 @published $name,
-                                <<$arguments as Spec>::Format as FormatSubset>::FORMATS
+                                <$arguments as Spec>::FORMATS
                             ),
                         )?
                     )*

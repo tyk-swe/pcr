@@ -328,7 +328,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strings_are_bounded_by_the_owned_buffer_and_require_alignment_and_termination() {
+    fn strings_bounded_aligned_terminated() {
         let mut units = [65u16, 66];
         let pointer = units.as_mut_ptr();
         let bounds = BufferBounds::new(pointer.cast(), size_of_val(&units)).unwrap();

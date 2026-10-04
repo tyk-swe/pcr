@@ -12,13 +12,14 @@ pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
 pub use crate::commands::Command;
 
 impl Command {
-    pub fn require_format<F: FormatSubset>(self, format: Format) -> Result<F, Error> {
-        match F::try_from(format) {
-            Ok(narrowed) if self.formats().contains(&format) => Ok(narrowed),
-            _ => Err(Error::UnsupportedFormat {
+    pub fn require_format(self, format: Format) -> Result<Format, Error> {
+        if self.formats().contains(&format) {
+            Ok(format)
+        } else {
+            Err(Error::UnsupportedFormat {
                 command: self,
                 format,
-            }),
+            })
         }
     }
 }
@@ -34,8 +35,6 @@ pub enum Format {
     Text,
     Json,
     Ndjson,
-    Csv,
-    Tsv,
     Hex,
     Raw,
     Pcap,
@@ -46,8 +45,6 @@ impl Format {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
-            Self::Csv => "csv",
-            Self::Tsv => "tsv",
             Self::Json => "json",
             Self::Ndjson => "ndjson",
             Self::Hex => "hex",
@@ -55,6 +52,10 @@ impl Format {
             Self::Pcap => "pcap",
             Self::PcapNg => "pcapng",
         }
+    }
+
+    pub(crate) fn unreachable(self) -> ! {
+        unreachable!("dispatch already selected a supported format: {self}")
     }
 }
 
@@ -69,152 +70,6 @@ impl fmt::Display for Format {
 pub enum Mode {
     Aggregate,
     Stream,
-}
-
-pub trait FormatSubset: Copy + Into<Format> + TryFrom<Format, Error = Format> {
-    const FORMATS: &'static [Format];
-}
-
-macro_rules! format_subset {
-    (
-        $(#[$meta:meta])*
-        pub enum $name:ident { $($variant:ident),+ $(,)? }
-    ) => {
-        $(#[$meta])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $($variant,)+
-        }
-
-        impl FormatSubset for $name {
-            const FORMATS: &'static [Format] = &[$(Format::$variant),+];
-        }
-
-        impl $name {
-            pub const fn as_format(self) -> Format {
-                match self {
-                    $(Self::$variant => Format::$variant,)+
-                }
-            }
-        }
-
-        impl From<$name> for Format {
-            fn from(value: $name) -> Self {
-                value.as_format()
-            }
-        }
-
-        impl TryFrom<Format> for $name {
-            type Error = Format;
-
-            fn try_from(format: Format) -> Result<Self, Format> {
-                match format {
-                    $(Format::$variant => Ok(Self::$variant),)+
-                    _ => Err(format),
-                }
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.as_format().fmt(formatter)
-            }
-        }
-    };
-}
-
-format_subset! {
-    pub enum AggregateFormat {
-        Text,
-        Json,
-    }
-}
-
-format_subset! {
-    pub enum ToolFormat {
-        Text,
-        Json,
-        Ndjson,
-    }
-}
-
-format_subset! {
-    pub enum BuildFormat {
-        Text,
-        Json,
-        Ndjson,
-        Hex,
-        Raw,
-        Pcap,
-        PcapNg,
-    }
-}
-
-format_subset! {
-    pub enum CaptureFormat {
-        Text,
-        Json,
-        Ndjson,
-        Hex,
-        Pcap,
-        PcapNg,
-    }
-}
-
-format_subset! {
-    pub enum DissectFormat {
-        Text,
-        Json,
-        Ndjson,
-        Csv,
-        Tsv,
-        Hex,
-        Raw,
-    }
-}
-
-format_subset! {
-    pub enum SendFormat {
-        Text,
-        Json,
-        Hex,
-        Raw,
-        Pcap,
-        PcapNg,
-    }
-}
-
-format_subset! {
-    pub enum ExchangeFormat {
-        Text,
-        Json,
-        Ndjson,
-        Pcap,
-        PcapNg,
-    }
-}
-
-format_subset! {
-    pub enum ReadFormat {
-        Text,
-        Json,
-        Ndjson,
-        Csv,
-        Tsv,
-        Hex,
-        Pcap,
-        PcapNg,
-    }
-}
-
-format_subset! {
-    pub enum FollowFormat {
-        Text,
-        Json,
-        Ndjson,
-        Hex,
-        Raw,
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

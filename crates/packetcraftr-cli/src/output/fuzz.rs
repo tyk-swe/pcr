@@ -7,19 +7,17 @@ use packetcraftr::fuzz as live_fuzz;
 use packetcraftr_core::fuzz::{self as packet_fuzz, Totals};
 
 use super::contract::Error as ContractError;
-use super::diagnostic::Diagnostic;
 use super::envelope::{Error as OutputError, Published, Stats};
 use super::frame::{Captured, Wire};
+use packetcraftr_core::diagnostic::Diagnostic;
 
-impl From<&packet_fuzz::Stats> for Stats {
-    fn from(value: &packet_fuzz::Stats) -> Self {
-        Self {
-            packets_attempted: value.cases_generated,
-            packets_completed: value.cases_built,
-            bytes: value.bytes,
-            elapsed: value.elapsed,
-            capture: Default::default(),
-        }
+fn operation_stats(value: &packet_fuzz::Stats) -> Stats {
+    Stats {
+        packets_attempted: value.cases_generated,
+        packets_completed: value.cases_built,
+        bytes: value.bytes,
+        elapsed: value.elapsed,
+        capture: Default::default(),
     }
 }
 
@@ -182,7 +180,7 @@ impl TryFrom<packet_fuzz::Report> for Published<Report> {
             report(seed, first_case, Mode::Offline, totals, cases),
             Vec::new(),
         )
-        .with_stats(&stats))
+        .with_stats(operation_stats(&stats)))
     }
 }
 
@@ -206,7 +204,7 @@ impl TryFrom<live_fuzz::Aggregate> for Published<Report> {
             report(seed, first_case, Mode::Live, totals, cases),
             Vec::new(),
         )
-        .with_stats(&stats))
+        .with_stats(stats))
     }
 }
 
@@ -310,7 +308,7 @@ fn convert_case(
         responses: captured(responses)?,
         unmatched: captured(unmatched)?,
         undecoded: captured(undecoded)?,
-        diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+        diagnostics,
     })
 }
 
@@ -365,7 +363,7 @@ impl TryFrom<packet_fuzz::Summary> for Published<Event> {
             complete(summary.seed, summary.first_case, Mode::Offline, totals),
             Vec::new(),
         )
-        .with_stats(&summary.stats))
+        .with_stats(operation_stats(&summary.stats)))
     }
 }
 
@@ -378,7 +376,7 @@ impl TryFrom<live_fuzz::Report> for Published<Event> {
             complete(report.seed, report.first_case, Mode::Live, totals),
             Vec::new(),
         )
-        .with_stats(&report.stats))
+        .with_stats(report.stats))
     }
 }
 

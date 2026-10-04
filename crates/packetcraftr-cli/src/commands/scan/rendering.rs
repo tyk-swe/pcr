@@ -37,8 +37,8 @@ pub(super) fn render_text(
     ))?;
     for endpoint in &result.endpoints {
         let endpoint_name = match endpoint.transport {
-            output::probe::Transport::Icmp => endpoint.transport.to_string(),
-            output::probe::Transport::Tcp | output::probe::Transport::Udp => {
+            packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
+            packetcraftr::probe::Transport::Tcp | packetcraftr::probe::Transport::Udp => {
                 format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
             }
         };

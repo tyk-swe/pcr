@@ -7,7 +7,7 @@ use common::{path_text, run};
 const TCP_SESSION_RECIPE: &str = "ethernet(src=02:00:00:00:00:01,dst=02:00:00:00:00:02)/ipv4(src=192.0.2.1,dst=198.51.100.2)/tcp(sport=40000,dport=80)/raw()";
 
 #[test]
-fn build_session_reports_the_frame_limit_and_empty_responses_as_typed_errors() {
+fn build_session_reports_limit_and_empty_as_errors() {
     let output = run(&[
         "--output",
         "pcap",

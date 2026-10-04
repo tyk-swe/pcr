@@ -79,7 +79,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
 }
 
 #[test]
-fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() {
+fn offline_fuzz_rejects_live_options_and_limits() {
     let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
     for live_only in [
         &["--allow-permissive-live"][..],

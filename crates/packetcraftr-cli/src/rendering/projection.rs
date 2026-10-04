@@ -34,13 +34,10 @@ impl Projector {
         if columns.is_empty() {
             return Ok(None);
         }
-        if !matches!(
-            format,
-            Format::Text | Format::Json | Format::Ndjson | Format::Csv | Format::Tsv
-        ) {
+        if !matches!(format, Format::Text | Format::Json | Format::Ndjson) {
             return Err(CliError::new(
                 core::error::Kind::Usage,
-                "--field requires text, JSON, NDJSON, CSV, or TSV output",
+                "--field requires text, JSON, or NDJSON output",
             ));
         }
         let projection = Projection::compile(columns.iter().map(String::as_str), registry)
@@ -73,20 +70,17 @@ impl Projector {
         Ok(())
     }
     fn header(&mut self) -> Result<(), CliError> {
-        if self.header_written || !matches!(self.format, Format::Csv | Format::Tsv | Format::Text) {
+        if self.header_written || self.format != Format::Text {
             return Ok(());
         }
-        let separator = if self.format == Format::Csv {
-            b','
-        } else {
-            b'\t'
-        };
         let mut buffer = BoundedBuffer::new(self.remaining);
         for (index, column) in self.projection.columns().iter().enumerate() {
             if index != 0 {
-                buffer.write_all(&[separator]).map_err(|_| self.limit())?;
+                buffer.write_all(b"\t").map_err(|_| self.limit())?;
             }
-            quoted(&mut buffer, column.as_bytes()).map_err(|_| self.limit())?;
+            buffer
+                .write_all(column.as_bytes())
+                .map_err(|_| self.limit())?;
         }
         buffer.write_all(b"\n").map_err(|_| self.limit())?;
         self.charge(buffer.bytes.len())?;
@@ -102,26 +96,17 @@ impl Projector {
     ) -> Result<(), CliError> {
         let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         self.header()?;
-        if matches!(self.format, Format::Csv | Format::Tsv | Format::Text) {
-            let separator = if self.format == Format::Csv {
-                b','
-            } else {
-                b'\t'
-            };
+        if self.format == Format::Text {
             let mut buffer = BoundedBuffer::new(self.remaining);
             for (index, value) in row.values.iter().enumerate() {
                 if index != 0 {
-                    buffer.write_all(&[separator]).map_err(|_| self.limit())?;
+                    buffer.write_all(b"\t").map_err(|_| self.limit())?;
                 }
                 let mut cell =
                     BoundedBuffer::new(self.remaining.saturating_sub(buffer.bytes.len()));
                 serde_json::to_writer(&mut cell, &value.as_ref().map(Cell))
                     .map_err(|_| self.limit())?;
-                if self.format == Format::Text {
-                    buffer.write_all(&cell.bytes).map_err(|_| self.limit())?;
-                } else {
-                    quoted(&mut buffer, &cell.bytes).map_err(|_| self.limit())?;
-                }
+                buffer.write_all(&cell.bytes).map_err(|_| self.limit())?;
             }
             buffer.write_all(b"\n").map_err(|_| self.limit())?;
             self.charge(buffer.bytes.len())?;
@@ -193,16 +178,6 @@ impl Write for BoundedBuffer {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-fn quoted(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
-    writer.write_all(b"\"")?;
-    for part in bytes.split_inclusive(|byte| *byte == b'"') {
-        writer.write_all(part)?;
-        if part.last() == Some(&b'"') {
-            writer.write_all(b"\"")?;
-        }
-    }
-    writer.write_all(b"\"")
 }
 
 pub(crate) fn missing_fields_error() -> CliError {

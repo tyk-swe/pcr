@@ -11,7 +11,6 @@ use std::fmt::Write as _;
 use std::sync::OnceLock;
 
 use crate::output;
-use crate::output::envelope::ErrorKind;
 use clap::{Parser, ValueEnum};
 
 use crate::commands::CommandLine;
@@ -21,8 +20,6 @@ const ROOT_HELP_FORMATS: &str = r"Output formats:
   text    Human-readable summaries and diagnostics.
   json    One aggregate JSON document.
   ndjson  One JSON record per streamed event.
-  csv     Selected fields as comma-delimited JSON cells.
-  tsv     Selected fields as tab-delimited JSON cells.
   hex     Exact frame bytes as hexadecimal text.
   raw     Exact frame bytes without text framing.
   pcap    Classic PCAP capture bytes.
@@ -54,7 +51,7 @@ pub(crate) fn exit_codes_help() -> String {
             help,
             "  {:<3} {}: {}",
             exit_code_for(kind),
-            ErrorKind::from(kind).as_str(),
+            kind.as_str(),
             exit_code_description(kind)
         );
     }
@@ -150,8 +147,6 @@ pub(crate) enum Format {
     Text,
     Json,
     Ndjson,
-    Csv,
-    Tsv,
     Hex,
     Raw,
     Pcap,
@@ -165,8 +160,6 @@ impl From<Format> for output::contract::Format {
             Format::Text => Self::Text,
             Format::Json => Self::Json,
             Format::Ndjson => Self::Ndjson,
-            Format::Csv => Self::Csv,
-            Format::Tsv => Self::Tsv,
             Format::Hex => Self::Hex,
             Format::Raw => Self::Raw,
             Format::Pcap => Self::Pcap,

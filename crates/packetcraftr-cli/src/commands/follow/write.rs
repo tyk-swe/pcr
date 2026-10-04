@@ -276,7 +276,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_parent_alias_retargeted_to_an_empty_directory_is_refused_without_publishing() {
+    fn empty_directory_retarget_refused() {
         let (_root, original, replacement, alias) = aliased_directories();
         let files = staged_directions(&alias);
         std::fs::remove_file(&alias).expect("remove original alias");
@@ -296,7 +296,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_stable_parent_alias_publishes_both_directions_and_reports_requested_paths() {
+    fn stable_parent_alias_publishes_both_directions() {
         let (_root, original, replacement, alias) = aliased_directories();
         let written = staged_directions(&alias)
             .publish()

@@ -121,7 +121,7 @@ fn declared_length_beyond_the_datagram_is_malformed_with_the_bytes_kept() {
 }
 
 #[test]
-fn gtpu_is_an_encapsulation_boundary_and_a_malformed_header_hides_the_destination() {
+fn gtpu_boundary_malformed_header_hides_destination() {
     let packet = tunnel(Gtpu::default());
     // ethernet, outer ipv4, udp and the GTP-U header are the transmitted path
     assert_eq!(outer_scope_len(&packet), 4);

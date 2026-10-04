@@ -72,7 +72,7 @@ fn emission_check(cancellation: &core::budget::Cancellation) -> Result<(), CliEr
 mod tests {
     use std::cell::RefCell;
 
-    use crate::output::contract::ToolFormat;
+    use crate::output::contract::Format;
     use packetcraftr_core::budget::Cancellation;
 
     use super::*;
@@ -100,7 +100,7 @@ mod tests {
     fn hooks<'a>(
         log: &'a RefCell<Vec<String>>,
         stream_engine: impl FnOnce(Emit<u64>) -> Result<u64, CliError> + 'a,
-    ) -> Hooks<'a, u64, u64, u64, ToolFormat, u64> {
+    ) -> Hooks<'a, u64, u64, u64, Format, u64> {
         Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
@@ -129,7 +129,7 @@ mod tests {
         let injector = cancellation.clone();
         let log = RefCell::new(Vec::new());
         let error = run_workflow(
-            ToolFormat::Ndjson,
+            Format::Ndjson,
             &stream,
             &cancellation,
             hooks(&log, move |mut emit| {

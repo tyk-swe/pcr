@@ -11,9 +11,7 @@ use packetcraftr_core::layer::Layer;
 use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Vlan, Vlan8021ad};
-use packetcraftr_core::protocol::network::{
-    DestinationOptions, HopByHop, Icmpv6, Ipv6, SegmentRoutingHeader, ndp,
-};
+use packetcraftr_core::protocol::network::{DestinationOptions, HopByHop, Icmpv6, Ipv6, ndp};
 use packetcraftr_core::protocol::tunnel::Ah;
 
 use super::is_unicast_mac;
@@ -151,8 +149,5 @@ fn advertisement(
 }
 
 fn is_unfragmented_extension(layer: &dyn Layer) -> bool {
-    layer.is::<HopByHop>()
-        || layer.is::<DestinationOptions>()
-        || layer.is::<SegmentRoutingHeader>()
-        || layer.is::<Ah>()
+    layer.is::<HopByHop>() || layer.is::<DestinationOptions>() || layer.is::<Ah>()
 }

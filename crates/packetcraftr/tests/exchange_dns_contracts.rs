@@ -96,6 +96,9 @@ impl capture::Provider for Io {
 }
 
 impl capture::Session for Capture {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }

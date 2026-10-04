@@ -14,6 +14,9 @@ pub(super) struct Owned<C: Session> {
 }
 
 impl<C: Session> Owned<C> {
+    pub(super) fn supports_ingress_time(&self) -> bool {
+        self.capture.supports_ingress_time()
+    }
     pub(super) fn new(index: usize, request: &Request, capture: C) -> Self {
         let metadata = capture.metadata();
         let native = &metadata.native;

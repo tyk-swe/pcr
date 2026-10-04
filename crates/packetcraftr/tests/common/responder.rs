@@ -176,6 +176,9 @@ pub(crate) struct Capture {
 }
 
 impl capture::Session for Capture {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }

@@ -8,6 +8,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Custom capture sessions used for active exchanges must now explicitly report
+  `supports_ingress_time() == true`; the default refuses transmission. Native
+  sessions and capture groups propagate this capability.
+- DNS batches share the strictest question's evidence byte, frame, and undecoded
+  limits across all questions, including streaming publication.
+
+- Reject routed neighbor advertisements and ICMP error quotes that would mix
+  outer network addresses with a tunneled transport or omit a request's SRH.
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
   `TcpProviders`, so each `Client` workflow requires only the provider cluster

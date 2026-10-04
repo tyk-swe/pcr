@@ -211,6 +211,9 @@ impl Resolver for FakeProviders {
 pub(crate) struct IdleSession(capture::Metadata);
 
 impl capture::Session for IdleSession {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.0
     }

@@ -149,6 +149,9 @@ impl NativeCaptureSession {
 }
 
 impl Session for NativeCaptureSession {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &Metadata {
         &self.metadata
     }

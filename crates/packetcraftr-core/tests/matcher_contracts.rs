@@ -230,3 +230,49 @@ fn quoted_icmp_rejects_malformed_or_inexact_ipv4_probes() {
         "echo request is not an ICMP error"
     );
 }
+
+#[test]
+fn quoted_icmp_cannot_combine_outer_addresses_and_inner_transport() {
+    let flat = build_probe(NetworkVersion::V4, ProbeTransport::Tcp);
+    let response = quoted_response(NetworkVersion::V4, &flat.bytes, 3, 13);
+    assert!(quoted_icmp_error(&flat.packet, &response, QuotedTransport::Tcp).is_some());
+    let mut tunneled = ipv4_envelope(IPV4_CLIENT, IPV4_SERVER);
+    tunneled.push(Ipv4 {
+        source: "192.0.2.10".parse().unwrap(),
+        destination: "192.0.2.20".parse().unwrap(),
+        ..Default::default()
+    });
+    tunneled.push(Tcp {
+        source_port: CLIENT_PORT,
+        destination_port: SERVER_PORT,
+        sequence: 0x1234_5678,
+        ..Default::default()
+    });
+    assert_eq!(
+        quoted_icmp_error(&tunneled, &response, QuotedTransport::Tcp),
+        None
+    );
+}
+
+#[test]
+fn quoted_icmp_cannot_omit_request_segment_routing() {
+    use packetcraftr_core::protocol::network::SegmentRoutingHeader;
+    let flat = build_probe(NetworkVersion::V6, ProbeTransport::Tcp);
+    let response = quoted_response(NetworkVersion::V6, &flat.bytes, 1, 1);
+    assert!(quoted_icmp_error(&flat.packet, &response, QuotedTransport::Tcp).is_some());
+    let mut routed = ipv6_envelope(IPV6_CLIENT, IPV6_SERVER);
+    routed.push(SegmentRoutingHeader {
+        segments: vec![IPV6_SERVER, IPV6_ROUTER],
+        ..Default::default()
+    });
+    routed.push(Tcp {
+        source_port: CLIENT_PORT,
+        destination_port: SERVER_PORT,
+        sequence: 0x1234_5678,
+        ..Default::default()
+    });
+    assert_eq!(
+        quoted_icmp_error(&routed, &response, QuotedTransport::Tcp),
+        None
+    );
+}

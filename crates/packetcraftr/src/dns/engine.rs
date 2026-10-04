@@ -118,7 +118,15 @@ where
         deadline,
         &Attempts,
     )?;
-    prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
+    let mut evidence = EvidenceState::new(request.limits.evidence(), EVIDENCE_DIAGNOSTICS);
+    prepared.execute(
+        authorizer,
+        registry,
+        executor,
+        Context::new(deadline, clock, Attempts),
+        &mut evidence,
+        emit,
+    )?;
     Ok(prepared.report)
 }
 
@@ -173,8 +181,8 @@ impl<'a> PreparedOperation<'a> {
         authorizer: &mut A,
         registry: &Registry,
         executor: &mut E,
-        clock: &mut C,
-        deadline: &mut Deadline,
+        execution: Context<'_, C, Attempts>,
+        evidence: &mut EvidenceState,
         mut emit: F,
     ) -> Result<(), Error>
     where
@@ -183,7 +191,7 @@ impl<'a> PreparedOperation<'a> {
         C: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {
-        deadline.enforce()?;
+        execution.deadline().enforce()?;
         let context = Arc::new(EventContext {
             server: Arc::from(self.report.server.as_str()),
             server_port: self.report.server_port,
@@ -195,12 +203,12 @@ impl<'a> PreparedOperation<'a> {
             authorizer,
             registry,
             executor,
-            execution: Context::new(deadline, clock, Attempts),
+            execution,
             query: self.query.clone(),
             delay: self.delay,
             context,
             report: &mut self.report,
-            evidence: EvidenceState::new(self.request.limits.evidence(), EVIDENCE_DIAGNOSTICS),
+            evidence,
             emit: &mut emit,
         }
         .execute()
@@ -217,7 +225,7 @@ struct Retries<'a, A, E, C, F> {
     delay: Duration,
     context: Arc<EventContext>,
     report: &'a mut Report,
-    evidence: EvidenceState,
+    evidence: &'a mut EvidenceState,
     emit: &'a mut F,
 }
 
@@ -276,7 +284,7 @@ where
             || self.execution.enforce(attempt),
         )?;
         let udp = match best {
-            Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
+            Some(candidate) => candidate_evidence(&probe, sent_at, candidate, self.evidence),
             None => timeout_evidence(&probe, sent_at),
         };
         self.record_diagnostics(attempt, [])?;

@@ -293,6 +293,9 @@ impl<C: Session> Group<C> {
 }
 
 impl<C: Session> Session for Group<C> {
+    fn supports_ingress_time(&self) -> bool {
+        !self.sources.is_empty() && self.sources.iter().all(Owned::supports_ingress_time)
+    }
     fn metadata(&self) -> &Metadata {
         self.sources
             .first()

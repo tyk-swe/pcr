@@ -173,6 +173,12 @@ impl<C: Session> Transaction<C> {
                 operation: "waiting for capture readiness",
             });
         }
+        if !self.capture.inner.supports_ingress_time() {
+            return Err(LiveIoError::Capture {
+                message: "exchange requires monotonic capture ingress timestamps".to_owned(),
+                source: None,
+            });
+        }
         self.capture.inner.wait_ready(self.window.deadline())
     }
 }

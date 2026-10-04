@@ -47,6 +47,12 @@ pub trait Session: Send {
     fn source_metadata(&self, source: usize) -> Option<&Metadata> {
         (source == 0).then(|| self.metadata())
     }
+    /// Whether this provider supplies monotonic ingress markers for correlation.
+    /// Providers unable to establish a marker for an individual record must still
+    /// omit it; that record will never be correlated.
+    fn supports_ingress_time(&self) -> bool {
+        false
+    }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), Error>;
     /// Waits until `deadline` for a record. `Ok(None)` means no record was
@@ -59,6 +65,9 @@ pub trait Session: Send {
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
+    fn supports_ingress_time(&self) -> bool {
+        (**self).supports_ingress_time()
+    }
     fn metadata(&self) -> &Metadata {
         (**self).metadata()
     }

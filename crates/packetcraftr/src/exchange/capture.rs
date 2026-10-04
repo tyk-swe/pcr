@@ -218,6 +218,9 @@ mod tests {
     }
 
     impl Session for FixtureCapture {
+        fn supports_ingress_time(&self) -> bool {
+            true
+        }
         fn metadata(&self) -> &Metadata {
             &self.metadata
         }

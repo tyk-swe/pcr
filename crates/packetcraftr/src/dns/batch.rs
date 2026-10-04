@@ -19,6 +19,7 @@ use super::executor::{Exchange, TcpQuerier};
 use super::plan::batch_limits;
 use super::report::Observed;
 use super::{Error, QueryType};
+use crate::execution::evidence::EvidenceState;
 
 pub const MAX_QUESTIONS: usize = 256;
 
@@ -255,6 +256,16 @@ where
     if !stop {
         approve_operation(authorizer, Operation::Dns(limits), deadline, &Attempts)?;
     }
+    // A batch retains all published evidence, so every question spends the same
+    // budget. Honor the strictest requested bound when question limits differ.
+    let mut evidence_limits = requests[0].limits.evidence();
+    for question in &requests[1..] {
+        let limits = question.limits.evidence();
+        evidence_limits.max_frames = evidence_limits.max_frames.min(limits.max_frames);
+        evidence_limits.max_bytes = evidence_limits.max_bytes.min(limits.max_bytes);
+        evidence_limits.max_undecoded = evidence_limits.max_undecoded.min(limits.max_undecoded);
+    }
+    let mut evidence = EvidenceState::new(evidence_limits, super::EVIDENCE_DIAGNOSTICS);
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();
     let mut previous_delay: Option<Duration> = None;
@@ -293,8 +304,8 @@ where
             authorizer,
             registry,
             executor,
-            clock,
-            &mut *deadline,
+            Context::new(&mut *deadline, clock, Attempts),
+            &mut evidence,
             |event, deadline| {
                 observe(
                     Event {

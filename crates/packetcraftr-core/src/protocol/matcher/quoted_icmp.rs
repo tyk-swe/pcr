@@ -51,9 +51,29 @@ pub fn quoted_icmp_error(
     response: &Packet,
     expected_transport: QuotedTransport,
 ) -> Option<IcmpErrorKind> {
-    let transport = request
+    let (transport_index, transport) = request.iter().enumerate().find_map(|(index, layer)| {
+        Some((
+            index,
+            BuiltinProtocol::of(layer).and_then(QuotedTransport::of)?,
+        ))
+    })?;
+    // A quote of the outer network header cannot identify a transport inside
+    // another network or tunnel envelope.
+    let outer_index = request
         .iter()
-        .find_map(|layer| BuiltinProtocol::of(layer).and_then(QuotedTransport::of))?;
+        .position(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ip))?;
+    if !request
+        .iter()
+        .take(transport_index)
+        .skip(outer_index + 1)
+        .all(|layer| {
+            BuiltinProtocol::of(layer).is_some_and(|protocol| {
+                protocol.is_ipv6_extension() && protocol != BuiltinProtocol::Ipv6Srh
+            })
+        })
+    {
+        return None;
+    }
     if transport != expected_transport {
         return None;
     }

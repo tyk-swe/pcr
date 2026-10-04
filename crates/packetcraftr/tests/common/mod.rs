@@ -340,6 +340,9 @@ pub(crate) struct ReplyCapture {
 }
 
 impl capture::Session for ReplyCapture {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
@@ -367,6 +370,9 @@ impl capture::Session for ReplyCapture {
 pub(crate) struct IdleCapture(capture::Metadata);
 
 impl capture::Session for IdleCapture {
+    fn supports_ingress_time(&self) -> bool {
+        true
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.0
     }

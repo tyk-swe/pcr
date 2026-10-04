@@ -32,6 +32,7 @@ use std::time::{Duration, Instant, SystemTime};
 enum Fault {
     None,
     Start,
+    NoIngress,
     Ready,
     PartialSend,
     Receive,
@@ -117,6 +118,9 @@ impl capture::Provider for Io {
     }
 }
 impl capture::Session for Capture {
+    fn supports_ingress_time(&self) -> bool {
+        self.fault != Fault::NoIngress
+    }
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
@@ -232,6 +236,7 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
     for (fault, expected_sends, expected_shutdowns) in [
         (Fault::Start, 0, 0),
         (Fault::Ready, 0, 1),
+        (Fault::NoIngress, 0, 1),
         (Fault::PartialSend, 1, 1),
         (Fault::Receive, 1, 1),
         (Fault::Shutdown, 1, 1),

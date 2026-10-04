@@ -1019,3 +1019,46 @@ fn batch_rejects_empty_and_invalid_requests_before_any_side_effects() {
         "no resolution side effect ran"
     );
 }
+
+#[test]
+fn batch_questions_share_evidence_budgets() {
+    for (frames, bytes, undecoded) in [(4, 16, 1), (1, 16, 1), (4, 1, 4)] {
+        let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+        let mut question = dns_request(address);
+        question.limits.max_evidence_frames = frames;
+        question.limits.max_evidence_bytes = bytes;
+        question.limits.max_undecoded = undecoded;
+        let request = super::batch::Request {
+            questions: vec![question; 3],
+        };
+        let mut seen = Vec::new();
+        let mut retained = 0;
+        let report = super::batch::run(
+            &request,
+            &mut SingleAddressAuthorizer { address },
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut ClassifiedResponseExecutor,
+            &mut NoopClock,
+            &mut Deadline::new(Duration::from_secs(5)),
+            |event, _| {
+                match event.event {
+                    super::Event::Undecoded(_) => {
+                        seen.push(event.question);
+                        retained += 1;
+                    }
+                    super::Event::Attempt { evidence, .. } => {
+                        retained += usize::from(evidence.response().is_some())
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(report.questions.len(), 3);
+        if frames == 4 && bytes == 16 {
+            assert_eq!(seen, vec![0]);
+        }
+        assert_eq!(retained, frames.min(bytes));
+    }
+}

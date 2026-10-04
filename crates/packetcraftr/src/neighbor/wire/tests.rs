@@ -332,3 +332,25 @@ fn replies_deeper_than_the_discovery_tag_limit_are_refused() {
         Some(SENDER)
     );
 }
+
+#[test]
+fn routed_neighbor_advertisements_are_not_local_replies() {
+    use packetcraftr_core::protocol::network::SegmentRoutingHeader;
+    let request = ipv6_request();
+    let bytes = with_extensions(
+        &request,
+        vec![Box::new(SegmentRoutingHeader {
+            segments_left: WireValue::Exact(1),
+            segments: vec![
+                "2001:db8::1".parse().unwrap(),
+                "2001:db8::99".parse().unwrap(),
+            ],
+            ..Default::default()
+        })],
+    );
+    assert_eq!(match_neighbor_response(&request, &capture(bytes)), None);
+    assert_eq!(
+        match_neighbor_response(&request, &capture(neighbor_advertisement(&request, SENDER))),
+        Some(SENDER)
+    );
+}

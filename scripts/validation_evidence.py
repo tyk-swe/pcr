@@ -54,9 +54,9 @@ DECODE_PROFILES = {
 NATIVE_SCENARIOS = (
     'loopback_exchange', 'readiness_and_repeated_cleanup', 'idle_deadline_and_cancellation',
     'bounded_queue_reports_real_capture_loss',
-    'native_settings_apply_before_activation_and_report_realized_values',
-    'native_filter_error_preserves_diagnostic_and_releases_admission',
-    'interface_disappearance_reports_driver_failure_and_cleans_up',
+    'native_set_before_realized_values',
+    'native_filter_error_releases_admission',
+    'iface_disappearance_driver_fail_cleans_up',
 )
 
 

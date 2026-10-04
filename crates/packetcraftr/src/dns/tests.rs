@@ -1022,7 +1022,7 @@ fn batch_rejects_empty_and_invalid_requests_before_any_side_effects() {
 
 #[test]
 fn batch_questions_share_evidence_budgets() {
-    for (frames, bytes, undecoded) in [(4, 16, 1), (1, 16, 1), (4, 1, 4)] {
+    for (frames, bytes, undecoded) in [(4, 16, 1), (3, 16, 3), (4, 3, 4)] {
         let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
         let mut question = dns_request(address);
         question.limits.max_evidence_frames = frames;
@@ -1047,7 +1047,7 @@ fn batch_questions_share_evidence_budgets() {
                         retained += 1;
                     }
                     super::Event::Attempt { evidence, .. } => {
-                        retained += usize::from(evidence.response().is_some())
+                        retained += usize::from(evidence.response().is_some());
                     }
                     _ => {}
                 }

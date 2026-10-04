@@ -79,8 +79,6 @@ cargo doc --locked --workspace --all-features --no-deps --document-private-items
 ```
 
 - `cargo bench -p packetcraftr-core` runs the benchmarks.
-- `python3 scripts/measure-analysis.py` measures peak RSS and time on Linux; see
-  [resource measurements](docs/analysis-resources.md#reproducing-measurements).
 - `cargo deny --locked check` and
   `cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories` apply
   the dependency policy that `dependency-policy.yml` runs weekly, on dependency

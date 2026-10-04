@@ -357,9 +357,7 @@ packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
   `--stream tcp:INDEX` (`udp:INDEX` too, except for `http` and `http2`), including the
   fragments that rebuilt its packets. `http` covers cleartext HTTP/1 only;
   `http2` covers cleartext HTTP/2 and h2c upgrades -- encrypted TLS traffic is
-  unsupported, never decrypted. `python3 scripts/check-http2-oracle.py` checks
-  the two checked-in `http2-*` example captures against a pinned TShark 4.6.4
-  oracle after `cargo build -p packetcraftr-cli`.
+  unsupported, never decrypted.
 - `dhcpv4` (`dhcp`) and `dhcpv6` (`dhcp6`) build and dissect DHCP below UDP; see
   `examples/documents/packet-dhcpv4-offer.json`,
   `examples/documents/packet-dhcpv6-reply.json`, and

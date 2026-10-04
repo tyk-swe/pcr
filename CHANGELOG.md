@@ -1768,6 +1768,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Removed
 
+- Retired optional local harnesses that CI and release never invoked:
+  `scripts/check-http2-oracle.py`, `scripts/check-native-capture.py`, and
+  `scripts/measure-analysis.py`. Decoder-oracle packet generators now live in
+  `scripts/check-decode-oracle.py`. Isolated native validation remains
+  `scripts/test-native-isolated.py`.
 - The `internal.final_wire_authorization`, `internal.target_resolution`, and
   `internal.unsupported_operation` codes are no longer reported: they
   classified an authorizer that lacked final-wire authorization or target

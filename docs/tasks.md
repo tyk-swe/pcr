@@ -79,9 +79,6 @@ python3 scripts/test-native-isolated.py --binary target/release/packetcraftr
 ```
 
 Do not point an active example at a production endpoint to obtain a green test.
-On a separately authorized loopback adapter, the opt-in
-`scripts/check-native-capture.py` covers passive capture only; its scope is in
-[native validation](native-validation.md).
 
 Retain input/output hashes, tool identity, capture point, settings, observation
 window, and acquisition unknowns with any real regression result. Review bundles

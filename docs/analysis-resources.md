@@ -159,42 +159,6 @@ two VXLAN network identifiers, so conversation rows expose scope identifiers and
 ordered encapsulation metadata. The release archive verifier runs both examples
 and checks that their output equals the packaged JSON documents.
 
-## Reproducing measurements
-
-Build the portable CLI with `cargo build --locked --release -p packetcraftr-cli
---no-default-features`, then run `python3 scripts/measure-analysis.py` for
-release-profile CLI measurements (`--sizes` sets the workload cardinalities).
-It generates unique flows, tiny reverse-ordered TCP segments, retransmissions,
-reverse fragments, VNI scopes, TLS gaps, and adjacent and reverse TCP growth
-(`tcp-growth`, `tcp-growth-reverse`). It measures read, follow, TLS, HTTP source
-tracking, selected/filtered stats, forwarding with and without retained details,
-file/pipe input and intentional limit failures. `read` supports NDJSON, not
-aggregate JSON; TLS and stats exercise aggregate output where supported.
-
-`target/analysis-measurements/report.json` records the binary path and SHA-256,
-version, compiler, and, per measurement, the exact command, workload and
-cardinality, physical frame count, input bytes, exit code, time and peak RSS.
-Per-command help files preserve the effective defaults. Setup is outside the
-timed child; process startup and output to `/dev/null` are inside.
-
-Pass `--heaptrack` for **separate** allocator-profile runs, or run a focused
-`heaptrack -o PROFILE target/release/packetcraftr ...` and inspect it with
-`heaptrack_print -f PROFILE.zst`. RSS measurements exclude profiler overhead.
-Each allocator run uses a fresh directory and records its separate
-`allocator_exit_code`, diagnostic `allocator_log`, and nonempty
-`allocator_profile_files`. `allocator_profile_prefix` is present only when
-files were produced; their presence does not certify a complete or readable
-profile. A nonzero allocator exit can also come from an intentional CLI limit
-failure: inspect the log and profile rather than treating the timed command's
-exit code as the allocator run's outcome. Pipe runs have no allocator run.
-The final handshake measurements have cardinality one (one handshake), with
-the fixture's physical frame count recorded separately.
-Allocator “unfreed at exit” includes process-lifetime state and is not proof of
-an operation leak; engine and callback cleanup tests check their own ownership.
-Do not interpret a process that has exited as an in-process heap-retention sample.
-Shared-runner timings are observations, not performance gates. Keep full report
-files with the binary digest when comparing versions.
-
 ## Interpreting loss and empty results
 
 | Evidence | Interpretation |

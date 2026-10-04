@@ -9,23 +9,7 @@ reviewed-native, or release report.
 | Portable core / fake-provider contracts | CI | CI |
 | Native profiles compile / deterministic contracts | CI | Platform CI |
 | Privileged isolated native inventory | Disposable namespace lane | Not configured |
-| Additional passive capture smoke | Opt-in script | Opt-in script; operator-provisioned backend/driver |
 | Idle cancellation, queue loss, active native I/O | Isolated Linux tests | No equivalent privileged CI evidence claimed |
-
-`check-native-capture.py` requires an explicit adapter and operator confirmation:
-
-```sh
-python3 scripts/check-native-capture.py --binary PATH_TO_PACKETCRAFTR \
-  --interface LOOPBACK_NAME_OR_INDEX --authorize-isolated-loopback \
-  --output NEW_PRIVATE_EVIDENCE_DIRECTORY
-```
-
-It sends no traffic. It checks reported readiness, metadata, shutdown, requested
-versus applied settings, a typed invalid-filter failure, and successful reopening.
-Unknown effective settings remain null. Its result is `capture_smoke_passed`,
-not a full native certificate. Cancellation remains explicitly `not_exercised`:
-sending a signal after an arbitrary sleep does not prove capture was idle and
-ready when it arrived. Use a backend-specific readiness-aware test for that claim.
 
 ## Before merge
 

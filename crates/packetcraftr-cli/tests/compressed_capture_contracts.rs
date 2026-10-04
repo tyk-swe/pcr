@@ -5,7 +5,7 @@ mod common;
 use common::run;
 
 #[test]
-fn invalid_compression_output_is_rejected_before_live_or_input_work() {
+fn invalid_compression_reject_before_live_work() {
     for command in [
         vec!["capture", "--interface", "missing-interface"],
         vec!["read", "/missing/capture"],

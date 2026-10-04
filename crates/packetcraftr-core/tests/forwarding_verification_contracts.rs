@@ -84,7 +84,7 @@ fn compare(rules: &forwarding::Rules, ingress: &[Frame], egress: &[Frame]) -> fo
 }
 
 #[test]
-fn the_evidence_budget_fails_loudly_instead_of_evicting() {
+fn ev_budget_fails_loudly_instead_evicting() {
     let rules = rules(&["raw.bytes"], &[], &[]);
     let mut collector = forwarding::Collector::new(&rules, Side::Ingress, 200);
     let mut reader = common::reader(&[
@@ -141,7 +141,7 @@ fn cancellation_stops_verification() {
 }
 
 #[test]
-fn malformed_expectations_are_rejected_before_input() {
+fn bad_expectations_reject_before_input() {
     for rule in [
         "",
         "no-separator",
@@ -162,7 +162,7 @@ fn malformed_expectations_are_rejected_before_input() {
 }
 
 #[test]
-fn two_missing_values_never_satisfy_ordinary_preservation() {
+fn two_missing_never_ordinary_preservation() {
     let frames = [frame(
         1,
         common::CLIENT,

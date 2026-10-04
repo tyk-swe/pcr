@@ -162,7 +162,7 @@ fn late_denials() -> [(Policy, &'static str); 2] {
 }
 
 #[test]
-fn an_exchange_refused_a_sink_worker_causes_no_neighbor_discovery_traffic() {
+fn xchg_reject_no_disc_traffic() {
     let (client, steps, io) = recording_client(Policy::default());
     let client = client.with_runtime(Runtime::new(0).unwrap());
 
@@ -209,7 +209,7 @@ fn admission_denials() -> [(Policy, &'static str); 2] {
 }
 
 #[test]
-fn admission_precedes_every_interface_route_and_neighbor_call() {
+fn admission_precedes_iface_route_nbr_call() {
     for (policy, code) in admission_denials() {
         let (client, steps) = fully_recorded_client(policy.clone());
         let error = client

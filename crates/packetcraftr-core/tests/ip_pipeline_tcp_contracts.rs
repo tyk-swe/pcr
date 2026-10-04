@@ -116,7 +116,7 @@ fn fragmented_tcp_datagram(
 }
 
 #[test]
-fn ip_expiry_and_tcp_state_keep_separate_limits_and_terminal_evidence() {
+fn ip_expiry_terminal_ev() {
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH;
     let fragments = ipv4_fragments(&registry);

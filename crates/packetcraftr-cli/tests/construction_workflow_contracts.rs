@@ -7,7 +7,7 @@ use common::{path_text, run};
 const TCP_SESSION_RECIPE: &str = "ethernet(src=02:00:00:00:00:01,dst=02:00:00:00:00:02)/ipv4(src=192.0.2.1,dst=198.51.100.2)/tcp(sport=40000,dport=80)/raw()";
 
 #[test]
-fn build_session_reports_limit_and_empty_as_errors() {
+fn build_session_reports_limit_empty_errors() {
     let output = run(&[
         "--output",
         "pcap",
@@ -50,7 +50,7 @@ fn build_session_reports_limit_and_empty_as_errors() {
 }
 
 #[test]
-fn build_session_refuses_oversized_or_conflicting_requests_before_output() {
+fn build_session_reject_before_output() {
     let directory = tempfile::tempdir().expect("scratch directory");
     let response = directory.path().join("response.bin");
     std::fs::write(&response, vec![0_u8; 1460 * 5000]).unwrap();

@@ -120,7 +120,7 @@ fn outcome(trial: &Trial) -> Option<Outcome> {
 }
 
 #[test]
-fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
+fn live_ev_offline_campaign() {
     let valid = request(packet_fuzz::Request::default());
     valid.validate().expect("default live limits");
 
@@ -212,7 +212,7 @@ impl Clock for InterruptedPacingClock {
 }
 
 #[test]
-fn live_pacing_distinguishes_cancellation_from_clock_failure() {
+fn live_pacing_clock_fail() {
     for progressive in [false, true] {
         for (cancel, fail) in [(true, true), (true, false), (false, true)] {
             let request = Request {

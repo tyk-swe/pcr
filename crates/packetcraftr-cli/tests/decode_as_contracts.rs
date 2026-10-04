@@ -6,7 +6,7 @@ mod common;
 use common::{parse_json, run};
 
 #[test]
-fn incompatible_or_conflicting_bindings_fail_before_input() {
+fn mismatch_conflict_fail_before_input() {
     for options in [
         vec!["--decode-as", "tcp.port=53:vxlan"],
         vec!["--decode-as", "udp.port=0:dns"],

@@ -4,7 +4,7 @@
 mod common;
 use common::{parse_json, parse_ndjson, run};
 #[test]
-fn failure_reports_effective_settings_and_invalid_options_fail_before_work() {
+fn fail_set_invalid_opts_fail_before_work() {
     let records = parse_ndjson(&run(&[
         "--output",
         "ndjson",

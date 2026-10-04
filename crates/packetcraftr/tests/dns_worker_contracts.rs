@@ -42,7 +42,7 @@ impl tcp::Provider for Blocked {
 }
 
 #[test]
-fn dns_connects_are_admitted_and_cancellation_releases_the_workflow() {
+fn dns_connects_releases_workflow() {
     let (entered, started) = mpsc::channel();
     let (release, blocked) = mpsc::channel();
     let (completed, result) = mpsc::channel();

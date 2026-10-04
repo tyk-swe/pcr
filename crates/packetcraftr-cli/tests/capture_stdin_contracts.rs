@@ -49,7 +49,7 @@ fn handshake_capture(format: Format) -> Vec<u8> {
 }
 
 #[test]
-fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
+fn piped_empty_bad_trunc_input_file_errors() {
     let mut inputs = vec![Vec::new(), b"nope".to_vec(), vec![0xd4, 0xc3, 0xb2]];
     let mut partial = tempfile::NamedTempFile::new().unwrap();
     partial.write_all(&handshake_capture(Format::Pcap)).unwrap();
@@ -75,7 +75,7 @@ fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
 }
 
 #[test]
-fn piped_captures_keep_frame_byte_and_per_item_limits() {
+fn piped_captures_keep_frame_byte_item_limits() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let bytes = handshake_capture(capture_format);
         let mut reader = Reader::new(Cursor::new(&bytes)).unwrap();

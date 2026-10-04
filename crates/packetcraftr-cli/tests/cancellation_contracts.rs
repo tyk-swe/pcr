@@ -151,7 +151,7 @@ impl Drop for Running {
 }
 
 #[test]
-fn cancelled_json_publication_keeps_complete_document() {
+fn cancel_json_publish_keeps_document() {
     common::require_procfs();
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
@@ -215,7 +215,7 @@ fn cancelled_json_publication_keeps_complete_document() {
 }
 
 #[test]
-fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
+fn offline_fuzz_cancel_no_success_format() {
     common::require_procfs();
     for format in ["text", "json", "ndjson"] {
         for signal in ["INT", "TERM"] {
@@ -269,7 +269,7 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
 }
 
 #[test]
-fn a_repeated_interrupt_removes_staged_output_before_exiting() {
+fn repeated_break_before_exiting() {
     common::require_procfs();
     let mut seed = tempfile::NamedTempFile::new().unwrap();
     {
@@ -326,7 +326,7 @@ fn a_repeated_interrupt_removes_staged_output_before_exiting() {
 }
 
 #[test]
-fn http2_cancellation_emits_one_error_without_complete() {
+fn http2_cancel_emits_one_error_no_complete() {
     common::require_procfs();
     for signal in ["INT", "TERM"] {
         let bytes = common::http2_capture::capture_bytes(&[common::http2_capture::multiplexed(80)]);

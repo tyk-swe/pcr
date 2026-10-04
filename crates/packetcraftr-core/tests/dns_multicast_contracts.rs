@@ -102,7 +102,7 @@ fn round_trip(packet: Packet) -> decode::DecodedPacket {
 }
 
 #[test]
-fn malformed_dns_on_the_multicast_ports_keeps_its_bytes() {
+fn bad_dns_multicast_ports_keeps_bytes() {
     for port in [MDNS_PORT, LLMNR_PORT] {
         let wire = build_with(
             udp_packet(

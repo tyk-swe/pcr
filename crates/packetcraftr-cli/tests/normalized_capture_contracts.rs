@@ -94,7 +94,7 @@ fn normalization_enforces_io_limits() {
 }
 
 #[test]
-fn normalization_fails_on_truncated_trailer() {
+fn normalization_fails_trunc_trailer() {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(&capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]))
         .unwrap();
@@ -131,7 +131,7 @@ fn pcapng_with_fcs_length(value: &'static [u8]) -> Vec<u8> {
 }
 
 #[test]
-fn normalization_refuses_input_that_declares_a_frame_check_sequence() {
+fn normalization_reject_declares_check_seq() {
     // Bit 26 marks the FCS length as present and bits 28..=31 count its 16-bit words.
     let classic = classic_with_network_word(0x2400_0000 | LinkType::IPV4.0);
     let pcapng = pcapng_with_fcs_length(&[32]);

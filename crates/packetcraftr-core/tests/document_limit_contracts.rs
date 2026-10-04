@@ -94,7 +94,7 @@ fn limit_of(result: Result<Packet, Error>) -> Limit {
 }
 
 #[test]
-fn every_limit_is_exact_at_the_boundary_and_rejects_one_unit_over() {
+fn every_limit_exact_boundary_reject_one_unit() {
     struct Case {
         limit: Limit,
         at: String,
@@ -244,7 +244,7 @@ fn every_limit_is_exact_at_the_boundary_and_rejects_one_unit_over() {
 }
 
 #[test]
-fn invalid_limits_are_rejected_before_any_parsing() {
+fn invalid_limits_reject_before_parsing() {
     let limits = DocumentLimits {
         max_nesting: MAX_DOCUMENT_NESTING + 1,
         ..DocumentLimits::DEFAULT
@@ -272,7 +272,7 @@ fn invalid_limits_are_rejected_before_any_parsing() {
 }
 
 #[test]
-fn deeply_nested_lists_are_bounded_without_exhausting_the_stack() {
+fn deeply_nested_no_exhausting_stack() {
     let at_maximum = document(&layer("raw", &[nested_lists("f", MAX_DOCUMENT_NESTING)]));
     parse_both(&at_maximum, &DocumentLimits::DEFAULT).expect("maximum nesting is accepted");
     let over = document(&layer(

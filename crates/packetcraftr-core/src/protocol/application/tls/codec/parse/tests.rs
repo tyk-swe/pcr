@@ -51,7 +51,7 @@ fn client_hello(extensions: &[Vec<u8>]) -> Vec<u8> {
 }
 
 #[test]
-fn a_zero_length_or_oversized_record_is_malformed() {
+fn zero_length_oversize_record_bad() {
     let empty = record(CONTENT_TYPE_HANDSHAKE, 0x0303, &[]);
     assert!(matches!(parse_record(&empty), Outcome::Malformed(_)));
 
@@ -76,7 +76,7 @@ fn a_zero_length_or_oversized_record_is_malformed() {
 }
 
 #[test]
-fn an_oversized_handshake_body_is_malformed_before_any_copy() {
+fn oversize_handshake_body_bad_before_copy() {
     let mut message = vec![HANDSHAKE_CLIENT_HELLO];
     let length = u32::try_from(MAX_HANDSHAKE_BODY + 1).expect("limit fits in u24");
     message.extend_from_slice(&length.to_be_bytes()[1..]);

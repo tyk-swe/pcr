@@ -64,7 +64,7 @@ fn tcp_capture(path: &std::path::Path, count: usize) {
 }
 
 #[test]
-fn v2_rules_file_rejects_unknown_assignment_properties() {
+fn v2_rules_reject_assignment_properties() {
     let source = examples().join("captures/http-stream.pcap");
     let directory = tempfile::tempdir().unwrap();
     let rules = directory.path().join("rules.json");
@@ -89,7 +89,7 @@ fn v2_rules_file_rejects_unknown_assignment_properties() {
 }
 
 #[test]
-fn change_reporting_is_bounded_and_discloses_omissions() {
+fn change_bounded_discloses_omissions() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("many.pcapng");
     tcp_capture(&source, 1100);

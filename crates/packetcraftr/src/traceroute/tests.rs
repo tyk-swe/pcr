@@ -341,7 +341,7 @@ fn icmpv6_error(
 }
 
 #[test]
-fn traceroute_udp_port_overflow_precedes_duration_limit() {
+fn trace_udp_port_ovf_precedes_duration_limit() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));
     request.destination_port = Some(u16::MAX);

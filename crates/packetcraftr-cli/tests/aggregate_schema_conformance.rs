@@ -140,7 +140,7 @@ fn plan_case() -> Value {
 }
 
 #[test]
-fn unknown_envelope_fields_and_invalid_known_payload_fields_are_rejected() {
+fn unknown_envelope_invalid_payload_reject() {
     for (pointer, value) in [
         ("/undeclared", Value::from(1)),
         ("/result/route", Value::from("invalid route")),

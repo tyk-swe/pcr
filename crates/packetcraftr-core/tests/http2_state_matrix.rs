@@ -112,7 +112,7 @@ fn settings_enable_push_role_violation() {
 }
 
 #[test]
-fn settings_invalid_frame_size_is_confirmed() {
+fn set_invalid_frame_size_confirm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(5, 100)]));
@@ -122,7 +122,7 @@ fn settings_invalid_frame_size_is_confirmed() {
 }
 
 #[test]
-fn settings_initial_window_overflow_is_confirmed() {
+fn set_initial_win_ovf_confirm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &settings(&[(4, 0x8000_0000)]));
@@ -131,7 +131,7 @@ fn settings_initial_window_overflow_is_confirmed() {
 }
 
 #[test]
-fn interleaved_header_block_is_connection_error() {
+fn interleaved_hdr_block_conn_error() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, &REQUEST[..8], 0));
@@ -160,7 +160,7 @@ fn headers_on_client_promised_stream_id() {
 }
 
 #[test]
-fn response_on_unknown_stream_preserves_ordering_uncertainty() {
+fn resp_unknown_strm_keeps_ordering_uncertain() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.server(&mut stream, &headers(7, RESPONSE_OK, END_HEADERS));
@@ -213,7 +213,7 @@ fn duplicate_pseudo_header_is_malformed() {
 }
 
 #[test]
-fn pseudo_header_after_regular_is_malformed() {
+fn pseudo_hdr_after_regular_bad() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let block = [0x00, 0x01, b'x', 0x00, 0x82];
@@ -248,7 +248,7 @@ fn response_without_status_is_malformed() {
 }
 
 #[test]
-fn trailers_with_pseudo_headers_are_malformed() {
+fn trailers_pseudo_hdrs_bad() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -459,7 +459,7 @@ fn two_settings_frames_stay_pending() {
 }
 
 #[test]
-fn ping_frames_preserve_opaque_and_match_nothing() {
+fn ping_frames_keep_opaque_match_nothing() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &ping(0xdeadbeef));
@@ -500,7 +500,7 @@ fn ping_frames_preserve_opaque_and_match_nothing() {
 }
 
 #[test]
-fn server_first_observation_preserves_connection() {
+fn server_first_obs_keeps_conn() {
     let (mut capture, mut stream) = setup();
     capture.server(&mut stream, &settings(&[]));
     capture.server(
@@ -515,7 +515,7 @@ fn server_first_observation_preserves_connection() {
 }
 
 #[test]
-fn first_client_stream_id_101_stores_one_stream() {
+fn first_client_strm_id_101_stores_one_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(101, REQUEST, END_HEADERS | END_STREAM));
@@ -542,7 +542,7 @@ fn largest_stream_id_is_bounded() {
 }
 
 #[test]
-fn server_headers_on_unpromised_even_stream_poisons() {
+fn server_hdrs_unpromised_strm_poisons() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &headers(2, RESPONSE_OK, END_HEADERS | END_STREAM));
@@ -562,7 +562,7 @@ fn client_headers_on_even_stream_poisons() {
 }
 
 #[test]
-fn client_settings_table_size_before_any_server_bytes() {
+fn client_set_table_size_before_server_bytes() {
     let events = exercise(|capture, stream| {
         let mut client = common::http2::preface();
         client.extend_from_slice(&settings(&[(1, 0), (4, 65_535)]));
@@ -573,7 +573,7 @@ fn client_settings_table_size_before_any_server_bytes() {
 }
 
 #[test]
-fn settings_ack_moves_table_size_to_decoder() {
+fn set_ack_moves_table_size_decoder() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(1, 0)]));
@@ -590,7 +590,7 @@ fn settings_ack_moves_table_size_to_decoder() {
 }
 
 #[test]
-fn table_update_above_pending_minimum_fails() {
+fn table_update_above_pend_minimum_fails() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(1, 64), (1, 200)]));
@@ -721,7 +721,7 @@ fn differing_peer_initial_windows() {
 }
 
 #[test]
-fn duplicate_initial_window_deltas_apply_in_order() {
+fn duplicate_initial_win_deltas_apply_order() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -735,7 +735,7 @@ fn duplicate_initial_window_deltas_apply_in_order() {
 }
 
 #[test]
-fn negative_stream_window_after_settings_shrink_is_legal() {
+fn negative_strm_win_after_set_shrink_legal() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -751,7 +751,7 @@ fn negative_stream_window_after_settings_shrink_is_legal() {
 }
 
 #[test]
-fn pending_frame_size_decrease_is_not_confirmed() {
+fn pend_frame_size_decrease_not_confirm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(5, 65_536)]));
@@ -974,7 +974,7 @@ fn connect_response_tunnels_data() {
 }
 
 #[test]
-fn connect_2xx_content_length_is_prohibited() {
+fn connect_2xx_content_length_prohibited() {
     let mut block = Vec::new();
     block.extend_from_slice(&[0x00, 0x07]);
     block.extend_from_slice(b":method");
@@ -1054,7 +1054,7 @@ fn trailer_block_must_end_stream() {
 }
 
 #[test]
-fn informational_response_cannot_end_stream() {
+fn t1xx_resp_cant_end_strm() {
     let mut resp = vec![0x00, 0x07];
     resp.extend_from_slice(b":status");
     resp.extend_from_slice(&[0x03]);
@@ -1159,7 +1159,7 @@ fn review_h2c_accepts_token_methods() {
 }
 
 #[test]
-fn review_refused_upgrade_preserves_evidence_and_allows_retry() {
+fn reject_upgrade_keeps_ev_allows_retry() {
     for active_body in [false, true] {
         for retry in [false, true] {
             let mut request = common::http2::upgrade_request(&[]);
@@ -1218,7 +1218,7 @@ fn review_literal(block: &mut Vec<u8>, name: &[u8], value: &[u8]) {
 }
 
 #[test]
-fn review_pushed_head_retains_bodyless_semantics() {
+fn pushed_head_keeps_nobody_sem() {
     for with_data in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -1278,7 +1278,7 @@ fn review_connect_rejects_empty_authority() {
 }
 
 #[test]
-fn review_reset_peer_frames_preserve_compression_and_same_side_errors() {
+fn reset_peer_frames_compression_side_errors() {
     for reset_client in [false, true] {
         for late_headers in [false, true] {
             for same_side in [false, true] {
@@ -1335,7 +1335,7 @@ fn review_reset_peer_frames_preserve_compression_and_same_side_errors() {
 }
 
 #[test]
-fn duplicate_settings_preserve_transient_window_overflow() {
+fn duplicate_set_keep_transient_win_ovf() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -1347,7 +1347,7 @@ fn duplicate_settings_preserve_transient_window_overflow() {
 }
 
 #[test]
-fn review_hpack_increase_before_ack_is_accepted() {
+fn hpack_increase_before_ack_accepted() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1362,7 +1362,7 @@ fn review_hpack_increase_before_ack_is_accepted() {
 }
 
 #[test]
-fn review_protocol_is_only_valid_for_connect() {
+fn proto_only_valid_connect() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut request = REQUEST.to_vec();
@@ -1403,7 +1403,7 @@ fn review_unsafe_push_is_malformed() {
 }
 
 #[test]
-fn review_stream_frame_errors_preserve_later_messages_and_hpack() {
+fn strm_frame_errors_keep_later_msgs_hpack() {
     for kind in [0, 1, 2, 8] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -1459,7 +1459,7 @@ fn review_stream_frame_errors_preserve_later_messages_and_hpack() {
 }
 
 #[test]
-fn review_path_rejects_literal_fragment_but_accepts_escaped_hash() {
+fn path_reject_escaped_hash() {
     for path in ["/resource#fragment", "/resource%23fragment"] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -1491,7 +1491,7 @@ fn review_101_forbids_framing_fields() {
 }
 
 #[test]
-fn review_hpack_increase_before_server_direction_exists() {
+fn hpack_increase_before_direction_exists() {
     let events = exercise(|capture, stream| {
         let mut client = common::http2::preface();
         client.extend_from_slice(&settings(&[(1, 8192)]));
@@ -1509,7 +1509,7 @@ fn review_hpack_increase_before_server_direction_exists() {
 }
 
 #[test]
-fn review_invalid_priority_cannot_interrupt_a_header_chain() {
+fn invalid_prio_cant_break_hdr_chain() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, &REQUEST[..2], END_STREAM));
@@ -1529,7 +1529,7 @@ fn review_invalid_priority_cannot_interrupt_a_header_chain() {
 }
 
 #[test]
-fn review_invalid_priority_marks_whole_or_split_messages_malformed() {
+fn invalid_prio_marks_whole_split_msgs_bad() {
     for client in [false, true] {
         for split in [false, true] {
             let events = exercise(|capture, stream| {
@@ -1577,7 +1577,7 @@ fn review_invalid_priority_marks_whole_or_split_messages_malformed() {
 }
 
 #[test]
-fn review_idle_data_terminates_clean_connections() {
+fn idle_data_terminates_clean_conns() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &data(11, b"idle", 0));
@@ -1593,7 +1593,7 @@ fn review_idle_data_terminates_clean_connections() {
 }
 
 #[test]
-fn review_request_path_forms_follow_method_semantics() {
+fn req_path_forms_follow_method_sem() {
     for (method, path, valid) in [
         ("GET", "*", false),
         ("OPTIONS", "*", true),
@@ -1617,7 +1617,7 @@ fn review_request_path_forms_follow_method_semantics() {
 }
 
 #[test]
-fn review_invalid_settings_stop_later_messages() {
+fn invalid_set_stop_later_msgs() {
     for (id, value) in [(4, 0x8000_0000), (5, 100), (2, 1)] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -1631,7 +1631,7 @@ fn review_invalid_settings_stop_later_messages() {
 }
 
 #[test]
-fn review_malformed_informational_is_preserved_and_closes_stream() {
+fn bad_1xx_kept_closes_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1677,7 +1677,7 @@ fn review_205_rejects_content() {
 }
 
 #[test]
-fn review_late_goaway_amends_complete_request_with_sourced_issue() {
+fn late_goaway_amends_req_sourced_issue() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1700,7 +1700,7 @@ fn review_late_goaway_amends_complete_request_with_sourced_issue() {
 }
 
 #[test]
-fn review_data_on_implicitly_closed_stream_does_not_become_idle_error() {
+fn data_implicit_not_idle_error() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
@@ -1720,7 +1720,7 @@ fn review_data_on_implicitly_closed_stream_does_not_become_idle_error() {
 }
 
 #[test]
-fn review_late_goaway_corrects_closed_exchanges_once() {
+fn late_goaway_corrects_closed_exchanges() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1739,7 +1739,7 @@ fn review_late_goaway_corrects_closed_exchanges_once() {
 }
 
 #[test]
-fn review_initial_settings_violation_stops_messages() {
+fn initial_set_violation_stops_msgs() {
     for first in [
         headers(1, REQUEST, END_HEADERS | END_STREAM),
         settings_ack(),
@@ -1757,7 +1757,7 @@ fn review_initial_settings_violation_stops_messages() {
 }
 
 #[test]
-fn review_invalid_upgrade_settings_stop_messages() {
+fn invalid_upgrade_set_stop_msgs() {
     for setting in [(4, 0x8000_0000), (5, 100), (2, 2)] {
         let events = exercise(|capture, stream| {
             capture.client(stream, &common::http2::upgrade_request(&[setting]));
@@ -1787,7 +1787,7 @@ fn review_invalid_upgrade_settings_stop_messages() {
 }
 
 #[test]
-fn review_settings_window_overflow_stops_later_messages() {
+fn set_win_ovf_stops_later_msgs() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -1801,7 +1801,7 @@ fn review_settings_window_overflow_stops_later_messages() {
 }
 
 #[test]
-fn review_idle_reset_stops_but_implicitly_closed_reset_does_not() {
+fn idle_reset_stops_implicit_closed_reset_not() {
     for idle in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -1823,7 +1823,7 @@ fn review_idle_reset_stops_but_implicitly_closed_reset_does_not() {
 }
 
 #[test]
-fn review_interim_upgrade_response_retains_bad_framing() {
+fn interim_upgrade_resp_keeps_bad_framing() {
     for field in ["Content-Length: 0", "Transfer-Encoding: chunked"] {
         let events = exercise(|capture, stream| {
             capture.client(stream, &common::http2::upgrade_request(&[]));
@@ -1840,7 +1840,7 @@ fn review_interim_upgrade_response_retains_bad_framing() {
 }
 
 #[test]
-fn review_malformed_head_retains_response_semantics() {
+fn bad_head_keeps_resp_sem() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut request = vec![0x86, 0x84];
@@ -1856,7 +1856,7 @@ fn review_malformed_head_retains_response_semantics() {
 }
 
 #[test]
-fn review_disabled_push_is_connection_fatal() {
+fn disabled_push_conn_fatal() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1881,7 +1881,7 @@ fn review_disabled_push_is_connection_fatal() {
 }
 
 #[test]
-fn review_intermediate_pending_frame_limit_is_not_confirmed() {
+fn mid_pend_frame_limit_not_confirm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(5, 32768)]));
@@ -1895,7 +1895,7 @@ fn review_intermediate_pending_frame_limit_is_not_confirmed() {
 }
 
 #[test]
-fn review_unsolicited_prelude_response_is_preserved() {
+fn unsol_prelude_resp_kept() {
     let events = exercise(|capture, stream| {
         capture.client(stream, b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n");
         capture.server(stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\nHTTP/1.1 200 Extra\r\nContent-Length: 0\r\n\r\n");
@@ -1914,7 +1914,7 @@ fn review_unsolicited_prelude_response_is_preserved() {
 }
 
 #[test]
-fn review_http2_settings_header_is_forbidden_on_streams() {
+fn http2_set_hdr_forbidden_strms() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut request = REQUEST.to_vec();
@@ -1930,7 +1930,7 @@ fn review_http2_settings_header_is_forbidden_on_streams() {
 }
 
 #[test]
-fn review_early_prelude_responses_wait_for_partial_request_heads() {
+fn early_prelude_resps_wait_partial_req_heads() {
     for clean in [false, true] {
         for upgrade in [false, true] {
             let (mut capture, mut stream) = setup();
@@ -1984,7 +1984,7 @@ fn review_early_prelude_responses_wait_for_partial_request_heads() {
 }
 
 #[test]
-fn review_increasing_goaway_stops_later_messages() {
+fn increasing_goaway_stops_later_msgs() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &goaway(3, 0));
@@ -1996,7 +1996,7 @@ fn review_increasing_goaway_stops_later_messages() {
 }
 
 #[test]
-fn review_idle_window_update_stops_but_implicitly_closed_does_not() {
+fn idle_win_update_stops_implicit_closed_not() {
     for idle in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2020,7 +2020,7 @@ fn review_idle_window_update_stops_but_implicitly_closed_does_not() {
 }
 
 #[test]
-fn review_push_on_closed_parent_stops_later_messages() {
+fn push_closed_parent_stops_later_msgs() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -2044,7 +2044,7 @@ fn review_push_on_closed_parent_stops_later_messages() {
 }
 
 #[test]
-fn review_connect_host_must_match_authority() {
+fn connect_host_must_match_authz() {
     for host in [
         b"target-a.example:443".as_slice(),
         b"target-b.example:443".as_slice(),
@@ -2065,7 +2065,7 @@ fn review_connect_host_must_match_authority() {
 }
 
 #[test]
-fn review_in_flight_push_after_peer_reset_still_reserves_stream() {
+fn flight_push_after_peer_reset_reserves_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -2097,7 +2097,7 @@ fn review_in_flight_push_after_peer_reset_still_reserves_stream() {
 }
 
 #[test]
-fn review_stream_window_overflow_flushes_only_affected_stream() {
+fn strm_win_ovf_flushes_only_affected_strm() {
     for increment in [0, 0x7fff_ffff] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2137,7 +2137,7 @@ fn review_stream_window_overflow_flushes_only_affected_stream() {
 }
 
 #[test]
-fn review_priority_errors_close_only_the_affected_stream() {
+fn prio_errors_close_only_affected_strm() {
     for priority in [frame(2, 0, 1, &[0, 0, 0, 1, 0]), frame(2, 0, 1, &[0; 4])] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2164,7 +2164,7 @@ fn review_priority_errors_close_only_the_affected_stream() {
 }
 
 #[test]
-fn review_acknowledged_zero_concurrency_rejects_request_and_push() {
+fn acked_zero_conc_reject_req_push() {
     for push in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2199,7 +2199,7 @@ fn review_acknowledged_zero_concurrency_rejects_request_and_push() {
 }
 
 #[test]
-fn review_data_before_final_response_closes_stream() {
+fn data_before_final_resp_closes_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -2218,7 +2218,7 @@ fn review_data_before_final_response_closes_stream() {
 }
 
 #[test]
-fn review_pending_hpack_increase_proves_required_intermediate_decrease() {
+fn pend_hpack_mid_decrease() {
     for shrink in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2249,7 +2249,7 @@ fn review_pending_hpack_increase_proves_required_intermediate_decrease() {
 }
 
 #[test]
-fn review_unmatched_midstream_response_is_classified_at_eof() {
+fn unmatched_midstream_resp_classed_eof() {
     let (mut capture, mut stream) = setup();
     capture.frames.clear();
     let request = b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n";
@@ -2274,7 +2274,7 @@ fn review_unmatched_midstream_response_is_classified_at_eof() {
 }
 
 #[test]
-fn review_observed_hpack_shrink_is_not_required_twice() {
+fn observed_hpack_shrink_not_required_twice() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         for id in [1, 3, 5] {
@@ -2301,7 +2301,7 @@ fn review_observed_hpack_shrink_is_not_required_twice() {
 }
 
 #[test]
-fn review_concurrency_preserves_uncertain_peer_closure() {
+fn conc_keeps_uncertain_peer_closure() {
     for end_request in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2331,7 +2331,7 @@ fn review_concurrency_preserves_uncertain_peer_closure() {
 }
 
 #[test]
-fn review_concurrency_allows_capture_delayed_peer_reset() {
+fn conc_allows_capture_delayed_peer_reset() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &settings(&[(3, 1)]));
@@ -2352,7 +2352,7 @@ fn review_concurrency_allows_capture_delayed_peer_reset() {
 }
 
 #[test]
-fn review_pre_ack_hpack_shrink_without_receipt_proof_is_uncertain() {
+fn pre_ack_no_proof_uncertain() {
     for repeat_shrink in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2392,7 +2392,7 @@ fn review_pre_ack_hpack_shrink_without_receipt_proof_is_uncertain() {
 }
 
 #[test]
-fn review_partial_request_at_eof_does_not_confirm_unsolicited_response() {
+fn partial_req_eof_not_confirm_unsol_resp() {
     for with_fin in [false, true] {
         let (mut capture, mut stream) = setup();
         capture.client(&mut stream, b"GET / HTTP/1.1\r\nHost: examp");
@@ -2414,7 +2414,7 @@ fn review_partial_request_at_eof_does_not_confirm_unsolicited_response() {
 }
 
 #[test]
-fn review_unsolicited_settings_ack_stops_later_messages() {
+fn unsol_set_ack_stops_later_msgs() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &settings_ack());
@@ -2435,7 +2435,7 @@ fn review_unsolicited_settings_ack_stops_later_messages() {
 }
 
 #[test]
-fn review_headers_priority_error_closes_stream_after_hpack() {
+fn hdrs_prio_error_closes_strm_after_hpack() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut payload = vec![0, 0, 0, 1, 0];
@@ -2465,7 +2465,7 @@ fn review_headers_priority_error_closes_stream_after_hpack() {
 }
 
 #[test]
-fn review_completed_unprocessed_requests_validate_content_length() {
+fn completed_unproc_content_length() {
     for complete in [false, true] {
         for bytes in [b"abc".as_slice(), b"abcde".as_slice()] {
             let events = exercise(|capture, stream| {
@@ -2499,7 +2499,7 @@ fn review_completed_unprocessed_requests_validate_content_length() {
 }
 
 #[test]
-fn review_capture_delayed_open_survives_peer_reset() {
+fn capture_delayed_open_survives_peer_reset() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &rst(1, 0));
@@ -2522,7 +2522,7 @@ fn review_capture_delayed_open_survives_peer_reset() {
 }
 
 #[test]
-fn review_rejected_push_cannot_emit_complete_response() {
+fn reject_push_cant_emit_complete_resp() {
     for invalid in 0..3 {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2583,7 +2583,7 @@ fn review_http_authority_rejects_userinfo() {
 }
 
 #[test]
-fn review_field_values_reject_controls_and_preserve_visible_bytes() {
+fn field_values_reject_controls_visible_bytes() {
     for byte in (0u8..=32).chain([0x7f, 0x80, 0xff]) {
         for response in [false, true] {
             let events = exercise(|capture, stream| {
@@ -2620,7 +2620,7 @@ fn review_field_values_reject_controls_and_preserve_visible_bytes() {
 }
 
 #[test]
-fn review_data_on_reserved_push_terminates_connection() {
+fn data_reserved_push_terminates_conn() {
     for client_sender in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2655,7 +2655,7 @@ fn review_data_on_reserved_push_terminates_connection() {
 }
 
 #[test]
-fn review_malformed_field_sections_close_only_their_stream() {
+fn bad_field_sections_close_only_strm() {
     for section in 0..4 {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2706,7 +2706,7 @@ fn review_malformed_field_sections_close_only_their_stream() {
 }
 
 #[test]
-fn review_sender_closed_data_flushes_pending_peer_message() {
+fn sender_closed_data_flushes_pend_peer_msg() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -2728,7 +2728,7 @@ fn review_sender_closed_data_flushes_pending_peer_message() {
 }
 
 #[test]
-fn review_capture_delayed_request_preserves_early_response_evidence() {
+fn capture_delayed_req_keeps_early_resp_ev() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS));
@@ -2758,7 +2758,7 @@ fn review_capture_delayed_request_preserves_early_response_evidence() {
 }
 
 #[test]
-fn review_http_authority_enforces_host_port_grammar() {
+fn http_authz_enforces_host_port_grammar() {
     for (authority, valid) in [
         ("good.example bad.example", false),
         ("example.com:abc", false),
@@ -2802,7 +2802,7 @@ fn review_http_authority_enforces_host_port_grammar() {
 }
 
 #[test]
-fn review_malformed_body_closes_stream_before_later_peer_frames() {
+fn bad_body_closes_strm_before_peer_frames() {
     for bodyless in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2841,7 +2841,7 @@ fn review_malformed_body_closes_stream_before_later_peer_frames() {
 }
 
 #[test]
-fn review_path_enforces_uri_characters_and_percent_escapes() {
+fn path_enforces_uri_chars_percent_escapes() {
     for (path, valid) in [
         (b"/item%zz".as_slice(), false),
         (b"/bad[", false),
@@ -2872,7 +2872,7 @@ fn review_path_enforces_uri_characters_and_percent_escapes() {
 }
 
 #[test]
-fn review_window_updates_allow_delayed_peer_data() {
+fn win_updates_allow_delayed_peer_data() {
     for id in [0, 1] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2902,7 +2902,7 @@ fn review_window_updates_allow_delayed_peer_data() {
 }
 
 #[test]
-fn review_settings_ack_waits_for_delayed_peer_settings() {
+fn set_ack_waits_delayed_peer_set() {
     for client_ack in [false, true] {
         for early_fin in [false, true] {
             let events = exercise(|capture, stream| {
@@ -2942,7 +2942,7 @@ fn review_settings_ack_waits_for_delayed_peer_settings() {
 }
 
 #[test]
-fn review_connection_window_overflow_after_sender_fin_is_confirmed() {
+fn conn_win_ovf_after_sender_fin_confirm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -2964,7 +2964,7 @@ fn review_connection_window_overflow_after_sender_fin_is_confirmed() {
 }
 
 #[test]
-fn review_reconciled_ack_releases_complete_message_evidence() {
+fn reconciled_ack_releases_complete_msg_ev() {
     for reconcile in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -2999,7 +2999,7 @@ fn review_reconciled_ack_releases_complete_message_evidence() {
 }
 
 #[test]
-fn review_mutually_early_acks_do_not_invent_a_valid_tcp_order() {
+fn mutually_acks_not_invent_valid_tcp_order() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings_ack());
@@ -3019,7 +3019,7 @@ fn review_mutually_early_acks_do_not_invent_a_valid_tcp_order() {
 }
 
 #[test]
-fn review_reconciled_ack_releases_informational_and_push_messages() {
+fn reconciled_ack_releases_1xx_push_msgs() {
     for reconcile in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3059,7 +3059,7 @@ fn review_reconciled_ack_releases_informational_and_push_messages() {
 }
 
 #[test]
-fn review_provisional_overflow_is_reconciled_at_sender_end() {
+fn interim_ovf_reconciled_sender_end() {
     for id in [0, 1] {
         for body in [b"".as_slice(), b"x"] {
             let events = exercise(|capture, stream| {
@@ -3094,7 +3094,7 @@ fn review_provisional_overflow_is_reconciled_at_sender_end() {
 }
 
 #[test]
-fn review_both_unsolicited_acks_retain_confirmed_evidence() {
+fn unsol_acks_retain_confirm_ev() {
     for fins in [false, true] {
         let (mut capture, mut stream) = setup();
         prior_knowledge_handshake(&mut capture, &mut stream);
@@ -3118,7 +3118,7 @@ fn review_both_unsolicited_acks_retain_confirmed_evidence() {
 }
 
 #[test]
-fn review_post_reset_headers_are_stream_scoped() {
+fn post_reset_hdrs_strm_scoped() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -3139,7 +3139,7 @@ fn review_post_reset_headers_are_stream_scoped() {
 }
 
 #[test]
-fn review_push_capacity_failure_names_promised_stream() {
+fn push_capacity_fail_names_promised_strm() {
     use packetcraftr_core::analysis::{
         application::Limits as AppLimits,
         http2::{Collector, Limits},
@@ -3169,7 +3169,7 @@ fn review_push_capacity_failure_names_promised_stream() {
 }
 
 #[test]
-fn review_ack_deferred_pushes_release_active_slots() {
+fn ack_deferred_pushes_release_active_slots() {
     use packetcraftr_core::analysis::{
         application::Limits as AppLimits,
         http2::{Collector, Limits},
@@ -3218,7 +3218,7 @@ fn review_ack_deferred_pushes_release_active_slots() {
 }
 
 #[test]
-fn review_headers_after_deferred_end_stream_are_rejected() {
+fn hdrs_after_deferred_end_strm_reject() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &settings_ack());
@@ -3241,7 +3241,7 @@ fn review_headers_after_deferred_end_stream_are_rejected() {
 }
 
 #[test]
-fn review_closed_deferred_messages_are_invalidated() {
+fn closed_deferred_msgs_invalid() {
     for reset in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3276,7 +3276,7 @@ fn review_closed_deferred_messages_are_invalidated() {
 }
 
 #[test]
-fn review_later_settings_do_not_reopen_closed_deferred_streams() {
+fn later_set_not_reopen_closed_deferred_strms() {
     for early_ack in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3301,7 +3301,7 @@ fn review_later_settings_do_not_reopen_closed_deferred_streams() {
 }
 
 #[test]
-fn review_credit_exhaustion_after_granting_fin_is_confirmed() {
+fn credit_exh_after_granting_fin_confirm() {
     for connection_window in [false, true] {
         for early_fin in [false, true] {
             let events = exercise(|capture, stream| {
@@ -3349,7 +3349,7 @@ fn review_credit_exhaustion_after_granting_fin_is_confirmed() {
 }
 
 #[test]
-fn review_closed_granting_direction_preserves_valid_credit_cases() {
+fn closed_granting_direction_credit_cases() {
     for pending_increase in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3385,7 +3385,7 @@ fn review_closed_granting_direction_preserves_valid_credit_cases() {
 }
 
 #[test]
-fn review_early_data_without_response_headers_preserves_delayed_request() {
+fn early_data_no_resp_hdrs_keeps_delayed_req() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &data(1, b"x", 0));
@@ -3413,7 +3413,7 @@ fn review_early_data_without_response_headers_preserves_delayed_request() {
 }
 
 #[test]
-fn review_reserved_headers_are_connection_scoped() {
+fn reserved_hdrs_conn_scoped() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -3431,7 +3431,7 @@ fn review_reserved_headers_are_connection_scoped() {
 }
 
 #[test]
-fn review_payload_free_reverse_reset_closes_known_connection() {
+fn payload_free_reverse_reset_closes_conn() {
     use packetcraftr_core::protocol::transport::Tcp;
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, &common::http2::preface());
@@ -3446,7 +3446,7 @@ fn review_payload_free_reverse_reset_closes_known_connection() {
 }
 
 #[test]
-fn review_completed_stream_credit_is_reconciled_at_late_fin() {
+fn completed_strm_credit_reconciled_late_fin() {
     for restore in 0..4 {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3479,7 +3479,7 @@ fn review_completed_stream_credit_is_reconciled_at_late_fin() {
 }
 
 #[test]
-fn review_transient_settings_peak_is_not_data_credit() {
+fn transient_set_peak_not_data_credit() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -3507,7 +3507,7 @@ fn review_transient_settings_peak_is_not_data_credit() {
 }
 
 #[test]
-fn review_connect_authority_uses_host_port_grammar() {
+fn connect_authz_uses_host_port_grammar() {
     for (authority, valid) in [
         (b"good.example bad.example".as_slice(), false),
         (b"user@host:443", false),
@@ -3526,7 +3526,7 @@ fn review_connect_authority_uses_host_port_grammar() {
 }
 
 #[test]
-fn review_delayed_opener_preserves_early_response_end() {
+fn delayed_opener_keeps_early_resp_end() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &headers(1, RESPONSE_OK, END_HEADERS | END_STREAM));
@@ -3546,7 +3546,7 @@ fn review_delayed_opener_preserves_early_response_end() {
 }
 
 #[test]
-fn review_receiver_fin_confirms_positive_concurrency_limit() {
+fn receiver_fin_confirm_positive_conc_limit() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &settings(&[(3, 1)]));
@@ -3568,7 +3568,7 @@ fn review_receiver_fin_confirms_positive_concurrency_limit() {
 }
 
 #[test]
-fn review_settings_transient_does_not_apply_to_later_sender_stream() {
+fn set_transient_not_apply_later_sender_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &settings(&[(4, 0x7fff_ffff), (4, 65535)]));
@@ -3586,7 +3586,7 @@ fn review_settings_transient_does_not_apply_to_later_sender_stream() {
 }
 
 #[test]
-fn review_skipped_response_stream_is_a_stream_error() {
+fn skipped_resp_strm_error() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(3, REQUEST, END_HEADERS | END_STREAM));
@@ -3604,7 +3604,7 @@ fn review_skipped_response_stream_is_a_stream_error() {
 }
 
 #[test]
-fn review_payload_free_reverse_fin_is_observed() {
+fn payload_free_reverse_fin_observed() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, &common::http2::preface());
     capture.client(&mut stream, &settings(&[]));
@@ -3621,7 +3621,7 @@ fn review_payload_free_reverse_fin_is_observed() {
 }
 
 #[test]
-fn review_delayed_response_final_and_data_end_state_are_preserved() {
+fn delayed_resp_final_data_end_state_kept() {
     for kind in 0..3 {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3657,7 +3657,7 @@ fn review_delayed_response_final_and_data_end_state_are_preserved() {
 }
 
 #[test]
-fn review_settings_peak_does_not_assume_receipt_of_later_window_update() {
+fn set_peak_not_assume_receipt_win_update() {
     for open_first in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3687,7 +3687,7 @@ fn review_settings_peak_does_not_assume_receipt_of_later_window_update() {
 }
 
 #[test]
-fn review_later_credit_does_not_hide_proven_settings_overflow() {
+fn later_credit_not_hide_proven_set_ovf() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS));
@@ -3710,7 +3710,7 @@ fn review_later_credit_does_not_hide_proven_settings_overflow() {
 }
 
 #[test]
-fn review_host_fallback_requires_one_valid_authority() {
+fn host_fallback_requires_one_valid_authz() {
     for (host, duplicates, valid) in [
         (b"good.example bad.example".as_slice(), false, false),
         (b"user@host:80", false, false),
@@ -3732,7 +3732,7 @@ fn review_host_fallback_requires_one_valid_authority() {
 }
 
 #[test]
-fn review_delayed_response_retains_invalid_headers() {
+fn delayed_resp_keeps_invalid_hdrs() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut invalid = RESPONSE_OK.to_vec();
@@ -3754,7 +3754,7 @@ fn review_delayed_response_retains_invalid_headers() {
 }
 
 #[test]
-fn review_zero_window_update_on_idle_stream_terminates() {
+fn zero_win_update_idle_strm_terminates() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &window_update(1, 0));
@@ -3812,7 +3812,7 @@ fn review_status_specific_trailer_rules() {
 }
 
 #[test]
-fn review_upgrade_settings_do_not_replace_wire_preface() {
+fn upgrade_set_not_replace_wire_preface() {
     let events = exercise(|capture, stream| {
         capture.client(stream, &common::http2::upgrade_request(&[]));
         capture.server(
@@ -3831,7 +3831,7 @@ fn review_upgrade_settings_do_not_replace_wire_preface() {
 }
 
 #[test]
-fn review_failed_early_response_preserves_delayed_request() {
+fn failed_early_resp_keeps_delayed_req() {
     for during_request in [false, true] {
         for extra in 0..3 {
             let events = exercise(|capture, stream| {
@@ -3872,7 +3872,7 @@ fn review_failed_early_response_preserves_delayed_request() {
 }
 
 #[test]
-fn review_http_requests_require_target_authority() {
+fn http_reqs_require_target_authz() {
     for (scheme, host, valid) in [
         (b"http".as_slice(), false, false),
         (b"https", false, false),
@@ -3893,7 +3893,7 @@ fn review_http_requests_require_target_authority() {
 }
 
 #[test]
-fn review_non_http_authority_uses_uri_grammar() {
+fn non_http_authz_uses_uri_grammar() {
     for (authority, valid) in [
         (b"good.example bad.example".as_slice(), false),
         (b"user:pass@example.com:21", true),
@@ -3917,7 +3917,7 @@ fn review_non_http_authority_uses_uri_grammar() {
 }
 
 #[test]
-fn review_ipvfuture_rejects_percent_even_when_escaped() {
+fn ipvfuture_reject_percent_escaped() {
     for (authority, valid) in [
         (b"[v1.%zz]:80".as_slice(), false),
         (b"[v1.%20]:80", false),
@@ -3934,7 +3934,7 @@ fn review_ipvfuture_rejects_percent_even_when_escaped() {
 }
 
 #[test]
-fn review_delayed_priority_error_terminates_response_direction() {
+fn delayed_prio_error_resp_direction() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         let mut payload = 1u32.to_be_bytes().to_vec();
@@ -3958,7 +3958,7 @@ fn review_delayed_priority_error_terminates_response_direction() {
 }
 
 #[test]
-fn review_trace_requests_reject_content_but_allow_empty_data() {
+fn trace_reqs_reject_content_allow_empty_data() {
     for body in [b"".as_slice(), b"content"] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -3976,7 +3976,7 @@ fn review_trace_requests_reject_content_but_allow_empty_data() {
 }
 
 #[test]
-fn review_sender_fin_confirms_stream_overflow_without_http_end() {
+fn sender_fin_confirm_strm_ovf_no_http_end() {
     for delayed_data in 0..3 {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4039,7 +4039,7 @@ fn review_upgrade_requires_one_valid_host() {
 }
 
 #[test]
-fn review_pending_settings_preserve_overflow_causality() {
+fn pend_set_keep_ovf_cause() {
     for ended in [false, true] {
         for order in 0..3 {
             let events = exercise(|capture, stream| {
@@ -4072,7 +4072,7 @@ fn review_pending_settings_preserve_overflow_causality() {
 }
 
 #[test]
-fn review_host_authority_comparison_normalizes_uri_components() {
+fn host_authz_uri_components() {
     for (scheme, authority, host, valid) in [
         ("http", "Example.COM", "example.com", true),
         ("http", "example.com", "example.com:080", true),
@@ -4101,7 +4101,7 @@ fn review_host_authority_comparison_normalizes_uri_components() {
 }
 
 #[test]
-fn review_pending_increase_cannot_confirm_window_overflow() {
+fn pend_increase_cant_confirm_win_ovf() {
     for ack in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4125,7 +4125,7 @@ fn review_pending_increase_cannot_confirm_window_overflow() {
 }
 
 #[test]
-fn review_idle_priority_errors_prevent_later_same_sender_messages() {
+fn idle_prio_errors_prevent_later_sender_msgs() {
     for server in [false, true] {
         for bad_length in [false, true] {
             let events = exercise(|capture, stream| {
@@ -4161,7 +4161,7 @@ fn review_idle_priority_errors_prevent_later_same_sender_messages() {
 }
 
 #[test]
-fn review_early_reset_prevents_later_server_response() {
+fn early_reset_prevents_later_server_resp() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(stream, &common::http2::rst(1, 0));
@@ -4181,7 +4181,7 @@ fn review_early_reset_prevents_later_server_response() {
 }
 
 #[test]
-fn review_push_promise_preserves_capture_delayed_parent() {
+fn push_promise_keeps_capture_delayed_parent() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.server(
@@ -4212,7 +4212,7 @@ fn review_push_promise_preserves_capture_delayed_parent() {
 }
 
 #[test]
-fn review_pending_transient_increase_requires_receiver_ack() {
+fn pend_transient_receiver_ack() {
     for ack in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4238,7 +4238,7 @@ fn review_pending_transient_increase_requires_receiver_ack() {
 }
 
 #[test]
-fn review_delayed_pushes_reconcile_parent_or_remain_incomplete() {
+fn delayed_pushes_reconcile_parent_partial() {
     for opener in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4268,7 +4268,7 @@ fn review_delayed_pushes_reconcile_parent_or_remain_incomplete() {
 }
 
 #[test]
-fn review_push_cannot_reuse_priority_tombstones() {
+fn push_cant_reuse_prio_tombstones() {
     for bad_length in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4295,7 +4295,7 @@ fn review_push_cannot_reuse_priority_tombstones() {
 }
 
 #[test]
-fn review_push_parent_cannot_arrive_after_clean_client_fin() {
+fn push_cant_arrive_after_clean_client_fin() {
     for promise_first in [false, true] {
         let (mut capture, mut stream) = setup();
         prior_knowledge_handshake(&mut capture, &mut stream);
@@ -4333,7 +4333,7 @@ fn review_push_parent_cannot_arrive_after_clean_client_fin() {
 }
 
 #[test]
-fn review_promise_in_flight_after_client_reset_does_not_revive_stream() {
+fn promise_flight_after_reset_not_revive_strm() {
     let events = exercise(|capture, stream| {
         prior_knowledge_handshake(capture, stream);
         capture.client(stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -4361,7 +4361,7 @@ fn review_promise_in_flight_after_client_reset_does_not_revive_stream() {
 }
 
 #[test]
-fn review_parent_reset_preserves_prior_server_end() {
+fn parent_reset_keeps_prior_server_end() {
     for server_ended in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4393,7 +4393,7 @@ fn review_parent_reset_preserves_prior_server_end() {
 }
 
 #[test]
-fn review_peer_reset_does_not_hide_prior_directional_end() {
+fn peer_reset_not_hide_prior_directional_end() {
     for client_sender in [false, true] {
         for ended in [false, true] {
             for send_data in [false, true] {
@@ -4451,7 +4451,7 @@ fn review_peer_reset_does_not_hide_prior_directional_end() {
 }
 
 #[test]
-fn review_idle_peer_frames_are_confirmed_at_clean_owner_fin() {
+fn idle_peer_frames_confirm_clean_owner_fin() {
     for kind in 0..3 {
         for fin_first in [false, true] {
             let (mut capture, mut stream) = setup();
@@ -4498,7 +4498,7 @@ fn review_host_is_not_a_trailer_field() {
 }
 
 #[test]
-fn review_head_response_allows_no_content_data_framing() {
+fn head_resp_allows_no_content_data_framing() {
     for content in [false, true] {
         for padded in [false, true] {
             let events = exercise(|capture, stream| {
@@ -4533,7 +4533,7 @@ fn review_head_response_allows_no_content_data_framing() {
 }
 
 #[test]
-fn review_h2c_request_target_forms_are_validated() {
+fn h2c_req_target_forms_validated() {
     for (method, target, valid) in [
         ("GET", "relative", false),
         ("GET", "/x#fragment", false),
@@ -4571,7 +4571,7 @@ fn review_h2c_request_target_forms_are_validated() {
 }
 
 #[test]
-fn review_provisional_controls_reconcile_both_initiator_directions() {
+fn interim_controls_initiator_directions() {
     for client_owner in [false, true] {
         for reset in [false, true] {
             for opener in [false, true] {
@@ -4672,7 +4672,7 @@ fn review_h2c_lists_reject_invalid_members() {
 }
 
 #[test]
-fn review_h2c_host_must_match_absolute_form_target() {
+fn h2c_host_must_match_absolute_form_target() {
     let offer = |target: &str, host: &str| {
         format!(
             "GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n"
@@ -4717,7 +4717,7 @@ fn review_h2c_host_must_match_absolute_form_target() {
 }
 
 #[test]
-fn review_protocol_pseudo_header_must_be_a_token() {
+fn proto_pseudo_hdr_must_token() {
     for (protocol, malformed) in [
         (b"web socket".as_slice(), true),
         (b"".as_slice(), true),
@@ -4752,7 +4752,7 @@ fn review_protocol_pseudo_header_must_be_a_token() {
 }
 
 #[test]
-fn review_prohibited_trailer_fields_are_malformed() {
+fn prohibited_trailer_fields_bad() {
     for name in [
         b"content-type".as_slice(),
         b"authorization",
@@ -4778,7 +4778,7 @@ fn review_prohibited_trailer_fields_are_malformed() {
 }
 
 #[test]
-fn review_response_above_servers_own_goaway_is_confirmed_malformed() {
+fn resp_above_servers_own_goaway_confirm_bad() {
     for delayed in [false, true] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);
@@ -4841,7 +4841,7 @@ fn review_response_above_servers_own_goaway_is_confirmed_malformed() {
 }
 
 #[test]
-fn review_later_client_stream_confirms_pending_opener_without_fin() {
+fn later_strm_confirm_pend_opener_no_fin() {
     for kind in 0..3 {
         let (mut capture, mut stream) = setup();
         prior_knowledge_handshake(&mut capture, &mut stream);
@@ -4909,7 +4909,7 @@ fn review_later_client_stream_confirms_pending_opener_without_fin() {
 }
 
 #[test]
-fn review_frame_header_errors_retain_only_the_malformed_frame() {
+fn frame_hdr_errors_retain_only_bad_frame() {
     // Bytes following an accepted 101 arrive in the same buffer, so a
     // connection-fatal frame error must not absorb the frames behind it.
     let events = exercise(|capture, stream| {
@@ -4930,7 +4930,7 @@ fn review_frame_header_errors_retain_only_the_malformed_frame() {
 }
 
 #[test]
-fn review_capture_delayed_bodyless_response_rejects_data() {
+fn capture_delayed_nobody_resp_reject_data() {
     for (block, bodyless) in [(&[0x89u8][..], true), (RESPONSE_OK, false)] {
         let events = exercise(|capture, stream| {
             prior_knowledge_handshake(capture, stream);

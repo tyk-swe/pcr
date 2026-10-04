@@ -319,7 +319,7 @@ fn replay_refuses_unschedulable_fixed_rate() {
 }
 
 #[test]
-fn replay_authorization_denial_has_no_later_io_side_effects() {
+fn replay_auth_denial_no_io_side_effects() {
     let reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
     let mut authorizer = RecordingAuthorizer {
         deny: true,

@@ -8,7 +8,7 @@ use serde_json::Value;
 use common::{parse_json, parse_ndjson, run};
 
 #[test]
-fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
+fn offline_fuzz_bounded_stable_rejects() {
     let packet = "ipv4(src=192.0.2.1,dst=198.51.100.2)/\
                   udp(sport=12345,dport=9)/raw(text=hello)";
     let arguments = [
@@ -79,7 +79,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
 }
 
 #[test]
-fn offline_fuzz_rejects_live_options_and_limits() {
+fn offline_fuzz_reject_live_opts_limits() {
     let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
     for live_only in [
         &["--allow-permissive-live"][..],

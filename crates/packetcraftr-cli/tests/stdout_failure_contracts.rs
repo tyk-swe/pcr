@@ -11,7 +11,7 @@ const REMEDIATION: &str = "restore the stdout consumer or choose a writable outp
 const FULL_DEVICE: &str = "No space left on device";
 
 #[test]
-fn generated_command_errors_report_stderr_write_failures() {
+fn generated_command_errors_write_fails() {
     common::require_dev_full();
     let arguments = ["topics", "no-such-topic"];
     let normal = common::run(&arguments);
@@ -64,11 +64,11 @@ fn assert_stdout_failure_is_classified(arguments: &[&str]) {
 }
 
 #[test]
-fn text_stdout_failure_reports_the_stdout_classification() {
+fn text_stdout_fail_reports_stdout_class() {
     assert_stdout_failure_is_classified(&["--output", "text", "build", "--packet", "raw(text=a)"]);
 }
 
 #[test]
-fn json_stdout_failure_reports_the_stdout_classification() {
+fn json_stdout_fail_reports_stdout_class() {
     assert_stdout_failure_is_classified(&["--output", "json", "build", "--packet", "raw(text=a)"]);
 }

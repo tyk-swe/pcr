@@ -250,7 +250,7 @@ fn request(query: &[u8]) -> Request<'_> {
 }
 
 #[test]
-fn short_attempt_waits_for_connect_then_deadline() {
+fn short_attempt_waits_connect_dl() {
     let timeout = Duration::from_millis(20);
     assert!(timeout < POLL_INTERVAL);
     let provider = connector(vec![0, 1, 1]);
@@ -299,7 +299,7 @@ fn short_attempt_waits_for_connect_then_deadline() {
 }
 
 #[test]
-fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
+fn explicit_provider_cant_query_bytes() {
     let mut provider = connector(vec![0, 1, 1]);
     provider.stream.peer = "127.0.0.2:53".parse().unwrap();
     let error = query(request(b"q"), Arc::new(provider.clone())).unwrap_err();
@@ -308,7 +308,7 @@ fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
 }
 
 #[test]
-fn cancellation_before_connect_completes_has_written_no_query_bytes() {
+fn cancel_before_no_query_bytes() {
     let signal = Cancellation::default();
     signal.cancel();
     let provider = connector(vec![0, 1, 1]);
@@ -336,7 +336,7 @@ fn cancellation_before_connect_completes_has_written_no_query_bytes() {
 }
 
 #[test]
-fn framing_failures_are_distinct_and_bounded_before_allocation() {
+fn framing_fails_before_allocation() {
     for (input, maximum, expected) in [
         (Vec::new(), 512, Error::IncompletePrefix { actual: 0 }),
         (vec![0], 512, Error::IncompletePrefix { actual: 1 }),

@@ -147,7 +147,7 @@ fn registry() -> Arc<packetcraftr_core::registry::Registry> {
 }
 
 #[test]
-fn projection_streams_bounded_fields_records() {
+fn proj_strms_bounded_fields_records() {
     let (provider, request, stopped) = single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
     let (publisher, buffer) = stream(Command::Capture);
     let projector = crate::rendering::Projector::prepare(

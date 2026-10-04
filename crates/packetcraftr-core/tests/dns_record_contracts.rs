@@ -115,7 +115,7 @@ fn captured(message: &[u8]) -> Frame {
 }
 
 #[test]
-fn malformed_and_truncated_records_remain_exact_malformed_capture_bytes() {
+fn bad_trunc_records_exact_bad_capture_bytes() {
     let mut bad_length = question();
     bad_length[7] = 1;
     record(&mut bad_length, &[0xc0, 12], 1, 1, 0, &[192, 0, 2]);
@@ -158,7 +158,7 @@ fn malformed_and_truncated_records_remain_exact_malformed_capture_bytes() {
 }
 
 #[test]
-fn encoding_refuses_more_txt_strings_or_edns_options_than_decoding_accepts() {
+fn encoding_reject_decoding_accepts() {
     let owner = Name::root();
     let txt = |count: usize| dns::Record {
         owner: owner.clone(),

@@ -228,7 +228,7 @@ fn callback_failure() -> BoundaryError {
 }
 
 #[test]
-fn phase_failures_never_report_success_or_skip_capture_cleanup() {
+fn phase_fails_never_capture_cleanup() {
     for (fault, expected_sends, expected_shutdowns) in [
         (Fault::Start, 0, 0),
         (Fault::Ready, 0, 1),
@@ -257,7 +257,7 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
 }
 
 #[test]
-fn cartesian_exchange_denies_the_whole_set_before_transmission() {
+fn cartesian_xchg_denies_whole_set_before_tx() {
     let (client, state) = fixture(Fault::None);
     let template = Template::new(query_packet())
         .axis(
@@ -441,7 +441,7 @@ fn describe(events: &[exchange::Event]) -> Vec<String> {
 }
 
 #[test]
-fn refused_reply_fails_exchange_not_unanswered() {
+fn reject_reply_fails_xchg_not_unanswered() {
     let (client, state) = fixture(Fault::None);
     state.lock().unwrap().script = Some(flood_then_reply(0, udp_reply));
 

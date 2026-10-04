@@ -27,7 +27,7 @@ fn pcapng_stream(endianness: Endianness, blocks: &[Vec<u8>]) -> Vec<u8> {
 }
 
 #[test]
-fn classic_reader_fails_closed_on_truncation_and_limits() {
+fn classic_reader_fails_truncation_limits() {
     let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3, 4]);
     let capture = pcap_bytes(PcapOptions::default(), &[frame]);
 
@@ -54,7 +54,7 @@ fn classic_reader_fails_closed_on_truncation_and_limits() {
 }
 
 #[test]
-fn pcapng_reader_enforces_metadata_and_interface_budgets() {
+fn pcapng_reader_enforces_meta_iface_budgets() {
     let endianness = Endianness::Little;
     let bytes = pcapng_stream(
         endianness,

@@ -49,7 +49,7 @@ fn checked_in_captures_match_the_generator() {
 }
 
 #[test]
-fn multiplexed_capture_reports_all_frame_types_and_messages() {
+fn multiplexed_capture_frame_types_msgs() {
     let path = multiplexed();
     let path = path.to_str().unwrap();
     let document = parse_json(&run_success(&["--output", "json", "http2", path]));
@@ -115,7 +115,7 @@ fn multiplexed_capture_reports_all_frame_types_and_messages() {
 }
 
 #[test]
-fn ndjson_reports_contiguous_stream_with_all_event_kinds() {
+fn ndjson_reports_contiguous_strm_event_kinds() {
     let path = multiplexed();
     let records = parse_ndjson(&run_success(&[
         "--output",
@@ -186,7 +186,7 @@ fn upgrade_capture_reports_h2c_connection() {
 }
 
 #[test]
-fn text_and_stream_outputs_escape_and_stay_bounded() {
+fn text_strm_outputs_escape_stay_bounded() {
     let path = multiplexed();
     let path = path.to_str().unwrap();
     let text = run_success(&["http2", path]);
@@ -323,7 +323,7 @@ fn file_stdin_and_compressed_parity() {
 }
 
 #[test]
-fn application_output_budget_is_exact_for_all_formats() {
+fn application_output_budget_exact_formats() {
     let path = upgrade();
     let expected_text = concat!(
         "HTTP2 tcp:0 stream=1 message=1 kind=request status=complete body_bytes=4 request=none frames=4\n",
@@ -359,7 +359,7 @@ fn application_output_budget_is_exact_for_all_formats() {
 }
 
 #[test]
-fn fatal_budget_keeps_ndjson_prefix_and_emits_one_error() {
+fn fatal_budget_keeps_ndjson_prefix_error() {
     let path = multiplexed();
     let document = parse_json(&run_success(&[
         "--output",
@@ -392,7 +392,7 @@ fn fatal_budget_keeps_ndjson_prefix_and_emits_one_error() {
 }
 
 #[test]
-fn resource_diagnostics_declare_all_http2_limits() {
+fn resource_diags_declare_all_http2_limits() {
     let path = multiplexed();
     let document = parse_json(&run_success(&[
         "--resource-diagnostics",
@@ -466,7 +466,7 @@ fn resource_diagnostics_declare_all_http2_limits() {
 }
 
 #[test]
-fn invalid_header_bytes_are_escaped_and_hex_faithful() {
+fn invalid_hdr_bytes_escaped_hex_faithful() {
     let mut exchange = common::http2_capture::Exchange::new(80);
     let mut preface = packetcraftr_core::protocol::application::http2::CLIENT_PREFACE.to_vec();
     preface.extend_from_slice(&common::http2_capture::frame(0x4, 0, 0, &[]));
@@ -498,7 +498,7 @@ fn invalid_header_bytes_are_escaped_and_hex_faithful() {
 }
 
 #[test]
-fn tls_server_port_is_unsupported_not_fabricated() {
+fn tls_server_port_unsup_not_fabricated() {
     let tls = tls_capture::write_capture(&[tls_capture::Handshake::complete(
         40_000,
         443,
@@ -524,7 +524,7 @@ fn tls_server_port_is_unsupported_not_fabricated() {
 }
 
 #[test]
-fn ndjson_malformed_headers_emit_issue_and_single_connection() {
+fn ndjson_bad_hdrs_emit_issue_single_conn() {
     use common::http2_capture::{Exchange, frame, settings};
     let mut exchange = Exchange::new(80);
     let mut preface = packetcraftr_core::protocol::application::http2::CLIENT_PREFACE.to_vec();
@@ -561,7 +561,7 @@ fn ndjson_malformed_headers_emit_issue_and_single_connection() {
 }
 
 #[test]
-fn published_http2_examples_match_the_real_cli() {
+fn published_http2_examples_match_real_cli() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
     let read_document = |name: &str| {
         serde_json::from_str::<serde_json::Value>(
@@ -627,7 +627,7 @@ fn published_http2_examples_match_the_real_cli() {
 }
 
 #[test]
-fn schema_rejects_invalid_http2_evidence_values() {
+fn schema_reject_invalid_http2_ev_values() {
     let path = multiplexed();
     let aggregate = parse_json(&run_success(&[
         "--output",
@@ -718,7 +718,7 @@ fn schema_rejects_invalid_http2_evidence_values() {
 }
 
 #[test]
-fn unresolved_h2c_offer_reports_incomplete_upgrade_evidence() {
+fn unresolved_h2c_offer_partial_upgrade_ev() {
     let head: &[u8] = b"GET / HTTP/1.1\r\nHost: www.example.com\r\nConnection: upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAEAAAAA\r\n\r\n";
     let expected_hex: String = head.iter().map(|b| format!("{b:02x}")).collect();
     let mut exchange = common::http2_capture::Exchange::new(80);
@@ -790,7 +790,7 @@ fn normalize_scope(value: &mut serde_json::Value) {
 }
 
 #[test]
-fn classic_pcap_reports_identical_http2_evidence() {
+fn classic_pcap_reports_identical_http2_ev() {
     let pcapng_bytes = std::fs::read(multiplexed()).expect("checked-in capture must exist");
     let mut reader =
         packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(&pcapng_bytes))

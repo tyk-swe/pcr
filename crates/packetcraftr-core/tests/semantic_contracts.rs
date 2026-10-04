@@ -60,7 +60,7 @@ fn ipv6_addr(value: &str) -> Ipv6Addr {
 }
 
 #[test]
-fn malformed_ipv4_source_routes_fail_closed() {
+fn bad_ipv4_source_routes_fail_closed() {
     let cases = [
         (vec![1; 41], "exceed the 40-byte header limit"),
         (vec![7], "missing its length byte"),
@@ -87,7 +87,7 @@ fn malformed_ipv4_source_routes_fail_closed() {
 }
 
 #[test]
-fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
+fn encapsulation_bounds_vlan_interpretation() {
     let outer_destination = Ipv4Addr::new(192, 0, 2, 2);
     let inner_destination = ipv6_addr("2001:db8::2");
     let mut packet = Packet::new();

@@ -47,7 +47,7 @@ fn new_collector(limits: Limits) -> Result<Collector, packetcraftr_core::analysi
 }
 
 #[test]
-fn zero_limits_are_rejected_at_construction() {
+fn zero_limits_reject_build() {
     for (name, field) in [
         ("max_frames", |l: &mut Limits| l.max_frames = 0),
         ("max_streams", |l| l.max_streams = 0),
@@ -243,7 +243,7 @@ fn body_bytes_boundary() {
 }
 
 #[test]
-fn huge_table_advertisement_does_not_allocate() {
+fn huge_table_advertisement_not_allocate() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &settings(&[(1, u32::MAX)]));
@@ -324,7 +324,7 @@ fn header_bytes_and_count_boundaries() {
 }
 
 #[test]
-fn capture_early_settings_ack_cannot_grow_an_unbounded_buffer() {
+fn capture_set_ack_cant_grow_unbounded_buffer() {
     for flood in [false, true] {
         let (mut capture, mut stream) = setup();
         prior_knowledge_handshake(&mut capture, &mut stream);

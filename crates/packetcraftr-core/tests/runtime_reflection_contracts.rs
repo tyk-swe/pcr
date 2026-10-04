@@ -12,7 +12,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 
 #[test]
-fn reflected_fields_cover_supported_types_and_fail_closed() {
+fn reflected_cover_fail_closed() {
     let mut layer = Probe::default();
     layer.set_field("enabled", true.into()).expect("bool");
     layer.set_field("label", "renamed".into()).expect("text");
@@ -105,7 +105,7 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
 }
 
 #[test]
-fn typed_iteration_selects_concrete_layers_in_packet_order() {
+fn typed_iteration_pkt_order() {
     let mut packet = Packet::new();
     packet.push(Probe {
         value: 1,
@@ -166,7 +166,7 @@ fn typed_iteration_selects_concrete_layers_in_packet_order() {
 }
 
 #[test]
-fn mutable_typed_iteration_edits_only_matching_layers() {
+fn mutable_typed_matching_layers() {
     let mut packet = Packet::new();
     packet.push(Probe {
         value: 1,

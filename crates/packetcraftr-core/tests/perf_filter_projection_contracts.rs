@@ -147,7 +147,7 @@ fn tcp_fixture() -> Tcp {
 }
 
 #[test]
-fn missing_timestamp_fails_the_whole_filter_before_any_short_circuit() {
+fn missing_ts_fails_before_short_circuit() {
     let mut undated = tunnelled();
     undated.frame.timestamp = None;
     for source in [
@@ -254,7 +254,7 @@ fn generated(rng: &mut Rng, leaves: &[(&str, bool)], depth: usize) -> (String, b
 }
 
 #[test]
-fn parser_limits_long_chains_and_nested_not_hold() {
+fn parser_limits_long_chains_nested_not_hold() {
     let at_terms = vec!["ipv4"; MAX_FILTER_TERMS].join(" && ");
     assert!(Filter::compile(&at_terms, &registry(), Limits::default()).is_ok());
     let over_terms = vec!["ipv4"; MAX_FILTER_TERMS + 1].join(" && ");
@@ -314,7 +314,7 @@ fn parser_limits_long_chains_and_nested_not_hold() {
 }
 
 #[test]
-fn projection_budget_is_enforced_at_exact_cell_boundaries() {
+fn proj_budget_enforced_exact_cell_boundaries() {
     let tunnelled = tunnelled();
     let single = Projection::compile(["frame.number"], &registry()).expect("compiles");
     let tunnelled_context = context(&tunnelled);

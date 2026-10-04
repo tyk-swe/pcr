@@ -13,7 +13,7 @@ use common::{parse_json, run, run_success};
 use packetcraftr_core::capture_file::{Reader, compression::Input};
 
 #[test]
-fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
+fn merged_file_never_overwrites_path() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures");
     let source = root.join("dns-response.pcap");
     let directory = tempfile::tempdir().unwrap();
@@ -55,7 +55,7 @@ fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
 }
 
 #[test]
-fn source_count_and_stdin_repeats_are_usage_errors() {
+fn source_count_stdin_repeats_usage_errors() {
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("merged.pcapng");
     let absent = directory.path().join("absent.pcap");

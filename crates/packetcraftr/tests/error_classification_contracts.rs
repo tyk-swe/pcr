@@ -47,7 +47,7 @@ fn selection_failure() -> packetcraftr_core::filter::Error {
 }
 
 #[test]
-fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
+fn every_unnamed_error_class_stably() {
     let cases: Vec<(&str, ReplayError, &str, Kind, Option<Coordinate>)> = vec![
         (
             "InvalidDuration",
@@ -253,7 +253,7 @@ fn ipv4_with_truncated_options() -> Vec<u8> {
 }
 
 #[test]
-fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destination() {
+fn wire_auth_reject_ipv4_bad_opts_hide_dst() {
     let mut packet = Packet::new();
     packet.push(Raw::new(ipv4_with_truncated_options()));
     let mut options = send::Options {

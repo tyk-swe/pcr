@@ -20,7 +20,7 @@ fn source(tracker: &Tracker, number: u64) -> crate::analysis::provenance::Source
 }
 
 #[test]
-fn source_buffer_tracks_spans_in_delivery_order() {
+fn source_buffer_tracks_spans_delivery_order() {
     let mut buffer = SourceBuffer::new();
     let tracker = Tracker::new(1 << 20, 1024).expect("tracker");
     let first = source(&tracker, 7);
@@ -63,7 +63,7 @@ fn settings_validate_wire_values() {
 }
 
 #[test]
-fn repeated_invalid_settings_have_bounded_diagnostics() {
+fn repeated_invalid_set_bounded_diags() {
     let mut direction = DirectionSettings::new();
     let applied = direction.apply(&vec![Setting { id: 2, value: 99 }; 2048], false);
     assert_eq!(applied.issues.len(), 1);

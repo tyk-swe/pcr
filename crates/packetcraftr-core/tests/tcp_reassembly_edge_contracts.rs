@@ -69,7 +69,7 @@ fn open(
 }
 
 #[test]
-fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
+fn tcp_segment_fail_no_mutating_delivery() {
     let now = Instant::now();
     let key = flow(10_005);
     let mut segment_limit = TcpReassembler::new(Limits {

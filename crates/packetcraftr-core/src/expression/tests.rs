@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn the_generated_budget_spans_every_layer_of_an_expression() {
+fn generated_budget_spans_layer_expression() {
     let registry = crate::protocol::builtin::registry();
     let source = "raw(bytes=zeros(6))/raw(bytes=zeros(6))";
     assert!(

@@ -20,7 +20,7 @@ struct WireRecord {
 }
 
 #[test]
-fn dns_timeout_output_omits_response_only_fields() {
+fn dns_timeout_output_omits_resp_only_fields() {
     let Published {
         result: output,
         diagnostics,

@@ -229,7 +229,7 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Ag
 }
 
 #[test]
-fn mismatched_or_malformed_dns_replies_cannot_fall_back_to_the_udp_tuple() {
+fn mismatched_bad_cant_udp_tuple() {
     let template = Template::new(query_packet(0x1234, "example.com."));
     let report = run(
         &template,

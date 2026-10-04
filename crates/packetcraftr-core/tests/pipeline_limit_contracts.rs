@@ -19,7 +19,7 @@ fn with(edit: impl FnOnce(&mut Limits)) -> Limits {
 }
 
 #[test]
-fn limits_validate_each_finite_budget_before_input_is_read() {
+fn limits_validate_finite_budget_before_read() {
     type ZeroOne = fn(&mut Limits);
     let zeroed: [(&str, ZeroOne); 13] = [
         ("max_frames", |limits| limits.max_frames = 0),
@@ -273,7 +273,7 @@ fn pipeline_reports_limits_at_exact_frame() {
 }
 
 #[test]
-fn cancellation_stops_before_reading_input_and_is_not_a_timeout() {
+fn cancel_stops_before_input_not_timeout() {
     // Reader construction needs the header, so cancel after opening a real header.
     let signal = packetcraftr_core::budget::Cancellation::default();
     let registry = registry();

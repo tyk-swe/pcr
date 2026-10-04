@@ -36,7 +36,7 @@ impl Write for FailAfter {
 }
 
 #[test]
-fn rewrite_is_same_format_and_enforces_stream_bounds() {
+fn rewrite_same_format_enforces_strm_bounds() {
     let frames = [
         frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one"),
         frame_at(

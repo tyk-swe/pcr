@@ -8,7 +8,7 @@ use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
 use packetcraftr_netio::deadline::detach;
 
 #[test]
-fn detaching_preserves_cancellation_inherited_without_a_local_signal() {
+fn detaching_cancel_inherited_no_local_signal() {
     let signal = Cancellation::default();
     let parent = Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
     let child = Deadline::new(Duration::from_secs(30)).with_parent(Some(Arc::new(parent)));

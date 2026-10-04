@@ -78,7 +78,7 @@ fn an_unbound_port_never_dissects_tls() {
 }
 
 #[test]
-fn a_packet_document_rejects_a_non_boolean_incomplete_flag() {
+fn pkt_reject_non_boolean_partial_flag() {
     let decoded = dissect(CLIENT_PORT, 443, &client_hello_record());
     let mut document = document::Packet::from_packet(&decoded.packet);
     document

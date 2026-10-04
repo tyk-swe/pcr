@@ -55,7 +55,7 @@ fn conversation(protocol: Protocol) -> Conversation {
 }
 
 #[test]
-fn frame_limit_applies_before_any_frame_exists() {
+fn frame_limit_applies_before_frame_exists() {
     let big = vec![0_u8; 1460 * 2000];
     let error = conversation(Protocol::Tcp)
         .expand(&tcp_recipe(&big), &Bytes::from(big.clone()))
@@ -83,7 +83,7 @@ fn frame_limit_applies_before_any_frame_exists() {
 }
 
 #[test]
-fn recipes_that_are_not_a_supported_conversation_are_refused() {
+fn recipes_not_supported_conversation_reject() {
     let udp = recipe(Udp::default(), b"");
     assert!(matches!(
         conversation(Protocol::Tcp).expand(&udp, &Bytes::new()),

@@ -3,7 +3,7 @@
 mod common;
 use common::{parse_json, run};
 #[test]
-fn storage_limits_are_checked_before_interface_lookup_or_activation() {
+fn storage_limits_before_lookup_activate() {
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("capture.pcapng");
     let name = target.to_str().unwrap();
@@ -57,7 +57,7 @@ fn storage_limits_are_checked_before_interface_lookup_or_activation() {
 }
 
 #[test]
-fn capture_settings_checked_before_lookup_activation() {
+fn capture_set_checked_before_lookup_activate() {
     for extra in [
         vec!["--capture-buffer-bytes", "0"],
         // Smaller than one configured snapshot cannot hold a frame.
@@ -126,7 +126,7 @@ fn capture_settings_checked_before_lookup_activation() {
 }
 
 #[test]
-fn live_capture_rejects_stream_projection_before_interface_discovery() {
+fn live_capture_reject_before_iface_disc() {
     let output = run(&[
         "--output",
         "ndjson",

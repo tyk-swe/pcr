@@ -88,7 +88,7 @@ fn response(
 }
 
 #[test]
-fn canonical_name_validation_rejects_empty_oversize_and_non_wire_characters() {
+fn canonical_name_reject_wire_chars() {
     assert_eq!(
         dns::wire::canonical_query_name("*.SRV_example.test."),
         Ok("*.srv_example.test.".to_owned())
@@ -109,7 +109,7 @@ fn canonical_name_validation_rejects_empty_oversize_and_non_wire_characters() {
 }
 
 #[test]
-fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
+fn record_limits_trailing_bad_rdata_reject() {
     let base = response(
         "example.test.",
         QueryType::A,
@@ -168,7 +168,7 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
 }
 
 #[test]
-fn txt_limits_and_name_compression_safety_are_enforced() {
+fn txt_limits_safety_enforced() {
     let message = response(
         "example.test.",
         QueryType::TXT,

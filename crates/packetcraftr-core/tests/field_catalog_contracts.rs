@@ -106,7 +106,7 @@ fn icmp_frame(ipv6: bool) -> Frame {
 }
 
 #[test]
-fn out_of_range_values_and_fields_outside_the_catalog_are_refused() {
+fn out_range_fields_outside_catalog_reject() {
     assert!(matches!(
         compile(&["tcp.window=70000"], ChecksumMode::Repair),
         Err(transform::Error::Invalid(InvalidInput::EditValueWidth))
@@ -129,7 +129,7 @@ fn out_of_range_values_and_fields_outside_the_catalog_are_refused() {
 }
 
 #[test]
-fn edits_in_truncated_captures_are_still_refused() {
+fn edits_trunc_captures_reject() {
     let original = icmp_frame(false);
     let truncated = common::truncated(&original, 4);
     assert!(apply(&truncated, &["icmp.identifier=1"], ChecksumMode::Repair).is_err());

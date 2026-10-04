@@ -215,6 +215,6 @@ fn connect_scan_keeps_probe_past_peer_reset() {
 }
 
 #[test]
-fn connect_scan_keeps_probe_through_peer_reset() {
+fn connect_scan_probe_through_peer_reset() {
     assert_open_without_local_address(Fault::LocalQuery(io::ErrorKind::NotConnected));
 }

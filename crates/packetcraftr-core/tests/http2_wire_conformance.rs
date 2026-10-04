@@ -47,7 +47,7 @@ fn data_frame_splits_padding_from_content() {
 }
 
 #[test]
-fn headers_frame_parses_priority_and_padding() {
+fn hdrs_frame_parses_prio_padding() {
     let payload = [&[3u8][..], &[0x80, 0, 0, 7, 0x0f], b"block", &[0; 3]].concat();
     let (frame, consumed) = parse(&wire(0x1, 0x4 | 0x8 | 0x20, 3, &payload)).unwrap();
     assert_eq!(consumed, 9 + 14);
@@ -72,7 +72,7 @@ fn headers_frame_parses_priority_and_padding() {
 }
 
 #[test]
-fn remaining_frame_types_decode_their_fields() {
+fn remaining_frame_types_decode_fields() {
     let (frame, n) = parse(&wire(0x2, 0, 9, &[0, 0, 0, 3, 200])).unwrap();
     assert_eq!(n, 14);
     assert_eq!(
@@ -147,7 +147,7 @@ fn remaining_frame_types_decode_their_fields() {
 }
 
 #[test]
-fn incomplete_input_returns_none_at_every_prefix() {
+fn partial_input_returns_none_every_prefix() {
     for frame in [
         wire(0x0, 0x9, 1, &[7, b'a', b'b', 0, 0, 0, 0, 0, 0, 0]),
         wire(0x1, 0x25, 1, &[0x80, 0, 0, 7, 9, b'x']),
@@ -219,7 +219,7 @@ fn reserved_and_unknown_bits_are_preserved() {
 }
 
 #[test]
-fn fixed_length_and_stream_rules_are_enforced() {
+fn fixed_length_strm_rules_enforced() {
     for (frame_type, stream, payload) in [
         (0x2, 1, &[0u8; 4][..]),
         (0x2, 1, &[0u8; 6][..]),
@@ -247,7 +247,7 @@ fn fixed_length_and_stream_rules_are_enforced() {
 }
 
 #[test]
-fn minimum_lengths_are_rejected_from_the_header() {
+fn minimum_lengths_reject_hdr() {
     for (frame_type, flags, stream, length) in [
         (0x0, 0x8, 1, 0u32),
         (0x1, 0x8, 1, 0),
@@ -301,7 +301,7 @@ fn stream_zero_rules_match_rfc9113() {
 }
 
 #[test]
-fn padding_and_dependency_malformations_are_rejected() {
+fn padding_dependency_malformations_reject() {
     assert!(matches!(
         parse_frame(&wire(0x0, 0x8, 1, &[4, 0, 0, 0]), MAX),
         Err(Error::Invalid(_))
@@ -333,7 +333,7 @@ fn padding_and_dependency_malformations_are_rejected() {
 }
 
 #[test]
-fn advertised_length_is_capped_before_buffering() {
+fn advertised_length_capped_before_buffering() {
     let oversized = Bytes::from_static(&[0xff, 0xff, 0xff, 0x0, 0, 0, 0, 0, 1]);
     assert!(matches!(
         parse_frame(&oversized, MAX),
@@ -350,7 +350,7 @@ fn advertised_length_is_capped_before_buffering() {
 }
 
 #[test]
-fn zero_length_and_acknowledgment_frames_decode() {
+fn zero_length_acknowledgment_frames_decode() {
     let (frame, consumed) = parse(&wire(0x0, 0x1, 1, &[])).unwrap();
     assert_eq!(consumed, 9);
     let Payload::Data { data, padding } = &frame.payload else {

@@ -28,7 +28,7 @@ fn payload_spec(selector: &str, path: &Path) -> OsString {
 }
 
 #[test]
-fn payload_file_preserves_unicode_spaces_and_equals_in_paths() {
+fn payload_file_unicode_spaces_equals_paths() {
     let directory = tempfile::tempdir().unwrap();
     let payload = directory.path().join("界 café = bytes.bin");
     let expected = b"payload\x00\xff";
@@ -46,7 +46,7 @@ fn payload_file_preserves_unicode_spaces_and_equals_in_paths() {
 // with an illegal-byte-sequence error before the CLI can run.
 #[cfg(packetcraftr_test_non_utf8_paths)]
 #[test]
-fn payload_file_preserves_non_utf8_paths_without_opening_the_lossy_alternative() {
+fn payload_file_non_utf8_paths_no_lossy_alt() {
     use std::os::unix::ffi::OsStrExt;
 
     let directory = tempfile::tempdir().unwrap();
@@ -68,7 +68,7 @@ fn payload_file_preserves_non_utf8_paths_without_opening_the_lossy_alternative()
 }
 
 #[test]
-fn payload_file_keeps_selector_errors_separate_from_path_io_errors() {
+fn payload_file_errors_io_errors() {
     let directory = tempfile::tempdir().unwrap();
     let missing = directory.path().join("missing = payload.bin");
     for spec in [
@@ -105,7 +105,7 @@ fn payload_file_keeps_selector_errors_separate_from_path_io_errors() {
 
 #[cfg(unix)]
 #[test]
-fn payload_file_rejects_non_utf8_selectors_before_opening_the_path() {
+fn payload_file_reject_before_path() {
     use std::os::unix::ffi::OsStrExt;
 
     let output = build_payload(OsStr::from_bytes(b"raw.\xff=missing.bin"), "json");

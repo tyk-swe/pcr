@@ -44,7 +44,7 @@ fn distinct_profiles_share_one_storage_budget() {
 }
 
 #[test]
-fn an_invalid_profile_keeps_its_own_classification() {
+fn invalid_profile_keeps_own_class() {
     let mut document = sample();
     document["profiles"][1]["profile"]["response"]["checks"][0]["mask"] = json!("00");
     let error = parse(&document).expect_err("mask length differs from data");

@@ -117,7 +117,7 @@ fn client(sender: RecordingSender) -> Client<Fakes, VirtualClock> {
 }
 
 #[test]
-fn cumulative_byte_budget_stops_the_run_and_keeps_emitted_evidence() {
+fn cumulative_byte_emitted_ev() {
     let template = Template::new(packet(64));
     let client = client_with(
         RecordingSender::default(),
@@ -142,7 +142,7 @@ fn cumulative_byte_budget_stops_the_run_and_keeps_emitted_evidence() {
 }
 
 #[test]
-fn invalid_repetition_and_rate_fail_before_side_effects() {
+fn invalid_repetition_fail_before_effects() {
     let template = Template::new(packet(64));
     let client = client(RecordingSender::default());
 
@@ -159,7 +159,7 @@ fn invalid_repetition_and_rate_fail_before_side_effects() {
 }
 
 #[test]
-fn scheduled_pacing_beyond_the_operation_ceiling_is_refused() {
+fn scheduled_pacing_ceiling_reject() {
     let template = Template::new(packet(64));
     let client = client(RecordingSender::default());
     let error = client

@@ -231,7 +231,7 @@ fn assert_build_decode_limits(
 }
 
 #[test]
-fn registry_build_decode_and_error_paths_are_bounded() {
+fn registry_build_decode_error_paths_bounded() {
     let registry = Arc::new(probe_registry());
     assert_registry_queries(&registry);
     let (builder, decoded) = build_and_decode_probe(&registry);
@@ -280,7 +280,7 @@ fn assert_typed_iteration_encoded_cache(packet: Packet) {
 }
 
 #[test]
-fn typed_layer_iteration_preserves_or_clears_encoded_lengths() {
+fn typed_layer_encoded_lengths() {
     let registry = Arc::new(probe_registry());
     let (_, built) = build_probe(&registry);
     assert_typed_iteration_encoded_cache(built.packet);
@@ -422,7 +422,7 @@ fn assert_filter_field_binding_conflicts() {
 }
 
 #[test]
-fn registry_rejects_alias_binding_and_filter_contract_conflicts() {
+fn registry_reject_contract_conflicts() {
     assert_registry_binding_conflicts();
     assert_filter_field_binding_conflicts();
 }

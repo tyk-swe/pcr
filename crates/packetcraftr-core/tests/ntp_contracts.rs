@@ -12,7 +12,7 @@ use packetcraftr_core::{
 };
 
 #[test]
-fn ntp_construction_rejects_unsupported_versions_modes_and_bad_fields() {
+fn ntp_build_reject_bad_fields() {
     let registry = builtin::registry();
     for recipe in [
         "ntp(version=2)",
@@ -61,7 +61,7 @@ fn ntp_construction_rejects_unsupported_versions_modes_and_bad_fields() {
 }
 
 #[test]
-fn truncated_and_out_of_scope_wire_decodes_as_terminal_raw() {
+fn trunc_out_scope_wire_decodes_terminal_raw() {
     let built = build(
         "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=123)/ntp()",
     );

@@ -30,7 +30,7 @@ impl tcp::Provider for Blocked {
 }
 
 #[test]
-fn an_attempt_expires_on_the_client_clock_before_the_operation_deadline() {
+fn attempt_expires_clock_before_operation_dl() {
     let (release, blocked) = mpsc::channel();
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),

@@ -212,7 +212,7 @@ fn request() -> scan::Request {
 }
 
 #[test]
-fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
+fn timed_out_not_fail_scan() {
     let _serial = CONNECT_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -270,7 +270,7 @@ fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
 }
 
 #[test]
-fn route_overrides_are_rejected_before_any_tcp_connect() {
+fn route_overrides_reject_before_tcp_connect() {
     struct CountConnects(Arc<AtomicUsize>);
 
     impl Provider for CountConnects {

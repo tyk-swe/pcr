@@ -188,7 +188,7 @@ fn roundtrip(report: &Report) -> Vec<&Diagnostic> {
 }
 
 #[test]
-fn the_rebuild_is_bounded_by_the_remaining_byte_budget_and_retains_nothing() {
+fn rebuild_bounded_by_byte_budget_nothing() {
     let request = |max_total_bytes| Request {
         cases: 1,
         build: Options {
@@ -271,7 +271,7 @@ impl LayerCodec for CancelOnMutatedDecode {
 }
 
 #[test]
-fn cancellation_during_decode_stops_the_case_before_it_is_rebuilt() {
+fn cancel_decode_stops_case_before_rebuilt() {
     let cancellation = Cancellation::default();
     let encodes = Arc::new(AtomicUsize::new(0));
     let registry = Arc::new(

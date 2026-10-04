@@ -214,7 +214,7 @@ fn interrupts() -> [(Deadline, &'static str); 2] {
 }
 
 #[test]
-fn replay_text_write_failure_wins_over_deadline_expiring_during_write() {
+fn replay_text_fail_expiring_write() {
     let expired = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
     let expired_for_clock = Arc::clone(&expired);
@@ -265,7 +265,7 @@ fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
 }
 
 #[test]
-fn prepare_rejects_gap_clamp_with_immediate_timing() {
+fn prepare_reject_gap_clamp_immediate_timing() {
     let missing = std::path::Path::new("/nonexistent/fixture.pcap");
     let arguments = replay_arguments(missing, &["--timing", "immediate", "--max-gap-ms", "5"]);
     let Err(error) = prepare(&arguments) else {

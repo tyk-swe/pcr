@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use packetcraftr_core::protocol::application::http::{self, Body, BodyDecoder};
 #[test]
-fn invalid_delimiters_oversized_input_and_body_limits_fail_explicitly() {
+fn invalid_delimiters_fail_explicit() {
     for wire in [
         b"GET / HTTP/1.1\n\n".as_slice(),
         b"GET / HTTP/1.1\r\n Folded: bad\r\n\r\n",

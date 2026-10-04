@@ -37,7 +37,7 @@ fn assert_message_is_stable(message: &str, variant: &str) {
 }
 
 #[test]
-fn every_build_error_variant_renders_and_classifies_stably() {
+fn every_build_error_renders_class_stably() {
     let cases: Vec<(&str, build::Error, &str, Kind)> = vec![
         (
             "EmptyPacket",
@@ -163,7 +163,7 @@ fn every_build_error_variant_renders_and_classifies_stably() {
 }
 
 #[test]
-fn every_decode_error_variant_renders_and_classifies_stably() {
+fn every_decode_error_renders_class_stably() {
     let cases: Vec<(&str, decode::Error, &str, Kind)> = vec![
         (
             "PacketSizeLimit",
@@ -238,7 +238,7 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
 }
 
 #[test]
-fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
+fn analysis_errors_class_distinct() {
     let invalid = analysis::Error::InvalidLimit {
         field: "max_flows",
         value: 0,

@@ -61,7 +61,7 @@ fn request() -> traceroute::Request {
 }
 
 #[test]
-fn a_denied_destination_arms_no_capture_and_sends_nothing() {
+fn denied_dst_arms_no_capture_sends_nothing() {
     let state = network();
     let policy = Policy {
         allowed_destinations: vec![DestinationConstraint::Exact(IpAddr::V4(Ipv4Addr::new(
@@ -92,7 +92,7 @@ fn narrowed_request(frames: usize, bytes: usize) -> traceroute::Request {
 }
 
 #[test]
-fn over_wide_collection_refused_before_capture() {
+fn wide_collection_reject_before_capture() {
     let bytes = traceroute::Limits::default().max_evidence_bytes;
     let frames = traceroute::Limits::default().max_evidence_frames;
     for (request, field) in [

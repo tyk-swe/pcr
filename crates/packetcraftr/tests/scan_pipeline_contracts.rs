@@ -79,7 +79,7 @@ fn execute(request: &Request, state: Arc<Mutex<State>>) -> Result<scan::Aggregat
     collector.finish(report)
 }
 #[test]
-fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {
+fn pacing_prep_limits_apply_whole_pipeline() {
     let state = Arc::new(Mutex::new(overlapping()));
     let mut request = request();
     request.probes_per_second = Some(200);
@@ -101,7 +101,7 @@ fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {
 }
 
 #[test]
-fn scans_stop_at_undecoded_limit_once_diagnosed() {
+fn scans_stop_undecoded_limit_diagnosed() {
     let observe = |max_in_flight| {
         let mut request = request();
         request.max_in_flight = max_in_flight;

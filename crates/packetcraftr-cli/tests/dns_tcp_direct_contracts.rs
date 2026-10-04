@@ -6,7 +6,7 @@ mod common;
 use common::{parse_json, run};
 
 #[test]
-fn direct_tcp_rejects_incompatible_options_before_any_connection() {
+fn direct_tcp_reject_before_conn() {
     for options in [
         vec!["--udp-only"],
         vec!["--source-port", "45000"],

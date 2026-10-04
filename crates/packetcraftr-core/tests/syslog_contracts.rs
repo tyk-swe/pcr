@@ -83,7 +83,7 @@ fn is_raw(message: &[u8]) -> bool {
 }
 
 #[test]
-fn invalid_priorities_and_oversized_messages_decode_as_raw() {
+fn invalid_priorities_decode_raw() {
     for message in [
         &b"<192>1 - - - - - -"[..],
         b"<999>hello",
@@ -110,7 +110,7 @@ fn invalid_priorities_and_oversized_messages_decode_as_raw() {
 }
 
 #[test]
-fn structured_data_element_count_is_bounded() {
+fn structured_data_element_count_bounded() {
     let message = |elements: usize| {
         let mut message = b"<14>1 - - - - - ".to_vec();
         for _ in 0..elements {

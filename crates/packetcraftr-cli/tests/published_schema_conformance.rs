@@ -19,7 +19,7 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
 }
 
 #[test]
-fn schema_accepts_one_based_source_frames_and_rejects_zero() {
+fn schema_accepts_based_source_reject_zero() {
     let validator = schema_validator();
     let mut document: Value = serde_json::from_str(include_str!(
         "../../../examples/documents/output-read-dissect-event.json"
@@ -37,7 +37,7 @@ fn schema_accepts_one_based_source_frames_and_rejects_zero() {
 }
 
 #[test]
-fn rewrite_v2_schema_rejects_unknown_assignment_properties() {
+fn rewrite_v2_reject_assignment_properties() {
     let document = json!({
         "schema": "packetcraftr.rewrite/v2",
         "rules": [{"assign": [{"field": "ipv4.ttl", "value": 63, "occurrence": 2}]}],
@@ -50,7 +50,7 @@ fn rewrite_v2_schema_rejects_unknown_assignment_properties() {
 /// packet example is parsed by the document parser and validated through its
 /// serialized form, since the schema describes the JSON representation.
 #[test]
-fn every_published_example_document_matches_its_declared_schema() {
+fn every_published_declared_schema() {
     use packetcraftr_core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
 
     let packet_validator = validator(include_str!(

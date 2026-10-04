@@ -3,7 +3,7 @@
 mod common;
 use common::{parse_json, run};
 #[test]
-fn zero_or_over_ceiling_frame_limit_is_usage_error() {
+fn zero_ceiling_frame_limit_usage_error() {
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let source = source.to_str().unwrap();

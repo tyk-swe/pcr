@@ -103,7 +103,7 @@ fn run_step(
 }
 
 #[test]
-fn cancelled_sleep_stops_before_charge_and_work() {
+fn cancel_sleep_stops_before_charge_work() {
     let signal = Cancellation::default();
     let time = Time::new();
     let mut deadline = time
@@ -137,7 +137,7 @@ fn cancelled_sleep_stops_before_charge_and_work() {
 }
 
 #[test]
-fn a_delay_past_the_remaining_budget_is_refused_before_sleeping() {
+fn delay_past_budget_reject_before_sleeping() {
     let time = Time::new();
     let mut deadline = time.deadline(Duration::from_secs(1));
     let mut clock = RecordingClock::default();

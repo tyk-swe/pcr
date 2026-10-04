@@ -519,7 +519,7 @@ fn arp_response(request: &Request, sender: MacAddress) -> Frame {
 }
 
 #[test]
-fn exhausted_attempts_return_bounded_not_found_evidence() {
+fn exh_attempts_return_bounded_not_found_ev() {
     let request = request();
     let mut capture = FixtureCapture::empty();
     capture.responses = VecDeque::from([CaptureStep::End, CaptureStep::End]);
@@ -549,7 +549,7 @@ fn exhausted_attempts_return_bounded_not_found_evidence() {
 }
 
 #[test]
-fn request_deadline_stops_attempts_before_the_configured_budget() {
+fn req_dl_before_configured_budget() {
     let request = request();
     let deadline = Deadline::new(Duration::from_millis(40));
     let layer2 = FixtureLayer2::successful();

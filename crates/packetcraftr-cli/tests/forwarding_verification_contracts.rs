@@ -56,7 +56,7 @@ fn an_empty_selection_never_passes() {
 }
 
 #[test]
-fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
+fn snaplen_trunc_ev_explicit_inconclusive() {
     let ingress = write_pcap_hex(&[UDP_CLIENT]);
     let egress = write_snaplen_truncated_capture();
 
@@ -74,7 +74,7 @@ fn snaplen_truncated_evidence_is_explicitly_inconclusive() {
 }
 
 #[test]
-fn malformed_expectations_are_rejected_before_input_is_read() {
+fn bad_expectations_reject_before_input_read() {
     let output = run(&[
         "verify-forwarding",
         "does-not-exist.pcap",

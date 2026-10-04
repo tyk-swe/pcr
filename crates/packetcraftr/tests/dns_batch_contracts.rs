@@ -137,7 +137,7 @@ fn framed_query_bytes(request: &dns::Request) -> u64 {
 }
 
 #[test]
-fn batches_authorize_combined_query_bytes_before_discovery() {
+fn batches_authorize_before_disc() {
     let questions = [request("a"), request("longer.example.test"), request("z")];
     let total = questions.iter().map(framed_query_bytes).sum::<u64>();
     let policy = Policy {
@@ -158,7 +158,7 @@ fn batches_authorize_combined_query_bytes_before_discovery() {
 }
 
 #[test]
-fn a_pre_cancelled_batch_leaves_every_question_unattempted() {
+fn pre_cancel_question_unattempted() {
     let signal = Cancellation::default();
     signal.cancel();
     let (client, steps) = client(Policy::default());

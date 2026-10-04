@@ -23,7 +23,7 @@ fn reencode(packet: Packet) -> Bytes {
 }
 
 #[test]
-fn unknown_and_malformed_tcp_options_keep_exact_wire_bytes() {
+fn unknown_bad_tcp_opts_keep_exact_wire_bytes() {
     let mut packet = Packet::new();
     packet.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
     packet.push(Tcp {
@@ -71,7 +71,7 @@ fn unknown_and_malformed_tcp_options_keep_exact_wire_bytes() {
 }
 
 #[test]
-fn tcp_options_enforce_construction_limits_and_raw_byte_input() {
+fn tcp_opts_byte_input() {
     let registry = builtin::registry();
     let prefix = "ipv4(source=192.0.2.1,destination=198.51.100.2)/";
     for (options, refusal) in [

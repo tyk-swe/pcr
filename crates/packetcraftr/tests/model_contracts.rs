@@ -19,7 +19,7 @@ impl Resolver for FixedResolver {
 }
 
 #[test]
-fn hostname_parser_canonicalizes_ascii_and_rejects_each_invalid_shape() {
+fn host_parser_reject_invalid_shape() {
     let hostname = Hostname::from_str("WWW.Example.COM.").expect("valid hostname");
     assert_eq!(hostname.as_str(), "www.example.com");
     assert_eq!(hostname.to_string(), "www.example.com");
@@ -45,7 +45,7 @@ fn hostname_parser_canonicalizes_ascii_and_rejects_each_invalid_shape() {
 }
 
 #[test]
-fn policy_validates_address_and_operation_bounds() {
+fn policy_validates_address_operation_bounds() {
     let defaults = policy::Policy::default();
     assert!(defaults.validate().is_ok());
     assert!(matches!(
@@ -148,7 +148,7 @@ fn policy_validates_address_and_operation_bounds() {
 }
 
 #[test]
-fn resolution_rejects_empty_and_over_limit_results() {
+fn resolution_reject_empty_limit_results() {
     let target = Target::from_str("example.test").expect("hostname");
     let policy = policy::Policy {
         allow_hostname_resolution: true,

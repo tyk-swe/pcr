@@ -40,7 +40,7 @@ impl Drop for BlockedWriter {
 }
 
 #[test]
-fn terminal_write_failure_is_incomplete_no_retry() {
+fn terminal_write_fail_partial_no_retry() {
     for terminal_error in [false, true] {
         let (entered, writer_entered) = mpsc::channel();
         let (release, wait) = mpsc::channel();
@@ -94,7 +94,7 @@ fn terminal_write_failure_is_incomplete_no_retry() {
 }
 
 #[test]
-fn serialized_limit_counts_escaping_and_newline_at_exact_boundaries() {
+fn serialized_limit_exact_boundaries() {
     let value = "\n\"";
     let expected = serde_json::to_vec(&value).unwrap().len() + 1;
     for limit in [expected - 1, expected, expected + 1] {

@@ -46,7 +46,7 @@ fn frame(ipv6: bool, tcp: bool, ethernet: bool, disabled: bool) -> Frame {
     }
 }
 #[test]
-fn a_malformed_link_trailer_survives_a_network_rewrite_byte_for_byte() {
+fn bad_link_rewrite_byte() {
     let trailer = [0xde, 0xad, 0xbe, 0xef, 0x01];
     for ipv6 in [false, true] {
         let datagram = frame(ipv6, false, true, false);
@@ -90,7 +90,7 @@ fn a_malformed_link_trailer_survives_a_network_rewrite_byte_for_byte() {
     }
 }
 #[test]
-fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
+fn frag_network_growth_reject() {
     let original = frame(false, false, true, false);
     let fragments = transform::fragment(
         &original,

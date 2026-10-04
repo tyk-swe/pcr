@@ -111,7 +111,7 @@ fn llc_frame(bpdu: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn stp_truncated_bpdu_becomes_malformed_with_its_bytes() {
+fn stp_trunc_bpdu_becomes_bad_bytes() {
     let registry = rooted_registry("ethernet");
     let bytes = llc_frame(&CONFIG_BPDU[..34]);
     let decoded = dissect(&registry, &bytes);
@@ -131,7 +131,7 @@ fn eap_identity_request() -> Vec<u8> {
 }
 
 #[test]
-fn eapol_overrun_malformed_exact_length_strict() {
+fn eapol_overrun_bad_exact_length_strict() {
     let registry = rooted_registry("ethernet");
     let bytes = frame(PAE_MULTICAST, 0x888e, &[0x02, 0x00, 0x00, 0x20, 0x01, 0x01]);
     let decoded = dissect(&registry, &bytes);

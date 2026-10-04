@@ -11,7 +11,7 @@ use common::tls_frames::{
 use packetcraftr_core::analysis::tls::Status;
 
 #[test]
-fn a_fatal_alert_before_the_server_hello_ends_the_session_as_alert() {
+fn fatal_alert_before_session_alert() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);
@@ -47,7 +47,7 @@ fn a_fatal_alert_before_the_server_hello_ends_the_session_as_alert() {
 }
 
 #[test]
-fn a_stream_that_is_not_tls_never_becomes_a_session() {
+fn strm_not_tls_never_becomes_session() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     stream.server_port = 8_080;

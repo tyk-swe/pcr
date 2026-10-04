@@ -46,7 +46,7 @@ fn udp_frame(ttl: u8) -> Frame {
 }
 
 #[test]
-fn an_oversized_document_is_refused_before_it_is_read() {
+fn oversize_document_reject_before_read() {
     let document = vec![b' '; rules::MAX_REWRITE_DOCUMENT_BYTES + 1];
     assert!(matches!(
         parse(&document),
@@ -56,7 +56,7 @@ fn an_oversized_document_is_refused_before_it_is_read() {
 }
 
 #[test]
-fn a_failed_rule_stops_before_later_filters_are_asked() {
+fn failed_rule_stops_before_filters_asked() {
     let rules = parse_json(json!({
         "schema": "packetcraftr.rewrite/v2",
         "rules": [

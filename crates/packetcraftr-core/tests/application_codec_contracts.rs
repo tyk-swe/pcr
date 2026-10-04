@@ -70,7 +70,7 @@ fn dissect_dns(udp: bool, payload: &[u8]) -> (DecodedPacket, Frame) {
 }
 
 #[test]
-fn a_tcp_dns_message_past_a_decode_limit_stays_raw_and_says_why() {
+fn tcp_dns_says_why() {
     let over = dns_response_with_answers(513);
     let (decoded, frame) = dissect_dns(false, &length_prefixed(&over));
     assert_eq!(protocols(&decoded), vec!["ipv4", "tcp", "raw"]);

@@ -166,7 +166,7 @@ fn request(count: usize) -> GroupRequest {
     }
 }
 #[test]
-fn invalid_native_settings_are_rejected_before_arming() {
+fn invalid_native_set_reject_before_arming() {
     let mut invalid = request(1);
     invalid.native.buffer_size = Some(0);
     assert!(Group::<Session>::new(&invalid).is_err());
@@ -175,7 +175,7 @@ fn invalid_native_settings_are_rejected_before_arming() {
     assert!(Group::<Session>::new(&invalid).is_err());
 }
 #[test]
-fn bad_shared_capacity_rejected_before_arming() {
+fn bad_shared_capacity_reject_before_arming() {
     let mut invalid = request(2);
     invalid.limits.max_bytes = 40;
     let error = Group::<Session>::new(&invalid)
@@ -200,7 +200,7 @@ fn bad_shared_capacity_rejected_before_arming() {
 }
 
 #[test]
-fn an_oversized_reported_interface_name_is_bounded_before_it_is_kept() {
+fn oversize_reported_before_kept() {
     let provider = Provider::new(vec![Script {
         reported_interface: Some(Id {
             index: 7,

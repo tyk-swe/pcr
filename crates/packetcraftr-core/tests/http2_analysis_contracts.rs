@@ -56,7 +56,7 @@ fn header<'a>(message: &'a Message, name: &[u8]) -> Option<&'a [u8]> {
 }
 
 #[test]
-fn prior_knowledge_exchange_correlates_and_preserves_provenance() {
+fn prior_knowledge_xchg_correlates_provenance() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -183,7 +183,7 @@ fn refused_upgrade_stays_plain_http1() {
 }
 
 #[test]
-fn server_first_frames_wait_for_client_election() {
+fn server_first_frames_wait_client_election() {
     let (mut capture, mut stream) = setup();
     capture.server(&mut stream, &settings(&[]));
     let mut client = common::http2::preface();
@@ -472,7 +472,7 @@ fn unknown_and_padded_frames_preserved() {
 }
 
 #[test]
-fn scope_and_source_tracking_on_every_event() {
+fn scope_source_tracking_every_event() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -605,7 +605,7 @@ fn prelude_100_continue_then_upgrade() {
 }
 
 #[test]
-fn cancelled_deadline_interrupts_collection() {
+fn cancel_dl_interrupts_collection() {
     use packetcraftr_core::budget::{Cancellation, Deadline};
     use std::sync::Arc;
     use std::time::Duration;
@@ -641,7 +641,7 @@ fn cancelled_deadline_interrupts_collection() {
 }
 
 #[test]
-fn early_101_holds_until_request_body_completes() {
+fn early_101_holds_until_req_body_completes() {
     let (mut capture, mut stream) = setup();
     let mut request = common::http2::upgrade_request(&[]);
     request.truncate(request.len() - 2);
@@ -727,7 +727,7 @@ fn upgrade_101_requires_connection_token() {
 }
 
 #[test]
-fn overlapping_offers_match_the_first_pending_request() {
+fn overlapping_offers_match_first_pend_req() {
     let (mut capture, mut stream) = setup();
     let first = common::http2::upgrade_request(&[(4, 1_000)]);
     let second = common::http2::upgrade_request(&[(3, 7)]);
@@ -799,7 +799,7 @@ fn h2c_head_request_has_bodyless_response() {
 }
 
 #[test]
-fn duplicate_headers_on_stream_one_after_upgrade_do_not_restart() {
+fn duplicate_hdrs_after_not_restart() {
     let (mut capture, mut stream) = setup();
     h2c_handshake(&mut capture, &mut stream);
     capture.server(
@@ -917,7 +917,7 @@ fn build_two_generations(capture: &mut Capture, stream: &mut Stream) {
 }
 
 #[test]
-fn identical_tuples_under_two_scopes_are_distinct() {
+fn identical_tuples_two_scopes_distinct() {
     let (mut capture, mut stream) = setup();
     build_two_generations(&mut capture, &mut stream);
     let first_len = capture.frames.len();
@@ -959,7 +959,7 @@ fn identical_tuples_under_two_scopes_are_distinct() {
 }
 
 #[test]
-fn out_of_order_and_duplicate_segments_reassemble() {
+fn out_order_duplicate_segments_reassemble() {
     let (mut capture, mut stream) = setup();
     let mut client = common::http2::preface();
     client.extend_from_slice(&settings(&[]));
@@ -994,7 +994,7 @@ fn out_of_order_and_duplicate_segments_reassemble() {
 }
 
 #[test]
-fn fatal_observe_error_fails_the_collector_cleanly() {
+fn fatal_observe_error_fails_collector_cleanly() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1082,7 +1082,7 @@ fn capture_eof_is_not_reassembly_eviction() {
 }
 
 #[test]
-fn clean_tuple_reuse_preserves_completed_generation() {
+fn clean_tuple_reuse_keeps_generation() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1118,7 +1118,7 @@ fn clean_tuple_reuse_preserves_completed_generation() {
 }
 
 #[test]
-fn terminal_unsupported_generation_is_not_relabelled_evicted() {
+fn terminal_unsup_not_relabelled_evicted() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, &[0x16, 0x03, 0x03, 0x00, 0x2a, 0x02]);
     capture.reopen(&mut stream, 10_000);
@@ -1149,7 +1149,7 @@ fn terminal_unsupported_generation_is_not_relabelled_evicted() {
 }
 
 #[test]
-fn collector_cancelled_before_payload_is_rejected() {
+fn collector_cancel_before_payload_reject() {
     use packetcraftr_core::budget::{Cancellation, Deadline};
     use std::sync::Arc;
     use std::time::Duration;
@@ -1185,7 +1185,7 @@ fn collector_cancelled_before_payload_is_rejected() {
 }
 
 #[test]
-fn collector_cancelled_during_finalization_is_rejected() {
+fn collector_cancel_finalization_reject() {
     use packetcraftr_core::budget::{Cancellation, Deadline};
     use packetcraftr_core::error::Classified;
     use std::sync::Arc;
@@ -1230,7 +1230,7 @@ fn collector_cancelled_during_finalization_is_rejected() {
 }
 
 #[test]
-fn eof_header_chain_uses_incomplete_not_evicted() {
+fn eof_hdr_chain_uses_partial_not_evicted() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, &REQUEST[..4], END_STREAM));
@@ -1265,7 +1265,7 @@ fn eof_header_chain_uses_incomplete_not_evicted() {
 }
 
 #[test]
-fn tcp_conflict_issue_names_triggering_packet() {
+fn tcp_conflict_issue_names_triggering_pkt() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     let wire = headers(1, REQUEST, END_HEADERS | END_STREAM);
@@ -1332,7 +1332,7 @@ const ACCEPT_101: &[u8] =
     b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: h2c\r\n\r\n";
 
 #[test]
-fn eof_upgrade_offer_preserves_http1_evidence() {
+fn eof_upgrade_offer_keeps_http1_ev() {
     let (mut capture, mut stream) = setup();
     let split = UPGRADE_GET.len() / 2;
     capture.client(&mut stream, &UPGRADE_GET[..split]);
@@ -1373,7 +1373,7 @@ fn eof_upgrade_offer_preserves_http1_evidence() {
 }
 
 #[test]
-fn eof_upgrade_body_retains_head_and_body_sources() {
+fn eof_upgrade_body_keeps_head_body_sources() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, UPGRADE_POST);
     let head_number = capture.frames.len() as u64;
@@ -1402,7 +1402,7 @@ fn eof_upgrade_body_retains_head_and_body_sources() {
 }
 
 #[test]
-fn eof_partial_upgrade_response_preserves_both_directions() {
+fn eof_partial_upgrade_resp_keeps_directions() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, UPGRADE_GET);
     let request_number = capture.frames.len() as u64;
@@ -1457,7 +1457,7 @@ fn eof_partial_upgrade_response_preserves_both_directions() {
 }
 
 #[test]
-fn eof_accepted_upgrade_body_flushes_stream_one() {
+fn eof_accepted_upgrade_body_flushes_strm_one() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, UPGRADE_POST);
     let head_number = capture.frames.len() as u64;
@@ -1563,7 +1563,7 @@ fn reset_upgrade_offer_preserves_evidence() {
 }
 
 #[test]
-fn idle_expiry_preserves_partial_message_and_trigger() {
+fn idle_expiry_keeps_partial_msg_trigger() {
     let (mut capture, mut stream) = setup();
     prior_knowledge_handshake(&mut capture, &mut stream);
     capture.client(&mut stream, &headers(1, REQUEST, END_HEADERS | END_STREAM));
@@ -1601,7 +1601,7 @@ fn idle_expiry_preserves_partial_message_and_trigger() {
 }
 
 #[test]
-fn request_response_schedules_and_segmentation_decode_identically() {
+fn req_resp_decode_same() {
     let actions: [fn(&mut Capture, &mut Stream, u32); 4] = [
         |capture, stream, chunk| {
             let wire = headers(1, REQUEST, END_HEADERS | END_STREAM);

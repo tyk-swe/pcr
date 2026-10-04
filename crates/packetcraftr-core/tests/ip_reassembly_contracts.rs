@@ -68,7 +68,7 @@ fn ipv4_fragment(
 }
 
 #[test]
-fn resource_limits_reject_before_retaining_new_payload() {
+fn resource_limits_reject_before_new_payload() {
     let key = ipv4_key();
     let now = Instant::now();
     let mut datagrams = Reassembler::new(
@@ -137,7 +137,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
 }
 
 #[test]
-fn malformed_lengths_fail_closed_preserving_state() {
+fn bad_lengths_fail_closed_preserving_state() {
     let key = ipv4_key();
     let now = Instant::now();
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
@@ -173,7 +173,7 @@ fn malformed_lengths_fail_closed_preserving_state() {
 }
 
 #[test]
-fn unrepresentable_idle_expiry_is_refused_at_construction() {
+fn unrepresentable_idle_expiry_reject_build() {
     let limits = Limits {
         idle_expiry: Duration::MAX,
         ..Limits::default()

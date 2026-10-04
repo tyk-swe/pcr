@@ -47,7 +47,7 @@ fn rejected(writer: &mut Writer<Vec<u8>>, frame: &Frame, expected: Error) {
 }
 
 #[test]
-fn previews_do_not_consume_stream_budgets_and_keep_limit_precedence() {
+fn previews_not_limit_precedence() {
     for format in [Format::Pcap, Format::PcapNg] {
         let limits = Limits {
             max_frames: 1,
@@ -191,7 +191,7 @@ impl Write for FaultWriter {
 }
 
 #[test]
-fn partial_writes_preserve_prefix_and_poison() {
+fn partial_writes_keep_prefix_poison() {
     for order in [Endianness::Little, Endianness::Big] {
         for format in [Format::Pcap, Format::PcapNg] {
             let open = || match format {

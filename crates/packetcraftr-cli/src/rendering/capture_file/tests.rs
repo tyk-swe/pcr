@@ -14,7 +14,7 @@ fn frame(link_type: LinkType, bytes: Vec<u8>) -> Frame {
 }
 
 #[test]
-fn empty_capture_is_rejected_before_spool_creation() {
+fn empty_capture_reject_before_spool_creation() {
     let mut created = false;
     let error = write_capture_file_with(
         Format::Pcap,
@@ -112,7 +112,7 @@ impl Write for FailingDestination {
 }
 
 #[test]
-fn large_capture_is_spooled_and_copied_in_bounded_chunks() {
+fn large_capture_bounded_chunks() {
     struct ObservedDestination {
         total: usize,
         largest_write: usize,

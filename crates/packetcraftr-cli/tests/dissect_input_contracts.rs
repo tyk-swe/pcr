@@ -33,7 +33,7 @@ fn hex_file(contents: &str) -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn hex_text_and_decoded_bytes_are_bounded_by_the_packet_budget() {
+fn hex_text_decoded_bounded_by_pkt_budget() {
     // Four text bytes per packet byte plus 4096 of slack is the most hex text read.
     let oversized = hex_file(&"00".repeat(4096 + 4 * 8));
     let output = run(&[
@@ -103,7 +103,7 @@ fn hex_text_and_decoded_bytes_are_bounded_by_the_packet_budget() {
 }
 
 #[test]
-fn stdin_write_failures_remain_errors_unless_a_failed_child_refused_input() {
+fn stdin_write_fails_errors_failed_reject_input() {
     let refused_input = AtomicBool::new(false);
     let successful_child = std::panic::catch_unwind(|| {
         run_with_stdin_writer(&["--help"], b"unused", |mut stdin, input, child_exited| {
@@ -147,7 +147,7 @@ fn assert_stdin_writer_panic(result: std::thread::Result<std::process::Output>) 
 }
 
 #[test]
-fn malformed_hex_text_keeps_the_inline_usage_errors() {
+fn bad_hex_text_keeps_inline_usage_errors() {
     for (text, message) in [
         ("abc", "even number of digits"),
         ("zz00", "invalid hex at byte 0"),

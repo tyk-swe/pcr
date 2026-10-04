@@ -63,7 +63,7 @@ fn known_tcp() -> Tcp {
 }
 
 #[test]
-fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
+fn sctp_dns_bad_inputs_cover_bounded_parsers() {
     let init_chunk = vec![
         1, 0, 0, 20, 0, 0, 0, 7, 0, 0, 4, 0, 0, 10, 0, 10, 0, 1, 0, 1,
     ];
@@ -115,7 +115,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
 }
 
 #[test]
-fn typed_child_without_payload_is_preserved_as_malformed() {
+fn typed_child_no_payload_kept_bad() {
     let mut bytes = vec![0; 14];
     bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
 
@@ -141,7 +141,7 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
 }
 
 #[test]
-fn corrupted_builtin_checksums_report_integrity_failures() {
+fn corrupted_builtin_integrity_fails() {
     let mut ipv4_header = Packet::new();
     ipv4_header.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
     ipv4_header.push(Icmpv4::default());

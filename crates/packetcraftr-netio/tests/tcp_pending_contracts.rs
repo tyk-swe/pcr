@@ -97,7 +97,7 @@ fn wait_empty() {
 }
 
 #[test]
-fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
+fn cancel_workers_admission_cleanup() {
     let _pool = exclusive_pool();
     wait_empty();
     let (entered, started) = mpsc::channel();
@@ -179,7 +179,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
 }
 
 #[test]
-fn a_spent_or_cancelled_caller_starts_no_connection() {
+fn spent_cancel_caller_starts_no_conn() {
     let _pool = exclusive_pool();
     let (entered, started) = mpsc::channel();
     let (_release, gate) = mpsc::channel();
@@ -208,7 +208,7 @@ fn a_spent_or_cancelled_caller_starts_no_connection() {
 }
 
 #[test]
-fn tcp_workers_observe_parent_cancellation_after_dispatch() {
+fn tcp_workers_observe_cancel_after_dispatch() {
     struct CancelParent(Cancellation);
 
     impl Provider for CancelParent {

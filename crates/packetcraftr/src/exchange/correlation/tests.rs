@@ -33,7 +33,7 @@ fn decoded_evidence(bytes: &'static [u8]) -> DecodedPacket {
 }
 
 #[test]
-fn deadline_expiry_preserves_unsolicited_order() {
+fn dl_expiry_keeps_unsol_order() {
     let received_at = Instant::now();
     let mut accumulator = Accumulator::new(0);
     accumulator.unsolicited = vec![
@@ -88,7 +88,7 @@ fn deadline_expiry_preserves_unsolicited_order() {
 }
 
 #[test]
-fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
+fn workflow_matcher_expires_candidates() {
     let received_at = Instant::now();
     let sent = [Arc::new(crate::test_support::sent_packet(raw_packet()))];
     let mut accumulator = Accumulator::new(1);

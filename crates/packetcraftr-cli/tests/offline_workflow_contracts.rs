@@ -30,7 +30,7 @@ fn write_capture() -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
+fn follow_reject_absent_tcp_udp_strms_format() {
     for capture in [write_capture(), write_pcap_hex(&[])] {
         let path = path_text(capture.path());
         for selector in ["tcp:999", "udp:999"] {
@@ -70,7 +70,7 @@ fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
 }
 
 #[test]
-fn format_and_limit_failures_are_reported_before_offline_work() {
+fn format_limit_fails_before_offline_work() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcap");
     let missing = path_text(&missing);
     let unsupported = run(&["--output", "raw", "stats", missing]);
@@ -144,7 +144,7 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
     feature = "native-layer3"
 )))]
 #[test]
-fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
+fn dst_bearing_behind_policy() {
     let commands: &[&[&str]] = &[
         &[
             "--output",
@@ -219,7 +219,7 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
 
 #[cfg(unix)]
 #[test]
-fn follow_write_through_a_parent_alias_reports_requested_paths() {
+fn follow_write_through_alias_requested_paths() {
     let capture = write_capture();
     let root = tempfile::tempdir().expect("output root");
     let original = root.path().join("original");

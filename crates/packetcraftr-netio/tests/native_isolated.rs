@@ -191,7 +191,7 @@ fn bounded_queue_reports_real_capture_loss() {
 
 #[test]
 #[ignore = "requires the isolated Linux launcher"]
-fn native_settings_apply_before_activation_and_report_realized_values() {
+fn native_set_before_realized_values() {
     isolated();
     let interface = Id {
         name: "lo".to_owned(),
@@ -267,7 +267,7 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
 
 #[test]
 #[ignore = "requires the isolated Linux launcher"]
-fn native_filter_error_preserves_diagnostic_and_releases_admission() {
+fn native_filter_error_releases_admission() {
     isolated();
     let mut request = request();
     request.filter = Some("udp and (".to_owned());
@@ -288,7 +288,7 @@ fn native_filter_error_preserves_diagnostic_and_releases_admission() {
 
 #[test]
 #[ignore = "requires the isolated Linux launcher"]
-fn interface_disappearance_reports_driver_failure_and_cleans_up() {
+fn iface_disappearance_driver_fail_cleans_up() {
     struct Remove;
     impl Drop for Remove {
         fn drop(&mut self) {

@@ -10,7 +10,7 @@ use common::tls_frames::{
 use packetcraftr_core::analysis::tls::Status;
 
 #[test]
-fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
+fn snaplen_trunc_rather_trunc() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);

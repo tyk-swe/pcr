@@ -170,7 +170,7 @@ fn quoted_response(network: NetworkVersion, quote: &[u8], icmp_type: u8, code: u
 }
 
 #[test]
-fn quoted_icmp_rejects_malformed_or_inexact_ipv4_probes() {
+fn quoted_icmp_reject_bad_inexact_ipv4_probes() {
     let request = build_probe(NetworkVersion::V4, ProbeTransport::Tcp);
     let variants = [
         (

@@ -7,7 +7,7 @@ use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::{packet::Packet, template};
 
 #[test]
-fn template_aliases_value_errors_and_overflow_are_rejected_before_iteration() {
+fn template_aliases_errors_reject_before_iteration() {
     use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
     let mut base = Packet::new();
     base.push(Udp::default());

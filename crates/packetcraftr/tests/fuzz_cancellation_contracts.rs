@@ -52,7 +52,7 @@ fn run_cancelled(
 }
 
 #[test]
-fn cancellation_at_entry_prevents_the_first_live_case() {
+fn cancel_entry_prevents_first_live_case() {
     for progressive in [false, true] {
         let signal = Cancellation::default();
         signal.cancel();
@@ -131,7 +131,7 @@ impl LayerCodec for CancellingCodec {
 }
 
 #[test]
-fn cancelled_preparation_stops_generation_early() {
+fn cancel_prep_stops_generation_early() {
     for progressive in [false, true] {
         for cases in [1, 3] {
             let signal = Cancellation::default();

@@ -105,7 +105,7 @@ fn option(name: &str, value: &str) -> TftpOption {
 }
 
 #[test]
-fn malformed_and_out_of_scope_messages_decode_as_raw_with_bytes_intact() {
+fn bad_out_scope_msgs_decode_raw_bytes_intact() {
     let registry = builtin::registry();
     let mut too_many = b"\x00\x02f\x00octet\x00".to_vec();
     for _ in 0..=MAX_OPTIONS {
@@ -162,7 +162,7 @@ fn malformed_and_out_of_scope_messages_decode_as_raw_with_bytes_intact() {
 }
 
 #[test]
-fn construction_refuses_what_the_wire_cannot_carry() {
+fn build_reject_what_wire_cant_carry() {
     let registry = builtin::registry();
     let strict = |message: Tftp| {
         build::Builder::new(Arc::clone(&registry))

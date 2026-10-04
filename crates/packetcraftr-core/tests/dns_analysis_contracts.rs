@@ -109,7 +109,7 @@ fn assert_limit_refusal(error: &analysis::application::Error, field: &str, limit
 }
 
 #[test]
-fn a_new_udp_conversation_beyond_max_streams_is_refused() {
+fn new_udp_strms_reject() {
     let registry = registry();
     let query = message(3, false, "a.test");
     let frames: Vec<_> = [40000, 40001, 40000]
@@ -135,7 +135,7 @@ fn limits_with(field: &str, value: usize) -> Limits {
 }
 
 #[test]
-fn application_limits_must_be_positive_and_within_their_ceilings() {
+fn application_limits_within_ceilings() {
     for (field, maximum) in [
         ("max_messages", 100_000),
         ("max_streams", 100_000),
@@ -165,7 +165,7 @@ fn application_limits_must_be_positive_and_within_their_ceilings() {
 }
 
 #[test]
-fn invalid_limits_are_reported_before_invalid_ports() {
+fn invalid_limits_before_invalid_ports() {
     let error = Collector::new(limits_with("max_messages", 0), vec![0])
         .err()
         .expect("invalid limits and ports must be rejected");

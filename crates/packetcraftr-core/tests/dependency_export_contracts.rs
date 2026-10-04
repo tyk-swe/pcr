@@ -9,7 +9,7 @@ use packetcraftr_core::{
     error::{Classified, Kind},
 };
 #[test]
-fn a_selected_frame_limit_that_is_zero_or_above_its_ceiling_is_invalid() {
+fn selected_limit_zero_above_ceiling_invalid() {
     for (max_selected_frames, reason) in [
         (0, analysis::Constraint::NonZero),
         (

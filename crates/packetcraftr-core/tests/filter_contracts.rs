@@ -22,7 +22,7 @@ fn assert_rejected(cases: &[(&str, &str)]) {
 }
 
 #[test]
-fn occurrence_selectors_reject_every_malformed_spelling() {
+fn occurrence_selectors_reject_bad_spelling() {
     assert_rejected(&[
         ("ipv4.source#2 == 192.0.2.1", "must follow the protocol"),
         ("ipv4#x.source == 192.0.2.1", "is not a number"),
@@ -43,7 +43,7 @@ fn occurrence_selectors_reject_every_malformed_spelling() {
 }
 
 #[test]
-fn malformed_and_misused_ranges_are_typed_errors_with_offsets() {
+fn bad_misused_ranges_typed_errors_offsets() {
     let registry = registry();
     for (source, offset) in [
         ("tcp.port in 200..100", 12),

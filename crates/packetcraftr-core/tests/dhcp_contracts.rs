@@ -51,7 +51,7 @@ fn reply() -> Dhcpv6 {
     message
 }
 #[test]
-fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
+fn dhcp_limits_bad_fail_no_capture_bytes() {
     let wire = reply().to_wire().unwrap();
     assert_eq!(
         Dhcpv6::from_wire_with_limits(
@@ -131,7 +131,7 @@ fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
 }
 
 #[test]
-fn dhcp_limits_above_their_ceiling_are_refused_rather_than_lowered() {
+fn dhcp_limits_reject_rather_lowered() {
     use packetcraftr_core::error::Classified;
     use packetcraftr_core::protocol::application::dhcp::{
         Error, Limit, MAX_MESSAGE_BYTES, MAX_NESTING, MAX_OPTIONS,

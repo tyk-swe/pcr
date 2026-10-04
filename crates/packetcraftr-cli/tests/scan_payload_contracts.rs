@@ -6,7 +6,7 @@ mod common;
 use common::{parse_json, path_text, run};
 
 #[test]
-fn udp_payload_input_is_charged_before_probe_execution() {
+fn udp_payload_charged_before_probe_execution() {
     let directory = tempfile::tempdir().unwrap();
     let payload = directory.path().join("payload.bin");
     std::fs::write(&payload, b"hello\x00\xff").unwrap();
@@ -36,7 +36,7 @@ fn udp_payload_input_is_charged_before_probe_execution() {
 }
 
 #[test]
-fn oversized_udp_payload_file_is_a_usage_error_naming_the_payload() {
+fn oversize_udp_error_naming_payload() {
     let directory = tempfile::tempdir().unwrap();
     let payload = directory.path().join("payload.bin");
     std::fs::write(

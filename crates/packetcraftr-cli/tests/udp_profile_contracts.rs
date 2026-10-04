@@ -3,7 +3,7 @@
 mod common;
 use common::{parse_json, run};
 #[test]
-fn profile_files_validate_before_target_resolution() {
+fn profile_validate_before_target_resolution() {
     let sample: serde_json::Value = serde_json::from_str(include_str!(
         "../../../examples/documents/udp-profiles.json"
     ))

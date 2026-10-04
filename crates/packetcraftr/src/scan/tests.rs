@@ -198,7 +198,7 @@ impl Executor<Batch<Probe>> for TimeoutExecutor {
 }
 
 #[test]
-fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
+fn udp_payload_reject() {
     use packetcraftr_core::error::Classified as _;
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
@@ -306,7 +306,7 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 }
 
 #[test]
-fn serial_scan_refuses_over_wide_collection() {
+fn serial_scan_reject_wide_collection() {
     let address = "192.0.2.1".parse().unwrap();
     let mut frames = tcp_scan_request(Target::Address(address));
     frames.limits.max_evidence_frames = 16;

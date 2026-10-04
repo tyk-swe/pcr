@@ -104,7 +104,7 @@ fn adversarial_pcapng() -> Vec<u8> {
 }
 
 #[test]
-fn timestamp_requiring_writer_rejects_simple_packet_time_absence() {
+fn ts_requiring_reject_time_absence() {
     let input = adversarial_pcapng();
     let mut reader = Reader::new(Cursor::new(input)).expect("pcapng opens");
     let mut simple = loop {

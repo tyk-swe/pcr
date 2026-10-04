@@ -74,7 +74,7 @@ fn tunnel(reply: bool, geneve: bool, tcp: bool) -> Packet {
 }
 
 #[test]
-fn udp_probes_validate_inner_tunnel_flows_before_reporting_open() {
+fn udp_probes_before_open() {
     let registry = builtin::registry();
     for geneve in [false, true] {
         for tcp in [false, true] {

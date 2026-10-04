@@ -44,7 +44,7 @@ fn assert_zero_limit(result: Result<impl Sized, Error>, expected: &str) {
 }
 
 #[test]
-fn every_stream_consumer_refuses_a_zero_ceiling_before_any_output() {
+fn every_strm_reject_before_output() {
     for (field, limits) in [
         (
             "max_frames",
@@ -119,7 +119,7 @@ fn every_stream_consumer_refuses_a_zero_ceiling_before_any_output() {
 }
 
 #[test]
-fn a_stream_budget_charges_frames_and_refuses_without_changing() {
+fn strm_budget_charges_reject_no_changing() {
     let mut budget = Budget::new(Limits {
         max_frames: 2,
         max_bytes: 10,
@@ -150,7 +150,7 @@ fn a_stream_budget_charges_frames_and_refuses_without_changing() {
 }
 
 #[test]
-fn merge_refuses_a_source_ceiling_above_the_merge_maximum() {
+fn merge_reject_merge_maximum() {
     for max_sources in [0, MAX_MERGE_SOURCES + 1] {
         let limits = MergeLimits {
             max_sources,
@@ -173,7 +173,7 @@ fn merge_refuses_a_source_ceiling_above_the_merge_maximum() {
 }
 
 #[test]
-fn compressed_input_refuses_a_window_outside_the_decoder_range() {
+fn compressed_reject_decoder_range() {
     for max_window_log in [
         compression::MIN_WINDOW_LOG - 1,
         compression::MAX_WINDOW_LOG + 1,
@@ -225,7 +225,7 @@ fn pcapng_with_options(
 }
 
 #[test]
-fn pcapng_blocks_refuse_options_above_the_per_block_ceiling() {
+fn pcapng_blocks_reject_block_ceiling() {
     const LIMIT: usize = 8;
     let endianness = Endianness::Little;
     let limits = ReaderLimits {

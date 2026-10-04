@@ -14,7 +14,7 @@ fn parser(max_nesting: usize) -> Parser {
 }
 
 #[test]
-fn recursive_list_limit_is_checked_before_descending() {
+fn recursive_list_before_descending() {
     assert_eq!(
         parse_value_bounded(0, "[]", 0, &mut parser(1)).unwrap(),
         FieldValue::List(Vec::new())
@@ -34,7 +34,7 @@ fn recursive_list_limit_is_checked_before_descending() {
 }
 
 #[test]
-fn generated_bytes_are_charged_cumulatively_before_allocation() {
+fn generated_charged_before_allocation() {
     let limits = |max_generated_bytes| Limits {
         max_generated_bytes,
         ..Limits::default()

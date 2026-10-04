@@ -20,7 +20,7 @@ fn target(selector: &str) -> payload::Target {
 }
 
 #[test]
-fn a_refused_payload_target_never_loads_its_bytes() {
+fn reject_payload_target_never_loads_bytes() {
     let occupied = "ipv4()/udp()/raw(hex=\"aa\")";
     for (recipe_text, selector, message) in [
         (

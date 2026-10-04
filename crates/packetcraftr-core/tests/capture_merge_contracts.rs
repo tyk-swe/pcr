@@ -31,7 +31,7 @@ fn source(name: &str, frames: &[(u64, u8, u32)]) -> MergeSource<Cursor<Vec<u8>>>
 }
 
 #[test]
-fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
+fn unordered_missing_fails_explicit() {
     let mut sources = [source("bad", &[(2, 1, 0), (1, 2, 0)])];
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     assert!(matches!(
@@ -102,7 +102,7 @@ fn reorder(frames: usize) -> MergeLimits {
 }
 
 #[test]
-fn reorder_window_respects_byte_budget_and_max() {
+fn reorder_win_respects_byte_budget_max() {
     // Frames are charged as they are read into the window, so the cumulative budget bounds it.
     let limits = MergeLimits {
         streams: capture_file::Limits {

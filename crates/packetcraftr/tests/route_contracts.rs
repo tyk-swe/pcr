@@ -100,7 +100,7 @@ fn assert_row(
 }
 
 #[test]
-fn route_planning_retains_semantic_failures_before_provider_io() {
+fn route_planning_fails_before_provider_io() {
     use packetcraftr_core::{
         field::WireValue,
         protocol::network::{Ipv6, SegmentRoutingHeader},

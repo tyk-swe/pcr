@@ -9,7 +9,7 @@ use std::{
 };
 
 #[test]
-fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
+fn ordinary_tcp_reject_no_capture() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let open = listener.local_addr().unwrap().port();
     listener.set_nonblocking(true).unwrap();

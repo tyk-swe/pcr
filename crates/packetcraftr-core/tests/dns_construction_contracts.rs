@@ -4,7 +4,7 @@
 use packetcraftr_core::protocol::application::dns::{self, Dns};
 
 #[test]
-fn borrowed_dns_wire_enforces_message_byte_limit() {
+fn borrowed_dns_wire_enforces_msg_byte_limit() {
     let mut wire = vec![0; 12];
     wire[7] = 1;
     wire.extend_from_slice(&[0, 0xfd, 0xe8, 0, 1, 0, 0, 0, 0]);

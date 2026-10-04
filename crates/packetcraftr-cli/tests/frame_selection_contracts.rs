@@ -28,7 +28,7 @@ fn capture(template: &str) -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn malformed_selections_are_usage_errors_before_input_is_read() {
+fn bad_selections_usage_errors_before_read() {
     let many = (1..=257)
         .map(|index| (index * 2).to_string())
         .collect::<Vec<_>>()
@@ -64,7 +64,7 @@ fn malformed_selections_are_usage_errors_before_input_is_read() {
 }
 
 #[test]
-fn skipped_frames_still_consume_the_input_budgets() {
+fn skipped_frames_consume_input_budgets() {
     let file = capture(UDP_CLIENT);
     let path = path_text(file.path());
     let limited = run(&["read", path, "--frames", "1", "--max-frames", "5"]);

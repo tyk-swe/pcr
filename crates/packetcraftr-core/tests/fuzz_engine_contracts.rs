@@ -37,7 +37,7 @@ fn udp_fuzz_packet() -> Packet {
 }
 
 #[test]
-fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
+fn fuzz_bounded_case_growth() {
     let error = fuzz(
         &Request {
             cases: 2,
@@ -76,7 +76,7 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
 }
 
 #[test]
-fn malformed_derived_fields_strict_reject_permissive_build() {
+fn bad_derived_strict_reject_permissive_build() {
     let base = udp_fuzz_packet();
     let strict = fuzz(
         &Request {

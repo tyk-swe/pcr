@@ -7,7 +7,7 @@ use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 const IP: &str = "45000014000000004001f6e7c0000201c6336402";
 
 #[test]
-fn projection_byte_limit_counts_the_rendered_json_payload() {
+fn proj_byte_json_payload() {
     let dissect = [
         "dissect",
         "--hex",

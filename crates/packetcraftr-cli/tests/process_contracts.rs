@@ -61,7 +61,7 @@ fn run_command_with_open_stdin(mut command: Command) -> Output {
 
 #[cfg(packetcraftr_test_util_linux)]
 #[test]
-fn capture_commands_reject_terminal_stdin_before_reading() {
+fn capture_commands_reject_before_reading() {
     common::require_util_linux_script();
     for arguments in [
         "read -",
@@ -102,7 +102,7 @@ fn malformed_raw_frame_capture() -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn replay_rejects_malformed_capture_before_emitting_transmission_evidence() {
+fn replay_reject_bad_capture_before_tx_ev() {
     let capture = malformed_raw_frame_capture();
     let path = capture.path().to_str().expect("temporary path is UTF-8");
 
@@ -180,7 +180,7 @@ fn replay_rejects_malformed_capture_before_emitting_transmission_evidence() {
 }
 
 #[test]
-fn unsupported_output_formats_fail_before_command_work() {
+fn unsup_formats_fail_before_command_work() {
     let directory = tempfile::tempdir().expect("temporary directory must open");
     let missing = directory.path().join("missing");
     let missing = missing.to_str().expect("temporary path is UTF-8");
@@ -247,7 +247,7 @@ fn unsupported_output_formats_fail_before_command_work() {
 
 #[cfg(all(packetcraftr_test_util_linux, packetcraftr_test_dev_full))]
 #[test]
-fn binary_terminal_refusal_reports_stderr_write_failures() {
+fn binary_terminal_refusal_stderr_write_fails() {
     common::require_util_linux_script();
     common::require_dev_full();
     let mut command = Command::new("script");

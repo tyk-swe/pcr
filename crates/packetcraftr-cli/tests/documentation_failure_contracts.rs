@@ -8,7 +8,7 @@ mod common;
 use common::{path_text, run};
 
 #[test]
-fn documentation_reports_completion_write_failures_without_panicking() {
+fn documentation_completion_fails_no_panic() {
     common::require_dev_full();
     for file in [
         "packetcraftr.bash",

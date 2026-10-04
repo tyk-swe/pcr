@@ -26,7 +26,7 @@ fn seed_dir(relative: std::path::PathBuf) -> std::path::PathBuf {
 }
 
 #[test]
-fn yaml_packet_document_seeds_parse_under_the_fuzz_limits() {
+fn yaml_pkt_document_seeds_parse_fuzz_limits() {
     let mut checked = 0_usize;
     for entry in fs::read_dir(corpus("packet_document_yaml"))
         .expect("corpus directory")
@@ -50,7 +50,7 @@ fn yaml_packet_document_seeds_parse_under_the_fuzz_limits() {
 }
 
 #[test]
-fn smoke_test_ip_reassembly_seeds_reach_completion_and_overlap() {
+fn smoke_test_completion_overlap() {
     let corpus_dir = corpus("ip_reassembly");
     let mut coverage = ip_reassembly_support::Coverage::default();
     let mut checked = 0_usize;
@@ -190,7 +190,7 @@ fn http2_hpack_seeds_reach_the_decoder() {
 }
 
 #[test]
-fn http2_segmentation_seeds_reassemble_identically() {
+fn http2_segmentation_seeds_reassemble_same() {
     use packetcraftr_core::analysis::http2::{Event, Status};
     let mut checked = 0_usize;
     for entry in fs::read_dir(corpus("http2_segmentation"))

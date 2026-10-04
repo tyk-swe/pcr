@@ -329,7 +329,7 @@ fn size_updates_track_acknowledged_maxima() {
 }
 
 #[test]
-fn size_updates_require_smallest_then_final() {
+fn size_updates_require_smallest_final() {
     let mut decoder = Decoder::new(limits()).unwrap();
     decoder.acknowledge_table_size(300).unwrap();
     decoder.acknowledge_table_size(64).unwrap();
@@ -358,7 +358,7 @@ fn size_updates_require_smallest_then_final() {
 }
 
 #[test]
-fn size_update_exceeding_ceiling_or_late_is_rejected() {
+fn size_update_exceeding_ceiling_late_reject() {
     let mut decoder = Decoder::new(limits()).unwrap();
     assert!(matches!(
         decoder.decode(&hex("3fe2 1f82"), 1),
@@ -404,7 +404,7 @@ fn eviction_removes_oldest_entries() {
 }
 
 #[test]
-fn oversized_entry_empties_table_without_error() {
+fn oversize_entry_empties_table_no_error() {
     let mut decoder = Decoder::new(limits()).unwrap();
     decoder.decode(&hex("4001 6101 62"), 1).unwrap();
     assert_eq!(decoder.buffered_bytes(), 34 + ENTRY_STRUCT_BYTES);
@@ -499,7 +499,7 @@ fn limits_are_enforced_at_exact_boundaries() {
 }
 
 #[test]
-fn budgets_are_checked_before_expansion_and_insertion() {
+fn budgets_checked_before_expansion_insertion() {
     let mut small = limits();
     small.max_headers = 1;
     let mut decoder = Decoder::new(small).unwrap();
@@ -615,7 +615,7 @@ fn oversized_blocks_poison_the_decoder() {
 }
 
 #[test]
-fn checked_decode_interrupts_within_one_huffman_literal() {
+fn checked_decode_huffman_literal() {
     use super::DecodeError;
     use crate::budget::{Cancellation, Deadline};
     use std::time::Duration;
@@ -659,7 +659,7 @@ fn checked_decode_interrupts_within_one_huffman_literal() {
 }
 
 #[test]
-fn checked_decode_interrupts_field_and_table_update_runs() {
+fn checked_decode_update_runs() {
     use super::DecodeError;
     for byte in [0x82, 0x20] {
         let mut decoder = Decoder::new(limits()).unwrap();

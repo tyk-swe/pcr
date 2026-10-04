@@ -4,7 +4,7 @@
 use packetcraftr_netio::{Error, capture};
 
 #[test]
-fn capture_limits_validate_each_bound_and_cross_field_constraint() {
+fn capture_limits_field_constraint() {
     let defaults = capture::Limits::default();
     for (field, limits) in [
         (
@@ -80,7 +80,7 @@ fn capture_limits_validate_each_bound_and_cross_field_constraint() {
 }
 
 #[test]
-fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
+fn capture_statistics_checked_add_detects_ovf() {
     let first = capture::Stats {
         received_frames: 1,
         received_bytes: 2,

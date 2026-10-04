@@ -26,7 +26,7 @@ fn numbers(message: &Message) -> Vec<u64> {
 }
 
 #[test]
-fn malformed_and_gap_messages_keep_their_contributing_sources() {
+fn bad_gap_msgs_keep_contributing_sources() {
     let (mut capture, mut stream) = setup();
     capture.client(&mut stream, b"GET /x HTTP/1.1\rBAD\r\n\r\n");
     let (messages, _) = collect(&capture.frames, collector());

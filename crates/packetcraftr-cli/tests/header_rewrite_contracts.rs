@@ -11,7 +11,7 @@ use capture_support::{ethernet_frame, write_pcapng};
 use common::{parse_json, run, run_success};
 
 #[test]
-fn per_section_interface_limit_does_not_bound_the_rewritten_output() {
+fn section_iface_not_rewritten_output() {
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/tls-handshake.pcapng");
     let section = std::fs::read(source).unwrap();
@@ -98,7 +98,7 @@ fn assert_tcp_checksums(bytes: &[u8]) {
 }
 
 #[test]
-fn rewrite_refuses_a_directory_style_destination_before_reading_input() {
+fn rewrite_reject_dir_style_dst_before_input() {
     let directory = tempfile::tempdir().unwrap();
     let source = tcp_source(directory.path());
     let mut target = directory.path().join("out").into_os_string();

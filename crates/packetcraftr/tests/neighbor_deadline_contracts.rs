@@ -118,7 +118,7 @@ fn template() -> packetcraftr_core::template::Template {
 }
 
 #[test]
-fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
+fn nbr_disc_bounded_by_xchg_dl() {
     let link = SilentLink::default();
     // Each discovery attempt alone may wait far longer than the exchange.
     let attempt_timeout = Duration::from_secs(30);

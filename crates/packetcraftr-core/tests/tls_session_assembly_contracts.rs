@@ -8,7 +8,7 @@ use common::tls_frames::{ClientHelloSpec, client_hello, handshake_record, split}
 use packetcraftr_core::analysis::tls::Status;
 
 #[test]
-fn a_capture_ending_mid_hello_reports_truncated() {
+fn capture_ending_mid_hello_reports_trunc() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);

@@ -39,7 +39,7 @@ fn assert_capability_failure(arguments: &[&str]) {
     feature = "native-layer3"
 )))]
 #[test]
-fn interfaces_and_routes_fail_closed_without_a_native_route_backend() {
+fn ifaces_routes_fail_no_route_backend() {
     assert_capability_failure(&["interfaces"]);
     assert_capability_failure(&["routes"]);
 }

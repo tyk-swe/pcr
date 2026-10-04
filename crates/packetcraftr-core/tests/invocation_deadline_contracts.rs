@@ -38,7 +38,7 @@ impl Read for Ticking {
 }
 
 #[test]
-fn multiple_parents_preserve_the_tightest_existing_ceiling() {
+fn multiple_parents_keep_tightest_ceiling() {
     let (tight, ticks) = clock(5);
     let child = Deadline::new(Duration::from_secs(60))
         .with_parent(Some(tight))

@@ -14,7 +14,7 @@ use packetcraftr_core::{
 };
 
 #[test]
-fn over_limit_connection_fails_run_after_delivery() {
+fn limit_conn_fails_run_after_delivery() {
     let (mut capture, mut first) = setup();
     capture.client(&mut first, b"GET / HTTP/1.1\r\n\r\n");
     capture.server(&mut first, b"HTTP/1.1 204 No Content\r\n\r\n");
@@ -64,7 +64,7 @@ fn over_limit_connection_fails_run_after_delivery() {
 }
 
 #[test]
-fn body_byte_limit_must_be_positive_and_within_its_ceiling() {
+fn body_byte_within_ceiling() {
     for (max_body_bytes, reason) in [
         (0, Constraint::NonZero),
         (

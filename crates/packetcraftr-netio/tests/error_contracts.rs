@@ -10,7 +10,7 @@ use packetcraftr_netio::{
 };
 
 #[test]
-fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
+fn unsup_capabilities_error_type() {
     for (capability, code, subject) in [
         (
             NativeCapability::Route,
@@ -79,7 +79,7 @@ fn assert_row(
 }
 
 #[test]
-fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
+fn live_io_errors_stable_classes_fail_variant() {
     let cases = [
         (
             Error::Unsupported(Unsupported::new(NativeCapability::Capture, "fixture")),

@@ -4,7 +4,7 @@ mod common;
 use common::{parse_json, run, run_success};
 
 #[test]
-fn http_rejects_zero_ports_and_out_of_range_body_limits_as_usage_errors() {
+fn http_reject_usage_errors() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let path = path.to_str().unwrap();
@@ -36,7 +36,7 @@ fn http_rejects_zero_ports_and_out_of_range_body_limits_as_usage_errors() {
 }
 
 #[test]
-fn zero_application_message_limit_is_a_usage_error() {
+fn zero_application_msg_limit_usage_error() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let path = path.to_str().unwrap();

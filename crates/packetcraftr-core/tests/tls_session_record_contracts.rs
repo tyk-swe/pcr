@@ -20,7 +20,7 @@ fn raw_record(content_type: u8, body: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn a_record_the_parser_rejects_is_malformed_and_says_what_it_read() {
+fn record_parser_reject_bad_says_what_read() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);

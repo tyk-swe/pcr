@@ -6,7 +6,7 @@ use std::time::Duration;
 use packetcraftr::neighbor::{self};
 
 #[test]
-fn neighbor_options_reject_every_unbounded_value() {
+fn nbr_opts_reject_every_unbounded_value() {
     let defaults = neighbor::Options::default();
     defaults.validate().expect("defaults are valid");
 

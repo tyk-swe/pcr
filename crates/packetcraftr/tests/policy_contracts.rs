@@ -92,7 +92,7 @@ impl Resolver for CountingResolver {
 }
 
 #[test]
-fn hostname_authorization_precedes_resolver_side_effects() {
+fn host_auth_precedes_resolver_side_effects() {
     let target = Target::from_str("Example.COM.").expect("hostname must parse");
     let resolver = CountingResolver {
         calls: AtomicUsize::new(0),
@@ -229,7 +229,7 @@ fn sourced_packet(source_mac: Option<[u8; 6]>, source: Ipv4Addr) -> Packet {
 }
 
 #[test]
-fn the_client_refuses_a_malformed_policy_as_the_policy_does() {
+fn client_reject_bad_policy() {
     let malformed = policy::Policy {
         max_resolved_addresses: 0,
         ..policy::Policy::default()

@@ -74,7 +74,7 @@ fn refusal(frame: &Frame, options: FragmentOptions) -> Refusal {
 }
 
 #[test]
-fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
+fn frag_limits_fail_before_returning_output() {
     let original = complete(false, false);
     assert_eq!(
         fragment(&original, Default::default()).unwrap(),

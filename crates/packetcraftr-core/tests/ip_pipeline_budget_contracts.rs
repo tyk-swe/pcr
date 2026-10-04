@@ -16,7 +16,7 @@ use packetcraftr_core::frame::LinkType;
 use std::time::{Duration, SystemTime};
 
 #[test]
-fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
+fn budget_reduced_resource_class() {
     let registry = registry();
     let frames = cascading_vxlan_tcp_frames(&registry);
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames[..2]);
@@ -53,7 +53,7 @@ fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
 }
 
 #[test]
-fn idle_expiry_is_delivered_before_a_failing_fragment_push() {
+fn idle_expiry_before_frag_push() {
     let registry = registry();
     let first_payload = [1_u8; 8];
     let failing_payload = [2_u8; 8];

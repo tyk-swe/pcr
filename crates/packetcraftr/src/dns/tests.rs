@@ -702,7 +702,7 @@ fn dns_request(address: IpAddr) -> super::Request {
 }
 
 #[test]
-fn direct_tcp_denials_and_scoped_targets_never_execute_a_probe() {
+fn direct_tcp_never_execute_probe() {
     use packetcraftr_core::error::Classified as _;
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
@@ -874,7 +874,7 @@ fn loopback_fallback(edns: Option<super::EdnsRequest>) {
 }
 
 #[test]
-fn edns_validation_precedes_authorization_and_execution() {
+fn edns_validation_precedes_auth_execution() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     for udp_payload_size in [0, 511] {
         let mut request = dns_request(address);
@@ -971,7 +971,7 @@ fn batch_request(address: IpAddr, name: &str, transaction_id: u16) -> super::Req
 }
 
 #[test]
-fn batch_rejects_empty_and_invalid_requests_before_any_side_effects() {
+fn batch_reject_invalid_before_effects() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     let mut authorizer = RecordingAuthorizer::new(address);
     let calls = Arc::new(AtomicUsize::new(0));

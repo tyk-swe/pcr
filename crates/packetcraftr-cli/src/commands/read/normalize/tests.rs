@@ -27,7 +27,7 @@ fn description(resolution: capture::TimestampResolution, snap_len: u32) -> captu
 }
 
 #[test]
-fn a_nanosecond_detail_never_rounds_into_a_microsecond_target() {
+fn ns_detail_never_rounds_microsecond_target() {
     let mut writer = open_classic_writer(
         Vec::new(),
         &description(capture::TimestampResolution::Decimal(6), 100),

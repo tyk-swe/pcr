@@ -4,7 +4,7 @@ mod common;
 use common::{parse_json, run};
 
 #[test]
-fn application_output_budget_counts_only_compact_event_payloads() {
+fn application_budget_event_payloads() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/dns-response.pcap");
     let expected_text = concat!(
@@ -32,7 +32,7 @@ fn application_output_budget_counts_only_compact_event_payloads() {
 }
 
 #[test]
-fn zero_application_message_limit_is_a_usage_error() {
+fn zero_application_msg_limit_usage_error() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/dns-response.pcap");
     let path = path.to_str().unwrap();

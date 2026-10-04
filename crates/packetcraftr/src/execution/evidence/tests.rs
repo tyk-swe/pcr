@@ -24,7 +24,7 @@ const DESCRIPTOR: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::n
 );
 
 #[test]
-fn a_request_selects_its_best_response_within_the_timeout() {
+fn req_selects_best_resp_within_timeout() {
     let timeout = Duration::from_millis(10);
     let mut responses = vec![
         response(1, 1, &[1]),
@@ -84,7 +84,7 @@ impl EvidenceSink for RecordingSink {
 }
 
 #[test]
-fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
+fn kept_undecoded_ev_emitted_before_dl_fail() {
     let mut state = EvidenceState::new(LIMITS, DESCRIPTOR);
     let mut sink = RecordingSink {
         emitted: Vec::new(),

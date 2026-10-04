@@ -90,7 +90,7 @@ fn layer_range(frame: &Frame, protocol: &str, field: &str) -> (usize, usize) {
 }
 
 #[test]
-fn invalid_fields_values_and_occurrences_are_rejected() {
+fn invalid_fields_values_occurrences_reject() {
     for assignment in [
         "tcp.checksum=1",    // outside the supported set
         "dns.questions=1",   // nested/variable structure
@@ -109,7 +109,7 @@ fn invalid_fields_values_and_occurrences_are_rejected() {
 }
 
 #[test]
-fn truncated_fragmented_and_protected_frames_are_rejected() {
+fn trunc_fragmented_protected_frames_reject() {
     let original = frame(false, false, true, false);
     let truncated = common::truncated(&original, original.bytes().len() - 40);
     assert!(apply(&truncated, &["ipv4.ttl=1"], ChecksumMode::Repair).is_err());

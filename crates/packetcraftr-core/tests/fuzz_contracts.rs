@@ -7,7 +7,7 @@ use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::fuzz;
 
 #[test]
-fn fuzz_failures_retain_stable_boundary_classifications() {
+fn fuzz_fails_retain_stable_boundary_class() {
     let cases = [
         (
             fuzz::Error::InvalidStrategies,
@@ -62,7 +62,7 @@ fn fuzz_failures_retain_stable_boundary_classifications() {
 }
 
 #[test]
-fn campaign_limits_reject_values_above_the_ceilings_they_enforce() {
+fn campaign_limits_reject_ceilings_enforce() {
     for limits in [
         fuzz::Limits {
             max_total_bytes: fuzz::MAX_TOTAL_BYTES + 1,

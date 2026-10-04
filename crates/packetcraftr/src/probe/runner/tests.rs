@@ -267,7 +267,7 @@ fn run(
 }
 
 #[test]
-fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
+fn ev_another_reject_before_anything_published() {
     let foreign = || Script {
         responses: vec![(0, &[1, 1], 1)],
         diagnostics: vec![Diagnostic::info("fixture.executor", "fixture")],
@@ -319,7 +319,7 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
 }
 
 #[test]
-fn diagnostics_are_published_before_each_probes_event() {
+fn diags_published_before_probes_event() {
     let mut executor = ScriptedExecutor::new([
         Script {
             responses: vec![(0, &[1, 1], 1)],

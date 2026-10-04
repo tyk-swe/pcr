@@ -543,7 +543,7 @@ fn validate_dns_event_variants() {
 }
 
 #[test]
-fn dns_schema_rejects_truncated_tcp_results() {
+fn dns_schema_reject_trunc_tcp_results() {
     for document in [
         include_str!("../../../examples/documents/output-dns-success.json"),
         include_str!("../../../examples/documents/output-dns-complete.json"),
@@ -603,7 +603,7 @@ fn complete(
 }
 
 #[test]
-fn schema_rejects_legacy_event_placement_and_unknown_root_discriminators() {
+fn schema_reject_event_unknown_root_discs() {
     let original: Value = serde_json::from_str(include_str!(
         "../../../examples/documents/output-tls-event.json"
     ))

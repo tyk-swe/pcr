@@ -33,7 +33,7 @@ impl Classified for ClassifiedFailure {
 }
 
 #[test]
-fn deadline_accepts_bounded_phases_and_preserves_limit_on_failure() {
+fn dl_accepts_bounded_phases_keeps_limit_fail() {
     let mut deadline = Deadline::new(Duration::from_secs(60));
 
     assert!(deadline.check().is_ok(), "fresh deadline must be available");
@@ -69,7 +69,7 @@ fn deadline_accepts_bounded_phases_and_preserves_limit_on_failure() {
 }
 
 #[test]
-fn frame_lengths_fail_closed_during_construction_and_deserialization() {
+fn frame_lengths_fail_closed_build_decode() {
     let cases = [
         (
             2,
@@ -114,7 +114,7 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
 }
 
 #[test]
-fn frame_truncation_reflects_capture_lengths_only() {
+fn frame_truncation_lengths_only() {
     let frame = |captured, original, bytes| {
         Frame::try_with_lengths(
             SystemTime::UNIX_EPOCH,
@@ -178,7 +178,7 @@ fn frame_truncation_reflects_capture_lengths_only() {
 }
 
 #[test]
-fn erased_classified_error_retains_source_classification_and_causes() {
+fn erased_classed_error_source_class_causes() {
     let error = BoundaryError::from_error(ClassifiedFailure);
 
     assert_eq!(error.to_string(), "classified failure");

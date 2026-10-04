@@ -289,7 +289,7 @@ fn opaque_payload_frame(
 }
 
 #[test]
-fn request_builder_rejects_family_and_mtu_mismatches() {
+fn req_builder_reject_family_mtu_mismatches() {
     // An ARP message is 28 bytes, a solicitation 40 + 32 bytes of IPv6.
     for (mut request, fits) in [(ipv4_request(), 28), (ipv6_request(), 72)] {
         request.mtu = fits;
@@ -319,7 +319,7 @@ fn request_builder_rejects_family_and_mtu_mismatches() {
 }
 
 #[test]
-fn replies_deeper_than_the_discovery_tag_limit_are_refused() {
+fn replies_deeper_disc_tag_limit_reject() {
     let mut request = ipv4_request();
     request.vlan_tags = vec![tag(VlanKind::Ieee8021Q, 0, false, 7); MAX_VLAN_TAGS + 1];
     assert_eq!(

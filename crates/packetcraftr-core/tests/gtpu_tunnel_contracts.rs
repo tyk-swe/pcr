@@ -90,7 +90,7 @@ fn round_trip(packet: Packet) -> (Bytes, decode::DecodedPacket) {
 }
 
 #[test]
-fn declared_length_beyond_the_datagram_is_malformed_with_the_bytes_kept() {
+fn declared_length_beyond_datagram_bad_kept() {
     let built = build::Builder::new(registry())
         .build(
             tunnel(Gtpu::default()),
@@ -121,7 +121,7 @@ fn declared_length_beyond_the_datagram_is_malformed_with_the_bytes_kept() {
 }
 
 #[test]
-fn gtpu_boundary_malformed_header_hides_destination() {
+fn gtpu_boundary_bad_hdr_hides_dst() {
     let packet = tunnel(Gtpu::default());
     // ethernet, outer ipv4, udp and the GTP-U header are the transmitted path
     assert_eq!(outer_scope_len(&packet), 4);

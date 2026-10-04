@@ -570,3 +570,19 @@ fn request_deadline_stops_attempts_before_the_configured_budget() {
     assert!(attempts <= 1, "deadline allowed {attempts} attempts");
     assert_eq!(layer2.sent().len(), usize::try_from(attempts).unwrap());
 }
+
+#[test]
+fn discovery_reservation_counts_every_attempt_padding_and_vlan_tag() {
+    use packetcraftr_core::packet::{VlanKind, VlanTag};
+    let state = State::try_new(test_options(7)).unwrap();
+    let mut request = request();
+    request.vlan_tags = vec![VlanTag::from_tci(VlanKind::Ieee8021Q, 17); 8];
+    let arp = state.traffic_limit(&request).unwrap();
+    assert_eq!(arp.packets(), 7);
+    assert_eq!(arp.wire_bytes(), 7 * (60 + 8 * 4));
+    request.interface_source = "2001:db8::1".parse().unwrap();
+    request.target = "2001:db8::2".parse().unwrap();
+    let ndp = state.traffic_limit(&request).unwrap();
+    assert_eq!(ndp.packets(), 7);
+    assert_eq!(ndp.wire_bytes(), 7 * (14 + 40 + 32 + 8 * 4));
+}

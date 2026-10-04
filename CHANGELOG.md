@@ -6,6 +6,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Packet preparation now authorizes route-derived ARP/NDP targets and reserves
+  every configured discovery attempt, including Ethernet padding and VLAN bytes,
+  against the same packet/byte policy budget as the prepared probes. Reservations
+  remain conservative on cache hits because entries can expire before discovery.
+
 ### Breaking
 
 - `packetcraftr::Providers` is now a blanket marker over the capability

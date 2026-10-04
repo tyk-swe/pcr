@@ -69,6 +69,18 @@ impl State {
         })
     }
 
+    /// Reserve the full attempt ceiling even on a cache hit: entries can expire
+    /// between passive admission and discovery.
+    pub(crate) fn traffic_limit(
+        &self,
+        request: &Request,
+    ) -> Result<crate::policy::WireLimits, Error> {
+        validate_request(request)?;
+        let bytes = build_request_frame(request)?.len() as u64;
+        let attempts = u64::from(self.options.max_attempts);
+        Ok(crate::policy::WireLimits::new(attempts, bytes * attempts))
+    }
+
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
         Active {
             transmit,

@@ -332,3 +332,130 @@ fn plan_by_name(
         deadline,
     )
 }
+
+#[derive(Clone, Copy)]
+struct Gateway(IpAddr);
+
+impl RouteProvider for Gateway {
+    type Error = std::convert::Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<Decision, Self::Error> {
+        let mut route = FixedRoutes.lookup_with_preferences(
+            destination,
+            interface_hint,
+            preferred_source,
+            deadline,
+        )?;
+        route.next_hop = Some(self.0);
+        Ok(route)
+    }
+}
+
+#[test]
+fn route_derived_neighbor_targets_are_authorized_before_capture_or_send() {
+    for (target, policy, code) in [
+        (
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            Policy::default(),
+            "policy.public_destination",
+        ),
+        (
+            IpAddr::V4(SECOND),
+            Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(IpAddr::V4(FIRST))],
+                ..Policy::default()
+            },
+            "policy.destination_not_allowed",
+        ),
+    ] {
+        let steps = Steps::default();
+        let io = RecordingTransmit::new(steps.clone());
+        let client = Client::new(
+            builtin::registry(),
+            policy,
+            common::providers(Gateway(target), io.clone()),
+        );
+        let error = send_once(&client, first_packet(&[FIRST]), layer2_send()).unwrap_err();
+        assert_eq!(error.classification().code, code);
+        assert_eq!(io.armed(), 0);
+        assert_eq!(steps.take(), []);
+        let error = client
+            .exchange(
+                exchange_request(template(&[FIRST])),
+                exchange::Collector::default(),
+            )
+            .unwrap_err();
+        assert_eq!(error.classification().code, code);
+        assert_eq!(io.armed(), 0);
+        assert_eq!(steps.take(), []);
+    }
+}
+
+#[test]
+fn discovery_attempts_and_padded_bytes_share_the_operation_budget() {
+    let payload = frame_len();
+    for (policy, code) in [
+        (
+            Policy {
+                max_packets_per_operation: 3,
+                ..Policy::default()
+            },
+            "policy.packet_limit",
+        ),
+        (
+            Policy {
+                max_bytes_per_operation: payload + 3 * 60 - 1,
+                ..Policy::default()
+            },
+            "policy.byte_limit",
+        ),
+    ] {
+        let (client, steps, io) = recording_client(policy);
+        let error = send_once(&client, first_packet(&[FIRST]), layer2_send()).unwrap_err();
+        assert_eq!(error.classification().code, code);
+        assert_eq!(io.armed(), 0);
+        assert_eq!(steps.take(), []);
+        let error = client
+            .exchange(
+                exchange_request(template(&[FIRST])),
+                exchange::Collector::default(),
+            )
+            .unwrap_err();
+        assert_eq!(error.classification().code, code);
+        assert_eq!(io.armed(), 0);
+        assert_eq!(steps.take(), []);
+    }
+    let (client, _, _) = recording_client(Policy {
+        max_packets_per_operation: 4,
+        max_bytes_per_operation: payload + 3 * 60,
+        ..Policy::default()
+    });
+    let sent = send_once(&client, first_packet(&[FIRST]), layer2_send()).unwrap();
+    assert_eq!(
+        sent.stats.bytes, payload,
+        "report counts payload, not reserved traffic"
+    );
+}
+
+#[test]
+fn all_exchange_discovery_reservations_precede_any_live_io() {
+    let (client, steps, io) = recording_client(Policy {
+        max_packets_per_operation: 7, // Two payloads plus two sets of three ARP attempts need eight.
+        ..Policy::default()
+    });
+    let error = client
+        .exchange(
+            exchange_request(template(&[FIRST, FIRST])),
+            exchange::Collector::default(),
+        )
+        .unwrap_err();
+    assert_eq!(error.classification().code, "policy.packet_limit");
+    assert_eq!(io.armed(), 0);
+    assert_eq!(steps.take(), []);
+}

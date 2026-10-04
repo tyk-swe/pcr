@@ -184,6 +184,7 @@ impl Materializer<'_> {
 struct Budget {
     packets: u64,
     wire_bytes: u64,
+    discovery_bytes: u64,
 }
 
 impl Budget {
@@ -192,11 +193,17 @@ impl Budget {
         Ok(Self {
             packets,
             wire_bytes: 0,
+            discovery_bytes: 0,
         })
     }
 
     /// Arithmetic overflow is itself a byte-limit denial.
-    fn charge(&mut self, policy: &Policy, wire_len: usize) -> Result<(), Error> {
+    fn charge(
+        &mut self,
+        policy: &Policy,
+        wire_len: usize,
+        discovery: WireLimits,
+    ) -> Result<(), Error> {
         let wire_bytes = u64::try_from(wire_len)
             .ok()
             .and_then(|bytes| self.wire_bytes.checked_add(bytes))
@@ -204,7 +211,22 @@ impl Budget {
                 actual: u64::MAX,
                 limit: policy.max_bytes_per_operation,
             })?;
-        policy.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
+        let packets = self.packets.checked_add(discovery.packets()).ok_or(
+            crate::policy::Error::PacketLimit {
+                actual: u64::MAX,
+                limit: policy.max_packets_per_operation,
+            },
+        )?;
+        let discovery_bytes = self.discovery_bytes.checked_add(discovery.wire_bytes());
+        let total_bytes = discovery_bytes
+            .and_then(|bytes| bytes.checked_add(wire_bytes))
+            .ok_or(crate::policy::Error::ByteLimit {
+                actual: u64::MAX,
+                limit: policy.max_bytes_per_operation,
+            })?;
+        policy.authorize(Operation::Wire(WireLimits::new(packets, total_bytes)))?;
+        self.packets = packets;
+        self.discovery_bytes = discovery_bytes.expect("total bytes were checked");
         self.wire_bytes = wire_bytes;
         Ok(())
     }
@@ -287,7 +309,16 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     }
 
     fn charge(&self, budget: &mut Budget, admitted: Admitted) -> Result<Admitted, Error> {
-        budget.charge(self.policy, admitted.wire_len())?;
+        let discovery = if let Some(request) = admitted.plan.neighbor_request()? {
+            self.policy.authorize_destination(request.target)?;
+            self.client
+                .neighbors
+                .traffic_limit(&request)
+                .map_err(route::Error::from)?
+        } else {
+            WireLimits::new(0, 0)
+        };
+        budget.charge(self.policy, admitted.wire_len(), discovery)?;
         Ok(admitted)
     }
 
@@ -592,7 +623,7 @@ mod tests {
         budget.wire_bytes = u64::MAX - 1;
 
         let error = budget
-            .charge(&policy, 2)
+            .charge(&policy, 2, WireLimits::new(0, 0))
             .expect_err("overflowing the cumulative total must be denied");
 
         assert!(

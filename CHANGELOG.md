@@ -1299,6 +1299,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Offline analysis, dissection, packet building, and display filters do less
+  work per packet: TCP reassembly copies delivered bytes by slice, capture
+  readers keep one buffer per record, compressed captures are read through a
+  buffer, HTTP/1 heads are searched with SIMD, TLS records are parsed in place,
+  and `in { .. }` sets are indexed. In the core benchmarks TCP reassembly is
+  about 90% faster, HTTP/2 analysis 66%, packet decode and rebuild about 40%,
+  and a 256-member set lookup 97%. Output, limits, and diagnostics are
+  unchanged.
+- Human field trees reach standard output in one write per packet instead of
+  one flushed write per line; interruption is checked between packets.
 - A capture group's waits classify like a single session's: `wait_ready`
   with a spent deadline reports `io.capture_readiness`, and a wait whose
   remainder exceeds the one-hour ceiling reports `cli.capture_timeout`,

@@ -354,7 +354,7 @@ struct Resolved {
 fn screen_stack(decoded: &DecodedPacket) -> Result<(), Error> {
     for layer in decoded.packet.iter() {
         if matches!(
-            BuiltinProtocol::of(layer),
+            BuiltinProtocol::from_id(*layer.protocol_id()),
             Some(BuiltinProtocol::Ah | BuiltinProtocol::Esp)
         ) {
             return Err(Error::Unsupported(Unsupported::EditProtectedTraffic));
@@ -648,6 +648,43 @@ fn write_uint(bytes: &mut [u8], range: ByteRange, value: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Debug, Default)]
+    struct AlternateAh(crate::protocol::tunnel::Ah);
+    impl crate::layer::Layer for AlternateAh {
+        fn schema(&self) -> &'static crate::layer::Schema {
+            self.0.schema()
+        }
+        fn clone_box(&self) -> Box<dyn crate::layer::Layer> {
+            Box::new(self.clone())
+        }
+        fn field(&self, name: &str) -> Option<crate::field::FieldValue> {
+            self.0.field(name)
+        }
+        fn set_field(
+            &mut self,
+            name: &str,
+            value: crate::field::FieldValue,
+        ) -> Result<(), crate::field::Error> {
+            self.0.set_field(name, value)
+        }
+    }
+    #[test]
+    fn alternate_ah_layer_is_protected_by_protocol_identity() {
+        let frame = Frame::without_timestamp(crate::frame::LinkType::IPV4, vec![0; 20]).unwrap();
+        let mut packet = crate::packet::Packet::new();
+        packet.push(AlternateAh::default());
+        let decoded = DecodedPacket {
+            packet,
+            frame,
+            layout: PacketLayout::default(),
+            diagnostics: vec![],
+        };
+        assert!(matches!(
+            screen_stack(&decoded),
+            Err(Error::Unsupported(Unsupported::EditProtectedTraffic))
+        ));
+    }
 
     #[test]
     fn assignment_parsing_names_the_malformed_part() {

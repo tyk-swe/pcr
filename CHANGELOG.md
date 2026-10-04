@@ -6,7 +6,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Preserve requested analysis stages for physical-only collectors, redact decoded
+  HTTP/2 DATA bodies from sequencing diagnostics, and reject field edits through
+  alternate AH/ESP codecs. Filtered captures omit non-copyable custom metadata.
+
 ### Breaking
+
+- Capture `rewrite` and `select` byte limits now include source headers, packet
+  options and metadata. Application collector port lists accept at most 256 input
+  items, including duplicates.
 
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and

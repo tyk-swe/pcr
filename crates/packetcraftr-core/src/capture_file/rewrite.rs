@@ -31,6 +31,7 @@ pub struct RewriteReport {
 }
 
 /// Every validated source record, including section lengths, is copied verbatim.
+/// `limits.max_bytes` bounds all source bytes, including headers and metadata.
 pub fn rewrite<R: Read, W: Write>(
     reader: &mut Reader<R>,
     output: W,
@@ -51,6 +52,7 @@ pub fn rewrite<R: Read, W: Write>(
 }
 
 /// The predicate receives the original one-based frame number.
+/// Non-copyable custom blocks are omitted. `limits.max_bytes` bounds all source bytes.
 pub fn select<R: Read, W: Write, F>(
     reader: &mut Reader<R>,
     output: W,
@@ -82,6 +84,8 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
         interfaces: 0,
         metadata_records: 0,
     };
+    let mut source_bytes = 0_u64;
+    charge_source_bytes(&mut source_bytes, reader.header().raw().len(), limits)?;
     if selecting && reader.format() == super::Format::PcapNg {
         super::pcapng::write_selected_section(&mut output, reader.header().raw())?;
     } else {
@@ -90,6 +94,18 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
             .map_err(Error::from)?;
     }
     while let Some(record) = reader.next_record()? {
+        charge_source_bytes(&mut source_bytes, record.raw_bytes().len(), limits)?;
+        if selecting
+            && matches!(
+                record.kind,
+                RecordKind::Metadata(MetadataBlockKind::Custom {
+                    block_type: super::wire::PCAPNG_CUSTOM_BLOCK_NO_COPY,
+                    ..
+                })
+            )
+        {
+            continue;
+        }
         if let Some(frame) = record.frame.as_ref() {
             budget.charge(frame.captured_length())?;
             (report.frames_read, report.captured_bytes_read) =
@@ -118,4 +134,16 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
     output.flush().map_err(Error::from)?;
     report.interfaces = reader.interfaces().len();
     Ok((output, report))
+}
+
+fn charge_source_bytes(total: &mut u64, bytes: usize, limits: Limits) -> Result<(), Error> {
+    let actual = total.saturating_add(bytes as u64);
+    if actual > limits.max_bytes {
+        return Err(Error::StreamByteLimitExceeded {
+            actual,
+            limit: limits.max_bytes,
+        });
+    }
+    *total = actual;
+    Ok(())
 }

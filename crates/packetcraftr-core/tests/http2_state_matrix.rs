@@ -4970,3 +4970,24 @@ fn review_capture_delayed_bodyless_response_rejects_data() {
         );
     }
 }
+
+#[test]
+fn interleaved_data_body_is_absent_from_issue_evidence() {
+    let secret = b"private body material";
+    let events = exercise(|capture, stream| {
+        prior_knowledge_handshake(capture, stream);
+        capture.client(stream, &headers(1, &REQUEST[..8], 0));
+        capture.client(stream, &data(1, secret, 0));
+    });
+    let issue = issues(&events)
+        .into_iter()
+        .find(|issue| issue.code == "broken_header_block")
+        .unwrap();
+    assert_eq!(issue.wire.len(), 9);
+    assert!(!issues(&events).iter().any(|issue| {
+        issue
+            .wire
+            .windows(secret.len())
+            .any(|bytes| bytes == secret)
+    }));
+}

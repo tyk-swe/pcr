@@ -94,7 +94,7 @@ impl<C: Collector> Outcome<C> {
     }
 }
 
-/// Replaces `options.plan` and raises `tcp_events`/`track_sources` to cover collector needs.
+/// Preserves `options.plan` and raises `tcp_events`/`track_sources` to cover collector needs.
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -117,7 +117,9 @@ impl<'a, C: Collector> Session<'a, C> {
         if selector.is_some() {
             options.stream = selector;
         }
-        let indexed = requirements.tcp_stream
+        let indexed = options.plan.tcp_index
+            || options.plan.udp_index
+            || requirements.tcp_stream
             || requirements.udp_stream
             || needs.tcp_stream
             || needs.udp_stream
@@ -126,7 +128,7 @@ impl<'a, C: Collector> Session<'a, C> {
             Plan::default()
         } else {
             Plan {
-                ip_reassembly: needs.ip_reassembly,
+                ip_reassembly: options.plan.ip_reassembly || needs.ip_reassembly,
                 tcp_index: false,
                 udp_index: false,
             }

@@ -231,7 +231,11 @@ impl Conn {
                         status: Status::Malformed,
                         code: "broken_header_block",
                         detail: "a frame interrupts an unfinished header block".into(),
-                        wire: wire_bytes.clone(),
+                        wire: if header.frame_type == 0 {
+                            Bytes::copy_from_slice(&wire_bytes[..9])
+                        } else {
+                            wire_bytes.clone()
+                        },
                         sources: sources.clone(),
                     },
                 )?;

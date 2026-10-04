@@ -24,7 +24,9 @@ pub const DEFAULT_MAX_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
 pub const DEFAULT_MAX_STREAM_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Aggregate frame and captured-byte ceilings for a streaming capture operation.
+/// Aggregate frame and byte ceilings for a streaming capture operation.
+/// Writers charge captured payload; fidelity-preserving `rewrite` and `select`
+/// charge all source bytes, including headers, options and metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
     pub max_frames: u64,

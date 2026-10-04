@@ -152,7 +152,21 @@ pub(crate) fn normalize_ports(
     ports: impl IntoIterator<Item = u16>,
     field: &'static str,
 ) -> Result<Vec<u16>, Error> {
-    let mut ports: Vec<u16> = ports.into_iter().collect();
+    let mut bounded = Vec::new();
+    for port in ports {
+        if bounded.len() == MAX_SERVICE_PORTS {
+            return Err(super::Error::InvalidLimit {
+                field,
+                value: MAX_SERVICE_PORTS as u64 + 1,
+                reason: Constraint::AtMost {
+                    maximum: MAX_SERVICE_PORTS as u64,
+                },
+            }
+            .into());
+        }
+        bounded.push(port);
+    }
+    let mut ports = bounded;
     ports.sort_unstable();
     ports.dedup();
     let (value, reason) = if ports.first().is_none_or(|port| *port == 0) {
@@ -560,6 +574,18 @@ fn subtract(span: Span, sequence: u32, length: u32) -> Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_port_iterator_is_bounded_before_collection() {
+        let mut consumed = 0;
+        let ports = std::iter::repeat(53).inspect(|_| consumed += 1);
+        assert!(normalize_ports(ports, "dns_ports").is_err());
+        assert_eq!(consumed, MAX_SERVICE_PORTS + 1);
+        assert_eq!(
+            normalize_ports([53, 53, 80], "dns_ports").unwrap(),
+            [53, 80]
+        );
+    }
 
     const LIMITS: Limits = Limits {
         max_messages: 2,

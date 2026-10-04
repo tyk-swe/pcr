@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use memchr::memmem;
 
 use super::reflection::{http_layout, http_schema};
 use super::{
@@ -120,15 +121,12 @@ impl Head {
 }
 /// Parses a complete header block. `None` means more bytes are required.
 pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
-    let end = input[..input.len().min(MAX_HEADER_BYTES)]
-        .windows(4)
-        .position(|bytes| bytes == b"\r\n\r\n")
-        .map(|n| n + 4);
+    let end = memmem::find(&input[..input.len().min(MAX_HEADER_BYTES)], b"\r\n\r\n").map(|n| n + 4);
     let Some(end) = end else {
         if input.len() >= MAX_HEADER_BYTES {
             return Err(Error::Limit(Limit::HeaderBytes));
         }
-        if input.iter().position(|b| *b == b'\n').is_none() && input.len() > MAX_START_LINE {
+        if memchr::memchr(b'\n', input).is_none() && input.len() > MAX_START_LINE {
             return Err(Error::Limit(Limit::StartLine));
         }
         validate_line_endings(input)?;
@@ -138,10 +136,7 @@ pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
         return Err(Error::Limit(Limit::HeaderBytes));
     }
     validate_line_endings(&input[..end])?;
-    let first = input[..end]
-        .windows(2)
-        .position(|b| b == b"\r\n")
-        .ok_or(Error::Invalid("lacks a start line"))?;
+    let first = memmem::find(&input[..end], b"\r\n").ok_or(Error::Invalid("lacks a start line"))?;
     if first > MAX_START_LINE {
         return Err(Error::Limit(Limit::StartLine));
     }
@@ -160,9 +155,7 @@ pub(crate) fn parse_headers(input: &Bytes) -> Result<Vec<Header>, Error> {
     let mut headers = Vec::new();
     let mut offset = 0;
     while offset < input.len() {
-        let end = input[offset..]
-            .windows(2)
-            .position(|b| b == b"\r\n")
+        let end = memmem::find(&input[offset..], b"\r\n")
             .ok_or(Error::Invalid("has an incomplete header line"))?
             + offset;
         if end == offset {
@@ -318,10 +311,13 @@ pub(crate) fn trim(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 fn validate_line_endings(input: &[u8]) -> Result<(), Error> {
-    for (i, b) in input.iter().enumerate() {
-        if (*b == b'\n' && (i == 0 || input[i - 1] != b'\r'))
-            || (*b == b'\r' && i + 1 < input.len() && input[i + 1] != b'\n')
-        {
+    for i in memchr::memchr2_iter(b'\r', b'\n', input) {
+        let bare = if input[i] == b'\n' {
+            i == 0 || input[i - 1] != b'\r'
+        } else {
+            i + 1 < input.len() && input[i + 1] != b'\n'
+        };
+        if bare {
             return Err(Error::Invalid("uses a bare CR or LF"));
         }
     }

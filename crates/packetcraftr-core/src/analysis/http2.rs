@@ -48,7 +48,8 @@ pub struct Collector {
     limits: Limits,
     deadline: Option<Arc<Deadline>>,
     tcp: TcpSources,
-    connections: BTreeMap<ConnKey, Conn>,
+    // Boxed so each delivery moves a pointer rather than the whole connection.
+    connections: BTreeMap<ConnKey, Box<Conn>>,
     flow_index: BTreeMap<ScopedFlowKey, ConnKey>,
     buffered: usize,
     retained: usize,
@@ -168,9 +169,15 @@ impl Collector {
                     conn.finish(&mut self.with_cx(out))?;
                 }
                 let mut conn = self.connections.remove(&key).unwrap_or_else(|| {
-                    Conn::new(delivery.stream, delivery.generation, delivery.flow.clone())
+                    Box::new(Conn::new(
+                        delivery.stream,
+                        delivery.generation,
+                        delivery.flow.clone(),
+                    ))
                 });
-                self.flow_index.insert(delivery.flow.clone(), key);
+                if self.flow_index.get(&delivery.flow) != Some(&key) {
+                    self.flow_index.insert(delivery.flow.clone(), key);
+                }
                 let result = conn.data(&delivery, number, &mut self.with_cx(out));
                 self.connections.insert(key, conn);
                 result
@@ -266,7 +273,7 @@ impl Collector {
                 self.dispatch(event, run.frames_read, &mut out)?;
             }
         }
-        let connections: Vec<Conn> = std::mem::take(&mut self.connections)
+        let connections: Vec<Box<Conn>> = std::mem::take(&mut self.connections)
             .into_values()
             .collect();
         for mut conn in connections {

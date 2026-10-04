@@ -11,7 +11,7 @@ use bytes::Bytes;
 use super::reflection::{tls_layout, tls_schema};
 use super::{
     CONTENT_TYPE_HANDSHAKE, ClientHello, Error, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
-    Handshake, Hello, Record, ServerHello, Tls, Transport, ja3, ja4,
+    Handshake, Hello, ServerHello, Tls, Transport, ja3, ja4,
 };
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
@@ -29,6 +29,7 @@ mod hello;
 mod parse;
 
 pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
+use parse::{RecordRef, parse_record_ref};
 
 pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 
@@ -98,7 +99,7 @@ impl Tls {
                 }
                 break;
             }
-            match parse_record(wire.get(consumed..)?) {
+            match parse_record_ref(wire.get(consumed..)?) {
                 Outcome::Complete {
                     consumed: used,
                     value,
@@ -158,14 +159,23 @@ impl Tls {
         })
     }
 
-    fn apply_handshake(&mut self, records: &[Record], diagnostics: &mut Vec<Diagnostic>) {
+    fn apply_handshake(&mut self, records: &[RecordRef<'_>], diagnostics: &mut Vec<Diagnostic>) {
         if self.content_type != CONTENT_TYPE_HANDSHAKE {
             return;
         }
-        let mut stream = Vec::new();
-        for record in records.iter().take_while(|record| record.is_handshake()) {
-            stream.extend_from_slice(&record.body);
-        }
+        let is_handshake = |record: &&RecordRef<'_>| record.content_type == CONTENT_TYPE_HANDSHAKE;
+        let leading = records.iter().take_while(is_handshake).count();
+        // A handshake message within one record parses in place; one spanning records is joined.
+        let stream: std::borrow::Cow<'_, [u8]> = match &records[..leading] {
+            [only] => only.body.into(),
+            leading_records => {
+                let mut joined = Vec::new();
+                for record in leading_records {
+                    joined.extend_from_slice(record.body);
+                }
+                joined.into()
+            }
+        };
         let (value, consumed) = match parse_handshake(&stream) {
             Outcome::Complete { value, consumed } => (value, consumed),
             Outcome::NeedMore { .. } => return,
@@ -182,7 +192,7 @@ impl Tls {
                 return;
             }
         };
-        let editable = consumed == stream.len() && records.iter().all(Record::is_handshake);
+        let editable = consumed == stream.len() && leading == records.len();
         match value {
             Handshake::ClientHello(hello) => {
                 self.handshake_type = Some(HANDSHAKE_CLIENT_HELLO);

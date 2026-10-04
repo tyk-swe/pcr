@@ -133,6 +133,7 @@ pub(in crate::platform) fn timestamp_types(
     if count == 0 {
         return Ok(Vec::new());
     }
+    crate::platform::common::pcap_api::validate_timestamp_list(list)?;
     let count = usize::try_from(count).unwrap_or(0);
     if count > MAX_TIMESTAMP_TYPES {
         // SAFETY: list is a live Npcap allocation released exactly once.

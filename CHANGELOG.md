@@ -1814,6 +1814,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Native capture rejects null timestamp-type lists with positive counts before
+  constructing Rust slices, and rejects dotted six-component MAC spellings in
+  host/network BPF operands to prevent implicit name resolution.
+
 - `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
   and rollback to the parent directory opened before input is read. On Linux
   with procfs they address the directory handle, so a parent path retargeted

@@ -264,3 +264,29 @@ pub(in crate::platform) fn is_permission_denied(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     PHRASES.iter().any(|phrase| message.contains(phrase))
 }
+
+/// Validate the native list pointer before either freeing or constructing a slice.
+pub(in crate::platform) fn validate_timestamp_list<T>(list: *const T) -> Result<(), Error> {
+    if list.is_null() {
+        return Err(Error::Capture {
+            message: "native capture reported timestamp types without a list".to_owned(),
+            source: None,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonempty_timestamp_list_rejects_null_pointer() {
+        assert!(matches!(
+            validate_timestamp_list(std::ptr::null::<i32>()),
+            Err(Error::Capture { .. })
+        ));
+        let types = [0, 1];
+        assert!(validate_timestamp_list(types.as_ptr()).is_ok());
+    }
+}

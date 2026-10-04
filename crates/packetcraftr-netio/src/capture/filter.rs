@@ -133,7 +133,10 @@ fn is_numeric_mac(atom: &str) -> bool {
 }
 
 fn is_hostname_shaped_mac(atom: &str) -> bool {
-    is_plain_mac(atom) || is_hex_sequence(atom, '.', 3, 4, 4) || is_hex_sequence(atom, '-', 6, 1, 2)
+    is_plain_mac(atom)
+        || is_hex_sequence(atom, '.', 3, 4, 4)
+        || is_hex_sequence(atom, '.', 6, 1, 2)
+        || is_hex_sequence(atom, '-', 6, 1, 2)
 }
 
 fn is_plain_mac(atom: &str) -> bool {
@@ -180,4 +183,29 @@ fn is_bpf_keyword(atom: &str) -> bool {
     KEYWORDS
         .split_ascii_whitespace()
         .any(|keyword| atom == keyword)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dotted_six_component_mac_requires_ethernet_context() {
+        for filter in [
+            "host de.ad.be.ef.ca.fe",
+            "src host DE.AD.BE.EF.CA.FE",
+            "net 01.02.03.04.05.06",
+            "ether host de.ad.be.ef.ca.fe or host de.ad.be.ef.ca.fe",
+        ] {
+            assert!(has_symbolic_operand(filter), "{filter}");
+        }
+        for filter in [
+            "ether host de.ad.be.ef.ca.fe",
+            "ether src DE.AD.BE.EF.CA.FE",
+            "host 192.0.2.1",
+            "host 2001:db8::1",
+        ] {
+            assert!(!has_symbolic_operand(filter), "{filter}");
+        }
+    }
 }

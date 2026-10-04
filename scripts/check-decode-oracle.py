@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Compare curated physical-frame fields with pinned TShark, without live traffic."""
 import argparse
+import functools
 import hashlib
 import ipaddress
 import json
 import pathlib
-import runpy
 import socket
 import shutil
 import struct
@@ -18,8 +18,76 @@ from validation_evidence import (
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-helpers = runpy.run_path(str(ROOT / 'scripts/measure-analysis.py'))
-ipv4, packets = [helpers[key] for key in ['ipv4', 'packets']]
+
+
+def ipv4(payload, source, protocol=6, identity=0, fragment=0):
+    destination = socket.inet_aton('198.51.100.2')
+    header = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), identity,
+                         fragment, 64, protocol, 0, source, destination)
+    return header[:10] + struct.pack('!H', checksum(header)) + header[12:] + payload
+
+
+def tcp(index, sequence=1000, flags=2, payload=b''):
+    source = socket.inet_aton(f'192.0.2.{1 + (index // 60000) % 254}')
+    destination = socket.inet_aton('198.51.100.2')
+    segment = struct.pack('!HHIIBBHHH', 1024 + index % 60000, 4444, sequence,
+                          0, 0x50, flags, 8192, 0, 0) + payload
+    pseudo = source + destination + struct.pack('!BBH', 0, 6, len(segment))
+    segment = segment[:16] + struct.pack('!H', checksum(pseudo + segment)) + segment[18:]
+    return ipv4(segment, source)
+
+
+@functools.cache
+def client_hello_record():
+    data = (ROOT / 'examples/captures/tls-handshake.pcapng').read_bytes()
+    cursor = 0
+    while cursor < len(data):
+        kind, length = struct.unpack_from('<II', data, cursor)
+        if kind == 6:
+            captured = struct.unpack_from('<I', data, cursor + 20)[0]
+            packet = data[cursor + 28:cursor + 28 + captured]
+            ip_header = (packet[0] & 15) * 4
+            tcp_header = (packet[ip_header + 12] >> 4) * 4
+            payload = packet[ip_header + tcp_header:]
+            if payload[:1] == b'\x16' and payload[5:6] == b'\x01':
+                return payload
+        cursor += length
+    raise AssertionError('published fixture lacks ClientHello')
+
+
+def packets(kind, size):
+    if kind in ('tcp-growth', 'tcp-growth-reverse'):
+        yield tcp(0)
+        indices = range(size) if kind == 'tcp-growth' else range(size - 1, -1, -1)
+        for index in indices:
+            yield tcp(0, 1002 + index * 100, 16, b'x' * 100)
+        return
+    for index in range(size):
+        if kind == 'flows':
+            yield tcp(index)
+        elif kind in ('segments', 'overlaps'):
+            yield tcp(index)
+            offsets = range(31, -1, -1) if kind == 'segments' else [0, 0, 1, 0]
+            for offset in offsets:
+                yield tcp(index, 1001 + offset, 16, bytes([offset]))
+        elif kind == 'tls-gaps':
+            hello = client_hello_record()
+            yield tcp(index)
+            yield tcp(index, 1001, 16, hello[:64])
+            yield tcp(index, 1097, 16, hello[96:128])
+        elif kind == 'fragments':
+            source = socket.inet_aton(f'192.0.2.{1 + (index // 60000) % 254}')
+            payload = struct.pack('!HHHH', 1024 + index % 60000, 9999, 16, 0) + b'fragment'
+            yield ipv4(payload[8:], source, 17, index % 65536, 1)
+            yield ipv4(payload[:8], source, 17, index % 65536, 0x2000)
+        elif kind == 'scopes':
+            ethernet = bytes.fromhex('0200000000020200000000010800')
+            vxlan = b'\x08\0\0\0' + (index + 1).to_bytes(3, 'big') + b'\0'
+            udp_payload = vxlan + ethernet + tcp(0)
+            udp = struct.pack('!HHHH', 40000, 4789, 8 + len(udp_payload), 0) + udp_payload
+            yield ipv4(udp, socket.inet_aton('203.0.113.1'), 17)
+        else:
+            raise ValueError(kind)
 
 
 def curated():

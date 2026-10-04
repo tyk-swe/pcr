@@ -5,7 +5,7 @@
   "status": "error",
   "error": {
     "code": "cli.error",
-    "kind": "cli",
+    "kind": "usage",
     "message": "invalid raw layer: invalid hex at byte 0",
     "causes": []
   },

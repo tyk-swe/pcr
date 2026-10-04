@@ -7063,7 +7063,7 @@
         "kind": {
           "type": "string",
           "enum": [
-            "cli",
+            "usage",
             "packet",
             "capability",
             "io",

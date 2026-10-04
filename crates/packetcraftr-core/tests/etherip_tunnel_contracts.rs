@@ -62,7 +62,7 @@ fn protocols(decoded: &decode::DecodedPacket) -> Vec<&str> {
 }
 
 #[test]
-fn etherip_is_an_encapsulation_boundary_and_a_malformed_header_hides_the_destination() {
+fn etherip_boundary_malformed_header_hides_destination() {
     assert!(BuiltinProtocol::Etherip.is_encapsulation_boundary());
     let packet = etherip_packet(Etherip::default());
     // the outer IPv4 header and the EtherIP header are the transmitted path

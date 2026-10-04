@@ -7,7 +7,7 @@ use packetcraftr_core::error::Kind;
 
 use crate::command_options::Bounded;
 use crate::errors::CliError;
-use crate::output::contract::{Format, FormatSubset};
+use crate::output::contract::Format;
 use crate::rendering::StreamEncoder;
 use crate::resources::Settings;
 
@@ -52,7 +52,7 @@ mod traceroute;
 mod verify_forwarding;
 
 pub(crate) trait Spec: Sized {
-    type Format: FormatSubset;
+    const FORMATS: &'static [Format];
 
     /// Whether shared cancellation is installed before dispatch.
     const CANCELLATION: bool;
@@ -69,7 +69,7 @@ pub(crate) trait Spec: Sized {
 
     fn resources(&self, _settings: &mut Settings<'_>) {}
 
-    fn run(self, format: Self::Format, stream: &StreamEncoder) -> Result<CommandExit, CliError>;
+    fn run(self, format: Format, stream: &StreamEncoder) -> Result<CommandExit, CliError>;
 }
 
 /// An unpublished command that writes files or static text itself, so it has

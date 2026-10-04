@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::error::Kind;
 
@@ -23,7 +23,11 @@ use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status
 use rendering::State;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -45,18 +49,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: ToolFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let selected_stream = arguments
         .stream
         .as_ref()
@@ -120,9 +120,10 @@ pub(super) fn run(
     let (selected, omitted) = state.counts();
     let summary = output::tls::Summary::from((outcome.summary, &outcome.run, selected, omitted));
     match format {
-        ToolFormat::Text => rendering::render_text(&state, &summary, &prepared.registry),
-        ToolFormat::Json => rendering::render_aggregate(state, summary),
-        ToolFormat::Ndjson => rendering::render_stream(summary, stream),
+        Format::Text => rendering::render_text(&state, &summary, &prepared.registry),
+        Format::Json => rendering::render_aggregate(state, summary),
+        Format::Ndjson => rendering::render_stream(summary, stream),
+        other => other.unreachable(),
     }
 }
 

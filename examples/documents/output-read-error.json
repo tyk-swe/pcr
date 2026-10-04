@@ -6,7 +6,7 @@
   "status": "error",
   "error": {
     "code": "cli.capture_limit",
-    "kind": "cli",
+    "kind": "usage",
     "message": "capture stream limits must be non-zero",
     "causes": [],
     "remediation": "use finite non-zero capture frame, byte, packet, and interface limits"

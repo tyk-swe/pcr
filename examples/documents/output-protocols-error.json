@@ -5,7 +5,7 @@
   "status": "error",
   "error": {
     "code": "cli.protocol",
-    "kind": "cli",
+    "kind": "usage",
     "message": "unknown built-in protocol 'unknown'",
     "causes": [],
     "remediation": "run `packetcraftr protocols` to list built-in protocols"

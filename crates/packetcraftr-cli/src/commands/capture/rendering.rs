@@ -4,7 +4,7 @@
 use crate::errors::CliError;
 use crate::output::{
     self,
-    contract::{CaptureFormat, Command},
+    contract::{Command, Format},
 };
 use crate::rendering::{
     StreamEncoder, document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
@@ -12,20 +12,20 @@ use crate::rendering::{
 };
 
 pub(super) fn render_complete(
-    format: CaptureFormat,
+    format: Format,
     snapshot: &output::capture::Snapshot,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let output::capture::Snapshot { summary, stats } = snapshot;
     match format {
-        CaptureFormat::Json => {
+        Format::Json => {
             emit_aggregate_with_stats(Command::Capture, summary, diagnostics, stats.clone())
         }
-        CaptureFormat::Ndjson => stream
+        Format::Ndjson => stream
             .complete_with_stats(summary, diagnostics, stats.clone())
             .map_err(Into::into),
-        CaptureFormat::Text => {
+        Format::Text => {
             write_summary_line(format_args!(
                 "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {}",
                 stats.packets_attempted,

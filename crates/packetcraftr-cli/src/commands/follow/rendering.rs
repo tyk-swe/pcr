@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 
-use crate::output::contract::FollowFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::analysis;
 
@@ -32,20 +32,20 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: FollowFormat,
+    format: Format,
     chunk: Chunk,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        FollowFormat::Text => write_stdout_line(format_args!(
+        Format::Text => write_stdout_line(format_args!(
             "{} #{} generation={} {}",
             direction_marker(&chunk),
             chunk.number,
             chunk.direction_generation,
             chunk.bytes.escape_ascii()
         )),
-        FollowFormat::Hex => {
+        Format::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(
                 "{} #{} generation={} {}",
@@ -55,14 +55,13 @@ pub(super) fn render_record(
                 rendered.bytes_hex
             ))
         }
-        FollowFormat::Raw => write_raw(&chunk.bytes),
-        FollowFormat::Json => {
+        Format::Raw => write_raw(&chunk.bytes),
+        Format::Json => {
             state.retained.push(|| chunk.into());
             Ok(())
         }
-        FollowFormat::Ndjson => {
-            Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?)
-        }
+        Format::Ndjson => Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?),
+        other => other.unreachable(),
     }
 }
 

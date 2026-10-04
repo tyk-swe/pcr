@@ -33,7 +33,7 @@ impl Resolver for CancellingResolver {
 }
 
 #[test]
-fn cancellation_before_authorization_or_during_resolution_prevents_dns_execution() {
+fn early_cancellation_prevents_dns_execution() {
     for (edns, transport) in [
         None,
         Some(dns::EdnsRequest {

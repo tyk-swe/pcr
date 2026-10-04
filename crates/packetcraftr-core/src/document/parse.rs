@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_stream_probe_separates_an_exhausted_stream_from_a_second_document() {
+    fn eof_probe_distinguishes_exhausted_from_second_document() {
         let single =
             Packet::parse_with_limits(ONE_DOCUMENT, Format::Yaml, &DocumentLimits::DEFAULT)
                 .expect("a single document parses through the end-of-stream probe");

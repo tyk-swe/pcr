@@ -5,7 +5,7 @@ pub(super) mod arguments;
 mod rendering;
 
 use self::arguments::{Args, OrderArg};
-use crate::output::{self, contract::ToolFormat};
+use crate::output::{self, contract::Format};
 use crate::{
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate},
@@ -14,7 +14,11 @@ use packetcraftr_core::{capture_file, error::Kind};
 use std::path::Path;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::ToolFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+    ];
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
@@ -27,14 +31,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     args.limits.validate()?;
     let reorder = args.max_reorder_frames > 0;
     if reorder && args.order == OrderArg::Append {
@@ -104,8 +108,9 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     staged.persist()?;
     let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {
-        ToolFormat::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
-        ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => rendering::render_text(&report),
+        Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
+        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        Format::Text => rendering::render_text(&report),
+        other => other.unreachable(),
     }
 }

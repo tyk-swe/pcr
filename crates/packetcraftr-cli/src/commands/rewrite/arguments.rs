@@ -11,7 +11,7 @@ use packetcraftr_core::{
 };
 
 use crate::command_options::{
-    CompressionArgs, DecodeArgs, MaxDurationArgs, OfflineCaptureLimitsArgs, RunTime, SavedPcapNg,
+    CompressionArgs, DecodeArgs, MaxDurationArgs, OfflineCaptureLimitsArgs,
 };
 use crate::errors::CliError;
 
@@ -36,8 +36,7 @@ pub(crate) struct Args {
     /// Match original frame fields; unmatched frames are retained unchanged.
     #[arg(long)]
     pub(crate) filter: Option<String>,
-    /// Ordered JSON rules under packetcraftr.rewrite/v1 (header patches) or
-    /// /v2 (field assignments); at most 1 MiB and 64 rules.
+    /// Ordered JSON rules under packetcraftr.rewrite/v2; at most 1 MiB and 64 rules.
     #[arg(long)]
     pub(crate) rules_file: Option<PathBuf>,
     /// Assign one fixed-width field in place, <protocol>[#occurrence].<field>=
@@ -105,22 +104,13 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) strip_vlans: bool,
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<SavedPcapNg>,
+    pub(crate) compression: CompressionArgs,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<RewriteRunTime>,
+    pub(crate) duration: MaxDurationArgs,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct RewriteRunTime;
-
-impl RunTime for RewriteRunTime {
-    const HELP: &'static str = "Maximum rewrite run time in milliseconds";
-    const PARSED: std::ops::RangeInclusive<u64> =
-        1..=crate::command_options::MAX_DURATION_MILLISECONDS;
 }
 
 /// How field edits treat the checksums covering changed bytes.

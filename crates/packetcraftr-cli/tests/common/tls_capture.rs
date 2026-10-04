@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core as core;
-use packetcraftr_core::capture_file::Format as CaptureFormat;
+use packetcraftr_core::capture_file::Format;
 use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
@@ -81,7 +81,7 @@ pub(crate) fn write_fragmented_capture() -> tempfile::NamedTempFile {
     let handshake = Handshake::complete(40_000, 443, "api.example.test");
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     {
-        let mut writer = Writer::new(&mut file, CaptureFormat::PcapNg, LinkType::IPV4)
+        let mut writer = Writer::new(&mut file, Format::PcapNg, LinkType::IPV4)
             .expect("PCAPNG writer must initialize");
         let mut identification = 100_u16;
         for (offset, spec, payload) in conversation(&handshake)
@@ -135,7 +135,7 @@ pub(crate) fn write_capture_with_udp_443(
     let registry = registry();
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     {
-        let mut writer = Writer::new(&mut file, CaptureFormat::PcapNg, LinkType::IPV4)
+        let mut writer = Writer::new(&mut file, Format::PcapNg, LinkType::IPV4)
             .expect("PCAPNG writer must initialize");
         let mut millis = 0_u64;
         for handshake in handshakes {

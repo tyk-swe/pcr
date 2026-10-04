@@ -175,7 +175,7 @@ fn invalid_native_settings_are_rejected_before_arming() {
     assert!(Group::<Session>::new(&invalid).is_err());
 }
 #[test]
-fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_readiness() {
+fn bad_shared_capacity_rejected_before_arming() {
     let mut invalid = request(2);
     invalid.limits.max_bytes = 40;
     let error = Group::<Session>::new(&invalid)

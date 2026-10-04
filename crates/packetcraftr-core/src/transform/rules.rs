@@ -15,7 +15,6 @@ use crate::{
     transform,
 };
 
-pub const REWRITE_SCHEMA_V1: &str = "packetcraftr.rewrite/v1";
 pub const REWRITE_SCHEMA_V2: &str = "packetcraftr.rewrite/v2";
 pub const MAX_REWRITE_RULES: usize = 64;
 /// The largest rewrite document, in bytes.
@@ -37,7 +36,7 @@ pub struct Rules<F = String> {
 }
 
 impl Rules {
-    /// Reads a `packetcraftr.rewrite/v1` or `/v2` document.
+    /// Reads a `packetcraftr.rewrite/v2` document.
     pub fn parse(
         document: &[u8],
         checksums: ChecksumMode,
@@ -49,30 +48,7 @@ impl Rules {
                 limit: MAX_REWRITE_DOCUMENT_BYTES,
             });
         }
-        let schema = serde_json::from_slice::<serde_json::Value>(document)
-            .ok()
-            .and_then(|value| value.get("schema")?.as_str().map(str::to_owned))
-            .unwrap_or_default();
-        if schema == REWRITE_SCHEMA_V2 {
-            return Self::parse_assignments(document, checksums, registry);
-        }
-        let document: Document = serde_json::from_slice(document)
-            .map_err(|source| Error::Syntax(Source::new(source)))?;
-        check_shape(&document.schema, REWRITE_SCHEMA_V1, document.rules.len())?;
-        let mut rules = Vec::with_capacity(document.rules.len());
-        for rule in document.rules {
-            rule.patch.validate().map_err(Error::Patch)?;
-            if rule.patch.is_empty() {
-                return Err(Error::EmptyPatch);
-            }
-            rules.push(Rule {
-                filter: rule.filter,
-                patch: rule.patch,
-                map: None,
-                edits: None,
-            });
-        }
-        Ok(Self { rules })
+        Self::parse_assignments(document, checksums, registry)
     }
 
     fn parse_assignments(
@@ -247,20 +223,6 @@ fn check_shape(schema: &str, expected: &str, rules: usize) -> Result<(), Error> 
 // names stay as they were.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Document {
-    schema: String,
-    rules: Vec<PatchRule>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PatchRule {
-    filter: Option<String>,
-    patch: HeaderRewrite,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct AssignDocument {
     schema: String,
     rules: Vec<AssignRule>,
@@ -280,14 +242,10 @@ pub enum Error {
     DocumentSize { actual: usize, limit: usize },
     #[error("invalid rewrite rules")]
     Syntax(#[source] Source),
-    #[error(
-        "unsupported rewrite rules schema {schema}; expected {REWRITE_SCHEMA_V1} or {REWRITE_SCHEMA_V2}"
-    )]
+    #[error("unsupported rewrite rules schema {schema}; expected {REWRITE_SCHEMA_V2}")]
     Schema { schema: String },
     #[error("rewrite rules hold {count} rules; expected 1 to {MAX_REWRITE_RULES}")]
     RuleCount { count: usize },
-    #[error("rewrite rules cannot contain empty patches")]
-    EmptyPatch,
     #[error("rewrite rules cannot contain empty assignments")]
     EmptyAssignments,
     #[error(transparent)]
@@ -304,7 +262,6 @@ impl Classified for Error {
             | Self::Syntax(_)
             | Self::Schema { .. }
             | Self::RuleCount { .. }
-            | Self::EmptyPatch
             | Self::EmptyAssignments
             | Self::Assignment(_) => Classification::new("cli.error", Kind::Usage, None),
         }

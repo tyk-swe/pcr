@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use packetcraftr_core::capture_file::{self, MAX_REORDER_FRAMES};
 
-use crate::command_options::{CompressionArgs, OfflineCaptureLimitsArgs, SavedPcapNg};
+use crate::command_options::{CompressionArgs, OfflineCaptureLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Captures merge in timestamp order, and each input must already be ordered by timestamp unless --max-reorder-frames repairs small inversions; frames with equal timestamps keep the order the captures were named in. --order append instead writes every frame of the first capture, then the second, and so on, keeping each timestamp verbatim, so the output may be non-monotonic and is never checked for clock regression. Every input interface becomes its own interface in the one PCAPNG section written, and the destination is published only after every frame was written.
 
@@ -42,7 +42,7 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) write: PathBuf,
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<SavedPcapNg>,
+    pub(crate) compression: CompressionArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }

@@ -7,12 +7,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use serde::{Serialize, Serializer};
 
-use packetcraftr_core::frame::{self as library_frame, Frame};
+use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, layout};
 
 use super::contract::Error;
-use super::diagnostic::Diagnostic;
 use super::hex::CompactHex;
+use packetcraftr_core::diagnostic::Diagnostic;
 
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
 
@@ -89,13 +89,7 @@ impl std::fmt::Display for Timestamp {
     }
 }
 
-published_enum! {
-    pub enum Direction from library_frame::Direction {
-        Inbound => "inbound",
-        Outbound => "outbound",
-        Unknown => "unknown",
-    }
-}
+pub use packetcraftr_core::frame::Direction;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ByteRange {
@@ -216,7 +210,7 @@ impl TryFrom<Frame> for Captured {
             original_length: frame.original_length(),
             link_type: frame.link_type.0,
             interface: frame.interface,
-            direction: frame.direction.map(Into::into),
+            direction: frame.direction,
             bytes: frame.bytes().clone(),
         })
     }
@@ -248,7 +242,7 @@ impl From<&DecodedPacket> for Stack {
         Self {
             packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
             layout: (&decoded.layout).into(),
-            diagnostics: decoded.diagnostics.iter().map(Into::into).collect(),
+            diagnostics: decoded.diagnostics.clone(),
         }
     }
 }
@@ -275,7 +269,7 @@ impl TryFrom<DecodedPacket> for Decoded {
             frame: frame.try_into()?,
             packet: packetcraftr_core::document::Packet::from_packet(&packet),
             layout: layout.into(),
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            diagnostics,
         })
     }
 }

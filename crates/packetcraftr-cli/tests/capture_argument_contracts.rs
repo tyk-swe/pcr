@@ -57,7 +57,7 @@ fn storage_limits_are_checked_before_interface_lookup_or_activation() {
 }
 
 #[test]
-fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
+fn capture_settings_checked_before_lookup_activation() {
     for extra in [
         vec!["--capture-buffer-bytes", "0"],
         // Smaller than one configured snapshot cannot hold a frame.

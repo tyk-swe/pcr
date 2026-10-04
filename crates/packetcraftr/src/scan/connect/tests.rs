@@ -210,11 +210,11 @@ fn assert_open_without_local_address(fault: Fault) {
 }
 
 #[test]
-fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_peer_query() {
+fn connect_scan_keeps_probe_past_peer_reset() {
     assert_open_without_local_address(Fault::PeerQuery(io::ErrorKind::NotConnected));
 }
 
 #[test]
-fn connect_scan_keeps_a_connected_probe_whose_peer_reset_before_the_local_query() {
+fn connect_scan_keeps_probe_through_peer_reset() {
     assert_open_without_local_address(Fault::LocalQuery(io::ErrorKind::NotConnected));
 }

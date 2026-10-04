@@ -10,7 +10,7 @@ mod common;
 mod process_support;
 
 use capture_support::{TCP_CLIENT, UDP_CLIENT, write_pcap};
-use common::{path_text, run, run_success};
+use common::{parse_json, path_text, run, run_success};
 use process_support::decode_hex;
 
 const FRAMES: u8 = 12;
@@ -84,7 +84,7 @@ fn skipped_frames_still_consume_the_input_budgets() {
     assert_eq!(bytes.status.code(), Some(6));
     let projected = run(&[
         "--output",
-        "csv",
+        "json",
         "read",
         path,
         "--field",
@@ -99,7 +99,7 @@ fn skipped_frames_still_consume_the_input_budgets() {
     let tcp = capture(TCP_CLIENT);
     let indexed = run(&[
         "--output",
-        "csv",
+        "json",
         "read",
         path_text(tcp.path()),
         "--field",
@@ -110,5 +110,8 @@ fn skipped_frames_still_consume_the_input_budgets() {
         "5",
     ]);
     assert_eq!(indexed.status.code(), Some(6));
-    assert!(String::from_utf8_lossy(&indexed.stderr).contains("policy.capture_stream_limit"));
+    assert_eq!(
+        parse_json(&indexed)["error"]["code"],
+        "policy.capture_stream_limit"
+    );
 }

@@ -59,7 +59,7 @@ fn range_axes_expand_inclusively_and_fail_before_output() {
 }
 
 #[test]
-fn destination_allowlist_denies_before_route_preparation_on_every_send_command() {
+fn allowlist_denies_before_route_preparation() {
     for command in ["send", "exchange"] {
         let denied = run(&[
             "--output",

@@ -56,7 +56,7 @@ mod tests {
     }
 
     #[test]
-    fn native_interface_validation_rejects_incomplete_identity_and_invalid_family_prefixes() {
+    fn native_interface_rejects_bad_identity_and_prefix() {
         for invalid in [
             interface("", 7, Vec::new()),
             interface("fixture0", 0, Vec::new()),

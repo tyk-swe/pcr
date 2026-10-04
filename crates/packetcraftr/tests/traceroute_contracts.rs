@@ -92,7 +92,7 @@ fn narrowed_request(frames: usize, bytes: usize) -> traceroute::Request {
 }
 
 #[test]
-fn a_collection_wider_than_the_evidence_limits_is_refused_before_any_capture_or_send() {
+fn over_wide_collection_refused_before_capture() {
     let bytes = traceroute::Limits::default().max_evidence_bytes;
     let frames = traceroute::Limits::default().max_evidence_frames;
     for (request, field) in [

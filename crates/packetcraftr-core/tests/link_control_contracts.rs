@@ -131,7 +131,7 @@ fn eap_identity_request() -> Vec<u8> {
 }
 
 #[test]
-fn eapol_length_past_the_frame_is_malformed_and_exact_lengths_need_strict_agreement() {
+fn eapol_overrun_malformed_exact_length_strict() {
     let registry = rooted_registry("ethernet");
     let bytes = frame(PAE_MULTICAST, 0x888e, &[0x02, 0x00, 0x00, 0x20, 0x01, 0x01]);
     let decoded = dissect(&registry, &bytes);

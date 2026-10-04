@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
@@ -12,14 +12,14 @@ use crate::rendering::omitted_diagnostic;
 use crate::rendering::{StreamEncoder, emit_json, write_stdout_line};
 
 pub(super) fn render(
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
     report: &analysis::Report,
     arguments: &Args,
     sources: analysis::Sided<output::verify_forwarding::CaptureSource>,
 ) -> Result<(), CliError> {
     match format {
-        ToolFormat::Text => {
+        Format::Text => {
             render_text(report)?;
             for (side, source) in [("ingress", sources.ingress), ("egress", sources.egress)] {
                 write_stdout_line(format_args!(
@@ -29,7 +29,7 @@ pub(super) fn render(
             }
             Ok(())
         }
-        ToolFormat::Json | ToolFormat::Ndjson => {
+        Format::Json | Format::Ndjson => {
             let document = Report::try_from((
                 report,
                 analysis::Sided {
@@ -56,7 +56,7 @@ pub(super) fn render(
                 omitted_total(&report.omitted),
                 "--max-details / --max-detail-bytes",
             );
-            if format == ToolFormat::Json {
+            if format == Format::Json {
                 let envelope = crate::resources::decorate(output::envelope::Envelope::success(
                     output::contract::Command::VerifyForwarding,
                     document,
@@ -80,6 +80,7 @@ pub(super) fn render(
                 Ok(stream.complete(document, diagnostics)?)
             }
         }
+        other => other.unreachable(),
     }
 }
 

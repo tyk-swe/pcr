@@ -131,7 +131,7 @@ impl LayerCodec for CancellingCodec {
 }
 
 #[test]
-fn cancellation_during_preparation_stops_generation_before_live_budget_validation() {
+fn cancelled_preparation_stops_generation_early() {
     for progressive in [false, true] {
         for cases in [1, 3] {
             let signal = Cancellation::default();

@@ -107,7 +107,7 @@ fn hostname_authorization_precedes_resolver_side_effects() {
 }
 
 #[test]
-fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() {
+fn denied_address_never_reaches_providers() {
     let resolver = CountingResolver {
         calls: AtomicUsize::new(0),
         addresses: vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))],

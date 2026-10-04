@@ -7,8 +7,8 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, ProbeWindow, Probing,
-    RouteSelectionArgs, TimeoutArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, RouteSelectionArgs,
+    TimeoutArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -149,7 +149,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
     #[command(flatten)]
-    pub(crate) timeout: TimeoutArgs<ProbeWindow>,
+    pub(crate) timeout: TimeoutArgs,
     /// Operation-wide probe-start rate ceiling, not achieved throughput.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
@@ -160,7 +160,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
     pub(crate) max_probes: usize,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<Probing>,
+    pub(crate) duration: MaxDurationArgs,
     /// Maximum undecodable exact frames retained across the scan.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,

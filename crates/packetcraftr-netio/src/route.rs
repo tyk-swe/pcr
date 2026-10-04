@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn a_preferred_source_of_the_other_family_is_rejected_before_the_kernel_is_asked() {
+    fn other_family_source_rejected_before_kernel() {
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
         let preferred_source = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
 

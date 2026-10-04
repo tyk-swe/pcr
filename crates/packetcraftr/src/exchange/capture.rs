@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_exchange_fails_when_a_promotable_frame_was_refused_and_a_request_is_unanswered() {
+    fn exchange_fails_on_refused_frame_and_unanswered_request() {
         let (mut transaction, sender, state) =
             fixture_transaction(false, 1, crate::exchange::DEFAULT_MAX_RESPONSES);
         transaction.collection.max_unmatched_frames = 0;

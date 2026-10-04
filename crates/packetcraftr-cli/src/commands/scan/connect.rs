@@ -3,14 +3,14 @@
 
 use packetcraftr::scan::connect;
 
-use crate::output::{self, contract::ToolFormat};
+use crate::output::{self, contract::Format};
 use crate::system::{Client, Runtime, client};
 use crate::{errors::CliError, rendering::StreamEncoder};
 
 pub(super) fn run(
     request: &packetcraftr::scan::Request,
     policy: crate::command_options::HostnamePolicyArgs,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let policy = policy.into_policy();

@@ -44,7 +44,7 @@ impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
                         .map(Captured::try_from)
                         .collect::<Result<_, _>>()?,
                     evidence_truncated: resolution.evidence_truncated,
-                    capture_statistics: resolution.capture_statistics.into(),
+                    capture_statistics: resolution.capture_statistics,
                 })
             })
             .transpose()?;

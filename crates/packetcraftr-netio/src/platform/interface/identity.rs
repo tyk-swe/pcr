@@ -61,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn verification_rejects_a_name_that_no_longer_resolves_and_names_the_current_holder() {
+    fn verification_rejects_stale_name_and_names_holder() {
         let current = current_interface();
 
         let error = verify_interface_identity(&interface_id(ABSENT_NAME, current.index))

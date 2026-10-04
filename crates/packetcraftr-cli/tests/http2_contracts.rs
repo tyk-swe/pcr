@@ -226,7 +226,7 @@ fn selector_and_transport_rules_apply() {
     assert!(!output.status.success());
     let output = run(&["--output", "json", "http2", path, "--stream", "udp:0"]);
     assert_eq!(output.status.code(), Some(2));
-    assert_eq!(parse_json(&output)["error"]["kind"], "cli");
+    assert_eq!(parse_json(&output)["error"]["kind"], "usage");
     assert!(
         parse_json(&output)["error"]["message"]
             .as_str()
@@ -267,7 +267,7 @@ fn limits_are_usage_errors_before_input() {
             assert_eq!(output.status.code(), Some(2), "{flag}={value}: {output:?}");
             assert_eq!(
                 parse_json(&output)["error"]["kind"],
-                "cli",
+                "usage",
                 "{flag}={value}"
             );
         }

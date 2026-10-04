@@ -2,53 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fmt;
-use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic as LibraryDiagnostic;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use super::capture::Stats as CaptureStats;
 use super::contract::{Command, Mode, SCHEMA_V6};
-use super::diagnostic::Diagnostic;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorKind {
-    Cli,
-    Packet,
-    Capability,
-    Io,
-    Policy,
-    Internal,
-}
-
-impl ErrorKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Cli => "cli",
-            Self::Packet => "packet",
-            Self::Capability => "capability",
-            Self::Io => "io",
-            Self::Policy => "policy",
-            Self::Internal => "internal",
-        }
-    }
-}
-
-impl From<Kind> for ErrorKind {
-    fn from(kind: Kind) -> Self {
-        match kind {
-            Kind::Usage => Self::Cli,
-            Kind::Packet => Self::Packet,
-            Kind::Capability => Self::Capability,
-            Kind::Io => Self::Io,
-            Kind::Policy => Self::Policy,
-            Kind::Internal => Self::Internal,
-        }
-    }
-}
+pub use packetcraftr::Stats;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ErrorContext {
@@ -79,7 +41,7 @@ impl TryFrom<Coordinate> for ErrorContext {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
     pub code: String,
-    pub kind: ErrorKind,
+    pub kind: Kind,
     pub message: String,
     pub causes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,7 +62,7 @@ impl Error {
     ) -> Self {
         Self {
             code: classification.code.to_owned(),
-            kind: classification.kind.into(),
+            kind: classification.kind,
             message: message.into(),
             causes,
             context: None,
@@ -134,33 +96,6 @@ impl Error {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Stats {
-    pub packets_attempted: u64,
-    pub packets_completed: u64,
-    pub bytes: u64,
-    pub elapsed: Duration,
-    pub capture: CaptureStats,
-}
-
-impl From<packetcraftr::Stats> for Stats {
-    fn from(value: packetcraftr::Stats) -> Self {
-        Self {
-            packets_attempted: value.packets_attempted,
-            packets_completed: value.packets_completed,
-            bytes: value.bytes,
-            elapsed: value.elapsed,
-            capture: value.capture.into(),
-        }
-    }
-}
-
-impl From<&packetcraftr::Stats> for Stats {
-    fn from(value: &packetcraftr::Stats) -> Self {
-        value.clone().into()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Published<T> {
     pub result: T,
@@ -169,17 +104,17 @@ pub struct Published<T> {
 }
 
 impl<T> Published<T> {
-    pub(crate) fn new(result: T, diagnostics: Vec<LibraryDiagnostic>) -> Self {
+    pub(crate) fn new(result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
             result,
-            diagnostics: diagnostics.into_iter().map(Diagnostic::from).collect(),
+            diagnostics,
             stats: None,
         }
     }
 
     #[must_use]
-    pub(crate) fn with_stats(mut self, stats: impl Into<Stats>) -> Self {
-        self.stats = Some(stats.into());
+    pub(crate) fn with_stats(mut self, stats: Stats) -> Self {
+        self.stats = Some(stats);
         self
     }
 }
@@ -214,7 +149,7 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    pub fn success(command: Command, result: T, diagnostics: Vec<LibraryDiagnostic>) -> Self {
+    pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self::published(command, Published::new(result, diagnostics))
     }
 
@@ -264,8 +199,8 @@ impl<T> Envelope<T> {
     }
 
     #[must_use]
-    pub fn with_stats(mut self, stats: impl Into<Stats>) -> Self {
-        self.stats = Some(stats.into());
+    pub fn with_stats(mut self, stats: Stats) -> Self {
+        self.stats = Some(stats);
         self
     }
 }

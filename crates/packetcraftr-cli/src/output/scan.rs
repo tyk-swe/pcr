@@ -13,9 +13,8 @@ use super::contract::Error;
 use super::envelope::{Published, Stats};
 use super::frame::{Captured, Timestamp};
 use super::network::InterfaceId;
-use super::probe::{ProbeStatus, Transport};
+use packetcraftr::probe::{ProbeStatus, Transport};
 
-use packetcraftr::probe::Transport as ProbeTransport;
 use packetcraftr::scan as library;
 
 published_enum! {
@@ -113,13 +112,13 @@ pub enum Protocol {
     Icmpv6,
 }
 
-impl From<(ProbeTransport, IpAddr)> for Protocol {
-    fn from((transport, address): (ProbeTransport, IpAddr)) -> Self {
+impl From<(Transport, IpAddr)> for Protocol {
+    fn from((transport, address): (Transport, IpAddr)) -> Self {
         match (transport, address) {
-            (ProbeTransport::Tcp, _) => Self::Tcp,
-            (ProbeTransport::Udp, _) => Self::Udp,
-            (ProbeTransport::Icmp, IpAddr::V4(_)) => Self::Icmpv4,
-            (ProbeTransport::Icmp, IpAddr::V6(_)) => Self::Icmpv6,
+            (Transport::Tcp, _) => Self::Tcp,
+            (Transport::Udp, _) => Self::Udp,
+            (Transport::Icmp, IpAddr::V4(_)) => Self::Icmpv4,
+            (Transport::Icmp, IpAddr::V6(_)) => Self::Icmpv6,
         }
     }
 }
@@ -210,7 +209,7 @@ impl TryFrom<library::Endpoint> for Endpoint {
     fn try_from(endpoint: library::Endpoint) -> Result<Self, Error> {
         Ok(Self {
             address: endpoint.address,
-            transport: endpoint.transport.into(),
+            transport: endpoint.transport,
             port: endpoint.port,
             classification: endpoint.classification.into(),
             probes: endpoint
@@ -337,7 +336,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             destination: evidence.address,
             destination_port: evidence.port,
             attempt: evidence.attempt,
-            status: evidence.status.into(),
+            status: evidence.status,
             classification: evidence.classification.into(),
             responder: evidence.responder,
             sent_at: evidence.sent_at.try_into()?,
@@ -398,7 +397,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
 
     fn try_from(error: &library::PipelineFailure) -> Result<Self, Error> {
         Ok(Self {
-            stats: (&error.stats).into(),
+            stats: error.stats.clone(),
             pending: error
                 .pending
                 .iter()
@@ -413,7 +412,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 sequence: probe.sequence,
                 destination: probe.address,
                 destination_port: probe.endpoint.port(),
-                transport: probe.endpoint.transport().into(),
+                transport: probe.endpoint.transport(),
                 attempt: probe.attempt,
             }),
             capture_sources: error
@@ -424,7 +423,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                     ready: source.ready,
                     shutdown_confirmed: source.shutdown_confirmed,
                     statistics_valid: source.statistics_valid,
-                    statistics: source.statistics.into(),
+                    statistics: source.statistics,
                 })
                 .collect(),
         })

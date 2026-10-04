@@ -102,7 +102,7 @@ fn reorder(frames: usize) -> MergeLimits {
 }
 
 #[test]
-fn reorder_window_reads_stay_within_the_stream_byte_budget_and_the_window_has_a_maximum() {
+fn reorder_window_respects_byte_budget_and_max() {
     // Frames are charged as they are read into the window, so the cumulative budget bounds it.
     let limits = MergeLimits {
         streams: capture_file::Limits {

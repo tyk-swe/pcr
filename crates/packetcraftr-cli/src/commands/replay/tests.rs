@@ -265,7 +265,7 @@ fn replay_arguments(path: &std::path::Path, extra: &[&str]) -> arguments::Args {
 }
 
 #[test]
-fn prepare_rejects_the_gap_clamp_with_immediate_timing_before_opening_the_capture() {
+fn prepare_rejects_gap_clamp_with_immediate_timing() {
     let missing = std::path::Path::new("/nonexistent/fixture.pcap");
     let arguments = replay_arguments(missing, &["--timing", "immediate", "--max-gap-ms", "5"]);
     let Err(error) = prepare(&arguments) else {

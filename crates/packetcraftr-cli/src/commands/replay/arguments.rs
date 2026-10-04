@@ -6,8 +6,7 @@ use std::path::PathBuf;
 use crate::command_options::InterfaceSelector;
 
 use crate::command_options::{
-    Budget, CaptureReaderBoundsArgs, CaptureStdout, CompressionArgs, LinkMode, MaxDurationArgs,
-    NumericPolicyArgs, RunTime,
+    CaptureReaderBoundsArgs, CompressionArgs, LinkMode, MaxDurationArgs, NumericPolicyArgs,
 };
 use clap::ValueEnum;
 
@@ -42,7 +41,7 @@ impl From<Timing> for packetcraftr::replay::Timing {
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<CaptureStdout>,
+    pub(crate) compression: CompressionArgs,
 
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
@@ -92,7 +91,7 @@ pub(crate) struct Args {
     #[arg(long, value_name = "MILLISECONDS", conflicts_with_all = ["rate", "bps"], value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) max_gap_ms: Option<u64>,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<ReplayRunTime>,
+    pub(crate) duration: MaxDurationArgs,
     #[command(flatten)]
     pub(crate) reader: CaptureReaderBoundsArgs,
     /// Per-operation opt-in required for a permissively built or malformed live frame.
@@ -103,21 +102,5 @@ pub(crate) struct Args {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]
-    pub(crate) policy: NumericPolicyArgs<Streamed>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Streamed;
-
-impl Budget for Streamed {
-    const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
-    const BYTES_HELP: &'static str = "Maximum wire bytes this operation is authorized to transmit";
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ReplayRunTime;
-
-impl RunTime for ReplayRunTime {
-    const HELP: &'static str =
-        "Maximum replay run time in milliseconds, which also bounds the cumulative scheduled delay";
+    pub(crate) policy: NumericPolicyArgs,
 }

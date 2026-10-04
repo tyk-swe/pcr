@@ -69,12 +69,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   `impl IntoIterator<Item = u16>`, `transform::VlanTag` is renamed
   `VlanRewrite` (with `From<link::VlanTag>`), `analysis::follow::Direction` is
   renamed `PeerDirection`, and `budget::Interrupted` is `#[non_exhaustive]`.
-- CLI `output::contract::Command::require_format` is generic and returns a
-  narrowed proof enum (`AggregateFormat`, `ToolFormat`, `BuildFormat`,
-  `CaptureFormat`, `DissectFormat`, `SendFormat`, `ExchangeFormat`,
-  `ReadFormat`, `FollowFormat`) instead of `()`, so a command that cannot
-  emit a format fails at dispatch rather than re-checking `Format` inside
-  rendering.
+- CLI `output::contract::Command::require_format` returns the validated
+  `Format` instead of `()`, so a command that cannot emit a format fails at
+  dispatch rather than re-checking `Format` inside rendering.
 - `document::Error::Parse.source` is an `error::Source` (was `String`),
   retaining the packet parser's typed error in the chain.
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
@@ -101,9 +98,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `docs/migration-unreleased.md`.
 - `error::Kind::Cli` is renamed `Kind::Usage` (`as_str` and its serde name
   become `"usage"`), so library classifications no longer name the CLI. Codes
-  such as `cli.capture_filter` and CLI output are unchanged: the CLI's
-  `output::envelope::Error.kind` is the new CLI-owned `envelope::ErrorKind`,
-  which still publishes a usage failure as `"cli"` with exit code 2. See
+  such as `cli.capture_filter` are unchanged, and machine output publishes a
+  usage failure as `"kind": "usage"` with exit code 2. See
   `docs/migration-unreleased.md`.
 - Capture-file formats move from `packetcraftr_core::analysis::pcap` to the
   top-level `packetcraftr_core::capture_file`, with the same items. It also
@@ -140,10 +136,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `docs/migration-unreleased.md`.
 - CLI `output::contract::Command` is declared once with the command line it
   names: `Command::ALL` lists commands in `--help` order instead of a separate
-  canonical order. The per-command format enums implement the new
-  `output::contract::FormatSubset` trait, which carries `FORMATS` in place of
-  the inherent constant, and `Command::require_format` takes
-  `F: FormatSubset`. Serialized command names and formats are unchanged. See
+  canonical order. `Command::formats()` lists each command's supported
+  formats. Serialized command names and formats are unchanged. See
   `docs/migration-unreleased.md`.
 - Built-in protocols are grouped by layer: GRE is `protocol::tunnel::Gre`,
   ICMP is `protocol::network::{Icmpv4, Icmpv6}`, and the IPv6 extension headers
@@ -221,11 +215,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   rather than derived from `max_flows`. `decode::Options` and `build::Options`
   hold their `max_layers` and `max_packet_size` in a shared `packet::Limits`.
   See `docs/migration-unreleased.md`.
-- `packetcraftr_cli::output` types own every published field.
-  Output types embed only the versioned `packetcraftr.packet` document and its
-  field values; every other field is a CLI-owned mirror with the same JSON
-  shape (`envelope::Stats`, `diagnostic::Diagnostic`, `envelope::ErrorContext`,
-  `network::InterfaceId`, `analysis::Scope`, `fuzz::Outcome`, and others).
+- `packetcraftr_cli::output` publishes the versioned machine contract with
+  CLI-owned types wherever the contract's field names or variants differ from
+  the library's (`envelope::ErrorContext`, `network::InterfaceId`,
+  `analysis::Scope`, `fuzz::Outcome`, and others). Fields whose library types
+  already serialize to the published shape embed those types directly —
+  `packetcraftr::Stats`, `probe::{Transport, ProbeStatus}`,
+  `capture::StopReason`, core `diagnostic::{Diagnostic, Severity}` and
+  `frame::Direction`, and netio `capture::{Stats, TimestampSource,
+  TimestampPrecision, Realized, RealizedSettings}` — re-exported from their
+  output modules; `output::diagnostic` and `output::probe` are removed.
   Conversions are `From`/`TryFrom` only: the `from_*`, `try_from_*`, and
   `complete_from_*` constructors, `Report::new`, `Detail::new`,
   `Worker::progress`/`native`, and `provenance::from_source_set` are removed,
@@ -780,7 +779,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - The versioned input documents and their rules are library API, so other
   consumers read them exactly as the CLI does. Core `transform::rules::Rules`
-  reads `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing
+  reads `packetcraftr.rewrite/v2` documents (`Rules::parse`, failing
   with `transform::rules::Error`), builds one rule from direct edits
   (`Rules::single`), reports the VLAN growth a map needs
   (`maximum_growth`), and applies the rules in order to a frame with a
@@ -909,7 +908,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Explicit bounded IPv4/IPv6 fragmentation and the offline `fragment` command.
 - Ordered multi-capture merging with source/interface provenance and atomic file publication.
 - Gzip/Zstd capture input/output with encoded/decoded-byte and window ceilings.
-- Registered field projection from `read`/`dissect`, including CSV/TSV, missing
+- Registered field projection from `read`/`dissect`, with missing
   values, repeated layers, nested fields, stream indexes, and bounded row output.
 - Bounded TLS ClientHello/ServerHello fixtures with SNI/ALPN helpers, ordered
   opaque extensions, nested template/fuzz targets, and derived fingerprints.
@@ -1462,7 +1461,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   output in 64 KiB chunks instead of issuing one write syscall per record,
   removing the syscall bottleneck on large captures. Output bytes are
   identical.
-- `read` without `--field` rejects JSON, CSV, and TSV output with the shared
+- `read` without `--field` rejects JSON output with the shared
   "this output format requires --field selections" message.
 - Forwarding verification serializes each keyed observation's identity once
   instead of twice, preserving canonical key bytes and charging the scratch

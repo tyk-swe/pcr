@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::{contract::ToolFormat, stream::StreamRecord};
+use crate::output::{contract::Format, stream::StreamRecord};
 use crate::{
     errors::CliError,
     rendering::{StreamEncoder, bounded_json_len},
@@ -9,13 +9,13 @@ use crate::{
 use packetcraftr_core::error::Kind;
 
 pub(crate) struct EventOutput<'a> {
-    format: ToolFormat,
+    format: Format,
     stream: &'a StreamEncoder,
     remaining: usize,
 }
 
 impl<'a> EventOutput<'a> {
-    pub(crate) fn new(format: ToolFormat, stream: &'a StreamEncoder, maximum: usize) -> Self {
+    pub(crate) fn new(format: Format, stream: &'a StreamEncoder, maximum: usize) -> Self {
         Self {
             format,
             stream,
@@ -39,12 +39,13 @@ impl<'a> EventOutput<'a> {
         })?;
         self.remaining -= bytes;
         match self.format {
-            ToolFormat::Json => retained.push(value),
-            ToolFormat::Ndjson => self
+            Format::Json => retained.push(value),
+            Format::Ndjson => self
                 .stream
                 .emit_data(value, Vec::new())
                 .map_err(CliError::from)?,
-            ToolFormat::Text => render_text(&value)?,
+            Format::Text => render_text(&value)?,
+            other => other.unreachable(),
         }
         Ok(())
     }
@@ -104,7 +105,7 @@ mod tests {
     fn the_budget_is_shared_across_record_types_and_retention_vectors() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer);
-        let mut output = EventOutput::new(ToolFormat::Json, &stream, 5);
+        let mut output = EventOutput::new(Format::Json, &stream, 5);
         let mut strings: Vec<TestRecord<&str>> = Vec::new();
         let mut numbers: Vec<TestRecord<u64>> = Vec::new();
         let rendered = Cell::new(false);
@@ -136,7 +137,7 @@ mod tests {
     #[test]
     fn stream_write_failures_keep_their_io_classification() {
         let stream = StreamEncoder::new(Command::Http, BrokenPipe);
-        let mut output = EventOutput::new(ToolFormat::Ndjson, &stream, usize::MAX);
+        let mut output = EventOutput::new(Format::Ndjson, &stream, usize::MAX);
         let mut retained = Vec::new();
         let rendered = Cell::new(false);
         let error = output

@@ -151,7 +151,7 @@ impl Drop for Running {
 }
 
 #[test]
-fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() {
+fn cancelled_json_publication_keeps_complete_document() {
     common::require_procfs();
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());

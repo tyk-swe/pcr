@@ -10,7 +10,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{capture_file, protocol::builtin};
 
-use crate::command_options::{CompressionArgs, Destination, link_type, parse_timestamp};
+use crate::command_options::{CompressionArgs, link_type, parse_timestamp};
 use crate::errors::CliError;
 
 /// Capture-file options shared by commands that emit generated frames.
@@ -34,7 +34,7 @@ pub(crate) struct CaptureOutputArgs {
     #[arg(long, value_name = "SECONDS")]
     pub(crate) timestamp: Option<String>,
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<GeneratedCapture>,
+    pub(crate) compression: CompressionArgs,
 }
 
 pub(crate) struct CaptureOutput {
@@ -222,11 +222,4 @@ fn validate_link_type(
         ));
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct GeneratedCapture;
-
-impl Destination for GeneratedCapture {
-    const HELP: &'static str = "Compress binary capture output";
 }

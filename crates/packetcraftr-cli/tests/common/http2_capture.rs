@@ -6,7 +6,7 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::capture_file::{Format as CaptureFormat, Writer};
+use packetcraftr_core::capture_file::{Format, Writer};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
@@ -219,7 +219,7 @@ pub(crate) fn capture_bytes(exchanges: &[Exchange]) -> Vec<u8> {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let mut bytes = Vec::new();
     {
-        let mut writer = Writer::new(&mut bytes, CaptureFormat::PcapNg, LinkType::IPV4)
+        let mut writer = Writer::new(&mut bytes, Format::PcapNg, LinkType::IPV4)
             .expect("PCAPNG writer must initialize");
         let mut millis = 0_u64;
         for exchange in exchanges {

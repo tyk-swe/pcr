@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_interface_validation_rejects_modes_capabilities_and_link_mismatches() {
+    fn cached_interface_rejects_mode_capability_link_mismatch() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
         let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);

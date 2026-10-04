@@ -101,7 +101,7 @@ fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {
 }
 
 #[test]
-fn pipelined_and_serial_scans_stop_at_the_undecoded_limit_with_one_diagnostic() {
+fn scans_stop_at_undecoded_limit_once_diagnosed() {
     let observe = |max_in_flight| {
         let mut request = request();
         request.max_in_flight = max_in_flight;

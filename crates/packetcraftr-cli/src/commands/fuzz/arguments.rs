@@ -7,8 +7,8 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    BuildMode, CaptureLimitsArgs, MaxDurationArgs, NumericPolicyArgs, Probing, RecipeArgs,
-    RouteSelectionArgs, TimeoutArgs, Transmitted, Window,
+    BuildMode, CaptureLimitsArgs, MaxDurationArgs, NumericPolicyArgs, RecipeArgs,
+    RouteSelectionArgs, TimeoutArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"NDJSON publishes each case as soon as its offline or live outcome is final, then one complete event with campaign statistics. Earlier case records remain valid if a later case fails.
@@ -100,7 +100,7 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) destination: Option<IpAddr>,
     #[command(flatten)]
-    pub(crate) timeout: TimeoutArgs<CaseWindow>,
+    pub(crate) timeout: TimeoutArgs,
     /// Optional average live-case rate ceiling.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
@@ -124,19 +124,11 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_SHRINK_STEPS)]
     pub(crate) max_shrink_steps: usize,
     #[command(flatten)]
-    pub(crate) duration: MaxDurationArgs<Probing>,
+    pub(crate) duration: MaxDurationArgs,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) policy: NumericPolicyArgs<Transmitted>,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CaseWindow;
-
-impl Window for CaseWindow {
-    const DEFAULT_MILLISECONDS: &'static str = "1000";
-    const HELP: &'static str = "Response window for each capture-ready live case";
+    pub(crate) policy: NumericPolicyArgs,
 }

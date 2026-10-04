@@ -11,7 +11,7 @@ use packetcraftr_core::error::Kind;
 use super::selection::Selection;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
-use crate::output::contract::ReadFormat;
+use crate::output::contract::Format;
 
 #[derive(Clone, Copy)]
 pub(super) enum CaptureOutput {
@@ -20,10 +20,10 @@ pub(super) enum CaptureOutput {
 }
 
 impl CaptureOutput {
-    pub(super) fn resolve(normalize: bool, format: ReadFormat) -> Result<Option<Self>, CliError> {
+    pub(super) fn resolve(normalize: bool, format: Format) -> Result<Option<Self>, CliError> {
         let format = match format {
-            ReadFormat::Pcap => capture::Format::Pcap,
-            ReadFormat::PcapNg => capture::Format::PcapNg,
+            Format::Pcap => capture::Format::Pcap,
+            Format::PcapNg => capture::Format::PcapNg,
             _ if normalize => {
                 return Err(CliError::from_classification(
                     Classification::new(

@@ -17,6 +17,25 @@ pub enum StopReason {
     Failure,
 }
 
+impl StopReason {
+    /// The name the CLI prints, identical to the serialized one.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::FrameBudget => "frame_budget",
+            Self::Sink => "sink",
+            Self::Failure => "failure",
+        }
+    }
+}
+
+impl std::fmt::Display for StopReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// A sink error cannot express a stop, because a stop is a success whose evidence is kept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {

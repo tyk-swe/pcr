@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-use std::marker::PhantomData;
-
 use packetcraftr_core::capture_file::compression::{self, Output};
 use packetcraftr_core::error::Kind;
 
@@ -32,29 +29,22 @@ impl Compression {
     }
 }
 
-pub(crate) trait Destination:
-    Clone + Copy + fmt::Debug + Default + Send + Sync + 'static
-{
-    const HELP: &'static str;
-}
-
 /// The one `--compression` argument.
 ///
 /// Compression applies to capture bytes only, so a command reads it through
 /// [`for_output`](Self::for_output), which rejects it for any other stdout
 /// format, or through [`for_file`](Self::for_file) for a saved capture file.
 #[derive(Clone, Copy, Debug, clap::Args)]
-pub(crate) struct CompressionArgs<D: Destination> {
-    #[arg(long, value_enum, default_value_t = Compression::None, help = D::HELP)]
+pub(crate) struct CompressionArgs {
+    /// Compress binary capture output or a saved capture file.
+    #[arg(long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
-    #[arg(skip)]
-    destination: PhantomData<D>,
 }
 
-impl<D: Destination> CompressionArgs<D> {
-    pub(crate) fn for_output(self, format: impl Into<Format>) -> Result<Compression, CliError> {
+impl CompressionArgs {
+    pub(crate) fn for_output(self, format: Format) -> Result<Compression, CliError> {
         if !matches!(self.compression, Compression::None)
-            && !matches!(format.into(), Format::Pcap | Format::PcapNg)
+            && !matches!(format, Format::Pcap | Format::PcapNg)
         {
             return Err(CliError::new(
                 Kind::Usage,
@@ -67,19 +57,4 @@ impl<D: Destination> CompressionArgs<D> {
     pub(crate) const fn for_file(self) -> Compression {
         self.compression
     }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CaptureStdout;
-
-impl Destination for CaptureStdout {
-    const HELP: &'static str =
-        "Compress binary capture output; independent of the input's detected format";
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct SavedPcapNg;
-
-impl Destination for SavedPcapNg {
-    const HELP: &'static str = "Compression of the saved PCAPNG file";
 }

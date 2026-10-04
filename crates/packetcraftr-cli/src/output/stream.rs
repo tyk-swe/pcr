@@ -179,7 +179,7 @@ impl StreamEncoder {
         &self,
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
-        stats: impl Into<Stats>,
+        stats: Stats,
     ) -> Result<(), EncodeError> {
         self.complete_published(Published::new(result, diagnostics).with_stats(stats))
     }

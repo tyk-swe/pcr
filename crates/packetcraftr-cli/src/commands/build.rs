@@ -9,7 +9,7 @@ mod session;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::output::contract::BuildFormat;
+use crate::output::contract::Format;
 
 use crate::output;
 use packetcraftr_core as core;
@@ -25,7 +25,15 @@ use crate::rendering::{
 };
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::BuildFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Raw,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = false;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -35,19 +43,15 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: BuildFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let capture = arguments.capture.resolve(format.as_format())?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let capture = arguments.capture.resolve(format)?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
     let registry = packetcraftr_core::protocol::builtin::registry();
@@ -123,7 +127,7 @@ pub(super) fn run(
                 )
             }
         };
-    if packets.len() != 1 && matches!(format, BuildFormat::Json | BuildFormat::Raw) {
+    if packets.len() != 1 && matches!(format, Format::Json | Format::Raw) {
         return Err(CliError::new(
             Kind::Usage,
             "JSON and raw build output require exactly one packet; use text, hex, or NDJSON for packet sets",
@@ -165,7 +169,7 @@ pub(super) fn run(
                 writer.write_frame(&frame).map_err(|source| {
                     stream_capture_error("write capture output failed", source)
                 })?;
-            } else if format == BuildFormat::Ndjson {
+            } else if format == Format::Ndjson {
                 stream.emit_published(
                     output::envelope::Published::<output::build::PacketEvent>::from((
                         summary.packets_built,
@@ -195,10 +199,10 @@ pub(super) fn run(
         render_diagnostics_stderr(&diagnostics)?;
     }
     // Startup handles cancellation after JSON publication without a second document.
-    if format != BuildFormat::Json {
+    if format != Format::Json {
         crate::cancellation::check()?;
     }
-    if format == BuildFormat::Ndjson {
+    if format == Format::Ndjson {
         stream.complete(summary, Vec::new())?;
     }
     Ok(())

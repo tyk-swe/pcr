@@ -176,7 +176,7 @@ fn ethernet_capture(frames: &[Vec<u8>]) -> Reader<Cursor<Vec<u8>>> {
 }
 
 #[test]
-fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() {
+fn replay_stops_at_wire_byte_ceiling() {
     let frames = [
         owned_ethernet_frame(1),
         owned_ethernet_frame(2),

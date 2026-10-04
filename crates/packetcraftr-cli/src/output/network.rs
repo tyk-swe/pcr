@@ -158,7 +158,7 @@ impl From<packetcraftr_netio::capture::TimestampType> for TimestampType {
             value: value.value,
             name: value.name,
             description: value.description,
-            source: value.source.map(Into::into),
+            source: value.source,
         }
     }
 }

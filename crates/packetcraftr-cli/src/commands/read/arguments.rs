@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use crate::command_options::{
-    CaptureStdout, CompressionArgs, DecodeArgs, EpochBoundsArgs, FrameSelectionArgs,
-    OfflineCaptureLimitsArgs, TreeArgs,
+    CompressionArgs, DecodeArgs, EpochBoundsArgs, FrameSelectionArgs, OfflineCaptureLimitsArgs,
+    TreeArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -82,7 +82,7 @@ pub(crate) struct Args {
     pub(crate) max_projection_bytes: usize,
 
     #[command(flatten)]
-    pub(crate) compression: CompressionArgs<CaptureStdout>,
+    pub(crate) compression: CompressionArgs,
 
     /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,

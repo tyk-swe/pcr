@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::ReadFormat;
+use crate::output::contract::Format;
 
 use crate::output;
 
@@ -12,7 +12,7 @@ use crate::rendering::{
 
 pub(super) fn render_record(
     record: output::read::Frame,
-    format: ReadFormat,
+    format: Format,
     stream: &StreamEncoder,
     tree: Option<&mut FieldTree>,
 ) -> Result<(), CliError> {
@@ -22,19 +22,16 @@ pub(super) fn render_record(
         decoded,
     } = &record;
     match format {
-        ReadFormat::Text => match tree {
+        Format::Text => match tree {
             Some(tree) => render_frame_tree(*source_frame, frame, decoded.as_ref(), tree),
             None => render_frame_text(*source_frame, frame, decoded.as_ref()),
         },
-        ReadFormat::Hex => write_hex_line(frame.bytes()),
-        ReadFormat::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),
-        ReadFormat::Json
-        | ReadFormat::Csv
-        | ReadFormat::Tsv
-        | ReadFormat::Pcap
-        | ReadFormat::PcapNg => Err(CliError::new(
+        Format::Hex => write_hex_line(frame.bytes()),
+        Format::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),
+        Format::Json | Format::Pcap | Format::PcapNg => Err(CliError::new(
             packetcraftr_core::error::Kind::Internal,
             "capture-file output returned before frame rendering",
         )),
+        other => other.unreachable(),
     }
 }

@@ -11,7 +11,7 @@ mod writer;
 use self::arguments::Args;
 use crate::output::{
     capture::Retention,
-    contract::{CaptureFormat, Command},
+    contract::{Command, Format},
 };
 use crate::{
     errors::CliError,
@@ -45,7 +45,14 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::CaptureFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+        crate::output::contract::Format::Ndjson,
+        crate::output::contract::Format::Hex,
+        crate::output::contract::Format::Pcap,
+        crate::output::contract::Format::PcapNg,
+    ];
     const CANCELLATION: bool = true;
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -64,18 +71,14 @@ impl super::Spec for Args {
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(
-    args: Args,
-    format: CaptureFormat,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let timeout = args.timeout.timeout();
     if timeout > net::deadline::MAX_WAIT || Instant::now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
@@ -104,7 +107,7 @@ pub(super) fn run(
         args.max_projection_bytes,
         &registry,
         Command::Capture,
-        format.as_format(),
+        format,
     )?;
     if projector
         .as_ref()
@@ -160,7 +163,7 @@ pub(super) fn run(
             interfaces.push(interface);
         }
     }
-    if format == CaptureFormat::Pcap && interfaces.len() != 1 {
+    if format == Format::Pcap && interfaces.len() != 1 {
         return Err(CliError::new(
             Kind::Usage,
             "multiple interfaces require PCAPNG capture output",
@@ -191,12 +194,9 @@ pub(super) fn run(
     )
 }
 
-fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, CliError> {
+fn validate_output(args: &Args, format: Format) -> Result<Compression, CliError> {
     let compression = if args.write.is_some() {
-        if !matches!(
-            format,
-            CaptureFormat::Text | CaptureFormat::Json | CaptureFormat::Ndjson
-        ) {
+        if !matches!(format, Format::Text | Format::Json | Format::Ndjson) {
             return Err(CliError::new(
                 Kind::Usage,
                 "--write requires text, JSON, or NDJSON reporting",
@@ -204,7 +204,7 @@ fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, Cl
         }
         args.compression.for_file()
     } else {
-        let compression = args.compression.for_output(format.as_format())?;
+        let compression = args.compression.for_output(format)?;
         if args.rotate_bytes.is_some()
             || args.rotate_interval_ms.is_some()
             || args.rotate_files != 1
@@ -215,7 +215,7 @@ fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, Cl
                 "capture rotation requires --write",
             ));
         }
-        if format == CaptureFormat::Json {
+        if format == Format::Json {
             return Err(CliError::new(
                 Kind::Usage,
                 "JSON capture summaries require --write to retain packet data",
@@ -234,10 +234,8 @@ fn validate_output(args: &Args, format: CaptureFormat) -> Result<Compression, Cl
             Vec::new(),
         ));
     }
-    args.tree
-        .validate_format(format == CaptureFormat::Text, format.as_format())?;
-    if (args.dissect || !args.fields.is_empty())
-        && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson)
+    args.tree.validate_format(format == Format::Text, format)?;
+    if (args.dissect || !args.fields.is_empty()) && !matches!(format, Format::Text | Format::Ndjson)
     {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
@@ -306,7 +304,7 @@ impl Decoding {
 }
 
 struct Output<'a> {
-    format: CaptureFormat,
+    format: Format,
     compression: Compression,
     selector: Option<FrameSelector>,
     decoding: Option<Decoding>,
@@ -318,7 +316,7 @@ struct Destinations {
     files: Option<Files>,
     writer: Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     projector: Option<crate::rendering::Projector>,
-    format: CaptureFormat,
+    format: Format,
     compression: Compression,
     limits: capture_file::Limits,
     stream: StreamEncoder,
@@ -330,13 +328,13 @@ impl Destinations {
             files
                 .initialize(sources)
                 .map_err(BoundaryError::from_error)?;
-        } else if matches!(self.format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
+        } else if matches!(self.format, Format::Pcap | Format::PcapNg) {
             let destination = compression::Output::new(io::stdout(), self.compression.format())
                 .map_err(BoundaryError::from_error)?;
             self.writer = Some(
                 writer::initialize(
                     destination,
-                    if self.format == CaptureFormat::Pcap {
+                    if self.format == Format::Pcap {
                         capture_file::Format::Pcap
                     } else {
                         capture_file::Format::PcapNg
@@ -501,7 +499,7 @@ fn drive<P: packetcraftr::CaptureProviders>(
         return Err(error.with_capture(snapshot));
     }
     // A projection that never matched a frame still owes its text header.
-    if format == CaptureFormat::Text
+    if format == Format::Text
         && let Some(projector) = destinations.projector.take()
     {
         projector
@@ -521,7 +519,7 @@ fn emit_frame(
     decoding: Option<&mut Decoding>,
     projector: Option<&mut crate::rendering::Projector>,
     stream: &StreamEncoder,
-    format: CaptureFormat,
+    format: Format,
     writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     source_frame: u64,
     frame: Frame,
@@ -540,7 +538,7 @@ fn emit_frame(
             return projector.emit(source_frame, values, stream);
         }
         return match format {
-            CaptureFormat::Text => {
+            Format::Text => {
                 let stack = output::frame::Stack::from(&decoded);
                 let frame =
                     output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
@@ -550,36 +548,35 @@ fn emit_frame(
                     None => render_frame_text(source_frame, &frame, Some(&stack)),
                 }
             }
-            CaptureFormat::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
+            Format::Ndjson => output::read::Frame::try_from((source_frame, frame, &decoded))
                 .map_err(CliError::classified)
                 .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
-            CaptureFormat::Json
-            | CaptureFormat::Hex
-            | CaptureFormat::Pcap
-            | CaptureFormat::PcapNg => Err(CliError::new(
+            Format::Json | Format::Hex | Format::Pcap | Format::PcapNg => Err(CliError::new(
                 packetcraftr_core::error::Kind::Internal,
                 "decoded output requires text or NDJSON",
             )),
+            other => other.unreachable(),
         };
     }
     match format {
-        CaptureFormat::Text => output::frame::Captured::try_from(frame)
+        Format::Text => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| {
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 render_frame_text(source_frame, &frame, None)
             }),
-        CaptureFormat::Hex => output::frame::Captured::try_from(frame)
+        Format::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| write_hex_line(frame.bytes())),
-        CaptureFormat::Ndjson => output::read::Frame::try_from((source_frame, frame))
+        Format::Ndjson => output::read::Frame::try_from((source_frame, frame))
             .map_err(CliError::classified)
             .and_then(|record| stream.emit_data(record, Vec::new()).map_err(Into::into)),
-        CaptureFormat::Json => Ok(()),
-        CaptureFormat::Pcap | CaptureFormat::PcapNg => writer::write_frame(
+        Format::Json => Ok(()),
+        Format::Pcap | Format::PcapNg => writer::write_frame(
             writer.as_mut().expect("writer initialized before frames"),
             frame,
         )
         .map_err(CliError::classified),
+        other => other.unreachable(),
     }
 }

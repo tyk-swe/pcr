@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::contract::ToolFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::analysis;
 
@@ -31,13 +31,13 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: ToolFormat,
+    format: Format,
     finding: output::expert::Finding,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        ToolFormat::Text => match (finding.transport, finding.stream) {
+        Format::Text => match (finding.transport, finding.stream) {
             (Some(transport), Some(stream)) => write_stdout_line(format_args!(
                 "#{} {} {} ({} stream {stream}): {}",
                 finding.frame,
@@ -54,11 +54,12 @@ pub(super) fn render_record(
                 finding.message
             )),
         },
-        ToolFormat::Json => {
+        Format::Json => {
             state.retained.push(|| finding);
             Ok(())
         }
-        ToolFormat::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
+        other => other.unreachable(),
     }
 }
 

@@ -16,7 +16,7 @@ fn http_rejects_zero_ports_and_out_of_range_body_limits_as_usage_errors() {
         let output = run(&["--output", "json", "http", path, flag, value]);
         assert_eq!(output.status.code(), Some(2), "{flag} {value}: {output:?}");
         let error = parse_json(&output)["error"].clone();
-        assert_eq!(error["kind"], "cli", "{flag} {value}");
+        assert_eq!(error["kind"], "usage", "{flag} {value}");
         assert!(
             error["message"].as_str().unwrap().contains(flag),
             "{flag} {value}: {error}"
@@ -51,7 +51,7 @@ fn zero_application_message_limit_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2));
     let error = &parse_json(&output)["error"];
     assert_eq!(error["code"], "cli.analysis_limit");
-    assert_eq!(error["kind"], "cli");
+    assert_eq!(error["kind"], "usage");
     assert!(
         error["message"].as_str().unwrap().contains("max_messages"),
         "{error}"

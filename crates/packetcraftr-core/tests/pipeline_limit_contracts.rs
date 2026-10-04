@@ -252,7 +252,7 @@ fn assert_decode_flow_and_sink_limits(
 }
 
 #[test]
-fn pipeline_reports_aggregate_decode_flow_and_sink_limits_at_the_exact_frame() {
+fn pipeline_reports_limits_at_exact_frame() {
     let registry = registry();
     let epoch = SystemTime::UNIX_EPOCH;
     let frames = [

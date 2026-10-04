@@ -368,7 +368,7 @@ fn traceroute_udp_port_overflow_precedes_duration_limit() {
 }
 
 #[test]
-fn traceroute_zero_source_port_is_rejected_before_authorization_or_execution() {
+fn traceroute_rejects_zero_source_port() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));
     request.source_port = Some(0);

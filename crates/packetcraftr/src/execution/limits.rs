@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn check_rate_rejects_zero_and_rates_above_the_ceiling_with_the_exact_reason() {
+    fn rate_check_rejects_zero_and_over_ceiling() {
         for rate in [0, MAX_RATE + 1, u32::MAX] {
             assert_eq!(
                 check_rate(&Recorder, "probes_per_second", Some(rate)),
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_limits_reject_out_of_range_queues_and_undecoded_frames_beyond_the_frame_budget() {
+    fn evidence_limits_reject_bad_queues_and_over_budget_frames() {
         use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
         let frames = |value: usize| {

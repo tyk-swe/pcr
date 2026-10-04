@@ -435,7 +435,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_parent_alias_retargeted_to_a_collision_preserves_files_and_cleans_staging() {
+    fn collision_retarget_preserves_files_cleans_staging() {
         let (_root, original, replacement, alias) = aliased_directories();
         let destination = alias.join("out.pcapng");
         let mut staged = StagedFile::stage(&destination).expect("stage through alias");
@@ -469,7 +469,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_parent_alias_retargeted_to_an_empty_directory_is_refused_without_publishing() {
+    fn empty_directory_retarget_refused() {
         let (_root, original, replacement, alias) = aliased_directories();
         let destination = alias.join("out.pcapng");
         let mut staged = StagedFile::stage(&destination).expect("stage through alias");

@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use crate::output::contract::AggregateFormat;
+use crate::output::contract::Format;
 
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
@@ -17,26 +17,29 @@ use crate::errors::CliError;
 use crate::rendering::emit_aggregate;
 
 impl super::Spec for Args {
-    type Format = crate::output::contract::AggregateFormat;
+    const FORMATS: &'static [crate::output::contract::Format] = &[
+        crate::output::contract::Format::Text,
+        crate::output::contract::Format::Json,
+    ];
     const CANCELLATION: bool = false;
 
     fn run(
         self,
-        format: Self::Format,
+        format: Format,
         _stream: &crate::rendering::StreamEncoder,
     ) -> Result<super::CommandExit, CliError> {
         run(self, format).map(|()| super::CommandExit::SUCCESS)
     }
 }
 
-pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),
         None => list_protocols(format),
     }
 }
 
-fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
+fn list_protocols(format: Format) -> Result<(), CliError> {
     let result = output::protocols::ListResult::from(BuiltinProtocol::ALL);
     crate::rendering::render_aggregate_rows(
         output::contract::Command::Protocols,
@@ -47,7 +50,7 @@ fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
     )
 }
 
-fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {
+fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
     let protocol = BuiltinProtocol::ALL
         .iter()
         .copied()
@@ -63,12 +66,13 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
     let detail = output::protocols::Detail::try_from((registry.as_ref(), protocol))
         .map_err(CliError::classified)?;
     match format {
-        AggregateFormat::Text => rendering::render_detail(&detail),
-        AggregateFormat::Json => emit_aggregate(
+        Format::Text => rendering::render_detail(&detail),
+        Format::Json => emit_aggregate(
             output::contract::Command::Protocols,
             output::protocols::DetailResult::from(detail),
             Vec::new(),
         ),
+        other => other.unreachable(),
     }
 }
 

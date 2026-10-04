@@ -6,7 +6,7 @@
   "status": "error",
   "error": {
     "code": "cli.output_format",
-    "kind": "cli",
+    "kind": "usage",
     "message": "routes does not support ndjson output; choose text, json",
     "causes": [],
     "remediation": "choose one of the formats listed for this command"

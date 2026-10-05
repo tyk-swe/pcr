@@ -24,6 +24,8 @@ or [run an authorized isolated diagnostic](docs/tasks.md#3-run-an-authorized-dia
 For automation, start with the [forwarding contract](docs/verification-contract.md),
 [versioned resource presets](docs/resource-presets.md), and
 [consumer compatibility policy](docs/consumer-compatibility.md).
+For planned scanner capabilities, see the [core scanner roadmap](docs/roadmap/README.md)
+and its [Nmap gap matrix](docs/roadmap/nmap-gap-matrix.md).
 
 ## Quick start
 

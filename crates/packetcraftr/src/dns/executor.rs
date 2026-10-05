@@ -135,6 +135,7 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P
                 timeout: exchange.timeout,
                 max_template_packets: 1,
                 destination: exchange.probe.server_address,
+                interface: None,
                 max_responses: Some(max_responses),
             },
             &mut matches_request,

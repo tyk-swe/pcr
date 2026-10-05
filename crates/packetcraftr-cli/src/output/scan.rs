@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub mod connect;
+pub mod list;
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -16,6 +17,21 @@ use super::network::InterfaceId;
 use packetcraftr::probe::{ProbeStatus, Transport};
 
 use packetcraftr::scan as library;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Scope {
+    pub zone: String,
+    pub interface: InterfaceId,
+}
+
+impl From<&packetcraftr::target::ResolvedZone> for Scope {
+    fn from(scope: &packetcraftr::target::ResolvedZone) -> Self {
+        Self {
+            zone: scope.zone.as_str().to_owned(),
+            interface: (&scope.interface).into(),
+        }
+    }
+}
 
 published_enum! {
     pub enum Classification from library::Classification {
@@ -129,6 +145,8 @@ pub struct Probe {
     pub protocol: Protocol,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
     pub attempt: u32,
     pub status: ProbeStatus,
@@ -150,6 +168,8 @@ pub struct Probe {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
@@ -164,6 +184,7 @@ pub struct Report {
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
+    pub retained_evidence_bytes: usize,
     pub rtt: Rtt,
 }
 
@@ -178,6 +199,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
             endpoints,
             undecoded,
             diagnostics,
+            retained_evidence_bytes,
             stats,
             rtt,
         } = result;
@@ -195,6 +217,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
                     .into_iter()
                     .map(Captured::try_from)
                     .collect::<Result<_, _>>()?,
+                retained_evidence_bytes,
                 rtt: rtt.into(),
             },
             diagnostics,
@@ -209,6 +232,7 @@ impl TryFrom<library::Endpoint> for Endpoint {
     fn try_from(endpoint: library::Endpoint) -> Result<Self, Error> {
         Ok(Self {
             address: endpoint.address,
+            scope: endpoint.scope.as_ref().map(Scope::from),
             transport: endpoint.transport,
             port: endpoint.port,
             classification: endpoint.classification.into(),
@@ -226,6 +250,8 @@ pub struct Sent {
     pub sequence: u64,
     pub protocol: Protocol,
     pub destination: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     pub destination_port: Option<u16>,
     pub attempt: u32,
     pub sent_at: Timestamp,
@@ -247,6 +273,7 @@ impl TryFrom<library::SentProbe> for Sent {
                 .map(|profile| profile.name().to_owned()),
             protocol: (probe.endpoint.transport(), probe.address).into(),
             destination: probe.address,
+            scope: probe.scope.as_ref().map(Scope::from),
             destination_port: probe.endpoint.port(),
             attempt: probe.attempt,
             sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
@@ -275,6 +302,7 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
         counts: ClassificationCounts,
+        retained_evidence_bytes: usize,
         rtt: Rtt,
     },
 }
@@ -318,6 +346,7 @@ impl From<library::Report> for Published<Event> {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 counts: summary.counts.into(),
+                retained_evidence_bytes: summary.retained_evidence_bytes,
                 rtt: summary.rtt.into(),
             },
             Vec::new(),
@@ -334,6 +363,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
             sequence: evidence.sequence,
             protocol: (evidence.transport, evidence.address).into(),
             destination: evidence.address,
+            scope: evidence.scope.as_ref().map(Scope::from),
             destination_port: evidence.port,
             attempt: evidence.attempt,
             status: evidence.status,
@@ -371,6 +401,8 @@ pub struct Pending {
 pub struct FailedProbe {
     pub sequence: u64,
     pub destination: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     pub destination_port: Option<u16>,
     pub transport: Transport,
     pub attempt: u32,
@@ -411,6 +443,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
             failed_probe: error.failed_probe.as_ref().map(|probe| FailedProbe {
                 sequence: probe.sequence,
                 destination: probe.address,
+                scope: probe.scope.as_ref().map(Scope::from),
                 destination_port: probe.endpoint.port(),
                 transport: probe.endpoint.transport(),
                 attempt: probe.attempt,

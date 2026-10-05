@@ -44,6 +44,8 @@ pub enum Error {
     Family { family: &'static str },
     #[error("DNS-over-TCP cannot address scoped IPv6 link-local server {address}")]
     TcpLinkLocal { address: Ipv6Addr },
+    #[error("scoped link-local DNS server {server} is not supported by this workflow")]
+    ScopedServer { server: String },
     #[error("DNS-over-TCP uses kernel route and source selection")]
     UnsupportedTcpRoute,
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
@@ -119,6 +121,11 @@ impl Classified for Error {
                 "capability.dns_tcp_scope",
                 Kind::Capability,
                 Some("use --udp-only for a scoped IPv6 link-local DNS server"),
+            ),
+            Self::ScopedServer { .. } => Classification::new(
+                "capability.dns_scope",
+                Kind::Capability,
+                Some("use an unscoped DNS server address or scan for scoped target support"),
             ),
             Self::UnsupportedTcpRoute => Classification::new(
                 "capability.dns_tcp",

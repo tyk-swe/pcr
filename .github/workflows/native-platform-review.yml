@@ -1,0 +1,77 @@
+name: Reviewed macOS and Windows native validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full reviewed commit SHA; dispatch only after source review
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-platform-review:
+    name: Reviewed loopback native (${{ matrix.os }})
+    environment: native-review
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            python: python3
+          - os: macos-15-intel
+            python: python3
+          - os: windows-2022
+            python: python
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Require an immutable reviewed commit
+        shell: bash
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit }}
+        run: |
+          [[ "$REVIEWED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - name: Bind execution to the requested commit
+        shell: bash
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit }}
+        run: test "$(git rev-parse HEAD)" = "$REVIEWED_COMMIT"
+      - name: Initialize honest unexercised platform inventory
+        shell: bash
+        run: |
+          ${{ matrix.python }} scripts/test-native-platform.py --emit-unavailable \
+            --report target/validation/native-platform.json
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - name: Exercise reviewed macOS loopback scenarios
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit }}
+        run: |
+          sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+            python3 scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
+            --report target/validation/native-platform.json
+      - name: Exercise reviewed Windows loopback scenarios
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit }}
+        run: |
+          python scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
+            --report target/validation/native-platform.json
+      - name: Preserve evidence even when build or native execution fails
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: reviewed-native-platform-${{ matrix.os }}-${{ inputs.commit }}
+          path: target/validation/
+          if-no-files-found: error
+          retention-days: 90

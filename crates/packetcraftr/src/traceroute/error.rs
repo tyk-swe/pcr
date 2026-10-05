@@ -36,6 +36,8 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("traceroute duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
+    #[error("scoped link-local target {target} is not supported by this workflow")]
+    ScopedTarget { target: String },
     #[error("traceroute authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved target has no {family} address selected for this traceroute")]
@@ -96,6 +98,11 @@ impl Classified for Error {
             Self::Authorization(source)
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
+            Self::ScopedTarget { .. } => Classification::new(
+                "capability.traceroute_scope",
+                Kind::Capability,
+                Some("use an unscoped destination or scan for scoped target support"),
+            ),
             Self::Family { .. } => Classification::new(
                 "packet.target_address_family",
                 Kind::Packet,

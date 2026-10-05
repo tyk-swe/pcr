@@ -8,8 +8,22 @@ reviewed-native, or release report.
 | --- | --- | --- |
 | Portable core / fake-provider contracts | CI | CI |
 | Native profiles compile / deterministic contracts | CI | Platform CI |
-| Privileged isolated native inventory | Disposable namespace lane | Not configured |
-| Idle cancellation, queue loss, active native I/O | Isolated Linux tests | No equivalent privileged CI evidence claimed |
+| Privileged isolated native inventory | Disposable namespace lane | Manual reviewed-native route (`native-platform-review.yml`, disposable hosted runners, exact commit) |
+| Idle cancellation, queue loss, active native I/O | Isolated Linux tests | `native_loopback.rs` seven-scenario inventory, pending recorded runs |
+| Raw IPv4 delivery, Layer 3 | Isolated Linux tests (fixed `127.0.0.1` host route) | Host loopback `loopback_exchange` (no Layer 2 in `native-layer3`-only profiles; capture assertions are Layer 2–gated) |
+| Raw IPv6 | Not covered by this inventory — the isolated suite exercises IPv4 loopback only | Unsupported on the macOS host route; unexercised elsewhere — the gap is recorded, not fabricated |
+| Windows non-local UDP | Not claimed | Unchanged: no non-local UDP destinations on the host route |
+
+`scripts/test-native-platform.py` is the launcher: it compiles the CLI and the
+`native_loopback` test binary under each feature profile, records both
+digests, admits a UUID token plus platform gate, and runs each of the seven
+scenarios once per profile. Compilation is never reported as native evidence;
+each scenario is `exercised`, `failed`, or `unavailable` with a precise
+`reason_code` (`unsupported_capability`, `backend_not_installed`,
+`privilege_not_granted`, `isolation_unavailable`, `runtime_evidence_missing`).
+Evidence uses the v2 host-loopback record validated by
+`scripts/native_platform_evidence.py`; the Linux netns v1 record remains its
+own release gate.
 
 ## Before merge
 

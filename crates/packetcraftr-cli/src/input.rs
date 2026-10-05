@@ -4,6 +4,7 @@
 mod bounded;
 mod capture;
 mod fingerprint;
+pub(crate) mod manifest;
 mod recipe;
 
 pub(crate) use bounded::{

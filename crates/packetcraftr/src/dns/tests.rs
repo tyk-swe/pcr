@@ -148,10 +148,14 @@ struct SingleAddressAuthorizer {
 }
 
 impl crate::target::ResolveTarget for SingleAddressAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
-            addresses: vec![self.address],
+            selected: vec![crate::target::SelectedAddress::new(self.address)],
         })
     }
 }
@@ -173,10 +177,14 @@ struct ExpiringOperationAuthorizer {
 }
 
 impl crate::target::ResolveTarget for ExpiringOperationAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
-            addresses: vec![self.address],
+            selected: vec![crate::target::SelectedAddress::new(self.address)],
         })
     }
 }
@@ -199,7 +207,11 @@ struct SlowTcpDenyingAuthorizer {
 }
 
 impl crate::target::ResolveTarget for SlowTcpDenyingAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         if matches!(target, Target::Address(_)) {
             self.numeric_calls += 1;
             std::thread::sleep(self.delay);
@@ -211,7 +223,7 @@ impl crate::target::ResolveTarget for SlowTcpDenyingAuthorizer {
         }
         Ok(Authorized {
             declared: target.clone(),
-            addresses: vec![self.address],
+            selected: vec![crate::target::SelectedAddress::new(self.address)],
         })
     }
 }
@@ -616,7 +628,11 @@ impl RecordingAuthorizer {
 }
 
 impl crate::target::ResolveTarget for RecordingAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         self.targets.push(target.clone());
         if self.deny_numeric && matches!(target, Target::Address(_)) {
             return Err(BoundaryError::new(
@@ -627,7 +643,7 @@ impl crate::target::ResolveTarget for RecordingAuthorizer {
         }
         Ok(Authorized {
             declared: target.clone(),
-            addresses: vec![self.address],
+            selected: vec![crate::target::SelectedAddress::new(self.address)],
         })
     }
 }

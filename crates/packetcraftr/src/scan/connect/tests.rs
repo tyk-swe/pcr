@@ -218,3 +218,70 @@ fn connect_scan_keeps_probe_past_peer_reset() {
 fn connect_scan_probe_through_peer_reset() {
     assert_open_without_local_address(Fault::LocalQuery(io::ErrorKind::NotConnected));
 }
+
+#[derive(Clone)]
+struct Recorded {
+    endpoints: Arc<std::sync::Mutex<Vec<SocketAddr>>>,
+    closed: Arc<AtomicUsize>,
+}
+impl Provider for Recorded {
+    type Stream = Socket;
+    fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> Result<Socket, tcp::Error> {
+        self.endpoints.lock().expect("recorded").push(endpoint);
+        Ok(Socket {
+            peer: endpoint,
+            closed: Arc::clone(&self.closed),
+            fault: None,
+        })
+    }
+}
+
+#[test]
+fn connect_reaches_the_provider_with_the_scoped_socket() {
+    let recorded = Recorded {
+        endpoints: Arc::new(std::sync::Mutex::new(Vec::new())),
+        closed: Arc::new(AtomicUsize::new(0)),
+    };
+    let client = client(recorded.clone());
+    let request = Request {
+        targets: crate::target::Selection {
+            include: vec![crate::target::Specification::Target(
+                "fe80::1%fixture0".parse().expect("scoped target"),
+            )],
+            exclude: Vec::new(),
+        },
+        transport: Transport::Tcp,
+        udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
+        address_family: crate::target::Family::Any,
+        ports: vec![443],
+        attempts: 1,
+        timeout: Duration::from_secs(5),
+        probes_per_second: None,
+        max_in_flight: 1,
+        limits: Limits::default(),
+        route: Default::default(),
+        collection: Default::default(),
+    };
+    let report = collect(&client, request).expect("scoped connect");
+    let endpoints = recorded.endpoints.lock().expect("recorded");
+    let [endpoint] = endpoints.as_slice() else {
+        panic!("exactly one scoped connect");
+    };
+    let std::net::SocketAddr::V6(socket) = endpoint else {
+        panic!("a scoped target must connect on SocketAddrV6");
+    };
+    assert_eq!(
+        socket.ip(),
+        &std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)
+    );
+    assert_eq!(
+        socket.scope_id(),
+        1,
+        "the resolved interface index is the scope"
+    );
+    assert_eq!(
+        report.endpoints[0].scope.as_ref().unwrap().interface.index,
+        1
+    );
+}

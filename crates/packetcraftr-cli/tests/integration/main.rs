@@ -51,6 +51,8 @@ mod published_schema_conformance;
 mod recipe_payload_contracts;
 mod resource_diagnostic_contracts;
 mod scan_payload_contracts;
+mod scanner_corpus_conformance;
 mod stdout_failure_contracts;
+mod target_planning_contracts;
 mod tls_workflow_contracts;
 mod udp_profile_contracts;

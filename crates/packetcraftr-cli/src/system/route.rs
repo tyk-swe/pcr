@@ -70,8 +70,22 @@ pub(super) fn destination(
     let target = destination
         .parse::<packetcraftr::target::Target>()
         .map_err(CliError::classified)?;
+    if matches!(target, packetcraftr::target::Target::ScopedAddress(_)) {
+        return Err(CliError::classified(
+            packetcraftr::target::Error::ZoneCapability {
+                zone: match &target {
+                    packetcraftr::target::Target::ScopedAddress(scoped) => scoped.zone().clone(),
+                    _ => unreachable!("checked above"),
+                },
+            },
+        ));
+    }
     let resolved = policy
-        .resolve_target(&target, &packetcraftr::target::SystemResolver)
+        .resolve_target(
+            &target,
+            &packetcraftr::target::SystemResolver,
+            &crate::invocation::passive_lookup(),
+        )
         .map_err(CliError::classified)?;
     let ip_version = packet
         .iter()

@@ -30,8 +30,14 @@ The default window is one probe. --rate bounds probe starts across the operation
 larger windows overlap response waits. Planned duration conservatively includes
 timeout waves and pacing delays; it is not an achieved-throughput guarantee.
 
-Multiple targets accept IP addresses, hostnames, and bounded CIDRs. --exclude
-removes numeric addresses/CIDRs; --max-targets bounds the distinct selection.
+Multiple targets accept IP addresses, hostnames, scoped fe80::/10%zone
+targets, and bounded CIDRs. --targets-file/- and --exclude-file/- read
+line-oriented manifests (one declaration per line, # comments); at most one
+stdin consumer is admitted across include/exclude/payload/profile inputs.
+--exclude removes numeric addresses/CIDRs; --max-targets bounds the distinct
+selection. --list publishes the exact selected target plan with origins and
+resolved scopes without transmitting, capturing, or connecting; hostname
+resolution still requires its policy opt-in and is reported as performed.
 --connect uses ordinary TCP sockets, requires no raw-packet privileges, and caps
 overlapping connections at 16. It reports socket outcomes and rejects packet
 route overrides. Hostname lookup requires the existing policy opt-in.
@@ -120,9 +126,19 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1)]
     pub(crate) max_in_flight: usize,
 
+    #[arg(long)]
+    pub(crate) list: bool,
+    #[arg(value_name = "TARGET", num_args = 0..)]
     /// Explicit IP addresses, hostnames, or bounded CIDRs, in selection order.
-    #[arg(value_name = "TARGET", required = true, num_args = 1..)]
     pub(crate) targets: Vec<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) targets_file: Vec<std::path::PathBuf>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) exclude_file: Vec<std::path::PathBuf>,
+    #[arg(long, value_name = "BYTES")]
+    pub(crate) max_manifest_bytes: Option<usize>,
+    #[arg(long, value_name = "LINES")]
+    pub(crate) max_manifest_lines: Option<usize>,
     /// Numeric IP or CIDR to exclude; repeat as needed.
     #[arg(long = "exclude", value_name = "IP_OR_CIDR")]
     pub(crate) exclusions: Vec<packetcraftr::target::Network>,

@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M1][m1] | [M7][m7], and the ground-truth [close gate][close-gates] of every milestone that publishes scanner results |
+| In progress | [M1][m1] | [M7][m7], and the ground-truth [close gate][close-gates] of every milestone that publishes scanner results |
 
 Nothing in the repository today says what a scanner result *should* be for a
 given network condition, and nothing measures a live workflow end to end.
@@ -92,6 +92,29 @@ A repeatable benchmark for each live workflow, run against corpus scenarios.
 4. Whether benchmarks run in CI or on demand (recommended: on demand with
    recorded results, until run-to-run variance on hosted runners is measured).
 
+## Decisions made
+
+1. **The corpus inventory is a versioned document.** The authored inventory
+   lives at [`docs/scanner-corpus.v1.json`][corpus] under schema
+   [`packetcraftr.scanner-corpus/v1`][corpus-schema]; adding or changing a
+   scenario is a reviewed change to both.
+2. **Scenarios are provisioned by injected providers, not namespace
+   fixtures.** `examples/scanner_fixture` runs the real `Client` scan and
+   traceroute paths against deterministic in-process providers under
+   `tests/common/scanner_fixture/`, which never perform native I/O; every
+   platform receives identical inputs, and compilation alone is not claimed
+   as proof of identical native semantics. Native loopback TCP connect cells
+   run through the real CLI binary instead.
+3. **The comparison executable is a pinned official Nmap 7.991 build.**
+   Acquisition metadata (URL, SHA-256, configure flags, `--version` output)
+   is recorded under `target/validation/` per run; Nmap source and binaries
+   are never vendored.
+4. **Benchmarks run on demand.** `scripts/benchmark-scanner.py` repeats the
+   88-condition matrix (72 raw scan + 12 traceroute + 4 native connect) a
+   recorded number of times and measures exact-process peak RSS with the
+   `wait4` resource harness; retained-state charges are the workflows' own
+   `retained_evidence_bytes`, not estimates.
+
 ## Exit criteria
 
 - [ ] The fixture inventory specifies, for every scenario, an independent
@@ -105,6 +128,36 @@ A repeatable benchmark for each live workflow, run against corpus scenarios.
       memory.
 - [ ] The benchmark methodology is reviewed before any dependent feature is
       claimed complete.
+
+## Notes
+
+The frozen `target/validation/scanner-baseline.json` records the initial
+expectation mismatches and fixture-timing defect, and the post-review
+`scanner-baseline-reviewed.json` is likewise frozen history. The latest
+measured snapshot is `target/validation/scanner-baseline-final.json`
+(status `incomplete`, exit 1), which records three repetitions of all 88
+cells — 216 raw-scan and 36
+traceroute case-runs through the generated injected-provider fixture plus 12
+native loopback connect runs through the real CLI. Every exercised cell
+agrees with the corpus's independent expectations, including `closed` over
+`icmp`, which the corpus states as `unreachable` for an echo probe that
+carries no port — the corpus's per-transport expectation, not a classifier
+workaround. The six native IPv6 connect cells are unavailable in this
+environment (`Cannot assign requested address` on `::1` bind), an honest
+environment gap recorded as unavailable rather than product evidence; the
+six native IPv4 connect cells agree with Nmap.
+
+Coverage is deliberately asymmetric: raw-scan and traceroute truth comes
+from generated injected providers (deterministic, portable, never native
+I/O), while TCP connect coverage is the native loopback workflow — no full
+Nmap-versus-raw comparison is claimed. Peak process memory is exact-process
+peak RSS measured by the POSIX `wait4` resource harness over each child's
+lifetime; the Windows-equivalent peak is unavailable under that method and
+is not fabricated.
+
+Comparison is present and the corpus/evaluator review is done, but the
+unsupported-workflow limitations and native IPv6 connect gap remain open, so
+M2 stays **In progress**.
 
 [m1]: m01-claims-evidence.md
 [m1-vocabulary]: m01-claims-evidence.md#m11-evidence-vocabulary
@@ -120,3 +173,6 @@ A repeatable benchmark for each live workflow, run against corpus scenarios.
 [nmap-guide]: https://nmap.org/book/man.html
 [nmap-download]: https://nmap.org/download.html
 [nmap-performance]: https://nmap.org/book/man-performance.html
+
+[corpus]: ../scanner-corpus.v1.json
+[corpus-schema]: ../../schemas/packetcraftr.scanner-corpus.v1.schema.json

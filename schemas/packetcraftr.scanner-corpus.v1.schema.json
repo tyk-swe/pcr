@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "packetcraftr.scanner-corpus/v1",
+  "title": "Independent scanner ground-truth inventory",
+  "type": "object",
+  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "packetcraftr.scanner-corpus/v1"},
+    "dataset_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "families": {"const": ["ipv4", "ipv6"]},
+    "transports": {"const": ["tcp", "udp", "icmp"]},
+    "fixture_addresses": {
+      "type": "object",
+      "required": ["ipv4", "ipv6"],
+      "additionalProperties": false,
+      "properties": {"ipv4": {"$ref": "#/$defs/addresses"}, "ipv6": {"$ref": "#/$defs/addresses"}}
+    },
+    "request": {
+      "type": "object",
+      "required": ["attempts", "ports", "timeout_ms", "max_duration_ms", "max_probes", "max_evidence_bytes", "windows"],
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {"const": 1},
+        "ports": {"const": [443]},
+        "timeout_ms": {"const": 20},
+        "max_duration_ms": {"const": 2000},
+        "max_probes": {"const": 1},
+        "max_evidence_bytes": {"const": 65536},
+        "windows": {"const": [1, 2]}
+      }
+    },
+    "nmap": {
+      "type": "object",
+      "required": ["version", "acquisition", "connect_arguments", "limitations"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"const": "7.991"},
+        "acquisition": {"$ref": "#/$defs/text"},
+        "connect_arguments": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "limitations": {"$ref": "#/$defs/text"}
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "provision", "expected", "divergence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"enum": ["responsive", "closed", "blocked", "silent", "malformed", "unrelated"]},
+          "condition": {"$ref": "#/$defs/text"},
+          "provision": {"$ref": "#/$defs/text"},
+          "expected": {
+            "type": "object",
+            "required": ["attempt_classification", "status", "attributed_response"],
+            "additionalProperties": false,
+            "properties": {
+              "attempt_classification": {"enum": ["open", "closed", "filtered", "timeout"]},
+              "status": {"enum": ["response", "timeout"]},
+              "attributed_response": {"type": "boolean"}
+            }
+          },
+          "expected_by_transport": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "icmp": {
+                "type": "object",
+                "required": ["attempt_classification", "status", "attributed_response"],
+                "additionalProperties": false,
+                "properties": {
+                  "attempt_classification": {"const": "unreachable"},
+                  "status": {"const": "response"},
+                  "attributed_response": {"const": true}
+                }
+              }
+            }
+          },
+          "divergence": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "native_connect_scenarios": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "expected_outcome", "expected_classification", "nmap_expected", "divergence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"enum": ["connect-responsive", "connect-closed"]},
+          "condition": {"$ref": "#/$defs/text"},
+          "expected_outcome": {"enum": ["connected", "refused"]},
+          "expected_classification": {"enum": ["open", "closed"]},
+          "nmap_expected": {"enum": ["open", "closed"]},
+          "divergence": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "traceroute_scenarios": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "expected_termination", "expected_status", "expected_attributed_response", "divergence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"enum": ["responsive", "silent"]},
+          "condition": {"$ref": "#/$defs/text"},
+          "expected_termination": {"enum": ["destination_reached", "timeout"]},
+          "expected_status": {"enum": ["response", "timeout"]},
+          "expected_attributed_response": {"type": "boolean"},
+          "divergence": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source", "retrieved", "transforms", "license", "license_rationale", "maintainer", "refresh", "coverage"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {"$ref": "#/$defs/text"},
+        "retrieved": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "transforms": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "license": {"const": "AGPL-3.0-only"},
+        "license_rationale": {"$ref": "#/$defs/text"},
+        "maintainer": {"$ref": "#/$defs/text"},
+        "refresh": {"$ref": "#/$defs/text"},
+        "coverage": {"$ref": "#/$defs/text"}
+      }
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "addresses": {
+      "type": "object",
+      "required": ["source", "destination", "router"],
+      "additionalProperties": false,
+      "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "router": {"type": "string"}}
+    }
+  }
+}

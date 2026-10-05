@@ -95,6 +95,10 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         self.errors
     }
 
+    pub(crate) fn retained_evidence_bytes(&self) -> usize {
+        self.state.retained_evidence_bytes()
+    }
+
     pub(crate) fn into_classifier(self) -> K {
         self.classifier
     }

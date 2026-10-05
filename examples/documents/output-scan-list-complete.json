@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "method": "target_list",
+    "target": "fe80::1%eth0",
+    "resolution_performed": false,
+    "count": 1,
+    "duplicates": []
+  },
+  "diagnostics": []
+}

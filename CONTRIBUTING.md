@@ -105,6 +105,17 @@ owning crate's regression fixtures, not only CI artifacts. Update the nightly
 pin (in `ci.yml` and `fuzz.yml`) intentionally after a local smoke and record it
 with corpus changes.
 
+`python3 scripts/benchmark-scanner.py` measures the scanner corpus
+(`docs/scanner-corpus.v1.json`, schema
+`schemas/packetcraftr.scanner-corpus.v1.schema.json`): deterministic
+injected-provider cells run through `examples/scanner_fixture` on the real
+`Client` scan/traceroute paths (never native I/O), native connect cells run
+the real CLI on loopback, and an optional pinned Nmap executable is compared
+for agreement only. Each repetition executes all 88 conditions and the report
+(JSON) records per-case observations, exact retained evidence bytes, and
+peak process RSS measured with `wait4`; it never synthesizes accuracy values —
+absent tools are recorded as unavailable.
+
 `python3 scripts/check-decode-oracle.py --binary target/release/packetcraftr`
 compares curated IPv4/IPv6/extension/fragment/TCP-option/DNS fields and TLS JA3
 with TShark 4.6.4, accounting explicitly for opaque physical fragment children;
@@ -138,6 +149,13 @@ Native changes should cover affected unavailable-backend, stale-interface,
 timeout, cancellation, partial-I/O, accounting, and cleanup behavior using
 fake providers or isolated loopback tests. Record unavailable platform checks
 as unavailable.
+
+Scanner changes keep host observations, port inference, attempt outcomes, and
+operational failures in the separate vocabularies
+[scanner-evidence.md](docs/scanner-evidence.md) defines. Any bundled port,
+service, OS, or vendor data requires a completed provenance manifest and
+per-source license review under
+[scanner-data-policy.md](docs/scanner-data-policy.md) before it is imported.
 
 ## Verification and consumer changes
 

@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v6.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v7.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -35,6 +35,23 @@ Summary counters cover all accepted evidence. Retention only changes detail
 lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
+
+## Output family v7
+
+`packetcraftr.output/v7` is the current production family. It preserves every
+v6 meaning and adds:
+
+- the `target_list` branch of `scan` (`--list`), discriminated by
+  `method: "target_list"` in aggregate results, `target` stream records, and
+  the `complete` terminal; and
+- an optional `scope` object (`zone` text plus resolved `interface` identity)
+  on scoped targets in scan/connect probes, endpoints, sent evidence, and
+  failure records, plus the exact `retained_evidence_bytes` charge on scan,
+  connect, and traceroute summaries.
+
+The frozen `packetcraftr.output/v6` family stays bundled for previously
+published evidence; new output never reuses its identity. The reference
+consumer accepts both families.
 
 ## Streams and the reference consumer
 

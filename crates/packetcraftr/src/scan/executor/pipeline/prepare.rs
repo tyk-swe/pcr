@@ -18,7 +18,7 @@ use std::{
 };
 pub(super) struct Plan<'c, P, K> {
     pub discovery: Discovery<'c, P, K>,
-    pub routes: HashMap<IpAddr, AuthorizedRoute>,
+    pub routes: HashMap<(IpAddr, Option<interface::Id>), AuthorizedRoute>,
     pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
     pub base_bytes: usize,
@@ -64,11 +64,12 @@ pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
                 ),
             ));
         }
-        let route = match routes.entry(probe.address) {
+        let scope = probe.scope.as_ref().map(|scope| scope.interface.clone());
+        let route = match routes.entry((probe.address, scope)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let route = admission
-                    .route(&packet, *entry.key())
+                    .route_on(&packet, entry.key().0, entry.key().1.as_ref())
                     .map_err(BoundaryError::from_error)?;
                 if !interfaces.contains(route.interface()) {
                     interfaces.push(route.interface().clone());

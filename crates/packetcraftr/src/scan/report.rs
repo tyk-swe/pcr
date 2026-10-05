@@ -68,6 +68,7 @@ impl std::fmt::Display for Classification {
 pub struct ProbeEvidence {
     pub sequence: u64,
     pub address: IpAddr,
+    pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
     pub attempt: u32,
@@ -85,6 +86,7 @@ pub struct ProbeEvidence {
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub address: IpAddr,
+    pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
     pub classification: Classification,
@@ -99,6 +101,7 @@ pub struct Aggregate {
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<Diagnostic>,
+    pub retained_evidence_bytes: usize,
     pub stats: Stats,
     pub rtt: Rtt,
 }
@@ -190,6 +193,7 @@ pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub counts: ClassificationCounts,
+    pub retained_evidence_bytes: usize,
     pub stats: Stats,
     pub rtt: Rtt,
 }
@@ -224,7 +228,14 @@ pub struct Collector(Shared<Collected>);
 #[derive(Default)]
 struct Collected {
     endpoints: Vec<Endpoint>,
-    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
+    endpoint_indices: HashMap<
+        (
+            IpAddr,
+            Option<u16>,
+            Option<packetcraftr_netio::interface::Id>,
+        ),
+        usize,
+    >,
     probes: u64,
     undecoded: Vec<Frame>,
     diagnostics: Vec<Diagnostic>,
@@ -254,12 +265,15 @@ impl Collected {
         let address = evidence.address;
         let transport = evidence.transport;
         let port = evidence.port;
+        let scope = evidence.scope.clone();
+        let interface = scope.as_ref().map(|scope| scope.interface.clone());
         let endpoint = index_or_push(
             &mut self.endpoints,
             &mut self.endpoint_indices,
-            (address, port),
+            (address, port, interface),
             || Endpoint {
                 address,
+                scope,
                 transport,
                 port,
                 classification: Classification::Timeout,
@@ -299,6 +313,7 @@ impl Collector {
             endpoints,
             undecoded,
             diagnostics,
+            retained_evidence_bytes: report.retained_evidence_bytes,
             stats: report.stats,
             rtt: report.rtt,
         })

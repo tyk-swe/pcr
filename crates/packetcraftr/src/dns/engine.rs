@@ -347,12 +347,17 @@ where
         );
         self.execution.enforce(attempt)?;
         let resolved = resolved?;
-        self.report.server = resolved.declared;
-        let addresses = resolved.addresses;
+        if resolved.targets.iter().any(|target| target.scope.is_some()) {
+            return Err(Error::ScopedServer {
+                server: resolved.declared,
+            });
+        }
+        self.report.server = resolved.declared.clone();
+        let addresses = resolved.addresses();
         FamilyGate::new(self.request.address_family, |family| Error::Family {
             family: family.label(),
         })
-        .require(&addresses)?;
+        .require(&resolved.targets)?;
         for address in &addresses {
             if !self.report.resolved_addresses.contains(address) {
                 self.report.resolved_addresses.push(*address);

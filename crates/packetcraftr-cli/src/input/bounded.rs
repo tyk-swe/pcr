@@ -20,6 +20,8 @@ pub(crate) enum InputKind {
     /// The server reply a generated conversation carries.
     SessionResponse,
     Capture,
+    Manifest,
+    UdpProfiles,
 }
 
 impl InputKind {
@@ -31,6 +33,8 @@ impl InputKind {
             Self::Payload => "UDP payload",
             Self::SessionResponse => "session response",
             Self::Capture => "capture",
+            Self::Manifest => "target manifest",
+            Self::UdpProfiles => "UDP profiles",
         }
     }
 
@@ -42,6 +46,10 @@ impl InputKind {
             Self::Payload => "--udp-payload-hex or --udp-payload-file",
             Self::SessionResponse => "--session-response-file",
             Self::Capture => "a capture path, or use - with redirected capture stdin",
+            Self::Manifest => {
+                "--targets-file or --exclude-file PATH, or - with redirected manifest stdin"
+            }
+            Self::UdpProfiles => "--udp-profiles PATH, or - with redirected document stdin",
         }
     }
 
@@ -57,12 +65,23 @@ impl InputKind {
             Self::Payload => "provide --udp-payload-hex or --udp-payload-file",
             Self::SessionResponse => "provide a non-empty --session-response-file",
             Self::Capture => "provide a capture path or pipe PCAP/PCAPNG bytes with - as the path",
+            Self::Manifest => {
+                "provide a --targets-file or --exclude-file path, or pipe a manifest with -"
+            }
+            Self::UdpProfiles => {
+                "provide a --udp-profiles path, or pipe the document to stdin with -"
+            }
         }
     }
 
     fn oversized_error(self, actual: usize, limit: usize) -> CliError {
         match self {
-            Self::Recipe | Self::Payload | Self::SessionResponse | Self::Capture => CliError::new(
+            Self::Recipe
+            | Self::Payload
+            | Self::SessionResponse
+            | Self::Capture
+            | Self::Manifest
+            | Self::UdpProfiles => CliError::new(
                 Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),
@@ -175,6 +194,15 @@ pub(crate) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Ve
     let stdin = io::stdin();
     require_redirected_stdin(kind, stdin.is_terminal())?;
     read_bounded(stdin.lock(), max_bytes, kind)
+}
+
+pub(crate) fn read_stdin_bounded_allow_empty(
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    let stdin = io::stdin();
+    require_redirected_stdin(kind, stdin.is_terminal())?;
+    read_bounded_allow_empty(stdin.lock(), max_bytes, kind)
 }
 
 fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {

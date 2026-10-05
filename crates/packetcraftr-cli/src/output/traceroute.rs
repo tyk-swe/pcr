@@ -76,6 +76,7 @@ pub struct Report {
     pub destination_port: Option<u16>,
     pub hops: Vec<Hop>,
     pub undecoded: Vec<Undecoded>,
+    pub retained_evidence_bytes: usize,
     pub completion: Completion,
 }
 
@@ -93,6 +94,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
             undecoded,
             termination,
             diagnostics,
+            retained_evidence_bytes,
             stats,
         } = result;
         let hop_outputs = hops
@@ -126,6 +128,7 @@ impl TryFrom<library::Aggregate> for Published<Report> {
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
+                retained_evidence_bytes,
                 completion: termination.into(),
             },
             diagnostics,

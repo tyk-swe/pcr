@@ -3,6 +3,7 @@
 
 pub(super) mod arguments;
 mod connect;
+mod list;
 mod payload;
 mod profiles;
 mod rendering;
@@ -11,9 +12,12 @@ use crate::output::contract::Format;
 
 use crate::output;
 
+use packetcraftr_core::error::Kind;
+
 use self::arguments::Args;
 use super::execution;
 use crate::errors::CliError;
+use crate::input::manifest;
 use crate::rendering::StreamEncoder;
 use crate::system::{Runtime, prepare_workflow};
 
@@ -69,7 +73,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         connect,
         max_in_flight,
         max_prepared_bytes,
+        list,
         targets,
+        targets_file,
+        exclude_file,
+        max_manifest_bytes,
+        max_manifest_lines,
         exclusions,
         max_targets,
         transport,
@@ -89,21 +98,49 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         limits,
         policy,
     } = arguments;
+    let stdin_consumers = targets_file
+        .iter()
+        .chain(exclude_file.iter())
+        .filter(|path| manifest::is_stdin(path))
+        .count()
+        + usize::from(udp_payload_file.as_deref().is_some_and(manifest::is_stdin))
+        + usize::from(udp_profiles.as_deref().is_some_and(manifest::is_stdin));
+    if stdin_consumers > 1 {
+        return Err(CliError::new(
+            Kind::Usage,
+            "stdin (`-`) can supply at most one of --targets-file, --exclude-file, --udp-payload-file, or --udp-profiles",
+        ));
+    }
+    let selection = ingest_targets(
+        &targets,
+        &targets_file,
+        &exclusions,
+        &exclude_file,
+        max_manifest_bytes,
+        max_manifest_lines,
+    )?;
+    selection.targets.validate().map_err(CliError::classified)?;
+    let targets = selection.targets;
+    if list {
+        return list::run(
+            targets,
+            list::Options {
+                origins: selection.origins,
+                family,
+                max_targets,
+                max_duration: duration.max_duration(),
+                policy,
+            },
+            format,
+            stream,
+        );
+    }
     let udp_payload = payload::read(
         transport,
         udp_payload_hex.as_deref(),
         udp_payload_file.as_deref(),
     )?;
     let udp_profiles = profiles::load(udp_profiles.as_deref(), transport)?;
-    let targets = packetcraftr::target::Selection {
-        include: targets
-            .iter()
-            .map(|target| target.parse())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(CliError::classified)?,
-        exclude: exclusions,
-    };
-    targets.validate().map_err(CliError::classified)?;
     let queue_limits = limits.into_limits();
     let scan_limits = packetcraftr::scan::Limits {
         max_prepared_bytes,
@@ -174,4 +211,125 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             complete: rendering::emit_complete,
         },
     )
+}
+
+pub(super) struct Ingested {
+    pub(crate) targets: packetcraftr::target::Selection,
+    pub(crate) origins: Vec<manifest::Declaration>,
+}
+
+fn ingest_targets(
+    positional: &[String],
+    targets_file: &[std::path::PathBuf],
+    exclusions: &[packetcraftr::target::Network],
+    exclude_file: &[std::path::PathBuf],
+    max_manifest_bytes: Option<usize>,
+    max_manifest_lines: Option<usize>,
+) -> Result<Ingested, CliError> {
+    let bounds = manifest::ManifestBounds::new(
+        max_manifest_bytes.unwrap_or(manifest::MAX_MANIFEST_BYTES),
+        max_manifest_lines.unwrap_or(manifest::MAX_MANIFEST_LINES),
+    )?;
+    let mut include = Vec::with_capacity(positional.len());
+    let mut origins = Vec::with_capacity(positional.len());
+    for (position, target) in positional.iter().enumerate() {
+        include.push(
+            target
+                .parse::<packetcraftr::target::Specification>()
+                .map_err(|source| {
+                    declaration_error(source, &format!("argument {}", position + 1))
+                })?,
+        );
+        origins.push(manifest::Declaration {
+            token: target.clone(),
+            source: manifest::DeclarationSource::Argument {
+                position: position + 1,
+            },
+            line: None,
+        });
+    }
+    let mut budget = bounds.budget();
+    for declaration in manifest::read_with_budget(
+        &targets_file
+            .iter()
+            .map(|path| manifest::ManifestSource::open(path))
+            .collect::<Vec<_>>(),
+        &mut budget,
+    )? {
+        include.push(
+            declaration
+                .token
+                .parse::<packetcraftr::target::Specification>()
+                .map_err(|source| declaration_error(source, &source_label(&declaration)))?,
+        );
+        origins.push(declaration);
+    }
+    if include.is_empty() {
+        return Err(CliError::new(
+            Kind::Usage,
+            "at least one target is required: pass TARGET or --targets-file",
+        ));
+    }
+    let mut exclude = exclusions.to_vec();
+    for declaration in manifest::read_with_budget(
+        &exclude_file
+            .iter()
+            .map(|path| manifest::ManifestSource::open(path))
+            .collect::<Vec<_>>(),
+        &mut budget,
+    )? {
+        exclude.push(
+            declaration
+                .token
+                .parse::<packetcraftr::target::Network>()
+                .map_err(|source| declaration_error(source, &source_label(&declaration)))?,
+        );
+    }
+    Ok(Ingested {
+        targets: packetcraftr::target::Selection { include, exclude },
+        origins,
+    })
+}
+
+fn source_label(declaration: &manifest::Declaration) -> String {
+    let (source, _) = declaration.source.describe();
+    match declaration.line {
+        Some(line) => format!("{source}:{line}"),
+        None => source,
+    }
+}
+
+fn declaration_error(
+    source: impl std::error::Error + Send + Sync + 'static,
+    label: &str,
+) -> CliError {
+    CliError::caused(
+        Kind::Usage,
+        &DeclarationAt {
+            label: label.to_owned(),
+            source: Box::new(source),
+        },
+    )
+}
+
+#[derive(Debug)]
+struct DeclarationAt {
+    label: String,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl std::fmt::Display for DeclarationAt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "invalid declaration at {}: {}",
+            self.label, self.source
+        )
+    }
+}
+
+impl std::error::Error for DeclarationAt {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.source)
+    }
 }

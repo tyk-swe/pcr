@@ -261,12 +261,22 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         destination: Option<IpAddr>,
         routes: &R,
     ) -> Result<route::Plan, Error> {
+        self.plan_with(packet, destination, &self.options.plan, routes)
+    }
+
+    fn plan_with<R: RouteProvider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        route_options: &route::Options,
+        routes: &R,
+    ) -> Result<route::Plan, Error> {
         self.check()?;
         let plan = self.within(crate::deadline::PASSIVE_LOOKUP_TIMEOUT, |deadline| {
             self.client.authorize_and_plan(
                 packet,
                 destination,
-                &self.options.plan,
+                route_options,
                 routes,
                 deadline,
                 || self.check(),
@@ -370,16 +380,75 @@ impl<'c, P: PacketProviders, K: Clock> Admitting<'c, P, K> {
         self.stages.admit(&mut self.budget, packet, routes)
     }
 
+    #[cfg(test)]
     pub(crate) fn route(
         &self,
         packet: &Packet,
         destination: IpAddr,
     ) -> Result<AuthorizedRoute, Error> {
-        let plan = self.stages.plan(
+        self.route_on(packet, destination, None)
+    }
+
+    pub(crate) fn route_on(
+        &self,
+        packet: &Packet,
+        destination: IpAddr,
+        interface: Option<&interface::Id>,
+    ) -> Result<AuthorizedRoute, Error> {
+        let route_options;
+        let options = match interface {
+            Some(id) => {
+                let conflicts = match self.stages.options.plan.interface.as_ref() {
+                    Some(route::Interface::Id(requested)) => *requested != *id,
+                    Some(route::Interface::Name(name)) => *name != id.name,
+                    Some(route::Interface::Index(index)) => index.get() != id.index,
+                    None => false,
+                };
+                if conflicts {
+                    let requested = self
+                        .stages
+                        .options
+                        .plan
+                        .interface
+                        .as_ref()
+                        .expect("conflicting interface")
+                        .clone();
+                    let (name, index) = match &requested {
+                        route::Interface::Id(id) => (id.name.clone(), id.index),
+                        route::Interface::Name(name) => (name.clone(), 0),
+                        route::Interface::Index(index) => (index.to_string(), index.get()),
+                    };
+                    return Err(Error::Plan(route::Error::InterfaceMismatch {
+                        requested: name,
+                        requested_index: index,
+                        selected: id.name.clone(),
+                        selected_index: id.index,
+                    }));
+                }
+                route_options = route::Options {
+                    interface: Some(route::Interface::Id(id.clone())),
+                    ..self.stages.options.plan.clone()
+                };
+                &route_options
+            }
+            None => &self.stages.options.plan,
+        };
+        let plan = self.stages.plan_with(
             packet,
             Some(destination),
+            options,
             self.stages.client.providers.route(),
         )?;
+        if let Some(expected) = interface
+            && plan.decision.interface != *expected
+        {
+            return Err(Error::Plan(route::Error::InterfaceMismatch {
+                requested: expected.name.clone(),
+                requested_index: expected.index,
+                selected: plan.decision.interface.name.clone(),
+                selected_index: plan.decision.interface.index,
+            }));
+        }
         Ok(AuthorizedRoute { plan })
     }
 

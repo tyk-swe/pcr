@@ -44,6 +44,10 @@ pub(super) fn read(
             .map_err(|source| CliError::caused(Kind::Usage, &source));
     }
     if let Some(path) = path {
+        if crate::input::manifest::is_stdin(path) {
+            return crate::input::read_stdin_bounded(MAX_UDP_PAYLOAD_BYTES, InputKind::Payload)
+                .map(Bytes::from);
+        }
         return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Payload)
             .map(Bytes::from);
     }

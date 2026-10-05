@@ -161,10 +161,25 @@ impl Policy {
         &self,
         target: &Target,
         resolver: &R,
+        deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Authorized, TargetError> {
         self.validate()?;
-        let addresses = match target {
-            Target::Address(address) => vec![*address],
+        let selected = match target {
+            Target::Address(address) => vec![crate::target::SelectedAddress::new(*address)],
+            Target::ScopedAddress(scoped) => {
+                self.authorize_destination(scoped.address().into())?;
+                let interface = crate::target::valid_zone_interface(
+                    scoped.zone(),
+                    resolver.resolve_zone(scoped.zone(), deadline)?,
+                )?;
+                vec![crate::target::SelectedAddress {
+                    address: scoped.address().into(),
+                    scope: Some(crate::target::ResolvedZone {
+                        zone: scoped.zone().clone(),
+                        interface,
+                    }),
+                }]
+            }
             Target::Hostname(hostname) => {
                 // This authorization must precede DNS, route lookup, capture,
                 // neighbor discovery, and transmission side effects.
@@ -174,22 +189,30 @@ impl Policy {
                     resolver.resolve(hostname, self.max_resolved_addresses)?,
                     self.max_resolved_addresses,
                 )?
+                .into_iter()
+                .map(crate::target::SelectedAddress::new)
+                .collect()
             }
         };
-        self.authorize_selected(target, addresses)
+        self.authorize_selected(target, selected)
     }
 
     fn authorize_selected(
         &self,
         target: &Target,
-        addresses: Vec<IpAddr>,
+        selected: Vec<crate::target::SelectedAddress>,
     ) -> Result<Authorized, TargetError> {
-        for address in &addresses {
-            self.authorize_destination(*address)?;
+        for record in &selected {
+            self.authorize_destination(record.address)?;
+            if crate::target::requires_scope(record.address) && record.scope.is_none() {
+                return Err(TargetError::MissingScope {
+                    address: record.address,
+                });
+            }
         }
         Ok(Authorized {
             declared: target.clone(),
-            addresses,
+            selected,
         })
     }
 }
@@ -212,7 +235,11 @@ mod tests {
             ..Policy::default()
         };
         let target = Target::Hostname("example.test".parse().expect("hostname"));
-        policy.resolve_target(&target, &ScriptedResolver::new([answer]))
+        policy.resolve_target(
+            &target,
+            &ScriptedResolver::new([answer]),
+            &crate::test_support::live(),
+        )
     }
 
     #[test]

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashSet;
 use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
@@ -30,8 +29,8 @@ impl<E> FamilyGate<E> {
         self.family
     }
 
-    pub(crate) fn require(&self, addresses: &[IpAddr]) -> Result<(), E> {
-        if addresses.is_empty() {
+    pub(crate) fn require(&self, targets: &[super::SelectedAddress]) -> Result<(), E> {
+        if targets.is_empty() {
             return Err((self.unavailable)(self.family));
         }
         Ok(())
@@ -114,14 +113,14 @@ where
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
 {
-    family.require(&selected.addresses)?;
+    family.require(&selected.targets)?;
     let plan = plan(&selected)?;
     let operation = operation(&plan)?;
     approve_operation(authorizer, operation, deadline, gates)?;
     Ok((selected, plan))
 }
 
-fn resolve_selection<A, G>(
+pub(crate) fn resolve_selection<A, G>(
     authorizer: &mut A,
     targets: DeclaredTargets<'_, G::Error>,
     deadline: &Deadline,
@@ -138,14 +137,57 @@ where
         max_targets,
     } = targets;
     let family = family.family();
-    let mut selected = Vec::new();
-    let mut seen = HashSet::new();
-    let mut specifications = HashSet::new();
+    let mut selected: Vec<super::SelectedAddress> = Vec::new();
+    let mut declarations: Vec<Vec<u32>> = Vec::new();
+    let mut duplicates = Vec::new();
+    let mut seen: std::collections::HashMap<
+        (IpAddr, Option<packetcraftr_netio::interface::Id>),
+        usize,
+    > = std::collections::HashMap::new();
+    let mut admitted: std::collections::HashMap<Specification, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut origin_links = 0usize;
+    let link = |declarations: &mut Vec<Vec<u32>>,
+                target_index: usize,
+                index: usize,
+                deadline: &Deadline,
+                gates: &G| {
+        deadline
+            .enforce()
+            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
+        declarations[target_index].push(index as u32);
+        Ok(())
+    };
+    let mut charge_link = |deadline: &Deadline| -> Result<(), G::Error> {
+        deadline
+            .enforce()
+            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
+        origin_links = origin_links
+            .checked_add(1)
+            .filter(|count| *count <= MAX_CANDIDATES)
+            .ok_or_else(|| {
+                invalid(SelectionError::Limit {
+                    field: "target_origins",
+                    limit: MAX_CANDIDATES,
+                })
+            })?;
+        Ok(())
+    };
     let mut candidates = 0usize;
-    for specification in &selection.include {
-        if !specifications.insert(specification) {
+    for (index, specification) in selection.include.iter().enumerate() {
+        deadline
+            .enforce()
+            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
+        if let Some(indices) = admitted.get(specification) {
+            duplicates.push(index as u32);
+            for &target_index in indices {
+                charge_link(deadline)?;
+                link(&mut declarations, target_index, index, deadline, gates)?;
+            }
             continue;
         }
+        let mut produced: Vec<usize> = Vec::new();
+        let mut produced_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let expanded: Box<dyn Iterator<Item = Target> + '_> = match specification {
             Specification::Target(target) => Box::new(std::iter::once(target.clone())),
             Specification::Network(network) => Box::new(
@@ -168,35 +210,79 @@ where
                         limit: MAX_CANDIDATES,
                     })
                 })?;
-            if let Target::Address(address) = target
-                && (selection.excludes(address)
-                    || seen.contains(&address)
-                    || !family.accepts(address))
-            {
-                continue;
+            let declared_numeric = match &target {
+                Target::Address(address) => Some(*address),
+                Target::ScopedAddress(scoped) => Some(scoped.address().into()),
+                Target::Hostname(_) => None,
+            };
+            if let Some(address) = declared_numeric {
+                if selection.excludes(address) || !family.accepts(address) {
+                    continue;
+                }
+                if target_scope_key(&target).is_none()
+                    && let Some(&merge_index) = seen.get(&(address, None))
+                {
+                    if produced_set.insert(merge_index) {
+                        charge_link(deadline)?;
+                        link(&mut declarations, merge_index, index, deadline, gates)?;
+                        produced.push(merge_index);
+                    }
+                    continue;
+                }
             }
             let resolved = resolve_selected(authorizer, &target, family, deadline, gates)?;
-            for address in resolved.addresses {
+            for record in resolved.targets {
                 deadline
                     .enforce()
                     .map_err(|source| gates.interrupted(G::Step::default(), source))?;
-                if selection.excludes(address) || !seen.insert(address) {
+                if selection.excludes(record.address) {
                     continue;
                 }
-                if selected.len() >= max_targets {
-                    return Err(invalid(SelectionError::Limit {
-                        field: "max_targets",
-                        limit: max_targets,
-                    }));
+                let key = (
+                    record.address,
+                    record.scope.as_ref().map(|scope| scope.interface.clone()),
+                );
+                match seen.entry(key) {
+                    std::collections::hash_map::Entry::Occupied(entry) => {
+                        let target_index = *entry.get();
+                        if produced_set.insert(target_index) {
+                            charge_link(deadline)?;
+                            link(&mut declarations, target_index, index, deadline, gates)?;
+                            produced.push(target_index);
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        if selected.len() >= max_targets {
+                            return Err(invalid(SelectionError::Limit {
+                                field: "max_targets",
+                                limit: max_targets,
+                            }));
+                        }
+                        entry.insert(selected.len());
+                        charge_link(deadline)?;
+                        selected.push(record);
+                        declarations.push(vec![index as u32]);
+                        produced.push(selected.len() - 1);
+                        produced_set.insert(selected.len() - 1);
+                    }
                 }
-                selected.push(address);
             }
         }
+        admitted.insert(specification.clone(), produced);
     }
     Ok(SelectedTargets {
         declared: selection.to_string(),
-        addresses: selected,
+        targets: selected,
+        declarations,
+        duplicates,
     })
+}
+
+fn target_scope_key(target: &Target) -> Option<()> {
+    match target {
+        Target::ScopedAddress(_) => Some(()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -235,7 +321,11 @@ mod tests {
     }
 
     impl crate::target::ResolveTarget for RecordingAuthorizer {
-        fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+        fn resolve_and_authorize(
+            &mut self,
+            target: &Target,
+            _deadline: &Deadline,
+        ) -> Result<Authorized, BoundaryError> {
             self.calls.push(Call::Resolve(target.clone()));
             if let Some(cancellation) = &self.cancel {
                 cancellation.cancel();
@@ -243,13 +333,16 @@ mod tests {
             if self.deny_target {
                 return Err(boundary("the fixture denied the declared target"));
             }
-            let addresses = match target {
+            let selected = match target {
                 Target::Address(address) => vec![*address],
-                Target::Hostname(_) => self.answers.clone(),
+                Target::Hostname(_) | Target::ScopedAddress(_) => self.answers.clone(),
             };
             Ok(Authorized {
                 declared: target.clone(),
-                addresses,
+                selected: selected
+                    .into_iter()
+                    .map(crate::target::SelectedAddress::new)
+                    .collect(),
             })
         }
     }
@@ -377,13 +470,13 @@ mod tests {
                 max_targets: 16,
             },
             selection_error,
-            |selected| Ok(u64::try_from(selected.addresses.len()).unwrap_or(u64::MAX)),
+            |selected| Ok(u64::try_from(selected.targets.len()).unwrap_or(u64::MAX)),
             |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect("admission succeeds");
         assert_eq!(probes, 2);
         assert_eq!(
-            selected.addresses,
+            selected.addresses(),
             [
                 IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
                 IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9)),

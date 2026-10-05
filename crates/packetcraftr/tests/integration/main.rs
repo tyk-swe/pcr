@@ -26,6 +26,7 @@ mod policy_contracts;
 mod probe_tunnel_contracts;
 mod route_contracts;
 mod scan_pipeline_contracts;
+mod scanner_corpus_contracts;
 mod send_set_contracts;
 mod staged_preparation_contracts;
 mod traceroute_contracts;

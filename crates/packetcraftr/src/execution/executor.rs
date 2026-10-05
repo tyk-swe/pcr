@@ -55,6 +55,7 @@ pub(crate) struct WorkflowOverrides {
     pub(crate) timeout: std::time::Duration,
     pub(crate) max_template_packets: usize,
     pub(crate) destination: std::net::IpAddr,
+    pub(crate) interface: Option<packetcraftr_netio::interface::Id>,
     /// The workflow's own evidence limit for this one exchange, or `None` to
     /// keep the executor's ceilings.
     pub(crate) max_responses: Option<usize>,
@@ -74,6 +75,9 @@ where
     ) -> Result<crate::exchange::Aggregate, packetcraftr_core::error::BoundaryError> {
         let mut send = self.send.clone();
         send.destination = Some(overrides.destination);
+        if let Some(interface) = overrides.interface {
+            send.plan.interface = Some(crate::route::Interface::Id(interface));
+        }
         let mut collection = self.collection.clone();
         if let Some(max_responses) = overrides.max_responses {
             collection.max_responses = max_responses;

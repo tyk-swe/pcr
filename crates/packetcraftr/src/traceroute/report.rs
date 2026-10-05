@@ -116,6 +116,7 @@ pub struct Aggregate {
     pub undecoded: Vec<UndecodedEvidence>,
     pub termination: Termination,
     pub diagnostics: Vec<Diagnostic>,
+    pub retained_evidence_bytes: usize,
     pub stats: Stats,
 }
 
@@ -139,6 +140,7 @@ pub struct Report {
     pub strategy: Transport,
     pub destination_port: Option<u16>,
     pub termination: Termination,
+    pub retained_evidence_bytes: usize,
     pub stats: Stats,
 }
 
@@ -212,6 +214,7 @@ impl Collector {
             undecoded,
             termination: report.termination,
             diagnostics,
+            retained_evidence_bytes: report.retained_evidence_bytes,
             stats: report.stats,
         })
     }

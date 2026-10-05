@@ -58,6 +58,7 @@ struct Active<S> {
     pending: tcp::PendingConnect<S>,
     sequence: u64,
     endpoint: SocketAddr,
+    scope: Option<crate::target::ResolvedZone>,
     attempt: u32,
     started: Instant,
     scheduled_at: SystemTime,
@@ -82,6 +83,7 @@ fn execution(
 
 struct Planned {
     endpoints: Vec<SocketAddr>,
+    scopes: Vec<Option<crate::target::ResolvedZone>>,
     count: usize,
     delay: Duration,
     limits: SocketLimits,
@@ -126,7 +128,7 @@ fn planned<A: Authorizer + ResolveTarget>(
         },
         Error::TargetSelection,
         |selected| {
-            let count = probe_count(selected.addresses.len(), ports.len(), request.attempts)?;
+            let count = probe_count(selected.targets.len(), ports.len(), request.attempts)?;
             crate::probe::check_probe_count(&Probes, count, request.limits.max_probes)?;
             let delay = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
             let planned_duration = worst_case_duration(request, count)?;
@@ -136,16 +138,23 @@ fn planned<A: Authorizer + ResolveTarget>(
                 request.limits.max_duration,
             )?;
             let endpoints = selected
-                .addresses
+                .targets
                 .iter()
-                .flat_map(|address| {
-                    ports
-                        .iter()
-                        .map(move |port| SocketAddr::new(*address, *port))
+                .flat_map(|target| ports.iter().map(move |port| socket_endpoint(target, *port)))
+                .collect();
+            let scopes = selected
+                .targets
+                .iter()
+                .flat_map(|target| {
+                    ports.iter().map({
+                        let scope = target.scope.clone();
+                        move |_| scope.clone()
+                    })
                 })
                 .collect();
             Ok(Planned {
                 endpoints,
+                scopes,
                 count,
                 delay,
                 limits: SocketLimits::new(count as u64, 0, 0),
@@ -158,7 +167,19 @@ fn planned<A: Authorizer + ResolveTarget>(
                 .map_err(|source| execution(0, source))
         },
     )?;
-    Ok((selected.addresses, planned))
+    Ok((selected.addresses(), planned))
+}
+
+fn socket_endpoint(selected: &crate::target::SelectedAddress, port: u16) -> SocketAddr {
+    match (selected.address, &selected.scope) {
+        (IpAddr::V6(address), Some(scope)) => SocketAddr::V6(std::net::SocketAddrV6::new(
+            address,
+            port,
+            0,
+            scope.interface.index,
+        )),
+        (address, _) => SocketAddr::new(address, port),
+    }
 }
 
 /// `None` means every native connect admission is still held, for example by
@@ -179,6 +200,7 @@ where
     A: Authorizer + ResolveTarget,
 {
     let endpoint = planned.endpoints[next % planned.endpoints.len()];
+    let scope = planned.scopes[next % planned.endpoints.len()].clone();
     let attempt = (next / planned.endpoints.len()) as u32 + 1;
     let final_endpoints = [endpoint];
     let operation = SocketOperation::new(&final_endpoints, planned.limits)
@@ -200,6 +222,7 @@ where
         pending,
         sequence: next as u64,
         endpoint,
+        scope,
         attempt,
         started: admitted,
         scheduled_at,
@@ -228,6 +251,7 @@ fn settle_active<S: tcp::Stream>(
     Ok(Some(ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,
+        scope: entry.scope,
         attempt: entry.attempt,
         attempted,
         connect_succeeded: None,
@@ -341,6 +365,7 @@ where
     enforce_deadline(&Probes, deadline)?;
     stats.elapsed = clock.now().saturating_duration_since(started);
     stats.rtt = rtt.finish();
+    stats.retained_evidence_bytes = evidence_bytes;
     Ok(Report {
         target: request.targets.to_string(),
         resolved_addresses,
@@ -359,6 +384,7 @@ fn finish_probe<S: tcp::Stream>(
     let mut probe = ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,
+        scope: entry.scope,
         attempt: entry.attempt,
         attempted: result.attempted,
         connect_succeeded: Some(result.result.is_ok()),

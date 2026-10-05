@@ -390,3 +390,4 @@ impl capture::Session for IdleCapture {
         capture::Stats::default()
     }
 }
+pub mod scanner_fixture;

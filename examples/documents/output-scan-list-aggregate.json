@@ -1,0 +1,80 @@
+{
+  "schema": "packetcraftr.output/v7",
+  "command": "scan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "method": "target_list",
+    "target": "192.0.2.1,10.0.0.0/30,192.0.2.1",
+    "resolution_performed": false,
+    "targets": [
+      {
+        "method": "target_list",
+        "address": "192.0.2.1",
+        "origins": [
+          {
+            "index": 0,
+            "source": "argument 1"
+          },
+          {
+            "index": 2,
+            "source": "argument 3"
+          }
+        ]
+      },
+      {
+        "method": "target_list",
+        "address": "10.0.0.0",
+        "origins": [
+          {
+            "index": 1,
+            "source": "argument 2"
+          }
+        ]
+      },
+      {
+        "method": "target_list",
+        "address": "10.0.0.1",
+        "origins": [
+          {
+            "index": 1,
+            "source": "argument 2"
+          }
+        ]
+      },
+      {
+        "method": "target_list",
+        "address": "10.0.0.2",
+        "origins": [
+          {
+            "index": 1,
+            "source": "argument 2"
+          }
+        ]
+      },
+      {
+        "method": "target_list",
+        "address": "10.0.0.3",
+        "origins": [
+          {
+            "index": 1,
+            "source": "argument 2"
+          }
+        ]
+      }
+    ],
+    "duplicates": [
+      {
+        "index": 2,
+        "source": "argument 3"
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "code": "scan.duplicate_declaration",
+      "severity": "warning",
+      "message": "target declaration 3 duplicates an earlier declaration and was coalesced"
+    }
+  ]
+}

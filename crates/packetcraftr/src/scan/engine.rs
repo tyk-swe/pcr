@@ -76,7 +76,7 @@ where
 {
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
-    let batches = build_batches(request, &approved.addresses, &approved.endpoints);
+    let batches = build_batches(request, &approved.targets, &approved.endpoints);
     enforce_deadline(&Probes, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
@@ -90,6 +90,18 @@ where
         },
         emit,
     );
+    for duplicate in &approved.duplicates {
+        evidence.emit(
+            Event::Diagnostic(packetcraftr_core::diagnostic::Diagnostic::warning(
+                "scan.duplicate_declaration",
+                format!(
+                    "target declaration {} duplicates an earlier declaration and was coalesced",
+                    duplicate + 1
+                ),
+            )),
+            deadline,
+        )?;
+    }
     let stats = if request.max_in_flight == 1 {
         run_batches(
             batches,
@@ -110,17 +122,20 @@ where
         )
     };
     let stats = stats?;
+    let retained_evidence_bytes = evidence.retained_evidence_bytes();
     let ProbeClassifier { winners, rtt, .. } = evidence.into_classifier();
     let mut counts = ClassificationCounts::default();
     for classification in winners.into_values() {
         counts.increment(classification);
     }
 
+    let resolved_addresses = approved.addresses();
     Ok(Report {
         planned_duration: approved.planned_duration,
         target: approved.declared_target,
-        resolved_addresses: approved.addresses,
+        resolved_addresses,
         counts,
+        retained_evidence_bytes,
         stats,
         rtt: rtt.finish(),
     })
@@ -239,9 +254,16 @@ where
 struct ApprovedScan {
     planned_duration: std::time::Duration,
     declared_target: String,
-    addresses: Vec<IpAddr>,
+    targets: Vec<crate::target::SelectedAddress>,
+    duplicates: Vec<u32>,
     endpoints: Vec<ProbeEndpoint>,
     total_probes: usize,
+}
+
+impl ApprovedScan {
+    fn addresses(&self) -> Vec<IpAddr> {
+        self.targets.iter().map(|target| target.address).collect()
+    }
 }
 
 struct ScanPlan {
@@ -275,9 +297,9 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
         Error::TargetSelection,
         |selected| {
             let total_probes =
-                probe_count(selected.addresses.len(), endpoints.len(), request.attempts)?;
+                probe_count(selected.targets.len(), endpoints.len(), request.attempts)?;
             check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
-            let maximum_bytes = maximum_wire_bytes(&selected.addresses, &endpoints, request)?;
+            let maximum_bytes = maximum_wire_bytes(&selected.targets, &endpoints, request)?;
             let worst_case = worst_case_duration(request, total_probes)?;
             check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
             Ok(ScanPlan {
@@ -293,11 +315,21 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
             ))
         },
     )?;
+    if request.route.interface.is_some()
+        && selected.targets.iter().any(|target| target.scope.is_some())
+    {
+        return Err(Error::InvalidLimit {
+            field: "interface",
+            value: 0,
+            reason: "scoped targets cannot combine with an explicit --interface".to_owned(),
+        });
+    }
 
     Ok(ApprovedScan {
         planned_duration: plan.worst_case,
         declared_target: selected.declared,
-        addresses: selected.addresses,
+        targets: selected.targets,
+        duplicates: selected.duplicates,
         endpoints,
         total_probes: plan.total_probes,
     })
@@ -318,7 +350,7 @@ fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> 
 }
 
 fn maximum_wire_bytes(
-    addresses: &[IpAddr],
+    targets: &[crate::target::SelectedAddress],
     endpoints: &[ProbeEndpoint],
     request: &Request,
 ) -> Result<u64, Error> {
@@ -347,8 +379,8 @@ fn maximum_wire_bytes(
         0
     };
     let endpoints = endpoints.len() as u64;
-    addresses.iter().try_fold(0u64, |total, address| {
-        let header = if address.is_ipv4() {
+    targets.iter().try_fold(0u64, |total, target| {
+        let header = if target.address.is_ipv4() {
             IPV4_PROBE_BYTES
         } else {
             IPV6_PROBE_BYTES

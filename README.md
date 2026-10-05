@@ -25,7 +25,10 @@ For automation, start with the [forwarding contract](docs/verification-contract.
 [versioned resource presets](docs/resource-presets.md), and
 [consumer compatibility policy](docs/consumer-compatibility.md).
 For planned scanner capabilities, see the [core scanner roadmap](docs/roadmap/README.md)
-and its [Nmap gap matrix](docs/roadmap/nmap-gap-matrix.md).
+and its [Nmap gap matrix](docs/roadmap/nmap-gap-matrix.md); the
+[evidence vocabularies](docs/scanner-evidence.md) and
+[scanner data policy](docs/scanner-data-policy.md) govern what scan output may
+claim and what data the scanner may ship.
 
 ## Quick start
 
@@ -246,7 +249,9 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v6`](schemas/packetcraftr.output.v6.schema.json)
+- Structured command output: [`packetcraftr.output/v7`](schemas/packetcraftr.output.v7.schema.json)
+  (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json) family is retained
+  for previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
@@ -481,6 +486,9 @@ lists its controls and limits:
 packetcraftr dns 192.0.2.53 example.test --type a
 packetcraftr dns 127.0.0.1 example.test --tcp
 packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
+packetcraftr scan 192.0.2.10 --targets-file targets.txt --exclude-file skip.txt
+printf '192.0.2.10\n192.0.2.11\n' | packetcraftr scan --targets-file -
+packetcraftr scan --list 192.0.2.0/30 10.0.0.1 --output json
 packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
   --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
 packetcraftr replay capture.pcap --interface 2 --bps 8000000

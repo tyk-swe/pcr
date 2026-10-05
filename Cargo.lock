@@ -1069,7 +1069,6 @@ dependencies = [
  "packetcraftr-cli",
  "packetcraftr-core",
  "packetcraftr-netio",
- "proptest",
  "serde",
  "serde_json",
  "sha2",

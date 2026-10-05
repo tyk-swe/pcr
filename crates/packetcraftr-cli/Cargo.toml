@@ -43,7 +43,6 @@ tempfile.workspace = true
 
 [dev-dependencies]
 packetcraftr-cli = { workspace = true, features = ["test-support"] }
-proptest.workspace = true
 jsonschema.workspace = true
 
 [[bin]]
@@ -52,3 +51,5 @@ path = "src/main.rs"
 # The binary intentionally shares its name with the facade library, so exclude
 # it from `cargo doc` to avoid a colliding output path.
 doc = false
+# `main.rs` only forwards to the library, so it has no unit tests to build.
+test = false

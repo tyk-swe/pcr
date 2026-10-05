@@ -695,9 +695,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
-- A [core scanner roadmap](docs/roadmap/README.md) and source-backed Nmap gap
-  matrix document phased discovery, scanning, identification, performance, and
-  cross-platform work. These are future plans, not newly implemented features.
+- A [core scanner roadmap](docs/roadmap/README.md), one specification per
+  milestone, and a source-backed Nmap gap matrix document planned discovery,
+  scanning, identification, performance, and cross-platform work. These are
+  future plans, not newly implemented features.
 - `ReaderLimits::max_options_per_block` (default 1,024) bounds the options
   retained from one PCAPNG section, interface, or packet block; a block above
   the ceiling fails with `policy.capture_stream_limit`. Exhaustive

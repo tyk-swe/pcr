@@ -5,9 +5,15 @@ This roadmap addresses PacketcraftR's core scanner gaps relative to Nmap for
 packet-development and offline-analysis role; it does not propose cloning the
 entire Nmap tool suite.
 
-The phases below are **planned work, not shipped capabilities or release
-commitments**. The [Nmap gap matrix](nmap-gap-matrix.md) distinguishes existing
-functionality, partial coverage, missing capabilities, and explicit deferrals.
+It is milestone-driven: each milestone has a fixed scope, invariants, decisions
+to settle, and exit criteria, but no date. A milestone closes when its exit
+criteria pass. The milestones are **planned work, not shipped capabilities or
+release commitments**.
+
+| Document | Purpose |
+| --- | --- |
+| [Nmap gap matrix][matrix] | Each compared Nmap capability, PacketcraftR's state at the reviewed baseline, and the workstream that closes the gap |
+| [M1][m1] through [M13][m13] | One specification per milestone, listed [below](#milestones) |
 
 ## Comparison baseline
 
@@ -36,18 +42,21 @@ not by themselves fill those workflow gaps.
 
 Committed roadmap priorities are:
 
-1. Target planning, host discovery, and trustworthy mainstream scanning.
-2. Service/version and OS identification with explicit evidence and confidence.
-3. Bounded performance improvements and equal Linux, macOS, and Windows
-   acceptance requirements throughout.
-4. Later diagnostic coverage for additional TCP scan families, SCTP, and
-   IP-protocol inventory.
+1. Target planning, host discovery, and trustworthy mainstream scanning
+   ([M4][m4] through [M6][m6]).
+2. Service/version and OS identification with explicit evidence and confidence
+   ([M8][m8] through [M10][m10]).
+3. Bounded performance improvements ([M7][m7]) and equal Linux, macOS, and
+   Windows acceptance requirements throughout ([M3][m3]).
+4. Later diagnostic coverage for scan-informed traceroute, additional TCP scan
+   families, SCTP, and IP-protocol inventory ([M11][m11] through [M13][m13]).
 
 Scripting/NSE, scan resume/checkpointing, and Nmap-compatible XML are deferred.
 Exact Nmap CLI syntax, legacy output formats, and Zenmap/Ncat/Nping/Ndiff clones
 are not parity goals. Evasion/decoy, idle/bounce, exploit/brute-force, unbounded
 scanning, and random public-target workflows are outside this roadmap. These
-are scope decisions, not claims that their Nmap equivalents do not exist.
+are scope decisions, not claims that their Nmap equivalents do not exist. The
+[gap matrix][matrix-deferred] records each one.
 
 Capability parity means comparable, documented outcomes on the declared fixture
 and platform matrix, not identical algorithms, defaults, flags, or database
@@ -56,7 +65,7 @@ exists or one Linux fixture agrees with Nmap.
 
 ## Invariants and ownership
 
-All phases retain the [repository guide][repository-guide] boundaries:
+All milestones retain the [repository guide][repository-guide] boundaries:
 
 - Authorize declared targets, resolution, and the operation before active
   discovery; check final numeric endpoints and materialized bytes before
@@ -85,234 +94,123 @@ Only netio's `platform/` owns unsafe code. Native selection remains in its
 `build.rs` and dispatch boundary; code elsewhere uses emitted capability cfgs.
 Expose capabilities without introducing equivalent public assembly paths.
 
-## Phases and dependencies
+## Milestones
 
-| Phase | Priority outcome | Prerequisites |
-| --- | --- | --- |
-| [P0: Evidence and platform foundations](#p0-evidence-and-platform-foundations) | Define what can be claimed and establish comparison, data, and runtime evidence. | Required gates for every later phase. |
-| [P1: Target planning and host discovery](#p1-target-planning-and-host-discovery) | Select and discover authorized hosts before deeper investigation. | P0 semantics and validation fixtures. |
-| [P2: Reliable scanning and bounded performance](#p2-reliable-scanning-and-bounded-performance) | Complete mainstream scanner behavior and adapt work within hard limits. | P0/P1 planning and evidence foundations. |
-| [P3: Service and version identification](#p3-service-and-version-identification) | Identify applications rather than only reachable ports. | P0 data gates and P2 endpoint evidence/bounded I/O. |
-| [P4: OS identification and path inventory](#p4-os-identification-and-path-inventory) | Add qualified OS results and scan-informed multi-host traceroute. | P0/P2 fingerprint and scheduling foundations; P1 host inventory. |
-| [P5: Broader diagnostic scan coverage](#p5-broader-diagnostic-scan-coverage) | Extend diagnostic transports and scan-dependent inference. | P0/P2 contracts, correlation, and platform validation. |
+Milestones are numbered in recommended order. The dependency graph is the
+binding constraint: milestones without a path between them may proceed in
+parallel. OS identification, for example, need not wait for service
+identification.
 
-This is priority ordering, not a requirement that all work be serial. OS
-identification need not wait for service identification. Later diagnostic modes
-share the reliable scanning foundations and are not technically blocked on
-completion of every identification feature. Each phase remains open until its
-required outcomes and runtime evidence are met on Linux, macOS, and Windows.
-Unsupported profiles remain explicit limitations, not a way to call a missing
-platform feature complete.
+| ID | Milestone | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- |
+| M1 | [Claims and evidence model][m1] | Separate vocabularies for host observations, inferred port states, attempt outcomes, and operational failures; a reviewed policy for scanner data. | None | Planned |
+| M2 | [Ground truth and benchmarks][m2] | A versioned comparison corpus with provisioned expected outcomes, pinned Nmap comparison runs, and repeatable workflow benchmarks. | M1 | Planned |
+| M3 | [Native validation on three platforms][m3] | Controlled privileged runtime routes for macOS and Windows beside the Linux lane, reporting exercised, failed, and unavailable scenarios. | None | Planned |
+| M4 | [Target planning][m4] | Bounded target and exclusion manifests, a scan list/plan mode that sends nothing, and scoped IPv6 targets. | M1 | Planned |
+| M5 | [Host discovery][m5] | A composed discovery workflow over ARP/NDP and ICMP/TCP/UDP probes, with host-level records, reasons, and optional enrichment. | M4 | Planned |
+| M6 | [Port planning and state inference][m6] | Catalog and named port selections, port exclusions, curated UDP payloads, mixed TCP/UDP plans, inferred states, and capability-aware method planning. | M1 | Planned |
+| M7 | [Adaptive scheduling and bounded performance][m7] | RTT-driven timeouts, selective retries, rate-limit handling, per-host fairness, adaptive windows, and redesigned connect scheduling under hard ceilings. | M2, M6 | Planned |
+| M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | Planned |
+| M9 | [TLS services and identification corpus][m9] | TLS-wrapped interrogation over a bounded transport, an expanded reviewed corpus, and held-out evaluation of coverage and confidence. | M8 | Planned |
+| M10 | [OS identification][m10] | Finite IPv4 and IPv6 stack-fingerprint collection, matching against a reviewed corpus, and qualified or explicitly inconclusive results. | M5, M7 | Planned |
+| M11 | [Scan-informed traceroute][m11] | Traceroute that selects an observed responsive probe, traces several authorized hosts under one plan, and reuses paths with explicit provenance. | M5, M6 | Planned |
+| M12 | [TCP diagnostic scans][m12] | ACK/window and FIN/NULL/Xmas/Maimon scan families with probe flags kept separate from inference rules. | M6 | Planned |
+| M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and the remaining discovery probe families. | M5, M6 | Planned |
 
-## P0: Evidence and platform foundations
+```mermaid
+flowchart LR
+  M1[M1 Claims and evidence] --> M2[M2 Ground truth and benchmarks]
+  M1 --> M4[M4 Target planning]
+  M1 --> M6[M6 Port planning and inference]
+  M4 --> M5[M5 Host discovery]
+  M2 --> M7[M7 Adaptive scheduling]
+  M6 --> M7
+  M7 --> M8[M8 Service identification]
+  M8 --> M9[M9 TLS services and corpus]
+  M5 --> M10[M10 OS identification]
+  M7 --> M10
+  M5 --> M11[M11 Scan-informed traceroute]
+  M6 --> M11
+  M6 --> M12[M12 TCP diagnostic scans]
+  M5 --> M13[M13 SCTP and IP protocols]
+  M6 --> M13
+  M3[M3 Native validation]
+```
 
-**Owners:** all four crates within their domains; no scanner semantics in CI
-assembly or CLI-only types.
+### Close gates
 
-**Deliverables**
+The graph shows what a milestone needs before it can start. Two milestones
+additionally gate closing, and are not drawn as edges to every node:
 
-- Define host observations, scan-dependent port inference, per-attempt probe or
-  socket outcomes, and operational failures separately. Retain the current
-  timeout/unreachable/unknown evidence rather than simply renaming it to match
-  Nmap's port vocabulary.
-- Establish a versioned comparison corpus with provisioned ground truth for
-  responsive, closed, blocked, silent, malformed, and unrelated responses in
-  both IP families. Record Nmap settings and explain expected differences.
-- Establish repeatable workflow benchmarks recording elapsed time, work sent,
-  result accuracy, retained-state charges, and peak process memory. Logical byte
-  ceilings are not claims about process RSS.
-- Define provenance, license review, versioning, maintenance ownership, and
-  coverage policy for port, service, OS, and vendor data. Do not copy or bundle
-  Nmap code/data on the assumption that its [NPSL][nmap-license] is compatible
-  with PacketcraftR's AGPL license.
-- Establish controlled native runtime validation routes for Linux, macOS, and
-  Windows. The [current validation matrix][native-validation] has privileged
-  isolated Linux coverage but no equivalent configured macOS/Windows lane.
-  Preserve reviewed-native and administrator-owned permission controls.
+- **Ground truth ([M2][m2]).** A milestone that publishes scanner results
+  cannot close until its scenarios are in the comparison corpus with
+  independent expected outcomes.
+- **Runtime evidence ([M3][m3]).** A milestone with native behavior cannot
+  close until that behavior has recorded runtime evidence on Linux, macOS, and
+  Windows for every profile where the capability is supported.
 
-**Exit criteria**
+Work on a milestone may proceed before those gates exist; it stays
+`In progress`. Unsupported profiles remain explicit limitations, not a way to
+call a missing platform feature complete.
 
-- The fixture inventory specifies independent expected outcomes, comparison
-  versions/settings, and known divergences; matching Nmap alone is not an oracle.
-- Required platform/profile checks distinguish exercised, failed, and
-  unavailable scenarios. Compilation and fake-provider results are never
-  relabeled as privileged native evidence.
-- Data sources and benchmark methodology are reviewed before dependent features
-  are claimed complete. Missing runtime evidence remains an open platform gap.
+## Gap gate and scorecard
 
-## P1: Target planning and host discovery
+The committed scope is reached when every row of the [gap matrix][matrix] is
+`Present with constraints`, `Deferred`, or `Non-goal`. Progress is reported with
+these measures, recomputed whenever a milestone closes:
 
-**Owners:** workflow `target`, `neighbor`, and probe/discovery behavior; core
-wire models; netio interface/capture providers; CLI selection and host output.
+| Measure | Definition |
+| --- | --- |
+| Gap coverage | Rows marked `Present with constraints`, divided by all rows not marked `Deferred` or `Non-goal`. |
+| Result accuracy | Share of [M2][m2] corpus scenarios whose published outcome equals the provisioned expected outcome, per workflow and IP family. |
+| Work and latency | Probes or connections sent and elapsed time for each [M2 benchmark][m2-benchmarks] scenario. |
+| Retained state and memory | Charged retained-state bytes and peak process memory for each benchmark scenario, reported separately. |
+| Platform evidence | Required scenarios exercised, failed, and unavailable on each of Linux, macOS, and Windows, as [M3][m3-reporting] reports them. |
+| Identification quality | Held-out results for service ([M9][m9-evaluation]) and OS ([M10][m10-evaluation]) candidates, including the share reported as unknown or ambiguous. |
 
-**Deliverables**
+At the reviewed baseline the matrix has 44 rows: 9 `Present with constraints`,
+13 `Partial`, 14 `Missing`, 3 `Deferred`, and 5 `Non-goal`, a gap coverage of 9
+of 36 (25%). The other measures have no baseline; M2 and M3 define how they are
+recorded, and no value is claimed before then.
 
-- Add bounded target/exclusion file and stdin ingestion with deterministic
-  deduplication and provenance. Keep numeric/CIDR and hostname authorization,
-  exclusions, and family selection consistent across input forms.
-- Add a bulk scan list/plan mode distinct from today's passive packet-route
-  `plan`, and preserve interface/zone identity for scoped IPv6 targets.
-- Add a host-discovery workflow with discovery-only and explicit skip-discovery
-  behavior. Compose local ARP/NDP and configurable ICMP/TCP/UDP probes, including
-  an ordinary-socket path when raw I/O is unavailable and explicitly selected.
-- Publish host-level response reasons and optional, policy-aware reverse-DNS and
-  local-link MAC/vendor observations. Distinguish cached next-hop information,
-  proxy replies, and direct host evidence; do not infer target identity from a
-  routed gateway's MAC address.
+## Definition of done
 
-**Exit criteria**
+Every milestone, and every workstream inside it, ships with:
 
-- Numeric list/plan operations send no target or neighbor packets. Hostname
-  resolution remains explicit; it is not disguised as a network-free operation.
-- Denials, exclusions, malformed/oversized input, duplicate targets, scope
-  ambiguity, and family mismatches fail or narrow selection before active work.
-- Closed-but-responsive TCP endpoints can demonstrate host responsiveness;
-  silent or blocked hosts retain uncertainty. Discovery omission and skipping
-  are visible rather than represented as measured reachability.
-- The declared discovery matrix passes controlled IPv4/IPv6 behavior and native
-  runtime checks on all three platforms where the capability is supported.
-
-## P2: Reliable scanning and bounded performance
-
-**Owners:** workflow scan/probe planning and inference; netio bounded socket and
-capture resources; core port-data documents; CLI scan arguments and output.
-
-**Deliverables**
-
-- Add versioned common-port/named-port selections, explicit port exclusions,
-  bounded curated UDP payload coverage, and mixed TCP/UDP plans. Port-name hints
-  remain hints, not service identification. Combined endpoint identity includes
-  the transport, so TCP and UDP on one address/port cannot merge.
-- Define scan-dependent inferred states and reasons, including UDP ambiguity,
-  separately from the recorded outcome of each attempt. Retain conflicting and
-  late/unattributed evidence rather than erasing it to force a single answer.
-- Add capability-aware method planning without silently changing an explicitly
-  requested raw method into an ordinary connection or fabricating wire evidence
-  for socket observations.
-- Add bounded RTT estimation, selective retry/backoff, response-rate-limit
-  handling, per-host fairness/deadlines, and configurable adaptive windows.
-  Adaptation may reduce work or delay it but never bypass operation-wide limits.
-- Improve connect scheduling and plan retention under explicit process-wide and
-  operation-wide resource ceilings. The current 16-connection cap is a resource
-  contract to redesign and validate, not a constant to increase without review.
-
-**Exit criteria**
-
-- Mainstream state/reason matrices cover replies, silence, ICMP errors,
-  duplicates, contradictory attempts, malformed packets, loss, and reordering.
-  Socket deadline/capacity failures are not mistaken for target port states.
-- Virtual-clock/fake-provider tests verify pacing, fair progress, retry ceilings,
-  finite deadlines, backpressure, and cleanup. Cancellation does not release a
-  native permit while its resource or provider work is still alive.
-- Baseline and candidate runs record accuracy, latency, work, and peak memory on
-  the same fixtures/settings. Performance targets are agreed against that
-  baseline before an optimization is accepted; higher configured rate/window
-  values are not evidence of achieved throughput.
-- Every claimed optimization has Linux/macOS/Windows runtime evidence and keeps
-  retained/prepared state bounded, including fail-closed oversized-plan cases.
-
-## P3: Service and version identification
-
-**Owners:** core bounded response parsing and matching; workflow identification
-and policy; netio stream resources; CLI identification records.
-
-**Deliverables**
-
-- Add read-only banner and protocol-aware TCP/UDP identification with explicit
-  per-host/connection/probe byte, time, and attempt limits. Start with HTTP(S),
-  SSH banners, and DNS fixtures, then expand the reviewed corpus.
-- Add TLS-wrapped service interrogation through bounded, reviewed transport
-  support. Passive TLS decoding/JA3/JA4 observations are not this capability;
-  new runtime dependencies need the normal dependency and license review.
-- Add a versioned curated probe/match corpus with safe intensity controls,
-  sensitive-service exclusions, and maintenance/provenance metadata. Reuse UDP
-  profile building blocks without interpreting `confirmed` as product identity.
-- Report observed protocol/banner claims, matched product/version candidates,
-  confidence, and evidence provenance separately. Add hostname/device/CPE
-  metadata only when supported by the observations and matching data.
-
-**Exit criteria**
-
-- Known services on nonstandard ports, encrypted services, unknown services,
-  ambiguous matches, misleading banners, truncation, and malformed replies have
-  explicit fixture outcomes. Unknown/ambiguous cases do not become exact versions.
-- Reauthorization covers final numeric endpoints; hidden resolution, redirects,
-  authentication attempts, or extra probing cannot bypass the declared policy
-  and budget. Active identification remains an explicit operation.
-- Corpus versions reproduce matching results; claimed coverage and confidence
-  are evaluated against held-out fixtures, not only examples used to write rules.
-  An identified version is not an assertion that the service is vulnerable.
-- Applicable portable and native behavior passes on Linux, macOS, and Windows,
-  and any future machine-contract changes follow the compatibility policy.
-
-## P4: OS identification and path inventory
-
-**Owners:** core bounded fingerprint representation/matching; workflow OS and
-traceroute engines; netio packet resources; CLI qualified inventory output.
-
-**Deliverables**
-
-- Add explicit, finite IPv4/IPv6 stack-fingerprint collection and a reviewed
-  matching corpus. Define the probe and evidence requirements for each family
-  rather than assuming an IPv4 method transfers unchanged to IPv6.
-- Add suitability checks, ranked candidates with evaluated confidence, and
-  explicit unsupported/inconclusive results for missing evidence. Service
-  banners and passive TLS client fingerprints are not remote OS proof.
-- Integrate traceroute with host/scan results: select an observed responsive
-  protocol/endpoint, trace multiple authorized hosts under one finite plan, and
-  evaluate bounded path reuse with explicit source and freshness metadata.
-  Cached hops must not masquerade as fresh observations for another target.
-
-**Exit criteria**
-
-- Known and held-out OS fixtures cover exact/near/unknown matches, unavailable
-  open/closed ports, filtered paths, NAT/intermediaries, and malformed evidence.
-  Missing suitability conditions or ambiguous matches do not produce exact labels.
-- Traceroute fixtures cover hop timeouts, destination/unreachable termination,
-  protocol selection, multiple hosts, and reuse expiry without inventing hops or
-  treating an intermediate router as the destination.
-- Both workflows preserve authorized scope, final-wire checks, timestamps,
-  cancellation, evidence ceilings, and platform capability failures. Linux,
-  macOS, and Windows support and runtime evidence are recorded independently.
-
-## P5: Broader diagnostic scan coverage
-
-**Owners:** core transport/chunk models and matchers; workflow mode-specific
-planning/correlation/inference; netio native resources; CLI mode/result contracts.
-
-**Deliverables**
-
-- Add explicit TCP ACK/window and flag-based diagnostic families, including
-  FIN/NULL/Xmas/Maimon behavior where useful for controlled firewall/stack tests.
-  Separate configured probe flags from the chosen inference rules.
-- Add SCTP INIT/COOKIE-ECHO diagnostic scanning, reusing existing core SCTP
-  header/checksum and matcher building blocks while adding missing bounded
-  chunk models and workflow evidence.
-- Add bounded IP-protocol inventory and relevant additional discovery probes.
-  Protocol numbers are not transport ports; keep their selection/results typed.
-
-**Exit criteria**
-
-- Each mode has an observable correlation/state matrix, including unrelated
-  replies, valid negative replies, malformed chunks, ICMP quotations, and silence.
-  ACK responsiveness does not imply an open port, and window/flag-dependent
-  heuristics explicitly retain their stack-compatibility limits.
-- Ambiguous states remain ambiguous; idle-scan-only semantics are not added merely
-  to reproduce every Nmap label. Known implementation-dependent counterexamples
-  belong in the acceptance fixtures.
-- Applicable IPv4/IPv6 and Linux/macOS/Windows native checks pass before a mode is
-  marked complete. Unsupported execution paths publish capability failures,
-  not false port/protocol or host classifications.
-
-## Validation and roadmap maintenance
-
-Future implementation follows [Contributing][contributing] and the
-[native validation guidance][native-validation], using owner-local unit tests,
-public `*_contracts.rs` regressions, `*_matrix.rs` combinations, and
-`*_conformance.rs` wire/schema checks. Keep public integration modules in the
-owning crate's single integration binary; process-isolated native suites retain
-their dedicated launcher. Use loopback, documentation addresses, or isolated
-fixtures rather than uncontrolled reachable targets.
+1. **Authorization and budgets.** Targets, resolution, and the operation are
+   authorized before active work; final numeric endpoints and materialized
+   bytes are checked before transmission; every new loop, retry, or collection
+   spends an explicit finite budget.
+2. **Evidence.** Captured bytes, scope, timestamps, per-attempt outcomes, and
+   partial-execution evidence are preserved. Host reachability, inferred state,
+   application observations, and execution failures use the separate
+   vocabularies [M1][m1] defines.
+3. **Contracts.** Machine-contract changes follow the
+   [consumer compatibility policy][compatibility]: schemas, examples, CLI
+   conformance tests, migration notes, and release assets move together.
+4. **Tests at the right boundary.** Owner-local unit tests, public
+   `*_contracts.rs` regressions, `*_matrix.rs` combinations, and
+   `*_conformance.rs` wire/schema checks, as [Contributing][contributing]
+   describes. Public integration modules stay in the owning crate's single
+   integration binary; process-isolated native suites keep their dedicated
+   launcher. Tests use loopback, documentation addresses, or isolated fixtures
+   rather than uncontrolled reachable targets.
+5. **Ground truth.** Scenarios are in the [M2][m2] corpus with independent
+   expected outcomes and recorded divergences. Matching Nmap alone is not an
+   acceptance result.
+6. **Platform evidence.** Runtime evidence on Linux, macOS, and Windows is
+   recorded through the [M3][m3] routes and the
+   [native validation guidance][native-validation] for each relevant
+   portable, default, Layer 2, pcap-free, and full-native profile. A correct
+   unsupported error validates failure behavior, not feature parity.
+7. **Ownership.** Types, behavior, and tests stay with the crate that owns
+   them; unsafe code stays in netio's `platform/`; code elsewhere gates on
+   emitted capability cfgs.
+8. **Data.** Any bundled port, payload, probe, fingerprint, or vendor data has
+   a provenance record under the [M1 data policy][m1-data].
+9. **Documentation.** User-visible changes are recorded in `[Unreleased]`, and
+   the [gap matrix][matrix] rows the work closes are updated against the exact
+   reviewed revision with links to the behavior and native evidence.
 
 The existing comprehensive Linux check is:
 
@@ -323,20 +221,51 @@ cargo test --locked --workspace --all-features
 ```
 
 It requires libpcap development support and is not a substitute for macOS or
-Windows runtime validation. Exercise relevant portable/default/Layer 2/pcap-free/
-full-native profiles and record actual capability limitations. A correct
-unsupported error validates failure behavior, not successful feature parity.
+Windows runtime validation.
 
-When advancing a phase, update the matrix against the exact reviewed revision,
-link the behavior and native evidence, report known limits, and synchronize any
-changed contracts and release documentation. Keep deferrals explicit. Do not
-mark a phase complete based on compilation, a skipped scenario, or a claim that
-has no supporting fixture/runtime evidence.
+## Maintaining this roadmap
 
-This document addition changes no scanner behavior, schema, dependency, CI
-configuration, or permission policy. It does not claim a new comparison run or
-successful native validation.
+- **Status.** Each milestone file carries `Planned`, `In progress`, or
+  `Complete`. A change that moves a status also updates the table above and the
+  affected matrix rows. Do not mark a milestone complete based on compilation,
+  a skipped scenario, or a claim that has no supporting fixture or runtime
+  evidence.
+- **Decisions.** Each milestone lists the decisions to settle before
+  implementation. Record the outcome in the milestone file, with its rationale,
+  before the first implementation change lands. A listed recommendation is a
+  starting position, not a decision.
+- **Exit criteria.** Check a criterion only with a link to the test, fixture,
+  or recorded evidence that satisfies it, and report known limits beside it.
+- **Re-baselining.** When a milestone closes, update the matrix's reviewed
+  revision and source links together, and record the Nmap version and build
+  features of any comparison run. Keep deferrals explicit.
+- **Scope changes.** Edit the milestone specification in the change that
+  proposes the new scope, so the roadmap never trails the code.
 
+This roadmap changes no scanner behavior, schema, dependency, CI configuration,
+or permission policy. It does not claim a new comparison run or successful
+native validation.
+
+[matrix]: nmap-gap-matrix.md
+[matrix-deferred]: nmap-gap-matrix.md#deferred-capabilities-and-deliberate-differences
+[m1]: m01-claims-evidence.md
+[m1-data]: m01-claims-evidence.md#m12-scanner-data-policy
+[m2]: m02-ground-truth-benchmarks.md
+[m2-benchmarks]: m02-ground-truth-benchmarks.md#m23-workflow-benchmarks
+[m3]: m03-native-validation.md
+[m3-reporting]: m03-native-validation.md#m33-evidence-reporting
+[m4]: m04-target-planning.md
+[m5]: m05-host-discovery.md
+[m6]: m06-port-planning-inference.md
+[m7]: m07-adaptive-scheduling.md
+[m8]: m08-service-identification.md
+[m9]: m09-tls-services-corpus.md
+[m9-evaluation]: m09-tls-services-corpus.md#m94-held-out-evaluation
+[m10]: m10-os-identification.md
+[m10-evaluation]: m10-os-identification.md#m105-corpus-and-held-out-evaluation
+[m11]: m11-scan-informed-traceroute.md
+[m12]: m12-tcp-diagnostic-scans.md
+[m13]: m13-sctp-ip-protocol.md
 [project-readme]: ../../README.md
 [repository-guide]: ../../AGENTS.md
 [contributing]: ../../CONTRIBUTING.md
@@ -345,4 +274,3 @@ successful native validation.
 [output-contract]: ../../crates/packetcraftr-cli/src/output/contract.rs
 [nmap-guide]: https://nmap.org/book/man.html
 [nmap-download]: https://nmap.org/download.html
-[nmap-license]: https://nmap.org/npsl/

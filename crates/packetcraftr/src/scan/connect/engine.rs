@@ -320,6 +320,13 @@ where
             evidence_bytes = evidence_bytes
                 .checked_add(std::mem::size_of::<ProbeEvidence>())
                 .and_then(|bytes| {
+                    probe.scope.as_ref().map_or(Some(bytes), |scope| {
+                        bytes
+                            .checked_add(scope.zone.as_str().len())
+                            .and_then(|bytes| bytes.checked_add(scope.interface.name.len()))
+                    })
+                })
+                .and_then(|bytes| {
                     bytes.checked_add(
                         probe
                             .error

@@ -1857,6 +1857,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- TCP connect scans charge owned zone and interface-name strings against the
+  evidence byte budget before publishing probes and include them in retained
+  evidence statistics.
+- `scan --udp-payload-file -` accepts empty redirected stdin, matching empty
+  payload files while retaining the 65507-byte limit.
 - `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
   and rollback to the parent directory opened before input is read. On Linux
   with procfs they address the directory handle, so a parent path retargeted

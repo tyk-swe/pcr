@@ -48,9 +48,10 @@ changing features, run `cargo build --locked --workspace` and then
 `cargo build --locked -p packetcraftr-cli -v` in the same target directory, and
 confirm that `packetcraftr` and `packetcraftr-cli` are reported `Fresh`. Keep
 full development debug information and release overflow checks in the repository
-and CI defaults. Keep the integration-test layout unless clean, incremental and focused compile
-measurements justify a change; narrow regressions remain runnable as
-`cargo test --locked -p CRATE --test TEST_NAME`.
+and CI defaults. Each crate's integration tests link into one `integration`
+binary, so shared helpers compile and link once instead of once per file;
+measure clean, incremental and focused builds before splitting a test out. Run
+a narrow regression as `cargo test --locked -p CRATE --test integration MODULE::`.
 
 For storage-constrained local validation, temporarily omit debug information and
 incremental artifacts as below; use the same environment for the relevant Clippy
@@ -147,8 +148,8 @@ and [consumer-compatibility.md](docs/consumer-compatibility.md). Run:
 ```sh
 python3 scripts/check-external-consumer.py
 python3 scripts/forwarding-regression.py --binary target/debug/packetcraftr
-cargo test --locked -p packetcraftr-core --test forwarding_verification_contracts --test invocation_deadline_contracts --test pipeline_limit_contracts
-cargo test --locked -p packetcraftr-cli --test forwarding_verification_contracts --test aggregate_schema_conformance
+cargo test --locked -p packetcraftr-core --test integration -- forwarding_verification_contracts:: invocation_deadline_contracts:: pipeline_limit_contracts::
+cargo test --locked -p packetcraftr-cli --test integration -- forwarding_verification_contracts:: aggregate_schema_conformance::
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 ```
 

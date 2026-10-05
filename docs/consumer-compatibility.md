@@ -16,7 +16,7 @@ Never modify an already published archive in place.
 Consumers should tolerate unknown object members, but must not guess meanings
 for unknown verdicts, check kinds, evidence states, or contract families.
 Examples are fixtures, not a replacement for serializing actual Rust payloads;
-the `aggregate_schema_conformance` suite does that.
+the CLI's `aggregate_schema_conformance` tests do that.
 
 ## Fields, omission, and identifiers
 

@@ -1857,6 +1857,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- TCP connect scans report coalesced duplicate target declarations in text,
+  JSON, and NDJSON completion diagnostics.
+- Invalid target-planning durations report the requested milliseconds instead
+  of zero, saturating only values above `u64::MAX` milliseconds.
 - Invalid `scan` target and exclusion declarations retain their typed error
   codes and remediations while reporting argument or manifest provenance.
 - The scanner benchmark rejects corpora without the required scheduling

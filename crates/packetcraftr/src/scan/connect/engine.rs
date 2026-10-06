@@ -84,6 +84,7 @@ fn execution(
 struct Planned {
     endpoints: Vec<SocketAddr>,
     scopes: Vec<Option<crate::target::ResolvedZone>>,
+    diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     count: usize,
     delay: Duration,
     limits: SocketLimits,
@@ -155,6 +156,19 @@ fn planned<A: Authorizer + ResolveTarget>(
             Ok(Planned {
                 endpoints,
                 scopes,
+                diagnostics: selected
+                    .duplicates
+                    .iter()
+                    .map(|duplicate| {
+                        packetcraftr_core::diagnostic::Diagnostic::warning(
+                            "scan.duplicate_declaration",
+                            format!(
+                                "target declaration {} duplicates an earlier declaration and was coalesced",
+                                duplicate + 1
+                            ),
+                        )
+                    })
+                    .collect(),
                 count,
                 delay,
                 limits: SocketLimits::new(count as u64, 0, 0),
@@ -376,6 +390,7 @@ where
     Ok(Report {
         target: request.targets.to_string(),
         resolved_addresses,
+        diagnostics: planned.diagnostics,
         planned_duration: planned.planned_duration,
         stats,
     })

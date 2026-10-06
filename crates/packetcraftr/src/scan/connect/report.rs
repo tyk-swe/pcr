@@ -75,6 +75,7 @@ pub enum Event {
 pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub planned_duration: Duration,
     pub stats: Stats,
 }

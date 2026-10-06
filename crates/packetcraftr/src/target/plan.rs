@@ -195,9 +195,9 @@ impl<P: TargetProviders, K: Clock> Client<P, K> {
         {
             return Err(Error::InvalidLimit {
                 field: "max_duration",
-                value: 0,
+                value: u64::try_from(request.max_duration.as_millis()).unwrap_or(u64::MAX),
                 reason: format!(
-                    "must be finite and at most {:?}",
+                    "must be non-zero and at most {:?} (value in milliseconds)",
                     packetcraftr_netio::deadline::MAX_WAIT
                 ),
             });
@@ -495,15 +495,32 @@ mod tests {
                 })
             ));
         }
-        let mut request = request(selection(&["192.0.2.1"], &[]));
-        request.max_duration = Duration::ZERO;
-        assert!(matches!(
-            client.plan_targets(request),
-            Err(Error::InvalidLimit {
-                field: "max_duration",
-                ..
-            })
-        ));
+        for (max_duration, expected) in [
+            (Duration::ZERO, 0),
+            (
+                packetcraftr_netio::deadline::MAX_WAIT + Duration::from_millis(1),
+                3_600_001,
+            ),
+            (Duration::MAX, u64::MAX),
+        ] {
+            let mut request = request(selection(&["192.0.2.1"], &[]));
+            request.max_duration = max_duration;
+            let error = client.plan_targets(request).expect_err("invalid duration");
+            assert!(matches!(
+                error,
+                Error::InvalidLimit {
+                    field: "max_duration",
+                    value,
+                    ..
+                } if value == expected
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("max_duration={expected}"))
+            );
+            assert!(error.to_string().contains("milliseconds"));
+        }
     }
 
     #[test]

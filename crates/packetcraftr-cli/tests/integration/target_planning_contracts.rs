@@ -417,3 +417,74 @@ fn connect_via_file_and_stdin_targets_uses_real_loopback() {
         assert_eq!(probe["outcome"], "connected", "{json}");
     }
 }
+
+#[test]
+fn duplicate_connect_manifest_declarations_are_reported_in_every_format() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+    let port = listener
+        .local_addr()
+        .expect("local addr")
+        .port()
+        .to_string();
+    let contents = b"127.0.0.1\n127.0.0.1\n";
+    let manifest = manifest_file(contents);
+    for format in ["text", "json", "ndjson"] {
+        for source in [path_text(manifest.path()), "-"] {
+            let arguments = [
+                "scan",
+                "--connect",
+                "--attempts",
+                "1",
+                "--max-probes",
+                "1",
+                "--ports",
+                &port,
+                "--output",
+                format,
+                "--targets-file",
+                source,
+            ];
+            let output = if source == "-" {
+                run_with_stdin(&arguments, contents)
+            } else {
+                run(&arguments)
+            };
+            assert!(output.status.success(), "{output:?}");
+            if format == "text" {
+                let text = output_text(&output);
+                assert!(text.contains("scan.duplicate_declaration"), "{text}");
+                assert!(text.contains("target declaration 2"), "{text}");
+                continue;
+            }
+            let document = if format == "json" {
+                parse_json(&output)
+            } else {
+                let records = parse_ndjson(&output);
+                assert_eq!(
+                    records
+                        .iter()
+                        .filter(|record| record["event"] == "connect_probe")
+                        .count(),
+                    1,
+                    "{records:?}"
+                );
+                records.last().expect("complete record").clone()
+            };
+            assert_eq!(document["diagnostics"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                document["diagnostics"][0]["code"],
+                "scan.duplicate_declaration"
+            );
+            assert!(
+                document["diagnostics"][0]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("target declaration 2")
+            );
+            assert_eq!(
+                document["result"]["socket_stats"]["connections_scheduled"],
+                1
+            );
+        }
+    }
+}

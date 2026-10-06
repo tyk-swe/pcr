@@ -558,6 +558,14 @@ endpoint evidence, with no raw packet receipt or capture statistics, and
 `policy::Operation::Socket` carries `SocketOperation` with the authorized
 numeric endpoints and finite `SocketLimits`.
 
+`connect::Report` gains `diagnostics`, including `scan.duplicate_declaration`
+warnings for coalesced target declarations. CLI text, JSON, and NDJSON
+completion output publish these warnings through their existing diagnostic
+channels. Exhaustive report initializers must supply the new field.
+
+`target::plan::Error::InvalidLimit` reports invalid `max_duration` values in
+milliseconds, saturating at `u64::MAX` for larger durations.
+
 Netio's `tcp::start_connect` returns a pollable `PendingConnect`: cancellation
 or drop cancels unstarted calls, while admitted calls keep their process-wide
 resource lease until worker and socket cleanup finish. At most

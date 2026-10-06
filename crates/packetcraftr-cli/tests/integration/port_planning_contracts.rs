@@ -25,6 +25,10 @@ fn assert_usage(arguments: &[&str], code: &str, message: &str) {
     );
 }
 
+/// Windows retries a refused loopback connection for about two seconds before
+/// reporting it, so connect scans of the closed port wait longer than that.
+const CONNECT_TIMEOUT_MS: &str = "5000";
+
 /// A listening port and a port nothing listens on, both on loopback.
 fn loopback_ports() -> (TcpListener, u16) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -183,6 +187,8 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
         "2",
         "--max-in-flight",
         "2",
+        "--timeout-ms",
+        CONNECT_TIMEOUT_MS,
     ]));
     let result = &report["result"];
     assert_eq!(
@@ -245,6 +251,8 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
         "--connect",
         "--ports",
         &ports,
+        "--timeout-ms",
+        CONNECT_TIMEOUT_MS,
     ]));
     let events: Vec<_> = records
         .iter()
@@ -282,7 +290,15 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
         json!({"requested": "tcp_connect", "selected": "tcp_connect"})
     );
 
-    let text = run_success(&["scan", "127.0.0.1", "--connect", "--ports", &ports]);
+    let text = run_success(&[
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        &ports,
+        "--timeout-ms",
+        CONNECT_TIMEOUT_MS,
+    ]);
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(
         text.starts_with(
@@ -344,6 +360,8 @@ fn raw_scans_without_packet_io_fail_unless_automatic_selection_was_requested() {
         "auto",
         "--ports",
         &closed.to_string(),
+        "--timeout-ms",
+        CONNECT_TIMEOUT_MS,
     ]));
     let method = &report["result"]["plan"]["method"];
     assert_eq!(method["requested"], "automatic");

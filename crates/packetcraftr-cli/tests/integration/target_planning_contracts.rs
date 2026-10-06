@@ -263,6 +263,84 @@ fn malformed_and_oversized_manifests_fail_before_work() {
 }
 
 #[test]
+fn invalid_target_declarations_keep_classification_and_provenance() {
+    for (token, code, remediation) in [
+        (
+            "bad..example",
+            "cli.live_target",
+            "use a valid IP address or bounded ASCII DNS hostname",
+        ),
+        (
+            "192.0.2.1/33",
+            "cli.target_selection",
+            "supply explicit bounded host/IP/CIDR targets and numeric exclusions",
+        ),
+    ] {
+        let contents = format!("# declarations\n\n{token}\n");
+        let file = manifest_file(contents.as_bytes());
+        let path = path_text(file.path());
+        for (output, label) in [
+            (run(&list_arguments(&[token])), "argument 1".to_owned()),
+            (
+                run(&list_arguments(&["--targets-file", path])),
+                format!("{path}:3"),
+            ),
+            (
+                run_with_stdin(
+                    &list_arguments(&["--targets-file", "-"]),
+                    contents.as_bytes(),
+                ),
+                "stdin:3".to_owned(),
+            ),
+        ] {
+            assert_eq!(output.status.code(), Some(2), "{output:?}");
+            let json = parse_json(&output);
+            let error = &json["error"];
+            assert_eq!(error["code"], code, "{json}");
+            assert_eq!(error["kind"], "usage");
+            assert_eq!(error["remediation"], remediation);
+            assert!(
+                error["message"].as_str().unwrap().contains(&label),
+                "{json}"
+            );
+            assert!(
+                error["causes"][0].as_str().unwrap().contains(token),
+                "{json}"
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_exclusion_manifest_keeps_classification_and_provenance() {
+    let file = manifest_file(b"# exclusions\n192.0.2.1/33\n");
+    let path = path_text(file.path());
+    let output = run(&list_arguments(&["192.0.2.1", "--exclude-file", path]));
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let json = parse_json(&output);
+    let error = &json["error"];
+    assert_eq!(error["code"], "cli.target_selection");
+    assert_eq!(
+        error["remediation"],
+        "supply explicit bounded host/IP/CIDR targets and numeric exclusions"
+    );
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("{path}:2")),
+        "{json}"
+    );
+    assert!(
+        error["causes"][0]
+            .as_str()
+            .unwrap()
+            .contains("192.0.2.1/33"),
+        "{json}"
+    );
+}
+
+#[test]
 fn a_family_empty_plan_and_a_missing_scope_fail() {
     let output = run(&list_arguments(&["2001:db8::1", "--family", "ipv4"]));
     assert!(!output.status.success(), "{output:?}");

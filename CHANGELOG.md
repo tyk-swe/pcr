@@ -1857,6 +1857,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Invalid `scan` target and exclusion declarations retain their typed error
+  codes and remediations while reporting argument or manifest provenance.
+- The scanner benchmark rejects corpora without the required scheduling
+  windows `[1, 2]`, preventing incomplete case inventories from reporting
+  complete coverage.
 - Pipelined raw scans charge each probe's owned zone and interface-name strings
   against the preparation byte budget before collecting batches and during admission.
 - Windows IPv6 zones resolve using `Ipv6IfIndex`, including when it differs from

@@ -56,6 +56,25 @@ class ScannerMeasurements(unittest.TestCase):
                          * len(corpus["transports"]) * len(corpus["request"]["windows"]), 72)
         self.assertEqual(corpus["scenarios"][3]["expected"]["attempt_classification"], "timeout")
 
+    def test_invalid_window_inventory_fails_before_reporting_complete_coverage(self):
+        corpus, _ = benchmark.load_corpus(ROOT.parent / "docs/scanner-corpus.v1.json")
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "corpus.json"
+            report = pathlib.Path(directory) / "report.json"
+            arguments = ["benchmark-scanner", "--binary", sys.executable, "--corpus", str(path),
+                         "--report", str(report), "--repetitions", "1"]
+            for windows in ([], [1], [2], [2, 1], [1, 1, 2], [1, 2, 3], [True, 2], [1.0, 2]):
+                with self.subTest(windows=windows):
+                    corpus["request"]["windows"] = windows
+                    path.write_text(json.dumps(corpus))
+                    with mock.patch.object(sys, "argv", arguments):
+                        self.assertEqual(benchmark.main(), 1)
+                    output = json.loads(report.read_text())
+                    self.assertEqual(output["status"], "failed")
+                    self.assertIn("scheduling windows [1, 2]", output["setup_error"])
+                    self.assertFalse(output["coverage_complete"])
+                    self.assertEqual(output["cases"], [])
+
     def test_boolean_is_not_a_count(self):
         with self.assertRaises(ValueError):
             benchmark.require_integer(True, "work_sent")
@@ -149,6 +168,7 @@ class ScannerMeasurements(unittest.TestCase):
                 self.assertEqual(benchmark.main(), 0)
             output = json.loads(report.read_text())
             self.assertEqual(len(output["cases"]), 88)
+            self.assertTrue(output["coverage_complete"])
             self.assertEqual(len(output["accuracy"]), 6)
             for row in output["accuracy"]:
                 count = {"raw_scan": 36, "traceroute": 6, "tcp_connect": 2}[row["workflow"]]

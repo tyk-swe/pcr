@@ -12,7 +12,7 @@ use crate::output::contract::Format;
 
 use crate::output;
 
-use packetcraftr_core::error::Kind;
+use packetcraftr_core::error::{Classified, Kind};
 
 use self::arguments::Args;
 use super::execution;
@@ -299,37 +299,11 @@ fn source_label(declaration: &manifest::Declaration) -> String {
     }
 }
 
-fn declaration_error(
-    source: impl std::error::Error + Send + Sync + 'static,
-    label: &str,
-) -> CliError {
-    CliError::caused(
-        Kind::Usage,
-        &DeclarationAt {
-            label: label.to_owned(),
-            source: Box::new(source),
-        },
+fn declaration_error(source: impl Classified, label: &str) -> CliError {
+    CliError::from_classification(
+        source.classification(),
+        format!("invalid declaration at {label}: {source}"),
+        crate::errors::source_causes(&source),
     )
-}
-
-#[derive(Debug)]
-struct DeclarationAt {
-    label: String,
-    source: Box<dyn std::error::Error + Send + Sync>,
-}
-
-impl std::fmt::Display for DeclarationAt {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "invalid declaration at {}: {}",
-            self.label, self.source
-        )
-    }
-}
-
-impl std::error::Error for DeclarationAt {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
+    .with_context(source.context())
 }

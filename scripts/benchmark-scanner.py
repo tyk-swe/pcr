@@ -67,6 +67,9 @@ def load_corpus(path):
         raise ValueError("unsupported scanner corpus")
     if corpus["families"] != ["ipv4", "ipv6"] or corpus["transports"] != ["tcp", "udp", "icmp"]:
         raise ValueError("corpus must cover both families and all scanner transports")
+    windows = corpus["request"]["windows"]
+    if windows != [1, 2] or any(type(window) is not int for window in windows):
+        raise ValueError("corpus must contain both scheduling windows [1, 2]")
     if [case["id"] for case in corpus["scenarios"]] != list(CONDITIONS):
         raise ValueError("corpus must contain the complete, ordered independent inventory")
     if [case["id"] for case in corpus["native_connect_scenarios"]] != ["connect-responsive", "connect-closed"]:

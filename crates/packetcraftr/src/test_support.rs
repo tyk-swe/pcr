@@ -223,7 +223,7 @@ impl Resolver for FakeProviders {
         let interfaces = interface::Provider::interfaces(self, deadline).map_err(|source| {
             TargetError::ZoneResolution {
                 zone: zone.clone(),
-                source: Box::new(source),
+                source,
             }
         })?;
         crate::target::resolve_zone_from(zone, interfaces.into_iter().map(|info| info.id))

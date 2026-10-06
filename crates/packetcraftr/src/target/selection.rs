@@ -260,6 +260,14 @@ impl Classified for SelectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn specifications_reject_link_local_cidrs_and_scoped_networks() {
+        assert!(Specification::from_str("fe80::1%eth0").is_ok());
+        assert!(Specification::from_str("fe80::/10").is_err());
+        assert!(Specification::from_str("fe80::1/128%eth0").is_err());
+    }
+
     #[test]
     fn networks_normalize_host_bits_and_bound_expansion_before_iteration() {
         let network: Network = "192.0.2.7/30".parse().unwrap();

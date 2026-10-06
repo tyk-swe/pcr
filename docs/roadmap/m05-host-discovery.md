@@ -68,6 +68,8 @@ building blocks and publishes host-level records in the
 
 - Configurable ICMP echo, TCP, and UDP discovery probes, composed per host.
 - A closed-but-responsive TCP endpoint counts as host responsiveness.
+- Discovery probe ports come from the [M6][m6-selection] port selection after
+  its exclusions, so discovery never probes an excluded port.
 - An ordinary-socket path is available when raw I/O is unavailable and the
   request explicitly selects it. Its results are socket observations, not wire
   evidence.
@@ -148,6 +150,7 @@ building blocks and publishes host-level records in the
 [m4]: m04-target-planning.md
 [m10]: m10-os-identification.md
 [m11]: m11-scan-informed-traceroute.md
+[m6-selection]: m06-port-planning-inference.md#m62-port-exclusions
 [m13]: m13-sctp-ip-protocol.md
 [m13-discovery]: m13-sctp-ip-protocol.md#m134-additional-discovery-probes
 [probe]: ../../crates/packetcraftr/src/probe.rs

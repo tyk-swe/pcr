@@ -161,8 +161,17 @@ evidence are still pending real runner executions, so M3 stays **In
 progress**. The IPv6-loopback runtime gap remains documented rather than
 claimed; the test uses `127.0.0.1` only.
 
+[M6][m6-limits] found an open question for native scan evidence on Linux. Over
+an isolated veth pair, kernel replies (SYN/ACK, RST, ICMP port unreachable)
+arrive about 30 µs after a probe, before `send()` returns. The shared rule that
+a capture inside the submission interval is not proven post-send discards
+them, so those raw scan endpoints read as silent. Slower replies correlate
+normally. Native scan scenarios here need to decide what such frames prove
+before claiming TCP or ICMP-error coverage.
+
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md
+[m6-limits]: m06-port-planning-inference.md#known-limits
 [project-readme]: ../../README.md
 [native-validation]: ../native-validation.md
 [ci]: ../../.github/workflows/ci.yml

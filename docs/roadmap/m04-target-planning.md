@@ -132,7 +132,8 @@ Settled at M4 with the recommended positions:
    rejected, and `%zone` is accepted only on unicast `fe80::/10` addresses for
    this release.
 6. **Port selections publish in the list output when [M6][m6] adds them**,
-   rather than being designed here.
+   rather than being designed here. M6 publishes them as the list `ports`
+   record.
 7. **Scoped output ships in a new `packetcraftr.output/v7` family.**
    Reinterpreting v6 probe/endpoint identity to carry scope would change what
    existing fields mean, and the [compatibility policy][compatibility]

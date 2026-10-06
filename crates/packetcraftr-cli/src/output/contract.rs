@@ -9,6 +9,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
 pub const SCHEMA_V7: &str = "packetcraftr.output/v7";
+pub const SCHEMA_V8: &str = "packetcraftr.output/v8";
 
 pub use crate::commands::Command;
 

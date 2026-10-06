@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v7",
+  "schema": "packetcraftr.output/v8",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -8,12 +8,34 @@
     "resolved_addresses": [
       "192.168.56.10"
     ],
+    "plan": {
+      "method": {
+        "requested": "raw",
+        "selected": "raw"
+      },
+      "port_catalog": {
+        "name": "port-catalog",
+        "version": "1.0.0"
+      },
+      "excluded_endpoints": 0
+    },
     "endpoints": [
       {
         "address": "192.168.56.10",
         "transport": "tcp",
         "port": 443,
         "classification": "timeout",
+        "port_hint": "https",
+        "inference": {
+          "state": "filtered",
+          "rule": "tcp_syn.silence",
+          "supporting": [
+            70000
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
         "probes": [
           {
             "sequence": 70000,
@@ -33,6 +55,7 @@
       }
     ],
     "undecoded": [],
+    "unattributed": [],
     "retained_evidence_bytes": 0,
     "rtt": {
       "sent": 1,

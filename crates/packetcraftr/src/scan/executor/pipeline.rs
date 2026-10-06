@@ -4,7 +4,7 @@ mod correlation;
 mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
-use crate::scan::{PendingEvidence, PipelineFailure, Probe, SentProbe};
+use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
@@ -15,7 +15,7 @@ use crate::{
     providers::{CaptureProviders, PacketProviders},
     scan::error::Probes,
 };
-use correlation::{Best, SeenFrames, candidates, definitive};
+use correlation::{Best, SeenFrames, candidates, definitive, settled};
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,
@@ -30,7 +30,7 @@ use packetcraftr_netio::{
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     iter::Peekable,
     sync::Arc,
     time::{Duration, Instant},
@@ -181,6 +181,9 @@ struct Pipeline<'a, P: PacketProviders, K> {
     spacing: Duration,
     stats: Stats,
     pending: BTreeMap<usize, Pending>,
+    /// The last `max_in_flight` settled probes, so a reply that arrives
+    /// after its probe settled is retained as late rather than dropped.
+    recent: VecDeque<(usize, Arc<SentPacket>)>,
     retained: usize,
     evidence: RetentionBudget,
     failed_probe: Option<Probe>,
@@ -243,6 +246,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             spacing: Duration::ZERO,
             stats: Stats::default(),
             pending: BTreeMap::new(),
+            recent: VecDeque::new(),
             retained: plan.base_bytes,
             evidence: RetentionBudget::default(),
             failed_probe: None,
@@ -498,14 +502,36 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             &self.plan.interfaces[source],
             received,
         );
-        if candidates.len() != 1 {
-            if candidates.len() > 1 && self.diagnostics.insert("ambiguous") {
+        if candidates.is_empty() {
+            // Pending probes whose window closed have not settled yet, but
+            // a frame after their deadline cannot be their outcome either.
+            let expired = self
+                .pending
+                .iter()
+                .filter(|(_, entry)| received > entry.deadline)
+                .map(|(index, entry)| (*index, &entry.sent));
+            let recent = self.recent.iter().map(|(index, sent)| (*index, sent));
+            let settled = settled(
+                expired.chain(recent),
+                &self.planned,
+                &self.executor.client.registry,
+                &decoded,
+                &self.plan.interfaces[source],
+            );
+            return match settled.as_slice() {
+                [] => Ok(()),
+                [index] => self.unattributed(raw, Attribution::Late, Some(*index)),
+                _ => self.unattributed(raw, Attribution::Ambiguous, None),
+            };
+        }
+        if candidates.len() > 1 {
+            if self.diagnostics.insert("ambiguous") {
                 (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
                     "scan.ambiguous_response",
                     "capture matched multiple pending probes and was not attributed",
                 )))?;
             }
-            return Ok(());
+            return self.unattributed(raw, Attribution::Ambiguous, None);
         }
         let (index, observation) = candidates.pop().expect("one candidate");
         let definitive = definitive(&observation);
@@ -543,12 +569,35 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                         limit("evidence bytes", self.options.max_evidence_bytes)
                     }
                 })?;
-            entry.best = Some(candidate);
+            let superseded = entry.best.replace(candidate);
+            if let Some(previous) = superseded {
+                self.unattributed(
+                    previous.response.response.frame,
+                    Attribution::Duplicate,
+                    Some(index),
+                )?;
+            }
+        } else {
+            self.unattributed(raw, Attribution::Duplicate, Some(index))?;
         }
         if definitive {
             self.complete(index)?;
         }
         Ok(())
+    }
+
+    fn unattributed(
+        &mut self,
+        frame: Frame,
+        attribution: Attribution,
+        index: Option<usize>,
+    ) -> Result<(), BoundaryError> {
+        let sequence = index.map(|index| self.planned[index].probe.sequence);
+        (self.emit)(PipelineEvent::Unattributed {
+            frame,
+            attribution,
+            sequence,
+        })
     }
 
     fn complete(&mut self, index: usize) -> Result<(), BoundaryError> {
@@ -591,6 +640,10 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         if let Some(response) = entry.last_response {
             self.evidence.release(response.bytes().len());
         }
+        if self.recent.len() == self.options.max_in_flight {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((index, entry.sent));
         self.failed_probe = None;
         Ok(())
     }

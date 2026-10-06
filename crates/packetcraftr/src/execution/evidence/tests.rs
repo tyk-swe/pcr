@@ -20,6 +20,7 @@ const LIMITS: EvidenceLimits = EvidenceLimits {
 const DESCRIPTOR: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
     "fixture.evidence_limit",
     "fixture.undecoded_limit",
+    "fixture.unattributed_limit",
     "fixture",
 );
 

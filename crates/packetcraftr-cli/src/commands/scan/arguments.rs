@@ -18,13 +18,24 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
     --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
+  packetcraftr scan 192.0.2.10 --transport tcp,udp --ports @name-services,udp:ntp
+  packetcraftr scan 192.0.2.10 --ports @all --exclude-ports telnet,8000-8100
+  packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure \
+    --curated-udp-payloads
 
 Port syntax:
-  --ports accepts comma-separated u16 ports and inclusive ranges of the form
-  START-END, where START and END are both u16 ports and START <= END. Repeated
-  ports and overlapping ranges keep their first-seen order and deduplicate.
-  Expansion is bounded by --max-ports and stops as soon as another distinct
-  port would exceed that limit.
+  --ports and --exclude-ports accept comma-separated terms: a u16 port, an
+  inclusive START-END range with START <= END, a catalog name such as `https`,
+  or a catalog preset such as `@web`. A `tcp:` or `udp:` prefix limits a term to
+  one transport; otherwise it applies to every --transport. A name resolves to
+  its catalog port on each transport that lists it. Endpoints keep their
+  first-seen order and deduplicate; TCP and UDP on one port stay distinct.
+  Exclusions are removed after expansion and before any probe is planned, so
+  no stage probes an excluded endpoint, then --max-ports bounds the remainder.
+  No transport has a default selection: a scan names its ports. Catalog names
+  are conventional assignments (hints), not service identification; results
+  name the catalog version. The bundled presets are web, mail, name-services,
+  infrastructure, legacy-services, and all.
 
 The default window is one probe. --rate bounds probe starts across the operation;
 larger windows overlap response waits. Planned duration conservatively includes
@@ -41,6 +52,19 @@ resolution still requires its policy opt-in and is reported as performed.
 --connect uses ordinary TCP sockets, requires no raw-packet privileges, and caps
 overlapping connections at 16. It reports socket outcomes and rejects packet
 route overrides. Hostname lookup requires the existing policy opt-in.
+--method selects raw packets (the default), tcp-connect (the same as
+--connect), or auto. An explicit method is never replaced: raw fails with a
+capability error when this build cannot capture and transmit. auto chooses raw
+when the build can, and otherwise tcp-connect when every endpoint is TCP and no
+packet route override is set; results publish the method and why auto chose it.
+
+Each port endpoint reports an inferred state (open, closed, filtered,
+open_or_filtered, or unknown) with the rule that produced it and the attempts
+that support, conflict with, or did not answer it, beside every attempt
+outcome. A silent UDP port is open_or_filtered. Socket deadlines and local
+errors are operational failures, never port states. Late, duplicate, and
+ambiguous replies are retained as unattributed evidence, bounded by
+--max-undecoded and the evidence budget.
 
 --max-in-flight bounds overlapping raw-packet response windows (1..=1024).
 The complete plan is authorized before active discovery; capture is shared per
@@ -59,10 +83,61 @@ reachability: open does not imply confirmed. DNS responses must match ID, opcode
 and questions. Configured byte checks only confirm those checks, not identity.
 A nonmatching UDP reply remains evidence while a rolling window waits for a valid
 application reply or its deadline. Profiles do not perform hidden resolution.
+--curated-udp-payloads adds the bundled, versioned payload profiles (named
+curated/...) for the selected UDP ports they cover; an operator profile for the
+same port wins, and results list applied and overridden ports.
 ";
 
+/// One `--ports` or `--exclude-ports` term.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PortTerm(pub(crate) packetcraftr::scan::Term);
+
+impl FromStr for PortTerm {
+    type Err = String;
+
+    fn from_str(token: &str) -> Result<Self, Self::Err> {
+        let (transport, selector) = match token.split_once(':') {
+            Some(("tcp", selector)) => (Some(packetcraftr::probe::Transport::Tcp), selector),
+            Some(("udp", selector)) => (Some(packetcraftr::probe::Transport::Udp), selector),
+            Some((prefix, _)) => {
+                return Err(format!(
+                    "invalid port term `{token}`: transport prefix `{prefix}` is not tcp or udp"
+                ));
+            }
+            None => (None, token),
+        };
+        let selector = if let Some(preset) = selector.strip_prefix('@') {
+            packetcraftr::scan::Selector::Preset(catalog_name(token, preset)?)
+        } else if selector.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+            packetcraftr::scan::Selector::Ports(selector.parse::<PortSpec>()?.0)
+        } else {
+            packetcraftr::scan::Selector::Name(catalog_name(token, selector)?)
+        };
+        Ok(Self(packetcraftr::scan::Term {
+            transport,
+            selector,
+        }))
+    }
+}
+
+fn catalog_name(token: &str, name: &str) -> Result<String, String> {
+    let valid = name.len() <= packetcraftr_core::document::port_catalog::MAX_NAME_BYTES
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if valid {
+        Ok(name.to_owned())
+    } else {
+        Err(format!(
+            "invalid port term `{token}`: expected a u16 port, START-END range, catalog name, \
+             or @preset"
+        ))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PortSpec(pub(crate) packetcraftr::scan::PortSpec);
+struct PortSpec(packetcraftr::scan::PortSpec);
 
 impl FromStr for PortSpec {
     type Err = String;
@@ -99,7 +174,7 @@ fn parse_port(token: &str) -> Result<u16, String> {
         .map_err(|_| format!("invalid port spec `{token}`: expected a u16 port or START-END range"))
 }
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Transport {
     #[default]
     Tcp,
@@ -117,11 +192,34 @@ impl From<Transport> for packetcraftr::probe::Transport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum Method {
+    #[default]
+    Raw,
+    TcpConnect,
+    Auto,
+}
+
+impl From<Method> for packetcraftr::scan::method::Requested {
+    fn from(value: Method) -> Self {
+        match value {
+            Method::Raw => Self::Raw,
+            Method::TcpConnect => Self::Connect,
+            Method::Auto => Self::Automatic,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Use ordinary TCP connections without raw packet privileges.
-    #[arg(long = "connect")]
+    /// Use ordinary TCP connections without raw packet privileges; the same as
+    /// `--method tcp-connect`.
+    #[arg(long = "connect", conflicts_with = "method")]
     pub(crate) connect: bool,
+    /// Raw packets, ordinary TCP connections, or automatic selection from
+    /// this build's capabilities; an explicit method is never replaced.
+    #[arg(long, value_enum, default_value_t = Method::Raw)]
+    pub(crate) method: Method,
     /// Maximum overlapping probe windows; ordinary TCP is capped at 16.
     #[arg(long, default_value_t = 1)]
     pub(crate) max_in_flight: usize,
@@ -151,9 +249,10 @@ pub(crate) struct Args {
     /// Maximum distinct selected addresses across all targets.
     #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_targets)]
     pub(crate) max_targets: usize,
-    /// TCP SYN, UDP, or ICMP echo probes.
-    #[arg(long, value_enum, default_value_t = Transport::Tcp)]
-    pub(crate) transport: Transport,
+    /// TCP SYN, UDP, or ICMP echo probes; TCP and UDP combine in one plan
+    /// (`tcp,udp`), while ICMP echo stands alone.
+    #[arg(long, value_enum, value_delimiter = ',', num_args = 1.., default_value = "tcp")]
+    pub(crate) transport: Vec<Transport>,
     /// Exact UDP probe payload in hex, with optional whitespace, colon, or dash separators.
     #[arg(long, value_name = "HEX", conflicts_with = "udp_payload_file")]
     pub(crate) udp_payload_hex: Option<String>,
@@ -163,10 +262,13 @@ pub(crate) struct Args {
     /// Select all authorized addresses or only one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,
-    /// Comma-separated TCP/UDP destination ports or inclusive START-END ranges;
-    /// omitted for ICMP.
-    #[arg(long, value_delimiter = ',', num_args = 1..)]
-    pub(crate) ports: Vec<PortSpec>,
+    /// Comma-separated ports, START-END ranges, catalog names, or @presets,
+    /// optionally prefixed `tcp:` or `udp:`; omitted for ICMP.
+    #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
+    pub(crate) ports: Vec<PortTerm>,
+    /// Terms removed from the expanded selection before planning.
+    #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
+    pub(crate) exclude_ports: Vec<PortTerm>,
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
@@ -189,6 +291,10 @@ pub(crate) struct Args {
     /// Bounded per-port payload and response-check assignments (UDP profiles v1).
     #[arg(long)]
     pub(crate) udp_profiles: Option<std::path::PathBuf>,
+    /// Probe covered UDP ports with the bundled, versioned curated payloads;
+    /// operator profiles win for their ports.
+    #[arg(long)]
+    pub(crate) curated_udp_payloads: bool,
     /// Maximum charged plans and in-flight packet descriptions.
     #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_prepared_bytes)]
     pub(crate) max_prepared_bytes: usize,

@@ -11,6 +11,7 @@ use crate::execution::limits::EvidenceLimits;
 pub(crate) struct EvidenceDiagnosticDescriptor {
     evidence_limit_code: &'static str,
     undecoded_limit_code: &'static str,
+    unattributed_limit_code: &'static str,
     display_name: &'static str,
 }
 
@@ -18,11 +19,13 @@ impl EvidenceDiagnosticDescriptor {
     pub(crate) const fn new(
         evidence_limit_code: &'static str,
         undecoded_limit_code: &'static str,
+        unattributed_limit_code: &'static str,
         display_name: &'static str,
     ) -> Self {
         Self {
             evidence_limit_code,
             undecoded_limit_code,
+            unattributed_limit_code,
             display_name,
         }
     }
@@ -41,6 +44,7 @@ pub(crate) struct EvidenceState {
     descriptor: EvidenceDiagnosticDescriptor,
     budget: RetentionBudget,
     retained_undecoded: usize,
+    retained_unattributed: usize,
     diagnostics: DiagnosticLog,
 }
 
@@ -51,12 +55,32 @@ impl EvidenceState {
             descriptor,
             budget: RetentionBudget::default(),
             retained_undecoded: 0,
+            retained_unattributed: 0,
             diagnostics: DiagnosticLog::default(),
         }
     }
 
     pub(crate) fn retain_response(&mut self, frame: &Frame) -> Option<Frame> {
         self.reserve(frame).then(|| frame.clone())
+    }
+
+    /// Retains a correlated frame no outcome carries. The undecoded count
+    /// bounds these separately, so neither kind can starve the other, and
+    /// both share the frame and byte budget with responses.
+    pub(crate) fn retain_unattributed(&mut self, frame: &Frame) -> Option<Frame> {
+        if self.retained_unattributed >= self.limits.max_undecoded {
+            self.diagnostics.push_once(Diagnostic::warning(
+                self.descriptor.unattributed_limit_code,
+                format!(
+                    "unattributed {} evidence limit {} reached; later frames were omitted",
+                    self.descriptor.display_name, self.limits.max_undecoded
+                ),
+            ));
+            return None;
+        }
+        let retained = self.retain_response(frame)?;
+        self.retained_unattributed += 1;
+        Some(retained)
     }
 
     pub(crate) fn retain_undecoded<S: EvidenceSink>(

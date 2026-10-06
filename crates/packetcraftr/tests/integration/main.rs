@@ -24,6 +24,7 @@ mod model_contracts;
 mod neighbor_contracts;
 mod neighbor_deadline_contracts;
 mod policy_contracts;
+mod port_selection_matrix;
 mod probe_tunnel_contracts;
 mod route_contracts;
 mod scan_pipeline_contracts;

@@ -12,9 +12,9 @@ The four vocabularies are:
   correlated reply, an ICMP error, silence within its window, a late or
   unattributed frame, or a socket call's own result.
 - **Port inference.** A scan-method-dependent conclusion drawn from one
-  endpoint's attempts, together with the rule that produced it. No current
-  output publishes this layer. Conflicting attempts remain visible beside any
-  future inference.
+  endpoint's attempts, together with the rule that produced it. Output/v8
+  publishes it as each endpoint's `inference` ([port inference](#port-inference)).
+  Conflicting attempts remain visible beside it.
 - **Host observations.** Evidence that a host answered, by which probe, and
   whether the evidence is direct, a cached next hop, or a proxy reply. No
   current output publishes a host record.
@@ -135,8 +135,8 @@ attempt, not a verdict on the service.
 
 ## The endpoint aggregate is not port inference
 
-Each `endpoints[]` record groups the attempts for one `(address, port)` (packet
-scan) or socket address (connect scan) under `address`, `transport`, `port`,
+Each `endpoints[]` record groups the attempts for one
+`(address, transport, port)` (packet scan) or socket address (connect scan) under `address`, `transport`, `port`,
 and `probes` — all coordinate metadata — plus one `classification`.
 
 That endpoint `classification` is the **highest-ranked attempt outcome** the
@@ -145,8 +145,8 @@ endpoint collected, under the fixed order
 ([`Classification::rank`][scan-report], applied by `promote`). It is a legacy
 convenience aggregate over attempt observations. It is **not** the port
 inference vocabulary: it has no scan-method semantics, carries no inference
-rule, and must not be read as one. Scan-dependent inferred states publish in a
-new output family when [M6][m6] first produces them, per the
+rule, and must not be read as one. Scan-dependent inferred states publish
+beside it as `inference` in output/v8, per the
 [consumer compatibility policy][compatibility].
 
 The `complete` stream event's `counts` (`open`, `closed`, `filtered`,
@@ -243,13 +243,82 @@ and every `origins` entry (`index`, `source`, and manifest `line`), plus
 DNS resolution ran during planning and may have sent traffic; it is
 operational metadata, not a port-state claim.
 
-## Host observations and port inference
+## v8 port planning and inference
 
-Neither vocabulary has a producer yet. The layers exist in the model so that
-[M5][m5] host records and [M6][m6] inferred port states add fields in their
-own shapes — with their own enums in a new output family for inference —
-instead of re-encoding `classification`, `responder`, or `reason` values that
-already mean attempt outcomes.
+`packetcraftr.output/v8` ([M6][m6]) carries every v7 meaning unchanged and adds:
+
+| Field | Role |
+| --- | --- |
+| `plan.method` | Metadata: the `requested` and `selected` scan method, and the `reason` automatic selection chose it. An explicit method is never replaced. |
+| `plan.port_catalog` | Metadata: the catalog data set and version that names, presets, and hints came from. |
+| `plan.excluded_endpoints` | Metadata: endpoints removed by `--exclude-ports` after expansion and before planning. |
+| `plan.curated_udp_payloads` | Metadata: the curated payload data set and version, and the UDP ports where it was `applied` or `overridden` by an operator profile. |
+| `endpoints[].port_hint` | Metadata: the catalog name for the endpoint's transport and port. It is a hint, not service identification. |
+| `endpoints[].inference` | Port inference: the [inferred state](#port-inference). |
+| `unattributed[]` | Attempt observation: a correlated frame no attempt outcome carries (`late`, `duplicate`, or `ambiguous`), with the probe `sequence` when one probe is implicated. |
+| `endpoint` / `connect_endpoint` events | Metadata: the endpoint aggregate and inference, naming its probe sequences instead of repeating the attempts. |
+| `ports` (target list) | Metadata: the exact expanded endpoints a scan of the selection would probe. |
+
+Unattributed frames share the `--max-undecoded` count and the evidence frame
+and byte budgets with undecodable frames; the first one omitted warns
+`scan.unattributed_limit`. A duplicate is the losing reply for a probe that
+also has a winning one, a late reply arrived after its probe's window or
+outcome, and an ambiguous reply correlates with more than one probe. None
+changes an attempt outcome or an inference.
+
+## Port inference
+
+An inference concludes one endpoint's state from all of its attempts. It is
+published beside, never instead of, the attempts' own outcomes. Each attempt
+maps to one rule by the scan method; the highest-ranked rule decides the
+`state`, and the earliest attempt wins a tie, so delivery order never changes
+the conclusion. Every attempt's probe sequence then lands in exactly one list:
+
+- `supporting`: its own rule concludes the decided state;
+- `unanswered`: it was silent and silence concludes a different state;
+- `conflicting`: its reply concludes a different state; or
+- `failed`: an operational failure, which concludes no state.
+
+| Rank | TCP SYN (raw TCP) | UDP (raw UDP) | TCP connect |
+| --- | --- | --- | --- |
+| 6 | `tcp_syn.syn_ack` → `open` | `udp.reply` → `open` | `tcp_connect.connected` → `open` |
+| 5 | `tcp_syn.reset` → `closed` | `udp.port_unreachable` → `closed` | `tcp_connect.refused` → `closed` |
+| 4 | `tcp_syn.icmp_unreachable` (any destination unreachable) → `filtered` | `udp.icmp_unreachable` (administratively prohibited or other unreachable) → `filtered` | `tcp_connect.unreachable` → `filtered` |
+| 3 | `tcp_syn.time_exceeded` → `filtered` | `udp.time_exceeded` → `filtered` | — |
+| 2 | `tcp_syn.unclassified_reply` (other TCP, UDP, or echo reply) → `unknown` | `udp.unclassified_reply` (TCP or echo reply) → `unknown` | — |
+| 1 | `tcp_syn.silence` → `filtered` | `udp.silence` → `open_or_filtered` | `tcp_connect.timed_out` → `filtered` |
+| 0 | — | — | `local_error` or `deadline_expired` → no state, rule `operational_failure` |
+
+The rule is scan-dependent where the attempt vocabulary is not. An ICMP port
+unreachable is a `closed` attempt classification for both transports, but it
+infers `closed` only for UDP; for a TCP SYN it means a device refused on the
+port's behalf, so the inference is `filtered`. A silent UDP port stays
+`open_or_filtered` until a reply or ICMP error decides it, and a silent
+attempt beside a decisive reply is `unanswered`, not a conflict. ICMP echo
+endpoints are portless and carry no inference. When every attempt failed
+operationally, `state` is absent and the rule is `operational_failure`: a
+socket deadline or exhausted local capacity is never a port state. A
+connect scan retries a connection the socket provider has no capacity to admit
+instead of recording it.
+
+PacketcraftR's labels map to Nmap's for comparison only:
+
+| PacketcraftR | Nmap |
+| --- | --- |
+| `open`, `closed`, `filtered` | the same names |
+| `open_or_filtered` | `open\|filtered` |
+| `unknown` | no equivalent label |
+| state absent (`operational_failure`) | no equivalent label |
+
+PacketcraftR has no `unfiltered` label, which needs an ACK or window scan
+([M12][m12]), and no `closed|filtered`, which is idle-scan specific.
+
+## Host observations
+
+This vocabulary has no producer yet. The layer exists in the model so that
+[M5][m5] host records add fields in their own shapes instead of re-encoding
+`classification`, `responder`, or `reason` values that already mean attempt
+outcomes.
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs
@@ -259,6 +328,7 @@ already mean attempt outcomes.
 [m1]: roadmap/m01-claims-evidence.md
 [m5]: roadmap/m05-host-discovery.md
 [m6]: roadmap/m06-port-planning-inference.md
+[m12]: roadmap/m12-tcp-diagnostic-scans.md
 [scan-engine]: ../crates/packetcraftr/src/scan/engine.rs
 [scan-error]: ../crates/packetcraftr/src/scan/error.rs
 [scan-evidence]: ../crates/packetcraftr/src/scan/evidence.rs

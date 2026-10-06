@@ -19,6 +19,15 @@ fn preferred_latency(candidate: Duration, current: Duration) -> bool {
     candidate < current
 }
 
+/// Why a matched response did not become its probe's outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Passed {
+    /// It arrived after the probe's deadline.
+    Late,
+    /// A higher-ranked or earlier response was kept instead.
+    Superseded,
+}
+
 pub(crate) struct ResponseCandidate<'a, O> {
     pub(crate) observation: O,
     pub(crate) decoded: &'a DecodedPacket,
@@ -52,15 +61,16 @@ pub(crate) fn candidate_precedes<T: Ord>(
     candidate.bytes < current.bytes
 }
 
+/// Returns the response that lost, if any, and why.
 fn update_best_candidate<'a, O, K: Ord>(
     best: &mut Option<ResponseCandidate<'a, O>>,
     candidate: ResponseCandidate<'a, O>,
     timeout: Duration,
     rank: impl Fn(&O) -> u8,
     tie_break_key: impl Fn(&O) -> K,
-) {
+) -> Option<(&'a DecodedPacket, Passed)> {
     if !response_within_deadline(candidate.latency, timeout) {
-        return;
+        return Some((candidate.decoded, Passed::Late));
     }
     let key = |candidate: &ResponseCandidate<'a, O>| CandidateKey {
         rank: rank(&candidate.observation),
@@ -72,7 +82,10 @@ fn update_best_candidate<'a, O, K: Ord>(
         .as_ref()
         .is_none_or(|current| candidate_precedes(&key(&candidate), &key(current)));
     if candidate_precedes {
-        *best = Some(candidate);
+        best.replace(candidate)
+            .map(|previous| (previous.decoded, Passed::Superseded))
+    } else {
+        Some((candidate.decoded, Passed::Superseded))
     }
 }
 
@@ -93,10 +106,35 @@ impl<'a> ResponseSelector<'a> {
         &mut self,
         request_index: usize,
         timeout: Duration,
+        classify: impl FnMut(&DecodedPacket) -> Option<O>,
+        rank: impl Fn(&O) -> u8,
+        tie_break_key: impl Fn(&O) -> K,
+        check_deadline: impl FnMut() -> Result<(), E>,
+    ) -> Result<Option<ResponseCandidate<'a, O>>, E> {
+        let mut passed = Vec::new();
+        self.select_passing(
+            request_index,
+            timeout,
+            classify,
+            rank,
+            tie_break_key,
+            check_deadline,
+            &mut passed,
+        )
+    }
+
+    /// [`Self::select`], also collecting every classified response that did
+    /// not become the outcome, in executor evidence order.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn select_passing<O, K: Ord, E>(
+        &mut self,
+        request_index: usize,
+        timeout: Duration,
         mut classify: impl FnMut(&DecodedPacket) -> Option<O>,
         rank: impl Fn(&O) -> u8,
         tie_break_key: impl Fn(&O) -> K,
         mut check_deadline: impl FnMut() -> Result<(), E>,
+        passed: &mut Vec<(&'a DecodedPacket, Passed)>,
     ) -> Result<Option<ResponseCandidate<'a, O>>, E> {
         let mut best = None;
         while self
@@ -109,8 +147,8 @@ impl<'a> ResponseSelector<'a> {
                 .matched
                 .next()
                 .expect("peeked matched response must remain available");
-            if let Some(observation) = classify(&response.response) {
-                update_best_candidate(
+            if let Some(observation) = classify(&response.response)
+                && let Some(lost) = update_best_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -120,7 +158,9 @@ impl<'a> ResponseSelector<'a> {
                     timeout,
                     &rank,
                     &tie_break_key,
-                );
+                )
+            {
+                passed.push(lost);
             }
             check_deadline()?;
         }

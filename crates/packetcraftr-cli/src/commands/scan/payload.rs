@@ -7,16 +7,11 @@ use bytes::Bytes;
 use packetcraftr::scan::MAX_UDP_PAYLOAD_BYTES;
 use packetcraftr_core::error::Kind;
 
-use super::arguments::Transport;
 use crate::errors::CliError;
 use crate::input::{InputKind, read_bounded_file_allow_empty};
 
-pub(super) fn read(
-    transport: Transport,
-    hex: Option<&str>,
-    path: Option<&Path>,
-) -> Result<Bytes, CliError> {
-    if (hex.is_some() || path.is_some()) && !matches!(transport, Transport::Udp) {
+pub(super) fn read(udp: bool, hex: Option<&str>, path: Option<&Path>) -> Result<Bytes, CliError> {
+    if (hex.is_some() || path.is_some()) && !udp {
         return Err(CliError::new(
             Kind::Usage,
             "--udp-payload-hex and --udp-payload-file require --transport udp",

@@ -39,6 +39,7 @@ pub(crate) struct State {
     pub(crate) suppress_replies: bool,
     pub(crate) hold_replies_until: usize,
     pub(crate) tied_resets: bool,
+    pub(crate) repeated_syn_acks: bool,
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
     pub(crate) sent_wires: Vec<Bytes>,
@@ -107,8 +108,9 @@ impl transmit::Provider for Io {
             )
             .unwrap();
         let ip = decoded.packet.get::<Ipv4>().unwrap();
-        let tcp = decoded.packet.get::<Tcp>().unwrap();
+        let tcp = decoded.packet.get::<Tcp>();
         let reply = |identification: u16, flags: u16| {
+            let tcp = tcp.expect("only TCP probes draw TCP replies");
             let mut response = Packet::new();
             response.push(Ipv4 {
                 identification,
@@ -126,25 +128,31 @@ impl transmit::Provider for Io {
             });
             frame(response)
         };
+        let icmp_error = |source, icmp_type, code| {
+            let mut body = vec![0_u8; 4];
+            body.extend_from_slice(&wire[..wire.len().min(28)]);
+            let mut error = Packet::new();
+            error.push(Ipv4 {
+                source,
+                destination: ip.source,
+                ..Default::default()
+            });
+            error.push(Icmpv4 {
+                icmp_type,
+                code,
+                body: Bytes::from(body),
+                ..Default::default()
+            });
+            frame(error)
+        };
         let report = transmit::Report::committed(wire.len(), wire.clone());
         let ingress = Instant::now();
         let replies = match state.hops {
-            Some(hops) if ip.ttl < hops => {
-                let mut body = vec![0_u8; 4];
-                body.extend_from_slice(&wire[..wire.len().min(28)]);
-                let mut error = Packet::new();
-                error.push(Ipv4 {
-                    source: router(ip.ttl),
-                    destination: ip.source,
-                    ..Default::default()
-                });
-                error.push(Icmpv4 {
-                    icmp_type: 11,
-                    code: 0,
-                    body: Bytes::from(body),
-                    ..Default::default()
-                });
-                vec![frame(error)]
+            Some(hops) if ip.ttl < hops => vec![icmp_error(router(ip.ttl), 11, 0)],
+            // Every UDP port on the fixture host is closed.
+            _ if tcp.is_none() => vec![icmp_error(ip.destination, 3, 3)],
+            _ if state.repeated_syn_acks => {
+                vec![reply(1, Tcp::SYN | Tcp::ACK), reply(2, Tcp::SYN | Tcp::ACK)]
             }
             _ if state.tied_resets => {
                 vec![reply(2, Tcp::RST | Tcp::ACK), reply(1, Tcp::RST | Tcp::ACK)]

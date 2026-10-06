@@ -14,6 +14,9 @@ use crate::output;
 
 use packetcraftr_core::error::{Classified, Kind};
 
+use packetcraftr::probe::Transport;
+use packetcraftr::scan::{method, profile::curated};
+
 use self::arguments::Args;
 use super::execution;
 use crate::errors::CliError;
@@ -58,19 +61,9 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    if arguments.connect && !matches!(arguments.transport, arguments::Transport::Tcp) {
-        return Err(CliError::new(
-            packetcraftr_core::error::Kind::Usage,
-            "--connect requires TCP transport",
-        ));
-    }
-    if arguments.connect && !arguments.route.supports_kernel_tcp() {
-        return Err(CliError::classified(
-            packetcraftr::scan::Error::UnsupportedTcpRoute,
-        ));
-    }
     let Args {
         connect,
+        method,
         max_in_flight,
         max_prepared_bytes,
         list,
@@ -87,6 +80,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         udp_profiles,
         family,
         ports,
+        exclude_ports,
         attempts,
         timeout,
         rate,
@@ -94,10 +88,17 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_probes,
         duration,
         max_undecoded,
+        curated_udp_payloads,
         route,
         limits,
         policy,
     } = arguments;
+    let requested = if connect {
+        method::Requested::Connect
+    } else {
+        method.into()
+    };
+    let transports = transports(&transport)?;
     let stdin_consumers = targets_file
         .iter()
         .chain(exclude_file.iter())
@@ -122,10 +123,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     selection.targets.validate().map_err(CliError::classified)?;
     let targets = selection.targets;
     if list {
+        // Listing needs no ports, but publishes the selection when given one
+        // so the reviewed scope is exactly what a scan would probe.
+        let ports = if ports.is_empty() && exclude_ports.is_empty() {
+            None
+        } else {
+            let selected = select_endpoints(&transports, ports, exclude_ports, max_ports)?;
+            Some(output::scan::plan::Ports::from(&selected))
+        };
         return list::run(
             targets,
             list::Options {
                 origins: selection.origins,
+                ports,
                 family,
                 max_targets,
                 max_duration: duration.max_duration(),
@@ -135,12 +145,15 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             stream,
         );
     }
-    let udp_payload = payload::read(
-        transport,
-        udp_payload_hex.as_deref(),
-        udp_payload_file.as_deref(),
-    )?;
-    let udp_profiles = profiles::load(udp_profiles.as_deref(), transport)?;
+    let udp = transports.contains(&Transport::Udp);
+    let udp_payload = payload::read(udp, udp_payload_hex.as_deref(), udp_payload_file.as_deref())?;
+    let operator_profiles = profiles::load(udp_profiles.as_deref(), udp)?;
+    if curated_udp_payloads && !udp {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--curated-udp-payloads requires --transport udp",
+        ));
+    }
     let queue_limits = limits.into_limits();
     let scan_limits = packetcraftr::scan::Limits {
         max_prepared_bytes,
@@ -153,16 +166,21 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_undecoded,
     };
     scan_limits.validate().map_err(CliError::classified)?;
-    let ports = packetcraftr::scan::select_ports(ports.into_iter().map(|spec| spec.0), max_ports)
-        .map_err(CliError::classified)?;
+    let selected = select_endpoints(&transports, ports, exclude_ports, max_ports)?;
+    let (udp_profiles, curated) = if curated_udp_payloads {
+        let mut merged = curated::merge(operator_profiles, &selected.endpoints);
+        let profiles = std::mem::take(&mut merged.profiles);
+        (profiles, Some(merged.into()))
+    } else {
+        (operator_profiles, None)
+    };
     let request = packetcraftr::scan::Request {
         max_in_flight,
         targets,
-        transport: transport.into(),
         udp_payload,
         udp_profiles,
         address_family: family.into(),
-        ports,
+        endpoints: selected.endpoints,
         attempts,
         timeout: timeout.timeout(),
         probes_per_second: rate,
@@ -170,8 +188,24 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         route: packetcraftr::route::Options::default(),
         collection: packetcraftr::exchange::Collection::default(),
     };
-    if connect {
-        return connect::run(&request, policy, format, stream);
+    let selection = method::select(
+        requested,
+        &request.endpoints,
+        method::Capabilities {
+            raw: raw_capability(route.link_mode.into()),
+            packet_route: !route.supports_kernel_tcp(),
+        },
+    )
+    .map_err(CliError::classified)?;
+    let selected_method = selection.method;
+    let plan = output::scan::plan::Plan {
+        method: selection.into(),
+        port_catalog: packetcraftr::scan::catalog::data_set().into(),
+        excluded_endpoints: selected.excluded,
+        curated_udp_payloads: curated,
+    };
+    if selected_method == method::Method::Connect {
+        return connect::run(&request, plan, policy, format, stream);
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
     let client = workflow.client(Runtime::Workflow);
@@ -193,24 +227,122 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     .map_err(rendering::scan_error)?;
                 collector.finish(report).map_err(rendering::scan_error)
             }),
-            run_with_events: Box::new(|emit| {
-                client
-                    .scan(request.clone(), emit)
-                    .map_err(rendering::scan_error)
+            run_with_events: Box::new({
+                let plan = plan.clone();
+                let client = &client;
+                let request = &request;
+                move |mut emit| {
+                    // Events stream as they settle; the tracker keeps each
+                    // attempt without its frame, for the endpoint inferences.
+                    let tracker = packetcraftr::scan::Collector::default();
+                    let mut tracked = tracker.clone();
+                    let report = client
+                        .scan(request.clone(), move |event: packetcraftr::scan::Event| {
+                            if let packetcraftr::scan::Event::Probe { target, probe } = &event {
+                                let probe = packetcraftr::scan::ProbeEvidence {
+                                    response: None,
+                                    ..probe.clone()
+                                };
+                                packetcraftr::Sink::publish(
+                                    &mut tracked,
+                                    packetcraftr::scan::Event::Probe {
+                                        target: target.clone(),
+                                        probe,
+                                    },
+                                )?;
+                            }
+                            emit(event)
+                        })
+                        .map_err(rendering::scan_error)?;
+                    let aggregate = tracker
+                        .finish(report.clone())
+                        .map_err(rendering::scan_error)?;
+                    Ok(Streamed {
+                        report,
+                        endpoints: aggregate.endpoints,
+                        plan,
+                    })
+                }
             }),
             on_event: rendering::emit_event,
-            into_result: Box::new(|report| {
-                output::envelope::Published::<output::scan::Report>::try_from(report)
-                    .map_err(CliError::classified)
+            into_result: Box::new({
+                let plan = plan.clone();
+                move |report| {
+                    output::scan::Report::publish(report, plan).map_err(CliError::classified)
+                }
             }),
-            render_text: Box::new(|report, _| {
+            render_text: Box::new(move |report, _| {
                 rendering::render_text(
-                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                    output::scan::Report::publish(report, plan).map_err(CliError::classified)?,
                 )
             }),
             complete: rendering::emit_complete,
         },
     )
+}
+
+pub(super) struct Streamed {
+    pub(super) report: packetcraftr::scan::Report,
+    pub(super) endpoints: Vec<packetcraftr::scan::Endpoint>,
+    pub(super) plan: output::scan::plan::Plan,
+}
+
+/// The requested transports in first-seen order. ICMP echo is portless and
+/// cannot share a plan with port endpoints.
+fn transports(requested: &[arguments::Transport]) -> Result<Vec<Transport>, CliError> {
+    let mut transports: Vec<Transport> = Vec::with_capacity(requested.len());
+    for transport in requested {
+        let transport = Transport::from(*transport);
+        if !transports.contains(&transport) {
+            transports.push(transport);
+        }
+    }
+    if transports.len() > 1 && transports.contains(&Transport::Icmp) {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--transport icmp is portless and cannot be combined with tcp or udp",
+        ));
+    }
+    Ok(transports)
+}
+
+fn select_endpoints(
+    transports: &[Transport],
+    ports: Vec<arguments::PortTerm>,
+    exclude_ports: Vec<arguments::PortTerm>,
+    max_ports: usize,
+) -> Result<packetcraftr::scan::Selected, CliError> {
+    if transports == [Transport::Icmp] {
+        if !ports.is_empty() || !exclude_ports.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--ports and --exclude-ports do not apply to portless ICMP echo scans",
+            ));
+        }
+        return Ok(packetcraftr::scan::Selected {
+            endpoints: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
+            excluded: 0,
+        });
+    }
+    packetcraftr::scan::select_endpoints(
+        &packetcraftr::scan::PortSelection {
+            transports: transports.to_vec(),
+            include: ports.into_iter().map(|term| term.0).collect(),
+            exclude: exclude_ports.into_iter().map(|term| term.0).collect(),
+        },
+        packetcraftr::scan::catalog::bundled(),
+        max_ports,
+    )
+    .map_err(CliError::classified)
+}
+
+/// Raw scans need packet capture and transmission in the requested link mode.
+fn raw_capability(
+    link_mode: packetcraftr_netio::link::Mode,
+) -> Result<(), packetcraftr_netio::Unsupported> {
+    use packetcraftr_netio::NativeCapability;
+    NativeCapability::Capture.check()?;
+    NativeCapability::Transmission(link_mode).check()
 }
 
 pub(super) struct Ingested {

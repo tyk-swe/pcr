@@ -92,9 +92,19 @@ pub(super) fn build_batches<'a>(
         })
         .zip(0u64..)
         .map(move |((target, attempt, endpoint), sequence)| {
-            let profile = endpoint
-                .port()
-                .and_then(|port| request.udp_profiles.get(&port));
+            // Payloads and profiles are UDP-only; a TCP endpoint sharing the
+            // port number must not inherit them.
+            let (udp_profile, udp_payload) = match endpoint {
+                ProbeEndpoint::Udp { port } => {
+                    let profile = request.udp_profiles.get(&port);
+                    let payload = profile.map_or_else(
+                        || request.udp_payload.clone(),
+                        |profile| profile.payload(sequence),
+                    );
+                    (profile.cloned(), payload)
+                }
+                ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => (None, bytes::Bytes::new()),
+            };
             Batch::single(
                 Probe {
                     sequence,
@@ -102,11 +112,8 @@ pub(super) fn build_batches<'a>(
                     scope: target.scope.clone(),
                     endpoint,
                     attempt,
-                    udp_profile: profile.cloned(),
-                    udp_payload: profile.map_or_else(
-                        || request.udp_payload.clone(),
-                        |profile| profile.payload(sequence),
-                    ),
+                    udp_profile,
+                    udp_payload,
                 },
                 request.timeout,
             )
@@ -150,9 +157,8 @@ mod tests {
         let mut request = Request {
             max_in_flight: 1,
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
-            transport: crate::probe::Transport::Tcp,
             address_family: Family::Any,
-            ports: vec![80],
+            endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
             attempts: 1,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),

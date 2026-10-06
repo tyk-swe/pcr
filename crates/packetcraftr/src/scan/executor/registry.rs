@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use crate::probe::ProbeEndpoint;
 use crate::scan::Request;
 use packetcraftr_core::{
     error::BoundaryError,
@@ -12,7 +13,11 @@ pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
     request
         .udp_profiles
         .iter()
-        .filter(|(port, _)| request.ports.contains(port))
+        .filter(|(port, _)| {
+            request
+                .endpoints
+                .contains(&ProbeEndpoint::Udp { port: **port })
+        })
         .map(|(port, profile)| {
             (
                 *port,

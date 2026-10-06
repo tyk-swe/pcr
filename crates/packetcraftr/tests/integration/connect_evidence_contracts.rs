@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use packetcraftr::policy::Policy;
-use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
 use packetcraftr::target::{self, Family, Hostname, Resolver, Target, Zone};
 use packetcraftr::{Client, ProviderSet};
@@ -51,11 +50,10 @@ fn scoped_evidence_is_charged_before_publication() {
     ] {
         let request = scan::Request {
             targets: target.clone().into(),
-            transport: Transport::Tcp,
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             address_family: Family::Any,
-            ports: vec![443],
+            endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 443 }],
             attempts,
             timeout: Duration::from_secs(5),
             probes_per_second: None,

@@ -40,11 +40,13 @@ impl Workflow {
             Self::Scan => EvidenceDiagnosticDescriptor::new(
                 "scan.evidence_limit",
                 "scan.undecoded_limit",
+                "scan.unattributed_limit",
                 "scan",
             ),
             Self::Traceroute => EvidenceDiagnosticDescriptor::new(
                 "traceroute.evidence_limit",
                 "traceroute.undecoded_limit",
+                "traceroute.unattributed_limit",
                 "traceroute",
             ),
         }

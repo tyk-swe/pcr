@@ -28,7 +28,7 @@ use crate::execution::Admission;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::probe::Batch;
-use crate::probe::{Evidence, Transport};
+use crate::probe::Evidence;
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, Call, NoopClock, RejectingExecutor};
@@ -121,9 +121,8 @@ fn tcp_scan_request(target: Target) -> Request {
     Request {
         max_in_flight: 1,
         targets: target.into(),
-        transport: Transport::Tcp,
         address_family: Family::Any,
-        ports: vec![80],
+        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
         attempts: 1,
         timeout: Duration::from_millis(1),
         probes_per_second: None,
@@ -202,7 +201,7 @@ fn udp_payload_reject() {
     use packetcraftr_core::error::Classified as _;
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
-    request.transport = Transport::Udp;
+    request.endpoints = vec![crate::probe::ProbeEndpoint::Udp { port: 80 }];
     request.udp_payload = bytes::Bytes::from_static(b"payload");
     let mut policy = private_policy();
     policy.max_bytes_per_operation = super::IPV4_PROBE_BYTES;
@@ -249,7 +248,7 @@ fn udp_payload_reject() {
     request.udp_payload = vec![0; super::MAX_UDP_PAYLOAD_BYTES + 1].into();
     assert!(request.validate().is_err());
     request.udp_payload = bytes::Bytes::from_static(b"x");
-    request.transport = Transport::Tcp;
+    request.endpoints = vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }];
     assert!(request.validate().is_err());
 }
 
@@ -380,8 +379,7 @@ impl crate::policy::Authorizer for TargetSetAuthorizer {
 
 fn icmp_scan_request(target: Target, attempts: u32, timeout: Duration) -> Request {
     Request {
-        transport: Transport::Icmp,
-        ports: Vec::new(),
+        endpoints: vec![crate::probe::ProbeEndpoint::Icmp],
         attempts,
         timeout,
         ..tcp_scan_request(target)
@@ -520,11 +518,10 @@ fn scoped_v6_route(
 fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Request {
     Request {
         targets,
-        transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        ports: vec![443],
+        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
         attempts: 1,
         timeout: Duration::from_millis(20),
         probes_per_second: None,

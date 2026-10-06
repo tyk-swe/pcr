@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 use common::clock::VirtualClock;
 use packetcraftr::clock::Clock;
 use packetcraftr::policy::Policy;
-use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
 use packetcraftr::target::{Family, SystemResolver, Target};
 use packetcraftr::{Client, ProviderSet};
@@ -196,11 +195,12 @@ impl Clock for AdmissionClock {
 fn request() -> scan::Request {
     scan::Request {
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
-        transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        ports: (1..=32).collect(),
+        endpoints: (1..=32)
+            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .collect(),
         attempts: 1,
         timeout: Duration::from_millis(50),
         probes_per_second: None,
@@ -259,6 +259,14 @@ fn timed_out_not_fail_scan() {
             .iter()
             .all(|probe| probe.outcome == connect::Outcome::DeadlineExpired)
     );
+    // Exhausted capacity was waited for, and expired attempts are operational
+    // failures: neither becomes a port state.
+    for endpoint in &aggregate.endpoints {
+        let sequences: Vec<_> = endpoint.probes.iter().map(|probe| probe.sequence).collect();
+        assert_eq!(endpoint.inference.state, None);
+        assert_eq!(endpoint.inference.rule, scan::Rule::OperationalFailure);
+        assert_eq!(endpoint.inference.failed, sequences);
+    }
     assert_eq!(
         tcp_connect_snapshot().cleanup_retaining_capacity,
         MAX_PENDING_CONNECTIONS
@@ -299,7 +307,7 @@ fn route_overrides_reject_before_tcp_connect() {
         ProviderSet::tcp(CountConnects(Arc::clone(&calls)), SystemResolver),
     );
     let request = scan::Request {
-        ports: vec![80],
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         max_in_flight: 1,
         timeout: WATCHDOG,
         ..request()

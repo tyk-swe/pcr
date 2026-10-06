@@ -5,6 +5,7 @@ mod convert;
 mod error;
 mod parse;
 pub mod payload;
+pub mod port_catalog;
 pub mod recipe;
 mod types;
 pub mod udp_profiles;

@@ -85,7 +85,12 @@ pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
     pub scope: Option<crate::target::ResolvedZone>,
+    /// The highest-ranked attempt observation.
     pub classification: Classification,
+    /// The bundled catalog's TCP name for the port: a hint, never service
+    /// identification.
+    pub port_hint: Option<&'static str>,
+    pub inference: super::super::Inference,
     pub probes: Vec<ProbeEvidence>,
 }
 
@@ -129,12 +134,22 @@ impl Collector {
                 port: key.port(),
                 scope: probe.scope.clone(),
                 classification: Classification::Timeout,
+                port_hint: super::super::catalog::hint(crate::probe::Transport::Tcp, key.port()),
+                inference: super::super::inference::connect([]),
                 probes: Vec::new(),
             });
             endpoint
                 .classification
                 .promote(probe.outcome.classification());
             endpoint.probes.push(probe);
+        }
+        for endpoint in &mut endpoints {
+            endpoint.inference = super::super::inference::connect(
+                endpoint
+                    .probes
+                    .iter()
+                    .map(|probe| (probe.sequence, probe.outcome)),
+            );
         }
         Ok(Aggregate { report, endpoints })
     }

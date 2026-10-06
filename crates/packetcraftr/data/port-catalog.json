@@ -1,0 +1,613 @@
+{
+  "schema": "packetcraftr.port-catalog/v1",
+  "name": "port-catalog",
+  "version": "1.0.0",
+  "entries": [
+    {
+      "transport": "tcp",
+      "port": 7,
+      "name": "echo",
+      "reference": "RFC 862"
+    },
+    {
+      "transport": "tcp",
+      "port": 9,
+      "name": "discard",
+      "reference": "RFC 863"
+    },
+    {
+      "transport": "tcp",
+      "port": 13,
+      "name": "daytime",
+      "reference": "RFC 867"
+    },
+    {
+      "transport": "tcp",
+      "port": 19,
+      "name": "chargen",
+      "reference": "RFC 864"
+    },
+    {
+      "transport": "tcp",
+      "port": 20,
+      "name": "ftp-data",
+      "reference": "RFC 959"
+    },
+    {
+      "transport": "tcp",
+      "port": 21,
+      "name": "ftp",
+      "reference": "RFC 959"
+    },
+    {
+      "transport": "tcp",
+      "port": 22,
+      "name": "ssh",
+      "reference": "RFC 4253, section 4.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 25,
+      "name": "smtp",
+      "reference": "RFC 5321, section 4.5.4.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 37,
+      "name": "time",
+      "reference": "RFC 868"
+    },
+    {
+      "transport": "tcp",
+      "port": 53,
+      "name": "dns",
+      "reference": "RFC 1035, section 4.2.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 70,
+      "name": "gopher",
+      "reference": "RFC 1436"
+    },
+    {
+      "transport": "tcp",
+      "port": 79,
+      "name": "finger",
+      "reference": "RFC 1288"
+    },
+    {
+      "transport": "tcp",
+      "port": 80,
+      "name": "http",
+      "reference": "RFC 9110, section 4.2.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 88,
+      "name": "kerberos",
+      "reference": "RFC 4120, section 7.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 110,
+      "name": "pop3",
+      "reference": "RFC 1939, section 3"
+    },
+    {
+      "transport": "tcp",
+      "port": 111,
+      "name": "rpcbind",
+      "reference": "RFC 1833"
+    },
+    {
+      "transport": "tcp",
+      "port": 113,
+      "name": "ident",
+      "reference": "RFC 1413"
+    },
+    {
+      "transport": "tcp",
+      "port": 119,
+      "name": "nntp",
+      "reference": "RFC 3977, section 3"
+    },
+    {
+      "transport": "tcp",
+      "port": 139,
+      "name": "netbios-session",
+      "reference": "RFC 1002"
+    },
+    {
+      "transport": "tcp",
+      "port": 143,
+      "name": "imap",
+      "reference": "RFC 9051"
+    },
+    {
+      "transport": "tcp",
+      "port": 179,
+      "name": "bgp",
+      "reference": "RFC 4271, section 8.2.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 389,
+      "name": "ldap",
+      "reference": "RFC 4511, section 5"
+    },
+    {
+      "transport": "tcp",
+      "port": 443,
+      "name": "https",
+      "reference": "RFC 9110, section 4.2.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 465,
+      "name": "submissions",
+      "reference": "RFC 8314, section 7.3"
+    },
+    {
+      "transport": "tcp",
+      "port": 554,
+      "name": "rtsp",
+      "reference": "RFC 7826, section 19.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 587,
+      "name": "submission",
+      "reference": "RFC 6409, section 3.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 631,
+      "name": "ipp",
+      "reference": "RFC 8011"
+    },
+    {
+      "transport": "tcp",
+      "port": 830,
+      "name": "netconf-ssh",
+      "reference": "RFC 6242, section 3"
+    },
+    {
+      "transport": "tcp",
+      "port": 853,
+      "name": "dns-over-tls",
+      "reference": "RFC 7858, section 3.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 993,
+      "name": "imaps",
+      "reference": "RFC 8314, section 7.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 995,
+      "name": "pop3s",
+      "reference": "RFC 8314, section 7.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 1080,
+      "name": "socks",
+      "reference": "RFC 1928, section 3"
+    },
+    {
+      "transport": "tcp",
+      "port": 2049,
+      "name": "nfs",
+      "reference": "RFC 7530, section 3.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 3260,
+      "name": "iscsi",
+      "reference": "RFC 7143, section 13.11"
+    },
+    {
+      "transport": "tcp",
+      "port": 3478,
+      "name": "stun",
+      "reference": "RFC 8489, section 9"
+    },
+    {
+      "transport": "tcp",
+      "port": 5060,
+      "name": "sip",
+      "reference": "RFC 3261, section 18"
+    },
+    {
+      "transport": "tcp",
+      "port": 5061,
+      "name": "sips",
+      "reference": "RFC 3261, section 26.2"
+    },
+    {
+      "transport": "tcp",
+      "port": 5222,
+      "name": "xmpp-client",
+      "reference": "RFC 6120, section 14.7"
+    },
+    {
+      "transport": "tcp",
+      "port": 5269,
+      "name": "xmpp-server",
+      "reference": "RFC 6120, section 14.7"
+    },
+    {
+      "transport": "tcp",
+      "port": 6514,
+      "name": "syslog-tls",
+      "reference": "RFC 5425, section 4.1"
+    },
+    {
+      "transport": "tcp",
+      "port": 6697,
+      "name": "ircs",
+      "reference": "RFC 7194, section 2"
+    },
+    {
+      "transport": "udp",
+      "port": 7,
+      "name": "echo",
+      "reference": "RFC 862"
+    },
+    {
+      "transport": "udp",
+      "port": 9,
+      "name": "discard",
+      "reference": "RFC 863"
+    },
+    {
+      "transport": "udp",
+      "port": 13,
+      "name": "daytime",
+      "reference": "RFC 867"
+    },
+    {
+      "transport": "udp",
+      "port": 19,
+      "name": "chargen",
+      "reference": "RFC 864"
+    },
+    {
+      "transport": "udp",
+      "port": 37,
+      "name": "time",
+      "reference": "RFC 868"
+    },
+    {
+      "transport": "udp",
+      "port": 53,
+      "name": "dns",
+      "reference": "RFC 1035, section 4.2.1"
+    },
+    {
+      "transport": "udp",
+      "port": 67,
+      "name": "dhcp-server",
+      "reference": "RFC 2131, section 4.1"
+    },
+    {
+      "transport": "udp",
+      "port": 68,
+      "name": "dhcp-client",
+      "reference": "RFC 2131, section 4.1"
+    },
+    {
+      "transport": "udp",
+      "port": 69,
+      "name": "tftp",
+      "reference": "RFC 1350"
+    },
+    {
+      "transport": "udp",
+      "port": 88,
+      "name": "kerberos",
+      "reference": "RFC 4120, section 7.2"
+    },
+    {
+      "transport": "udp",
+      "port": 111,
+      "name": "rpcbind",
+      "reference": "RFC 1833"
+    },
+    {
+      "transport": "udp",
+      "port": 123,
+      "name": "ntp",
+      "reference": "RFC 5905, section 7.2"
+    },
+    {
+      "transport": "udp",
+      "port": 137,
+      "name": "netbios-name",
+      "reference": "RFC 1002"
+    },
+    {
+      "transport": "udp",
+      "port": 138,
+      "name": "netbios-datagram",
+      "reference": "RFC 1002"
+    },
+    {
+      "transport": "udp",
+      "port": 161,
+      "name": "snmp",
+      "reference": "RFC 3417, section 3.1"
+    },
+    {
+      "transport": "udp",
+      "port": 162,
+      "name": "snmp-trap",
+      "reference": "RFC 3417, section 3.1"
+    },
+    {
+      "transport": "udp",
+      "port": 500,
+      "name": "ike",
+      "reference": "RFC 7296, section 2"
+    },
+    {
+      "transport": "udp",
+      "port": 514,
+      "name": "syslog",
+      "reference": "RFC 5426, section 3.3"
+    },
+    {
+      "transport": "udp",
+      "port": 520,
+      "name": "rip",
+      "reference": "RFC 2453, section 3.1"
+    },
+    {
+      "transport": "udp",
+      "port": 521,
+      "name": "ripng",
+      "reference": "RFC 2080, section 2.1"
+    },
+    {
+      "transport": "udp",
+      "port": 546,
+      "name": "dhcpv6-client",
+      "reference": "RFC 8415, section 7.2"
+    },
+    {
+      "transport": "udp",
+      "port": 547,
+      "name": "dhcpv6-server",
+      "reference": "RFC 8415, section 7.2"
+    },
+    {
+      "transport": "udp",
+      "port": 1701,
+      "name": "l2tp",
+      "reference": "RFC 2661, section 8.1"
+    },
+    {
+      "transport": "udp",
+      "port": 1812,
+      "name": "radius",
+      "reference": "RFC 2865, section 3"
+    },
+    {
+      "transport": "udp",
+      "port": 1813,
+      "name": "radius-accounting",
+      "reference": "RFC 2866, section 3"
+    },
+    {
+      "transport": "udp",
+      "port": 3478,
+      "name": "stun",
+      "reference": "RFC 8489, section 9"
+    },
+    {
+      "transport": "udp",
+      "port": 4500,
+      "name": "ipsec-nat-t",
+      "reference": "RFC 3948, section 2"
+    },
+    {
+      "transport": "udp",
+      "port": 4789,
+      "name": "vxlan",
+      "reference": "RFC 7348, section 5"
+    },
+    {
+      "transport": "udp",
+      "port": 5060,
+      "name": "sip",
+      "reference": "RFC 3261, section 18"
+    },
+    {
+      "transport": "udp",
+      "port": 5353,
+      "name": "mdns",
+      "reference": "RFC 6762, section 1"
+    },
+    {
+      "transport": "udp",
+      "port": 5683,
+      "name": "coap",
+      "reference": "RFC 7252, section 6.1"
+    },
+    {
+      "transport": "udp",
+      "port": 6081,
+      "name": "geneve",
+      "reference": "RFC 8926, section 3.3"
+    }
+  ],
+  "presets": [
+    {
+      "name": "web",
+      "description": "HTTP and HTTPS",
+      "tcp": [
+        "http",
+        "https"
+      ],
+      "udp": []
+    },
+    {
+      "name": "mail",
+      "description": "Message transfer, submission, and mailbox access",
+      "tcp": [
+        "smtp",
+        "submission",
+        "submissions",
+        "pop3",
+        "pop3s",
+        "imap",
+        "imaps"
+      ],
+      "udp": []
+    },
+    {
+      "name": "name-services",
+      "description": "DNS, multicast DNS, and NetBIOS naming",
+      "tcp": [
+        "dns",
+        "dns-over-tls"
+      ],
+      "udp": [
+        "dns",
+        "mdns",
+        "netbios-name"
+      ]
+    },
+    {
+      "name": "infrastructure",
+      "description": "Network management, routing, time, directory, and authentication",
+      "tcp": [
+        "ssh",
+        "bgp",
+        "ldap",
+        "kerberos",
+        "netconf-ssh",
+        "syslog-tls"
+      ],
+      "udp": [
+        "ntp",
+        "snmp",
+        "snmp-trap",
+        "syslog",
+        "kerberos",
+        "radius",
+        "radius-accounting",
+        "ike",
+        "ipsec-nat-t",
+        "dhcp-server",
+        "dhcpv6-server",
+        "tftp",
+        "rip",
+        "ripng"
+      ]
+    },
+    {
+      "name": "legacy-services",
+      "description": "Historic diagnostic services that some hosts still run",
+      "tcp": [
+        "echo",
+        "discard",
+        "daytime",
+        "chargen",
+        "time",
+        "finger",
+        "ident",
+        "gopher"
+      ],
+      "udp": [
+        "echo",
+        "discard",
+        "daytime",
+        "chargen",
+        "time"
+      ]
+    },
+    {
+      "name": "all",
+      "description": "Every entry in this catalog",
+      "tcp": [
+        "echo",
+        "discard",
+        "daytime",
+        "chargen",
+        "ftp-data",
+        "ftp",
+        "ssh",
+        "smtp",
+        "time",
+        "dns",
+        "gopher",
+        "finger",
+        "http",
+        "kerberos",
+        "pop3",
+        "rpcbind",
+        "ident",
+        "nntp",
+        "netbios-session",
+        "imap",
+        "bgp",
+        "ldap",
+        "https",
+        "submissions",
+        "rtsp",
+        "submission",
+        "ipp",
+        "netconf-ssh",
+        "dns-over-tls",
+        "imaps",
+        "pop3s",
+        "socks",
+        "nfs",
+        "iscsi",
+        "stun",
+        "sip",
+        "sips",
+        "xmpp-client",
+        "xmpp-server",
+        "syslog-tls",
+        "ircs"
+      ],
+      "udp": [
+        "echo",
+        "discard",
+        "daytime",
+        "chargen",
+        "time",
+        "dns",
+        "dhcp-server",
+        "dhcp-client",
+        "tftp",
+        "kerberos",
+        "rpcbind",
+        "ntp",
+        "netbios-name",
+        "netbios-datagram",
+        "snmp",
+        "snmp-trap",
+        "ike",
+        "syslog",
+        "rip",
+        "ripng",
+        "dhcpv6-client",
+        "dhcpv6-server",
+        "l2tp",
+        "radius",
+        "radius-accounting",
+        "stun",
+        "ipsec-nat-t",
+        "vxlan",
+        "sip",
+        "mdns",
+        "coap",
+        "geneve"
+      ]
+    }
+  ]
+}

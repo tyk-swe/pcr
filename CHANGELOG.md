@@ -8,6 +8,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Structured command output moves to `packetcraftr.output/v8`, which adds
+  scanner port planning and inference; the v6 and v7 families and schemas stay
+  frozen. `scan::Request` replaces `transport` and `ports` with typed
+  `endpoints: Vec<probe::ProbeEndpoint>` that may mix TCP and UDP, and
+  `selected_ports()` is `planned_endpoints()`. `scan::Endpoint`,
+  `scan::connect::Endpoint`, `scan::ProbeEvidence`, `scan::CorrelatedResponse`,
+  and `scan::Aggregate` gain fields, and `scan::Event` gains `Unattributed`.
+  `scan --connect` with UDP or ICMP endpoints reports `cli.scan_method` instead
+  of `cli.error`. CLI scan output conversions take the published plan. See `docs/migration-unreleased.md`.
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
   `TcpProviders`, so each `Client` workflow requires only the provider cluster
@@ -695,6 +704,23 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Scanner port planning and state inference (roadmap M6). `scan --ports`
+  accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
+  `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
+  `tcp:`/`udp:` prefixes beside numbers and ranges, and `--exclude-ports`
+  removes endpoints before any stage plans them. `--transport tcp,udp` plans
+  both transports under one budget with distinct endpoints. Every endpoint
+  publishes a `port_hint` from the bundled, provenance-recorded port catalog
+  and an `inference` (state, rule, and supporting, conflicting, unanswered, and
+  failed attempts) beside its unchanged attempt outcomes; silent UDP is
+  `open_or_filtered`, and socket deadlines and local errors are operational
+  failures, never port states. Late, duplicate, and ambiguous replies are
+  retained as `unattributed` evidence under `--max-undecoded`. `--method
+  raw|tcp-connect|auto` publishes the requested and selected method; explicit
+  methods are never replaced. `--curated-udp-payloads` adds bundled UDP
+  profiles for seven protocols, with operator profiles winning visibly.
+  `scan --list` publishes the expanded port selection. Results name the
+  catalog and payload data versions.
 - `scan --targets-file`/`--exclude-file` bounded manifests (with `-` stdin),
   `scan --list` target planning, and scoped `fe80::/10%zone` targets carried
   through selection, connect sockets, and raw route planning. Malformed or

@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{Pending, Planned};
+use crate::evidence::SentPacket;
 use crate::scan::{Classification, evidence::Observation, profile};
 use packetcraftr_netio::capture::RecordIdentity;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     net::IpAddr,
+    sync::Arc,
     time::Instant,
 };
 
@@ -81,6 +83,31 @@ pub(super) fn candidates(
             )
             .map(|observation| (*index, observation))
         })
+        .collect()
+}
+
+/// Probes past their response window that a frame correlates with: the
+/// frame is a reply too late to be their outcome.
+pub(super) fn settled<'s>(
+    settled: impl IntoIterator<Item = (usize, &'s Arc<SentPacket>)>,
+    planned: &[Planned<'_>],
+    registry: &packetcraftr_core::registry::Registry,
+    decoded: &packetcraftr_core::decode::DecodedPacket,
+    native_interface: &packetcraftr_netio::interface::Id,
+) -> Vec<usize> {
+    settled
+        .into_iter()
+        .filter(|(index, sent)| {
+            sent.route().plan.decision.interface == *native_interface
+                && Observation::observe(
+                    registry,
+                    planned[*index].probe,
+                    &sent.built().packet,
+                    decoded,
+                )
+                .is_some()
+        })
+        .map(|(index, _)| index)
         .collect()
 }
 

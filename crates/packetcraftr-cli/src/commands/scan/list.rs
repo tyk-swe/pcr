@@ -14,6 +14,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 
 pub(super) struct Options {
     pub origins: Vec<Declaration>,
+    pub ports: Option<output::scan::plan::Ports>,
     pub family: AddressFamily,
     pub max_targets: usize,
     pub max_duration: Duration,
@@ -28,6 +29,7 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let Options {
         origins,
+        ports,
         family,
         max_targets,
         max_duration,
@@ -50,11 +52,11 @@ pub(super) fn run(
     let diagnostics = duplicate_diagnostics(&report.duplicates, &origins);
     match format {
         Format::Text => {
-            render_text(&report, &origins)?;
+            render_text(&report, &origins, ports.as_ref())?;
             crate::rendering::render_diagnostics_text(&diagnostics)
         }
         Format::Json => {
-            let published = output::scan::list::Report::new(report, &origins);
+            let published = output::scan::list::Report::new(report, &origins, ports);
             crate::rendering::emit_aggregate(
                 output::contract::Command::Scan,
                 published,
@@ -62,7 +64,7 @@ pub(super) fn run(
             )
         }
         Format::Ndjson => {
-            let published = output::scan::list::Report::new(report, &origins);
+            let published = output::scan::list::Report::new(report, &origins, ports);
             for target in &published.targets {
                 stream.emit_data(output::scan::list::TargetEvent::from(target), Vec::new())?;
             }
@@ -91,7 +93,11 @@ fn duplicate_diagnostics(duplicates: &[u32], origins: &[Declaration]) -> Vec<Dia
         .collect()
 }
 
-fn render_text(report: &plan::Report, origins: &[Declaration]) -> Result<(), CliError> {
+fn render_text(
+    report: &plan::Report,
+    origins: &[Declaration],
+    ports: Option<&output::scan::plan::Ports>,
+) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "target={} resolution_performed={}",
         report.declared, report.resolution_performed
@@ -125,6 +131,23 @@ fn render_text(report: &plan::Report, origins: &[Declaration]) -> Result<(), Cli
         write_stdout_line(format_args!(
             "{}{} declarations: {}",
             target.selected.address, scope, sources
+        ))?;
+    }
+    if let Some(ports) = ports {
+        for endpoint in &ports.endpoints {
+            write_stdout_line(format_args!(
+                "port {}/{} port-hint={}",
+                endpoint.transport,
+                endpoint.port,
+                endpoint.port_hint.unwrap_or("-")
+            ))?;
+        }
+        write_summary_line(format_args!(
+            "planned {} port endpoint(s) per target, {} excluded, port-catalog={}/{}",
+            ports.endpoints.len(),
+            ports.excluded_endpoints,
+            ports.port_catalog.name,
+            ports.port_catalog.version
         ))?;
     }
     write_summary_line(format_args!(

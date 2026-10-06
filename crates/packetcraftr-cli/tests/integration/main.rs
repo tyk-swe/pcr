@@ -46,6 +46,7 @@ mod normalized_capture_contracts;
 mod offline_fuzz_contracts;
 mod offline_workflow_contracts;
 mod packet_set_contracts;
+mod port_planning_contracts;
 mod process_contracts;
 mod published_schema_conformance;
 mod recipe_payload_contracts;

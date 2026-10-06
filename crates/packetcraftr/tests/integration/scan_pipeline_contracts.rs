@@ -9,7 +9,6 @@ use packetcraftr::{
     Client,
     clock::Clock,
     policy::Policy,
-    probe::Transport,
     scan::{self, Request},
     target::Target,
 };
@@ -50,9 +49,10 @@ fn request() -> Request {
     Request {
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
-        transport: Transport::Tcp,
         address_family: packetcraftr::target::Family::Any,
-        ports: vec![80, 81, 82, 83],
+        endpoints: [80, 81, 82, 83]
+            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .to_vec(),
         attempts: 1,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
@@ -196,7 +196,9 @@ fn scans_stop_undecoded_limit_diagnosed() {
     let observe = |max_in_flight| {
         let mut request = request();
         request.max_in_flight = max_in_flight;
-        request.ports = vec![80, 81, 82, 83, 84];
+        request.endpoints = (80..=84)
+            .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
+            .collect();
         request.limits.max_undecoded = 2;
         request.collection.decode.limits.max_packet_size = 39;
 
@@ -212,9 +214,14 @@ fn scans_stop_undecoded_limit_diagnosed() {
             .expect("undecodable replies are evidence, not a failure");
         let aggregate = collector.finish(report).unwrap();
         let state = state.lock().unwrap();
-        assert_eq!(state.sends, request.ports.len());
+        assert_eq!(state.sends, request.endpoints.len());
         assert_eq!(state.shutdowns, state.armed);
 
+        // A malformed reply is retained evidence, never a port state.
+        for endpoint in &aggregate.endpoints {
+            let inference = endpoint.inference.as_ref().unwrap();
+            assert_eq!(inference.rule, scan::Rule::SynSilence);
+        }
         let warnings = aggregate
             .diagnostics
             .iter()
@@ -275,4 +282,162 @@ fn sink_failure() -> BoundaryError {
         ErrorClassification::new("io.fixture_sink", Kind::Io, None),
         Vec::new(),
     )
+}
+
+#[test]
+fn extra_replies_are_retained_beside_each_outcome_under_the_undecoded_count() {
+    let observe = |max_in_flight, max_undecoded| {
+        let mut request = request();
+        request.max_in_flight = max_in_flight;
+        request.limits.max_undecoded = max_undecoded;
+        // Every probe draws two resets; one becomes the outcome.
+        let state = Arc::new(Mutex::new(State {
+            tied_resets: true,
+            ..State::default()
+        }));
+        execute(&request, state).unwrap()
+    };
+    for max_in_flight in [1, 2] {
+        let aggregate = observe(max_in_flight, 64);
+        assert_eq!(aggregate.endpoints.len(), 4);
+        for endpoint in &aggregate.endpoints {
+            let [probe] = endpoint.probes.as_slice() else {
+                panic!("one attempt per endpoint");
+            };
+            let inference = endpoint.inference.as_ref().unwrap();
+            assert_eq!(inference.state, Some(scan::State::Closed));
+            assert_eq!(inference.supporting, [probe.sequence]);
+        }
+        let mut retained: Vec<_> = aggregate
+            .unattributed
+            .iter()
+            .map(|frame| (frame.sequence, frame.attribution))
+            .collect();
+        retained.sort_unstable_by_key(|(sequence, _)| *sequence);
+        assert_eq!(
+            retained,
+            (0..4)
+                .map(|sequence| (Some(sequence), scan::Attribution::Duplicate))
+                .collect::<Vec<_>>(),
+            "max_in_flight={max_in_flight}"
+        );
+
+        let bounded = observe(max_in_flight, 2);
+        assert_eq!(bounded.unattributed.len(), 2);
+        assert_eq!(bounded.endpoints.len(), 4);
+        let warnings = bounded
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "scan.unattributed_limit")
+            .count();
+        assert_eq!(warnings, 1, "max_in_flight={max_in_flight}");
+    }
+}
+
+#[test]
+fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
+    use packetcraftr::probe::{ProbeEndpoint, Transport};
+
+    let mut request = request();
+    request.endpoints = vec![
+        ProbeEndpoint::Tcp { port: 53 },
+        ProbeEndpoint::Udp { port: 53 },
+    ];
+    request.attempts = 2;
+    for max_in_flight in [1, 2] {
+        request.max_in_flight = max_in_flight;
+        let state = Arc::new(Mutex::new(State::default()));
+        let aggregate = execute(&request, Arc::clone(&state)).unwrap();
+        let endpoints: Vec<_> = aggregate
+            .endpoints
+            .iter()
+            .map(|endpoint| {
+                let inference = endpoint.inference.as_ref().unwrap();
+                let probes: Vec<_> = endpoint
+                    .probes
+                    .iter()
+                    .map(|probe| (probe.sequence, probe.transport))
+                    .collect();
+                (
+                    endpoint.transport,
+                    endpoint.port,
+                    endpoint.port_hint,
+                    endpoint.classification,
+                    inference.state,
+                    inference.rule,
+                    probes,
+                )
+            })
+            .collect();
+        assert_eq!(
+            endpoints,
+            [
+                (
+                    Transport::Tcp,
+                    Some(53),
+                    Some("dns"),
+                    scan::Classification::Open,
+                    Some(scan::State::Open),
+                    scan::Rule::SynAck,
+                    vec![(0, Transport::Tcp), (2, Transport::Tcp)],
+                ),
+                (
+                    Transport::Udp,
+                    Some(53),
+                    Some("dns"),
+                    scan::Classification::Closed,
+                    Some(scan::State::Closed),
+                    scan::Rule::UdpPortUnreachable,
+                    vec![(1, Transport::Udp), (3, Transport::Udp)],
+                ),
+            ],
+            "max_in_flight={max_in_flight}"
+        );
+        assert_eq!(state.lock().unwrap().sends, 4);
+    }
+
+    // One probe budget covers both transports.
+    request.limits.max_probes = 3;
+    let state = Arc::new(Mutex::new(State::default()));
+    let error = execute(&request, Arc::clone(&state)).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            scan::Error::InvalidLimit {
+                field: "probes",
+                value: 4,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(state.lock().unwrap().sends, 0);
+}
+
+#[test]
+fn a_reply_after_a_definitive_outcome_is_retained_as_late() {
+    let state = Arc::new(Mutex::new(State {
+        repeated_syn_acks: true,
+        ..State::default()
+    }));
+    let aggregate = execute(&request(), state).unwrap();
+    for endpoint in &aggregate.endpoints {
+        let inference = endpoint.inference.as_ref().unwrap();
+        assert_eq!(inference.state, Some(scan::State::Open));
+        assert_eq!(inference.rule, scan::Rule::SynAck);
+    }
+    let mut late: Vec<_> = aggregate
+        .unattributed
+        .iter()
+        .map(|frame| (frame.sequence, frame.attribution))
+        .collect();
+    late.sort_unstable_by_key(|(sequence, _)| *sequence);
+    // The operation ends once its last probe settles; it does not wait for
+    // the final probe's trailing reply.
+    assert_eq!(
+        late,
+        (0..3)
+            .map(|sequence| (Some(sequence), scan::Attribution::Late))
+            .collect::<Vec<_>>()
+    );
 }

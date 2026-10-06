@@ -77,6 +77,10 @@ forms are permitted **only after the per-source review passes**; the choice is
 made per data set with its first import ([M6][m6-catalog] decides the port
 catalog's form). Separate assets still carry the same manifest and version.
 
+[M6][m6-catalog] bundles its two data sets inside the library: the
+[port catalog][port-catalog] and the [curated UDP payloads][udp-payloads], each
+beside its provenance manifest.
+
 ## Versioning, maintenance, and coverage
 
 - Results that consume bundled data name the data set and its independent
@@ -94,5 +98,7 @@ catalog's form). Separate assets still carry the same manifest and version.
 [m9]: roadmap/m09-tls-services-corpus.md
 [m10]: roadmap/m10-os-identification.md
 [npsl]: https://nmap.org/npsl/
+[port-catalog]: ../crates/packetcraftr/data/port-catalog.provenance.yaml
 [template]: scanner-data-provenance-template.md
 [udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs
+[udp-payloads]: ../crates/packetcraftr/data/udp-payloads.provenance.yaml

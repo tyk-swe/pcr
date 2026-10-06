@@ -14,7 +14,7 @@ use packetcraftr_core::packet::Packet;
 use super::{Batch, Evidence, Sequenced};
 use crate::evidence::SentPacket;
 use crate::execution::Errors;
-use crate::execution::evidence::{EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::evidence::{EvidenceSink, EvidenceState, Passed, ResponseSelector};
 use crate::execution::limits::EvidenceLimits;
 use crate::execution::validation::{
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
@@ -48,6 +48,11 @@ pub(crate) trait Classifier {
         outcome: Outcome<Self::Observation>,
     ) -> Self::Event;
     fn undecoded(&self, probes: &[Self::Probe], frame: Frame) -> Self::Event;
+    /// The event retaining a matched response that did not become the
+    /// probe's outcome; the default discards such responses.
+    fn passed(&self, _probe: &Self::Probe, _passed: Passed, _frame: Frame) -> Option<Self::Event> {
+        None
+    }
     fn diagnostic(&self, diagnostic: Diagnostic) -> Self::Event;
     fn ends_operation(&self, _event: &Self::Event) -> bool {
         false
@@ -164,13 +169,15 @@ where
                 emit,
                 ..
             } = self;
-            let best = selector.select(
+            let mut passed = Vec::new();
+            let best = selector.select_passing(
                 request_index,
                 batch.timeout,
                 |response| classifier.classify(probe, sent, response),
                 |observation| classifier.rank(observation),
                 |observation| classifier.responder(observation),
                 || enforce_deadline(errors, deadline),
+                &mut passed,
             )?;
             let outcome = match best {
                 None => Outcome::Timeout,
@@ -189,10 +196,42 @@ where
                 flow = ControlFlow::Break(());
             }
             emit(event, deadline)?;
+            // Published after the outcome, as the pipelined path does.
+            for (decoded, why) in passed {
+                let Some(event) = classifier.passed(probe, why, decoded.frame.clone()) else {
+                    continue;
+                };
+                if state.retain_unattributed(&decoded.frame).is_some() {
+                    emit(event, deadline)?;
+                }
+                state.publish_diagnostics(|diagnostic| {
+                    emit(classifier.diagnostic(diagnostic), deadline)
+                })?;
+            }
             self.enforce(deadline)?;
         }
         self.retain_undecoded(&batch.probes, undecoded, deadline)?;
         Ok(flow)
+    }
+
+    /// Retains a frame no probe outcome carries, such as a reply after its
+    /// probe settled, under the operation's evidence budget.
+    pub(crate) fn retain_unattributed(
+        &mut self,
+        frame: &Frame,
+        event: impl FnOnce(Frame) -> K::Event,
+        deadline: &Deadline,
+    ) -> Result<(), G::Error> {
+        let Self {
+            state,
+            classifier,
+            emit,
+            ..
+        } = self;
+        if let Some(frame) = state.retain_unattributed(frame) {
+            emit(event(frame), deadline)?;
+        }
+        state.publish_diagnostics(|diagnostic| emit(classifier.diagnostic(diagnostic), deadline))
     }
 
     pub(crate) fn retain_undecoded(

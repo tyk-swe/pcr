@@ -8,12 +8,12 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 pub(super) fn load(
     path: Option<&Path>,
-    transport: super::arguments::Transport,
+    udp: bool,
 ) -> Result<BTreeMap<u16, Arc<UdpProfile>>, CliError> {
     let Some(path) = path else {
         return Ok(BTreeMap::new());
     };
-    if !matches!(transport, super::arguments::Transport::Udp) {
+    if !udp {
         return Err(CliError::new(
             Kind::Usage,
             "--udp-profiles requires --transport udp",

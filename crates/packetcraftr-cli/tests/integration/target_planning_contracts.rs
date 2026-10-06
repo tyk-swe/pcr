@@ -271,12 +271,12 @@ fn malformed_and_oversized_manifests_fail_before_work() {
         path_text(bad_utf8.path()),
     ]));
     assert!(!output.status.success());
-    assert!(
-        output_text(&output).contains(&format!(
+    assert_eq!(
+        parse_json(&output)["error"]["message"],
+        format!(
             "{}:1: manifest must be UTF-8 text",
             path_text(bad_utf8.path())
-        )),
-        "{output:?}"
+        )
     );
 
     let two_tokens = manifest_file(b"192.0.2.1\none two\n");
@@ -285,12 +285,12 @@ fn malformed_and_oversized_manifests_fail_before_work() {
         path_text(two_tokens.path()),
     ]));
     assert!(!output.status.success());
-    assert!(
-        output_text(&output).contains(&format!(
-            "{}:2: one declaration per line",
+    assert_eq!(
+        parse_json(&output)["error"]["message"],
+        format!(
+            "{}:2: one declaration per line; extra tokens are rejected",
             path_text(two_tokens.path())
-        )),
-        "{output:?}"
+        )
     );
 
     let many = manifest_file(b"10.0.0.1\n10.0.0.2\n10.0.0.3\n");

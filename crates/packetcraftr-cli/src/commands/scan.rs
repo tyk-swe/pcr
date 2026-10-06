@@ -230,40 +230,23 @@ fn ingest_targets(
         max_manifest_bytes.unwrap_or(manifest::MAX_MANIFEST_BYTES),
         max_manifest_lines.unwrap_or(manifest::MAX_MANIFEST_LINES),
     )?;
-    let mut include = Vec::with_capacity(positional.len());
-    let mut origins = Vec::with_capacity(positional.len());
-    for (position, target) in positional.iter().enumerate() {
-        include.push(
-            target
-                .parse::<packetcraftr::target::Specification>()
-                .map_err(|source| {
-                    declaration_error(source, &format!("argument {}", position + 1))
-                })?,
-        );
-        origins.push(manifest::Declaration {
+    let mut budget = bounds.budget();
+    let mut origins = positional
+        .iter()
+        .enumerate()
+        .map(|(position, target)| manifest::Declaration {
             token: target.clone(),
             source: manifest::DeclarationSource::Argument {
                 position: position + 1,
             },
             line: None,
-        });
-    }
-    let mut budget = bounds.budget();
-    for declaration in manifest::read_with_budget(
-        &targets_file
-            .iter()
-            .map(|path| manifest::ManifestSource::open(path))
-            .collect::<Vec<_>>(),
+        })
+        .collect::<Vec<_>>();
+    origins.extend(manifest::read_with_budget(
+        &manifest_sources(targets_file),
         &mut budget,
-    )? {
-        include.push(
-            declaration
-                .token
-                .parse::<packetcraftr::target::Specification>()
-                .map_err(|source| declaration_error(source, &source_label(&declaration)))?,
-        );
-        origins.push(declaration);
-    }
+    )?);
+    let include = parse_declarations(&origins)?;
     if include.is_empty() {
         return Err(CliError::new(
             Kind::Usage,
@@ -271,38 +254,42 @@ fn ingest_targets(
         ));
     }
     let mut exclude = exclusions.to_vec();
-    for declaration in manifest::read_with_budget(
-        &exclude_file
-            .iter()
-            .map(|path| manifest::ManifestSource::open(path))
-            .collect::<Vec<_>>(),
-        &mut budget,
-    )? {
-        exclude.push(
-            declaration
-                .token
-                .parse::<packetcraftr::target::Network>()
-                .map_err(|source| declaration_error(source, &source_label(&declaration)))?,
-        );
-    }
+    exclude.extend(parse_declarations::<packetcraftr::target::Network>(
+        &manifest::read_with_budget(&manifest_sources(exclude_file), &mut budget)?,
+    )?);
     Ok(Ingested {
         targets: packetcraftr::target::Selection { include, exclude },
         origins,
     })
 }
 
-fn source_label(declaration: &manifest::Declaration) -> String {
-    let (source, _) = declaration.source.describe();
-    match declaration.line {
-        Some(line) => format!("{source}:{line}"),
-        None => source,
-    }
+fn manifest_sources(paths: &[std::path::PathBuf]) -> Vec<manifest::ManifestSource> {
+    paths
+        .iter()
+        .map(|path| manifest::ManifestSource::open(path))
+        .collect()
 }
 
-fn declaration_error(source: impl Classified, label: &str) -> CliError {
+fn parse_declarations<T>(declarations: &[manifest::Declaration]) -> Result<Vec<T>, CliError>
+where
+    T: std::str::FromStr,
+    T::Err: Classified,
+{
+    declarations
+        .iter()
+        .map(|declaration| {
+            declaration
+                .token
+                .parse()
+                .map_err(|source| declaration_error(source, declaration))
+        })
+        .collect()
+}
+
+fn declaration_error(source: impl Classified, declaration: &manifest::Declaration) -> CliError {
     CliError::from_classification(
         source.classification(),
-        format!("invalid declaration at {label}: {source}"),
+        format!("invalid declaration at {declaration}: {source}"),
         crate::errors::source_causes(&source),
     )
     .with_context(source.context())

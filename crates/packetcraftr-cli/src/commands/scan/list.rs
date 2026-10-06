@@ -10,6 +10,7 @@ use crate::output::{self, contract::Format};
 use crate::rendering::{StreamEncoder, write_stdout_line, write_summary_line};
 use crate::system::{Runtime, client};
 use packetcraftr::target::{Selection, plan};
+use packetcraftr_core::diagnostic::Diagnostic;
 
 pub(super) struct Options {
     pub origins: Vec<Declaration>,
@@ -45,28 +46,49 @@ pub(super) fn run(
         max_targets,
         max_duration,
     };
+    let report = client.plan_targets(request).map_err(CliError::classified)?;
+    let diagnostics = duplicate_diagnostics(&report.duplicates, &origins);
     match format {
         Format::Text => {
-            let report = client.plan_targets(request).map_err(CliError::classified)?;
-            render_text(&report, &origins)
+            render_text(&report, &origins)?;
+            crate::rendering::render_diagnostics_text(&diagnostics)
         }
         Format::Json => {
-            let report = client.plan_targets(request).map_err(CliError::classified)?;
             let published = output::scan::list::Report::new(report, &origins);
-            crate::rendering::emit_aggregate(output::contract::Command::Scan, published, Vec::new())
+            crate::rendering::emit_aggregate(
+                output::contract::Command::Scan,
+                published,
+                diagnostics,
+            )
         }
         Format::Ndjson => {
-            let report = client.plan_targets(request).map_err(CliError::classified)?;
             let published = output::scan::list::Report::new(report, &origins);
             for target in &published.targets {
                 stream.emit_data(output::scan::list::TargetEvent::from(target), Vec::new())?;
             }
             stream
-                .complete(output::scan::list::Complete::from(published), Vec::new())
+                .complete(output::scan::list::Complete::from(published), diagnostics)
                 .map_err(CliError::from)
         }
         other => other.unreachable(),
     }
+}
+
+/// The same warning a live scan raises for a coalesced declaration, naming where it was declared.
+fn duplicate_diagnostics(duplicates: &[u32], origins: &[Declaration]) -> Vec<Diagnostic> {
+    duplicates
+        .iter()
+        .filter_map(|index| {
+            let declaration = origins.get(*index as usize)?;
+            Some(Diagnostic::warning(
+                "scan.duplicate_declaration",
+                format!(
+                    "target declaration {} ({declaration}) duplicates an earlier declaration and was coalesced",
+                    index + 1
+                ),
+            ))
+        })
+        .collect()
 }
 
 fn render_text(report: &plan::Report, origins: &[Declaration]) -> Result<(), CliError> {
@@ -97,13 +119,7 @@ fn render_text(report: &plan::Report, origins: &[Declaration]) -> Result<(), Cli
             .declarations
             .iter()
             .filter_map(|index| origins.get(*index as usize))
-            .map(|declaration| {
-                let (text, _) = declaration.source.describe();
-                match declaration.line {
-                    Some(line) => format!("{text}:{line}"),
-                    None => text,
-                }
-            })
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
         write_stdout_line(format_args!(

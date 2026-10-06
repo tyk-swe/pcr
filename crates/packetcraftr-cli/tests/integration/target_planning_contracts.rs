@@ -51,6 +51,14 @@ fn list_json_reports_targets_origins_and_no_resolution() {
         json["result"]["duplicates"],
         serde_json::json!([{"index": 2, "source": "argument 3"}])
     );
+    assert_eq!(
+        json["diagnostics"],
+        serde_json::json!([{
+            "code": "scan.duplicate_declaration",
+            "severity": "warning",
+            "message": "target declaration 3 (argument 3) duplicates an earlier declaration and was coalesced",
+        }])
+    );
 }
 
 #[test]
@@ -77,11 +85,27 @@ fn list_ndjson_streams_targets_then_one_terminal() {
 
 #[test]
 fn list_text_lists_each_target_with_its_origins() {
-    let output = run_success(&["scan", "--list", "--output", "text", "192.0.2.1"]);
+    let manifest = manifest_file(b"# inventory\n192.0.2.1\n");
+    let path = path_text(manifest.path());
+    let output = run_success(&[
+        "scan",
+        "--list",
+        "--output",
+        "text",
+        "192.0.2.1",
+        "--targets-file",
+        path,
+    ]);
     let text = String::from_utf8(output.stdout).expect("text output");
-    assert!(text.contains("192.0.2.1"), "{text}");
-    assert!(text.contains("argument 1"), "{text}");
     assert!(text.contains("resolution_performed=false"), "{text}");
+    assert!(
+        text.contains(&format!("192.0.2.1 declarations: argument 1, {path}:2")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("target declaration 2 ({path}:2) duplicates")),
+        "{text}"
+    );
 }
 
 #[test]
@@ -185,7 +209,13 @@ fn exclude_files_share_the_include_manifest_budget() {
     let output = run(&args);
     assert!(!output.status.success(), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("byte limit"), "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "{}:1: combined manifest byte limit of 10 exceeded",
+            path_text(excludes.path())
+        )),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -241,15 +271,27 @@ fn malformed_and_oversized_manifests_fail_before_work() {
         path_text(bad_utf8.path()),
     ]));
     assert!(!output.status.success());
-    assert!(output_text(&output).contains("UTF-8"));
+    assert!(
+        output_text(&output).contains(&format!(
+            "{}:1: manifest must be UTF-8 text",
+            path_text(bad_utf8.path())
+        )),
+        "{output:?}"
+    );
 
-    let two_tokens = manifest_file(b"one two\n");
+    let two_tokens = manifest_file(b"192.0.2.1\none two\n");
     let output = run(&list_arguments(&[
         "--targets-file",
         path_text(two_tokens.path()),
     ]));
     assert!(!output.status.success());
-    assert!(output_text(&output).contains("extra tokens"));
+    assert!(
+        output_text(&output).contains(&format!(
+            "{}:2: one declaration per line",
+            path_text(two_tokens.path())
+        )),
+        "{output:?}"
+    );
 
     let many = manifest_file(b"10.0.0.1\n10.0.0.2\n10.0.0.3\n");
     let output = run(&list_arguments(&[

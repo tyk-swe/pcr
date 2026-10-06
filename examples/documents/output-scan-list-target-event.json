@@ -7,7 +7,7 @@
   "status": "success",
   "result": {
     "method": "target_list",
-    "address": "192.0.2.1",
+    "address": "fe80::1",
     "scope": {
       "zone": "eth0",
       "interface": {

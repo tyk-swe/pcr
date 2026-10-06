@@ -121,12 +121,28 @@ def respond(stop, interface, received):
             raw.send(frame[6:12] + frame[0:6] + frame[12:14] + header + tcp)
 
 
-def scoped_ipv6(binary, report):
+def scoped_capability_failure(binary, report, *options, target='fe80::1%1'):
+    command = [str(binary), '--output', 'json', 'scan', target, *options]
+    output = subprocess.run(command, capture_output=True, text=True, timeout=20)
+    report.setdefault('runs', []).append(dict(command=command, exit_code=output.returncode,
+                                              stdout=output.stdout, stderr=output.stderr))
+    assert output.returncode != 0, 'unsupported scoped operation succeeded'
+    assert json.loads(output.stdout)['error']['code'] == 'capability.unsupported', \
+        'unsupported scoped operation did not publish a capability failure'
+
+
+def scoped_ipv6(binary, report, profile='full-native'):
     corpus_path = ROOT / 'docs/scanner-corpus.v1.json'
     corpus = json.loads(corpus_path.read_bytes())
     expected = next(case['expected'] for case in corpus['target_planning_scenarios']
                     if case['id'] == 'scoped-isolated-links')
     report.update(corpus_sha256=digest(corpus_path), corpus_dataset_version=corpus['dataset_version'])
+    if profile == 'portable':
+        for options in (('--list',), ('--connect', '--ports', '1'), ('--ports', '1')):
+            scoped_capability_failure(binary, report, *options)
+        report.update(exit_code=0, status='passed', scoped_paths=dict(
+            selection='unsupported_capability', connect='unsupported_capability', raw='unsupported_capability'))
+        return
     near, far = SCOPED_LINKS[0]
     other = SCOPED_LINKS[1][0]
     try:
@@ -159,6 +175,12 @@ def scoped_ipv6(binary, report):
             'connect socket was not bound to the declared zone'
         assert probes[other]['classification'] == 'closed', 'scoped connect reached the wrong link'
 
+        if profile == 'default':
+            scoped_capability_failure(binary, report, '--ports', '1', target=f'{SCOPED_RAW_PEER}%{near}')
+            report.update(exit_code=0, status='passed', scoped_paths=dict(
+                selection='exercised', connect='exercised', raw='unsupported_capability'))
+            return
+
         stop, received = threading.Event(), []
         responder = threading.Thread(target=respond, args=(stop, far, received), daemon=True)
         responder.start()
@@ -179,7 +201,8 @@ def scoped_ipv6(binary, report):
     finally:
         for link, _ in SCOPED_LINKS:
             subprocess.run(['ip', 'link', 'del', link], stderr=subprocess.DEVNULL, timeout=10)
-    report.update(exit_code=0, status='passed')
+    report.update(exit_code=0, status='passed', scoped_paths=dict(
+        selection='exercised', connect='exercised', raw='exercised'))
 
 
 # Launcher-driven CLI scenarios; every other scenario is a native_isolated test.

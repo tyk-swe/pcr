@@ -15,7 +15,8 @@ spec.loader.exec_module(launcher)
 
 class NativeScenarioEvidence(unittest.TestCase):
     def run_case(self, stdout, returncode=0):
-        scenario = dict(name="scoped_ipv6_targets", status="unavailable")
+        scenario = dict(name="scoped_ipv6_targets", status="unavailable", reason_code="runtime_evidence_missing",
+                        reason="not executed yet")
         completed = subprocess.CompletedProcess([], returncode, stdout, "preserved stderr")
         with mock.patch.object(launcher, "current_platform", return_value="macOS"), mock.patch.object(
                 launcher.subprocess, "run", return_value=completed):
@@ -37,6 +38,8 @@ class NativeScenarioEvidence(unittest.TestCase):
             self.assertEqual(scenario["scoped_paths"], paths)
             self.assertEqual(scenario["stdout"], output)
             self.assertEqual(scenario["stderr"], "preserved stderr")
+            self.assertNotIn("reason", scenario)
+            self.assertNotIn("reason_code", scenario)
 
     def test_zero_exit_or_test_listing_is_not_scoped_execution(self):
         for output in ("", "scoped_ipv6_targets: test", "1 passed; 0 failed; 0 ignored;\n"):

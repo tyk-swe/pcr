@@ -111,6 +111,24 @@ after a short delay, because a veth peer can otherwise reply before the send
 call returns and fall outside the correlation window. Do not infer
 Windows/macOS native behavior from a Linux result or compilation.
 
+For M4 alone, `scripts/test-target-planning-isolated.py` builds and preserves
+the CLI under all five profiles, then runs the scoped fixture in a separate
+fresh namespace for each profile. Portable builds must publish capability
+failures for list, connect, and raw operations; the default profile exercises
+list/connect and rejects raw capture/transmission; Layer 2, pcap-free, and
+full-native profiles must deliver and correlate the raw probes. It writes a v3
+profile inventory with commands, output, binary/driver digests, fixture details,
+and corpus provenance. The other seven M3 scenarios remain explicitly
+unexercised. Run from a clean checkout:
+
+```sh
+python3 scripts/test-target-planning-isolated.py
+```
+
+On a restricted disposable host, use `sudo --preserve-env=PATH,RUSTUP_HOME,CARGO_HOME`
+and retain the invoking toolchain's `RUSTUP_HOME` and `CARGO_HOME` values, since
+this launcher builds each CLI profile before entering its namespaces.
+
 Capture drop counters, host offloading, acquisition location, and timestamp
 semantics remain contextual evidence. Zero or unavailable counters are not an
 automatic completeness guarantee. The comparator deliberately avoids inferring

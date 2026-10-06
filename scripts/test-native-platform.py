@@ -90,6 +90,8 @@ def run_scenario(binary, test_binary, scenario, token):
     env = dict(os.environ, PACKETCRAFTR_NATIVE_LOOPBACK_TOKEN=token,
                PACKETCRAFTR_NATIVE_LOOPBACK_PLATFORM=current_platform(), PACKETCRAFTR_NATIVE_CLI=str(binary))
     scenario.update(command=command, execution="privileged_native", privilege_granted=True)
+    for field in ("reason", "reason_code"):
+        scenario.pop(field, None)
     try:
         completed = subprocess.run(command, env=env, cwd=ROOT, capture_output=True, text=True, timeout=30)
         scenario.update(exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)

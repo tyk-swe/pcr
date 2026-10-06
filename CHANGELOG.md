@@ -1857,6 +1857,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Raw and TCP-connect scan text output includes IPv6 scope zones in endpoint
+  labels, so identical link-local addresses on different interfaces stay distinct.
 - TCP connect scans charge owned zone and interface-name strings against the
   evidence byte budget before publishing probes and include them in retained
   evidence statistics.

@@ -43,10 +43,13 @@ pub(super) fn render_text(
             }
         };
         write_stdout_line(format_args!(
-            "{} {} classification={}",
-            endpoint.address,
-            endpoint_name,
-            endpoint.classification.as_str()
+            "{}",
+            endpoint_text(
+                endpoint.address,
+                endpoint.scope.as_ref(),
+                &endpoint_name,
+                endpoint.classification,
+            )
         ))?;
         for evidence in &endpoint.probes {
             write_stdout_line(format_args!(
@@ -138,10 +141,13 @@ pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
 pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
     for endpoint in &report.endpoints {
         write_stdout_line(format_args!(
-            "{} tcp-connect/{} classification={}",
-            endpoint.address,
-            endpoint.port,
-            endpoint.classification.as_str()
+            "{}",
+            endpoint_text(
+                endpoint.address,
+                endpoint.scope.as_ref(),
+                &format!("tcp-connect/{}", endpoint.port),
+                endpoint.classification,
+            )
         ))?;
     }
     write_stdout_line(format_args!(
@@ -160,4 +166,77 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         optional_duration(rtt.avg),
         optional_duration(rtt.max),
     ))
+}
+
+fn endpoint_text(
+    address: std::net::IpAddr,
+    scope: Option<&output::scan::Scope>,
+    endpoint_name: &str,
+    classification: output::scan::Classification,
+) -> String {
+    let address = match scope {
+        Some(scope) => format!("{address}%{}", scope.zone),
+        None => address.to_string(),
+    };
+    format!(
+        "{address} {endpoint_name} classification={}",
+        classification.as_str()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use output::{network::InterfaceId, scan::Classification};
+
+    #[test]
+    fn text_endpoints_distinguish_identical_ipv6_addresses_on_different_interfaces() {
+        let address = "fe80::1".parse().unwrap();
+        let alpha = output::scan::Scope {
+            zone: "alpha".to_owned(),
+            interface: InterfaceId {
+                name: "alpha".to_owned(),
+                index: 2,
+            },
+        };
+        let beta = output::scan::Scope {
+            zone: "beta".to_owned(),
+            interface: InterfaceId {
+                name: "beta".to_owned(),
+                index: 3,
+            },
+        };
+        for endpoint_name in ["tcp/443", "udp/443", "icmp", "tcp-connect/443"] {
+            assert_eq!(
+                endpoint_text(address, Some(&alpha), endpoint_name, Classification::Open),
+                format!("fe80::1%alpha {endpoint_name} classification=open"),
+            );
+            assert_eq!(
+                endpoint_text(
+                    address,
+                    Some(&beta),
+                    endpoint_name,
+                    Classification::Filtered
+                ),
+                format!("fe80::1%beta {endpoint_name} classification=filtered"),
+            );
+        }
+    }
+
+    #[test]
+    fn unscoped_text_endpoints_keep_plain_addresses() {
+        for address in ["192.0.2.1", "2001:db8::1"] {
+            for endpoint_name in ["tcp/443", "tcp-connect/443"] {
+                assert_eq!(
+                    endpoint_text(
+                        address.parse().unwrap(),
+                        None,
+                        endpoint_name,
+                        Classification::Closed,
+                    ),
+                    format!("{address} {endpoint_name} classification=closed"),
+                );
+            }
+        }
+    }
 }

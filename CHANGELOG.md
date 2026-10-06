@@ -1857,6 +1857,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Pipelined raw scans charge each probe's owned zone and interface-name strings
+  against the preparation byte budget before collecting batches and during admission.
+- Windows IPv6 zones resolve using `Ipv6IfIndex`, including when it differs from
+  the IPv4 interface index; native identity checks accept either current index.
 - Raw and TCP-connect scan text output includes IPv6 scope zones in endpoint
   labels, so identical link-local addresses on different interfaces stay distinct.
 - TCP connect scans charge owned zone and interface-name strings against the

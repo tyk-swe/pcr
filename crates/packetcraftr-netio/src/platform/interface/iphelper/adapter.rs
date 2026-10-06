@@ -35,6 +35,16 @@ pub(in crate::platform) struct WindowsAdapter {
     pub(in crate::platform) luid: NET_LUID_LH,
 }
 
+impl WindowsAdapter {
+    pub(in crate::platform) fn ipv6_interface(mut self) -> Option<interface::Info> {
+        if self.ipv6_index == 0 {
+            return None;
+        }
+        self.interface.id.index = self.ipv6_index;
+        Some(self.interface)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(in crate::platform) struct BufferBounds {
     start: usize,
@@ -326,6 +336,53 @@ fn socket_address_ip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv6_identity_uses_the_ipv6_index_and_omits_ipv4_only_adapters() {
+        let mut native = IP_ADAPTER_ADDRESSES_LH::default();
+        native.Anonymous1.Anonymous.IfIndex = 7;
+        native.Ipv6IfIndex = 42;
+        let bounds = BufferBounds::new((&raw const native).cast(), size_of_val(&native)).unwrap();
+        let adapters = parse_adapters(&raw mut native, bounds).unwrap();
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].interface.id.index, 7);
+        let ipv6 = adapters[0].clone().ipv6_interface().unwrap();
+        assert_eq!(ipv6.id.index, 42);
+        assert_eq!(ipv6.id.name, adapters[0].interface.id.name);
+        assert!(find_windows_adapter(&adapters, &ipv6.id).is_ok());
+        assert!(
+            find_windows_adapter(
+                &adapters,
+                &InterfaceId {
+                    name: ipv6.id.name.clone(),
+                    index: 43,
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            find_windows_adapter(
+                &adapters,
+                &InterfaceId {
+                    name: "stale-name".to_owned(),
+                    index: ipv6.id.index,
+                }
+            )
+            .is_err()
+        );
+
+        native.Ipv6IfIndex = 0;
+        let adapters = parse_adapters(&raw mut native, bounds).unwrap();
+        assert_eq!(adapters[0].interface.id.index, 7);
+        assert!(
+            adapters
+                .into_iter()
+                .next()
+                .unwrap()
+                .ipv6_interface()
+                .is_none()
+        );
+    }
 
     #[test]
     fn strings_bounded_aligned_terminated() {

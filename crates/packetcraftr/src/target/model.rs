@@ -526,9 +526,8 @@ impl Resolver for SystemResolver {
         zone: &Zone,
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<packetcraftr_netio::interface::Id, Error> {
-        use packetcraftr_netio::interface::Provider as _;
         let interfaces = packetcraftr_netio::interface::SystemProvider
-            .interfaces(deadline)
+            .ipv6_interfaces(deadline)
             .map_err(|source| Error::ZoneResolution {
                 zone: zone.clone(),
                 source: Box::new(source),

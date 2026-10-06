@@ -32,6 +32,39 @@ pub(in crate::platform) fn interfaces(
     .map_err(interface::Error::native)
 }
 
+pub(in crate::platform) fn ipv6_interfaces(
+    deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    on_worker(deadline, "enumerating Windows IPv6 interfaces", |_| {
+        Ok(adapter_snapshots()?
+            .into_iter()
+            .filter_map(WindowsAdapter::ipv6_interface)
+            .collect())
+    })
+    .map_err(interface::Error::native)
+}
+
+#[cfg(native_send)]
+pub(in crate::platform) fn interfaces_for_identity(
+    expected: &interface::Id,
+    deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    let index = expected.index;
+    on_worker(deadline, "checking Windows interface identity", move |_| {
+        Ok(adapter_snapshots()?
+            .into_iter()
+            .filter_map(|adapter| {
+                if adapter.ipv6_index == index {
+                    adapter.ipv6_interface()
+                } else {
+                    Some(adapter.interface)
+                }
+            })
+            .collect())
+    })
+    .map_err(interface::Error::native)
+}
+
 pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0

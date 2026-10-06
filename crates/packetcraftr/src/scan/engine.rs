@@ -154,11 +154,22 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
     B: Iterator<Item = Batch<Probe>>,
 {
-    if approved
-        .total_probes
-        .saturating_mul(std::mem::size_of::<Batch<Probe>>())
-        > request.limits.max_prepared_bytes
-    {
+    let probes_per_target = approved.total_probes / approved.targets.len();
+    let batch_bytes = approved.targets.iter().fold(0usize, |bytes, target| {
+        let scope_bytes = target.scope.as_ref().map_or(0, |scope| {
+            scope
+                .zone
+                .as_str()
+                .len()
+                .saturating_add(scope.interface.name.len())
+        });
+        bytes.saturating_add(
+            (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
+                .saturating_add(scope_bytes)
+                .saturating_mul(probes_per_target),
+        )
+    });
+    if batch_bytes > request.limits.max_prepared_bytes {
         return Err(Error::PipelineExecution {
             source: super::executor::limit(
                 "prepared descriptions",

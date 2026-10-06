@@ -100,6 +100,97 @@ fn pacing_prep_limits_apply_whole_pipeline() {
     assert_eq!(state.armed, 0);
 }
 
+#[derive(Clone)]
+struct ScopedInterface {
+    id: packetcraftr_netio::interface::Id,
+    routes: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl packetcraftr::target::Resolver for ScopedInterface {
+    fn resolve(
+        &self,
+        _: &packetcraftr::target::Hostname,
+        _: usize,
+    ) -> Result<Vec<std::net::IpAddr>, packetcraftr::target::Error> {
+        unreachable!("the fixture uses a literal scoped address")
+    }
+
+    fn resolve_zone(
+        &self,
+        zone: &packetcraftr::target::Zone,
+        _: &Deadline,
+    ) -> Result<packetcraftr_netio::interface::Id, packetcraftr::target::Error> {
+        assert_eq!(zone.as_str(), "1");
+        Ok(self.id.clone())
+    }
+}
+
+impl packetcraftr_netio::route::Provider for ScopedInterface {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        _: std::net::IpAddr,
+        interface: Option<&packetcraftr_netio::interface::Id>,
+        _: Option<std::net::IpAddr>,
+        _: &Deadline,
+    ) -> Result<packetcraftr_netio::route::Decision, Infallible> {
+        use packetcraftr_netio::{link::Capability, route};
+        self.routes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(interface, Some(&self.id));
+        Ok(route::Decision {
+            interface: self.id.clone(),
+            source_mac: None,
+            selected_source: Some("fe80::9".parse().unwrap()),
+            preferred_source: None,
+            next_hop: None,
+            selection_reason: route::SelectionReason::OnLink,
+            destination_scope: route::Scope::Link,
+            mtu: 1500,
+            capability: Capability::Layer3,
+            link_type: packetcraftr_core::frame::LinkType::RAW,
+        })
+    }
+}
+
+#[test]
+fn scoped_strings_are_charged_before_collection_and_during_admission() {
+    use packetcraftr_core::error::Classified;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Eight probes clone a long resolver-supplied name. The first budget
+    // refuses collection; the second allows batches but refuses admission.
+    for (budget, route_calls) in [(32 * 1024, 0), (40 * 1024, 1)] {
+        let scoped = ScopedInterface {
+            id: packetcraftr_netio::interface::Id {
+                name: "x".repeat(4096),
+                index: 1,
+            },
+            routes: Arc::new(AtomicUsize::new(0)),
+        };
+        let steps = common::Steps::default();
+        let io = common::RecordingTransmit::new(steps.clone());
+        let providers = common::providers(scoped.clone(), io.clone()).with_resolver(scoped.clone());
+        let client = Client::new(builtin::registry(), policy(), providers);
+        let mut request = request();
+        request.targets = "fe80::1%1".parse::<Target>().unwrap().into();
+        request.attempts = 2;
+        request.limits.max_prepared_bytes = budget;
+
+        let error = client
+            .scan(request, scan::Collector::default())
+            .unwrap_err();
+        assert_eq!(error.classification().code, "policy.scan_pipeline_limit");
+        assert_eq!(scoped.routes.load(Ordering::SeqCst), route_calls);
+        assert_eq!(io.armed(), 0);
+        assert!(
+            steps.take().is_empty(),
+            "refused preparation must not transmit"
+        );
+    }
+}
+
 #[test]
 fn scans_stop_undecoded_limit_diagnosed() {
     let observe = |max_in_flight| {

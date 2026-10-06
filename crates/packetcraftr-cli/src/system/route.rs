@@ -70,13 +70,10 @@ pub(super) fn destination(
     let target = destination
         .parse::<packetcraftr::target::Target>()
         .map_err(CliError::classified)?;
-    if matches!(target, packetcraftr::target::Target::ScopedAddress(_)) {
+    if let packetcraftr::target::Target::ScopedAddress(scoped) = &target {
         return Err(CliError::classified(
             packetcraftr::target::Error::ZoneCapability {
-                zone: match &target {
-                    packetcraftr::target::Target::ScopedAddress(scoped) => scoped.zone().clone(),
-                    _ => unreachable!("checked above"),
-                },
+                zone: scoped.zone().clone(),
             },
         ));
     }

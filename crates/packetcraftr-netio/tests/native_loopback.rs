@@ -725,8 +725,8 @@ fn scoped_cli(targets: &[String], options: &[&str]) -> (bool, serde_json::Value)
             "--max-duration-ms",
             "5000",
         ])
-        .args(options)
         .args(targets)
+        .args(options)
         .output()
         .expect("run the scoped target CLI");
     assert!(
@@ -758,9 +758,18 @@ fn scoped_ipv6_targets() {
         .find(|case| case["id"] == "scoped-host-local")
         .expect("host-local scoped fixture")["expected"];
     if !cfg!(native_route) {
-        let (success, json) = scoped_cli(&["fe80::1%1".to_owned()], &["--list"]);
-        assert!(!success);
-        assert_eq!(json["error"]["code"], expected["portable"]);
+        for options in [
+            &["--list"][..],
+            &["--connect", "--ports", "1"][..],
+            &["--ports", "1"][..],
+        ] {
+            let (success, json) = scoped_cli(&["fe80::1%1".to_owned()], options);
+            assert!(
+                !success,
+                "unsupported scoped operation must fail: {options:?}"
+            );
+            assert_eq!(json["error"]["code"], expected["portable"], "{options:?}");
+        }
         println!(
             "PACKETCRAFTR_NATIVE_SCOPED={{\"selection\":\"unsupported_capability\",\"connect\":\"unsupported_capability\",\"raw\":\"unsupported_capability\"}}"
         );

@@ -46,6 +46,8 @@ class NativeScenarioEvidence(unittest.TestCase):
         good = self.output(dict(selection="exercised", connect="exercised", raw="exercised"))
         for output in (
             good + good,
+            evidence.SCOPED_MARKER + '{"selection":"unsupported_capability","selection":"exercised",'
+            '"connect":"exercised","raw":"exercised"}\n1 passed; 0 failed; 0 ignored;\n',
             evidence.SCOPED_MARKER + "not-json\n1 passed; 0 failed; 0 ignored;\n",
             self.output(dict(selection="exercised", connect="exercised")),
             self.output(dict(selection="exercised", connect="unavailable", raw="exercised")),

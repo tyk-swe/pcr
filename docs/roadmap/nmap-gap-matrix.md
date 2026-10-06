@@ -3,12 +3,16 @@
 This is the comparison companion to the [core scanner roadmap](README.md), not
 an exhaustive Nmap option checklist. It records PacketcraftR `main` at
 `22c7d182d577` as reviewed on 2026-10-05; the target rows and the
-machine-output row were re-reviewed on 2026-10-06 against the change that
-completed [M4][m4]. Nmap references are the official guide consulted on those
+machine-output row describe the M4 implementation at `7b1ea0f072a4860e23fff5a51a5de9497ee75c55`
+on 2026-10-06. This is not [M4][m4] completion: macOS/Windows scoped runtime
+recordings remain outstanding. Nmap references are the official guide consulted on those
 dates; actual differential tests must pin their binary version, build features,
 arguments, fixture truth, and acquisition conditions.
 
-No live comparison or newly passed native test is claimed by this document.
+No live Nmap comparison is claimed by this document. The M4 implementation has
+passed all eight isolated Linux native scenarios, including scoped IPv6, for
+that clean revision; the [M4 validation record][m4] identifies the local evidence
+and its preserved executable. This does not imply other-platform runtime proof.
 Relative source links describe the reviewed implementation; future changes need
 an updated baseline and supporting behavior evidence.
 

@@ -172,7 +172,8 @@ Settled at M4 with the recommended positions:
       (`target::plan` test).
 - [x] The [gap matrix][matrix] target rows are updated against the reviewed
       revision: files/stdin, bulk listing, and scoped targets are `Present
-      with constraints` as of the change that completed this milestone.
+      with constraints`, with macOS/Windows runtime evidence still explicitly
+      pending rather than presenting implementation as milestone completion.
 
 ## Ground-truth inventory
 
@@ -182,6 +183,33 @@ duplicate boundaries, and the independently provisioned host-local and isolated
 two-link scoped conditions. Numeric CLI contracts and native scoped suites read
 those expectations; native records include the corpus revision and SHA-256.
 The listener/responder conditions are the oracle, not agreement with Nmap.
+
+## Validation recorded on 2026-10-06
+
+For clean implementation revision `7b1ea0f072a4860e23fff5a51a5de9497ee75c55`:
+
+- Workspace rustfmt, all-target/all-feature Clippy with `-D warnings`, and
+  all-feature Cargo tests passed. Python evidence contracts passed (22 tests),
+  as did the four-crate dependency-direction check.
+- The target-planning CLI contracts passed in full-native and portable
+  builds (16 tests each).
+- The isolated Linux launcher passed all eight native scenarios, including
+  scoped list aliases, distinct links, scoped connect outcomes, and raw SYN
+  route/correlation ground truth. Local report:
+  `target/m4-linux-native-preserved.json`; preserved executed CLI:
+  `target/m4-binaries/linux-cli-full-native-7b1ea0f0`.
+- Executed CLI SHA-256:
+  `e0ff301e399a5881d78b6e6b8100d6f0e58ea3b55def075ac409f74fda89ccc4`;
+  native-test SHA-256:
+  `49fd4866b70bccbe043d9aa9f7c9994b464f29cc73c42450c53f0c9991c8f0ff`.
+  The scoped record binds corpus dataset 1.1.0 and its SHA-256
+  `fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f`.
+- A real portable Linux CLI returned `capability.unsupported` for scoped list
+  selection. Native host validation now requires that error independently for
+  list, connect, and raw requests, not inferred results for unexecuted paths.
+
+These ignored local artifacts are not hosted release evidence. No macOS or
+Windows runtime result is claimed, and the broader M2/M3 gates remain open.
 
 ## Blockers
 

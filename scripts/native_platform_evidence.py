@@ -29,7 +29,13 @@ def scoped_paths(output):
     markers = [line.split(SCOPED_MARKER, 1)[1] for line in output.splitlines() if SCOPED_MARKER in line]
     if len(markers) != 1:
         raise ValueError("scoped scenario lacks unambiguous per-path runtime evidence")
-    paths = json.loads(markers[0])
+    def unique_fields(pairs):
+        fields = dict(pairs)
+        if len(fields) != len(pairs):
+            raise ValueError("duplicate scoped runtime evidence field")
+        return fields
+
+    paths = json.loads(markers[0], object_pairs_hook=unique_fields)
     if (not isinstance(paths, dict) or set(paths) != {"selection", "connect", "raw"}
             or any(value not in ("exercised", "unsupported_capability") for value in paths.values())):
         raise ValueError("scoped evidence must distinguish selection, socket and raw runtime paths")

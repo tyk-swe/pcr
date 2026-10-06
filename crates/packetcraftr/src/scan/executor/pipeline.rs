@@ -341,7 +341,14 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         let prepared = self
             .plan
             .discovery
-            .rebuild(probe.packet(), &self.plan.routes[&probe.address], cost)
+            .rebuild(
+                probe.packet(),
+                &self.plan.routes[&(
+                    probe.address,
+                    probe.scope.as_ref().map(|scope| scope.interface.clone()),
+                )],
+                cost,
+            )
             .map_err(|error| match error {
                 RebuildError::Changed { admitted } => limit("changed preparation size", admitted),
                 RebuildError::Preparation(source) => BoundaryError::from_error(source),

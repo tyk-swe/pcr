@@ -40,6 +40,7 @@ use packetcraftr_core::error::BoundaryError;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Call {
     Route(IpAddr),
+    RouteOn(IpAddr, InterfaceId),
     Interfaces,
     Capture,
     Transmit(Vec<u8>),
@@ -51,6 +52,7 @@ pub(crate) enum Call {
 pub(crate) struct FakeProviders {
     pub(crate) calls: Arc<Mutex<Vec<Call>>>,
     pub(crate) addresses: Vec<IpAddr>,
+    pub(crate) routes: Arc<Mutex<std::collections::VecDeque<route::Decision>>>,
 }
 
 impl FakeProviders {
@@ -130,7 +132,13 @@ impl route::Provider for FakeProviders {
         _preferred_source: Option<IpAddr>,
         _deadline: &Deadline,
     ) -> Result<route::Decision, Infallible> {
-        self.record(Call::Route(destination));
+        self.record(match _interface_hint {
+            Some(interface) => Call::RouteOn(destination, interface.clone()),
+            None => Call::Route(destination),
+        });
+        if let Some(decision) = self.routes.lock().expect("scripted routes").pop_front() {
+            return Ok(decision);
+        }
         Ok(route::Decision {
             interface: fixture_interface(),
             source_mac: None,
@@ -205,6 +213,59 @@ impl Resolver for FakeProviders {
     fn resolve(&self, hostname: &Hostname, _limit: usize) -> Result<Vec<IpAddr>, TargetError> {
         self.record(Call::Resolve(hostname.to_string()));
         Ok(self.addresses.clone())
+    }
+
+    fn resolve_zone(
+        &self,
+        zone: &crate::target::Zone,
+        deadline: &Deadline,
+    ) -> Result<InterfaceId, TargetError> {
+        let interfaces = interface::Provider::interfaces(self, deadline).map_err(|source| {
+            TargetError::ZoneResolution {
+                zone: zone.clone(),
+                source: Box::new(source),
+            }
+        })?;
+        crate::target::resolve_zone_from(zone, interfaces.into_iter().map(|info| info.id))
+    }
+}
+
+pub(crate) struct ZoneMapResolver {
+    pub(crate) interfaces: Vec<InterfaceId>,
+    pub(crate) calls: Arc<AtomicUsize>,
+    pub(crate) resolve_calls: Arc<AtomicUsize>,
+    answers: Vec<IpAddr>,
+}
+
+impl ZoneMapResolver {
+    pub(crate) fn new(interfaces: Vec<InterfaceId>) -> Self {
+        Self {
+            interfaces,
+            calls: Arc::new(AtomicUsize::new(0)),
+            resolve_calls: Arc::new(AtomicUsize::new(0)),
+            answers: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_answers(mut self, answers: Vec<IpAddr>) -> Self {
+        self.answers = answers;
+        self
+    }
+}
+
+impl Resolver for ZoneMapResolver {
+    fn resolve(&self, _hostname: &Hostname, _limit: usize) -> Result<Vec<IpAddr>, TargetError> {
+        self.resolve_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.answers.clone())
+    }
+
+    fn resolve_zone(
+        &self,
+        zone: &crate::target::Zone,
+        _deadline: &Deadline,
+    ) -> Result<InterfaceId, TargetError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::target::resolve_zone_from(zone, self.interfaces.clone())
     }
 }
 
@@ -301,10 +362,18 @@ pub(crate) struct AddressListAuthorizer {
 }
 
 impl ResolveTarget for AddressListAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
-            addresses: self.addresses.clone(),
+            selected: self
+                .addresses
+                .iter()
+                .map(|address| crate::target::SelectedAddress::new(*address))
+                .collect(),
         })
     }
 }

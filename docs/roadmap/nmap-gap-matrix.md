@@ -150,6 +150,22 @@ matched configured profile stand in for evidence it does not provide.
 [scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
 [scan-evidence]: ../../crates/packetcraftr/src/scan/evidence.rs
 [scan-report]: ../../crates/packetcraftr/src/scan/report.rs
+## Implementation delta (M1–M4, pending review)
+
+The table above remains the reviewed `22c7d182d577` baseline. The rows below
+record what the M1–M4 change set adds, with the same honesty
+rules: completion claims wait for the recorded platform evidence, not for
+compilation or this documentation.
+
+| Capability | Implementation change | Remaining gate |
+| --- | --- | --- |
+| Target/exclusion files and stdin | `--targets-file`/`--exclude-file` with `-` stdin, shared byte/line budgets, one stdin consumer, and provenance-carrying origins are implemented (`input::manifest`, `scan` ingestion). | Native platform runs in [M3][m3]; corpus review in [M2][m2]. |
+| Bulk list/scan planning | `scan --list` plans the authorized selection without sending, capturing, or connecting; unscoped numeric targets make zero provider calls, while scoped targets may passively enumerate interfaces. `Client::plan_targets` publishes `target::plan::Report` with `resolution_performed`. | Native platform runs in [M3][m3]. |
+| Scoped IPv6 targets | `Target::ScopedAddress` keeps `fe80::/10%zone` through selection, sockets, and routes; `(address, interface)` identity deduplicates named/indexed aliases. | Actual scoped-runtime evidence per platform; scoped DNS/traceroute/send workflows still fail with a typed capability error. |
+| Output family | `packetcraftr.output/v7` adds `target_list` branches and optional `scope` fields; v6 stays frozen. | Consumer/migration review; the release schema verifier still gates. |
+| Measurement corpus | The injected-provider scanner fixture exercises 72 raw-scan and 12 traceroute cells against the authored corpus; four native loopback connect cells are specified for the real binary. | [M2][m2] native IPv6 coverage: six repeated `::1` connect case-runs are unavailable on this host. |
+
+
 [scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
 [connect-engine]: ../../crates/packetcraftr/src/scan/connect/engine.rs
 [connect-contract]: ../../crates/packetcraftr-cli/tests/integration/connect_scan_contracts.rs

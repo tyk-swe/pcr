@@ -97,6 +97,7 @@ where
         executor,
         &mut evidence,
     )?;
+    let retained_evidence_bytes = evidence.retained_evidence_bytes();
     let termination = evidence.into_classifier().termination;
 
     Ok(Report {
@@ -106,6 +107,7 @@ where
         strategy: request.strategy,
         destination_port: request.destination_port,
         termination,
+        retained_evidence_bytes,
         stats,
     })
 }
@@ -130,7 +132,17 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
         &request.target,
         FamilyGate::new(request.address_family, Error::family),
         |selected| {
-            if request.dont_fragment && selected.addresses.first().is_some_and(IpAddr::is_ipv6) {
+            if selected.targets.iter().any(|target| target.scope.is_some()) {
+                return Err(Error::ScopedTarget {
+                    target: selected.declared.clone(),
+                });
+            }
+            if request.dont_fragment
+                && selected
+                    .targets
+                    .first()
+                    .is_some_and(|target| target.address.is_ipv6())
+            {
                 return Err(Error::InvalidProbeOption {
                     option: "dont_fragment",
                     reason: "the IPv4 Don't Fragment flag does not exist for an IPv6 destination"
@@ -157,10 +169,11 @@ fn approve_traceroute<A: Authorizer + ResolveTarget>(
         },
     )?;
     // The admission gate guarantees the selected set is non-empty.
-    let destination = selected.addresses[0];
+    let destination = selected.targets[0].address;
+    let resolved_addresses = selected.addresses();
     Ok(ApprovedTraceroute {
         declared_target: selected.declared,
-        resolved_addresses: selected.addresses,
+        resolved_addresses,
         destination,
     })
 }

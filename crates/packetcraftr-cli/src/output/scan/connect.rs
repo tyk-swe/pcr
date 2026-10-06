@@ -27,6 +27,7 @@ pub struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
+    pub retained_evidence_bytes: usize,
     pub elapsed: Duration,
     pub rtt: Rtt,
 }
@@ -37,6 +38,7 @@ impl From<connect::Stats> for Stats {
             connections_scheduled: value.connections_scheduled,
             connections_attempted: value.connections_attempted,
             connections_succeeded: value.connections_succeeded,
+            retained_evidence_bytes: value.retained_evidence_bytes,
             elapsed: value.elapsed,
             rtt: value.rtt.into(),
         }
@@ -53,6 +55,8 @@ pub struct SocketError {
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<super::Scope>,
     pub port: u16,
     pub attempt: u32,
     pub attempted: bool,
@@ -71,6 +75,7 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
         Ok(Self {
             sequence: probe.sequence,
             address: probe.endpoint.ip(),
+            scope: probe.scope.as_ref().map(super::Scope::from),
             port: probe.endpoint.port(),
             attempt: probe.attempt,
             attempted: probe.attempted,
@@ -92,6 +97,8 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
 #[derive(Clone, Debug, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<super::Scope>,
     pub port: u16,
     pub classification: Classification,
     pub probes: Vec<Probe>,
@@ -132,6 +139,7 @@ impl TryFrom<connect::Aggregate> for Report {
                 .map(|endpoint| {
                     Ok(Endpoint {
                         address: endpoint.address,
+                        scope: endpoint.scope.as_ref().map(super::Scope::from),
                         port: endpoint.port,
                         classification: endpoint.classification.into(),
                         probes: endpoint

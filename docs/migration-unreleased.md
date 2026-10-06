@@ -2,9 +2,13 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v6` and
-validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents
-now use `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
+All structured command envelopes now identify `packetcraftr.output/v7` and
+validate against `schemas/packetcraftr.output.v7.schema.json`. The
+`packetcraftr.output/v6` schema remains frozen and available for validating
+previously emitted v6 output. The current producer and bundled examples have
+moved to v7; consumers pinned to v6 must explicitly support the new family.
+Packet documents now use
+`packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
 
 Behavior and contract changes come first, grouped by topic. The
@@ -554,6 +558,14 @@ endpoint evidence, with no raw packet receipt or capture statistics, and
 `policy::Operation::Socket` carries `SocketOperation` with the authorized
 numeric endpoints and finite `SocketLimits`.
 
+`connect::Report` gains `diagnostics`, including `scan.duplicate_declaration`
+warnings for coalesced target declarations. CLI text, JSON, and NDJSON
+completion output publish these warnings through their existing diagnostic
+channels. Exhaustive report initializers must supply the new field.
+
+`target::plan::Error::InvalidLimit` reports invalid `max_duration` values in
+milliseconds, saturating at `u64::MAX` for larger durations.
+
 Netio's `tcp::start_connect` returns a pollable `PendingConnect`: cancellation
 or drop cancels unstarted calls, while admitted calls keep their process-wide
 resource lease until worker and socket cleanup finish. At most
@@ -810,6 +822,50 @@ classify as `cli.live_target`. The CLI exposes the list as repeatable
 `--allow-destination ADDRESS[/PREFIX]` on every destination-bearing live
 command; `fuzz` takes it only with `--live`, and an offline run rejects it with
 a usage error naming `--live` where it used to accept and ignore it.
+
+## Target manifests, scan list mode, scoped IPv6 targets, and output/v7
+
+`scan` accepts repeatable `--targets-file PATH` and `--exclude-file PATH`
+beside positional targets; `-` names redirected standard input, and at most
+one input in an operation may consume stdin across include, exclude, UDP
+payload, and UDP profile inputs. Manifests are line-oriented UTF-8 text:
+blank lines and `#` comments (including trailing comments) are skipped, one
+declaration per remaining line, shared combined limits of 1 MiB and 4096
+physical lines tightened only downward by `--max-manifest-bytes` and
+`--max-manifest-lines`, and a 512-byte per-declaration bound. Every input is
+ingested and parsed before policy, DNS, or provider work; positional
+declarations keep first-seen order ahead of each `--targets-file` in flag
+order.
+
+`scan --list` plans the selection without sending, capturing, or connecting.
+`Client::plan_targets` (`target::plan::Request`/`Report`) performs the same
+admission path through only the `resolver` provider and reports
+`resolution_performed` — hostname resolution requires the existing
+`--allow-hostname-resolution` opt-in and is reported, never hidden. The
+aggregate and NDJSON `target`/`complete` events are a `target_list` method
+branch of the new `packetcraftr.output/v7` family.
+
+`Target::ScopedAddress` declares an IPv6 link-local target with an explicit
+`%zone` (name or nonzero index; zones resolve to exactly one interface or
+fail before work). Selection and endpoint identity key on
+`(address, interface)` through the new `SelectedAddress`/`ResolvedZone`/`Zone`
+types, so `Authorized` now exposes `selected()` records. The change to
+`addresses()` from `&[IpAddr]` to an owned `Vec<IpAddr>`, the serialized
+authorized-target shape, and the new `Target` enum variant are Rust/API
+breaking changes; callers must update exhaustive matches and use `selected()`
+when scope matters. Raw and connect scans carry the
+scope into routes and `SocketAddrV6`; probe/endpoint/sent/failed evidence
+records gain an optional `scope` field in output/v7. Workflows that cannot
+carry scope (DNS-driven, traceroute, send, exchange) fail with a typed
+capability error before work rather than silently discarding it.
+
+Raw scan and traceroute aggregates publish `retained_evidence_bytes`: the
+exact retained wire-frame byte charge. Connect `socket_stats` publishes the
+same field name for its separate per-probe struct plus error-display byte
+charge; sockets do not expose a retained wire transcript. Neither charge
+represents process memory or allocator overhead. The
+v6 schema keeps no such field; see
+[scanner evidence](scanner-evidence.md) for the exact charge definitions.
 
 ## Send packet sets
 

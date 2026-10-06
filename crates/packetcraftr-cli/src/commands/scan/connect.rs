@@ -39,20 +39,24 @@ pub(super) fn run(
                     .map_err(CliError::classified)
             }),
             on_event: emit_event,
-            into_result: Box::new(|aggregate| {
+            into_result: Box::new(|mut aggregate| {
+                let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
                 output::scan::connect::Report::try_from(aggregate)
-                    .map(|report| output::envelope::Published::new(report, Vec::new()))
+                    .map(|report| output::envelope::Published::new(report, diagnostics))
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|aggregate, _| {
+            render_text: Box::new(|mut aggregate, _| {
+                let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
                 super::rendering::render_connect_text(
                     &output::scan::connect::Report::try_from(aggregate)
                         .map_err(CliError::classified)?,
-                )
+                )?;
+                crate::rendering::render_diagnostics_text(&diagnostics)
             }),
-            complete: |report, stream| {
+            complete: |mut report, stream| {
+                let diagnostics = std::mem::take(&mut report.diagnostics);
                 stream
-                    .complete(output::scan::connect::Summary::from(report), Vec::new())
+                    .complete(output::scan::connect::Summary::from(report), diagnostics)
                     .map_err(CliError::from)
             },
         },

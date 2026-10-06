@@ -1,0 +1,118 @@
+{
+  "schema": "packetcraftr.scanner-corpus/v1",
+  "dataset_version": "1.0.0",
+  "families": ["ipv4", "ipv6"],
+  "transports": ["tcp", "udp", "icmp"],
+  "fixture_addresses": {
+    "ipv4": {"source": "192.0.2.1", "destination": "192.0.2.2", "router": "192.0.2.254"},
+    "ipv6": {"source": "2001:db8::1", "destination": "2001:db8::2", "router": "2001:db8::ffff"}
+  },
+  "request": {
+    "attempts": 1,
+    "ports": [443],
+    "timeout_ms": 20,
+    "max_duration_ms": 2000,
+    "max_probes": 1,
+    "max_evidence_bytes": 65536,
+    "windows": [1, 2]
+  },
+  "nmap": {
+    "version": "7.991",
+    "acquisition": "Operator-provided executable; no bundled Nmap code or data; reject version mismatch.",
+    "connect_arguments": ["-n", "-Pn", "-sT", "--reason", "--max-retries", "0", "--host-timeout", "5s", "-oX", "-"],
+    "limitations": "Only native loopback connect fixtures are directly comparable. Injected packet fixtures are not offered as Nmap runtime evidence."
+  },
+  "scenarios": [
+    {
+      "id": "responsive",
+      "condition": "An exact checksum-valid direct response reverses the sent tuple; TCP SYN/ACK acknowledges sequence+1, UDP echoes the exact payload, ICMP echoes the identity.",
+      "provision": "injected_direct_reply",
+      "expected": {"attempt_classification": "open", "status": "response", "attributed_response": true},
+      "divergence": "ICMP open is an attempt observation, not Nmap's host-up vocabulary. UDP open does not identify a service."
+    },
+    {
+      "id": "closed",
+      "condition": "TCP endpoint sends a correlated RST/ACK; UDP and ICMP receive an exact quoted ICMP port-unreachable error.",
+      "provision": "injected_refusal",
+      "expected": {"attempt_classification": "closed", "status": "response", "attributed_response": true},
+      "expected_by_transport": {
+        "icmp": {"attempt_classification": "unreachable", "status": "response", "attributed_response": true}
+      },
+      "divergence": "TCP reset and endpoint-quoted UDP port-unreachable establish refusal. An echo probe has no port: its quoted destination-unreachable establishes unreachable attempt evidence, not a closed port. No service identity is claimed."
+    },
+    {
+      "id": "blocked",
+      "condition": "The fixture router sends an exact quoted administrative rejection: ICMPv4 type 3 code 13 or ICMPv6 type 1 code 1.",
+      "provision": "injected_administrative_rejection",
+      "expected": {"attempt_classification": "filtered", "status": "response", "attributed_response": true},
+      "divergence": "A router's rejection is not a direct target host observation. This fixture models an explicit rejection, not silent packet dropping."
+    },
+    {
+      "id": "silent",
+      "condition": "The recording provider accepts one transmission and emits no captured frame for the entire bounded response window.",
+      "provision": "injected_silence",
+      "expected": {"attempt_classification": "timeout", "status": "timeout", "attributed_response": false},
+      "divergence": "PacketcraftR retains silence as timeout; Nmap may infer filtered for SYN or open|filtered for UDP. Neither establishes host absence."
+    },
+    {
+      "id": "malformed",
+      "condition": "The fixture emits a truncated IP header (one byte identifying IPv4 or IPv6), which cannot decode into a correlated reply.",
+      "provision": "injected_truncated_frame",
+      "expected": {"attempt_classification": "timeout", "status": "timeout", "attributed_response": false},
+      "divergence": "The acquisition record preserves the exact malformed byte. A tolerant dissector may represent it as unmatched raw data rather than a decode error, and the scanner does not retain every unrelated capture. Neither representation establishes a port state; timeout is expected despite one capture delivery."
+    },
+    {
+      "id": "unrelated",
+      "condition": "The fixture emits a checksum-valid direct-looking reply with a different TCP/UDP destination port or ICMP echo identity.",
+      "provision": "injected_unrelated_reply",
+      "expected": {"attempt_classification": "timeout", "status": "timeout", "attributed_response": false},
+      "divergence": "Captured but unrelated traffic is not attributed to the attempt, even when its address and transport match."
+    }
+  ],
+  "native_connect_scenarios": [
+    {
+      "id": "connect-responsive",
+      "condition": "A listener bound exclusively to the declared loopback address accepts the TCP handshake on an ephemeral port.",
+      "expected_outcome": "connected",
+      "expected_classification": "open",
+      "nmap_expected": "open",
+      "divergence": "Neither successful handshake authenticates application identity."
+    },
+    {
+      "id": "connect-closed",
+      "condition": "A loopback socket reserves an ephemeral TCP port without listening; it stays bound until the attempt completes.",
+      "expected_outcome": "refused",
+      "expected_classification": "closed",
+      "nmap_expected": "closed",
+      "divergence": "The reserved port avoids the close-and-rebind race; the fixture condition, not Nmap, is the oracle."
+    }
+  ],
+  "traceroute_scenarios": [
+    {
+      "id": "responsive",
+      "condition": "A checksum-valid direct reply to the first and only authorized hop proves the destination answered.",
+      "expected_termination": "destination_reached",
+      "expected_status": "response",
+      "expected_attributed_response": true,
+      "divergence": "This one-hop fixture measures existing traceroute execution; it does not imply multi-host or scan-informed path reuse."
+    },
+    {
+      "id": "silent",
+      "condition": "No frame arrives for the first and only authorized hop; the bounded trace retains silence, not host absence.",
+      "expected_termination": "timeout",
+      "expected_status": "timeout",
+      "expected_attributed_response": false,
+      "divergence": "Silence at a hop is an observation. It does not identify a router or prove a blocked destination."
+    }
+  ],
+  "provenance": {
+    "source": "Original PacketcraftR fixture specifications authored in this repository",
+    "retrieved": "2026-10-05",
+    "transforms": ["Independently specified network conditions; no Nmap database or output used to derive expectations"],
+    "license": "AGPL-3.0-only",
+    "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
+    "maintainer": "tyk-swe",
+    "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows.",
+    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports."
+  }
+}

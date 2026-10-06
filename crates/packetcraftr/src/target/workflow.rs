@@ -4,7 +4,9 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 
-use super::{Family, ResolveTarget, Target};
+use packetcraftr_netio::interface::Id as InterfaceId;
+
+use super::{Family, ResolveTarget, SelectedAddress, Target};
 use packetcraftr_core::budget::Deadline;
 
 use crate::execution::Errors;
@@ -13,7 +15,15 @@ use crate::policy::{Authorizer, Operation, WireLimits};
 #[derive(Debug)]
 pub(crate) struct SelectedTargets {
     pub(crate) declared: String,
-    pub(crate) addresses: Vec<IpAddr>,
+    pub(crate) targets: Vec<SelectedAddress>,
+    pub(crate) declarations: Vec<Vec<u32>>,
+    pub(crate) duplicates: Vec<u32>,
+}
+
+impl SelectedTargets {
+    pub(crate) fn addresses(&self) -> Vec<IpAddr> {
+        self.targets.iter().map(|target| target.address).collect()
+    }
 }
 
 pub(crate) fn resolve_selected<A, G>(
@@ -29,22 +39,28 @@ where
 {
     let check = || check_deadline(deadline, gates);
     check()?;
-    let resolved = authorizer.resolve_and_authorize(target);
+    let resolved = authorizer.resolve_and_authorize(target, deadline);
     check()?;
     let resolved = resolved.map_err(|source| gates.authorization(source))?;
 
     let declared = resolved.declared.to_string();
-    let mut addresses = Vec::with_capacity(resolved.addresses.len());
-    let mut seen = HashSet::with_capacity(resolved.addresses.len());
-    for address in resolved.addresses {
+    let mut targets = Vec::with_capacity(resolved.selected.len());
+    let mut seen = HashSet::<(IpAddr, Option<InterfaceId>)>::with_capacity(resolved.selected.len());
+    for record in resolved.selected {
         check()?;
-        if family.accepts(address) && seen.insert(address) {
-            addresses.push(address);
+        let key = (
+            record.address,
+            record.scope.as_ref().map(|scope| scope.interface.clone()),
+        );
+        if family.accepts(record.address) && seen.insert(key) {
+            targets.push(record);
         }
     }
     Ok(SelectedTargets {
         declared,
-        addresses,
+        targets,
+        declarations: Vec::new(),
+        duplicates: Vec::new(),
     })
 }
 

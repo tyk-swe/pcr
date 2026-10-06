@@ -3,11 +3,17 @@
 
 mod admission;
 mod model;
+pub mod plan;
 mod selection;
 mod workflow;
 
 pub(crate) use admission::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
-pub use model::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
-pub(crate) use model::{ResolveTarget, distinct_addresses};
+#[cfg(test)]
+pub(crate) use model::resolve_zone_from;
+pub use model::{
+    Authorized, Error, Family, Hostname, ResolvedZone, Resolver, ScopedAddress, SelectedAddress,
+    SystemResolver, Target, Zone, requires_scope,
+};
+pub(crate) use model::{ResolveTarget, distinct_addresses, valid_zone_interface};
 pub use selection::{Network, Selection, SelectionError, Specification};
 pub(crate) use workflow::{approve_operation, resolve_selected, wire_limits};

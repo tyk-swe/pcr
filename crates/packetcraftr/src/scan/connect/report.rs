@@ -43,6 +43,7 @@ impl Outcome {
 pub struct ProbeEvidence {
     pub sequence: u64,
     pub endpoint: SocketAddr,
+    pub scope: Option<crate::target::ResolvedZone>,
     pub attempt: u32,
     pub attempted: bool,
     /// None means no socket-call result was available by the deadline.
@@ -60,6 +61,7 @@ pub struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
+    pub retained_evidence_bytes: usize,
     pub elapsed: Duration,
     pub rtt: Rtt,
 }
@@ -73,6 +75,7 @@ pub enum Event {
 pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub planned_duration: Duration,
     pub stats: Stats,
 }
@@ -81,6 +84,7 @@ pub struct Report {
 pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
+    pub scope: Option<crate::target::ResolvedZone>,
     pub classification: Classification,
     pub probes: Vec<ProbeEvidence>,
 }
@@ -123,6 +127,7 @@ impl Collector {
             let endpoint = index_or_push(&mut endpoints, &mut indices, key, || Endpoint {
                 address: key.ip(),
                 port: key.port(),
+                scope: probe.scope.clone(),
                 classification: Classification::Timeout,
                 probes: Vec::new(),
             });

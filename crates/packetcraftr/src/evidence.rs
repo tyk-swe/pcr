@@ -187,6 +187,10 @@ impl RetentionBudget {
         Ok(())
     }
 
+    pub(crate) fn bytes(&self) -> usize {
+        self.retained_bytes
+    }
+
     pub(crate) fn release(&mut self, bytes: usize) {
         let frames = self
             .retained_frames

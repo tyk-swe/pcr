@@ -32,6 +32,8 @@ use packetcraftr_netio::{
     transmit,
 };
 
+const LIVE: Duration = Duration::from_secs(30);
+
 struct CountingResolver {
     calls: AtomicUsize,
     addresses: Vec<IpAddr>,
@@ -100,7 +102,7 @@ fn host_auth_precedes_resolver_side_effects() {
     };
 
     let error = policy::Policy::default()
-        .resolve_target(&target, &resolver)
+        .resolve_target(&target, &resolver, &Deadline::new(LIVE))
         .expect_err("default policy must deny hostname resolution");
     assert!(error.to_string().contains("denies hostname resolution"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);

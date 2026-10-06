@@ -19,6 +19,7 @@ use packetcraftr_core::error::BoundaryError;
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
+    pub scope: Option<crate::target::ResolvedZone>,
     pub endpoint: ProbeEndpoint,
     pub attempt: u32,
     pub udp_payload: bytes::Bytes,
@@ -77,27 +78,28 @@ pub(super) fn probe_count(
 
 pub(super) fn build_batches<'a>(
     request: &'a Request,
-    addresses: &'a [IpAddr],
+    targets: &'a [crate::target::SelectedAddress],
     endpoints: &'a [ProbeEndpoint],
 ) -> impl Iterator<Item = Batch<Probe>> + 'a {
-    addresses
+    targets
         .iter()
-        .flat_map(move |address| {
+        .flat_map(move |target| {
             (1..=request.attempts).flat_map(move |attempt| {
                 endpoints
                     .iter()
-                    .map(move |endpoint| (*address, attempt, *endpoint))
+                    .map(move |endpoint| (target, attempt, *endpoint))
             })
         })
         .zip(0u64..)
-        .map(move |((address, attempt, endpoint), sequence)| {
+        .map(move |((target, attempt, endpoint), sequence)| {
             let profile = endpoint
                 .port()
                 .and_then(|port| request.udp_profiles.get(&port));
             Batch::single(
                 Probe {
                     sequence,
-                    address,
+                    address: target.address,
+                    scope: target.scope.clone(),
                     endpoint,
                     attempt,
                     udp_profile: profile.cloned(),

@@ -695,10 +695,35 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `scan --targets-file`/`--exclude-file` bounded manifests (with `-` stdin),
+  `scan --list` target planning, and scoped `fe80::/10%zone` targets carried
+  through selection, connect sockets, and raw route planning. Structured
+  output moves to `packetcraftr.output/v7` (target-list branch, optional
+  `scope` fields, exact `retained_evidence_bytes`); the v6 family and its
+  schema/fixture stay frozen.
+- The [scanner corpus](docs/scanner-corpus.v1.json)
+  (`packetcraftr.scanner-corpus/v1`), its
+  `scanner_fixture` example driver (deterministic injected providers on the
+  real scan and traceroute paths, never native I/O), and the
+  `scripts/benchmark-scanner.py` on-demand 88-condition benchmark with a
+  pinned Nmap 7.991 agreement check; corpus expectations are independent of
+  Nmap. The M2 milestone stays in progress pending methodology review and the
+  unsupported-workflow limitations.
+- The `native_loopback` macOS/Windows evidence suite (seven ignored
+  scenarios, `packetcraftr_test_host_loopback` build cfg) and the manual
+  reviewed-native workflow on disposable hosted runners; actual platform
+  recordings are pending, so M3 stays in progress.
 - A [core scanner roadmap](docs/roadmap/README.md), one specification per
   milestone, and a source-backed Nmap gap matrix document planned discovery,
   scanning, identification, performance, and cross-platform work. These are
   future plans, not newly implemented features.
+- The completed first roadmap milestone documents the [scanner claims and
+  evidence model](docs/scanner-evidence.md) — host observations, port
+  inference, attempt outcomes, and operational failures as separate
+  vocabularies, with every current scan output field assigned to one — and the
+  [scanner data policy](docs/scanner-data-policy.md) governing provenance,
+  license review, versioning, maintenance, and coverage for bundled port,
+  service, OS, and vendor data. No scan behavior or output schema changes.
 - `ReaderLimits::max_options_per_block` (default 1,024) bounds the options
   retained from one PCAPNG section, interface, or packet block; a block above
   the ceiling fails with `policy.capture_stream_limit`. Exhaustive
@@ -1832,6 +1857,26 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- TCP connect scans report coalesced duplicate target declarations in text,
+  JSON, and NDJSON completion diagnostics.
+- Invalid target-planning durations report the requested milliseconds instead
+  of zero, saturating only values above `u64::MAX` milliseconds.
+- Invalid `scan` target and exclusion declarations retain their typed error
+  codes and remediations while reporting argument or manifest provenance.
+- The scanner benchmark rejects corpora without the required scheduling
+  windows `[1, 2]`, preventing incomplete case inventories from reporting
+  complete coverage.
+- Pipelined raw scans charge each probe's owned zone and interface-name strings
+  against the preparation byte budget before collecting batches and during admission.
+- Windows IPv6 zones resolve using `Ipv6IfIndex`, including when it differs from
+  the IPv4 interface index; native identity checks accept either current index.
+- Raw and TCP-connect scan text output includes IPv6 scope zones in endpoint
+  labels, so identical link-local addresses on different interfaces stay distinct.
+- TCP connect scans charge owned zone and interface-name strings against the
+  evidence byte budget before publishing probes and include them in retained
+  evidence statistics.
+- `scan --udp-payload-file -` accepts empty redirected stdin, matching empty
+  payload files while retaining the 65507-byte limit.
 - `rewrite`, `export`, `merge`, and `follow --write` bind staging, publication,
   and rollback to the parent directory opened before input is read. On Linux
   with procfs they address the directory handle, so a parent path retargeted

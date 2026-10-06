@@ -83,7 +83,14 @@ impl Observation {
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
-    pub(super) winners: HashMap<(IpAddr, Option<u16>), Classification>,
+    pub(super) winners: HashMap<
+        (
+            IpAddr,
+            Option<u16>,
+            Option<packetcraftr_netio::interface::Id>,
+        ),
+        Classification,
+    >,
     pub(super) rtt: RttAccumulator,
 }
 
@@ -122,6 +129,7 @@ impl Classifier for ProbeClassifier<'_> {
         let mut evidence = ProbeEvidence {
             sequence: probe.sequence,
             address: probe.address,
+            scope: probe.scope.clone(),
             transport: probe.endpoint.transport(),
             port: probe.endpoint.port(),
             attempt: probe.attempt,
@@ -151,7 +159,11 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.application = reply.observation.application;
         }
         self.winners
-            .entry((evidence.address, evidence.port))
+            .entry((
+                evidence.address,
+                evidence.port,
+                evidence.scope.as_ref().map(|scope| scope.interface.clone()),
+            ))
             .or_insert(Classification::Timeout)
             .promote(evidence.classification);
         Event::Probe {

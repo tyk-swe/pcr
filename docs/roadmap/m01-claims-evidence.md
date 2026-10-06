@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | None | [M2][m2], [M4][m4], [M6][m6], and the vocabulary every later milestone publishes |
+| Complete | None | [M2][m2], [M4][m4], [M6][m6], and the vocabulary every later milestone publishes |
 
 PacketcraftR's scan output already records per-probe classifications, reasons,
 timestamps, RTT, and captured responses. It uses one vocabulary for all of it:
@@ -82,35 +82,52 @@ A written policy covering port, service, OS, and vendor data:
 | Bounded document precedent for data | [`document/udp_profiles.rs`][udp-document] |
 | Policy text | A new document under `docs/`, linked from [Contributing][contributing] |
 
-## Decisions to settle
+## Decisions
 
-1. Whether inferred states are published as a new output contract family or as
-   additional records in v6 (recommended: one new family, introduced with the
-   first inference in [M6][m6], because the
+Settled at M1 with the recommended positions:
+
+1. **Inferred states publish in a new output contract family, not in v6.**
+   Port inference is scan-dependent: the same attempts can support different
+   conclusions under different methods, and assigning inference meanings to
+   the v6 classification enum would change what existing values promise. The
    [compatibility policy][compatibility] requires a new family for new enum
-   meanings).
-2. Whether M1 lands Rust types or only the written model (recommended: the
-   written model here, with each type landing beside its first producer in
-   [M5][m5] and [M6][m6], so no unused public type exists).
-3. Which data sources are acceptable for each data kind (recommended: decide
-   per kind during license review and record rejected sources with the reason).
-4. Whether data ships inside the binary, as separate release assets, or both
-   (recommended: decide with the first data set in [M6][m6-catalog]; the policy
-   must allow either).
+   meanings, so [M6][m6] introduces the inference family with the first
+   inference it publishes. The v6 `classification` values keep their current
+   attempt-observation semantics unchanged; the endpoint aggregate remains the
+   highest-ranked attempt outcome, not a method-specific inference.
+2. **M1 lands the written model only.** No Rust types ship without a
+   producer. Each type lands beside its first producer in [M5][m5] and
+   [M6][m6], so no unused public type exists. The model lives in
+   [scanner evidence][evidence-doc].
+3. **Data sources are decided per kind during license review.** The
+   [scanner data policy][data-policy] records which sources are acceptable,
+   which are candidates pending terms review, and which are rejected, with
+   the reason for each rejection.
+4. **Packaging is decided per data set with the first import in
+   [M6][m6-catalog].** The policy permits both binary-bundled and separate
+   release assets; each form requires the per-source review to pass first.
 
 ## Exit criteria
 
-- [ ] The four vocabularies are documented, and every field of the current
-      scan records is assigned to one of them.
-- [ ] The documented model retains the current timeout, unreachable, and
-      unknown evidence as attempt outcomes.
-- [ ] The data policy covers provenance, license review, versioning,
+- [x] The four vocabularies are documented, and every field of the current
+      scan records is assigned to one of them — [scanner
+      evidence](../scanner-evidence.md).
+- [x] The documented model retains the current timeout, unreachable, and
+      unknown evidence as attempt outcomes — [attempt
+      observations](../scanner-evidence.md#attempt-observations).
+- [x] The data policy covers provenance, license review, versioning,
       maintenance ownership, and coverage for port, service, OS, and vendor
-      data.
-- [ ] Data sources are reviewed under that policy before any dependent feature
-      is claimed complete.
-- [ ] Decisions 1 and 2 are recorded in this file with their rationale.
+      data — [scanner data policy](../scanner-data-policy.md) with the
+      [provenance template](../scanner-data-provenance-template.md).
+- [x] Data sources are reviewed under that policy before any dependent feature
+      is claimed complete — the [source review](../scanner-data-policy.md#source-review)
+      gate is recorded; enforcement is procedural at each import, and no
+      dependent feature is claimed complete yet.
+- [x] Decisions 1 and 2 are recorded in this file with their rationale —
+      [decisions](#decisions).
 
+[data-policy]: ../scanner-data-policy.md
+[evidence-doc]: ../scanner-evidence.md
 [m2]: m02-ground-truth-benchmarks.md
 [m4]: m04-target-planning.md
 [m5]: m05-host-discovery.md

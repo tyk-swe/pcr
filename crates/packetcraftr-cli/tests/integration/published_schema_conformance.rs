@@ -61,6 +61,9 @@ fn every_published_declared_schema() {
     ));
     let rewrite_v2 = rewrite_v2_validator();
     let output_validator = schema_validator();
+    let v6_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v6.schema.json"
+    ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
@@ -88,7 +91,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v6" => output_validator,
+            "packetcraftr.output/v7" => output_validator,
+            "packetcraftr.output/v6" => &v6_validator,
             "packetcraftr.packet/v2" => &packet_validator,
             "packetcraftr.rewrite/v2" => &rewrite_v2,
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,

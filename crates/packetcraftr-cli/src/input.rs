@@ -4,11 +4,13 @@
 mod bounded;
 mod capture;
 mod fingerprint;
+pub(crate) mod manifest;
 mod recipe;
 
 pub(crate) use bounded::{
     InputKind, hex_text_limit, missing_input_error, read_bounded_file,
     read_bounded_file_allow_empty, read_bounded_json_document, read_stdin_bounded,
+    read_stdin_bounded_allow_empty,
 };
 pub(crate) use capture::{open_capture, open_capture_file, open_capture_hashed, snapshot_capture};
 pub(crate) use recipe::{apply_overrides, read_recipe};

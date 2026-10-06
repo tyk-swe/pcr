@@ -68,6 +68,7 @@ impl<P: PacketProviders, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'
                 timeout: batch.timeout,
                 max_template_packets: batch.probes.len(),
                 destination: first.address,
+                interface: None,
                 max_responses: None,
             },
             &mut matches_request,

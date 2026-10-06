@@ -110,6 +110,35 @@ pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, i
     .into())
 }
 
+pub(crate) fn ipv6_interfaces(
+    deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    #[cfg(all(native_route, target_os = "windows"))]
+    {
+        interface_backend::ipv6_interfaces(deadline)
+    }
+    #[cfg(not(all(native_route, target_os = "windows")))]
+    {
+        interfaces(deadline)
+    }
+}
+
+#[cfg(native_send)]
+pub(crate) fn interfaces_for_identity(
+    expected: &InterfaceId,
+    deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    #[cfg(all(native_route, target_os = "windows"))]
+    {
+        interface_backend::interfaces_for_identity(expected, deadline)
+    }
+    #[cfg(not(all(native_route, target_os = "windows")))]
+    {
+        let _ = expected;
+        interfaces(deadline)
+    }
+}
+
 #[cfg(native_layer2)]
 pub(crate) fn open_capture(
     interface: &InterfaceId,

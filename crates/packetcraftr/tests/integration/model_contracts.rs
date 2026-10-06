@@ -3,12 +3,17 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
+use std::time::Duration;
+
+use packetcraftr_core::budget::Deadline;
 
 use packetcraftr::{
     policy,
     target::{Error as TargetError, Hostname, Resolver, Target},
 };
 use packetcraftr_core::error::{Classified, Kind};
+
+const LIVE: Duration = Duration::from_secs(30);
 
 struct FixedResolver(Vec<IpAddr>);
 
@@ -156,7 +161,7 @@ fn resolution_reject_empty_limit_results() {
         ..policy::Policy::default()
     };
     assert!(matches!(
-        policy.resolve_target(&target, &FixedResolver(Vec::new())),
+        policy.resolve_target(&target, &FixedResolver(Vec::new()), &Deadline::new(LIVE)),
         Err(TargetError::NoAddresses { .. })
     ));
     assert!(matches!(
@@ -166,7 +171,8 @@ fn resolution_reject_empty_limit_results() {
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-            ])
+            ]),
+            &Deadline::new(LIVE),
         ),
         Err(TargetError::AddressLimit { limit: 2, .. })
     ));

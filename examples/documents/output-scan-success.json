@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -33,6 +33,7 @@
       }
     ],
     "undecoded": [],
+    "retained_evidence_bytes": 0,
     "rtt": {
       "sent": 1,
       "received": 0,

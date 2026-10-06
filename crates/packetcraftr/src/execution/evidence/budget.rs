@@ -107,6 +107,10 @@ impl EvidenceState {
         self.diagnostics.publish_new(publish)
     }
 
+    pub(crate) fn retained_evidence_bytes(&self) -> usize {
+        self.budget.bytes()
+    }
+
     fn reserve(&mut self, frame: &Frame) -> bool {
         let EvidenceLimits {
             max_frames,

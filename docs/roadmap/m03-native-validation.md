@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | None | The runtime-evidence [close gate][close-gates] of every milestone with native behavior |
+| In progress | None | The runtime-evidence [close gate][close-gates] of every milestone with native behavior |
 
 PacketcraftR builds and ships for Linux, macOS, and Windows, and every roadmap
 milestone requires runtime evidence on all three. Only Linux has a controlled
@@ -111,6 +111,31 @@ Raw-source restrictions are recorded as the capability limits they are.
    existing seven wherever the capability exists, with each omission recorded
    and justified).
 
+## Decisions made
+
+1. **Disposable hosted runners** run the manual
+   `.github/workflows/native-platform-review.yml` route, which requires an
+   exact reviewed commit and the reviewed-native permission control; there are
+   no persistent privileged runners.
+2. **Fixed loopback only, not namespace parity.** The admitted destination is
+   the literal `127.0.0.1` on the single passive loopback interface behind a
+   token plus platform gate (`native_loopback.rs`); the macOS/Windows firewall
+   boundary is a boundary of its own, documented as different isolation from
+   Linux namespaces — scenarios it cannot host report unavailable, never a
+   weaker claim.
+3. **No driver provisioning without specific license approval.** Windows
+   Layer 2 stays unavailable where Npcap is not already installed; no
+   automatic driver download or install runs on the route.
+4. **Evidence format v2 is separate.** `scripts/native_platform_evidence.py`
+   validates the v2 host-loopback record (platform, profile, per-scenario
+   exercised/failed/unavailable); the Linux netns v1 evidence remains its own
+   release gate.
+5. **All seven scenarios in every profile.** `native_loopback.rs` declares
+   exactly the authored inventory, each either exercised or marked with a
+   precise `reason_code`; feature-disabled profiles map to
+   `unsupported_capability`, absent backends to `backend_not_installed`, and
+   interface mutation to `isolation_unavailable`.
+
 ## Exit criteria
 
 - [ ] macOS has a controlled route that runs the native scenario inventory for
@@ -127,6 +152,14 @@ Raw-source restrictions are recorded as the capability limits they are.
       a scenario is unavailable.
 - [ ] The [validation matrix][native-validation] states what each new route
       covers.
+
+## Notes
+
+The reviewed-native route, scenario executable (`native_loopback.rs`), and
+validators are implemented; macOS/Windows recordings and interface isolation
+evidence are still pending real runner executions, so M3 stays **In
+progress**. The IPv6-loopback runtime gap remains documented rather than
+claimed; the test uses `127.0.0.1` only.
 
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md

@@ -186,6 +186,7 @@ fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
 fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        scope: None,
         application: None,
         sequence,
         address,
@@ -397,6 +398,7 @@ fn validate_active_event_variants() {
     for event in [
         packetcraftr::scan::Event::Sent(packetcraftr::scan::SentProbe {
             probe: packetcraftr::scan::Probe {
+                scope: None,
                 udp_profile: None,
                 sequence: 0,
                 address: "192.0.2.2".parse().unwrap(),

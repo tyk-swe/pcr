@@ -18,7 +18,7 @@ use std::{
 };
 pub(super) struct Plan<'c, P, K> {
     pub discovery: Discovery<'c, P, K>,
-    pub routes: HashMap<IpAddr, AuthorizedRoute>,
+    pub routes: HashMap<(IpAddr, Option<interface::Id>), AuthorizedRoute>,
     pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
     pub base_bytes: usize,
@@ -44,10 +44,16 @@ pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
     let mut routes = HashMap::new();
     let mut interfaces = Vec::new();
     let mut admitted_probes = Vec::with_capacity(planned.len());
-    let mut base_bytes = planned
-        .len()
-        .checked_mul(384)
-        .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
+    let mut base_bytes = planned.iter().fold(0usize, |bytes, planned| {
+        let scope_bytes = planned.probe.scope.as_ref().map_or(0, |scope| {
+            scope
+                .zone
+                .as_str()
+                .len()
+                .saturating_add(scope.interface.name.len())
+        });
+        bytes.saturating_add(384).saturating_add(scope_bytes)
+    });
     if base_bytes > options.max_prepared_bytes {
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
@@ -64,11 +70,12 @@ pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
                 ),
             ));
         }
-        let route = match routes.entry(probe.address) {
+        let scope = probe.scope.as_ref().map(|scope| scope.interface.clone());
+        let route = match routes.entry((probe.address, scope)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let route = admission
-                    .route(&packet, *entry.key())
+                    .route_on(&packet, entry.key().0, entry.key().1.as_ref())
                     .map_err(BoundaryError::from_error)?;
                 if !interfaces.contains(route.interface()) {
                     interfaces.push(route.interface().clone());

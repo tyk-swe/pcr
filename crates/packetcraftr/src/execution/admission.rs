@@ -27,9 +27,13 @@ impl Authorizer for Admission<'_> {
 }
 
 impl ResolveTarget for Admission<'_> {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         self.policy
-            .resolve_target(target, self.resolver)
+            .resolve_target(target, self.resolver, deadline)
             .map_err(BoundaryError::from_error)
     }
 }
@@ -57,9 +61,9 @@ mod tests {
 
         let target: Target = "documentation.invalid".parse().expect("hostname target");
         let authorized = admission
-            .resolve_and_authorize(&target)
+            .resolve_and_authorize(&target, &crate::test_support::live())
             .expect("the documentation address is authorized");
-        assert_eq!(authorized.addresses, [address]);
+        assert_eq!(authorized.addresses(), [address]);
         assert_eq!(resolver.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         let denied = admission

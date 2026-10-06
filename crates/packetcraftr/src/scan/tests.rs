@@ -31,7 +31,7 @@ use crate::probe::Batch;
 use crate::probe::{Evidence, Transport};
 use crate::target::ResolveTarget;
 use crate::target::Target;
-use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor};
+use crate::test_support::{AddressListAuthorizer, Call, NoopClock, RejectingExecutor};
 use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
@@ -349,14 +349,20 @@ impl crate::target::ResolveTarget for TargetSetAuthorizer {
     fn resolve_and_authorize(
         &mut self,
         target: &Target,
+        _deadline: &Deadline,
     ) -> Result<crate::target::Authorized, BoundaryError> {
         self.calls.push(target.clone());
         Ok(crate::target::Authorized {
             declared: target.clone(),
-            addresses: match target {
-                Target::Address(address) => vec![*address],
-                Target::Hostname(_) => {
+            selected: match target {
+                Target::Address(address) => {
+                    vec![crate::target::SelectedAddress::new(*address)]
+                }
+                Target::Hostname(_) | Target::ScopedAddress(_) => {
                     vec!["192.0.2.3".parse().unwrap(), "192.0.2.3".parse().unwrap()]
+                        .into_iter()
+                        .map(crate::target::SelectedAddress::new)
+                        .collect()
                 }
             },
         })
@@ -492,4 +498,251 @@ impl Executor<Batch<Probe>> for StaleEchoExecutor {
         }
         Ok(execution)
     }
+}
+
+fn scoped_v6_route(
+    interface: packetcraftr_netio::interface::Id,
+) -> packetcraftr_netio::route::Decision {
+    packetcraftr_netio::route::Decision {
+        interface,
+        source_mac: None,
+        selected_source: Some(IpAddr::V6("fe80::9".parse().unwrap())),
+        preferred_source: None,
+        next_hop: None,
+        selection_reason: packetcraftr_netio::route::SelectionReason::OnLink,
+        destination_scope: packetcraftr_netio::route::Scope::Link,
+        mtu: 1500,
+        capability: packetcraftr_netio::link::Capability::Layer3,
+        link_type: packetcraftr_core::frame::LinkType::RAW,
+    }
+}
+
+fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Request {
+    Request {
+        targets,
+        transport: Transport::Tcp,
+        udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
+        address_family: Family::Any,
+        ports: vec![443],
+        attempts: 1,
+        timeout: Duration::from_millis(20),
+        probes_per_second: None,
+        max_in_flight,
+        limits: Limits::default(),
+        route: Default::default(),
+        collection: Default::default(),
+    }
+}
+
+fn client_scan(request: Request) -> (Result<Aggregate, Error>, crate::test_support::FakeProviders) {
+    let (client, providers) = crate::test_support::fake_client();
+    let collector = Collector::default();
+    let result = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report));
+    (result, providers)
+}
+
+#[test]
+fn scoped_raw_scan_routes_on_the_resolved_interface() {
+    let (client, providers) = crate::test_support::fake_client();
+    let fixture = packetcraftr_netio::interface::Id {
+        name: "fixture0".to_owned(),
+        index: 1,
+    };
+    providers
+        .routes
+        .lock()
+        .expect("routes")
+        .push_back(scoped_v6_route(fixture.clone()));
+    let collector = Collector::default();
+    let request = scoped_request(
+        crate::target::Selection {
+            include: vec![crate::target::Specification::Target(
+                "fe80::1%fixture0".parse().expect("scoped target"),
+            )],
+            exclude: Vec::new(),
+        },
+        1,
+    );
+    let report = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report))
+        .expect("scoped scan");
+
+    let scope = report.endpoints[0].scope.as_ref().expect("endpoint scope");
+    assert_eq!(scope.interface, fixture);
+    assert_eq!(scope.zone.as_str(), "fixture0");
+    assert!(providers.calls().iter().any(|call| matches!(
+        call,
+        Call::RouteOn(destination, interface)
+            if *destination == IpAddr::V6("fe80::1".parse().unwrap())
+                && *interface == fixture
+    )));
+}
+
+#[test]
+fn scoped_raw_scan_rejects_an_explicit_interface_conflict_before_sends() {
+    let (client, providers) = crate::test_support::fake_client();
+    let collector = Collector::default();
+    let mut request = scoped_request(
+        crate::target::Selection {
+            include: vec![crate::target::Specification::Target(
+                "fe80::1%fixture0".parse().expect("scoped target"),
+            )],
+            exclude: Vec::new(),
+        },
+        1,
+    );
+    request.route.interface = Some(crate::route::Interface::Index(
+        std::num::NonZeroU32::new(9).expect("nonzero"),
+    ));
+    let error = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report))
+        .expect_err("conflicting interface");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "interface",
+                ..
+            }
+        ),
+        "expected the interface conflict limit, got {error}"
+    );
+    assert!(
+        !providers.calls().iter().any(|call| matches!(
+            call,
+            Call::Route(_) | Call::RouteOn(..) | Call::Transmit(_) | Call::Capture
+        )),
+        "the conflict still reached providers: {:?}",
+        providers.calls()
+    );
+}
+
+#[test]
+fn scoped_raw_scan_rejects_a_mismatched_provider_route_before_sends() {
+    let (client, providers) = crate::test_support::fake_client();
+    providers
+        .routes
+        .lock()
+        .expect("routes")
+        .push_back(scoped_v6_route(packetcraftr_netio::interface::Id {
+            name: "other0".to_owned(),
+            index: 9,
+        }));
+    let collector = Collector::default();
+    let error = client
+        .scan(
+            scoped_request(
+                crate::target::Selection {
+                    include: vec![crate::target::Specification::Target(
+                        "fe80::1%fixture0".parse().expect("scoped target"),
+                    )],
+                    exclude: Vec::new(),
+                },
+                1,
+            ),
+            collector.clone(),
+        )
+        .and_then(|report| collector.finish(report))
+        .expect_err("route on the wrong interface is rejected");
+
+    assert!(
+        error.to_string().contains("interface")
+            || format!("{error:?}").contains("InterfaceMismatch"),
+        "expected the interface-mismatch source, got {error:?}"
+    );
+    assert!(
+        !providers
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::Transmit(_))),
+        "a mismatched route still transmitted: {:?}",
+        providers.calls()
+    );
+}
+
+#[test]
+fn scoped_window_routes_each_target_on_its_own_interface() {
+    use crate::providers::ProviderSet;
+    use crate::test_support::ZoneMapResolver;
+
+    let alpha = packetcraftr_netio::interface::Id {
+        name: "alpha".to_owned(),
+        index: 2,
+    };
+    let beta = packetcraftr_netio::interface::Id {
+        name: "beta".to_owned(),
+        index: 3,
+    };
+    let fake = crate::test_support::FakeProviders::default();
+    fake.routes.lock().expect("routes").extend([
+        scoped_v6_route(alpha.clone()),
+        scoped_v6_route(beta.clone()),
+    ]);
+    let providers = ProviderSet::packet(fake.clone(), fake.clone(), fake.clone(), fake.clone())
+        .with_resolver(ZoneMapResolver::new(vec![alpha.clone(), beta.clone()]));
+    let client = crate::Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        crate::policy::Policy::default(),
+        providers,
+    );
+    let collector = Collector::default();
+    let report = client
+        .scan(
+            scoped_request(
+                crate::target::Selection {
+                    include: vec![
+                        crate::target::Specification::Target(
+                            "fe80::1%alpha".parse().expect("scoped target"),
+                        ),
+                        crate::target::Specification::Target(
+                            "fe80::1%beta".parse().expect("scoped target"),
+                        ),
+                    ],
+                    exclude: Vec::new(),
+                },
+                2,
+            ),
+            collector.clone(),
+        )
+        .and_then(|report| collector.finish(report))
+        .expect("two scoped targets");
+
+    let mut interfaces: Vec<u32> = report
+        .endpoints
+        .iter()
+        .map(|endpoint| {
+            endpoint
+                .scope
+                .as_ref()
+                .expect("endpoint scope")
+                .interface
+                .index
+        })
+        .collect();
+    interfaces.sort();
+    assert_eq!(interfaces, [2, 3], "zones never merge across interfaces");
+    assert_eq!(
+        report
+            .endpoints
+            .iter()
+            .map(|e| e.address)
+            .collect::<Vec<_>>(),
+        vec![IpAddr::V6("fe80::1".parse().unwrap()); 2],
+    );
+    let routed: Vec<_> = fake
+        .calls()
+        .iter()
+        .filter_map(|call| match call {
+            Call::RouteOn(_, interface) => Some(interface.index),
+            _ => None,
+        })
+        .collect();
+    let mut routed = routed;
+    routed.sort();
+    assert_eq!(routed, [2, 3]);
 }

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Bounded reference consumer for the v6 forwarding contract.
+"""Bounded reference consumer for the forwarding contract.
 
 This validates the protocol and forwarding invariants it uses, not the complete
-JSON Schema. Additive fields are accepted; unknown semantic enums are rejected.
-An error envelope is an execution failure, not a forwarding verdict.
+JSON Schema. It accepts the current v7 family and the frozen v6 family without
+reinterpreting either. Additive fields are accepted; unknown semantic enums are
+rejected. An error envelope is an execution failure, not a forwarding verdict.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import json
 import sys
 from typing import BinaryIO, Any
 
-SCHEMA = "packetcraftr.output/v6"
+SCHEMAS = {"packetcraftr.output/v6", "packetcraftr.output/v7"}
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
 MAX_RULE_DECLARATIONS = 256
@@ -110,7 +111,7 @@ def decode(data: bytes) -> dict[str, Any]:
     except (UnicodeError, ValueError, RecursionError) as error:
         raise ContractError(f"invalid JSON: {error}") from error
     require(isinstance(value, dict), "an envelope must be an object")
-    require(value.get("schema") == SCHEMA, "unsupported schema; explicit migration required")
+    require(value.get("schema") in SCHEMAS, "unsupported schema; explicit migration required")
     require(value.get("command") == "verify-forwarding", "unexpected command")
     return value
 

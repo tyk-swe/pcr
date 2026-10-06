@@ -19,7 +19,11 @@ pub(super) fn load(
             "--udp-profiles requires --transport udp",
         ));
     }
-    let document = crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?;
+    let document = if crate::input::manifest::is_stdin(path) {
+        crate::input::read_stdin_bounded(MAX_PROFILE_BYTES, crate::input::InputKind::UdpProfiles)?
+    } else {
+        crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?
+    };
     let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
     profile::compile(assignments).map_err(CliError::classified)
 }

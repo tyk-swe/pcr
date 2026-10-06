@@ -149,7 +149,13 @@ impl FromStr for Specification {
     type Err = SelectionError;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if value.contains('/') {
-            value.parse().map(Self::Network)
+            let network: Network = value.parse()?;
+            if crate::target::requires_scope(network.address()) {
+                return Err(SelectionError::Target(crate::target::Error::MissingScope {
+                    address: network.address(),
+                }));
+            }
+            Ok(Self::Network(network))
         } else {
             value
                 .parse()

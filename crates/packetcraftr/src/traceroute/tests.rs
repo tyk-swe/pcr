@@ -126,10 +126,14 @@ struct FixedAuthorizer {
 }
 
 impl crate::target::ResolveTarget for FixedAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+        _deadline: &Deadline,
+    ) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
-            addresses: vec![self.address],
+            selected: vec![crate::target::SelectedAddress::new(self.address)],
         })
     }
 }

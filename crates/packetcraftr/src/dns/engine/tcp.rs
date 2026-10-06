@@ -152,7 +152,7 @@ where
             return Ok(false);
         }
         let resolved = resolved?;
-        if resolved.addresses.as_slice() != [probe.server_address] {
+        if resolved.addresses().as_slice() != [probe.server_address] {
             return Err(Error::InvalidEvidence {
                 attempt: probe.attempt,
                 fault: EvidenceFault::TcpServerChanged {

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v6",
+  "schema": "packetcraftr.output/v7",
   "command": "traceroute",
   "mode": "aggregate",
   "status": "success",
@@ -114,6 +114,7 @@
         }
       }
     ],
+    "retained_evidence_bytes": 8,
     "completion": "destination_reached"
   },
   "diagnostics": [],

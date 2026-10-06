@@ -11,7 +11,8 @@ reviewed-native, or release report.
 | Privileged isolated native inventory | Disposable namespace lane | Manual reviewed-native route (`native-platform-review.yml`, disposable hosted runners, exact commit) |
 | Idle cancellation, queue loss, active native I/O | Isolated Linux tests | `native_loopback.rs` seven-scenario inventory, pending recorded runs |
 | Raw IPv4 delivery, Layer 3 | Isolated Linux tests (fixed `127.0.0.1` host route) | Host loopback `loopback_exchange` (no Layer 2 in `native-layer3`-only profiles; capture assertions are Layer 2–gated) |
-| Raw IPv6 | Not covered by this inventory — the isolated suite exercises IPv4 loopback only | Unsupported on the macOS host route; unexercised elsewhere — the gap is recorded, not fabricated |
+| Raw IPv6 | Link-local TCP SYN only, through the scoped-target scenario's namespace-local veth pair; other raw IPv6 paths are not covered | Unsupported on the macOS host route; unexercised elsewhere — the gap is recorded, not fabricated |
+| Scoped IPv6 targets | Isolated Linux `scoped_ipv6_targets`: list, connect, and raw scans resolve each `%zone` to its interface and reach the peer on that link only | Not exercised; no scoped evidence is claimed |
 | Windows non-local UDP | Not claimed | Unchanged: no non-local UDP destinations on the host route |
 
 `scripts/test-native-platform.py` is the launcher: it compiles the CLI and the
@@ -64,8 +65,9 @@ The launcher builds the ignored `native_isolated` test target (unless
 `--native-test-binary` names a prebuilt one) and re-executes itself in a fresh
 user/network namespace. It refuses to run any scenario unless that namespace
 differs from its parent and holds only loopback; no external destinations are
-used, and the interface-disappearance scenario creates and deletes a
-namespace-local dummy interface. It writes its evidence to
+used, the interface-disappearance scenario creates and deletes a
+namespace-local dummy interface, and the scoped-target scenario creates and
+deletes two namespace-local veth pairs. It writes its evidence to
 `target/native-isolated.json` (`--report`).
 
 On restricted hosts, prebuild the test executable and run the launcher under
@@ -87,9 +89,14 @@ runner; do not broadly change permissions on a working checkout.
 
 The inventory covers readiness/repeated cleanup, idle deadline and
 cancellation, real bounded-queue loss, settings applied before activation,
-native filter errors, interface disappearance, and the controlled loopback
-exchange. Do not infer Windows/macOS native behavior from a Linux result or
-compilation.
+native filter errors, interface disappearance, the controlled loopback
+exchange, and scoped IPv6 targets. The scoped scenario gives two veth links
+the same `fe80::1`/`fe80::2` pair, so only the zone decides which peer a
+probe reaches: a kernel listener answers connects on one link only, and a
+packet-socket responder answers raw SYNs to a static-neighbor `fe80::3`
+after a short delay, because a veth peer can otherwise reply before the send
+call returns and fall outside the correlation window. Do not infer
+Windows/macOS native behavior from a Linux result or compilation.
 
 Capture drop counters, host offloading, acquisition location, and timestamp
 semantics remain contextual evidence. Zero or unavailable counters are not an

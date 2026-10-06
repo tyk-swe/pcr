@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::interface::Id as InterfaceId;
 
 use super::ResolveTarget;
 use super::selection::MAX_CANDIDATES;
@@ -136,58 +139,34 @@ where
         family,
         max_targets,
     } = targets;
+    // Bounds the declaration count, so every index below fits a `u32`.
+    selection.validate().map_err(&invalid)?;
     let family = family.family();
-    let mut selected: Vec<super::SelectedAddress> = Vec::new();
-    let mut declarations: Vec<Vec<u32>> = Vec::new();
+    let enforce = || {
+        deadline
+            .enforce()
+            .map_err(|source| gates.interrupted(G::Step::default(), source))
+    };
+    let mut selected = Vec::new();
+    let mut origins = Origins::default();
     let mut duplicates = Vec::new();
-    let mut seen: std::collections::HashMap<
-        (IpAddr, Option<packetcraftr_netio::interface::Id>),
-        usize,
-    > = std::collections::HashMap::new();
-    let mut admitted: std::collections::HashMap<Specification, Vec<usize>> =
-        std::collections::HashMap::new();
-    let mut origin_links = 0usize;
-    let link = |declarations: &mut Vec<Vec<u32>>,
-                target_index: usize,
-                index: usize,
-                deadline: &Deadline,
-                gates: &G| {
-        deadline
-            .enforce()
-            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
-        declarations[target_index].push(index as u32);
-        Ok(())
-    };
-    let mut charge_link = |deadline: &Deadline| -> Result<(), G::Error> {
-        deadline
-            .enforce()
-            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
-        origin_links = origin_links
-            .checked_add(1)
-            .filter(|count| *count <= MAX_CANDIDATES)
-            .ok_or_else(|| {
-                invalid(SelectionError::Limit {
-                    field: "target_origins",
-                    limit: MAX_CANDIDATES,
-                })
-            })?;
-        Ok(())
-    };
+    let mut seen: HashMap<(IpAddr, Option<InterfaceId>), usize> = HashMap::new();
+    // Targets each distinct specification produced, so a repeated declaration
+    // links to them without expanding or authorizing again.
+    let mut admitted: HashMap<&Specification, BTreeSet<usize>> = HashMap::new();
     let mut candidates = 0usize;
     for (index, specification) in selection.include.iter().enumerate() {
-        deadline
-            .enforce()
-            .map_err(|source| gates.interrupted(G::Step::default(), source))?;
-        if let Some(indices) = admitted.get(specification) {
-            duplicates.push(index as u32);
-            for &target_index in indices {
-                charge_link(deadline)?;
-                link(&mut declarations, target_index, index, deadline, gates)?;
+        enforce()?;
+        let index = index as u32;
+        if let Some(produced) = admitted.get(specification) {
+            duplicates.push(index);
+            for &target in produced {
+                enforce()?;
+                origins.link(target, index).map_err(&invalid)?;
             }
             continue;
         }
-        let mut produced: Vec<usize> = Vec::new();
-        let mut produced_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut produced = BTreeSet::new();
         let expanded: Box<dyn Iterator<Item = Target> + '_> = match specification {
             Specification::Target(target) => Box::new(std::iter::once(target.clone())),
             Specification::Network(network) => Box::new(
@@ -198,9 +177,7 @@ where
             ),
         };
         for target in expanded {
-            deadline
-                .enforce()
-                .map_err(|source| gates.interrupted(G::Step::default(), source))?;
+            enforce()?;
             candidates = candidates
                 .checked_add(1)
                 .filter(|count| *count <= MAX_CANDIDATES)
@@ -210,31 +187,29 @@ where
                         limit: MAX_CANDIDATES,
                     })
                 })?;
-            let declared_numeric = match &target {
+            let numeric = match &target {
                 Target::Address(address) => Some(*address),
-                Target::ScopedAddress(scoped) => Some(scoped.address().into()),
+                Target::ScopedAddress(scoped) => Some(IpAddr::V6(scoped.address())),
                 Target::Hostname(_) => None,
             };
-            if let Some(address) = declared_numeric {
+            if let Some(address) = numeric {
                 if selection.excludes(address) || !family.accepts(address) {
                     continue;
                 }
-                if target_scope_key(&target).is_none()
-                    && let Some(&merge_index) = seen.get(&(address, None))
+                // An unscoped address already selected merges without
+                // authorizing again; a scoped one must resolve its zone first.
+                if matches!(target, Target::Address(_))
+                    && let Some(&known) = seen.get(&(address, None))
                 {
-                    if produced_set.insert(merge_index) {
-                        charge_link(deadline)?;
-                        link(&mut declarations, merge_index, index, deadline, gates)?;
-                        produced.push(merge_index);
+                    if produced.insert(known) {
+                        origins.link(known, index).map_err(&invalid)?;
                     }
                     continue;
                 }
             }
             let resolved = resolve_selected(authorizer, &target, family, deadline, gates)?;
             for record in resolved.targets {
-                deadline
-                    .enforce()
-                    .map_err(|source| gates.interrupted(G::Step::default(), source))?;
+                enforce()?;
                 if selection.excludes(record.address) {
                     continue;
                 }
@@ -242,53 +217,60 @@ where
                     record.address,
                     record.scope.as_ref().map(|scope| scope.interface.clone()),
                 );
-                match seen.entry(key) {
-                    std::collections::hash_map::Entry::Occupied(entry) => {
-                        let target_index = *entry.get();
-                        if produced_set.insert(target_index) {
-                            charge_link(deadline)?;
-                            link(&mut declarations, target_index, index, deadline, gates)?;
-                            produced.push(target_index);
-                        }
-                    }
-                    std::collections::hash_map::Entry::Vacant(entry) => {
+                let target = match seen.entry(key) {
+                    Entry::Occupied(entry) => *entry.get(),
+                    Entry::Vacant(entry) => {
                         if selected.len() >= max_targets {
                             return Err(invalid(SelectionError::Limit {
                                 field: "max_targets",
                                 limit: max_targets,
                             }));
                         }
-                        entry.insert(selected.len());
-                        charge_link(deadline)?;
                         selected.push(record);
-                        declarations.push(vec![index as u32]);
-                        produced.push(selected.len() - 1);
-                        produced_set.insert(selected.len() - 1);
+                        origins.declarations.push(Vec::new());
+                        *entry.insert(selected.len() - 1)
                     }
+                };
+                if produced.insert(target) {
+                    origins.link(target, index).map_err(&invalid)?;
                 }
             }
         }
-        admitted.insert(specification.clone(), produced);
+        admitted.insert(specification, produced);
     }
     Ok(SelectedTargets {
         declared: selection.to_string(),
         targets: selected,
-        declarations,
+        declarations: origins.declarations,
         duplicates,
     })
 }
 
-fn target_scope_key(target: &Target) -> Option<()> {
-    match target {
-        Target::ScopedAddress(_) => Some(()),
-        _ => None,
+/// Declaration indices for each selected target, with one bound on the links
+/// across the whole selection.
+#[derive(Default)]
+struct Origins {
+    declarations: Vec<Vec<u32>>,
+    links: usize,
+}
+
+impl Origins {
+    fn link(&mut self, target: usize, declaration: u32) -> Result<(), SelectionError> {
+        self.links = self
+            .links
+            .checked_add(1)
+            .filter(|count| *count <= MAX_CANDIDATES)
+            .ok_or(SelectionError::Limit {
+                field: "target_origins",
+                limit: MAX_CANDIDATES,
+            })?;
+        self.declarations[target].push(declaration);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #![allow(dead_code)]
-
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -386,8 +368,6 @@ mod tests {
         Interrupted,
         Family(&'static str),
         Selection(&'static str),
-        Plan,
-        Operation,
         Limit(&'static str),
         Step,
     }

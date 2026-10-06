@@ -126,17 +126,23 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1)]
     pub(crate) max_in_flight: usize,
 
+    /// Publish the selected target plan and its origins without sending probes.
     #[arg(long)]
     pub(crate) list: bool,
+    /// Explicit IP addresses, hostnames, scoped fe80::/10%zone addresses, or
+    /// bounded CIDRs, in selection order.
     #[arg(value_name = "TARGET", num_args = 0..)]
-    /// Explicit IP addresses, hostnames, or bounded CIDRs, in selection order.
     pub(crate) targets: Vec<String>,
+    /// Target manifest with one declaration per line, or - for stdin; repeat as needed.
     #[arg(long, value_name = "PATH")]
     pub(crate) targets_file: Vec<std::path::PathBuf>,
+    /// Numeric IP or CIDR manifest, or - for stdin; repeat as needed.
     #[arg(long, value_name = "PATH")]
     pub(crate) exclude_file: Vec<std::path::PathBuf>,
+    /// Combined byte budget across all manifests (maximum and default 1 MiB).
     #[arg(long, value_name = "BYTES")]
     pub(crate) max_manifest_bytes: Option<usize>,
+    /// Combined physical-line budget across all manifests (maximum and default 4096).
     #[arg(long, value_name = "LINES")]
     pub(crate) max_manifest_lines: Option<usize>,
     /// Numeric IP or CIDR to exclude; repeat as needed.

@@ -272,24 +272,22 @@ impl FromStr for Target {
         match value.parse::<IpAddr>() {
             Ok(address) if requires_scope(address) => Err(Error::MissingScope { address }),
             Ok(address) => Ok(Self::Address(address)),
-            Err(_) => {
-                if let Some((address, zone)) = value.split_once('%') {
-                    let address =
-                        address
-                            .parse::<std::net::Ipv6Addr>()
-                            .map_err(|_| Error::InvalidScope {
-                                address: value
-                                    .parse::<IpAddr>()
-                                    .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
-                                reason: "a zone applies only to an IPv6 address",
-                            })?;
-                    return Ok(Self::ScopedAddress(ScopedAddress::new(
-                        address,
-                        zone.parse()?,
-                    )?));
-                }
-                value.parse::<Hostname>().map(Self::Hostname)
-            }
+            Err(_) => match value
+                .split_once('%')
+                .and_then(|(address, zone)| Some((address.parse::<IpAddr>().ok()?, zone)))
+            {
+                Some((IpAddr::V6(address), zone)) => Ok(Self::ScopedAddress(ScopedAddress::new(
+                    address,
+                    zone.parse()?,
+                )?)),
+                Some((address @ IpAddr::V4(_), _)) => Err(Error::InvalidScope {
+                    address,
+                    reason: "a zone applies only to an IPv6 address",
+                }),
+                // `%` is never valid in a hostname, so the hostname parser
+                // rejects any other zone-qualified text.
+                None => value.parse::<Hostname>().map(Self::Hostname),
+            },
         }
     }
 }
@@ -396,7 +394,7 @@ pub enum Error {
     ZoneResolution {
         zone: Zone,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: packetcraftr_netio::interface::Error,
     },
     #[error("zone {zone} resolved to an invalid interface identity: {interface:?}")]
     InvalidZoneInterface {
@@ -460,11 +458,17 @@ impl Classified for Error {
                     "the zone resolver must return an interface with a non-empty name and nonzero index",
                 ),
             ),
-            Self::ZoneResolution { .. } => Classification::new(
+            Self::ZoneResolution {
+                source: packetcraftr_netio::interface::Error::Discovery { .. },
+                ..
+            } => Classification::new(
                 "io.interface",
                 Kind::Io,
                 Some("inspect interface enumeration and retry before any target traffic"),
             ),
+            // A build without interface enumeration publishes its capability
+            // failure, and an interrupted enumeration stays interrupted.
+            Self::ZoneResolution { source, .. } => source.classification(),
             Self::ZoneCapability { .. } => Classification::new(
                 "capability.zone_resolution",
                 Kind::Capability,
@@ -530,7 +534,7 @@ impl Resolver for SystemResolver {
             .ipv6_interfaces(deadline)
             .map_err(|source| Error::ZoneResolution {
                 zone: zone.clone(),
-                source: Box::new(source),
+                source,
             })?;
         resolve_zone_from(zone, interfaces.into_iter().map(|info| info.id))
     }
@@ -596,6 +600,9 @@ pub(crate) fn distinct_addresses(
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv6Addr;
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
@@ -618,16 +625,6 @@ mod tests {
             Err(Error::NoAddresses { hostname }) if hostname == "example.test"
         ));
     }
-}
-
-#[cfg(test)]
-mod scoped_tests {
-    use std::net::Ipv6Addr;
-    use std::str::FromStr;
-
-    use crate::target::Specification;
-
-    use super::*;
 
     #[test]
     fn zone_names_and_indices_parse() {
@@ -684,14 +681,20 @@ mod scoped_tests {
         };
         assert_eq!(scoped.zone().as_str(), "eth0");
         assert_eq!(parsed.to_string(), "fe80::1%eth0");
-        assert_eq!(
-            Target::from_str("fe80::1%1").expect("zone index"),
-            Target::from_str("fe80::1%1").expect("scoped")
-        );
+        let Ok(Target::ScopedAddress(indexed)) = Target::from_str("fe80::1%1") else {
+            panic!("a numeric zone is a scoped target");
+        };
+        assert_eq!(indexed.zone().index(), Some(1));
         assert!(Target::from_str("fe80::1%").is_err(), "empty zone");
         assert!(Target::from_str("fe80::1%0").is_err(), "zero zone");
         assert!(Target::from_str("fe80::1%eth0/10").is_err(), "suffix");
-        assert!(Target::from_str("192.0.2.1%eth0").is_err(), "v4 scope");
+        assert!(
+            matches!(
+                Target::from_str("192.0.2.1%eth0"),
+                Err(Error::InvalidScope { address, .. }) if address.to_string() == "192.0.2.1"
+            ),
+            "an IPv4 scope names the declared address"
+        );
         assert!(
             Target::from_str("2001:db8::1%eth0").is_err(),
             "global scope"
@@ -738,12 +741,5 @@ mod scoped_tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn specifications_reject_link_local_cidrs_and_scoped_networks() {
-        assert!(Specification::from_str("fe80::1%eth0").is_ok());
-        assert!(Specification::from_str("fe80::/10").is_err());
-        assert!(Specification::from_str("fe80::1/128%eth0").is_err());
     }
 }

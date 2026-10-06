@@ -221,19 +221,38 @@ fn read_bounded_allow_empty(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_capped(reader, max_bytes).map_err(|source| {
-        CliError::caused(
-            Kind::Io,
-            &InputRead {
-                label: kind.label(),
-                source,
-            },
-        )
-    })?;
+    let bytes = read_capped(reader, max_bytes).map_err(|source| input_read_error(kind, source))?;
     if bytes.len() > max_bytes {
         return Err(kind.oversized_error(bytes.len(), max_bytes));
     }
     Ok(bytes)
+}
+
+/// Reads at most `max_bytes + 1` bytes of `path`, leaving the oversize decision to the caller.
+pub(crate) fn read_file_capped(
+    path: &Path,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    read_capped(open_file(path)?, max_bytes).map_err(|source| input_read_error(kind, source))
+}
+
+/// Reads at most `max_bytes + 1` bytes of redirected stdin, leaving the oversize decision to the
+/// caller.
+pub(crate) fn read_stdin_capped(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
+    let stdin = io::stdin();
+    require_redirected_stdin(kind, stdin.is_terminal())?;
+    read_capped(stdin.lock(), max_bytes).map_err(|source| input_read_error(kind, source))
+}
+
+fn input_read_error(kind: InputKind, source: io::Error) -> CliError {
+    CliError::caused(
+        Kind::Io,
+        &InputRead {
+            label: kind.label(),
+            source,
+        },
+    )
 }
 
 /// Reads at most `max_bytes + 1` bytes, so a caller can tell a full read from an oversized one.

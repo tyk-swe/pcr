@@ -2,9 +2,11 @@
 
 This is the comparison companion to the [core scanner roadmap](README.md), not
 an exhaustive Nmap option checklist. It records PacketcraftR `main` at
-`22c7d182d577` as reviewed on 2026-10-05. Nmap references are the official guide
-consulted on that date; actual differential tests must pin their binary version,
-build features, arguments, fixture truth, and acquisition conditions.
+`22c7d182d577` as reviewed on 2026-10-05; the target rows and the
+machine-output row were re-reviewed on 2026-10-06 against the change that
+completed [M4][m4]. Nmap references are the official guide consulted on those
+dates; actual differential tests must pin their binary version, build features,
+arguments, fixture truth, and acquisition conditions.
 
 No live comparison or newly passed native test is claimed by this document.
 Relative source links describe the reviewed implementation; future changes need
@@ -30,11 +32,11 @@ successful runtime validation are also separate claims.
 
 | Capability | Nmap behavior/reference | PacketcraftR baseline and concrete gap | Status | Roadmap |
 | --- | --- | --- | --- | --- |
-| Explicit targets, CIDRs, exclusions, and families | Hostnames, numeric addresses/CIDRs, exclusions, and family controls; see [targets][nmap-targets]. | [Target selections][target-selection] and [admission][target-admission] already bound expansion, deduplicate, apply numeric exclusions, and filter families. Hostname resolution is opt-in and all selected authorized answers are considered; do not assume Nmap's default first-answer behavior. | Present with constraints | Preserve in [M4][m4]. |
-| Target/exclusion files and stdin | `-iL`/`--excludefile` read declarations; see [targets][nmap-targets]. | [Scan arguments][scan-args] accept positional targets and numeric exclusions, not target/exclusion files or scanner stdin lists. Add bounded ingestion and consistent authorization/provenance. | Missing | [M4.1][m4] |
+| Explicit targets, CIDRs, exclusions, and families | Hostnames, numeric addresses/CIDRs, exclusions, and family controls; see [targets][nmap-targets]. | [Target selections][target-selection] and [admission][target-admission] bound expansion, deduplicate, apply numeric exclusions, and filter families identically for positional and manifest declarations. Hostname resolution is opt-in and all selected authorized answers are considered; do not assume Nmap's default first-answer behavior. | Present with constraints | Preserved by [M4][m4]. |
+| Target/exclusion files and stdin | `-iL`/`--excludefile` read declarations; see [targets][nmap-targets]. | [`--targets-file` and `--exclude-file`][scan-args] read line-oriented [manifests][cli-manifest] (one declaration per line, `#` comments, `-` for stdin) under one shared 1 MiB / 4,096-line budget, admitting at most one stdin consumer per operation. Manifest declarations take the same authorization and selection as positional targets, each selected target records the source and line that declared it, and malformed or oversized input fails as `source:line` before any provider call. Exclusions stay numeric. | Present with constraints | [M4.1][m4] |
 | Nmap-specific target grammar | IPv4 octet ranges and hostname/CIDR expressions; see [targets][nmap-targets]. | [Specifications][target-selection] accept numeric CIDRs or individual IP/hostname targets. Nmap's exact shorthand grammar is not implemented or promised; bounded explicit manifests can express the required authorized inventory. | Non-goal | Native selection interfaces in [M4][m4]; no syntax-clone commitment. |
-| Scoped IPv6 targets | Zone/interface-qualified non-global addresses; see [targets][nmap-targets]. | [Target values][target-model] use `IpAddr` and validated hostnames. Packet-route interface overrides exist, but declarations do not retain a zone and [connect planning][connect-engine] creates numeric socket endpoints without scope information. | Partial | [M4.3][m4] |
-| Bulk list/scan planning | `-sL` lists targets; DNS is independently controllable; see [discovery][nmap-discovery]. | Existing [`plan`][route-plan] performs passive route planning for a packet, not a bounded scan target/port manifest. Add an explicit bulk mode without target/neighbor transmission and with visible resolution opt-ins. | Missing | [M4.2][m4] |
+| Scoped IPv6 targets | Zone/interface-qualified non-global addresses; see [targets][nmap-targets]. | [Scoped targets][target-model] accept `%zone` on unicast `fe80::/10` only, and the zone must resolve to exactly one interface; `(address, interface)` identity merges name and index aliases. [Connect sockets][connect-engine] carry the resolved scope id and raw routes are pinned to the resolved interface; the isolated Linux `scoped_ipv6_targets` scenario exercises list, connect, and raw scans ([native validation][native-validation]). Builds without interface enumeration fail with a capability error, and traceroute, packet-route destinations, and DNS-over-TCP reject scoped addresses with typed errors. | Present with constraints | [M4.3][m4]; Windows/macOS scoped runtime evidence in [M3][m3]. |
+| Bulk list/scan planning | `-sL` lists targets; DNS is independently controllable; see [discovery][nmap-discovery]. | `scan --list` runs [`Client::plan_targets`][target-plan] through the scan's own admission and publishes each selected address, its scope, and its declaring sources (`target_list` in output v7) without sending, capturing, or connecting. Numeric unscoped selections make no provider calls and scoped ones enumerate interfaces passively; hostname resolution keeps its opt-in and is reported as `resolution_performed`. The packet-route [`plan`][route-plan] keeps its meaning. Port selections join the list in [M6][m6]. | Present with constraints | [M4.2][m4] |
 | Scanner DNS enrichment and controls | Reverse DNS, custom resolver selection, and parallel resolution controls; see [targets][nmap-targets]. | [Resolution][target-model] is synchronous system resolution with bounded answers and provider-owned I/O timeout. A [separate DNS workflow][project-readme] supports reverse questions, but scan output has no integrated reverse-name enrichment or configurable scanner resolver workflow. | Partial | [M5.5][m5]; bounded scheduling in [M7][m7]. |
 | Dedicated/composed host discovery | Discovery-only/skip-discovery controls and combined ICMP/TCP/UDP probes; see [discovery][nmap-discovery]. | [Scan transports][scan-args] include portless ICMP echo, SYN, UDP, and explicit connect probing, but [scan planning][scan-engine] has no separate discovery stage or host-level composition/selection result. | Partial | [M5.1][m5], [M5.3][m5] |
 | Local ARP/NDP discovery | Local-link discovery is distinct from IP probing; see [discovery][nmap-discovery]. | [Neighbor resolution][neighbor-resolver] supplies bounded ARP/NDP route-preparation building blocks, not a host-inventory workflow. Next-hop/cache success must not be interpreted as remote host responsiveness. | Partial | [M5.2][m5] |
@@ -78,7 +80,7 @@ successful runtime validation are also separate claims.
 | Existing resource and failure evidence | Nmap exposes timing/reason controls; see [performance][nmap-performance] and [output][nmap-output]. | [Limits][scan-request], [pipeline contracts][pipeline-contract], and [published failure records][scan-output] already cover bounded preparation/evidence and confirmed pending transmissions. Preserve these strengths; logical byte charges and complete acquisition are not the same claim. | Present with constraints | [M1.1][m1] and [M7][m7] |
 | IPv4/IPv6 and native platform coverage | IPv6 and platform/build-dependent capabilities; see [options][nmap-options] and [downloads][nmap-download]. | [Feature profiles][project-readme], [capability selection][native-build], and [dispatch][native-dispatch] cover Linux/macOS/Windows, not every Nmap platform. macOS complete-header raw IPv6 transmission and Windows raw-source restrictions remain explicit limits; capture-backed work needs Layer 2 support. | Partial | Platform gate in [M3][m3], tracked in every milestone. |
 | Privileged native runtime evidence | Platform/build-dependent raw and socket capabilities; see [scan techniques][nmap-techniques] and [downloads][nmap-download]. A guide entry is not runtime evidence. | The [validation matrix][native-validation] and [CI routes][ci] distinguish Linux isolated runtime checks from macOS/Windows compilation, passive, and deterministic contracts. Equivalent configured privileged macOS/Windows evidence is missing. | Partial | [M3][m3], required for each native milestone. |
-| Versioned machine output | Nmap offers normal/XML and other output formats; see [output][nmap-output]. | [Scan command formats][scan-command] already support text, JSON, and NDJSON under [output v6][output-contract], with streaming terminal semantics and a [compatibility policy][compatibility]. Machine output is not a missing capability; it is a different contract. | Present with constraints | Preserve/version in every milestone; no schema change in this roadmap addition. |
+| Versioned machine output | Nmap offers normal/XML and other output formats; see [output][nmap-output]. | [Scan command formats][scan-command] already support text, JSON, and NDJSON under [output v7][output-contract], with streaming terminal semantics and a [compatibility policy][compatibility]. Machine output is not a missing capability; it is a different contract. | Present with constraints | Preserve/version in every milestone; [M4][m4] introduced v7 for scoped identity and `target_list`, and v6 stays frozen. |
 
 ## Broader diagnostic scan coverage
 
@@ -102,6 +104,17 @@ These entries prevent recorded gaps from becoming accidental commitments.
 | Random public targets or unbounded scans | Random/unbounded target options appear in [target specification][nmap-targets]. | Keep explicit authorized targets and finite resource budgets. | Non-goal |
 | Nmap companion application suite | The [download page][nmap-download] also distributes companion applications. | No Zenmap/Ncat/Nping/Ndiff clone commitment; PacketcraftR's construction/capture/offline-analysis capabilities remain their own product strengths. | Non-goal |
 
+## Implementation delta (pending review)
+
+The sections above keep their reviewed baselines. The rows below record later
+changes that are not yet folded into one, with the same honesty rules:
+completion claims wait for the recorded platform evidence, not for compilation
+or this documentation.
+
+| Capability | Implementation change | Remaining gate |
+| --- | --- | --- |
+| Measurement corpus | The injected-provider scanner fixture exercises 72 raw-scan and 12 traceroute cells against the authored corpus; four native loopback connect cells are specified for the real binary. | [M2][m2] native IPv6 coverage: six repeated `::1` connect case-runs are unavailable on this host. |
+
 ## Evidence and acceptance
 
 Source links establish what the reviewed implementation exposes; they do not
@@ -119,6 +132,7 @@ revision together. Never make packet silence, a skipped native test, or a
 matched configured profile stand in for evidence it does not provide.
 
 [m1]: m01-claims-evidence.md
+[m2]: m02-ground-truth-benchmarks.md
 [m3]: m03-native-validation.md
 [m4]: m04-target-planning.md
 [m5]: m05-host-discovery.md
@@ -137,6 +151,8 @@ matched configured profile stand in for evidence it does not provide.
 [native-validation]: ../native-validation.md
 [ci]: ../../.github/workflows/ci.yml
 [target-model]: ../../crates/packetcraftr/src/target/model.rs
+[target-plan]: ../../crates/packetcraftr/src/target/plan.rs
+[cli-manifest]: ../../crates/packetcraftr-cli/src/input/manifest.rs
 [target-selection]: ../../crates/packetcraftr/src/target/selection.rs
 [target-admission]: ../../crates/packetcraftr/src/target/admission.rs
 [route-plan]: ../../crates/packetcraftr-cli/src/commands/plan.rs
@@ -150,22 +166,6 @@ matched configured profile stand in for evidence it does not provide.
 [scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
 [scan-evidence]: ../../crates/packetcraftr/src/scan/evidence.rs
 [scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-## Implementation delta (M1–M4, pending review)
-
-The table above remains the reviewed `22c7d182d577` baseline. The rows below
-record what the M1–M4 change set adds, with the same honesty
-rules: completion claims wait for the recorded platform evidence, not for
-compilation or this documentation.
-
-| Capability | Implementation change | Remaining gate |
-| --- | --- | --- |
-| Target/exclusion files and stdin | `--targets-file`/`--exclude-file` with `-` stdin, shared byte/line budgets, one stdin consumer, and provenance-carrying origins are implemented (`input::manifest`, `scan` ingestion). | Native platform runs in [M3][m3]; corpus review in [M2][m2]. |
-| Bulk list/scan planning | `scan --list` plans the authorized selection without sending, capturing, or connecting; unscoped numeric targets make zero provider calls, while scoped targets may passively enumerate interfaces. `Client::plan_targets` publishes `target::plan::Report` with `resolution_performed`. | Native platform runs in [M3][m3]. |
-| Scoped IPv6 targets | `Target::ScopedAddress` keeps `fe80::/10%zone` through selection, sockets, and routes; `(address, interface)` identity deduplicates named/indexed aliases. | Actual scoped-runtime evidence per platform; scoped DNS/traceroute/send workflows still fail with a typed capability error. |
-| Output family | `packetcraftr.output/v7` adds `target_list` branches and optional `scope` fields; v6 stays frozen. | Consumer/migration review; the release schema verifier still gates. |
-| Measurement corpus | The injected-provider scanner fixture exercises 72 raw-scan and 12 traceroute cells against the authored corpus; four native loopback connect cells are specified for the real binary. | [M2][m2] native IPv6 coverage: six repeated `::1` connect case-runs are unavailable on this host. |
-
-
 [scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
 [connect-engine]: ../../crates/packetcraftr/src/scan/connect/engine.rs
 [connect-contract]: ../../crates/packetcraftr-cli/tests/integration/connect_scan_contracts.rs

@@ -19,9 +19,10 @@ release commitments**.
 
 The implementation baseline is `main` at `22c7d182d577`, reviewed on
 2026-10-05, rather than only the published `0.5.0-beta.3` release. In particular,
-`main` publishes [output v6][output-contract]; the beta release has different
-contracts. Review the [release and migration guidance][project-readme] before
-assuming a roadmap baseline applies to a released binary.
+that baseline publishes [output v6][output-contract], [M4][m4] moved `main` to
+v7, and the beta release has different contracts. Review the [release and
+migration guidance][project-readme] before assuming a roadmap baseline applies
+to a released binary.
 
 The comparison uses the [official Nmap reference guide][nmap-guide] consulted on
 2026-10-05. The [download page][nmap-download] identifies `7.991` as stable at

@@ -21,10 +21,9 @@ pub struct Origin {
 
 impl Origin {
     pub(crate) fn new(index: u32, declaration: &Declaration) -> Self {
-        let (source, _) = declaration.source.describe();
         Self {
             index,
-            source,
+            source: declaration.source.to_string(),
             line: declaration.line,
         }
     }

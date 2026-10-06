@@ -697,10 +697,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - `scan --targets-file`/`--exclude-file` bounded manifests (with `-` stdin),
   `scan --list` target planning, and scoped `fe80::/10%zone` targets carried
-  through selection, connect sockets, and raw route planning. Structured
-  output moves to `packetcraftr.output/v7` (target-list branch, optional
-  `scope` fields, exact `retained_evidence_bytes`); the v6 family and its
-  schema/fixture stay frozen.
+  through selection, connect sockets, and raw route planning. Malformed or
+  oversized manifests fail as `source:line:` before any provider call, and
+  `scan --list` warns once per coalesced duplicate declaration with its
+  source. Structured output moves to `packetcraftr.output/v7` (target-list
+  branch, optional `scope` fields, exact `retained_evidence_bytes`); the v6
+  family and its schema/fixture stay frozen.
+- The isolated Linux launcher's `scoped_ipv6_targets` scenario: list,
+  ordinary-connect, and raw TCP SYN scans of zone-qualified link-local
+  targets over namespace-local veth pairs that share one address pair, so
+  only the zone selects the peer. Native-isolated release evidence now
+  requires it.
 - The [scanner corpus](docs/scanner-corpus.v1.json)
   (`packetcraftr.scanner-corpus/v1`), its
   `scanner_fixture` example driver (deterministic injected providers on the

@@ -74,7 +74,7 @@
     {
       "code": "scan.duplicate_declaration",
       "severity": "warning",
-      "message": "target declaration 3 duplicates an earlier declaration and was coalesced"
+      "message": "target declaration 3 (argument 3) duplicates an earlier declaration and was coalesced"
     }
   ]
 }

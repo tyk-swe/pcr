@@ -624,6 +624,72 @@ mod tests {
     }
 
     #[test]
+    fn scoped_targets_without_zone_enumeration_fail_as_capabilities() {
+        use crate::target::{Error as TargetError, Hostname, Resolver, Zone};
+        use packetcraftr_netio::{NativeCapability, Unsupported, interface};
+
+        /// A resolver that keeps the default, zone-less `resolve_zone`.
+        struct Unscoped;
+
+        impl Resolver for Unscoped {
+            fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                unreachable!("numeric scoped targets never resolve hostnames")
+            }
+        }
+
+        /// Zone resolution on a build without native interface enumeration.
+        struct Unenumerable;
+
+        impl Resolver for Unenumerable {
+            fn resolve(&self, _: &Hostname, _: usize) -> Result<Vec<IpAddr>, TargetError> {
+                unreachable!("numeric scoped targets never resolve hostnames")
+            }
+
+            fn resolve_zone(
+                &self,
+                zone: &Zone,
+                _: &packetcraftr_core::budget::Deadline,
+            ) -> Result<InterfaceId, TargetError> {
+                Err(TargetError::ZoneResolution {
+                    zone: zone.clone(),
+                    source: interface::Error::Unsupported(Unsupported::new(
+                        NativeCapability::InterfaceEnumeration,
+                        "the native-route feature is disabled",
+                    )),
+                })
+            }
+        }
+
+        fn plan(resolver: impl Resolver + 'static) -> Error {
+            let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+                route: (),
+                interface: (),
+                capture: (),
+                transmit: (),
+                tcp: (),
+                resolver,
+            };
+            crate::Client::new(
+                packetcraftr_core::protocol::builtin::registry(),
+                Policy::default(),
+                providers,
+            )
+            .plan_targets(request(selection(&["fe80::1%eth0"], &[])))
+            .expect_err("scoped target without zone enumeration")
+        }
+
+        for (error, code) in [
+            (plan(Unscoped), "capability.zone_resolution"),
+            (plan(Unenumerable), "capability.unsupported"),
+        ] {
+            assert!(matches!(error, Error::Authorization(_)), "{error:?}");
+            let classification = error.classification();
+            assert_eq!(classification.code, code, "{error:?}");
+            assert_eq!(classification.kind, Kind::Capability, "{error:?}");
+        }
+    }
+
+    #[test]
     fn a_denied_scoped_destination_fails_before_zone_enumeration() {
         let resolver = ZoneMapResolver::new(vec![InterfaceId {
             name: "fixture0".to_owned(),

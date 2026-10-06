@@ -175,7 +175,7 @@ def scoped_ipv6(binary, report, profile='full-native'):
             'connect socket was not bound to the declared zone'
         assert probes[other]['classification'] == 'closed', 'scoped connect reached the wrong link'
 
-        if profile == 'default':
+        if profile in ('default', 'pcap-free'):
             scoped_capability_failure(binary, report, '--ports', '1', target=f'{SCOPED_RAW_PEER}%{near}')
             report.update(exit_code=0, status='passed', scoped_paths=dict(
                 selection='exercised', connect='exercised', raw='unsupported_capability'))
@@ -185,8 +185,9 @@ def scoped_ipv6(binary, report, profile='full-native'):
         responder = threading.Thread(target=respond, args=(stop, far, received), daemon=True)
         responder.start()
         try:
+            mode = ('--link-mode', 'layer2') if profile == 'layer2' else ()
             records = cli(binary, report, '--output', 'ndjson', 'scan', f'{SCOPED_RAW_PEER}%{near}',
-                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '1000')
+                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '1000', *mode)
         finally:
             stop.set()
             responder.join(timeout=5)

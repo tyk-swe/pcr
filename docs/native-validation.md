@@ -114,9 +114,10 @@ Windows/macOS native behavior from a Linux result or compilation.
 For M4 alone, `scripts/test-target-planning-isolated.py` builds and preserves
 the CLI under all five profiles, then runs the scoped fixture in a separate
 fresh namespace for each profile. Portable builds must publish capability
-failures for list, connect, and raw operations; the default profile exercises
-list/connect and rejects raw capture/transmission; Layer 2, pcap-free, and
-full-native profiles must deliver and correlate the raw probes. It writes a v3
+failures for list, connect, and raw operations; default and pcap-free profiles
+exercise list/connect and reject raw scans that need unavailable transmission
+or capture. Layer 2 explicitly selects `--link-mode layer2`; it and full-native
+must deliver and correlate the raw probes. It writes a v3
 profile inventory with commands, output, binary/driver digests, fixture details,
 and corpus provenance. The other seven M3 scenarios remain explicitly
 unexercised. Run from a clean checkout:

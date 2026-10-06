@@ -158,18 +158,48 @@ Settled at M4 with the recommended positions:
       exclude, payload, and profile inputs).
 - [ ] A scoped IPv6 target reaches its socket or route with its scope intact,
       with runtime evidence on each platform that supports it; elsewhere it
-      publishes a capability failure. **Done on injected providers** — the
-      connect provider records a `SocketAddrV6` carrying the resolved
-      `scope_id`, and raw plans route on the resolved interface; native
-      platform evidence is still pending, so this criterion stays open.
-- [ ] The [gap matrix][matrix] target rows are updated against the reviewed
-      revision.
+      publishes a capability failure. **Linux and capability failures are
+      done; macOS and Windows evidence is [blocked](#blockers).** Injected
+      providers record a `SocketAddrV6` carrying the resolved `scope_id` and
+      raw plans routed on the resolved interface. On Linux, the isolated
+      launcher's `scoped_ipv6_targets` scenario ([native
+      validation][native-validation]) gives two veth links the same
+      link-local pair, so only the zone selects the peer. In that scenario,
+      name and index aliases merge in `--list`, a connect scan reaches the
+      listener on its zone's link and is refused on the other, and raw SYNs
+      leave on the zone's interface and correlate the peer's answers. A
+      build without interface enumeration publishes `capability.unsupported`
+      (`target::plan` test).
+- [x] The [gap matrix][matrix] target rows are updated against the reviewed
+      revision: files/stdin, bulk listing, and scoped targets are `Present
+      with constraints` as of the change that completed this milestone.
+
+## Blockers
+
+- **macOS and Windows scoped runtime evidence.** This host can run only the
+  Linux lane. Closing the criterion needs a scoped scenario in the
+  [M3][m3] host-loopback suite (`native_loopback.rs`, schema
+  `packetcraftr.native-platform-evidence/v2`) and a recorded reviewed-native
+  run on each platform. That route has no recorded run for any scenario yet,
+  so the scenario is not added unexercised. Suggested shape: on macOS, connect
+  to `fe80::1%lo0` and expect raw IPv6 to fail as a capability, since the host
+  route rejects IPv6 header inclusion. On Windows, connect to the host
+  adapter's own link-local address, which exercises the IP Helper
+  `ipv6_interfaces` zone lookup.
+- **Live-scan duplicate warnings name the position, not the source.** A live
+  scan warns `target declaration N duplicates an earlier declaration`, where
+  N is the declaration's ordinal across arguments and then manifests.
+  `scan --list` names the source and line as well. Carrying those labels
+  into the library's live diagnostics needs a `scan::Request` field, which is
+  left for a change that has no other reason to touch every request literal.
 
 [compatibility]: ../consumer-compatibility.md
 [m1]: m01-claims-evidence.md
+[m3]: m03-native-validation.md
 [m5]: m05-host-discovery.md
 [m6]: m06-port-planning-inference.md
 [matrix]: nmap-gap-matrix.md
+[native-validation]: ../native-validation.md
 [target-model]: ../../crates/packetcraftr/src/target/model.rs
 [target-selection]: ../../crates/packetcraftr/src/target/selection.rs
 [target-admission]: ../../crates/packetcraftr/src/target/admission.rs

@@ -12,11 +12,17 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import uuid
 
 from validation_evidence import NATIVE_SCENARIOS, ROOT, checksum, digest, provenance, validate_native
 
-SCENARIOS = tuple(name for name in NATIVE_SCENARIOS if name != 'loopback_exchange')
+# Two veth links share one link-local pair, so only a declared zone decides
+# which peer a probe reaches. The raw peer fe80::3 exists only as a user-space
+# responder behind the first link.
+SCOPED_LINKS = (('pcrs0', 'pcrs1'), ('pcrt0', 'pcrt1'))
+SCOPED_RAW_PEER = 'fe80::3'
+SCOPED_OPEN, SCOPED_CLOSED = 8443, 8444
 
 
 def exchange(binary, report):
@@ -65,6 +71,116 @@ def exchange(binary, report):
     assert b'isolated-reply'.hex() in output.stdout.decode(), 'reply absent from capture'
     assert next(index for index, record in enumerate(records) if record['event'] == 'sent') < len(records) - 1
     report['status'] = 'passed'
+
+
+def ip(*args):
+    subprocess.run(['ip', *args], check=True, timeout=10)
+
+
+def cli(binary, report, *args):
+    command = [str(binary), *args]
+    output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20)
+    report.setdefault('runs', []).append(dict(command=command, exit_code=output.returncode,
+                                              stdout=output.stdout, stderr=output.stderr))
+    records = [json.loads(line) for line in output.stdout.splitlines()]
+    assert output.returncode == 0 and records and records[-1]['event'] == 'complete', f'{command} did not complete'
+    return records
+
+
+def scope(record, interface):
+    return record.get('scope') == dict(zone=interface, interface=dict(name=interface, index=socket.if_nametoindex(interface)))
+
+
+def respond(stop, interface, received):
+    """Answer raw SYNs to the scoped peer with exact, checksummed TCP replies."""
+    peer = socket.inet_pton(socket.AF_INET6, SCOPED_RAW_PEER)
+    with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x86dd)) as raw:
+        raw.bind((interface, 0x86dd))
+        raw.settimeout(0.1)
+        while not stop.is_set():
+            try:
+                frame, (_, _, kind, _, _) = raw.recvfrom(2048)
+            except socket.timeout:
+                continue
+            # Ethernet (14) + IPv6 (40) + TCP (20): a SYN without ACK to the peer.
+            if kind == socket.PACKET_OUTGOING or len(frame) < 74 or frame[20] != 6 or frame[38:54] != peer \
+                    or (frame[67] & 0x12) != 0x02:
+                continue
+            source, destination = frame[38:54], frame[22:38]
+            source_port, destination_port, sequence = struct.unpack('!HHI', frame[54:62])
+            received.append(dict(interface=interface, destination_port=destination_port, frame=frame.hex()))
+            # A veth peer can answer before the scanner's send call returns, and
+            # correlation rightly refuses a frame captured inside that interval.
+            time.sleep(0.05)
+            flags, window = (0x12, 65535) if destination_port == SCOPED_OPEN else (0x14, 0)
+            tcp = struct.pack('!HHIIBBHHH', destination_port, source_port, 0x1000, (sequence + 1) & 0xffffffff,
+                              0x50, flags, window, 0, 0)
+            check = checksum(source + destination + struct.pack('!I3xB', len(tcp), 6) + tcp)
+            tcp = tcp[:16] + struct.pack('!H', check) + tcp[18:]
+            header = struct.pack('!IHBB', 0x6 << 28, len(tcp), 6, 64) + source + destination
+            raw.send(frame[6:12] + frame[0:6] + frame[12:14] + header + tcp)
+
+
+def scoped_ipv6(binary, report):
+    near, far = SCOPED_LINKS[0]
+    other = SCOPED_LINKS[1][0]
+    try:
+        for link, peer in SCOPED_LINKS:
+            ip('link', 'add', link, 'type', 'veth', 'peer', 'name', peer)
+            for name, address in ((link, 'fe80::1/64'), (peer, 'fe80::2/64')):
+                ip('link', 'set', name, 'addrgenmode', 'none')
+                ip('-6', 'addr', 'add', address, 'dev', name, 'nodad')
+                ip('link', 'set', name, 'up')
+        mac = json.loads(subprocess.check_output(['ip', '-j', 'link', 'show', far], text=True, timeout=10))[0]['address']
+        ip('-6', 'neigh', 'add', SCOPED_RAW_PEER, 'lladdr', mac, 'dev', near, 'nud', 'permanent')
+
+        records = cli(binary, report, '--output', 'ndjson', 'scan', '--list', f'fe80::2%{near}',
+                      f'fe80::2%{socket.if_nametoindex(near)}', f'fe80::2%{other}')
+        listed = [record['result'] for record in records if record['event'] == 'target']
+        assert len(listed) == 2 and scope(listed[0], near) and scope(listed[1], other), 'zones did not resolve'
+        assert [origin['index'] for origin in listed[0]['origins']] == [0, 1], 'name/index aliases did not merge'
+
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
+            listener.bind(('fe80::2', SCOPED_OPEN, 0, socket.if_nametoindex(far)))
+            listener.listen(4)
+            records = cli(binary, report, '--output', 'ndjson', 'scan', '--connect', f'fe80::2%{near}',
+                          f'fe80::2%{other}', '--ports', str(SCOPED_OPEN), '--timeout-ms', '1000')
+        probes = {record['result']['scope']['zone']: record['result']
+                  for record in records if record['event'] == 'connect_probe'}
+        assert set(probes) == {near, other} and all(scope(probe, zone) for zone, probe in probes.items()), \
+            'connect probes lost their scope'
+        assert probes[near]['classification'] == 'open', 'scoped connect missed the listening link'
+        assert probes[near]['local'].startswith(f'[fe80::1%{socket.if_nametoindex(near)}]:'), \
+            'connect socket was not bound to the declared zone'
+        assert probes[other]['classification'] == 'closed', 'scoped connect reached the wrong link'
+
+        stop, received = threading.Event(), []
+        responder = threading.Thread(target=respond, args=(stop, far, received), daemon=True)
+        responder.start()
+        try:
+            records = cli(binary, report, '--output', 'ndjson', 'scan', f'{SCOPED_RAW_PEER}%{near}',
+                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '1000')
+        finally:
+            stop.set()
+            responder.join(timeout=5)
+        report['responder_received'] = received
+        probes = {record['result']['probe']['destination_port']: record['result']['probe']
+                  for record in records if record['event'] == 'probe'}
+        assert set(probes) == {SCOPED_OPEN, SCOPED_CLOSED} and all(scope(probe, near) for probe in probes.values()), \
+            'raw probes lost their scope'
+        assert {item['destination_port'] for item in received} == set(probes), 'raw probes did not leave the declared link'
+        assert probes[SCOPED_OPEN]['classification'] == 'open' and probes[SCOPED_CLOSED]['classification'] == 'closed', \
+            'raw replies on the declared link were not correlated'
+    finally:
+        for link, _ in SCOPED_LINKS:
+            subprocess.run(['ip', 'link', 'del', link], stderr=subprocess.DEVNULL, timeout=10)
+    report.update(exit_code=0, status='passed')
+
+
+# Launcher-driven CLI scenarios; every other scenario is a native_isolated test.
+# The scoped scenario adds interfaces, so it runs after the loopback-only tests.
+CLI_SCENARIOS = {'loopback_exchange': exchange, 'scoped_ipv6_targets': scoped_ipv6}
+SCENARIOS = tuple(name for name in NATIVE_SCENARIOS if name not in CLI_SCENARIOS)
 
 
 def build_tests():
@@ -117,18 +233,17 @@ def run(args, report):
     report.update(namespace=namespace, parent_namespace=args.parent_namespace,
                   native_test_sha256=digest(args.native_test_binary))
     subprocess.run(['ip', 'link', 'set', 'lo', 'up'], check=True, timeout=10)
-    try:
-        exchange(args.binary, report['scenarios'][0])
-    except Exception as error:
-        report['scenarios'][0].update(status='failed', error=str(error))
     env = dict(os.environ, PACKETCRAFTR_PARENT_NETNS=str(args.parent_namespace))
     listing = subprocess.check_output([str(args.native_test_binary), '--ignored', '--list'], text=True, timeout=10)
     present = {line.removesuffix(': test') for line in listing.splitlines() if line.endswith(': test')}
     if present != set(SCENARIOS):
         raise RuntimeError(f'native test inventory differs: {sorted(present)}')
-    for scenario in report['scenarios'][1:]:
-        command = [str(args.native_test_binary), '--ignored', '--exact', scenario['name'], '--nocapture', '--test-threads=1']
+    for scenario in report['scenarios']:
         try:
+            if scenario['name'] in CLI_SCENARIOS:
+                CLI_SCENARIOS[scenario['name']](args.binary, scenario)
+                continue
+            command = [str(args.native_test_binary), '--ignored', '--exact', scenario['name'], '--nocapture', '--test-threads=1']
             result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20)
             scenario.update(command=command, exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr,
                             status='passed' if result.returncode == 0 else 'failed')

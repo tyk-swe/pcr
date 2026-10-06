@@ -57,6 +57,7 @@ NATIVE_SCENARIOS = (
     'native_set_before_realized_values',
     'native_filter_error_releases_admission',
     'iface_disappearance_driver_fail_cleans_up',
+    'scoped_ipv6_targets',
 )
 
 

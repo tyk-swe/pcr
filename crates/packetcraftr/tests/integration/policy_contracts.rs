@@ -130,6 +130,7 @@ fn denied_address_never_reaches_providers() {
         .with_resolver(resolver),
     );
     let request = scan::Request {
+        target_sources: Vec::new(),
         max_in_flight: 1,
         targets: Target::from_str("example.test")
             .expect("hostname must parse")

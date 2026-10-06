@@ -119,6 +119,7 @@ where
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
+        target_sources: Vec::new(),
         max_in_flight: 1,
         targets: target.into(),
         transport: Transport::Tcp,
@@ -519,6 +520,7 @@ fn scoped_v6_route(
 
 fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Request {
     Request {
+        target_sources: Vec::new(),
         targets,
         transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
@@ -745,4 +747,70 @@ fn scoped_window_routes_each_target_on_its_own_interface() {
     let mut routed = routed;
     routed.sort();
     assert_eq!(routed, [2, 3]);
+}
+
+#[test]
+fn raw_duplicate_diagnostics_keep_source_labels_before_execution() {
+    let (client, providers) = crate::test_support::fake_client();
+    let mut request = tcp_scan_request(Target::Address("192.0.2.1".parse().unwrap()));
+    request.timeout = Duration::from_secs(1);
+    request
+        .targets
+        .include
+        .push(request.targets.include[0].clone());
+    request.target_sources = vec!["argument 1".to_owned(), "inventory.txt:4".to_owned()];
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let sink_observed = observed.clone();
+    let sink_providers = providers.clone();
+    client
+        .scan(request, move |event| {
+            if let Event::Diagnostic(diagnostic) = event {
+                assert_eq!(diagnostic.code, "scan.duplicate_declaration");
+                assert!(
+                    diagnostic
+                        .message
+                        .contains("target declaration 2 (inventory.txt:4)")
+                );
+                assert!(
+                    !sink_providers
+                        .calls()
+                        .iter()
+                        .any(|call| matches!(call, Call::Transmit(_)))
+                );
+                *sink_observed.lock().unwrap() = true;
+            }
+            Ok(())
+        })
+        .expect("scan");
+    assert!(*observed.lock().unwrap());
+}
+
+#[test]
+fn invalid_declaration_sources_fail_before_any_provider_call() {
+    for sources in [
+        vec!["".to_owned()],
+        vec!["x".repeat(4097)],
+        vec!["a".to_owned(), "b".to_owned()],
+    ] {
+        let (client, providers) = crate::test_support::fake_client();
+        let mut request = tcp_scan_request(Target::Address("192.0.2.1".parse().unwrap()));
+        request.target_sources = sources;
+        let collector = Collector::default();
+        assert!(matches!(
+            client.scan(request.clone(), collector),
+            Err(Error::InvalidLimit {
+                field: "target_sources",
+                ..
+            })
+        ));
+        let collector = super::connect::Collector::default();
+        assert!(matches!(
+            client.scan_connect(request, collector),
+            Err(Error::InvalidLimit {
+                field: "target_sources",
+                ..
+            })
+        ));
+        assert!(providers.calls().is_empty());
+    }
 }

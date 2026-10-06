@@ -122,6 +122,11 @@ def respond(stop, interface, received):
 
 
 def scoped_ipv6(binary, report):
+    corpus_path = ROOT / 'docs/scanner-corpus.v1.json'
+    corpus = json.loads(corpus_path.read_bytes())
+    expected = next(case['expected'] for case in corpus['target_planning_scenarios']
+                    if case['id'] == 'scoped-isolated-links')
+    report.update(corpus_sha256=digest(corpus_path), corpus_dataset_version=corpus['dataset_version'])
     near, far = SCOPED_LINKS[0]
     other = SCOPED_LINKS[1][0]
     try:
@@ -137,7 +142,7 @@ def scoped_ipv6(binary, report):
         records = cli(binary, report, '--output', 'ndjson', 'scan', '--list', f'fe80::2%{near}',
                       f'fe80::2%{socket.if_nametoindex(near)}', f'fe80::2%{other}')
         listed = [record['result'] for record in records if record['event'] == 'target']
-        assert len(listed) == 2 and scope(listed[0], near) and scope(listed[1], other), 'zones did not resolve'
+        assert len(listed) == expected['selected_targets'] and scope(listed[0], near) and scope(listed[1], other), 'zones did not resolve'
         assert [origin['index'] for origin in listed[0]['origins']] == [0, 1], 'name/index aliases did not merge'
 
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
@@ -169,7 +174,7 @@ def scoped_ipv6(binary, report):
         assert set(probes) == {SCOPED_OPEN, SCOPED_CLOSED} and all(scope(probe, near) for probe in probes.values()), \
             'raw probes lost their scope'
         assert {item['destination_port'] for item in received} == set(probes), 'raw probes did not leave the declared link'
-        assert probes[SCOPED_OPEN]['classification'] == 'open' and probes[SCOPED_CLOSED]['classification'] == 'closed', \
+        assert probes[SCOPED_OPEN]['classification'] == expected['raw_open'] and probes[SCOPED_CLOSED]['classification'] == expected['raw_closed'], \
             'raw replies on the declared link were not correlated'
     finally:
         for link, _ in SCOPED_LINKS:

@@ -158,6 +158,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let request = packetcraftr::scan::Request {
         max_in_flight,
         targets,
+        target_sources: selection.origins.iter().map(ToString::to_string).collect(),
         transport: transport.into(),
         udp_payload,
         udp_profiles,

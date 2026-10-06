@@ -48,6 +48,7 @@ fn client(state: &Arc<Mutex<State>>) -> Client<common::FakeProviders<Routes, Io>
 
 fn request() -> Request {
     Request {
+        target_sources: Vec::new(),
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
         transport: Transport::Tcp,

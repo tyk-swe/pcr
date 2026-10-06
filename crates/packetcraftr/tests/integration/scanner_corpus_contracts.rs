@@ -175,6 +175,7 @@ fn run_scan(
     let aggregate = client
         .scan(
             scan::Request {
+                target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
                         addresses.destination,
@@ -448,6 +449,7 @@ fn window_two_publishes_sent_before_the_probe_event() {
     client
         .scan(
             scan::Request {
+                target_sources: Vec::new(),
                 targets: Selection {
                     include: vec![Specification::Target(Target::Address(
                         addresses.destination,

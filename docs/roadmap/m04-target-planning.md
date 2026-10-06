@@ -4,11 +4,11 @@
 | --- | --- | --- |
 | In progress | [M1][m1] | [M5][m5] |
 
-PacketcraftR already bounds target expansion, deduplicates, applies numeric
-exclusions, and filters address families. Targets reach a scan only as
-positional arguments, there is no way to see the resulting plan without running
-it, and a link-local IPv6 address loses its interface scope on the way to a
-socket. An authorized inventory is usually a file, and an operator needs to
+At this milestone's start, PacketcraftR bounded target expansion, deduplicated,
+applied numeric exclusions, and filtered address families. Targets reached a
+scan only as positional arguments, there was no way to see the resulting plan
+without running it, and a link-local IPv6 address lost its interface scope on
+the way to a socket. An authorized inventory is usually a file, and an operator needs to
 check what a scan would touch before it touches anything.
 
 This milestone adds bounded manifests, a list mode that sends nothing, and
@@ -174,24 +174,29 @@ Settled at M4 with the recommended positions:
       revision: files/stdin, bulk listing, and scoped targets are `Present
       with constraints` as of the change that completed this milestone.
 
+## Ground-truth inventory
+
+[`scanner-corpus.v1.json`](../scanner-corpus.v1.json), dataset 1.1.0, records
+numeric source equivalence, exclusions/family narrowing, manifest failure and
+duplicate boundaries, and the independently provisioned host-local and isolated
+two-link scoped conditions. Numeric CLI contracts and native scoped suites read
+those expectations; native records include the corpus revision and SHA-256.
+The listener/responder conditions are the oracle, not agreement with Nmap.
+
 ## Blockers
 
-- **macOS and Windows scoped runtime evidence.** This host can run only the
-  Linux lane. Closing the criterion needs a scoped scenario in the
-  [M3][m3] host-loopback suite (`native_loopback.rs`, schema
-  `packetcraftr.native-platform-evidence/v2`) and a recorded reviewed-native
-  run on each platform. That route has no recorded run for any scenario yet,
-  so the scenario is not added unexercised. Suggested shape: on macOS, connect
-  to `fe80::1%lo0` and expect raw IPv6 to fail as a capability, since the host
-  route rejects IPv6 header inclusion. On Windows, connect to the host
-  adapter's own link-local address, which exercises the IP Helper
-  `ipv6_interfaces` zone lookup.
-- **Live-scan duplicate warnings name the position, not the source.** A live
-  scan warns `target declaration N duplicates an earlier declaration`, where
-  N is the declaration's ordinal across arguments and then manifests.
-  `scan --list` names the source and line as well. Carrying those labels
-  into the library's live diagnostics needs a `scan::Request` field, which is
-  left for a change that has no other reason to touch every request literal.
+- **macOS and Windows scoped runtime evidence.** The host-local native suite
+  now includes `scoped_ipv6_targets` in every profile, with v3 evidence that
+  separately records list selection, scoped sockets, and pinned raw routes /
+  raw IPv6 UDP delivery or a capability failure. The manual reviewed-native
+  workflow can run this scenario alone without claiming broader M3 completion.
+  A clean exact-reviewed-commit execution on each platform remains required;
+  implementation and Linux compilation are not that runtime evidence.
+
+Live raw and connect duplicate warnings now retain argument or manifest/stdin
+labels and physical lines via bounded `scan::Request.target_sources`. Contract
+regressions cover every CLI format, and invalid label counts or sizes fail before
+provider calls.
 
 [compatibility]: ../consumer-compatibility.md
 [m1]: m01-claims-evidence.md

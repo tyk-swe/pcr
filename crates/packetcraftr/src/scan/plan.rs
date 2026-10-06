@@ -148,6 +148,7 @@ mod tests {
     #[test]
     fn duration_planning_preserves_per_gap_rounding_empty_plans_and_overflow() {
         let mut request = Request {
+            target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
             transport: crate::probe::Transport::Tcp,

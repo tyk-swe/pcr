@@ -8,6 +8,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `scan::Request` gains `target_sources`, an optional ordered set of bounded
+  declaration source labels. Live scan duplicate diagnostics now include the
+  originating argument or manifest path/stdin and physical line, consistently
+  with `scan --list`. See `docs/migration-unreleased.md`.
+
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
   `TcpProviders`, so each `Client` workflow requires only the provider cluster
@@ -694,6 +699,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   `&Bytes`. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- Reviewed host-local native validation now includes scoped IPv6 selection,
+  sockets, and pinned raw delivery/capability checks across every feature profile.
+  Evidence v3 binds the executable and independent corpus digests and distinguishes
+  each scoped path; focused M4 runs do not claim completion of broader M3 tests.
+- Scanner corpus dataset 1.1.0 includes M4 numeric manifest and scoped fixture
+  ground truth, with schema-checked expectations consumed by the existing suites.
 
 - `scan --targets-file`/`--exclude-file` bounded manifests (with `-` stdin),
   `scan --list` target planning, and scoped `fe80::/10%zone` targets carried

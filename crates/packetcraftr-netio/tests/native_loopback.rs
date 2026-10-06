@@ -707,3 +707,258 @@ fn iface_disappearance_driver_fail_cleans_up() {
     }
     .emit();
 }
+
+fn scoped_cli(targets: &[String], options: &[&str]) -> (bool, serde_json::Value) {
+    let binary =
+        std::env::var_os("PACKETCRAFTR_NATIVE_CLI").expect("the launcher supplies the built CLI");
+    let output = std::process::Command::new(binary)
+        .args([
+            "scan",
+            "--output",
+            "json",
+            "--attempts",
+            "1",
+            "--timeout-ms",
+            "1000",
+            "--max-probes",
+            "1",
+            "--max-duration-ms",
+            "5000",
+        ])
+        .args(options)
+        .args(targets)
+        .output()
+        .expect("run the scoped target CLI");
+    assert!(
+        output.stdout.len() + output.stderr.len() <= 65_536,
+        "bounded CLI output"
+    );
+    let json = serde_json::from_slice(&output.stdout).expect("scoped CLI JSON");
+    println!("scoped CLI: {}", String::from_utf8_lossy(&output.stdout));
+    (output.status.success(), json)
+}
+
+/// Every address used below is assigned to this host. No interface is mutated
+/// and no off-host destination or neighbor discovery is requested.
+#[test]
+#[ignore = "native host scoped evidence runs only via scripts/test-native-platform.py"]
+fn scoped_ipv6_targets() {
+    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::protocol::network::Ipv6;
+    use std::net::{SocketAddrV6, TcpListener};
+
+    gate();
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../docs/scanner-corpus.v1.json"))
+            .expect("independent scanner corpus");
+    let expected = &corpus["target_planning_scenarios"]
+        .as_array()
+        .expect("target scenarios")
+        .iter()
+        .find(|case| case["id"] == "scoped-host-local")
+        .expect("host-local scoped fixture")["expected"];
+    if !cfg!(native_route) {
+        let (success, json) = scoped_cli(&["fe80::1%1".to_owned()], &["--list"]);
+        assert!(!success);
+        assert_eq!(json["error"]["code"], expected["portable"]);
+        println!(
+            "PACKETCRAFTR_NATIVE_SCOPED={{\"selection\":\"unsupported_capability\",\"connect\":\"unsupported_capability\",\"raw\":\"unsupported_capability\"}}"
+        );
+        return;
+    }
+    let baseline = warm_baseline();
+    let interfaces = interface::SystemProvider
+        .ipv6_interfaces(&deadline(MAX_WAIT))
+        .expect("enumerate real IPv6 interface identities without a capture backend");
+    // Prefer the loopback link-local address where it exists (macOS lo0).
+    // Windows uses an adapter's own link-local address and IPv6 interface index.
+    let fixture = interfaces
+        .iter()
+        .filter(|info| info.flags.up)
+        .flat_map(|info| {
+            info.addresses
+                .iter()
+                .filter_map(move |assigned| match assigned.address {
+                    IpAddr::V6(address) if address.is_unicast_link_local() => Some((info, address)),
+                    _ => None,
+                })
+        })
+        .min_by_key(|(info, _)| !info.flags.loopback);
+    let Some((info, address)) = fixture else {
+        await_release(baseline);
+        return Unavailable {
+            reason_code: "isolation_unavailable",
+            reason: "this host has no assigned link-local IPv6 address for a host-local scoped fixture",
+        }.emit();
+    };
+    let index = info.id.index;
+    assert_ne!(index, 0);
+    // Windows friendly names may contain spaces or non-ASCII text. The
+    // target grammar intentionally accepts token-sized names; those adapters
+    // remain reachable by their real IPv6 index, not their IPv4 index.
+    let token_name = !info.id.name.is_empty()
+        && info.id.name.len() <= 128
+        && !info.id.name.starts_with('-')
+        && !info.id.name.bytes().all(|byte| byte.is_ascii_digit())
+        && info
+            .id
+            .name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    let zone = if token_name {
+        info.id.name.clone()
+    } else {
+        index.to_string()
+    };
+    let named = format!("{address}%{zone}");
+    let indexed = if token_name {
+        format!("{address}%{index}")
+    } else {
+        format!("{address}%0{index}")
+    };
+    let targets = [named.clone(), indexed];
+    let (success, json) = scoped_cli(&targets, &["--list"]);
+    assert!(success, "scoped list failed: {json}");
+    let listed = json["result"]["targets"]
+        .as_array()
+        .expect("listed targets");
+    assert_eq!(
+        listed.len() as u64,
+        expected["selected_targets"].as_u64().unwrap(),
+        "name/index aliases coalesce"
+    );
+    assert_eq!(listed[0]["address"], address.to_string());
+    assert_eq!(listed[0]["scope"]["zone"], zone);
+    assert_eq!(listed[0]["scope"]["interface"]["name"], info.id.name);
+    assert_eq!(listed[0]["scope"]["interface"]["index"], index);
+    assert_eq!(
+        listed[0]["origins"].as_array().unwrap().len() as u64,
+        expected["origins"].as_u64().unwrap()
+    );
+    assert_eq!(json["result"]["resolution_performed"], false);
+
+    let listener = TcpListener::bind(SocketAddrV6::new(address, 0, 0, index))
+        .expect("bind a TCP listener on this host's scoped address");
+    listener.set_nonblocking(true).expect("bounded TCP accept");
+    let port = listener
+        .local_addr()
+        .expect("listener address")
+        .port()
+        .to_string();
+    let (success, json) = scoped_cli(&targets, &["--connect", "--ports", &port]);
+    assert!(success, "scoped connect failed: {json}");
+    let endpoints = json["result"]["endpoints"]
+        .as_array()
+        .expect("connect endpoints");
+    assert_eq!(endpoints.len(), 1);
+    let probe = &endpoints[0]["probes"][0];
+    assert_eq!(probe["outcome"], expected["connect_outcome"], "{json}");
+    assert_eq!(probe["classification"], expected["connect_classification"]);
+    assert_eq!(probe["scope"]["interface"]["index"], index);
+    let local: SocketAddr = probe["local"]
+        .as_str()
+        .expect("client socket local address")
+        .parse()
+        .unwrap();
+    let started = Instant::now();
+    let peer = loop {
+        match listener.accept() {
+            Ok((_, peer)) => break peer,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    && started.elapsed() < MAX_WAIT =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("scoped native listener did not receive the connection: {error}"),
+        }
+    };
+    assert_eq!(
+        peer, local,
+        "independent listener matches the published client socket"
+    );
+    let SocketAddr::V6(peer) = peer else {
+        panic!("scoped socket peer must be IPv6")
+    };
+    assert_eq!(*peer.ip(), address);
+    assert_eq!(
+        peer.scope_id(),
+        index,
+        "native socket keeps its selected IPv6 zone"
+    );
+    assert_eq!(json["result"]["socket_stats"]["connections_scheduled"], 1);
+    drop(listener);
+
+    // A real raw route is pinned to the same resolved identity; a UDP socket
+    // supplies independent delivery ground truth, without requiring Npcap.
+    let decision = route::SystemProvider
+        .lookup_with_preferences(
+            IpAddr::V6(address),
+            Some(&info.id),
+            Some(IpAddr::V6(address)),
+            &deadline(MAX_WAIT),
+        )
+        .expect("route to the host's scoped address on the selected interface");
+    assert_eq!(
+        decision.interface, info.id,
+        "raw route retains the resolved zone"
+    );
+    assert_eq!(decision.selected_source, Some(IpAddr::V6(address)));
+    let receiver =
+        UdpSocket::bind(SocketAddrV6::new(address, 0, 0, index)).expect("scoped UDP receiver");
+    receiver
+        .set_read_timeout(Some(MAX_WAIT))
+        .expect("finite UDP receive");
+    let source = UdpSocket::bind(SocketAddrV6::new(address, 0, 0, index))
+        .expect("reserve scoped source port");
+    let mut packet = Packet::new();
+    packet.push(Ipv6 {
+        source: address,
+        destination: address,
+        ..Ipv6::default()
+    });
+    packet.push(Udp {
+        source_port: source.local_addr().unwrap().port(),
+        destination_port: receiver.local_addr().unwrap().port(),
+        ..Udp::default()
+    });
+    packet.push(Raw::new(PAYLOAD));
+    let bytes = packetcraftr_core::build::Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .expect("scoped UDP packet")
+        .bytes;
+    let outbound = transmit::Outbound::try_new(
+        &bytes,
+        transmit::Route {
+            decision: &decision,
+            mode: Mode::Layer3,
+            lookup_destination: Some(IpAddr::V6(address)),
+        },
+    )
+    .expect("scoped raw outbound");
+    let raw = match transmit::SystemProvider.send(outbound) {
+        Ok(report) => {
+            report
+                .validate_exact(&bytes)
+                .expect("raw submission evidence");
+            let mut buffer = [0u8; 2048];
+            let (length, peer) = receiver
+                .recv_from(&mut buffer)
+                .expect("scoped raw UDP delivery");
+            assert_eq!(&buffer[..length], PAYLOAD);
+            assert_eq!(peer.ip(), IpAddr::V6(address));
+            assert_eq!(peer.port(), source.local_addr().unwrap().port());
+            "exercised"
+        }
+        Err(error @ Error::Unsupported(_)) => {
+            assert_eq!(error.classification().code, "capability.unsupported");
+            println!("scoped raw capability: {error}");
+            "unsupported_capability"
+        }
+        Err(error) => panic!("scoped raw send failed: {error}"),
+    };
+    await_release(baseline);
+    println!(
+        "PACKETCRAFTR_NATIVE_SCOPED={{\"selection\":\"exercised\",\"connect\":\"exercised\",\"raw\":\"{raw}\"}}"
+    );
+}

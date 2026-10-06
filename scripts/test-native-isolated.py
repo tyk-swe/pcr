@@ -92,7 +92,7 @@ def scope(record, interface):
 
 
 def respond(stop, interface, received):
-    """Answer raw SYNs to the scoped peer with exact, checksummed TCP replies."""
+    """Answer NDP and raw SYNs with independently checksummed local replies."""
     peer = socket.inet_pton(socket.AF_INET6, SCOPED_RAW_PEER)
     with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x86dd)) as raw:
         raw.bind((interface, 0x86dd))
@@ -102,8 +102,21 @@ def respond(stop, interface, received):
                 frame, (_, _, kind, _, _) = raw.recvfrom(2048)
             except socket.timeout:
                 continue
+            if kind == socket.PACKET_OUTGOING:
+                continue
+            # Layer 2 preparation actively solicits the unassigned user-space
+            # peer. Answer only its Neighbor Solicitation on this isolated link.
+            if len(frame) >= 78 and frame[20] == 58 and frame[54] == 135 and frame[62:78] == peer:
+                destination = frame[22:38]
+                mac = raw.getsockname()[4]
+                advertisement = struct.pack('!BBHI', 136, 0, 0, 0x60000000) + peer + bytes((2, 1)) + mac
+                pseudo = peer + destination + struct.pack('!I3xB', len(advertisement), 58)
+                advertisement = advertisement[:2] + struct.pack('!H', checksum(pseudo + advertisement)) + advertisement[4:]
+                header = struct.pack('!IHBB16s16s', 6 << 28, len(advertisement), 58, 255, peer, destination)
+                raw.send(frame[6:12] + mac + bytes.fromhex('86dd') + header + advertisement)
+                continue
             # Ethernet (14) + IPv6 (40) + TCP (20): a SYN without ACK to the peer.
-            if kind == socket.PACKET_OUTGOING or len(frame) < 74 or frame[20] != 6 or frame[38:54] != peer \
+            if len(frame) < 74 or frame[20] != 6 or frame[38:54] != peer \
                     or (frame[67] & 0x12) != 0x02:
                 continue
             source, destination = frame[38:54], frame[22:38]
@@ -187,7 +200,7 @@ def scoped_ipv6(binary, report, profile='full-native'):
         try:
             mode = ('--link-mode', 'layer2') if profile == 'layer2' else ()
             records = cli(binary, report, '--output', 'ndjson', 'scan', f'{SCOPED_RAW_PEER}%{near}',
-                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '1000', *mode)
+                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '5000', *mode)
         finally:
             stop.set()
             responder.join(timeout=5)

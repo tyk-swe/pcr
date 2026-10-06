@@ -66,6 +66,8 @@ def parent(args):
                    and row.get('target', {}).get('name') == 'packetcraftr']
         directory = args.report.parent / profile['name']
         directory.mkdir(parents=True, exist_ok=True)
+        if os.geteuid() == 0 and 'SUDO_UID' in os.environ:
+            os.chown(directory, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
         preserved = directory / 'packetcraftr'
         shutil.copy2(binary, preserved)
         profile.update(binary_sha256=digest(preserved), test_binary_sha256=digest(__file__),

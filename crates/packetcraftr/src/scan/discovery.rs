@@ -65,10 +65,9 @@ impl Options {
 
     pub(super) fn validate(
         &self,
-        attempts: u32,
         timeout: Duration,
         route: &crate::route::Options,
-        max_ports: usize,
+        limits: &super::Limits,
     ) -> Result<(), Error> {
         let invalid = |message: &str| {
             Err(Error::InvalidDiscovery {
@@ -90,11 +89,11 @@ impl Options {
         if self.probes.is_empty() && !self.neighbor {
             return invalid("discovery needs at least one probe");
         }
-        if self.probes.len() > max_ports {
+        if self.probes.len() > limits.max_ports {
             return Err(Error::InvalidLimit {
                 field: "discovery_probes",
                 value: u64::try_from(self.probes.len()).unwrap_or(u64::MAX),
-                reason: format!("exceeds max_ports={max_ports}"),
+                reason: format!("exceeds max_ports={}", limits.max_ports),
             });
         }
         let mut seen = HashSet::with_capacity(self.probes.len());
@@ -107,17 +106,19 @@ impl Options {
             if route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
                 return invalid("neighbor discovery needs a link-layer route");
             }
-            crate::neighbor::Options {
-                max_attempts: attempts,
-                attempt_timeout: timeout,
-                ..crate::neighbor::Options::default()
-            }
-            .validate()
-            .map_err(|source| Error::InvalidDiscovery {
-                message: format!(
-                    "neighbor discovery cannot use the scan attempts and timeout: {source}"
-                ),
-            })?;
+            // Each attempt is one resolver request bounded like a probe.
+            crate::neighbor::Options::default()
+                .single_attempt(
+                    timeout,
+                    limits.max_evidence_frames,
+                    limits.max_evidence_bytes,
+                )
+                .validate()
+                .map_err(|source| Error::InvalidDiscovery {
+                    message: format!(
+                        "neighbor discovery cannot use the scan timeout and evidence limits: {source}"
+                    ),
+                })?;
         }
         Ok(())
     }

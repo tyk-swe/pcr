@@ -350,19 +350,41 @@ fn a_routed_gateway_answer_is_not_host_evidence() {
         Policy::default(),
         common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
     );
-    let report = scan_with(&client, neighbor_only(&[FIRST]));
-    assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
-    let host = &report.hosts[0];
+    let alone = scan_with(&client, neighbor_only(&[FIRST]));
+    // The gateway is not a selected target, so it is sent nothing.
+    assert!(steps.take().is_empty());
+    let host = &alone.hosts[0];
     assert_eq!(
         (host.state, host.scan),
         (State::NoResponse, Scan::NotRequested)
     );
     assert!(host.reasons.is_empty());
-    let Some(NeighborOutcome::Routed(next_hop)) = host.neighbor.as_ref().map(|n| &n.outcome) else {
-        panic!("the target resolves through its gateway");
+    let neighbor = host.neighbor.as_ref().unwrap();
+    let NeighborOutcome::Routed(next_hop) = &neighbor.outcome else {
+        panic!("the target is reached through its gateway");
     };
-    assert_eq!(next_hop.address, address(GATEWAY));
-    assert_eq!(next_hop.link.as_ref().unwrap().address, NEIGHBOR_MAC);
+    assert_eq!(
+        (next_hop.address, next_hop.link, neighbor.attempts),
+        (address(GATEWAY), None, 0)
+    );
+
+    // A gateway selected as a target answers for itself; the routed target
+    // reports that entry only as its cached next hop.
+    let both = scan_with(&client, neighbor_only(&[GATEWAY, FIRST]));
+    assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
+    let [gateway, routed] = &both.hosts[..] else {
+        panic!("one record per target");
+    };
+    assert_eq!(gateway.state, State::Responded);
+    assert_eq!(gateway.reasons[0].basis, Basis::Direct);
+    assert_eq!(routed.state, State::NoResponse);
+    assert!(routed.reasons.is_empty());
+    let Some(NeighborOutcome::Routed(next_hop)) = routed.neighbor.as_ref().map(|n| &n.outcome)
+    else {
+        panic!("the target is reached through its gateway");
+    };
+    let link = next_hop.link.unwrap();
+    assert_eq!((link.address, link.cached), (NEIGHBOR_MAC, true));
 }
 
 #[test]

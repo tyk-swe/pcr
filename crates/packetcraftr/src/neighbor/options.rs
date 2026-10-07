@@ -74,6 +74,25 @@ impl Options {
         Ok(())
     }
 
+    /// These options narrowed to one request that waits `attempt_timeout`,
+    /// capturing at most `max_frames` frames and `max_bytes` bytes.
+    #[must_use]
+    pub(crate) fn single_attempt(
+        &self,
+        attempt_timeout: Duration,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Self {
+        Self {
+            max_attempts: 1,
+            attempt_timeout,
+            max_capture_queue_frames: self.max_capture_queue_frames.min(max_frames),
+            max_captured_bytes: self.max_captured_bytes.min(max_bytes),
+            snap_length: self.snap_length.min(max_bytes),
+            ..self.clone()
+        }
+    }
+
     /// The capture bounds a discovery session runs under. Overflow always
     /// fails: a lost frame would make a negative result unverifiable.
     #[must_use]

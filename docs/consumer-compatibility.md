@@ -53,8 +53,9 @@ v8 meaning and adds host discovery:
   answered for another address of the same family, as a target or a gateway;
   it does not assert a cause;
 - an optional `neighbor` outcome (`resolved`, `silent`, `routed`, or
-  `not_applicable`). A routed target's `next_hop` link address is the
-  gateway's, never the target's identity;
+  `not_applicable`). A routed target's `next_hop` is its gateway, sent no
+  request; its link address, present only when already cached, is never the
+  target's identity;
 - an optional `reverse_dns` lookup with the PTR `names` the server answered.
   Names are observations, not authenticated identity;
 - a required `stage` (`discovery` or `scan`) on probe, `probe_sent`,

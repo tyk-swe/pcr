@@ -907,12 +907,12 @@ ICMP endpoints reports `cli.scan_method` (exit 2, `the tcp_connect scan method
 cannot send udp probes`) instead of `cli.error` with `--connect requires TCP
 transport`; scripts that match the old code or text need updating. `auto` picks
 raw when the build can capture and transmit in the requested `--link-mode`,
-and otherwise TCP connect when every endpoint is TCP and the route needs no
-packet override. When neither applies it keeps raw, whose execution reports
-the missing capability, and its published reason names what an ordinary
-connection could not probe. Selection reads the build's capabilities, not
-run-time privileges: an unprivileged run of a capture-capable build selects raw
-and fails at execution.
+and otherwise TCP connect when every scan and discovery probe is TCP and the
+route needs no packet override. When neither applies it keeps raw, whose
+execution reports the missing capability, and its published reason names what
+an ordinary connection could not probe. Selection reads the build's
+capabilities, not run-time privileges: an unprivileged run of a capture-capable
+build selects raw and fails at execution.
 
 `--curated-udp-payloads` adds the bundled `curated/...` UDP profiles for
 planned UDP ports that have one (DNS, mDNS, RPC bind, NTP, SNMPv3, STUN, and
@@ -982,10 +982,13 @@ port, so `--ports` is a usage error and every host is `scan: "not_requested"`.
 `--discovery-probes` selects `icmp` (the default), `tcp`, `udp`, and
 `neighbor`. TCP and UDP probes take `--discovery-ports` terms in the
 `--ports` syntax, and the scan's `--exclude-ports` applies to them, so no stage
-probes an excluded port. `neighbor` sends ARP or NDP to each on-link target
-with the scan's `--attempts` and `--timeout`; a routed target resolves only its
-gateway, whose link address is published as the next hop's and never as the
-target's. Discovery and the scan share one authorization, one sequence space,
+probes an excluded port. `neighbor` sends each on-link target up to
+`--attempts` ARP or NDP requests, paced by `--rate`, each waiting `--timeout`
+and captured within the scan's evidence limits. A routed target is sent none:
+its gateway is published as the next hop, with a link address only when the
+neighbor cache already holds one, and never as the target's. Neighbor requests
+count in the scan statistics. Discovery and the scan share one authorization,
+one sequence space,
 `--max-probes`, `--max-duration`, and the evidence budget, and authorization
 precedes every discovery packet, including ARP and NDP. With `--connect` only
 `tcp` discovery runs, through ordinary sockets; `icmp`, `udp`, and `neighbor`

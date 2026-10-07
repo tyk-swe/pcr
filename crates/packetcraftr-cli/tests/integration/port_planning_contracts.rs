@@ -420,7 +420,7 @@ fn raw_scans_without_packet_io_fail_unless_automatic_selection_was_requested() {
         method["reason"]
             .as_str()
             .unwrap()
-            .contains("every endpoint is TCP"),
+            .contains("every probe is TCP"),
         "{method}"
     );
     assert_eq!(

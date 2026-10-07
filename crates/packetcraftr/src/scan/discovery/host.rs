@@ -113,7 +113,8 @@ pub struct Link {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NextHop {
     pub address: IpAddr,
-    /// Absent when the next hop did not answer.
+    /// The cached entry for the next hop, if any. The next hop is not a
+    /// selected target, so discovery sends it no request.
     pub link: Option<Link>,
 }
 
@@ -123,7 +124,7 @@ pub enum NeighborOutcome {
     Resolved(Link),
     /// The host is on-link and no reply arrived.
     Silent,
-    /// The host is routed, so only its next hop was resolved.
+    /// The host is routed through a next hop, and no request was sent.
     Routed(NextHop),
     /// The route to the host has no link-layer address resolution.
     NotApplicable,
@@ -133,8 +134,9 @@ pub enum NeighborOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Neighbor {
     pub outcome: NeighborOutcome,
-    /// Requests sent; zero when the cache answered or nothing applied.
+    /// Requests sent; zero when the cache answered or nothing was sent.
     pub attempts: u32,
+    /// When the fresh reply was captured, or when the outcome was settled.
     pub observed_at: SystemTime,
 }
 

@@ -58,8 +58,9 @@ route overrides. Hostname lookup requires the existing policy opt-in.
 --method selects raw packets (the default), tcp-connect (the same as
 --connect), or auto. An explicit method is never replaced: raw fails with a
 capability error when this build cannot capture and transmit. auto chooses raw
-when the build can, and otherwise tcp-connect when every endpoint is TCP and no
-packet route override is set; results publish the method and why auto chose it.
+when the build can, and otherwise tcp-connect when every scan and discovery
+probe is TCP and no packet route override is set; results publish the method
+and why auto chose it.
 
 Each port endpoint reports an inferred state (open, closed, filtered,
 open_or_filtered, or unknown) with the rule that produced it and the attempts
@@ -99,9 +100,10 @@ counts as responded (each reason names its wire, socket, or cache evidence and
 whether it is direct, cached, or a possible proxy), and whether the scan probed
 it. A host that did not answer is no_response, never absent; an ICMP error from
 another router is not host evidence. A TCP reset counts: closed, but
-responsive. neighbor sends ARP or NDP with the scan's --attempts and --timeout
-before the other probes; a routed target resolves only its next hop, whose link
-address belongs to the gateway and is never host evidence. --discovery-ports
+responsive. neighbor sends each on-link target up to --attempts ARP or NDP
+requests, paced by --rate and waiting --timeout, before the other probes; a
+routed target is sent none and reports its next hop, whose link address
+belongs to the gateway and is never host evidence. --discovery-ports
 takes --ports terms for tcp and udp probes, after --exclude-ports. Discovery and
 the scan share one authorization, sequence space, --max-probes,
 --max-duration, and evidence budget. With --connect only tcp discovery runs,
@@ -256,7 +258,7 @@ impl From<Discovery> for packetcraftr::scan::discovery::Mode {
 pub(crate) enum DiscoveryProbe {
     /// ICMP or ICMPv6 echo.
     Icmp,
-    /// ARP or NDP for the target, or for its next hop when it is routed.
+    /// ARP or NDP for an on-link target; a routed target reports its next hop.
     Neighbor,
     /// TCP SYN, or a connection with `--connect`, to each discovery port.
     Tcp,

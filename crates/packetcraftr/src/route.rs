@@ -14,6 +14,6 @@ pub use error::Error;
 pub use interface::Interface;
 pub(crate) use interface::ResolvedInterface;
 pub use materialize::Materialized;
-pub(crate) use materialize::materialize;
+pub(crate) use materialize::{materialize, neighbor_request};
 pub use model::{Options, Plan};
 pub use planner::plan;

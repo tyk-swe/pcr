@@ -58,11 +58,58 @@ impl<E: Executor<Batch<Probe>>> Pipelined for Serial<'_, E> {
     fn resolve_neighbor(
         &mut self,
         _target: &crate::target::SelectedAddress,
-        _attempts: u32,
         _timeout: Duration,
         _deadline: &Deadline,
-    ) -> Result<super::discovery::Neighbor, BoundaryError> {
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
         unreachable!("serial fixtures select no neighbor discovery")
+    }
+}
+
+/// Answers neighbor requests from a script, one outcome per call.
+#[derive(Default)]
+struct ScriptedNeighbors {
+    outcomes: std::collections::VecDeque<super::discovery::NeighborOutcome>,
+    calls: Vec<IpAddr>,
+}
+
+impl Executor<Batch<Probe>> for ScriptedNeighbors {
+    fn execute(&mut self, _batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        unreachable!("neighbor-only discovery sends no probe")
+    }
+}
+
+impl Pipelined for ScriptedNeighbors {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("neighbor-only discovery sends no probe")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        use super::discovery::NeighborOutcome;
+        self.calls.push(target.address);
+        let outcome = self.outcomes.pop_front().expect("a scripted outcome");
+        let attempts = u32::from(!matches!(outcome, NeighborOutcome::Routed(_)));
+        let stats = Stats {
+            packets_attempted: u64::from(attempts),
+            packets_completed: u64::from(attempts),
+            bytes: 42 * u64::from(attempts),
+            ..Stats::default()
+        };
+        let neighbor = super::discovery::Neighbor {
+            outcome,
+            attempts,
+            observed_at: UNIX_EPOCH,
+        };
+        Ok((neighbor, stats))
     }
 }
 
@@ -933,4 +980,72 @@ fn discovery_composes_one_record_per_family_and_scans_only_responders() {
     assert_eq!(report.endpoints.len(), 1);
     assert_eq!(report.endpoints[0].probes[0].sequence, 2);
     assert_eq!(report.rtt.sent, 3);
+}
+
+#[test]
+fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
+    use super::discovery::{Link, Mode, NeighborOutcome, NextHop, Options, State};
+    let on_link = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let routed = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7));
+    let gateway = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+    let link = Link {
+        address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+        cached: false,
+    };
+    let mut request = tcp_scan_request(Target::Address(on_link));
+    request.targets = crate::target::Selection {
+        include: [on_link, routed]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    request.endpoints = Vec::new();
+    request.attempts = 2;
+    request.probes_per_second = Some(10);
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        ..Options::default()
+    };
+    let mut executor = ScriptedNeighbors {
+        outcomes: [
+            NeighborOutcome::Silent,
+            NeighborOutcome::Resolved(link),
+            NeighborOutcome::Routed(NextHop {
+                address: gateway,
+                link: None,
+            }),
+        ]
+        .into(),
+        ..ScriptedNeighbors::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let report = engine::run(
+        &request,
+        &mut Admission::new(&private_policy(), &crate::target::SystemResolver),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut Deadline::new(request.limits.max_duration),
+        |_, _| Ok(()),
+    )
+    .expect("neighbor discovery");
+
+    // A silent neighbor is asked again; a routed target's gateway never is.
+    assert_eq!(executor.calls, [on_link, on_link, routed]);
+    // One interval follows each request; nothing was sent for the last.
+    assert_eq!(clock.delays(), [Duration::from_millis(100); 2]);
+    assert_eq!(
+        (report.stats.packets_attempted, report.stats.bytes),
+        (2, 84)
+    );
+    let neighbors = report
+        .hosts
+        .iter()
+        .map(|host| (host.state, host.neighbor.map(|neighbor| neighbor.attempts)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        neighbors,
+        [(State::Responded, Some(2)), (State::NoResponse, Some(0))]
+    );
 }

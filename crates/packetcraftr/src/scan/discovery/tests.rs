@@ -241,12 +241,18 @@ fn neighbor_reasons_precede_probe_reasons() {
     );
 }
 
+fn limits() -> crate::scan::Limits {
+    crate::scan::Limits {
+        max_ports: 8,
+        ..crate::scan::Limits::default()
+    }
+}
+
 fn validate(options: &Options) -> Result<(), Error> {
     options.validate(
-        1,
         Duration::from_secs(1),
         &crate::route::Options::default(),
-        8,
+        &limits(),
     )
 }
 
@@ -317,19 +323,24 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
     };
     assert!(
         neighbor
-            .validate(1, Duration::from_secs(1), &layer3, 8)
+            .validate(Duration::from_secs(1), &layer3, &limits())
             .is_err()
     );
-    // The resolver's own bounds apply to the scan's attempts and timeout.
+    // The resolver's own bounds apply to the scan's timeout and evidence
+    // limits.
     let default_route = crate::route::Options::default();
     assert!(
         neighbor
-            .validate(11, Duration::from_secs(1), &default_route, 8)
+            .validate(Duration::from_secs(31), &default_route, &limits())
             .is_err()
     );
+    let unsnappable = crate::scan::Limits {
+        max_evidence_bytes: 64,
+        ..limits()
+    };
     assert!(
         neighbor
-            .validate(1, Duration::from_secs(31), &default_route, 8)
+            .validate(Duration::from_secs(1), &default_route, &unsnappable)
             .is_err()
     );
 }

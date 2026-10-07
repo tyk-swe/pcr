@@ -69,22 +69,29 @@ impl State {
         })
     }
 
-    /// A resolver sharing this cache that sends at most `max_attempts`
-    /// requests and waits `attempt_timeout` for each.
-    pub(crate) fn exchange(
+    /// A resolver sharing this cache that sends one request and waits
+    /// `attempt_timeout` for its reply, capturing at most `max_frames` frames
+    /// and `max_bytes` bytes.
+    pub(crate) fn single_attempt(
         &self,
-        max_attempts: u32,
         attempt_timeout: std::time::Duration,
+        max_frames: usize,
+        max_bytes: usize,
     ) -> Result<Self, Error> {
-        Self::try_new(Options {
-            max_attempts,
-            attempt_timeout,
-            ..self.options.clone()
-        })
+        Self::try_new(
+            self.options
+                .single_attempt(attempt_timeout, max_frames, max_bytes),
+        )
         .map(|state| Self {
             cache: Arc::clone(&self.cache),
             ..state
         })
+    }
+
+    /// The unexpired cache entry for `request`, without sending anything.
+    pub(crate) fn cached(&self, request: &Request) -> Result<Option<MacAddress>, Error> {
+        validate_request(request)?;
+        self.cache.get(&NeighborCacheKey::from(request))
     }
 
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
@@ -206,6 +213,11 @@ where
             capture_statistics: statistics,
         })
     }
+}
+
+/// The length of the frame that resolving `request` sends.
+pub(crate) fn request_length(request: &Request) -> Result<usize, Error> {
+    build_request_frame(request).map(|frame| frame.len())
 }
 
 impl<T, C> Active<'_, T, C>

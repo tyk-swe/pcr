@@ -76,10 +76,21 @@ impl Lookup {
             .filter(|(_, host)| host.state != State::NoResponse)
             .map(|(index, _)| index)
             .collect();
-        for chunk in selected.chunks(batch::MAX_QUESTIONS) {
-            let remaining = deadline.map_or(Duration::ZERO, |deadline| {
+        // A batch paces its own questions; this pause keeps the scan's rate
+        // between the scan's last probe and each batch's first question.
+        let pause = self
+            .template
+            .queries_per_second
+            .and_then(|rate| Duration::from_secs(1).checked_div(rate))
+            .unwrap_or_default();
+        let remaining = || {
+            deadline.map_or(Duration::ZERO, |deadline| {
                 deadline.saturating_duration_since(Instant::now())
-            });
+            })
+        };
+        for chunk in selected.chunks(batch::MAX_QUESTIONS) {
+            std::thread::sleep(pause.min(remaining()));
+            let remaining = remaining();
             let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
             for (&index, lookup) in chunk.iter().zip(self.lookup(client, &addresses, remaining)) {
                 names[index] = Some(lookup);

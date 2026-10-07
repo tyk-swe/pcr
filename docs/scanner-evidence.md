@@ -347,9 +347,9 @@ The record keeps these rules:
 - `no_response` means the host stayed silent to every selected discovery
   probe within its budget. It is uncertain, never absent.
 - `not_requested` and `skipped` are labels, not measurements.
-- A routed target's neighbor request resolves only its gateway. The gateway's
-  link address appears under `neighbor.next_hop`, never as the target's link
-  or a reason. A target whose own neighbor reply carries the same link address
+- A routed target is sent no neighbor request. Its gateway appears under
+  `neighbor.next_hop`, with a link address only when the neighbor cache
+  already holds one, and never as the target's link or a reason. A target whose own neighbor reply carries the same link address
   as another address of the same family, whether a target or a next hop, is
   flagged `possible_proxy`; PacketcraftR does not assert a cause. A dual-stack
   host answering for one IPv4 and one IPv6 address, or a gateway that is

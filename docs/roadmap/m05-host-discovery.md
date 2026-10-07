@@ -120,11 +120,14 @@ building blocks and publishes one host record per target in the
 - The `neighbor` probe ([executor][scan-executor]) plans the route an ICMP
   probe would take and forces a link-layer route when the link supports one;
   otherwise the outcome is `not_applicable`. An on-link target is resolved
-  through the [neighbor resolver][neighbor-resolver] and its shared cache with
-  the scan's `--attempts` and `--timeout`, giving `resolved` (fresh or cached)
-  or `silent`. A routed target resolves only its gateway, giving `routed` with
-  the gateway's address and link address under `next_hop`. No neighbor request
-  is ever sent for the routed target itself.
+  through the [neighbor resolver][neighbor-resolver] and its shared cache,
+  one request per `--attempts` paced like a probe, each waiting `--timeout`
+  and captured within the scan's evidence limits. That gives `resolved` (fresh
+  or cached) or `silent`; a fresh answer is timestamped when its reply was
+  captured, and the requests count in the scan statistics. A routed target is
+  `routed` with the gateway's address under `next_hop`. Its gateway is not a
+  selected target, so it is sent no request; the next hop carries a link
+  address only when the neighbor cache already holds one.
 - [Host composition][discovery-host] turns discovery outcomes into reasons.
   A reply counts only when the target itself sent it: an echo reply, a TCP
   SYN/ACK or reset, a UDP reply, or a port unreachable from the host. An ICMP
@@ -169,16 +172,21 @@ building blocks and publishes one host record per target in the
   responsive one included, stayed `no_response`. An existing
   `send --link-mode layer2` to the same host fails the same way. With a 5 ms
   egress delay on the target namespace, discovery with `icmp,neighbor,tcp/9`
-  before a `tcp/22` scan published the following:
+  before a `tcp/22` scan, with `--attempts 2` and `--rate 50`, published the
+  following:
   - The dual-stack host was `responded` in both families. Its fresh neighbor
-    reply, echo reply, and TCP reset from the closed port were all `direct`,
-    and the scan found tcp/22 open over IPv4 and closed over IPv6.
-  - The silent on-link targets in each family had `silent` neighbor outcomes,
-    stayed `no_response`, and were skipped.
-  - The routed targets published only the gateway, as a cached `next_hop`.
-    They stayed `no_response`, and the gateway's ICMP unreachable remained
-    probe evidence with no reason.
-  - That run first flagged the dual-stack host as `possible_proxy`, which led
+    reply, timestamped at capture, and its echo replies and TCP resets from
+    the closed port were all `direct`, and the scan found tcp/22 open in both
+    families.
+  - The silent on-link targets in each family were asked twice, had `silent`
+    neighbor outcomes, stayed `no_response`, and were skipped.
+  - The routed targets were sent no neighbor request. Each published its
+    gateway as `next_hop`, with the link address cached from the gateway's own
+    answer as a target. They stayed `no_response`, and the gateway's ICMP
+    unreachable remained probe evidence with no reason.
+  - The statistics counted 34 frames: 24 discovery probes, 6 neighbor
+    requests, and 4 scan probes.
+  - An earlier run flagged the dual-stack host as `possible_proxy`, which led
     to the same-family rule above.
 
 ### Known limits
@@ -192,6 +200,9 @@ building blocks and publishes one host record per target in the
   fails the request, as scan probes already did. Under the default link mode
   the operating system resolves neighbors for wire probes, and the
   `neighbor` probe records silence without failing.
+- **A routed target's next hop is only as complete as the cache.** Its link
+  address appears when the gateway answered earlier, for example as a
+  selected target; otherwise `next_hop` carries the address alone.
 - **Proxy detection is limited to the request.** `possible_proxy` compares
   link addresses only among this request's targets and gateways. A proxy that
   answers for a single target cannot be told apart from the host.

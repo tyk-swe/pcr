@@ -17,34 +17,7 @@ pub(crate) fn materialize<N: neighbor::Resolver>(
 ) -> Result<Materialized, Error> {
     let mut neighbor_resolution = None;
     if plan.needs_neighbor_resolution() {
-        let target = plan
-            .neighbor_target
-            .ok_or_else(|| Error::MissingNeighborTarget {
-                interface: plan.decision.interface.name.clone(),
-            })?;
-        let source = plan
-            .neighbor_source
-            .ok_or_else(|| Error::MissingNeighborSource {
-                interface: plan.decision.interface.name.clone(),
-            })?;
-        let interface_mac = plan
-            .decision
-            .source_mac
-            .ok_or_else(|| Error::MissingSourceMac {
-                interface: plan.decision.interface.name.clone(),
-            })?;
-        let resolution = resolver.resolve(
-            &NeighborRequest {
-                interface: plan.decision.interface.clone(),
-                interface_source: source,
-                interface_mac,
-                target,
-                vlan_tags: plan.neighbor_vlan_tags.clone(),
-                mtu: plan.decision.mtu,
-                link_type: plan.decision.link_type,
-            },
-            deadline,
-        )?;
+        let resolution = resolver.resolve(&neighbor_request(&plan)?, deadline)?;
         plan.destination_mac = Some(resolution.mac_address);
         neighbor_resolution = Some(resolution);
     }
@@ -56,6 +29,36 @@ pub(crate) fn materialize<N: neighbor::Resolver>(
     Ok(Materialized {
         plan,
         neighbor_resolution,
+    })
+}
+
+/// The request that resolves the neighbor `plan` sends its frames to.
+pub(crate) fn neighbor_request(plan: &Plan) -> Result<NeighborRequest, Error> {
+    let interface = || plan.decision.interface.name.clone();
+    let target = plan
+        .neighbor_target
+        .ok_or_else(|| Error::MissingNeighborTarget {
+            interface: interface(),
+        })?;
+    let interface_source = plan
+        .neighbor_source
+        .ok_or_else(|| Error::MissingNeighborSource {
+            interface: interface(),
+        })?;
+    let interface_mac = plan
+        .decision
+        .source_mac
+        .ok_or_else(|| Error::MissingSourceMac {
+            interface: interface(),
+        })?;
+    Ok(NeighborRequest {
+        interface: plan.decision.interface.clone(),
+        interface_source,
+        interface_mac,
+        target,
+        vlan_tags: plan.neighbor_vlan_tags.clone(),
+        mtu: plan.decision.mtu,
+        link_type: plan.decision.link_type,
     })
 }
 

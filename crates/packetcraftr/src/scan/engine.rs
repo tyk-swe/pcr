@@ -114,18 +114,24 @@ where
                 clock,
                 deadline,
                 &mut composer,
+                &mut stats,
             )?;
         }
-        let batches: Vec<_> = build_batches(
+        let discovery = StagePlan {
+            targets: &approved.targets,
+            endpoints: &options.probes,
+            stage: Stage::Discovery,
+            first_sequence: 0,
+        };
+        scan_sequence = discovery.probes(request)?;
+        let discovered = execute(
             request,
-            &approved.targets,
-            &options.probes,
-            Stage::Discovery,
-            0,
-        )
-        .collect();
-        scan_sequence = batches.len() as u64;
-        let discovered = execute(request, executor, clock, deadline, &mut evidence, batches)?;
+            executor,
+            clock,
+            deadline,
+            &mut evidence,
+            &discovery,
+        )?;
         add_stats(&mut stats, &discovered, scan_sequence)?;
         for observation in evidence.classifier_mut().discovery.drain(..) {
             if !composer.observe(observation) {
@@ -146,16 +152,14 @@ where
         .filter(|(_, host)| host.scan == discovery::Scan::Scanned)
         .map(|(target, _)| target.clone())
         .collect();
-    let batches: Vec<_> = build_batches(
-        request,
-        &scanned,
-        &approved.endpoints,
-        Stage::Scan,
-        scan_sequence,
-    )
-    .collect();
-    let scan_probes = batches.len() as u64;
-    let scanned = execute(request, executor, clock, deadline, &mut evidence, batches)?;
+    let scan = StagePlan {
+        targets: &scanned,
+        endpoints: &approved.endpoints,
+        stage: Stage::Scan,
+        first_sequence: scan_sequence,
+    };
+    let scan_probes = scan.probes(request)?;
+    let scanned = execute(request, executor, clock, deadline, &mut evidence, &scan)?;
     add_stats(
         &mut stats,
         &scanned,
@@ -181,8 +185,9 @@ where
     })
 }
 
-/// Resolves each target's link address in selection order, pacing targets by
-/// the requests the previous one sent.
+/// Resolves each target's link address in selection order. Each request is
+/// paced like a probe, and a silent neighbor is asked again until the
+/// request's attempts are spent.
 fn discover_neighbors<E: Pipelined, C: Clock>(
     request: &Request,
     targets: &[SelectedAddress],
@@ -190,36 +195,49 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
     clock: &mut C,
     deadline: &mut Deadline,
     composer: &mut Composer,
+    stats: &mut crate::Stats,
 ) -> Result<(), Error> {
-    let mut previous = 0;
+    let mut sent = false;
     for (index, target) in targets.iter().enumerate() {
-        if previous > 0 {
-            pace(request, clock, deadline, previous)?;
-        }
-        enforce_deadline(&Probes, deadline)?;
-        let neighbor = executor
-            .resolve_neighbor(target, request.attempts, request.timeout, deadline)
-            .map_err(|source| Error::Neighbor {
-                address: target.address,
-                source,
-            })?;
-        // A resolver stopped by the deadline reports silence; the deadline
-        // decides instead.
-        enforce_deadline(&Probes, deadline)?;
-        if neighbor.attempts > request.attempts {
-            return Err(Error::InvalidEvidence {
-                sequence: 0,
-                message: format!(
-                    "neighbor discovery of {} sent {} requests for {} attempts",
-                    target.address, neighbor.attempts, request.attempts
-                ),
-            });
-        }
-        previous = neighbor.attempts as usize;
+        let mut attempts = 0;
+        let neighbor = loop {
+            if sent {
+                pace(request, clock, deadline, 1)?;
+            }
+            enforce_deadline(&Probes, deadline)?;
+            let (neighbor, exchange) = executor
+                .resolve_neighbor(target, request.timeout, deadline)
+                .map_err(|source| Error::Neighbor {
+                    address: target.address,
+                    source,
+                })?;
+            // A resolver stopped by the deadline reports silence; the deadline
+            // decides instead.
+            enforce_deadline(&Probes, deadline)?;
+            if neighbor.attempts > 1 {
+                return Err(Error::InvalidEvidence {
+                    sequence: 0,
+                    message: format!(
+                        "neighbor discovery of {} sent {} requests in one attempt",
+                        target.address, neighbor.attempts
+                    ),
+                });
+            }
+            add_stats(stats, &exchange, 0)?;
+            sent = neighbor.attempts > 0;
+            attempts += neighbor.attempts;
+            let silent = matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
+            if !silent || !sent || attempts >= request.attempts {
+                break discovery::Neighbor {
+                    attempts,
+                    ..neighbor
+                };
+            }
+        };
         composer.neighbor(index, neighbor);
     }
-    if previous > 0 {
-        pace(request, clock, deadline, previous)?;
+    if sent {
+        pace(request, clock, deadline, 1)?;
     }
     Ok(())
 }
@@ -246,24 +264,53 @@ fn pace<C: Clock>(
     })
 }
 
+/// One stage's probes: every endpoint on every target, attempt by attempt,
+/// numbered from `first_sequence`.
+struct StagePlan<'a> {
+    targets: &'a [SelectedAddress],
+    endpoints: &'a [ProbeEndpoint],
+    stage: Stage,
+    first_sequence: u64,
+}
+
+impl StagePlan<'_> {
+    fn probes(&self, request: &Request) -> Result<u64, Error> {
+        probe_count(self.targets.len(), self.endpoints.len(), request.attempts)
+            .map(|count| count as u64)
+    }
+
+    fn batches<'r>(&self, request: &'r Request) -> impl Iterator<Item = Batch<Probe>> + 'r
+    where
+        Self: 'r,
+    {
+        build_batches(
+            request,
+            self.targets,
+            self.endpoints,
+            self.stage,
+            self.first_sequence,
+        )
+    }
+}
+
 fn execute<E, C, F>(
     request: &Request,
     executor: &mut E,
     clock: &mut C,
     deadline: &mut Deadline,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
-    batches: Vec<Batch<Probe>>,
+    plan: &StagePlan<'_>,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    if batches.is_empty() {
+    if plan.targets.is_empty() || plan.endpoints.is_empty() {
         Ok(crate::Stats::default())
     } else if request.max_in_flight == 1 {
         run_batches(
-            batches,
+            plan.batches(request),
             request.probes_per_second,
             deadline,
             clock,
@@ -271,7 +318,7 @@ where
             evidence,
         )
     } else {
-        run_pipelined(request, executor, evidence, deadline, batches)
+        run_pipelined(request, executor, evidence, deadline, plan)
     }
 }
 
@@ -286,25 +333,30 @@ fn run_pipelined<E, F>(
     executor: &mut E,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
     deadline: &Deadline,
-    batches: Vec<Batch<Probe>>,
+    plan: &StagePlan<'_>,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    let batch_bytes = batches.iter().fold(0usize, |bytes, batch| {
-        let scope_bytes = batch.probes.iter().fold(0usize, |bytes, probe| {
-            bytes.saturating_add(probe.scope.as_ref().map_or(0, |scope| {
-                scope
-                    .zone
-                    .as_str()
-                    .len()
-                    .saturating_add(scope.interface.name.len())
-            }))
+    // Checked before any description is built.
+    let probes_per_target = plan
+        .endpoints
+        .len()
+        .saturating_mul(request.attempts as usize);
+    let batch_bytes = plan.targets.iter().fold(0usize, |bytes, target| {
+        let scope_bytes = target.scope.as_ref().map_or(0, |scope| {
+            scope
+                .zone
+                .as_str()
+                .len()
+                .saturating_add(scope.interface.name.len())
         });
-        bytes
-            .saturating_add(std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
-            .saturating_add(scope_bytes)
+        bytes.saturating_add(
+            (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
+                .saturating_add(scope_bytes)
+                .saturating_mul(probes_per_target),
+        )
     });
     if batch_bytes > request.limits.max_prepared_bytes {
         return Err(Error::PipelineExecution {
@@ -314,6 +366,7 @@ where
             ),
         });
     }
+    let batches: Vec<_> = plan.batches(request).collect();
     let mut completed = vec![false; batches.len()];
     let mut confirmed = vec![false; batches.len()];
     let mut sent_bytes = 0u64;

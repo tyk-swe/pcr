@@ -13220,7 +13220,7 @@
         },
         "next_hop": {
           "type": "object",
-          "description": "The gateway a routed target resolves through; its link address is never the target's identity.",
+          "description": "The gateway a routed target is reached through, which is sent no request. Its link address appears only when already cached and is never the target's identity.",
           "required": [
             "address"
           ],

@@ -133,7 +133,7 @@ impl<C: Session> Transaction<C> {
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         mut stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
-    ) -> Result<(Report, Vec<Option<std::time::Instant>>), Error>
+    ) -> Result<(Report, Vec<super::evidence::UnsolicitedIngress>), Error>
     where
         T: transmit::Provider + ?Sized,
         F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,

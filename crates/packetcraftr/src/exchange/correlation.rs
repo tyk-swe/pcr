@@ -449,10 +449,10 @@ impl Accumulator {
         &mut self,
         candidates: impl IntoIterator<Item = UnsolicitedEvidence>,
     ) -> ProcessOutcome {
+        self.mark_correlation_deadline_expired();
         for candidate in candidates {
             self.queue_unsolicited(candidate);
         }
-        self.mark_correlation_deadline_expired();
         ProcessOutcome::CorrelationDeadlineExpired
     }
 
@@ -471,7 +471,10 @@ impl Accumulator {
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
         self.unsolicited_ingress
-            .push(candidate.freshness.map(|freshness| freshness.received_at));
+            .push(super::evidence::UnsolicitedIngress {
+                received_at: candidate.freshness.map(|freshness| freshness.received_at),
+                correlation_expired: self.correlation_deadline_expired,
+            });
         self.pending_events.push(super::Event::Unsolicited {
             frame: candidate.decoded,
         });

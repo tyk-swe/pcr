@@ -9,8 +9,14 @@ use std::time::Duration;
 
 pub(crate) struct WorkflowEvidence {
     pub(crate) aggregate: Aggregate,
-    pub(crate) unsolicited_ingress: Vec<Option<std::time::Instant>>,
+    pub(crate) unsolicited_ingress: Vec<UnsolicitedIngress>,
     pub(crate) response_deadline: std::time::Instant,
+}
+
+#[derive(Debug)]
+pub(crate) struct UnsolicitedIngress {
+    pub(crate) received_at: Option<std::time::Instant>,
+    pub(crate) correlation_expired: bool,
 }
 
 #[derive(Clone, Debug)]

@@ -1890,6 +1890,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Serial raw scans retain queued replies processed after expiration as late
+  evidence, and label replies as duplicates only when the probe has a winner.
 - Serial raw scans label in-window replies rejected by the response limit as
   duplicate evidence, preserving the late label for arrivals after the window.
 - Raw scans reserve evidence capacity for outstanding probes before retaining

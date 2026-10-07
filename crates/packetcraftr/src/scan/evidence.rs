@@ -191,13 +191,17 @@ impl Classifier for ProbeClassifier<'_> {
         probe: &Probe,
         sent: &SentPacket,
         capture: &crate::probe::runner::UnsolicitedCapture,
+        has_response: bool,
     ) -> Option<Event> {
         let received_at = capture.received_at?;
         if received_at < sent.timing().freshness_marker().monotonic() {
             return None;
         }
         self.classify(probe, sent, &capture.decoded)?;
-        let passed = if received_at > capture.response_deadline {
+        let passed = if capture.correlation_expired
+            || received_at > capture.response_deadline
+            || !has_response
+        {
             Passed::Late
         } else {
             Passed::Superseded

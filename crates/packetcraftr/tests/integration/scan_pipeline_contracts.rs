@@ -532,6 +532,43 @@ fn serial_in_window_reply_rejected_by_response_limit_is_a_duplicate() {
 }
 
 #[test]
+fn serial_sole_on_time_reply_in_final_drain_is_late() {
+    let mut request = request();
+    request.max_in_flight = 1;
+    request.endpoints.truncate(1);
+    request.timeout = Duration::from_secs(1);
+    let clock = VirtualClock::default();
+    let ingress = clock.now() + request.timeout / 2;
+    let state = Arc::new(Mutex::new(State {
+        idle_clock: Some(clock.clone()),
+        release_replies_after_timeout: true,
+        late_ingress: Some(Some(ingress)),
+        ..State::default()
+    }));
+    let collector = scan::Collector::default();
+    let report = client(&state)
+        .with_clock(clock)
+        .scan(request, collector.clone())
+        .unwrap();
+    let aggregate = collector.finish(report).unwrap();
+    let probe = &aggregate.endpoints[0].probes[0];
+    assert_eq!(probe.status, packetcraftr::probe::ProbeStatus::Timeout);
+    assert!(probe.response.is_none());
+    let [capture] = aggregate.unattributed.as_slice() else {
+        panic!("the sole queued reply must be retained");
+    };
+    assert_eq!(capture.sequence, Some(probe.sequence));
+    assert_eq!(capture.attribution, scan::Attribution::Late);
+    assert!(
+        aggregate
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
+    );
+    assert_eq!(state.lock().unwrap().sends, 1);
+}
+
+#[test]
 fn serial_final_drain_retains_only_fresh_late_evidence() {
     let stale = Instant::now() - Duration::from_secs(1);
     for (ingress, max_undecoded, retained) in [

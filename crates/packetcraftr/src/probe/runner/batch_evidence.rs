@@ -59,6 +59,7 @@ pub(crate) trait Classifier {
         _probe: &Self::Probe,
         _sent: &SentPacket,
         _capture: &UnsolicitedCapture,
+        _has_response: bool,
     ) -> Option<Self::Event> {
         None
     }
@@ -173,6 +174,7 @@ where
         self.enforce(deadline)?;
         let mut selector = ResponseSelector::new(&mut responses);
         let mut flow = ControlFlow::Continue(());
+        let mut has_response = Vec::with_capacity(batch.probes.len());
         for (request_index, (probe, sent)) in batch.probes.iter().zip(&sent).enumerate() {
             self.enforce(deadline)?;
             let Self {
@@ -192,6 +194,7 @@ where
                 || enforce_deadline(errors, deadline),
                 &mut passed,
             )?;
+            has_response.push(best.is_some());
             state.settle_response();
             let outcome = match best {
                 None => Outcome::Timeout,
@@ -230,7 +233,11 @@ where
                 .probes
                 .iter()
                 .zip(&sent)
-                .filter_map(|(probe, sent)| self.classifier.unsolicited(probe, sent, &capture));
+                .zip(&has_response)
+                .filter_map(|((probe, sent), has_response)| {
+                    self.classifier
+                        .unsolicited(probe, sent, &capture, *has_response)
+                });
             let Some(event) = matches.next() else {
                 continue;
             };

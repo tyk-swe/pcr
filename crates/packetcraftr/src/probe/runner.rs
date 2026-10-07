@@ -38,6 +38,7 @@ pub(crate) struct UnsolicitedCapture {
     pub(crate) decoded: DecodedPacket,
     pub(crate) received_at: Option<Instant>,
     pub(crate) response_deadline: Instant,
+    pub(crate) correlation_expired: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -68,10 +69,11 @@ impl Evidence {
         let unsolicited = unsolicited
             .into_iter()
             .zip(result.unsolicited_ingress)
-            .map(|(decoded, received_at)| UnsolicitedCapture {
+            .map(|(decoded, ingress)| UnsolicitedCapture {
                 decoded,
-                received_at,
+                received_at: ingress.received_at,
                 response_deadline: result.response_deadline,
+                correlation_expired: ingress.correlation_expired,
             })
             .collect();
         let sent = sent

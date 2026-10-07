@@ -272,6 +272,7 @@ impl Executor<Batch<Probe>> for LateResponseExecutor {
                 ),
                 received_at: None,
                 response_deadline: std::time::Instant::now(),
+                correlation_expired: true,
             });
         Ok(execution)
     }
@@ -308,6 +309,54 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
         &[0x45],
         diagnostics,
     )
+}
+
+#[test]
+fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
+    use crate::probe::runner::{Classifier as _, UnsolicitedCapture};
+
+    let local = Ipv4Addr::new(192, 0, 2, 1);
+    let remote = Ipv4Addr::new(192, 0, 2, 2);
+    let probe = Probe {
+        sequence: 0,
+        address: remote.into(),
+        scope: None,
+        endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        attempt: 1,
+        udp_payload: Default::default(),
+        udp_profile: None,
+    };
+    let sent = crate::test_support::sent_packet(tcp_packet(local, remote, 50_000, 80, Tcp::SYN));
+    let received_at = sent.timing().freshness_marker().monotonic();
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let classifier = super::evidence::ProbeClassifier {
+        registry: &registry,
+        target: "192.0.2.2".into(),
+        winners: Default::default(),
+        rtt: Default::default(),
+    };
+    for (has_response, correlation_expired, expected) in [
+        (false, false, super::Attribution::Late),
+        (true, true, super::Attribution::Late),
+        (true, false, super::Attribution::Duplicate),
+    ] {
+        let capture = UnsolicitedCapture {
+            decoded: decoded(
+                tcp_packet(remote, local, 80, 50_000, Tcp::SYN | Tcp::ACK),
+                Vec::new(),
+            ),
+            received_at: Some(received_at),
+            response_deadline: received_at + Duration::from_secs(1),
+            correlation_expired,
+        };
+        let Some(Event::Unattributed(evidence)) =
+            classifier.unsolicited(&probe, &sent, &capture, has_response)
+        else {
+            panic!("the correlated reply must be retained");
+        };
+        assert_eq!(evidence.sequence, Some(probe.sequence));
+        assert_eq!(evidence.attribution, expected);
+    }
 }
 
 #[test]

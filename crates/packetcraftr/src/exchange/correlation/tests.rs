@@ -76,6 +76,12 @@ fn dl_expiry_keeps_unsol_order() {
         ProcessOutcome::CorrelationDeadlineExpired
     );
     assert!(accumulator.unsolicited.is_empty());
+    assert!(
+        accumulator
+            .unsolicited_ingress
+            .iter()
+            .all(|ingress| ingress.correlation_expired)
+    );
     assert_eq!(
         accumulator
             .drain_events()

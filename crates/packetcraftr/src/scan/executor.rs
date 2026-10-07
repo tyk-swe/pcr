@@ -250,6 +250,19 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 link,
             }));
         }
+        // The resolver sends exactly this frame, so its final bytes are checked
+        // like a prepared packet's. An NDP solicitation goes to the target's
+        // solicited-node group, so the address it asks for is authorized
+        // rather than the group, and every source must be the route's own.
+        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
+        crate::policy::decode_wire(request.link_type, &frame)
+            .and_then(|decoded| {
+                client.policy.authorize_destination(request.target)?;
+                client
+                    .policy
+                    .authorize_packet_sources(&decoded.packet, plan)
+            })
+            .map_err(BoundaryError::from_error)?;
         let (max_frames, max_bytes) = self.neighbor_capture;
         let state = client
             .neighbors
@@ -288,8 +301,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             }) => (None, attempts, capture_statistics, None),
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
-        let frame_bytes =
-            crate::neighbor::request_length(&request).map_err(BoundaryError::from_error)?;
+        let frame_bytes = frame.len();
         let stats = Stats {
             packets_attempted: u64::from(attempts),
             packets_completed: u64::from(attempts),

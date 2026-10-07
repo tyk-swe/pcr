@@ -280,7 +280,9 @@ impl Request {
         if self.endpoints.is_empty() {
             return invalid("TCP and UDP scans require at least one destination port".to_owned());
         }
-        if self.probes(Transport::Icmp) && self.endpoints.len() > 1 {
+        // Discovery may pair ICMP echo with port probes; only the scan's
+        // portless ICMP endpoint stands alone.
+        if self.endpoints.contains(&ProbeEndpoint::Icmp) && self.endpoints.len() > 1 {
             return invalid(
                 "ICMP scans are portless and do not accept destination ports".to_owned(),
             );

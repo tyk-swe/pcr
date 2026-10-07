@@ -124,7 +124,9 @@ building blocks and publishes one host record per target in the
   one request per `--attempts` paced like a probe, each waiting `--timeout`
   and captured within the scan's evidence limits. That gives `resolved` (fresh
   or cached) or `silent`; a fresh answer is timestamped when its reply was
-  captured, and the requests count in the scan statistics. A routed target is
+  captured, and the requests count in the scan statistics. Each request
+  frame is checked before it is sent: the address it asks for must be
+  authorized and its sources must be the route's own. A routed target is
   `routed` with the gateway's address under `next_hop`. Its gateway is not a
   selected target, so it is sent no request; the next hop carries a link
   address only when the neighbor cache already holds one.
@@ -172,20 +174,20 @@ building blocks and publishes one host record per target in the
   responsive one included, stayed `no_response`. An existing
   `send --link-mode layer2` to the same host fails the same way. With a 5 ms
   egress delay on the target namespace, discovery with `icmp,neighbor,tcp/9`
-  before a `tcp/22` scan, with `--attempts 2` and `--rate 50`, published the
-  following:
+  before a scan of tcp/22 and tcp/80, with `--attempts 2` and `--rate 50`,
+  published the following:
   - The dual-stack host was `responded` in both families. Its fresh neighbor
     reply, timestamped at capture, and its echo replies and TCP resets from
-    the closed port were all `direct`, and the scan found tcp/22 open in both
-    families.
+    the closed port were all `direct`, and the scan found tcp/22 open and
+    tcp/80 closed in both families.
   - The silent on-link targets in each family were asked twice, had `silent`
     neighbor outcomes, stayed `no_response`, and were skipped.
   - The routed targets were sent no neighbor request. Each published its
     gateway as `next_hop`, with the link address cached from the gateway's own
     answer as a target. They stayed `no_response`, and the gateway's ICMP
     unreachable remained probe evidence with no reason.
-  - The statistics counted 34 frames: 24 discovery probes, 6 neighbor
-    requests, and 4 scan probes.
+  - The statistics counted 38 frames: 24 discovery probes, 6 neighbor
+    requests, and 8 scan probes.
   - An earlier run flagged the dual-stack host as `possible_proxy`, which led
     to the same-family rule above.
 

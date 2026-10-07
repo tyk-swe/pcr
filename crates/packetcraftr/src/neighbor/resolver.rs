@@ -215,9 +215,9 @@ where
     }
 }
 
-/// The length of the frame that resolving `request` sends.
-pub(crate) fn request_length(request: &Request) -> Result<usize, Error> {
-    build_request_frame(request).map(|frame| frame.len())
+/// The frame that resolving `request` sends on each attempt.
+pub(crate) fn request_frame(request: &Request) -> Result<Bytes, Error> {
+    build_request_frame(request)
 }
 
 impl<T, C> Active<'_, T, C>

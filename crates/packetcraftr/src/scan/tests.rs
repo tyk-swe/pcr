@@ -1049,3 +1049,26 @@ fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
         [(State::Responded, Some(2)), (State::NoResponse, Some(0))]
     );
 }
+
+#[test]
+fn icmp_discovery_pairs_with_a_multi_port_scan() {
+    use super::discovery::{Mode, Options};
+    use crate::probe::ProbeEndpoint;
+    let mut request = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))));
+    request.endpoints = vec![
+        ProbeEndpoint::Tcp { port: 22 },
+        ProbeEndpoint::Tcp { port: 80 },
+    ];
+    request.discovery = Options {
+        mode: Mode::Before,
+        probes: vec![ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    request
+        .validate()
+        .expect("ICMP discovery before a two-port scan");
+
+    // The scan's own portless ICMP endpoint still stands alone.
+    request.endpoints.insert(0, ProbeEndpoint::Icmp);
+    assert!(matches!(request.validate(), Err(Error::InvalidPort { .. })));
+}

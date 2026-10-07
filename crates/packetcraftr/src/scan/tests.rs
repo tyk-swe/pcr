@@ -271,6 +271,7 @@ impl Executor<Batch<Probe>> for LateResponseExecutor {
                     Vec::new(),
                 ),
                 received_at: None,
+                response_deadline: std::time::Instant::now(),
             });
         Ok(execution)
     }

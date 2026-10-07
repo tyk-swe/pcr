@@ -197,7 +197,12 @@ impl Classifier for ProbeClassifier<'_> {
             return None;
         }
         self.classify(probe, sent, &capture.decoded)?;
-        self.passed(probe, Passed::Late, capture.decoded.frame.clone())
+        let passed = if received_at > capture.response_deadline {
+            Passed::Late
+        } else {
+            Passed::Superseded
+        };
+        self.passed(probe, passed, capture.decoded.frame.clone())
     }
 
     fn diagnostic(&self, diagnostic: Diagnostic) -> Event {

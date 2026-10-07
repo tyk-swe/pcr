@@ -15,7 +15,10 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::{Icmpv4, Ipv4};
-use packetcraftr_core::protocol::transport::Tcp;
+use packetcraftr_core::protocol::{
+    application::dns::Dns,
+    transport::{Tcp, Udp},
+};
 use packetcraftr_netio::interface::Id;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::{self as net, capture, route, transmit};
@@ -42,6 +45,7 @@ pub(crate) struct State {
     pub(crate) hold_replies_until: usize,
     pub(crate) tied_resets: bool,
     pub(crate) repeated_syn_acks: bool,
+    pub(crate) mismatched_dns_replies: bool,
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
     pub(crate) sent_wires: Vec<Bytes>,
@@ -151,6 +155,32 @@ impl transmit::Provider for Io {
         let ingress = Instant::now();
         let replies = match state.hops {
             Some(hops) if ip.ttl < hops => vec![icmp_error(router(ip.ttl), 11, 0)],
+            _ if tcp.is_none() && state.mismatched_dns_replies => {
+                let udp = decoded.packet.get::<Udp>().unwrap();
+                let query = decoded.packet.get::<Dns>().unwrap();
+                (1..=2)
+                    .map(|offset| {
+                        let mut dns = query.clone();
+                        dns.edit(|dns| {
+                            dns.response = true;
+                            dns.id = query.id.wrapping_add(offset);
+                        });
+                        let mut response = Packet::new();
+                        response.push(Ipv4 {
+                            source: ip.destination,
+                            destination: ip.source,
+                            ..Default::default()
+                        });
+                        response.push(Udp {
+                            source_port: udp.destination_port,
+                            destination_port: udp.source_port,
+                            ..Default::default()
+                        });
+                        response.push(dns);
+                        frame(response)
+                    })
+                    .collect()
+            }
             // Every UDP port on the fixture host is closed.
             _ if tcp.is_none() => vec![icmp_error(ip.destination, 3, 3)],
             _ if state.repeated_syn_acks => {

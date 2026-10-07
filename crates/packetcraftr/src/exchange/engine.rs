@@ -66,6 +66,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
     ) -> Result<super::WorkflowEvidence, Error> {
         let mut observed = Observed::default();
         let transaction = self.arm_capture(self.prepare_exchange(request)?)?;
+        let response_deadline = transaction.window.ends_at();
         let (report, unsolicited_ingress) = transaction.execute(
             self.providers.transmit(),
             workflow_matcher,
@@ -78,6 +79,7 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         Ok(super::WorkflowEvidence {
             aggregate: observed.finish(report)?,
             unsolicited_ingress,
+            response_deadline,
         })
     }
 }

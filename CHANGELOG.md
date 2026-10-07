@@ -1890,6 +1890,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Serial raw scans label in-window replies rejected by the response limit as
+  duplicate evidence, preserving the late label for arrivals after the window.
 - Raw scans reserve evidence capacity for outstanding probes before retaining
   extra replies, so early duplicates cannot crowd out later winning frames.
 - The scan help exclusion example uses `ssh`, which is in the bundled port catalog.

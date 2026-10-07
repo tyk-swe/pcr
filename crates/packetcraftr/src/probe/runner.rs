@@ -37,6 +37,7 @@ impl<P> Batch<P> {
 pub(crate) struct UnsolicitedCapture {
     pub(crate) decoded: DecodedPacket,
     pub(crate) received_at: Option<Instant>,
+    pub(crate) response_deadline: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +71,7 @@ impl Evidence {
             .map(|(decoded, received_at)| UnsolicitedCapture {
                 decoded,
                 received_at,
+                response_deadline: result.response_deadline,
             })
             .collect();
         let sent = sent

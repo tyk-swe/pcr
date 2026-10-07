@@ -490,6 +490,48 @@ fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
 }
 
 #[test]
+fn serial_in_window_reply_rejected_by_response_limit_is_a_duplicate() {
+    let mut request = request();
+    request.max_in_flight = 1;
+    request.endpoints = vec![packetcraftr::probe::ProbeEndpoint::Udp { port: 53 }];
+    request.timeout = Duration::from_secs(1);
+    request.collection.max_responses = 1;
+    request
+        .udp_profiles
+        .insert(53, Arc::clone(&scan::profile::curated::bundled()[&53]));
+    let clock = VirtualClock::default();
+    let state = Arc::new(Mutex::new(State {
+        idle_clock: Some(clock.clone()),
+        mismatched_dns_replies: true,
+        ..State::default()
+    }));
+    let collector = scan::Collector::default();
+    let report = client(&state)
+        .with_clock(clock)
+        .scan(request, collector.clone())
+        .unwrap();
+    let aggregate = collector.finish(report).unwrap();
+    let probe = &aggregate.endpoints[0].probes[0];
+    assert_eq!(probe.classification, scan::Classification::Open);
+    assert_eq!(
+        probe.application.as_ref().unwrap().status,
+        scan::profile::Status::Rejected
+    );
+    assert!(probe.response.is_some());
+    assert!(
+        aggregate
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.response_limit")
+    );
+    let [capture] = aggregate.unattributed.as_slice() else {
+        panic!("the extra DNS reply must be retained");
+    };
+    assert_eq!(capture.sequence, Some(probe.sequence));
+    assert_eq!(capture.attribution, scan::Attribution::Duplicate);
+}
+
+#[test]
 fn serial_final_drain_retains_only_fresh_late_evidence() {
     let stale = Instant::now() - Duration::from_secs(1);
     for (ingress, max_undecoded, retained) in [

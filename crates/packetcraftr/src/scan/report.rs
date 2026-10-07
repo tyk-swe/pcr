@@ -157,8 +157,8 @@ pub enum Attribution {
     /// Correlates with a probe whose outcome was already published: its
     /// window had closed or a definitive reply had settled it.
     Late,
-    /// An additional reply to a probe whose outcome kept a higher-ranked or
-    /// earlier reply.
+    /// An additional in-window reply whose probe kept another reply, through
+    /// candidate ordering or the response limit.
     Duplicate,
     /// Correlates with more than one probe, so no outcome claimed it.
     Ambiguous,

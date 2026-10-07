@@ -40,6 +40,7 @@ struct Pending {
     sent: Arc<SentPacket>,
     deadline: Instant,
     best: Option<Best>,
+    passed: Vec<crate::exchange::Response>,
     last_response: Option<Frame>,
     charge: usize,
 }
@@ -399,6 +400,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 sent: sent.clone(),
                 deadline: end,
                 best: None,
+                passed: Vec::new(),
                 last_response: None,
                 charge: memory,
             },
@@ -561,37 +563,79 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .as_ref()
             .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
         {
-            self.evidence
-                .replace(
-                    entry
-                        .best
-                        .as_ref()
-                        .map(|previous| previous.response.response.frame.bytes().len()),
-                    raw.bytes().len(),
-                    self.options.max_evidence_frames,
-                    self.options.max_evidence_bytes,
-                )
-                .map_err(|error| match error {
-                    RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
-                        limit("evidence frames", self.options.max_evidence_frames)
-                    }
-                    RetentionError::ByteCountOverflow | RetentionError::ByteLimit => {
-                        limit("evidence bytes", self.options.max_evidence_bytes)
-                    }
-                })?;
-            let superseded = entry.best.replace(candidate);
-            if let Some(previous) = superseded {
-                self.unattributed(
-                    previous.response.response.frame,
-                    Attribution::Duplicate,
-                    Some(index),
-                )?;
+            let previous_bytes = entry
+                .best
+                .as_ref()
+                .map(|previous| previous.response.response.frame.bytes().len());
+            // Buffered duplicates may use spare capacity, but a winner takes priority.
+            while let Err(error) = self.evidence.replace(
+                previous_bytes,
+                raw.bytes().len(),
+                self.options.max_evidence_frames,
+                self.options.max_evidence_bytes,
+            ) {
+                let Some(discarded) = self
+                    .pending
+                    .values_mut()
+                    .find_map(|entry| entry.passed.pop())
+                else {
+                    return Err(match error {
+                        RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
+                            limit("evidence frames", self.options.max_evidence_frames)
+                        }
+                        RetentionError::ByteCountOverflow | RetentionError::ByteLimit => {
+                            limit("evidence bytes", self.options.max_evidence_bytes)
+                        }
+                    });
+                };
+                self.evidence
+                    .release(discarded.response.frame.bytes().len());
+                self.evidence_limit()?;
+            }
+            let entry = self.pending.get_mut(&index).expect("candidate is pending");
+            if let Some(previous) = entry.best.replace(candidate) {
+                self.buffer_duplicate(index, previous.response)?;
             }
         } else {
-            self.unattributed(raw, Attribution::Duplicate, Some(index))?;
+            self.buffer_duplicate(index, candidate.response)?;
         }
         if definitive {
             self.complete(index)?;
+        }
+        Ok(())
+    }
+
+    fn buffer_duplicate(
+        &mut self,
+        index: usize,
+        response: crate::exchange::Response,
+    ) -> Result<(), BoundaryError> {
+        if self
+            .evidence
+            .reserve(
+                response.response.frame.bytes().len(),
+                self.options.max_evidence_frames,
+                self.options.max_evidence_bytes,
+            )
+            .is_ok()
+        {
+            self.pending
+                .get_mut(&index)
+                .expect("candidate is pending")
+                .passed
+                .push(response);
+            Ok(())
+        } else {
+            self.evidence_limit()
+        }
+    }
+
+    fn evidence_limit(&mut self) -> Result<(), BoundaryError> {
+        if self.diagnostics.insert("scan.evidence_limit") {
+            (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                "scan.evidence_limit",
+                "scan evidence retention limit reached; extra replies were omitted",
+            )))?;
         }
         Ok(())
     }
@@ -627,15 +671,20 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
             capture: Default::default(),
         };
+        let mut responses: Vec<_> = entry
+            .best
+            .take()
+            .map(|best| best.response)
+            .into_iter()
+            .collect();
+        responses.append(&mut entry.passed);
+        for response in &responses {
+            self.evidence.release(response.response.frame.bytes().len());
+        }
         let execution = Evidence {
             permit: self.planned[index].permit,
             sent: vec![entry.sent.as_ref().clone()],
-            responses: entry
-                .best
-                .take()
-                .map(|best| best.response)
-                .into_iter()
-                .collect(),
+            responses,
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
@@ -646,9 +695,6 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .pending
             .remove(&index)
             .expect("completed pending probe");
-        if let Some(response) = entry.last_response {
-            self.evidence.release(response.bytes().len());
-        }
         if self.recent.len() == self.options.max_in_flight
             && let Some((_, _, charge)) = self.recent.pop_front()
         {

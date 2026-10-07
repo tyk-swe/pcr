@@ -186,6 +186,20 @@ impl Classifier for ProbeClassifier<'_> {
         }))
     }
 
+    fn unsolicited(
+        &self,
+        probe: &Probe,
+        sent: &SentPacket,
+        capture: &crate::probe::runner::UnsolicitedCapture,
+    ) -> Option<Event> {
+        let received_at = capture.received_at?;
+        if received_at < sent.timing().freshness_marker().monotonic() {
+            return None;
+        }
+        self.classify(probe, sent, &capture.decoded)?;
+        self.passed(probe, Passed::Late, capture.decoded.frame.clone())
+    }
+
     fn diagnostic(&self, diagnostic: Diagnostic) -> Event {
         Event::Diagnostic(diagnostic)
     }

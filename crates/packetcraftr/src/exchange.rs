@@ -21,7 +21,7 @@ pub(crate) use accumulator::{
 };
 pub use error::Error;
 pub use evidence::{Event, Response};
-pub(crate) use evidence::{Observed, into_sent_packet};
+pub(crate) use evidence::{Observed, WorkflowEvidence, into_sent_packet};
 pub(crate) use plan::Prepared;
 pub use report::{Aggregate, Collector, Report};
 pub use request::{

@@ -164,22 +164,21 @@ fn expand(
                 ))
             })?;
             let mut matched = false;
-            for (member_transport, member) in preset.members() {
-                let Some(transport) = applies
-                    .iter()
-                    .copied()
-                    .find(|transport| catalog_transport(*transport) == Some(member_transport))
-                else {
-                    continue;
-                };
-                let entry = catalog.named(member_transport, member).ok_or_else(|| {
-                    invalid(format!(
-                        "port preset {name:?} member {transport}/{member} is not in catalog {}",
-                        catalog.version
-                    ))
-                })?;
-                visit(endpoint(transport, entry.port));
-                matched = true;
+            for transport in applies.iter().copied() {
+                for (member_transport, member) in
+                    preset.members().filter(|(member_transport, _)| {
+                        catalog_transport(transport) == Some(*member_transport)
+                    })
+                {
+                    let entry = catalog.named(member_transport, member).ok_or_else(|| {
+                        invalid(format!(
+                            "port preset {name:?} member {transport}/{member} is not in catalog {}",
+                            catalog.version
+                        ))
+                    })?;
+                    visit(endpoint(transport, entry.port));
+                    matched = true;
+                }
             }
             if !matched {
                 return Err(invalid(format!(

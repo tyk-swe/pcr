@@ -10,6 +10,7 @@ use packetcraftr_netio::capture::Captured;
 use std::{sync::Arc, time::Duration};
 
 use super::*;
+use crate::exchange::Collection;
 
 fn closed_window() -> Window {
     Window::open(&crate::clock::SystemClock, Duration::ZERO, None).expect("fixture window")

@@ -257,16 +257,21 @@ struct LateResponseExecutor(TimeoutExecutor);
 impl Executor<Batch<Probe>> for LateResponseExecutor {
     fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
-        execution.unsolicited.push(decoded(
-            tcp_packet(
-                Ipv4Addr::new(10, 0, 0, 2),
-                Ipv4Addr::new(10, 0, 0, 1),
-                80,
-                50_000,
-                Tcp::SYN | Tcp::ACK,
-            ),
-            Vec::new(),
-        ));
+        execution
+            .unsolicited
+            .push(crate::probe::runner::UnsolicitedCapture {
+                decoded: decoded(
+                    tcp_packet(
+                        Ipv4Addr::new(10, 0, 0, 2),
+                        Ipv4Addr::new(10, 0, 0, 1),
+                        80,
+                        50_000,
+                        Tcp::SYN | Tcp::ACK,
+                    ),
+                    Vec::new(),
+                ),
+                received_at: None,
+            });
         Ok(execution)
     }
 }

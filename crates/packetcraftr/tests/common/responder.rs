@@ -36,6 +36,8 @@ pub(crate) struct State {
     pub(crate) send_clock: Option<Arc<dyn Fn() -> Instant + Send + Sync>>,
     pub(crate) idle_clock: Option<VirtualClock>,
     pub(crate) bad_ingress: Option<Option<Instant>>,
+    pub(crate) release_replies_after_timeout: bool,
+    pub(crate) late_ingress: Option<Option<Instant>>,
     pub(crate) suppress_replies: bool,
     pub(crate) hold_replies_until: usize,
     pub(crate) tied_resets: bool,
@@ -197,6 +199,22 @@ impl capture::Session for Capture {
     ) -> Result<Option<capture::Captured>, net::Error> {
         let mut state = self.state.lock().unwrap();
         if state.sends < state.hold_replies_until || state.suppress_replies {
+            return Ok(None);
+        }
+        if state.release_replies_after_timeout {
+            if !deadline.limit().is_zero() {
+                use packetcraftr::clock::Clock as _;
+                let clock = state
+                    .idle_clock
+                    .as_ref()
+                    .expect("late replies use a virtual clock");
+                clock.advance(deadline.limit().saturating_add(Duration::from_micros(1)));
+                let ingress = state.late_ingress.unwrap_or(Some(clock.now()));
+                for captured in &mut state.replies {
+                    captured.received_at = ingress;
+                }
+                state.release_replies_after_timeout = false;
+            }
             return Ok(None);
         }
         if let Some(marker) = state.bad_ingress.take()

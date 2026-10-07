@@ -15,9 +15,9 @@ fn validate_capture_statistics(statistics: Stats) -> Result<(), String> {
         .map_err(|error| format!("capture statistics are invalid: {error}"))
 }
 
-pub(crate) fn validate_aggregate_evidence_limits(
+pub(crate) fn validate_aggregate_evidence_limits<'a>(
     matched_responses: &[crate::exchange::Response],
-    unsolicited: &[DecodedPacket],
+    unsolicited: impl ExactSizeIterator<Item = &'a DecodedPacket>,
     undecoded: &[Frame],
     max_captured_frames: usize,
     max_captured_bytes: usize,
@@ -35,7 +35,7 @@ pub(crate) fn validate_aggregate_evidence_limits(
         matched_responses
             .iter()
             .map(|response| &response.response.frame)
-            .chain(unsolicited.iter().map(|response| &response.frame))
+            .chain(unsolicited.map(|response| &response.frame))
             .chain(undecoded),
     )
     .ok_or(evidence::Error::CapturedByteCountOverflow)?;
@@ -60,9 +60,9 @@ pub(crate) fn validate_sent_byte_accounting(
     Ok(())
 }
 
-pub(crate) fn validate_response_frames_and_deadlines(
+pub(crate) fn validate_response_frames_and_deadlines<'a>(
     matched_responses: &[crate::exchange::Response],
-    unsolicited: &[DecodedPacket],
+    unsolicited: impl IntoIterator<Item = &'a DecodedPacket>,
     timeout: Duration,
 ) -> Result<(), evidence::Error> {
     for response in matched_responses {

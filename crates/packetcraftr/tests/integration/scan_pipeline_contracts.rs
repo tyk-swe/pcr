@@ -335,6 +335,31 @@ fn extra_replies_are_retained_beside_each_outcome_under_the_undecoded_count() {
 }
 
 #[test]
+fn a_duplicate_cannot_take_the_winners_last_evidence_slot() {
+    for (endpoints, frames, bytes) in [(1, 1, 1500), (1, 2, 40), (2, 2, 1500)] {
+        let mut request = request();
+        request.endpoints.truncate(endpoints);
+        request.limits.max_evidence_frames = frames;
+        request.limits.max_evidence_bytes = bytes;
+        request.limits.max_undecoded = frames;
+        let state = Arc::new(Mutex::new(State {
+            tied_resets: true,
+            ..State::default()
+        }));
+        let aggregate = execute(&request, state).unwrap();
+        for endpoint in &aggregate.endpoints {
+            let probe = &endpoint.probes[0];
+            assert_eq!(probe.classification, scan::Classification::Closed);
+            let winner = probe.response.as_ref().expect("winning reply is retained");
+            // The second reset wins the stable bytes tie-break (IPv4 identification 1).
+            assert_eq!(&winner.bytes()[4..6], &[0, 1]);
+        }
+        assert!(aggregate.unattributed.is_empty());
+        assert_eq!(aggregate.retained_evidence_bytes, endpoints * 40);
+    }
+}
+
+#[test]
 fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
     use packetcraftr::probe::{ProbeEndpoint, Transport};
 
@@ -412,6 +437,56 @@ fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
         "{error:?}"
     );
     assert_eq!(state.lock().unwrap().sends, 0);
+}
+
+#[test]
+fn serial_final_drain_retains_only_fresh_late_evidence() {
+    let stale = Instant::now() - Duration::from_secs(1);
+    for (ingress, max_undecoded, retained) in [
+        (None, 1, 1),
+        (Some(None), 1, 0),
+        (Some(Some(stale)), 1, 0),
+        (None, 0, 0),
+    ] {
+        let mut request = request();
+        request.max_in_flight = 1;
+        request.endpoints.truncate(1);
+        request.limits.max_undecoded = max_undecoded;
+        let clock = VirtualClock::default();
+        let state = Arc::new(Mutex::new(State {
+            idle_clock: Some(clock.clone()),
+            release_replies_after_timeout: true,
+            late_ingress: ingress,
+            ..State::default()
+        }));
+        let collector = scan::Collector::default();
+        let report = client(&state)
+            .with_clock(clock)
+            .scan(request, collector.clone())
+            .unwrap();
+        let aggregate = collector.finish(report).unwrap();
+        let probe = &aggregate.endpoints[0].probes[0];
+        assert_eq!(probe.classification, scan::Classification::Timeout);
+        assert!(probe.response.is_none());
+        assert_eq!(
+            aggregate.unattributed.len(),
+            retained,
+            "ingress={ingress:?}, max_undecoded={max_undecoded}"
+        );
+        for capture in &aggregate.unattributed {
+            assert_eq!(capture.attribution, scan::Attribution::Late);
+            assert_eq!(capture.sequence, Some(probe.sequence));
+        }
+        assert_eq!(
+            aggregate.retained_evidence_bytes,
+            aggregate
+                .unattributed
+                .iter()
+                .map(|capture| capture.frame.bytes().len())
+                .sum::<usize>()
+        );
+        assert_eq!(state.lock().unwrap().shutdowns, 1);
+    }
 }
 
 #[test]

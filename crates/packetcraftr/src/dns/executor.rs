@@ -149,7 +149,7 @@ impl<P: PacketProviders, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P
             undecoded,
             diagnostics,
             stats,
-        } = result;
+        } = result.aggregate;
         if sent.len() != 1 {
             return Err(RESULT_FAULT
                 .internal("single-query DNS exchange returned an invalid sent-evidence count"));

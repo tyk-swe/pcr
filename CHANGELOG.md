@@ -1890,6 +1890,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Raw scans retain winning replies before duplicates under tight evidence
+  budgets, and serial scans retain eligible late unsolicited captures.
+- Unqualified port presets expand in the requested transport order.
 - Pipelined raw scans keep settled packets charged against the preparation byte
   budget and evict the oldest cached packets when admission needs space.
 - Raw scans reject pre-send capture markers when matching settled probes, so

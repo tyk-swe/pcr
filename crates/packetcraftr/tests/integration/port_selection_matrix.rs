@@ -100,6 +100,13 @@ fn selections_expand_in_term_order_and_keep_transports_apart() {
         // One name on both transports is two endpoints, never one.
         (&both, &[(None, "dns")], &[], vec![tcp(53), udp(53)], 0),
         (
+            &[Transport::Udp, Transport::Tcp],
+            &[(None, "@name-services")],
+            &[],
+            vec![udp(53), udp(5353), udp(137), tcp(53), tcp(853)],
+            0,
+        ),
+        (
             &both,
             &[(TCP, "http"), (UDP, "ntp")],
             &[],

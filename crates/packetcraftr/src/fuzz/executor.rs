@@ -74,7 +74,7 @@ impl<P: PacketProviders, K: Clock> Executor<CaseStep> for ExchangeExecutor<'_, P
             undecoded,
             diagnostics,
             stats,
-        } = exchange;
+        } = exchange.aggregate;
         let sent = match <[_; 1]>::try_from(sent) {
             Ok([sent]) => crate::exchange::into_sent_packet(sent),
             Err(sent) => {

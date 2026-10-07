@@ -32,7 +32,9 @@ pub enum State {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scan {
     Scanned,
-    /// Discovery got no response and the request skips unresponsive hosts.
+    /// Discovery got no response and no scan probes were sent to the host:
+    /// the request skips unresponsive hosts, or its own link address stayed
+    /// silent so no frame could be sent to it at all.
     Skipped,
     /// The request ran discovery only.
     NotRequested,
@@ -303,7 +305,7 @@ impl Composer {
                 Mode::Only => Scan::NotRequested,
                 Mode::Before
                     if host.state == State::NoResponse
-                        && self.unresponsive == Unresponsive::Skip =>
+                        && (self.unresponsive == Unresponsive::Skip || unsendable(host)) =>
                 {
                     Scan::Skipped
                 }
@@ -312,6 +314,15 @@ impl Composer {
         }
         self.hosts
     }
+}
+
+/// An on-link target whose own address never resolved accepts no frame, so
+/// the scan stage cannot send it probes whatever the unresponsive policy is.
+fn unsendable(host: &Host) -> bool {
+    matches!(
+        host.neighbor.map(|neighbor| neighbor.outcome),
+        Some(NeighborOutcome::Silent)
+    )
 }
 
 fn resolved(host: &Host) -> Option<Link> {

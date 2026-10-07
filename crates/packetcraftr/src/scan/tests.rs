@@ -1269,6 +1269,108 @@ fn skipped_hosts_release_their_evidence_reservation() {
     );
 }
 
+/// Scripts neighbor outcomes per call and times out every probe batch,
+/// recording the addresses it was asked to probe.
+#[derive(Default)]
+struct NeighborAwareExecutor {
+    neighbors: ScriptedNeighbors,
+    inner: TimeoutExecutor,
+    probed: Vec<IpAddr>,
+}
+
+impl Executor<Batch<Probe>> for NeighborAwareExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.probed
+            .extend(batch.probes.iter().map(|probe| probe.address));
+        self.inner.execute(batch)
+    }
+}
+
+impl Pipelined for NeighborAwareExecutor {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        target: &crate::target::SelectedAddress,
+        timeout: Duration,
+        deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        self.neighbors.resolve_neighbor(target, timeout, deadline)
+    }
+}
+
+#[test]
+fn a_silent_neighbor_sends_no_ip_probes_and_is_never_scanned() {
+    use super::discovery::{Link, Mode, NeighborOutcome, Options, Scan, State, Unresponsive};
+    use crate::probe::ProbeEndpoint;
+    let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
+    let mut request = tcp_scan_request(Target::Address(answered));
+    request.targets = crate::target::Selection {
+        include: [silent, answered]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    // `scan` asks to probe unresponsive hosts, but a target whose own link
+    // address stayed silent cannot be sent a frame at all.
+    request.discovery = Options {
+        mode: Mode::Before,
+        neighbor: true,
+        probes: vec![ProbeEndpoint::Icmp],
+        unresponsive: Unresponsive::Scan,
+    };
+    let mut executor = NeighborAwareExecutor {
+        neighbors: ScriptedNeighbors {
+            outcomes: [
+                NeighborOutcome::Silent,
+                NeighborOutcome::Resolved(Link {
+                    address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+                    cached: false,
+                }),
+            ]
+            .into(),
+            ..ScriptedNeighbors::default()
+        },
+        ..NeighborAwareExecutor::default()
+    };
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![silent, answered],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+        &mut Deadline::new(request.limits.max_duration),
+        |_, _| Ok(()),
+    )
+    .expect("a silent neighbor keeps its record without aborting the scan");
+
+    // Only the resolvable host was probed: one discovery echo, then the scan.
+    assert_eq!(executor.probed, [answered, answered]);
+    assert_eq!(executor.neighbors.calls, [silent, answered]);
+    let states = report
+        .hosts
+        .iter()
+        .map(|host| (host.address, host.state, host.scan, host.probes.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        [
+            (silent, State::NoResponse, Scan::Skipped, Vec::new()),
+            (answered, State::Responded, Scan::Scanned, vec![0]),
+        ]
+    );
+}
+
 /// Answers every neighbor request after marking `work` clock time spent, so
 /// the run can observe work that the plan never predicted.
 struct SlowNeighbors {

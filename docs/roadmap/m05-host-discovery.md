@@ -149,7 +149,9 @@ building blocks and publishes one host record per target in the
   gateway, is `possible_proxy`. No cause is asserted. A host is `responded`
   with at least one reason and `no_response` otherwise, and `not_requested` or
   `skipped` when no stage ran. Its `scan` disposition is `scanned`, `skipped`,
-  or `not_requested`.
+  or `not_requested`; a `no_response` host is `skipped` when the request
+  skips unresponsive hosts or when its own link address stayed silent, so no
+  frame could be sent to it under `--unresponsive-hosts scan` either.
 - The ordinary-socket path runs TCP discovery through `--connect` and the
   [connect engine][connect-engine]. A refused or completed connection is a
   `socket` reason, and one socket operation covers both stages. ICMP, UDP, and
@@ -209,9 +211,11 @@ building blocks and publishes one host record per target in the
 - **A layer-2 probe still needs its neighbor.** When the probe route is
   link-layer (`--link-mode layer2`, or a link without layer-3 injection), a
   discovery or scan probe to an on-link host that does not answer ARP or NDP
-  fails the request, as scan probes already did. Under the default link mode
-  the operating system resolves neighbors for wire probes, and the
-  `neighbor` probe records silence without failing.
+  fails the request, as scan probes already did — unless the `neighbor`
+  probe already proved the silence, in which case the host is sent no IP
+  probes, keeps `no_response`, and is `skipped` by the scan stage. Under
+  the default link mode the operating system resolves neighbors for wire
+  probes, and the `neighbor` probe records silence without failing.
 - **A routed target's next hop is only as complete as the cache.** Its link
   address appears when the gateway answered earlier, for example as a
   selected target; otherwise `next_hop` carries the address alone.

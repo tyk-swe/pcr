@@ -1942,6 +1942,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Discovery and stage-transition pauses count in the scan's elapsed
   statistics, and `--reverse-dns` folds the lookups' exchange statistics
   into the reported statistics (elapsed under `--connect`).
+- A host whose own link-layer resolution stayed silent no longer aborts the
+  scan: it is sent no discovery or scan probes and keeps `no_response` with
+  `scan: skipped`, even under `--unresponsive-hosts scan`.
 - Discovery pacing pauses are reserved against `--max-duration` before the
   sleep and the deadline is enforced again afterward.
 - The implicit neighbor resolution inside a probe send shares the scan's

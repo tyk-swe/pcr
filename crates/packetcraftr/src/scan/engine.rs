@@ -107,8 +107,9 @@ where
     let mut stats = crate::Stats::default();
     let mut scan_sequence = 0;
     if options.runs() {
+        let mut sendable = vec![true; approved.targets.len()];
         if options.neighbor {
-            discover_neighbors(
+            sendable = discover_neighbors(
                 request,
                 &approved.targets,
                 executor,
@@ -118,8 +119,18 @@ where
                 &mut stats,
             )?;
         }
+        // A target whose own link address stayed silent accepts no frame:
+        // its IP probes would only fail to materialize, so they are skipped
+        // and the host keeps its `no_response` record.
+        let probe_targets: Vec<_> = approved
+            .targets
+            .iter()
+            .zip(&sendable)
+            .filter(|(_, sendable)| **sendable)
+            .map(|(target, _)| target.clone())
+            .collect();
         let discovery = StagePlan {
-            targets: &approved.targets,
+            targets: &probe_targets,
             endpoints: &options.probes,
             stage: Stage::Discovery,
             first_sequence: 0,
@@ -195,6 +206,9 @@ where
 /// Resolves each target's link address in selection order. Each request is
 /// paced like a probe, and a silent neighbor is asked again until the
 /// request's attempts are spent.
+///
+/// Returns the targets a frame can still be sent to: a target whose own
+/// resolution stayed silent accepts nothing, so later stages skip it.
 fn discover_neighbors<E: Pipelined, C: Clock>(
     request: &Request,
     targets: &[SelectedAddress],
@@ -203,7 +217,8 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
     deadline: &mut Deadline,
     composer: &mut Composer,
     stats: &mut crate::Stats,
-) -> Result<(), Error> {
+) -> Result<Vec<bool>, Error> {
+    let mut sendable = vec![true; targets.len()];
     let mut sent = false;
     for (index, target) in targets.iter().enumerate() {
         let mut attempts = 0;
@@ -241,12 +256,13 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
                 };
             }
         };
+        sendable[index] = !matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
         composer.neighbor(index, neighbor);
     }
     if sent {
         pace(request, clock, deadline, 1, stats)?;
     }
-    Ok(())
+    Ok(sendable)
 }
 
 /// Waits out the request rate for `items` probes already sent, recording

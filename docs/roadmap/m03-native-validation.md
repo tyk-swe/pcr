@@ -117,8 +117,9 @@ Raw-source restrictions are recorded as the capability limits they are.
    `.github/workflows/native-platform-review.yml` route, which requires an
    exact reviewed commit and the reviewed-native permission control; there are
    no persistent privileged runners.
-2. **Fixed loopback only, not namespace parity.** The admitted destination is
-   the literal `127.0.0.1` on the single passive loopback interface behind a
+2. **Host-local only, not namespace parity.** The admitted destinations are
+   the literal `127.0.0.1` and scoped IPv6 addresses already assigned to the
+   host (preferring loopback where available), behind a
    token plus platform gate (`native_loopback.rs`); the macOS/Windows firewall
    boundary is a boundary of its own, documented as different isolation from
    Linux namespaces — scenarios it cannot host report unavailable, never a
@@ -126,11 +127,11 @@ Raw-source restrictions are recorded as the capability limits they are.
 3. **No driver provisioning without specific license approval.** Windows
    Layer 2 stays unavailable where Npcap is not already installed; no
    automatic driver download or install runs on the route.
-4. **Evidence format v2 is separate.** `scripts/native_platform_evidence.py`
-   validates the v2 host-loopback record (platform, profile, per-scenario
+4. **Evidence format v3 is separate.** `scripts/native_platform_evidence.py`
+   validates the v3 host-local record (platform, profile, per-scenario
    exercised/failed/unavailable); the Linux netns v1 evidence remains its own
    release gate.
-5. **All seven scenarios in every profile.** `native_loopback.rs` declares
+5. **All eight scenarios in every profile.** `native_loopback.rs` declares
    exactly the authored inventory, each either exercised or marked with a
    precise `reason_code`; feature-disabled profiles map to
    `unsupported_capability`, absent backends to `backend_not_installed`, and
@@ -156,10 +157,13 @@ Raw-source restrictions are recorded as the capability limits they are.
 ## Notes
 
 The reviewed-native route, scenario executable (`native_loopback.rs`), and
-validators are implemented; macOS/Windows recordings and interface isolation
-evidence are still pending real runner executions, so M3 stays **In
-progress**. The IPv6-loopback runtime gap remains documented rather than
-claimed; the test uses `127.0.0.1` only.
+validators are implemented. [M4 acceptance records](evidence/m04/README.md)
+now prove the scoped IPv6 scenario across five profiles on Linux, macOS
+ARM/Intel, and Windows for clean revision
+`8e010a0b9eac118aa13384f0b854111a73d47d76`. Focused host reports deliberately
+leave the other seven scenarios unexecuted. The broader macOS/Windows native
+inventory, interface-isolation evidence, and administrator-owned protection
+controls remain incomplete, so M3 stays **In progress**.
 
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md

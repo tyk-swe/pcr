@@ -92,13 +92,7 @@ where
     );
     for duplicate in &approved.duplicates {
         evidence.emit(
-            Event::Diagnostic(packetcraftr_core::diagnostic::Diagnostic::warning(
-                "scan.duplicate_declaration",
-                format!(
-                    "target declaration {} duplicates an earlier declaration and was coalesced",
-                    duplicate + 1
-                ),
-            )),
+            Event::Diagnostic(request.duplicate_diagnostic(*duplicate)),
             deadline,
         )?;
     }

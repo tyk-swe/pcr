@@ -185,6 +185,7 @@ class NativeEvidence(unittest.TestCase):
                          for scenario in native.SCENARIOS]
             profiles.append(dict(name=profile, scenarios=scenarios, status="incomplete"))
         return dict(schema=native.SCHEMA, platform="macOS", commit="a" * 40,
+                    corpus_sha256="c" * 64, corpus_dataset_version="fixture",
                     dirty=False, isolation=dict(kind="loopback_only",
                                                external_destinations=False,
                                                interface_mutation=False),
@@ -203,6 +204,8 @@ class NativeEvidence(unittest.TestCase):
             lambda report: report["profiles"][0]["scenarios"][0].pop("reason"),
             lambda report: report.update(commit="main"),
             lambda report: report.update(status="exercised"),
+            lambda report: report.pop("corpus_sha256"),
+            lambda report: report.update(corpus_dataset_version=""),
         ):
             report = self.report()
             mutate(report)
@@ -229,6 +232,21 @@ class NativeEvidence(unittest.TestCase):
         native.validate(report)
         with self.assertRaises(ValueError):
             native.validate(report, expected_commit="b" * 40)
+
+    def test_scoped_paths_must_match_the_preserved_native_output(self):
+        report = self.report()
+        profile = report["profiles"][0]
+        profile.update(binary_sha256="b" * 64, test_binary_sha256="c" * 64)
+        scenario = profile["scenarios"][-1]
+        paths = dict(selection="exercised", connect="exercised", raw="unsupported_capability")
+        scenario.update(status="exercised", exit_code=0,
+                        command=["native-test", "--ignored", "--exact", "scoped_ipv6_targets"],
+                        execution="privileged_native", privilege_granted=True, scoped_paths=paths.copy(),
+                        stdout=native.SCOPED_MARKER + json.dumps(paths), stderr="")
+        native.validate(report)
+        scenario["scoped_paths"]["raw"] = "exercised"
+        with self.assertRaises(ValueError):
+            native.validate(report)
 
 
 if __name__ == "__main__":

@@ -478,6 +478,7 @@ fn scan_port_80(
     };
 
     let request = scan::Request {
+        target_sources: Vec::new(),
         max_in_flight: 1,
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
         transport: Transport::Tcp,

@@ -7,13 +7,20 @@ on:
         description: Full reviewed commit SHA; dispatch only after source review
         type: string
         required: true
+      scenario:
+        description: Select the full inventory or M4 scoped target evidence across every profile
+        type: choice
+        options:
+          - all
+          - scoped_ipv6_targets
+        default: all
 
 permissions:
   contents: read
 
 jobs:
   native-platform-review:
-    name: Reviewed loopback native (${{ matrix.os }})
+    name: Reviewed host-local native (${{ matrix.os }})
     environment: native-review
     strategy:
       fail-fast: false
@@ -50,22 +57,26 @@ jobs:
             --report target/validation/native-platform.json
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
-      - name: Exercise reviewed macOS loopback scenarios
+      - name: Exercise reviewed macOS host-local scenarios
         if: runner.os == 'macOS'
         shell: bash
         env:
           REVIEWED_COMMIT: ${{ inputs.commit }}
+          SCENARIO: ${{ inputs.scenario }}
         run: |
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
             python3 scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
+            --scenario "$SCENARIO" \
             --report target/validation/native-platform.json
-      - name: Exercise reviewed Windows loopback scenarios
+      - name: Exercise reviewed Windows host-local scenarios
         if: runner.os == 'Windows'
         shell: bash
         env:
           REVIEWED_COMMIT: ${{ inputs.commit }}
+          SCENARIO: ${{ inputs.scenario }}
         run: |
           python scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
+            --scenario "$SCENARIO" \
             --report target/validation/native-platform.json
       - name: Preserve evidence even when build or native execution fails
         if: always()

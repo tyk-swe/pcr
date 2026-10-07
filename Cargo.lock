@@ -1107,6 +1107,7 @@ dependencies = [
  "pcap",
  "rtnetlink",
  "serde",
+ "serde_json",
  "socket2",
  "thiserror",
  "tokio",

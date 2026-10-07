@@ -1890,6 +1890,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- The scan help exclusion example uses `ssh`, which is in the bundled port catalog.
 - `scan --transport` accepts one argument per occurrence, preserving positional
   targets after the option while retaining comma-separated and repeated values.
 - The output v8 schema accepts port zero in JSON and NDJSON scan listings,

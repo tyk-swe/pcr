@@ -19,7 +19,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
     --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
   packetcraftr scan 192.0.2.10 --transport tcp,udp --ports @name-services,udp:ntp
-  packetcraftr scan 192.0.2.10 --ports @all --exclude-ports telnet,8000-8100
+  packetcraftr scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
   packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure \
     --curated-udp-payloads
 

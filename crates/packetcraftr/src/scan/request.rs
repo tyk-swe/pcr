@@ -16,7 +16,7 @@ use crate::target::Selection;
 
 use super::Error;
 use super::error::Probes;
-use crate::probe::Transport;
+use crate::probe::{ProbeEndpoint, Transport};
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
 };
@@ -148,12 +148,13 @@ pub struct Request {
     /// `stdin:3`. Empty uses declaration ordinals; otherwise supply one label
     /// per included specification, each nonempty and at most 4096 bytes.
     pub target_sources: Vec<String>,
-    pub transport: Transport,
+    /// Probed on every target, in order; TCP and UDP endpoints may share a
+    /// port and never merge. ICMP echo is portless and stands alone.
+    pub endpoints: Vec<ProbeEndpoint>,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
     pub address_family: Family,
-    pub ports: Vec<u16>,
     pub attempts: u32,
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
@@ -198,7 +199,7 @@ impl Request {
             }
         }
         if self.udp_profiles.len() > packetcraftr_core::document::udp_profiles::MAX_PROFILE_PORTS
-            || (!self.udp_profiles.is_empty() && self.transport != Transport::Udp)
+            || (!self.udp_profiles.is_empty() && !self.probes(Transport::Udp))
         {
             return Err(Error::InvalidLimit {
                 field: "udp_profiles",
@@ -221,7 +222,7 @@ impl Request {
             });
         }
         if self.udp_payload.len() > super::MAX_UDP_PAYLOAD_BYTES
-            || (!self.udp_payload.is_empty() && self.transport != Transport::Udp)
+            || (!self.udp_payload.is_empty() && !self.probes(Transport::Udp))
         {
             return Err(Error::InvalidLimit {
                 field: "udp_payload_bytes",
@@ -246,29 +247,46 @@ impl Request {
             });
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
-        match self.transport {
-            Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
-                return Err(Error::InvalidPort {
-                    message: "TCP and UDP scans require at least one destination port".to_owned(),
-                });
+        self.validate_endpoints()
+    }
+
+    /// Whether any endpoint uses `transport`.
+    pub fn probes(&self, transport: Transport) -> bool {
+        self.endpoints
+            .iter()
+            .any(|endpoint| endpoint.transport() == transport)
+    }
+
+    fn validate_endpoints(&self) -> Result<(), Error> {
+        let invalid = |message: String| Err(Error::InvalidPort { message });
+        if self.endpoints.is_empty() {
+            return invalid("TCP and UDP scans require at least one destination port".to_owned());
+        }
+        if self.probes(Transport::Icmp) && self.endpoints.len() > 1 {
+            return invalid(
+                "ICMP scans are portless and do not accept destination ports".to_owned(),
+            );
+        }
+        if self.endpoints.len() > self.limits.max_ports {
+            return Err(Error::InvalidLimit {
+                field: "ports",
+                value: u64::try_from(self.endpoints.len()).unwrap_or(u64::MAX),
+                reason: format!("exceeds max_ports={}", self.limits.max_ports),
+            });
+        }
+        let mut seen = HashSet::with_capacity(self.endpoints.len());
+        for endpoint in &self.endpoints {
+            if !seen.insert(*endpoint) {
+                return invalid(format!("endpoint {endpoint} is listed more than once"));
             }
-            Transport::Icmp if !self.ports.is_empty() => {
-                return Err(Error::InvalidPort {
-                    message: "ICMP scans are portless and do not accept destination ports"
-                        .to_owned(),
-                });
-            }
-            _ => {}
         }
         Ok(())
     }
 
-    pub fn selected_ports(&self) -> Result<Vec<u16>, Error> {
+    /// The validated endpoints every target is probed on.
+    pub fn planned_endpoints(&self) -> Result<&[ProbeEndpoint], Error> {
         self.validate()?;
-        select_ports(
-            self.ports.iter().copied().map(PortSpec::Single),
-            self.limits.max_ports,
-        )
+        Ok(&self.endpoints)
     }
 
     pub(crate) fn duplicate_diagnostic(

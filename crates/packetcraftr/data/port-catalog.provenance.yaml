@@ -1,0 +1,44 @@
+manifest_version: 1
+
+dataset:
+  name: "port-catalog"
+  kind: "port"
+  version: "1.0.0"
+  packaged_as: "bundled"
+  review_outcome: "accepted"
+
+source:
+  name: "PacketcraftR project, citing IETF RFCs"
+  locator: "crates/packetcraftr/data/port-catalog.json"
+  retrieved: "2026-10-06"
+  upstream_version: "none; project-authored"
+  license: "AGPL-3.0-only (project-authored); cited port numbers are protocol constants"
+  license_rationale: |
+    Every entry is authored in this repository. Each pairs a port number with
+    the RFC section that states it as the protocol's port and a short
+    project-chosen name for that protocol; the scanner data policy accepts
+    project-authored data and RFC constants with citation. No IANA registry
+    text, Nmap data, or other scanner database was copied or consulted to
+    build or rank the list, so no third-party terms apply.
+
+transforms:
+  - step: "author"
+    detail: "authored in repository; no transform"
+  - step: "presets"
+    detail: |
+      Presets group entries by protocol family. They are curated lists with no
+      frequency or popularity ranking, and none applies unless requested.
+
+maintenance:
+  maintainer: "tyk-swe"
+  refresh: |
+    Entries change only by review against the cited RFC. A change of meaning
+    or a new entry bumps `version` here and in the data file; a new kind of
+    source (for example a registry export) requires a new license review
+    under docs/scanner-data-policy.md before it is merged.
+
+coverage:
+  - fixture: "crates/packetcraftr/src/scan/catalog/tests.rs"
+    covers: "the bundled document parses, matches this manifest's version, and every preset resolves"
+  - fixture: "crates/packetcraftr/tests/integration/port_selection_matrix.rs"
+    covers: "preset, name, range, and exclusion expansion against the bundled catalog"

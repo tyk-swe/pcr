@@ -10,6 +10,7 @@ use packetcraftr_netio::capture::Captured;
 use std::{sync::Arc, time::Duration};
 
 use super::*;
+use crate::exchange::Collection;
 
 fn closed_window() -> Window {
     Window::open(&crate::clock::SystemClock, Duration::ZERO, None).expect("fixture window")
@@ -75,6 +76,12 @@ fn dl_expiry_keeps_unsol_order() {
         ProcessOutcome::CorrelationDeadlineExpired
     );
     assert!(accumulator.unsolicited.is_empty());
+    assert!(
+        accumulator
+            .unsolicited_ingress
+            .iter()
+            .all(|ingress| ingress.correlation_expired)
+    );
     assert_eq!(
         accumulator
             .drain_events()

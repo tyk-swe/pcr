@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v7.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v8.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,10 +36,40 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v8
+
+`packetcraftr.output/v8` is the current production family. It preserves every
+v7 meaning and adds scanner port planning and inference:
+
+- a required `plan` on raw scan results, NDJSON scan `complete`, and connect
+  summaries: the requested and selected scan `method` (with the reason when
+  automatic selection chose it), the `port_catalog` data set and version that
+  names and hints came from, the `excluded_endpoints` count, and, when curated
+  UDP payloads were requested, their data set and the `applied` and
+  `overridden` ports;
+- a `port_hint` on endpoints whose port has a catalog name. A hint is not
+  service identification;
+- an `inference` on endpoints: a PacketcraftR `state` (`open`, `closed`,
+  `filtered`, `open_or_filtered`, `unknown`, or absent when only operational
+  failures were observed), the `rule` that decided it, and every attempt
+  sequence in exactly one of `supporting`, `conflicting`, `unanswered`, or
+  `failed`. Attempt `classification` values and the endpoint `classification`
+  aggregate keep their v7 meaning; consumers must not substitute one for the
+  other;
+- a required `unattributed` list on raw scan results, and `unattributed` stream
+  records, for correlated `late`, `duplicate`, and `ambiguous` frames that no
+  attempt outcome carries;
+- one `endpoint` (raw) or `connect_endpoint` (connect) stream record per
+  endpoint before `complete`, naming the probe sequences it aggregates; and
+- an optional `ports` selection on `target_list` results and terminals.
+
+Inference states map to Nmap's for comparison only:
+[scanner evidence](scanner-evidence.md#port-inference) has the rule table and
+mapping.
+
 ## Output family v7
 
-`packetcraftr.output/v7` is the current production family. It preserves every
-v6 meaning and adds:
+`packetcraftr.output/v7` is frozen. It preserves every v6 meaning and adds:
 
 - the `target_list` branch of `scan` (`--list`), discriminated by
   `method: "target_list"` in aggregate results, `target` stream records, and
@@ -49,9 +79,9 @@ v6 meaning and adds:
   failure records, plus the exact `retained_evidence_bytes` charge on scan,
   connect, and traceroute summaries.
 
-The frozen `packetcraftr.output/v6` family stays bundled for previously
-published evidence; new output never reuses its identity. The reference
-consumer accepts both families.
+The frozen `packetcraftr.output/v6` and `packetcraftr.output/v7` families stay
+bundled for previously published evidence; new output never reuses their
+identities. The reference consumer accepts all three families.
 
 ## Streams and the reference consumer
 

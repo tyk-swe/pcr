@@ -40,6 +40,8 @@ pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPa
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(super) pending_events: Vec<super::Event>,
+    /// Ingress markers and correlation state for unsolicited events, in publication order.
+    pub(crate) unsolicited_ingress: Vec<super::evidence::UnsolicitedIngress>,
     pub(crate) diagnostics: DiagnosticLog,
     pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
@@ -89,6 +91,7 @@ impl Accumulator {
         Self {
             unsolicited: Vec::new(),
             pending_events: Vec::new(),
+            unsolicited_ingress: Vec::new(),
             diagnostics: DiagnosticLog::default(),
             evidence_budget: RetentionBudget::default(),
             response_counts: vec![0; requests],

@@ -6,7 +6,7 @@ mod batch_evidence;
 pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, Outcome};
 
 use std::borrow::BorrowMut;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
@@ -34,11 +34,19 @@ impl<P> Batch<P> {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct UnsolicitedCapture {
+    pub(crate) decoded: DecodedPacket,
+    pub(crate) received_at: Option<Instant>,
+    pub(crate) response_deadline: Instant,
+    pub(crate) correlation_expired: bool,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct Evidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
-    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) unsolicited: Vec<UnsolicitedCapture>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) stats: Stats,
@@ -47,7 +55,7 @@ pub(crate) struct Evidence {
 impl Evidence {
     pub(crate) fn from_exchange(
         permit: ExecutionPermit,
-        result: crate::exchange::Aggregate,
+        result: crate::exchange::WorkflowEvidence,
     ) -> Self {
         let crate::exchange::Aggregate {
             sent,
@@ -57,7 +65,17 @@ impl Evidence {
             undecoded,
             diagnostics,
             stats,
-        } = result;
+        } = result.aggregate;
+        let unsolicited = unsolicited
+            .into_iter()
+            .zip(result.unsolicited_ingress)
+            .map(|(decoded, ingress)| UnsolicitedCapture {
+                decoded,
+                received_at: ingress.received_at,
+                response_deadline: result.response_deadline,
+                correlation_expired: ingress.correlation_expired,
+            })
+            .collect();
         let sent = sent
             .into_iter()
             .map(crate::exchange::into_sent_packet)

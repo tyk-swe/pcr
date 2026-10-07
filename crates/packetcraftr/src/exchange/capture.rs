@@ -399,7 +399,7 @@ mod tests {
         let stop: &mut WorkflowStopPredicate<'_> = &mut stop;
         let mut collector = crate::exchange::Observed::default();
 
-        let summary = transaction
+        let (summary, _) = transaction
             .execute(&sender, Some(matcher), Some(stop), &mut |event| {
                 collector.observe(event);
                 Ok(())

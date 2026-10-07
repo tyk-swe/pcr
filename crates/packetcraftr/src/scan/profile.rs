@@ -18,6 +18,7 @@ use packetcraftr_core::{
 };
 use serde::Serialize;
 
+pub mod curated;
 mod document;
 pub use document::compile;
 

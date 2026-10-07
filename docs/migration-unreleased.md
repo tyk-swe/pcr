@@ -2,11 +2,12 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v7` and
-validate against `schemas/packetcraftr.output.v7.schema.json`. The
-`packetcraftr.output/v6` schema remains frozen and available for validating
-previously emitted v6 output. The current producer and bundled examples have
-moved to v7; consumers pinned to v6 must explicitly support the new family.
+All structured command envelopes now identify `packetcraftr.output/v8` and
+validate against `schemas/packetcraftr.output.v8.schema.json`. The
+`packetcraftr.output/v6` and `packetcraftr.output/v7` schemas remain frozen and
+available for validating previously emitted output. The current producer and
+bundled examples have moved to v8; consumers pinned to v6 or v7 must explicitly
+support the new family.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
@@ -873,6 +874,99 @@ charge; sockets do not expose a retained wire transcript. Neither charge
 represents process memory or allocator overhead. The
 v6 schema keeps no such field; see
 [scanner evidence](scanner-evidence.md) for the exact charge definitions.
+
+## Port planning, state inference, and output/v8
+
+`scan --ports` takes comma-separated terms: numeric ports and `START-END`
+ranges as before, names from the bundled port catalog (`ssh`, `ntp`), and
+`@preset` selections (`@web`, `@mail`, `@name-services`, `@infrastructure`,
+`@legacy-services`, `@all`). A `tcp:` or `udp:` prefix confines a term to one
+transport; an unprefixed term applies to every scan transport that defines it.
+`--exclude-ports` takes the same terms and removes endpoints after expansion
+and before `--max-ports`, planning, policy, or `--list`, so no stage sees an
+excluded endpoint. A scan never gets an implicit default selection. A name or
+preset that no applicable transport defines, a prefix naming a transport the
+scan does not probe, and a selection that exclusions leave empty are usage
+errors (`cli.scan_limit`, exit 2). Catalog names are hints published as
+`port_hint`, not service identification.
+
+`--transport` accepts `tcp,udp` (or repeats) to plan both under one
+`--max-ports`, `--max-probes`, duration, and wire budget. TCP and UDP endpoints
+on one address and port stay distinct in plans, evidence, and output. ICMP echo
+stays portless and cannot be combined with TCP or UDP. `scan --list` publishes
+the expanded selection as `ports` (catalog version, excluded count, and each
+`transport`/`port` with its hint) when port terms are given.
+
+`--method raw|tcp-connect|auto` chooses the scan method; `raw` is the default
+and `--connect` remains an alias of `--method tcp-connect`. An explicit method
+is never replaced: a raw scan in a build without packet capture and transmission
+still fails with `capability.unsupported` (exit 4) after policy review, so a
+policy or budget denial reads the same in every build. `--connect` with UDP or
+ICMP endpoints reports `cli.scan_method` (exit 2, `the tcp_connect scan method
+cannot probe udp endpoints`) instead of `cli.error` with `--connect requires TCP
+transport`; scripts that match the old code or text need updating. `auto` picks
+raw when the build can capture and transmit in the requested `--link-mode`,
+and otherwise TCP connect when every endpoint is TCP and the route needs no
+packet override. When neither applies it keeps raw, whose execution reports
+the missing capability, and its published reason names what an ordinary
+connection could not probe. Selection reads the build's capabilities, not
+run-time privileges: an unprivileged run of a capture-capable build selects raw
+and fails at execution.
+
+`--curated-udp-payloads` adds the bundled `curated/...` UDP profiles for
+planned UDP ports that have one (DNS, mDNS, RPC bind, NTP, SNMPv3, STUN, and
+CoAP). An operator `--udp-profiles` assignment for the same port wins; results
+list the `applied` and `overridden` ports. A confirmed curated check is a
+configured check that matched, not product identity.
+
+Output/v8 changes, all additive within the new family:
+
+- Raw scan results and NDJSON `complete` require `plan`: `method`
+  (`requested`, `selected`, and an automatic selection's `reason`),
+  `port_catalog` (`name`, `version`), `excluded_endpoints`, and an optional
+  `curated_udp_payloads` (`data_set`, `applied`, `overridden`). Connect
+  summaries carry the same `plan`.
+- Raw scan endpoints gain optional `port_hint` and `inference`; connect
+  endpoints gain `port_hint` and a required `inference`. An inference has a
+  `state` (`open`, `closed`, `filtered`, `open_or_filtered`, `unknown`, or
+  absent when only operational failures were observed), the `rule` that
+  decided it, and every attempt sequence in exactly one of `supporting`,
+  `conflicting`, `unanswered`, or `failed`. Each attempt's `classification`
+  keeps its v6/v7 attempt-observation meaning, and the endpoint
+  `classification` is still the highest-ranked attempt outcome.
+- Raw scan results require `unattributed`: correlated `late`, `duplicate`, and
+  `ambiguous` frames with the probe `sequence` they correlate with when it is
+  unique. They share the `--max-undecoded` count and the evidence frame and
+  byte budgets; the first omission warns `scan.unattributed_limit`.
+- NDJSON adds `unattributed` events and one `endpoint` (raw) or
+  `connect_endpoint` (connect) event per endpoint before `complete`, naming its
+  probe sequences rather than repeating the attempts.
+
+In Rust, `scan::Request` replaces `transport` and `ports` with
+`endpoints: Vec<probe::ProbeEndpoint>`, which may mix TCP and UDP endpoints
+(or hold a lone `ProbeEndpoint::Icmp`); `validate` rejects an empty list,
+duplicates, ICMP beside other endpoints, and more than `limits.max_ports`.
+`Request::selected_ports()` is now `planned_endpoints()`. Build endpoints with
+`scan::select_endpoints(&PortSelection, scan::catalog::bundled(), max_ports)`
+or directly; `scan::select_ports` and `scan::PortSpec` remain for numeric
+lists. `client.scan_connect` rejects non-TCP endpoints with
+`scan::Error::MethodTransport` instead of `InvalidLimit { field: "transport" }`.
+`scan::Endpoint` and `scan::connect::Endpoint` gain `port_hint` and
+`inference`, `scan::ProbeEvidence` and `scan::CorrelatedResponse` gain the
+typed `reply`, `scan::Aggregate` gains `unattributed`, and `scan::Event` gains
+`Unattributed`; add the fields to literals and the arm to exhaustive matches.
+`scan::method::select` implements the method rules from
+`scan::method::Capabilities`, which a caller fills from
+`packetcraftr_netio::NativeCapability::check`. The catalog document format is
+`packetcraftr_core::document::port_catalog` (`packetcraftr.port-catalog/v1`),
+and `scan::profile::curated::merge` combines curated and operator profiles.
+
+In `packetcraftr-cli`, output conversions take the published plan:
+`output::scan::Report::publish(aggregate, plan)` replaces
+`Published::<Report>::try_from(aggregate)`, NDJSON `complete` converts from
+`(scan::Report, plan)`, and `output::scan::connect::{Report::publish,
+Summary::new}` replace the `TryFrom`/`From` conversions.
+`output::scan::list::Report::new` takes the optional `Ports` selection.
 
 ## Send packet sets
 

@@ -472,7 +472,6 @@ fn scan_port_80(
     Vec<packetcraftr::probe::ProbeStatus>,
 ) {
     use packetcraftr::{
-        probe::Transport,
         scan,
         target::{Family, Target},
     };
@@ -481,9 +480,8 @@ fn scan_port_80(
         target_sources: Vec::new(),
         max_in_flight: 1,
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
-        transport: Transport::Tcp,
         address_family: Family::Any,
-        ports: vec![80],
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         attempts: 1,
         timeout: WINDOW,
         probes_per_second: None,

@@ -11,10 +11,10 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
-use super::{Batch, Evidence, Sequenced};
+use super::{Batch, Evidence, Sequenced, UnsolicitedCapture};
 use crate::evidence::SentPacket;
 use crate::execution::Errors;
-use crate::execution::evidence::{EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::evidence::{EvidenceSink, EvidenceState, Passed, ResponseSelector};
 use crate::execution::limits::EvidenceLimits;
 use crate::execution::validation::{
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
@@ -48,6 +48,21 @@ pub(crate) trait Classifier {
         outcome: Outcome<Self::Observation>,
     ) -> Self::Event;
     fn undecoded(&self, probes: &[Self::Probe], frame: Frame) -> Self::Event;
+    /// The event retaining a matched response that did not become the
+    /// probe's outcome; the default discards such responses.
+    fn passed(&self, _probe: &Self::Probe, _passed: Passed, _frame: Frame) -> Option<Self::Event> {
+        None
+    }
+    /// Attributes unsolicited capture evidence without changing a probe's outcome.
+    fn unsolicited(
+        &self,
+        _probe: &Self::Probe,
+        _sent: &SentPacket,
+        _capture: &UnsolicitedCapture,
+        _has_response: bool,
+    ) -> Option<Self::Event> {
+        None
+    }
     fn diagnostic(&self, diagnostic: Diagnostic) -> Self::Event;
     fn ends_operation(&self, _event: &Self::Event) -> bool {
         false
@@ -99,6 +114,10 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         self.state.retained_evidence_bytes()
     }
 
+    pub(crate) fn reserve_responses(&mut self, count: usize, max_response_bytes: usize) {
+        self.state.reserve_responses(count, max_response_bytes);
+    }
+
     pub(crate) fn into_classifier(self) -> K {
         self.classifier
     }
@@ -141,7 +160,7 @@ where
             permit,
             sent,
             mut responses,
-            unsolicited: _,
+            unsolicited,
             undecoded,
             diagnostics,
             stats: _,
@@ -155,6 +174,7 @@ where
         self.enforce(deadline)?;
         let mut selector = ResponseSelector::new(&mut responses);
         let mut flow = ControlFlow::Continue(());
+        let mut has_response = Vec::with_capacity(batch.probes.len());
         for (request_index, (probe, sent)) in batch.probes.iter().zip(&sent).enumerate() {
             self.enforce(deadline)?;
             let Self {
@@ -164,14 +184,18 @@ where
                 emit,
                 ..
             } = self;
-            let best = selector.select(
+            let mut passed = Vec::new();
+            let best = selector.select_passing(
                 request_index,
                 batch.timeout,
                 |response| classifier.classify(probe, sent, response),
                 |observation| classifier.rank(observation),
                 |observation| classifier.responder(observation),
                 || enforce_deadline(errors, deadline),
+                &mut passed,
             )?;
+            has_response.push(best.is_some());
+            state.settle_response();
             let outcome = match best {
                 None => Outcome::Timeout,
                 Some(candidate) => Outcome::Reply(Reply {
@@ -189,10 +213,70 @@ where
                 flow = ControlFlow::Break(());
             }
             emit(event, deadline)?;
+            // Published after the outcome, as the pipelined path does.
+            for (decoded, why) in passed {
+                let Some(event) = classifier.passed(probe, why, decoded.frame.clone()) else {
+                    continue;
+                };
+                if state.retain_unattributed(&decoded.frame).is_some() {
+                    emit(event, deadline)?;
+                }
+                state.publish_diagnostics(|diagnostic| {
+                    emit(classifier.diagnostic(diagnostic), deadline)
+                })?;
+            }
             self.enforce(deadline)?;
+        }
+        for capture in unsolicited {
+            self.enforce(deadline)?;
+            let mut matches = batch
+                .probes
+                .iter()
+                .zip(&sent)
+                .zip(&has_response)
+                .filter_map(|((probe, sent), has_response)| {
+                    self.classifier
+                        .unsolicited(probe, sent, &capture, *has_response)
+                });
+            let Some(event) = matches.next() else {
+                continue;
+            };
+            if matches.next().is_some() {
+                continue;
+            }
+            if self
+                .state
+                .retain_unattributed(&capture.decoded.frame)
+                .is_some()
+            {
+                self.emit(event, deadline)?;
+            }
+            self.state.publish_diagnostics(|diagnostic| {
+                (self.emit)(self.classifier.diagnostic(diagnostic), deadline)
+            })?;
         }
         self.retain_undecoded(&batch.probes, undecoded, deadline)?;
         Ok(flow)
+    }
+
+    /// Retains a frame no probe outcome carries, such as a reply after its
+    /// probe settled, under the operation's evidence budget.
+    pub(crate) fn retain_unattributed(
+        &mut self,
+        frame: &Frame,
+        event: impl FnOnce(Frame) -> K::Event,
+        deadline: &Deadline,
+    ) -> Result<(), G::Error> {
+        let Self {
+            state,
+            classifier,
+            emit,
+            ..
+        } = self;
+        if let Some(frame) = state.retain_unattributed(frame) {
+            emit(event(frame), deadline)?;
+        }
+        state.publish_diagnostics(|diagnostic| emit(classifier.diagnostic(diagnostic), deadline))
     }
 
     pub(crate) fn retain_undecoded(
@@ -305,7 +389,7 @@ where
 
     validate_aggregate_evidence_limits(
         &execution.responses,
-        &execution.unsolicited,
+        execution.unsolicited.iter().map(|capture| &capture.decoded),
         &execution.undecoded,
         max_captured_frames,
         max_captured_bytes,
@@ -318,7 +402,11 @@ where
     }
 
     validate_sent_byte_accounting(&execution.sent, execution.stats.bytes)?;
-    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)?;
+    validate_response_frames_and_deadlines(
+        &execution.responses,
+        execution.unsolicited.iter().map(|capture| &capture.decoded),
+        timeout,
+    )?;
     validate_capture_statistics_evidence(execution.stats.capture)?;
     if execution.stats.packets_attempted != u64::try_from(probes.len()).unwrap_or(u64::MAX)
         || execution.stats.packets_completed != u64::try_from(probes.len()).unwrap_or(u64::MAX)

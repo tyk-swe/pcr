@@ -13,6 +13,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use packetcraftr::probe::ProbeEndpoint;
 use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{Client, scan, traceroute};
 use serde::Serialize;
@@ -144,17 +145,17 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
             ))],
             exclude: Vec::new(),
         },
-        transport: arguments.transport,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: match arguments.addresses.destination {
             IpAddr::V4(_) => Family::Ipv4,
             IpAddr::V6(_) => Family::Ipv6,
         },
-        ports: match arguments.transport {
-            packetcraftr::probe::Transport::Icmp => Vec::new(),
-            _ => vec![PORT],
-        },
+        endpoints: vec![match arguments.transport {
+            packetcraftr::probe::Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
+            packetcraftr::probe::Transport::Udp => ProbeEndpoint::Udp { port: PORT },
+            packetcraftr::probe::Transport::Icmp => ProbeEndpoint::Icmp,
+        }],
         attempts: 1,
         timeout: TIMEOUT,
         probes_per_second: None,

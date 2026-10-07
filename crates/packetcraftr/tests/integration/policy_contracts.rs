@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use packetcraftr::Client;
 use packetcraftr::policy;
-use packetcraftr::probe::Transport;
 use packetcraftr::scan;
 use packetcraftr::target::Family;
 use packetcraftr::target::Hostname;
@@ -135,11 +134,10 @@ fn denied_address_never_reaches_providers() {
         targets: Target::from_str("example.test")
             .expect("hostname must parse")
             .into(),
-        transport: Transport::Tcp,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        ports: vec![80],
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         attempts: 1,
         timeout: Duration::from_millis(20),
         probes_per_second: None,

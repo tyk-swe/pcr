@@ -249,11 +249,16 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v7`](schemas/packetcraftr.output.v7.schema.json)
-  (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json) family is retained
-  for previously published evidence)
+- Structured command output: [`packetcraftr.output/v8`](schemas/packetcraftr.output.v8.schema.json)
+  (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json) and
+  [`v7`](schemas/packetcraftr.output.v7.schema.json) families are retained for
+  previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
+- Bundled scanner data: the [port catalog](crates/packetcraftr/data/port-catalog.json)
+  (`packetcraftr.port-catalog/v1`) and
+  [curated UDP payloads](crates/packetcraftr/data/udp-payloads.json), each with
+  a provenance record and an independent data version that scan results name
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 These are the versions on `main`; release `0.5.0-beta.3` publishes only

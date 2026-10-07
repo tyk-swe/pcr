@@ -109,7 +109,7 @@ identification.
 | M3 | [Native validation on three platforms][m3] | Controlled privileged runtime routes for macOS and Windows beside the Linux lane, reporting exercised, failed, and unavailable scenarios. | None | In progress |
 | M4 | [Target planning][m4] | Bounded target/exclusion manifests, packet-free list mode, scoped IPv6 identity, and source-aware diagnostics, verified across Linux/macOS/Windows feature profiles. | M1 | Complete |
 | M5 | [Host discovery][m5] | A composed discovery workflow over ARP/NDP and ICMP/TCP/UDP probes, with host-level records, reasons, and optional enrichment. | M4 | Planned |
-| M6 | [Port planning and state inference][m6] | Catalog and named port selections, port exclusions, curated UDP payloads, mixed TCP/UDP plans, inferred states, and capability-aware method planning. | M1 | Planned |
+| M6 | [Port planning and state inference][m6] | Catalog and named port selections, port exclusions, curated UDP payloads, mixed TCP/UDP plans, inferred states, and capability-aware method planning. | M1 | In progress |
 | M7 | [Adaptive scheduling and bounded performance][m7] | RTT-driven timeouts, selective retries, rate-limit handling, per-host fairness, adaptive windows, and redesigned connect scheduling under hard ceilings. | M2, M6 | Planned |
 | M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | Planned |
 | M9 | [TLS services and identification corpus][m9] | TLS-wrapped interrogation over a bounded transport, an expanded reviewed corpus, and held-out evaluation of coverage and confidence. | M8 | Planned |

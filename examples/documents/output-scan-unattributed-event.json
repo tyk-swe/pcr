@@ -1,0 +1,27 @@
+{
+  "schema": "packetcraftr.output/v8",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "unattributed": {
+      "attribution": "late",
+      "sequence": 70000,
+      "frame": {
+        "timestamp": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 4000000
+        },
+        "captured_length": 4,
+        "original_length": 4,
+        "link_type": 147,
+        "interface": 0,
+        "direction": "inbound",
+        "bytes_hex": "deadbeef"
+      }
+    }
+  },
+  "diagnostics": [],
+  "event": "unattributed"
+}

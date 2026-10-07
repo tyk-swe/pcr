@@ -35,6 +35,7 @@ pub(super) fn render_text(
         },
         duration_text(stats.elapsed)
     ))?;
+    render_plan_text(&result.plan)?;
     for endpoint in &result.endpoints {
         let endpoint_name = match endpoint.transport {
             packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
@@ -51,6 +52,7 @@ pub(super) fn render_text(
                 endpoint.classification,
             )
         ))?;
+        render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
         for evidence in &endpoint.probes {
             write_stdout_line(format_args!(
                 "  sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
@@ -78,6 +80,14 @@ pub(super) fn render_text(
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
+    for unattributed in &result.unattributed {
+        write_stdout_line(format_args!(
+            "unattributed attribution={} sequence={} frame {}",
+            unattributed.attribution,
+            optional_display(unattributed.sequence),
+            captured_frame_text(&unattributed.frame)
+        ))?;
+    }
     let rtt = result.rtt;
     write_summary_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
@@ -97,6 +107,62 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
+pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), CliError> {
+    let method = &plan.method;
+    write_stdout_line(format_args!(
+        "method={} requested={}{} port-catalog={}/{} excluded-endpoints={}",
+        method.selected,
+        method.requested,
+        method
+            .reason
+            .as_ref()
+            .map_or_else(String::new, |reason| format!(" reason=\"{reason}\"")),
+        plan.port_catalog.name,
+        plan.port_catalog.version,
+        plan.excluded_endpoints,
+    ))?;
+    if let Some(curated) = &plan.curated_udp_payloads {
+        write_stdout_line(format_args!(
+            "curated-udp-payloads={}/{} applied={} overridden={}",
+            curated.data_set.name,
+            curated.data_set.version,
+            listed(&curated.applied),
+            listed(&curated.overridden),
+        ))?;
+    }
+    Ok(())
+}
+
+/// The inference line beneath an endpoint; the hint is labelled as such so
+/// it never reads as an identified service.
+pub(super) fn render_inference_text(
+    port_hint: Option<&str>,
+    inference: Option<&output::scan::plan::Inference>,
+) -> Result<(), CliError> {
+    let Some(inference) = inference else {
+        return Ok(());
+    };
+    write_stdout_line(format_args!(
+        "  inferred={} rule={} supporting={} conflicting={} unanswered={} failed={} port-hint={}",
+        inference.state.unwrap_or("undetermined"),
+        inference.rule,
+        listed(&inference.supporting),
+        listed(&inference.conflicting),
+        listed(&inference.unanswered),
+        listed(&inference.failed),
+        port_hint.unwrap_or("-"),
+    ))
+}
+
+/// A comma-separated list, or `-` when empty so every key keeps a value.
+fn listed<T: std::fmt::Display>(values: &[T]) -> String {
+    if values.is_empty() {
+        "-".to_owned()
+    } else {
+        comma_separated(values)
+    }
+}
+
 pub(super) fn emit_event(
     event: packetcraftr::scan::Event,
     stream: &StreamEncoder,
@@ -107,13 +173,23 @@ pub(super) fn emit_event(
 }
 
 pub(super) fn emit_complete(
-    summary: packetcraftr::scan::Report,
+    streamed: super::Streamed,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let super::Streamed {
+        report,
+        endpoints,
+        plan,
+    } = streamed;
+    for endpoint in endpoints {
+        stream.emit_published(output::envelope::Published::<output::scan::Event>::from(
+            endpoint,
+        ))?;
+    }
     Ok(
-        stream.complete_published(output::envelope::Published::<output::scan::Event>::from(
-            summary,
-        ))?,
+        stream.complete_published(output::envelope::Published::<output::scan::Event>::from((
+            report, plan,
+        )))?,
     )
 }
 
@@ -139,6 +215,7 @@ pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
 }
 
 pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
+    render_plan_text(&report.summary.plan)?;
     for endpoint in &report.endpoints {
         write_stdout_line(format_args!(
             "{}",
@@ -149,6 +226,7 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
                 endpoint.classification,
             )
         ))?;
+        render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
     }
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",

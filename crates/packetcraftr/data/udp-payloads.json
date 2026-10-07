@@ -1,0 +1,168 @@
+{
+  "schema": "packetcraftr.udp-profiles/v1",
+  "profiles": [
+    {
+      "ports": [
+        53
+      ],
+      "profile": {
+        "name": "curated/dns-root-ns",
+        "request": {
+          "type": "dns",
+          "name": ".",
+          "query_type": 2,
+          "recursion_desired": false
+        },
+        "response": {
+          "type": "dns"
+        }
+      }
+    },
+    {
+      "ports": [
+        5353
+      ],
+      "profile": {
+        "name": "curated/mdns-service-enumeration",
+        "request": {
+          "type": "dns",
+          "name": "_services._dns-sd._udp.local",
+          "query_type": 12,
+          "recursion_desired": false
+        },
+        "response": {
+          "type": "dns"
+        }
+      }
+    },
+    {
+      "ports": [
+        111
+      ],
+      "profile": {
+        "name": "curated/rpcbind-null",
+        "request": {
+          "type": "bytes",
+          "data": "504300010000000000000002000186a0000000020000000000000000000000000000000000000000"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "50430001"
+            },
+            {
+              "offset": 4,
+              "data": "00000001"
+            }
+          ],
+          "min_length": 24
+        }
+      }
+    },
+    {
+      "ports": [
+        123
+      ],
+      "profile": {
+        "name": "curated/ntp-client",
+        "request": {
+          "type": "bytes",
+          "data": "230000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "04",
+              "mask": "07"
+            }
+          ],
+          "min_length": 48
+        }
+      }
+    },
+    {
+      "ports": [
+        161
+      ],
+      "profile": {
+        "name": "curated/snmpv3-discovery",
+        "request": {
+          "type": "bytes",
+          "data": "303a020103300f02025043020300ffe30401040201030410300e0400020100020100040004000400301204000400a00c020250430201000201003000"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "30"
+            }
+          ],
+          "min_length": 2
+        }
+      }
+    },
+    {
+      "ports": [
+        3478
+      ],
+      "profile": {
+        "name": "curated/stun-binding",
+        "request": {
+          "type": "bytes",
+          "data": "000100002112a4425061636b6574637261667452"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "01",
+              "mask": "01"
+            },
+            {
+              "offset": 4,
+              "data": "2112a442"
+            },
+            {
+              "offset": 8,
+              "data": "5061636b6574637261667452"
+            }
+          ],
+          "min_length": 20
+        }
+      }
+    },
+    {
+      "ports": [
+        5683
+      ],
+      "profile": {
+        "name": "curated/coap-resource-discovery",
+        "request": {
+          "type": "bytes",
+          "data": "40015043bb2e77656c6c2d6b6e6f776e04636f7265"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "60",
+              "mask": "e0"
+            },
+            {
+              "offset": 2,
+              "data": "5043"
+            }
+          ],
+          "min_length": 4
+        }
+      }
+    }
+  ]
+}

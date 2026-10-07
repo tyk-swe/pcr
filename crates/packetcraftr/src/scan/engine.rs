@@ -30,7 +30,7 @@ use super::plan::{build_batches, probe_count, worst_case_duration};
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Probe, Report, Request};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
-use crate::probe::{ProbeEndpoint, Transport, enforce_deadline};
+use crate::probe::{ProbeEndpoint, enforce_deadline};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Scans the request's authorized targets and publishes each probe's
@@ -89,6 +89,10 @@ where
             rtt: RttAccumulator::default(),
         },
         emit,
+    );
+    evidence.reserve_responses(
+        approved.total_probes,
+        request.collection.capture.snap_length,
     );
     for duplicate in &approved.duplicates {
         evidence.emit(
@@ -229,6 +233,23 @@ where
             PipelineEvent::Undecoded { frame } => evidence
                 .retain_undecoded(&[], vec![frame], deadline)
                 .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
+            PipelineEvent::Unattributed {
+                frame,
+                attribution,
+                sequence,
+            } => evidence
+                .retain_unattributed(
+                    &frame,
+                    |frame| {
+                        Event::Unattributed(super::Unattributed {
+                            attribution,
+                            sequence,
+                            frame,
+                        })
+                    },
+                    deadline,
+                )
+                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
             PipelineEvent::Diagnostic(diagnostic) => evidence
                 .record_diagnostics(vec![diagnostic], deadline)
                 .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
@@ -282,7 +303,7 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
     authorizer: &mut A,
     deadline: &Deadline,
 ) -> Result<ApprovedScan, Error> {
-    let endpoints = probe_endpoints(request.transport, request.selected_ports()?);
+    let endpoints = request.planned_endpoints()?.to_vec();
     // Only the serial path reuses `collection` to retain each exchange's frames.
     if request.max_in_flight == 1 {
         check_collection_evidence(&Probes, &request.collection, request.limits.evidence())?;
@@ -340,20 +361,6 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
     })
 }
 
-fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> {
-    match transport {
-        Transport::Icmp => vec![ProbeEndpoint::Icmp],
-        Transport::Tcp => ports
-            .into_iter()
-            .map(|port| ProbeEndpoint::Tcp { port })
-            .collect(),
-        Transport::Udp => ports
-            .into_iter()
-            .map(|port| ProbeEndpoint::Udp { port })
-            .collect(),
-    }
-}
-
 fn maximum_wire_bytes(
     targets: &[crate::target::SelectedAddress],
     endpoints: &[ProbeEndpoint],
@@ -364,25 +371,24 @@ fn maximum_wire_bytes(
         value: u64::MAX,
         reason: "scan payload accounting overflowed".to_owned(),
     };
-    let payload = if request.transport == Transport::Udp {
-        endpoints
-            .iter()
-            .filter_map(|endpoint| endpoint.port())
-            .try_fold(0u64, |total, port| {
-                total
-                    .checked_add(
-                        request
-                            .udp_profiles
-                            .get(&port)
-                            .map_or(request.udp_payload.len(), |profile| {
-                                profile.payload_length()
-                            }) as u64,
-                    )
-                    .ok_or_else(overflow)
-            })?
-    } else {
-        0
-    };
+    let payload = endpoints
+        .iter()
+        .filter_map(|endpoint| match endpoint {
+            ProbeEndpoint::Udp { port } => Some(port),
+            ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => None,
+        })
+        .try_fold(0u64, |total, port| {
+            total
+                .checked_add(
+                    request
+                        .udp_profiles
+                        .get(port)
+                        .map_or(request.udp_payload.len(), |profile| {
+                            profile.payload_length()
+                        }) as u64,
+                )
+                .ok_or_else(overflow)
+        })?;
     let endpoints = endpoints.len() as u64;
     targets.iter().try_fold(0u64, |total, target| {
         let header = if target.address.is_ipv4() {

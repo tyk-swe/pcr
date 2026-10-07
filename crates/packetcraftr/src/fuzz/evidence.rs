@@ -27,6 +27,7 @@ use crate::execution::limits::EvidenceLimits;
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
     "fuzz.evidence_limit",
     "fuzz.undecoded_limit",
+    "fuzz.unattributed_limit",
     "fuzz response",
 );
 

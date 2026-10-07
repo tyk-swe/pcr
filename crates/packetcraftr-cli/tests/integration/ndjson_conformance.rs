@@ -195,6 +195,7 @@ fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
         attempt: 1,
         status: packetcraftr::probe::ProbeStatus::Timeout,
         classification: packetcraftr::scan::Classification::Timeout,
+        reply: None,
         responder: None,
         sent_at: UNIX_EPOCH,
         received_at: None,
@@ -413,6 +414,11 @@ fn validate_active_event_variants() {
             probe: scan_probe(9),
         },
         packetcraftr::scan::Event::Undecoded { frame: frame(&[2]) },
+        packetcraftr::scan::Event::Unattributed(packetcraftr::scan::Unattributed {
+            attribution: packetcraftr::scan::Attribution::Late,
+            sequence: Some(9),
+            frame: frame(&[4]),
+        }),
         packetcraftr::scan::Event::Diagnostic(core::diagnostic::Diagnostic::warning(
             "scan.fixture",
             "warning",
@@ -421,6 +427,27 @@ fn validate_active_event_variants() {
         let event = output::envelope::Published::<output::scan::Event>::try_from(event).unwrap();
         validate_published(output::contract::Command::Scan, event);
     }
+    let probe = scan_probe(9);
+    validate_published(
+        output::contract::Command::Scan,
+        output::envelope::Published::<output::scan::Event>::from(packetcraftr::scan::Endpoint {
+            address: probe.address,
+            scope: None,
+            transport: probe.transport,
+            port: probe.port,
+            classification: probe.classification,
+            port_hint: Some("http"),
+            inference: Some(packetcraftr::scan::Inference {
+                state: Some(packetcraftr::scan::State::OpenOrFiltered),
+                rule: packetcraftr::scan::Rule::UdpSilence,
+                supporting: vec![9],
+                conflicting: Vec::new(),
+                unanswered: Vec::new(),
+                failed: Vec::new(),
+            }),
+            probes: vec![probe],
+        }),
+    );
     for event in [
         packetcraftr::traceroute::Event::Probe {
             target: Arc::from("trace.test"),

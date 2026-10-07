@@ -5,7 +5,7 @@
 
 pub(crate) use budget::{EvidenceDiagnosticDescriptor, EvidenceSink, EvidenceState};
 pub(crate) use candidate_selection::{
-    CandidateKey, ResponseCandidate, ResponseSelector, candidate_precedes,
+    CandidateKey, Passed, ResponseCandidate, ResponseSelector, candidate_precedes,
 };
 
 mod budget;

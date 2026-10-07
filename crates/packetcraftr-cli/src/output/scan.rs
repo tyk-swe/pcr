@@ -3,6 +3,7 @@
 
 pub mod connect;
 pub mod list;
+pub mod plan;
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -173,7 +174,15 @@ pub struct Endpoint {
     pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// The highest-ranked attempt observation, kept from v7.
     pub classification: Classification,
+    /// The catalog's conventional name for this transport and port; a hint,
+    /// never service identification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_hint: Option<&'static str>,
+    /// Absent for portless ICMP echo endpoints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference: Option<plan::Inference>,
     pub probes: Vec<Probe>,
 }
 
@@ -182,40 +191,71 @@ pub struct Report {
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    pub plan: plan::Plan,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
+    pub unattributed: Vec<Unattributed>,
     pub retained_evidence_bytes: usize,
     pub rtt: Rtt,
 }
 
-impl TryFrom<library::Aggregate> for Published<Report> {
+/// A correlated frame no probe outcome carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Unattributed {
+    pub attribution: &'static str,
+    /// The probe the frame correlates with; absent when ambiguous.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+    pub frame: Captured,
+}
+
+impl TryFrom<library::Unattributed> for Unattributed {
     type Error = Error;
 
-    fn try_from(result: library::Aggregate) -> Result<Self, Error> {
+    fn try_from(unattributed: library::Unattributed) -> Result<Self, Error> {
+        Ok(Self {
+            attribution: unattributed.attribution.as_str(),
+            sequence: unattributed.sequence,
+            frame: unattributed.frame.try_into()?,
+        })
+    }
+}
+
+impl Report {
+    pub fn publish(
+        aggregate: library::Aggregate,
+        plan: plan::Plan,
+    ) -> Result<Published<Self>, Error> {
         let library::Aggregate {
             planned_duration,
             target,
             resolved_addresses,
             endpoints,
             undecoded,
+            unattributed,
             diagnostics,
             retained_evidence_bytes,
             stats,
             rtt,
-        } = result;
+        } = aggregate;
         let endpoint_outputs = endpoints
             .into_iter()
             .map(Endpoint::try_from)
             .collect::<Result<Vec<_>, Error>>()?;
-        Ok(Self::new(
-            Report {
+        Ok(Published::new(
+            Self {
                 planned_duration,
                 target,
                 resolved_addresses,
+                plan,
                 endpoints: endpoint_outputs,
                 undecoded: undecoded
                     .into_iter()
                     .map(Captured::try_from)
+                    .collect::<Result<_, _>>()?,
+                unattributed: unattributed
+                    .into_iter()
+                    .map(Unattributed::try_from)
                     .collect::<Result<_, _>>()?,
                 retained_evidence_bytes,
                 rtt: rtt.into(),
@@ -236,6 +276,8 @@ impl TryFrom<library::Endpoint> for Endpoint {
             transport: endpoint.transport,
             port: endpoint.port,
             classification: endpoint.classification.into(),
+            port_hint: endpoint.port_hint,
+            inference: endpoint.inference.map(plan::Inference::from),
             probes: endpoint
                 .probes
                 .into_iter()
@@ -296,11 +338,20 @@ pub enum Event {
     Undecoded {
         frame: Captured,
     },
+    Unattributed {
+        unattributed: Unattributed,
+    },
     Diagnostic {},
+    /// One per endpoint after the last probe, before `complete`: the
+    /// inference over attempts already published as `probe` records.
+    Endpoint {
+        endpoint: EndpointSummary,
+    },
     Complete {
         planned_duration: Duration,
         target: String,
         resolved_addresses: Vec<IpAddr>,
+        plan: plan::Plan,
         counts: ClassificationCounts,
         retained_evidence_bytes: usize,
         rtt: Rtt,
@@ -331,6 +382,12 @@ impl TryFrom<library::Event> for Published<Event> {
                 },
                 Vec::new(),
             ),
+            library::Event::Unattributed(unattributed) => Self::new(
+                Event::Unattributed {
+                    unattributed: unattributed.try_into()?,
+                },
+                Vec::new(),
+            ),
             library::Event::Diagnostic(diagnostic) => {
                 Self::new(Event::Diagnostic {}, vec![diagnostic])
             }
@@ -338,13 +395,51 @@ impl TryFrom<library::Event> for Published<Event> {
     }
 }
 
-impl From<library::Report> for Published<Event> {
-    fn from(summary: library::Report) -> Self {
+/// An endpoint without its attempts, which the stream already carried.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EndpointSummary {
+    pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
+    pub transport: Transport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub classification: Classification,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_hint: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference: Option<plan::Inference>,
+    pub probes: Vec<u64>,
+}
+
+impl From<library::Endpoint> for Published<Event> {
+    fn from(endpoint: library::Endpoint) -> Self {
+        Self::new(
+            Event::Endpoint {
+                endpoint: EndpointSummary {
+                    address: endpoint.address,
+                    scope: endpoint.scope.as_ref().map(Scope::from),
+                    transport: endpoint.transport,
+                    port: endpoint.port,
+                    classification: endpoint.classification.into(),
+                    port_hint: endpoint.port_hint,
+                    inference: endpoint.inference.map(plan::Inference::from),
+                    probes: endpoint.probes.iter().map(|probe| probe.sequence).collect(),
+                },
+            },
+            Vec::new(),
+        )
+    }
+}
+
+impl From<(library::Report, plan::Plan)> for Published<Event> {
+    fn from((summary, plan): (library::Report, plan::Plan)) -> Self {
         Self::new(
             Event::Complete {
                 planned_duration: summary.planned_duration,
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
+                plan,
                 counts: summary.counts.into(),
                 retained_evidence_bytes: summary.retained_evidence_bytes,
                 rtt: summary.rtt.into(),
@@ -385,7 +480,9 @@ impl crate::output::stream::StreamRecord for Event {
             Self::Sent { .. } => "probe_sent",
             Self::Probe { .. } => "probe",
             Self::Undecoded { .. } => "undecoded",
+            Self::Unattributed { .. } => "unattributed",
             Self::Diagnostic {} => "diagnostic",
+            Self::Endpoint { .. } => "endpoint",
             Self::Complete { .. } => "complete",
         }
     }

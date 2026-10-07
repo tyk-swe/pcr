@@ -9,7 +9,6 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use packetcraftr::policy::Policy;
-use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
 use packetcraftr::target::{Family, SystemResolver, Target};
 use packetcraftr::{Client, ProviderSet};
@@ -42,11 +41,10 @@ fn attempt_expires_clock_before_operation_dl() {
     let request = scan::Request {
         target_sources: Vec::new(),
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
-        transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: Family::Any,
-        ports: vec![53],
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 53 }],
         attempts: 1,
         timeout,
         probes_per_second: None,

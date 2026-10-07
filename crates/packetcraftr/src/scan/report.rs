@@ -10,12 +10,47 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
+use crate::correlation::Correlation;
 use crate::execution::Shared;
 use crate::probe::{ProbeStatus, Transport, index_or_push};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Error;
+
+/// What a correlated reply was, beside the classification it earned. Port
+/// inference reads this rather than the classification, because one
+/// classification can cover replies that mean different things per method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Reply {
+    TcpSynAck,
+    TcpReset,
+    /// A correlated TCP segment that is neither SYN/ACK nor a reset.
+    TcpOther,
+    UdpPayload,
+    IcmpEchoReply,
+    IcmpPortUnreachable,
+    IcmpAdministrativelyProhibited,
+    /// Destination unreachable other than port unreachable or prohibition.
+    IcmpDestinationUnreachable,
+    IcmpTimeExceeded,
+}
+
+impl Reply {
+    pub(crate) const fn from_correlation(correlation: Correlation) -> Self {
+        match correlation {
+            Correlation::TcpSynAck => Self::TcpSynAck,
+            Correlation::TcpReset => Self::TcpReset,
+            Correlation::TcpOther => Self::TcpOther,
+            Correlation::UdpReply => Self::UdpPayload,
+            Correlation::IcmpReply => Self::IcmpEchoReply,
+            Correlation::PortUnreachable => Self::IcmpPortUnreachable,
+            Correlation::AdministrativelyProhibited => Self::IcmpAdministrativelyProhibited,
+            Correlation::DestinationUnreachable => Self::IcmpDestinationUnreachable,
+            Correlation::TimeExceeded => Self::IcmpTimeExceeded,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +109,8 @@ pub struct ProbeEvidence {
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
+    /// The correlated reply; `None` when the attempt was silent.
+    pub reply: Option<Reply>,
     pub responder: Option<IpAddr>,
     pub sent_at: SystemTime,
     pub received_at: Option<SystemTime>,
@@ -89,7 +126,13 @@ pub struct Endpoint {
     pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
     pub port: Option<u16>,
+    /// The highest-ranked attempt observation.
     pub classification: Classification,
+    /// The bundled catalog's name for this transport and port: a hint about
+    /// a conventional assignment, never service identification.
+    pub port_hint: Option<&'static str>,
+    /// Absent for portless ICMP echo, which observes a host, not a port.
+    pub inference: Option<super::Inference>,
     pub probes: Vec<ProbeEvidence>,
 }
 
@@ -100,10 +143,45 @@ pub struct Aggregate {
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Frame>,
+    /// Correlated frames no probe outcome carries: late, duplicate, and
+    /// ambiguous replies.
+    pub unattributed: Vec<Unattributed>,
     pub diagnostics: Vec<Diagnostic>,
     pub retained_evidence_bytes: usize,
     pub stats: Stats,
     pub rtt: Rtt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Attribution {
+    /// Correlates with a probe whose outcome was already published: its
+    /// window had closed or a definitive reply had settled it.
+    Late,
+    /// An additional in-window reply whose probe kept another reply, through
+    /// candidate ordering or the response limit.
+    Duplicate,
+    /// Correlates with more than one probe, so no outcome claimed it.
+    Ambiguous,
+}
+
+impl Attribution {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Late => "late",
+            Self::Duplicate => "duplicate",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+}
+
+/// A correlated frame retained beside the probe outcomes rather than
+/// discarded to force a single answer.
+#[derive(Clone, Debug)]
+pub struct Unattributed {
+    pub attribution: Attribution,
+    /// The probe the frame correlates with; absent when ambiguous.
+    pub sequence: Option<u64>,
+    pub frame: Frame,
 }
 
 /// Each probe contributes at most one sample: duplicate responses inside one
@@ -182,6 +260,7 @@ pub enum Event {
     Undecoded {
         frame: Frame,
     },
+    Unattributed(Unattributed),
     Diagnostic(Diagnostic),
 }
 
@@ -225,19 +304,21 @@ impl ClassificationCounts {
 #[derive(Clone, Default)]
 pub struct Collector(Shared<Collected>);
 
+/// Endpoint identity: TCP and UDP on one address and port never merge.
+pub(in crate::scan) type EndpointKey = (
+    IpAddr,
+    Transport,
+    Option<u16>,
+    Option<packetcraftr_netio::interface::Id>,
+);
+
 #[derive(Default)]
 struct Collected {
     endpoints: Vec<Endpoint>,
-    endpoint_indices: HashMap<
-        (
-            IpAddr,
-            Option<u16>,
-            Option<packetcraftr_netio::interface::Id>,
-        ),
-        usize,
-    >,
+    endpoint_indices: HashMap<EndpointKey, usize>,
     probes: u64,
     undecoded: Vec<Frame>,
+    unattributed: Vec<Unattributed>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -256,6 +337,7 @@ impl Collected {
             Event::Sent(_) => {}
             Event::Probe { target: _, probe } => self.observe_probe(probe),
             Event::Undecoded { frame } => self.undecoded.push(frame),
+            Event::Unattributed(unattributed) => self.unattributed.push(unattributed),
             Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
         }
     }
@@ -270,13 +352,15 @@ impl Collected {
         let endpoint = index_or_push(
             &mut self.endpoints,
             &mut self.endpoint_indices,
-            (address, port, interface),
+            (address, transport, port, interface),
             || Endpoint {
                 address,
                 scope,
                 transport,
                 port,
                 classification: Classification::Timeout,
+                port_hint: port.and_then(|port| super::catalog::hint(transport, port)),
+                inference: None,
                 probes: Vec::new(),
             },
         );
@@ -291,6 +375,7 @@ impl Collector {
             mut endpoints,
             probes,
             undecoded,
+            unattributed,
             diagnostics,
             ..
         } = self.0.take();
@@ -304,6 +389,13 @@ impl Collector {
         }
         for endpoint in &mut endpoints {
             endpoint.probes.sort_by_key(|probe| probe.sequence);
+            endpoint.inference = super::inference::raw(
+                endpoint.transport,
+                endpoint
+                    .probes
+                    .iter()
+                    .map(|probe| (probe.sequence, probe.reply)),
+            );
         }
         endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
         Ok(Aggregate {
@@ -312,6 +404,7 @@ impl Collector {
             resolved_addresses: report.resolved_addresses,
             endpoints,
             undecoded,
+            unattributed,
             diagnostics,
             retained_evidence_bytes: report.retained_evidence_bytes,
             stats: report.stats,

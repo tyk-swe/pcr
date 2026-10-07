@@ -51,6 +51,12 @@ pub(crate) enum PipelineEvent {
     Undecoded {
         frame: packetcraftr_core::frame::Frame,
     },
+    /// A correlated frame no probe outcome carries.
+    Unattributed {
+        frame: packetcraftr_core::frame::Frame,
+        attribution: crate::scan::Attribution,
+        sequence: Option<u64>,
+    },
     Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
 }
 
@@ -161,7 +167,6 @@ mod tests {
 
     use super::*;
     use crate::evidence::ExecutionPermit;
-    use crate::probe::Transport;
     use crate::scan::Limits;
     use crate::target::{Family, Target};
     use crate::test_support::fake_client;
@@ -173,11 +178,10 @@ mod tests {
             target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
-            transport: Transport::Tcp,
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),
             address_family: Family::Any,
-            ports: vec![80],
+            endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
             attempts: 1,
             timeout: Duration::from_millis(20),
             probes_per_second: None,

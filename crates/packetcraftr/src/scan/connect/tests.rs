@@ -13,7 +13,6 @@ use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::{Classification, Error, Limits, Request};
 use super::{Aggregate, Collector, Outcome};
-use crate::probe::Transport;
 use crate::test_support::FakeProviders;
 use crate::{Client, ProviderSet};
 
@@ -156,11 +155,12 @@ fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
     let request = Request {
         target_sources: Vec::new(),
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
-        transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
-        ports: vec![80, 81, 82],
+        endpoints: [80, 81, 82]
+            .map(|port| crate::probe::ProbeEndpoint::Tcp { port })
+            .to_vec(),
         attempts: 1,
         timeout: Duration::from_secs(5),
         probes_per_second: None,
@@ -252,11 +252,10 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
             )],
             exclude: Vec::new(),
         },
-        transport: Transport::Tcp,
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
-        ports: vec![443],
+        endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
         attempts: 1,
         timeout: Duration::from_secs(5),
         probes_per_second: None,

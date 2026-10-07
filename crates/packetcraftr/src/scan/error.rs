@@ -35,6 +35,11 @@ pub enum Error {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("TCP connect uses kernel route and source selection")]
     UnsupportedTcpRoute,
+    #[error("the {method} scan method cannot probe {transport} endpoints")]
+    MethodTransport {
+        method: &'static str,
+        transport: &'static str,
+    },
     #[error("scan authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved target has no {family} address selected for this scan")]
@@ -121,6 +126,11 @@ impl Classified for Error {
                 "capability.scan_tcp_route",
                 Kind::Capability,
                 Some("omit packet interface/source/link overrides for ordinary TCP"),
+            ),
+            Self::MethodTransport { .. } => Classification::new(
+                "cli.scan_method",
+                Kind::Usage,
+                Some("probe UDP and ICMP endpoints with the raw method"),
             ),
             Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }

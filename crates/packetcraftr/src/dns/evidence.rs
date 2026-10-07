@@ -380,11 +380,15 @@ pub(super) fn validate_dns_execution(
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_capture_statistics_evidence(execution.stats.capture)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)
-        .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_response_frames_and_deadlines(
+        &execution.responses,
+        execution.unsolicited.iter(),
+        timeout,
+    )
+    .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_aggregate_evidence_limits(
         &execution.responses,
-        &execution.unsolicited,
+        execution.unsolicited.iter(),
         &execution.undecoded,
         limits.max_evidence_frames,
         limits.max_evidence_bytes,

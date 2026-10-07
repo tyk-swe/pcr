@@ -7,7 +7,7 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::packet::Packet;
 
 use super::{
-    Aggregate, Error, Event, Observed, Report, Request, StopCondition, WorkflowResponseMatcher,
+    Error, Event, Observed, Report, Request, StopCondition, WorkflowResponseMatcher,
     WorkflowStopPredicate,
 };
 use crate::clock::Clock;
@@ -40,20 +40,22 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         let mut stop_predicate =
             |request_index: usize, _: &Packet, _: &DecodedPacket| answered.record(request_index);
         let transaction = self.arm_capture(prepared)?;
-        transaction.execute(
-            self.providers.transmit(),
-            None,
-            (stop == StopCondition::AllAnswered)
-                .then_some(&mut stop_predicate as &mut WorkflowStopPredicate<'_>),
-            &mut |event| {
-                let deadline = if collection.check().is_ok() {
-                    &collection
-                } else {
-                    finalization.get_or_insert_with(|| self.deadline(finalization_limit))
-                };
-                publish(event, deadline)
-            },
-        )
+        transaction
+            .execute(
+                self.providers.transmit(),
+                None,
+                (stop == StopCondition::AllAnswered)
+                    .then_some(&mut stop_predicate as &mut WorkflowStopPredicate<'_>),
+                &mut |event| {
+                    let deadline = if collection.check().is_ok() {
+                        &collection
+                    } else {
+                        finalization.get_or_insert_with(|| self.deadline(finalization_limit))
+                    };
+                    publish(event, deadline)
+                },
+            )
+            .map(|(report, _)| report)
     }
 
     pub(crate) fn exchange_hooked(
@@ -61,10 +63,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
         request: Request,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
-    ) -> Result<Aggregate, Error> {
+    ) -> Result<super::WorkflowEvidence, Error> {
         let mut observed = Observed::default();
         let transaction = self.arm_capture(self.prepare_exchange(request)?)?;
-        let report = transaction.execute(
+        let response_deadline = transaction.window.ends_at();
+        let (report, unsolicited_ingress) = transaction.execute(
             self.providers.transmit(),
             workflow_matcher,
             stop_predicate,
@@ -73,7 +76,11 @@ impl<P: PacketProviders, K: Clock> Client<P, K> {
                 Ok(())
             },
         )?;
-        observed.finish(report)
+        Ok(super::WorkflowEvidence {
+            aggregate: observed.finish(report)?,
+            unsolicited_ingress,
+            response_deadline,
+        })
     }
 }
 

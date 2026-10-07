@@ -72,7 +72,7 @@ where
         overrides: WorkflowOverrides,
         matches_request: &mut crate::exchange::WorkflowResponseMatcher<'_>,
         stop_after_response: Option<&mut crate::exchange::WorkflowStopPredicate<'_>>,
-    ) -> Result<crate::exchange::Aggregate, packetcraftr_core::error::BoundaryError> {
+    ) -> Result<crate::exchange::WorkflowEvidence, packetcraftr_core::error::BoundaryError> {
         let mut send = self.send.clone();
         send.destination = Some(overrides.destination);
         if let Some(interface) = overrides.interface {

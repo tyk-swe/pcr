@@ -1,0 +1,41 @@
+manifest_version: 1
+
+dataset:
+  name: "udp-payloads"
+  kind: "service"
+  version: "1.0.0"
+  packaged_as: "bundled"
+  review_outcome: "accepted"
+
+source:
+  name: "PacketcraftR project, encoding message formats from IETF RFCs"
+  locator: "crates/packetcraftr/data/udp-payloads.json"
+  retrieved: "2026-10-06"
+  upstream_version: "none; project-authored"
+  license: "AGPL-3.0-only (project-authored); message layouts are protocol constants"
+  license_rationale: |
+    Each request is encoded in this repository from the message format its RFC
+    defines: DNS (RFC 1035), multicast DNS service enumeration (RFC 6762,
+    RFC 6763), rpcbind NULL (RFC 5531, RFC 1833), NTP client mode (RFC 5905),
+    SNMPv3 engine discovery (RFC 3412, RFC 3414), STUN Binding (RFC 8489), and
+    CoAP resource discovery (RFC 7252, RFC 6690). No payload was copied from
+    Nmap or another scanner. Requests carry no credentials and ask only for
+    read-only protocol responses.
+
+transforms:
+  - step: "author"
+    detail: |
+      Encoded with fixed transaction identifiers derived from the ASCII bytes
+      "PC" (0x5043); DNS requests use the existing `dns` request block so
+      transaction IDs advance per probe.
+
+maintenance:
+  maintainer: "tyk-swe"
+  refresh: |
+    A payload changes only by review against its RFC. Any change bumps
+    `version` here and `CURATED_UDP_PAYLOADS_VERSION`; response checks remain
+    configured checks and are never promoted to product identification.
+
+coverage:
+  - fixture: "crates/packetcraftr/src/scan/profile/curated/tests.rs"
+    covers: "every curated profile compiles, matches the catalog's UDP entry for its port, and its check accepts a conforming reply"

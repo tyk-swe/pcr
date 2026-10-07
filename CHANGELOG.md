@@ -8,6 +8,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Structured command output moves to `packetcraftr.output/v8`, which adds
+  scanner port planning and inference; the v6 and v7 families and schemas stay
+  frozen. `scan::Request` replaces `transport` and `ports` with typed
+  `endpoints: Vec<probe::ProbeEndpoint>` that may mix TCP and UDP, and
+  `selected_ports()` is `planned_endpoints()`. `scan::Endpoint`,
+  `scan::connect::Endpoint`, `scan::ProbeEvidence`, `scan::CorrelatedResponse`,
+  and `scan::Aggregate` gain fields, and `scan::Event` gains `Unattributed`.
+  `scan --connect` with UDP or ICMP endpoints reports `cli.scan_method` instead
+  of `cli.error`. CLI scan output conversions take the published plan. See `docs/migration-unreleased.md`.
 - `scan::Request` gains `target_sources`, an optional ordered set of bounded
   declaration source labels. Live scan duplicate diagnostics now include the
   originating argument or manifest path/stdin and physical line, consistently
@@ -700,6 +709,23 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Scanner port planning and state inference (roadmap M6). `scan --ports`
+  accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
+  `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
+  `tcp:`/`udp:` prefixes beside numbers and ranges, and `--exclude-ports`
+  removes endpoints before any stage plans them. `--transport tcp,udp` plans
+  both transports under one budget with distinct endpoints. Every endpoint
+  publishes a `port_hint` from the bundled, provenance-recorded port catalog
+  and an `inference` (state, rule, and supporting, conflicting, unanswered, and
+  failed attempts) beside its unchanged attempt outcomes; silent UDP is
+  `open_or_filtered`, and socket deadlines and local errors are operational
+  failures, never port states. Late, duplicate, and ambiguous replies are
+  retained as `unattributed` evidence under `--max-undecoded`. `--method
+  raw|tcp-connect|auto` publishes the requested and selected method; explicit
+  methods are never replaced. `--curated-udp-payloads` adds bundled UDP
+  profiles for seven protocols, with operator profiles winning visibly.
+  `scan --list` publishes the expanded port selection. Results name the
+  catalog and payload data versions.
 - Reviewed host-local native validation now includes scoped IPv6 selection,
   sockets, and pinned raw delivery/capability checks across every feature profile.
   Evidence v3 binds the executable and independent corpus digests and distinguishes
@@ -1880,6 +1906,28 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Exchanges retain directly correlated TCP and UDP replies rejected by the response
+  limit as bounded unsolicited evidence, so serial scans can report duplicates.
+- Serial raw scans retain queued replies processed after expiration as late
+  evidence, and label replies as duplicates only when the probe has a winner.
+- Serial raw scans label in-window replies rejected by the response limit as
+  duplicate evidence, preserving the late label for arrivals after the window.
+- Raw scans reserve evidence capacity for outstanding probes before retaining
+  extra replies, so early duplicates cannot crowd out later winning frames.
+- The scan help exclusion example uses `ssh`, which is in the bundled port catalog.
+- `scan --transport` accepts one argument per occurrence, preserving positional
+  targets after the option while retaining comma-separated and repeated values.
+- The output v8 schema accepts port zero in JSON and NDJSON scan listings,
+  matching accepted numeric port selections.
+- Raw scans retain winning replies before duplicates under tight evidence
+  budgets, and serial scans retain eligible late unsolicited captures.
+- Unqualified port presets expand in the requested transport order.
+- Pipelined raw scans keep settled packets charged against the preparation byte
+  budget and evict the oldest cached packets when admission needs space.
+- Raw scans reject pre-send capture markers when matching settled probes, so
+  stale frames cannot consume late-reply evidence budgets.
+- Port selection returns an error instead of panicking when a caller-supplied
+  catalog preset references a missing entry.
 - TCP connect scans report coalesced duplicate target declarations in text,
   JSON, and NDJSON completion diagnostics.
 - Invalid target-planning durations report the requested milliseconds instead

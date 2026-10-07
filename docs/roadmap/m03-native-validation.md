@@ -165,8 +165,17 @@ leave the other seven scenarios unexecuted. The broader macOS/Windows native
 inventory, interface-isolation evidence, and administrator-owned protection
 controls remain incomplete, so M3 stays **In progress**.
 
+[M6][m6-limits] found an open question for native scan evidence on Linux. Over
+an isolated veth pair, kernel replies (SYN/ACK, RST, ICMP port unreachable)
+arrive about 30 µs after a probe, before `send()` returns. The shared rule that
+a capture inside the submission interval is not proven post-send discards
+them, so those raw scan endpoints read as silent. Slower replies correlate
+normally. Native scan scenarios here need to decide what such frames prove
+before claiming TCP or ICMP-error coverage.
+
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md
+[m6-limits]: m06-port-planning-inference.md#known-limits
 [project-readme]: ../../README.md
 [native-validation]: ../native-validation.md
 [ci]: ../../.github/workflows/ci.yml

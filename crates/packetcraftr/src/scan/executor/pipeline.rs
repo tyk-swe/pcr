@@ -4,7 +4,7 @@ mod correlation;
 mod prepare;
 use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
-use crate::scan::{PendingEvidence, PipelineFailure, Probe, SentProbe};
+use crate::scan::{Attribution, PendingEvidence, PipelineFailure, Probe, SentProbe};
 use crate::{
     Client, Stats,
     clock::Clock,
@@ -15,7 +15,7 @@ use crate::{
     providers::{CaptureProviders, PacketProviders},
     scan::error::Probes,
 };
-use correlation::{Best, SeenFrames, candidates, definitive};
+use correlation::{Best, SeenFrames, candidates, definitive, settled};
 use packetcraftr_core::{
     budget::Deadline,
     decode::Dissector,
@@ -30,7 +30,7 @@ use packetcraftr_netio::{
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     iter::Peekable,
     sync::Arc,
     time::{Duration, Instant},
@@ -40,6 +40,7 @@ struct Pending {
     sent: Arc<SentPacket>,
     deadline: Instant,
     best: Option<Best>,
+    passed: Vec<crate::exchange::Response>,
     last_response: Option<Frame>,
     charge: usize,
 }
@@ -181,6 +182,10 @@ struct Pipeline<'a, P: PacketProviders, K> {
     spacing: Duration,
     stats: Stats,
     pending: BTreeMap<usize, Pending>,
+    /// Up to `max_in_flight` settled probes and their memory charges, so
+    /// replies after settlement can be retained as late. Admission evicts
+    /// the oldest cached probes when the preparation budget needs space.
+    recent: VecDeque<(usize, Arc<SentPacket>, usize)>,
     retained: usize,
     evidence: RetentionBudget,
     failed_probe: Option<Probe>,
@@ -243,6 +248,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             spacing: Duration::ZERO,
             stats: Stats::default(),
             pending: BTreeMap::new(),
+            recent: VecDeque::new(),
             retained: plan.base_bytes,
             evidence: RetentionBudget::default(),
             failed_probe: None,
@@ -320,10 +326,18 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         while !draining_captures
             && self.pending.len() < self.options.max_in_flight
             && self.executor.client.now() >= self.next_send
-            && let Some(probe) = self.admitted.next_if(|probe| {
-                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
-            })
         {
+            while self.admitted.peek().is_some_and(|probe| {
+                self.retained.saturating_add(probe.memory) > self.options.max_prepared_bytes
+            }) && let Some((_, _, charge)) = self.recent.pop_front()
+            {
+                self.retained -= charge;
+            }
+            let Some(probe) = self.admitted.next_if(|probe| {
+                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
+            }) else {
+                break;
+            };
             self.send(probe)?;
             if !self.spacing.is_zero() {
                 break;
@@ -386,6 +400,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 sent: sent.clone(),
                 deadline: end,
                 best: None,
+                passed: Vec::new(),
                 last_response: None,
                 charge: memory,
             },
@@ -498,14 +513,37 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             &self.plan.interfaces[source],
             received,
         );
-        if candidates.len() != 1 {
-            if candidates.len() > 1 && self.diagnostics.insert("ambiguous") {
+        if candidates.is_empty() {
+            // Pending probes whose window closed have not settled yet, but
+            // a frame after their deadline cannot be their outcome either.
+            let expired = self
+                .pending
+                .iter()
+                .filter(|(_, entry)| received > entry.deadline)
+                .map(|(index, entry)| (*index, &entry.sent));
+            let recent = self.recent.iter().map(|(index, sent, _)| (*index, sent));
+            let settled = settled(
+                expired.chain(recent),
+                &self.planned,
+                &self.executor.client.registry,
+                &decoded,
+                &self.plan.interfaces[source],
+                received,
+            );
+            return match settled.as_slice() {
+                [] => Ok(()),
+                [index] => self.unattributed(raw, Attribution::Late, Some(*index)),
+                _ => self.unattributed(raw, Attribution::Ambiguous, None),
+            };
+        }
+        if candidates.len() > 1 {
+            if self.diagnostics.insert("ambiguous") {
                 (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
                     "scan.ambiguous_response",
                     "capture matched multiple pending probes and was not attributed",
                 )))?;
             }
-            return Ok(());
+            return self.unattributed(raw, Attribution::Ambiguous, None);
         }
         let (index, observation) = candidates.pop().expect("one candidate");
         let definitive = definitive(&observation);
@@ -525,30 +563,95 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .as_ref()
             .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
         {
-            self.evidence
-                .replace(
-                    entry
-                        .best
-                        .as_ref()
-                        .map(|previous| previous.response.response.frame.bytes().len()),
-                    raw.bytes().len(),
-                    self.options.max_evidence_frames,
-                    self.options.max_evidence_bytes,
-                )
-                .map_err(|error| match error {
-                    RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
-                        limit("evidence frames", self.options.max_evidence_frames)
-                    }
-                    RetentionError::ByteCountOverflow | RetentionError::ByteLimit => {
-                        limit("evidence bytes", self.options.max_evidence_bytes)
-                    }
-                })?;
-            entry.best = Some(candidate);
+            let previous_bytes = entry
+                .best
+                .as_ref()
+                .map(|previous| previous.response.response.frame.bytes().len());
+            // Buffered duplicates may use spare capacity, but a winner takes priority.
+            while let Err(error) = self.evidence.replace(
+                previous_bytes,
+                raw.bytes().len(),
+                self.options.max_evidence_frames,
+                self.options.max_evidence_bytes,
+            ) {
+                let Some(discarded) = self
+                    .pending
+                    .values_mut()
+                    .find_map(|entry| entry.passed.pop())
+                else {
+                    return Err(match error {
+                        RetentionError::FrameCountOverflow | RetentionError::FrameLimit => {
+                            limit("evidence frames", self.options.max_evidence_frames)
+                        }
+                        RetentionError::ByteCountOverflow | RetentionError::ByteLimit => {
+                            limit("evidence bytes", self.options.max_evidence_bytes)
+                        }
+                    });
+                };
+                self.evidence
+                    .release(discarded.response.frame.bytes().len());
+                self.evidence_limit()?;
+            }
+            let entry = self.pending.get_mut(&index).expect("candidate is pending");
+            if let Some(previous) = entry.best.replace(candidate) {
+                self.buffer_duplicate(index, previous.response)?;
+            }
+        } else {
+            self.buffer_duplicate(index, candidate.response)?;
         }
         if definitive {
             self.complete(index)?;
         }
         Ok(())
+    }
+
+    fn buffer_duplicate(
+        &mut self,
+        index: usize,
+        response: crate::exchange::Response,
+    ) -> Result<(), BoundaryError> {
+        if self
+            .evidence
+            .reserve(
+                response.response.frame.bytes().len(),
+                self.options.max_evidence_frames,
+                self.options.max_evidence_bytes,
+            )
+            .is_ok()
+        {
+            self.pending
+                .get_mut(&index)
+                .expect("candidate is pending")
+                .passed
+                .push(response);
+            Ok(())
+        } else {
+            self.evidence_limit()
+        }
+    }
+
+    fn evidence_limit(&mut self) -> Result<(), BoundaryError> {
+        if self.diagnostics.insert("scan.evidence_limit") {
+            (self.emit)(PipelineEvent::Diagnostic(Diagnostic::warning(
+                "scan.evidence_limit",
+                "scan evidence retention limit reached; extra replies were omitted",
+            )))?;
+        }
+        Ok(())
+    }
+
+    fn unattributed(
+        &mut self,
+        frame: Frame,
+        attribution: Attribution,
+        index: Option<usize>,
+    ) -> Result<(), BoundaryError> {
+        let sequence = index.map(|index| self.planned[index].probe.sequence);
+        (self.emit)(PipelineEvent::Unattributed {
+            frame,
+            attribution,
+            sequence,
+        })
     }
 
     fn complete(&mut self, index: usize) -> Result<(), BoundaryError> {
@@ -568,15 +671,20 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
             capture: Default::default(),
         };
+        let mut responses: Vec<_> = entry
+            .best
+            .take()
+            .map(|best| best.response)
+            .into_iter()
+            .collect();
+        responses.append(&mut entry.passed);
+        for response in &responses {
+            self.evidence.release(response.response.frame.bytes().len());
+        }
         let execution = Evidence {
             permit: self.planned[index].permit,
             sent: vec![entry.sent.as_ref().clone()],
-            responses: entry
-                .best
-                .take()
-                .map(|best| best.response)
-                .into_iter()
-                .collect(),
+            responses,
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
@@ -587,10 +695,12 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .pending
             .remove(&index)
             .expect("completed pending probe");
-        self.retained -= entry.charge;
-        if let Some(response) = entry.last_response {
-            self.evidence.release(response.bytes().len());
+        if self.recent.len() == self.options.max_in_flight
+            && let Some((_, _, charge)) = self.recent.pop_front()
+        {
+            self.retained -= charge;
         }
+        self.recent.push_back((index, entry.sent, entry.charge));
         self.failed_probe = None;
         Ok(())
     }

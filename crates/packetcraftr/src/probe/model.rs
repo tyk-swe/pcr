@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::correlation::Transport;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProbeEndpoint {
     Tcp { port: u16 },
     Udp { port: u16 },
@@ -27,6 +27,16 @@ impl ProbeEndpoint {
         match self {
             Self::Tcp { port } | Self::Udp { port } => Some(port),
             Self::Icmp => None,
+        }
+    }
+}
+
+/// Renders `tcp/80`, `udp/53`, or `icmp`.
+impl std::fmt::Display for ProbeEndpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.port() {
+            Some(port) => write!(formatter, "{}/{port}", self.transport()),
+            None => write!(formatter, "{}", self.transport()),
         }
     }
 }

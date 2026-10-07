@@ -16,7 +16,7 @@ use crate::{
     clock::Clock,
     execution::rate_delay,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
-    probe::{Transport, enforce_deadline},
+    probe::{ProbeEndpoint, enforce_deadline},
     target::ResolveTarget,
     target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
 };
@@ -96,14 +96,17 @@ fn planned<A: Authorizer + ResolveTarget>(
     authorizer: &mut A,
     deadline: &Deadline,
 ) -> Result<(Vec<IpAddr>, Planned), Error> {
-    request.validate()?;
-    if request.transport != Transport::Tcp {
-        return Err(invalid(
-            "transport",
-            0,
-            "TCP connect requires TCP transport",
-        ));
-    }
+    let ports = request
+        .planned_endpoints()?
+        .iter()
+        .map(|endpoint| match endpoint {
+            ProbeEndpoint::Tcp { port } => Ok(*port),
+            ProbeEndpoint::Udp { .. } | ProbeEndpoint::Icmp => Err(Error::MethodTransport {
+                method: super::super::method::Method::Connect.as_str(),
+                transport: endpoint.transport().as_str(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if request.route.requires_packet_route() {
         return Err(Error::UnsupportedTcpRoute);
     }
@@ -114,7 +117,6 @@ fn planned<A: Authorizer + ResolveTarget>(
             "TCP connect is capped at 16 concurrent native operations",
         ));
     }
-    let ports = request.selected_ports()?;
     if ports.contains(&0) {
         return Err(invalid("port", 0, "TCP connect requires nonzero ports"));
     }

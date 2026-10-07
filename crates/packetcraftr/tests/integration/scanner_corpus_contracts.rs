@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::CaptureProviders;
-use packetcraftr::probe::Transport;
+use packetcraftr::probe::{ProbeEndpoint, Transport};
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_netio::capture;
 use packetcraftr_netio::capture::Session as _;
@@ -130,6 +130,14 @@ fn transport(name: &str) -> Transport {
     }
 }
 
+fn endpoint(transport: Transport) -> ProbeEndpoint {
+    match transport {
+        Transport::Tcp => ProbeEndpoint::Tcp { port: PORT },
+        Transport::Udp => ProbeEndpoint::Udp { port: PORT },
+        Transport::Icmp => ProbeEndpoint::Icmp,
+    }
+}
+
 fn collection() -> packetcraftr::exchange::Collection {
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 65535;
@@ -182,14 +190,10 @@ fn run_scan(
                     ))],
                     exclude: Vec::new(),
                 },
-                transport: transport(transport_name),
                 udp_payload: bytes::Bytes::new(),
                 udp_profiles: Default::default(),
                 address_family: family_of(addresses),
-                ports: match transport_name {
-                    "icmp" => Vec::new(),
-                    _ => vec![PORT],
-                },
+                endpoints: vec![endpoint(transport(transport_name))],
                 attempts: 1,
                 timeout: TIMEOUT,
                 probes_per_second: None,
@@ -456,11 +460,10 @@ fn window_two_publishes_sent_before_the_probe_event() {
                     ))],
                     exclude: Vec::new(),
                 },
-                transport: Transport::Tcp,
                 udp_payload: bytes::Bytes::new(),
                 udp_profiles: Default::default(),
                 address_family: Family::Ipv4,
-                ports: vec![PORT],
+                endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: PORT }],
                 attempts: 1,
                 timeout: TIMEOUT,
                 probes_per_second: None,
@@ -479,6 +482,7 @@ fn window_two_publishes_sent_before_the_probe_event() {
                     scan::Event::Sent(_) => "sent",
                     scan::Event::Probe { .. } => "probe",
                     scan::Event::Undecoded { .. } => "undecoded",
+                    scan::Event::Unattributed(_) => "unattributed",
                     scan::Event::Diagnostic(_) => "diagnostic",
                 });
                 Ok(())

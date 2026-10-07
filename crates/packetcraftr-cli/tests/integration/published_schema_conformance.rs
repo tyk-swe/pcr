@@ -19,6 +19,33 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
 }
 
 #[test]
+fn scan_listing_accepts_port_zero_in_json_and_ndjson() {
+    for format in ["json", "ndjson"] {
+        let output = common::run_success(&[
+            "--output",
+            format,
+            "scan",
+            "192.0.2.1",
+            "--list",
+            "--ports",
+            "0",
+        ]);
+        let report = if format == "json" {
+            common::parse_json(&output)
+        } else {
+            let records = common::parse_ndjson(&output);
+            let complete = records.last().expect("completion record");
+            assert_eq!(complete["event"], "complete");
+            complete.clone()
+        };
+        assert_eq!(
+            report["result"]["ports"]["endpoints"],
+            json!([{"transport": "tcp", "port": 0}]),
+        );
+    }
+}
+
+#[test]
 fn schema_accepts_based_source_reject_zero() {
     let validator = schema_validator();
     let mut document: Value = serde_json::from_str(include_str!(
@@ -64,6 +91,9 @@ fn every_published_declared_schema() {
     let v6_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v6.schema.json"
     ));
+    let v7_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v7.schema.json"
+    ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
@@ -91,7 +121,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v7" => output_validator,
+            "packetcraftr.output/v8" => output_validator,
+            "packetcraftr.output/v7" => &v7_validator,
             "packetcraftr.output/v6" => &v6_validator,
             "packetcraftr.packet/v2" => &packet_validator,
             "packetcraftr.rewrite/v2" => &rewrite_v2,

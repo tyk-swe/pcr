@@ -100,7 +100,13 @@ pub struct Endpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<super::Scope>,
     pub port: u16,
+    /// The highest-ranked socket outcome, kept from v7.
     pub classification: Classification,
+    /// The catalog's conventional TCP name for the port; a hint, never
+    /// service identification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_hint: Option<&'static str>,
+    pub inference: super::plan::Inference,
     pub probes: Vec<Probe>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -109,15 +115,17 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub planned_duration: Duration,
+    pub plan: super::plan::Plan,
     pub socket_stats: Stats,
 }
-impl From<connect::Report> for Summary {
-    fn from(report: connect::Report) -> Self {
+impl Summary {
+    pub fn new(report: connect::Report, plan: super::plan::Plan) -> Self {
         Self {
             method: "tcp_connect",
             target: report.target,
             resolved_addresses: report.resolved_addresses,
             planned_duration: report.planned_duration,
+            plan,
             socket_stats: report.stats.into(),
         }
     }
@@ -128,11 +136,10 @@ pub struct Report {
     pub summary: Summary,
     pub endpoints: Vec<Endpoint>,
 }
-impl TryFrom<connect::Aggregate> for Report {
-    type Error = Error;
-    fn try_from(aggregate: connect::Aggregate) -> Result<Self, Error> {
+impl Report {
+    pub fn publish(aggregate: connect::Aggregate, plan: super::plan::Plan) -> Result<Self, Error> {
         Ok(Self {
-            summary: aggregate.report.into(),
+            summary: Summary::new(aggregate.report, plan),
             endpoints: aggregate
                 .endpoints
                 .into_iter()
@@ -142,6 +149,8 @@ impl TryFrom<connect::Aggregate> for Report {
                         scope: endpoint.scope.as_ref().map(super::Scope::from),
                         port: endpoint.port,
                         classification: endpoint.classification.into(),
+                        port_hint: endpoint.port_hint,
+                        inference: endpoint.inference.into(),
                         probes: endpoint
                             .probes
                             .into_iter()
@@ -171,5 +180,42 @@ impl TryFrom<connect::ProbeEvidence> for ProbeEvent {
 impl StreamRecord for ProbeEvent {
     fn event_name(&self) -> &'static str {
         "connect_probe"
+    }
+}
+
+/// One per endpoint after the last probe, before `complete`: the inference
+/// over attempts already published as `connect_probe` records.
+#[derive(Clone, Debug, Serialize)]
+pub struct EndpointEvent {
+    method: &'static str,
+    pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<super::Scope>,
+    pub port: u16,
+    pub classification: Classification,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port_hint: Option<&'static str>,
+    pub inference: super::plan::Inference,
+    pub probes: Vec<u64>,
+}
+
+impl From<connect::Endpoint> for EndpointEvent {
+    fn from(endpoint: connect::Endpoint) -> Self {
+        Self {
+            method: "tcp_connect",
+            address: endpoint.address,
+            scope: endpoint.scope.as_ref().map(super::Scope::from),
+            port: endpoint.port,
+            classification: endpoint.classification.into(),
+            port_hint: endpoint.port_hint,
+            inference: endpoint.inference.into(),
+            probes: endpoint.probes.iter().map(|probe| probe.sequence).collect(),
+        }
+    }
+}
+
+impl StreamRecord for EndpointEvent {
+    fn event_name(&self) -> &'static str {
+        "connect_endpoint"
     }
 }

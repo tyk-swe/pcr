@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::execution::evidence::Passed;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use packetcraftr_core::{
 use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
-use super::{Classification, Event, Probe, ProbeEvidence};
+use super::{Classification, Event, Probe, ProbeEvidence, Reply};
 use crate::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
@@ -21,6 +22,7 @@ use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CorrelatedResponse {
     pub classification: Classification,
+    pub reply: Reply,
     pub responder: IpAddr,
     pub reason: &'static str,
 }
@@ -47,6 +49,7 @@ pub fn classify_response(
     };
     Some(CorrelatedResponse {
         classification,
+        reply: Reply::from_correlation(observation.correlation),
         responder: observation.responder,
         reason: observation.reason,
     })
@@ -83,14 +86,7 @@ impl Observation {
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
-    pub(super) winners: HashMap<
-        (
-            IpAddr,
-            Option<u16>,
-            Option<packetcraftr_netio::interface::Id>,
-        ),
-        Classification,
-    >,
+    pub(super) winners: HashMap<super::report::EndpointKey, Classification>,
     pub(super) rtt: RttAccumulator,
 }
 
@@ -135,6 +131,7 @@ impl Classifier for ProbeClassifier<'_> {
             attempt: probe.attempt,
             status: ProbeStatus::Timeout,
             classification: Classification::Timeout,
+            reply: None,
             responder: None,
             sent_at: sent.timing().freshness_marker().wall_clock(),
             received_at: None,
@@ -151,6 +148,7 @@ impl Classifier for ProbeClassifier<'_> {
             self.rtt.note_received(reply.latency);
             evidence.status = ProbeStatus::Response;
             evidence.classification = reply.observation.response.classification;
+            evidence.reply = Some(reply.observation.response.reply);
             evidence.responder = Some(reply.observation.response.responder);
             evidence.received_at = reply.received_at;
             evidence.latency = Some(reply.latency);
@@ -161,6 +159,7 @@ impl Classifier for ProbeClassifier<'_> {
         self.winners
             .entry((
                 evidence.address,
+                evidence.transport,
                 evidence.port,
                 evidence.scope.as_ref().map(|scope| scope.interface.clone()),
             ))
@@ -174,6 +173,40 @@ impl Classifier for ProbeClassifier<'_> {
 
     fn undecoded(&self, _probes: &[Probe], frame: Frame) -> Event {
         Event::Undecoded { frame }
+    }
+
+    fn passed(&self, probe: &Probe, passed: Passed, frame: Frame) -> Option<Event> {
+        Some(Event::Unattributed(super::Unattributed {
+            attribution: match passed {
+                Passed::Late => super::Attribution::Late,
+                Passed::Superseded => super::Attribution::Duplicate,
+            },
+            sequence: Some(probe.sequence),
+            frame,
+        }))
+    }
+
+    fn unsolicited(
+        &self,
+        probe: &Probe,
+        sent: &SentPacket,
+        capture: &crate::probe::runner::UnsolicitedCapture,
+        has_response: bool,
+    ) -> Option<Event> {
+        let received_at = capture.received_at?;
+        if received_at < sent.timing().freshness_marker().monotonic() {
+            return None;
+        }
+        self.classify(probe, sent, &capture.decoded)?;
+        let passed = if capture.correlation_expired
+            || received_at > capture.response_deadline
+            || !has_response
+        {
+            Passed::Late
+        } else {
+            Passed::Superseded
+        };
+        self.passed(probe, passed, capture.decoded.frame.clone())
     }
 
     fn diagnostic(&self, diagnostic: Diagnostic) -> Event {

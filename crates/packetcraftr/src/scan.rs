@@ -21,23 +21,36 @@ const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
+pub mod catalog;
 pub mod connect;
 mod engine;
 mod error;
 mod evidence;
 mod executor;
+mod inference;
+pub mod method;
 mod plan;
 pub mod profile;
 mod report;
 mod request;
+mod selection;
 #[cfg(test)]
 mod tests;
 
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
+pub use inference::{Inference, Rule, State};
 pub use plan::Probe;
 pub use report::{
-    Aggregate, Classification, ClassificationCounts, Collector, Endpoint, Event, PendingEvidence,
-    ProbeEvidence, Report, Rtt, SentProbe,
+    Aggregate, Attribution, Classification, ClassificationCounts, Collector, Endpoint, Event,
+    PendingEvidence, ProbeEvidence, Reply, Report, Rtt, SentProbe, Unattributed,
 };
 pub use request::{Limits, PortSpec, Request, select_ports};
+pub use selection::{MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints};
+
+/// A bundled data set a result drew on, named with its own version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DataSet {
+    pub name: &'static str,
+    pub version: &'static str,
+}

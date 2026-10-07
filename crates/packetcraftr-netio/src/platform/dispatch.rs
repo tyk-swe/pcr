@@ -36,14 +36,7 @@ pub(crate) fn unsupported(
     feature: &str,
     operation: &str,
 ) -> Unsupported {
-    Unsupported::new(
-        capability,
-        if feature_enabled {
-            format!("native {operation} is unsupported on this target")
-        } else {
-            format!("enable the {feature} feature for native {operation}")
-        },
-    )
+    Unsupported::unbuilt(capability, feature_enabled, feature, operation)
 }
 
 #[cfg(native_route)]

@@ -17,8 +17,12 @@ pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 32;
 pub const MAX_ATTEMPTS: u32 = 32;
 pub const MAX_RATE: u32 = crate::execution::limits::MAX_RATE;
 
-const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
-    EvidenceDiagnosticDescriptor::new("dns.evidence_limit", "dns.undecoded_limit", "DNS");
+const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
+    "dns.evidence_limit",
+    "dns.undecoded_limit",
+    "dns.unattributed_limit",
+    "DNS",
+);
 
 const FLAG_RESPONSE: u16 = 0x8000;
 const FLAG_AUTHORITATIVE: u16 = 0x0400;

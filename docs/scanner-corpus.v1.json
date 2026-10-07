@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.0.0",
+  "dataset_version": "1.1.0",
   "families": ["ipv4", "ipv6"],
   "transports": ["tcp", "udp", "icmp"],
   "fixture_addresses": {
@@ -105,14 +105,98 @@
       "divergence": "Silence at a hop is an observation. It does not identify a router or prove a blocked destination."
     }
   ],
+  "target_planning_scenarios": [
+    {
+      "id": "numeric-source-equivalence",
+      "condition": "The same three numeric declarations are supplied as arguments, or one positional address followed by a two-line file/stdin manifest. A /30 contains all four addresses, including its numeric endpoints; no target or neighbor work is needed.",
+      "include": [
+        "192.0.2.9",
+        "192.0.2.0/30",
+        "192.0.2.8"
+      ],
+      "expected_addresses": [
+        "192.0.2.9",
+        "192.0.2.0",
+        "192.0.2.1",
+        "192.0.2.2",
+        "192.0.2.3",
+        "192.0.2.8"
+      ],
+      "expected_resolution_performed": false,
+      "divergence": "No Nmap shorthand or implicit DNS is used. Original declaration order and physical manifest lines remain observable, independent of any Nmap rendering."
+    },
+    {
+      "id": "numeric-narrowing",
+      "condition": "A four-address numeric /30 excludes its middle two addresses. Separately, one IPv4 and one IPv6 declaration are narrowed to IPv4.",
+      "include": [
+        "192.0.2.0/30"
+      ],
+      "exclude": [
+        "192.0.2.1",
+        "192.0.2.2"
+      ],
+      "expected_addresses": [
+        "192.0.2.0",
+        "192.0.2.3"
+      ],
+      "family_include": [
+        "192.0.2.1",
+        "2001:db8::1"
+      ],
+      "family": "ipv4",
+      "expected_family_addresses": [
+        "192.0.2.1"
+      ],
+      "divergence": "Numeric exclusion and family filters define the expected selection without resolution or probes; network and broadcast numeric values are not silently removed."
+    },
+    {
+      "id": "manifest-boundaries",
+      "condition": "Malformed/oversized include and exclusion manifests are rejected before policy or providers. Exact repeated declarations coalesce, preserving all source labels and physical lines; one stdin consumer is admitted across all input roles.",
+      "expected": {
+        "input_errors_before_active_work": true,
+        "duplicate_diagnostic": "scan.duplicate_declaration",
+        "source_position_retained": true,
+        "unique_stdin_consumer": true
+      },
+      "divergence": "Bounded one-declaration-per-line manifests deliberately differ from unbounded or Nmap-specific input grammars. Errors and warnings retain PacketcraftR classifications."
+    },
+    {
+      "id": "scoped-host-local",
+      "condition": "A real assigned unicast link-local IPv6 address is named with its interface name and IPv6 index. A TCP listener and raw UDP receiver are bound only to that same local scoped address; no adapter mutation or external destination is allowed.",
+      "expected": {
+        "selected_targets": 1,
+        "origins": 2,
+        "scope_interface_retained": true,
+        "connect_outcome": "connected",
+        "connect_classification": "open",
+        "raw": "exact UDP payload delivery or typed capability.unsupported",
+        "portable": "capability.unsupported"
+      },
+      "divergence": "Name/index aliases identify one interface, not two targets. A successful socket is handshake evidence only. macOS complete-header raw IPv6 is unsupported, not a network timeout; unavailable host fixtures do not count as proof."
+    },
+    {
+      "id": "scoped-isolated-links",
+      "condition": "Inside a fresh Linux namespace, two independent veth links share the same link-local source and peer addresses. Only the first link hosts the TCP listener and exact raw TCP SYN responder; interface-name/index aliases select the same first link.",
+      "expected": {
+        "selected_targets": 2,
+        "alias_origins": 2,
+        "correct_zone_connect": "connected",
+        "other_zone_connect": "refused",
+        "raw_open": "open",
+        "raw_closed": "closed",
+        "scope_interface_retained": true
+      },
+      "divergence": "The provisioned listener/responder, not Nmap output, defines connected/open and refused/closed ground truth. Equal IPv6 bytes on distinct links must remain distinct endpoint identities."
+    }
+  ],
   "provenance": {
     "source": "Original PacketcraftR fixture specifications authored in this repository",
-    "retrieved": "2026-10-05",
+    "retrieved": "2026-10-06",
     "transforms": ["Independently specified network conditions; no Nmap database or output used to derive expectations"],
     "license": "AGPL-3.0-only",
     "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
     "maintainer": "tyk-swe",
     "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows.",
-    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports."
+    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions."
   }
 }

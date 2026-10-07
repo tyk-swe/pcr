@@ -161,15 +161,7 @@ fn planned<A: Authorizer + ResolveTarget>(
                 diagnostics: selected
                     .duplicates
                     .iter()
-                    .map(|duplicate| {
-                        packetcraftr_core::diagnostic::Diagnostic::warning(
-                            "scan.duplicate_declaration",
-                            format!(
-                                "target declaration {} duplicates an earlier declaration and was coalesced",
-                                duplicate + 1
-                            ),
-                        )
-                    })
+                    .map(|duplicate| request.duplicate_diagnostic(*duplicate))
                     .collect(),
                 count,
                 delay,

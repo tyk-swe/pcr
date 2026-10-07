@@ -194,6 +194,7 @@ impl Clock for AdmissionClock {
 
 fn request() -> scan::Request {
     scan::Request {
+        target_sources: Vec::new(),
         targets: Target::Address("192.0.2.10".parse().unwrap()).into(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),

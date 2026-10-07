@@ -76,6 +76,10 @@ def load_corpus(path):
         raise ValueError("corpus must contain both native connect conditions")
     if [case["id"] for case in corpus["traceroute_scenarios"]] != ["responsive", "silent"]:
         raise ValueError("corpus must contain both first-hop traceroute conditions")
+    if [case["id"] for case in corpus.get("target_planning_scenarios", [])] != [
+            "numeric-source-equivalence", "numeric-narrowing", "manifest-boundaries",
+            "scoped-host-local", "scoped-isolated-links"]:
+        raise ValueError("corpus must contain the complete target-planning fixture inventory")
     for family, addresses in corpus["fixture_addresses"].items():
         network = ipaddress.ip_network("192.0.2.0/24" if family == "ipv4" else "2001:db8::/32")
         if any(ipaddress.ip_address(value) not in network for value in addresses.values()):

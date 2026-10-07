@@ -17,6 +17,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   and `scan::Aggregate` gain fields, and `scan::Event` gains `Unattributed`.
   `scan --connect` with UDP or ICMP endpoints reports `cli.scan_method` instead
   of `cli.error`. CLI scan output conversions take the published plan. See `docs/migration-unreleased.md`.
+- `scan::Request` gains `target_sources`, an optional ordered set of bounded
+  declaration source labels. Live scan duplicate diagnostics now include the
+  originating argument or manifest path/stdin and physical line, consistently
+  with `scan --list`. See `docs/migration-unreleased.md`.
+
 - `packetcraftr::Providers` is now a blanket marker over the capability
   interfaces `CaptureProviders`, `PacketProviders`, `TargetProviders`, and
   `TcpProviders`, so each `Client` workflow requires only the provider cluster
@@ -721,6 +726,17 @@ All notable changes to PacketcraftR are documented here. The format follows
   profiles for seven protocols, with operator profiles winning visibly.
   `scan --list` publishes the expanded port selection. Results name the
   catalog and payload data versions.
+- Reviewed host-local native validation now includes scoped IPv6 selection,
+  sockets, and pinned raw delivery/capability checks across every feature profile.
+  Evidence v3 binds the executable and independent corpus digests and distinguishes
+  each scoped path; focused M4 runs do not claim completion of broader M3 tests.
+- M4 target-planning acceptance is complete: bounded manifests, packet-free
+  listing, provenance, and scoped IPv6 pass the relevant Linux/macOS/Windows
+  profiles. Recorded native and corpus evidence remains in the roadmap;
+  broader M2/M3 validation and documented native capability limits remain open.
+- Scanner corpus dataset 1.1.0 includes M4 numeric manifest and scoped fixture
+  ground truth, with schema-checked expectations consumed by the existing suites.
+
 - `scan --targets-file`/`--exclude-file` bounded manifests (with `-` stdin),
   `scan --list` target planning, and scoped `fe80::/10%zone` targets carried
   through selection, connect sockets, and raw route planning. Malformed or

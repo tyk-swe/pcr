@@ -92,7 +92,7 @@ def scope(record, interface):
 
 
 def respond(stop, interface, received):
-    """Answer raw SYNs to the scoped peer with exact, checksummed TCP replies."""
+    """Answer NDP and raw SYNs with independently checksummed local replies."""
     peer = socket.inet_pton(socket.AF_INET6, SCOPED_RAW_PEER)
     with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x86dd)) as raw:
         raw.bind((interface, 0x86dd))
@@ -102,8 +102,21 @@ def respond(stop, interface, received):
                 frame, (_, _, kind, _, _) = raw.recvfrom(2048)
             except socket.timeout:
                 continue
+            if kind == socket.PACKET_OUTGOING:
+                continue
+            # Layer 2 preparation actively solicits the unassigned user-space
+            # peer. Answer only its Neighbor Solicitation on this isolated link.
+            if len(frame) >= 78 and frame[20] == 58 and frame[54] == 135 and frame[62:78] == peer:
+                destination = frame[22:38]
+                mac = raw.getsockname()[4]
+                advertisement = struct.pack('!BBHI', 136, 0, 0, 0x60000000) + peer + bytes((2, 1)) + mac
+                pseudo = peer + destination + struct.pack('!I3xB', len(advertisement), 58)
+                advertisement = advertisement[:2] + struct.pack('!H', checksum(pseudo + advertisement)) + advertisement[4:]
+                header = struct.pack('!IHBB16s16s', 6 << 28, len(advertisement), 58, 255, peer, destination)
+                raw.send(frame[6:12] + mac + bytes.fromhex('86dd') + header + advertisement)
+                continue
             # Ethernet (14) + IPv6 (40) + TCP (20): a SYN without ACK to the peer.
-            if kind == socket.PACKET_OUTGOING or len(frame) < 74 or frame[20] != 6 or frame[38:54] != peer \
+            if len(frame) < 74 or frame[20] != 6 or frame[38:54] != peer \
                     or (frame[67] & 0x12) != 0x02:
                 continue
             source, destination = frame[38:54], frame[22:38]
@@ -121,7 +134,28 @@ def respond(stop, interface, received):
             raw.send(frame[6:12] + frame[0:6] + frame[12:14] + header + tcp)
 
 
-def scoped_ipv6(binary, report):
+def scoped_capability_failure(binary, report, *options, target='fe80::1%1'):
+    command = [str(binary), '--output', 'json', 'scan', target, *options]
+    output = subprocess.run(command, capture_output=True, text=True, timeout=20)
+    report.setdefault('runs', []).append(dict(command=command, exit_code=output.returncode,
+                                              stdout=output.stdout, stderr=output.stderr))
+    assert output.returncode != 0, 'unsupported scoped operation succeeded'
+    assert json.loads(output.stdout)['error']['code'] == 'capability.unsupported', \
+        'unsupported scoped operation did not publish a capability failure'
+
+
+def scoped_ipv6(binary, report, profile='full-native'):
+    corpus_path = ROOT / 'docs/scanner-corpus.v1.json'
+    corpus = json.loads(corpus_path.read_bytes())
+    expected = next(case['expected'] for case in corpus['target_planning_scenarios']
+                    if case['id'] == 'scoped-isolated-links')
+    report.update(corpus_sha256=digest(corpus_path), corpus_dataset_version=corpus['dataset_version'])
+    if profile == 'portable':
+        for options in (('--list',), ('--connect', '--ports', '1'), ('--ports', '1')):
+            scoped_capability_failure(binary, report, *options)
+        report.update(exit_code=0, status='passed', scoped_paths=dict(
+            selection='unsupported_capability', connect='unsupported_capability', raw='unsupported_capability'))
+        return
     near, far = SCOPED_LINKS[0]
     other = SCOPED_LINKS[1][0]
     try:
@@ -137,7 +171,7 @@ def scoped_ipv6(binary, report):
         records = cli(binary, report, '--output', 'ndjson', 'scan', '--list', f'fe80::2%{near}',
                       f'fe80::2%{socket.if_nametoindex(near)}', f'fe80::2%{other}')
         listed = [record['result'] for record in records if record['event'] == 'target']
-        assert len(listed) == 2 and scope(listed[0], near) and scope(listed[1], other), 'zones did not resolve'
+        assert len(listed) == expected['selected_targets'] and scope(listed[0], near) and scope(listed[1], other), 'zones did not resolve'
         assert [origin['index'] for origin in listed[0]['origins']] == [0, 1], 'name/index aliases did not merge'
 
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
@@ -154,12 +188,19 @@ def scoped_ipv6(binary, report):
             'connect socket was not bound to the declared zone'
         assert probes[other]['classification'] == 'closed', 'scoped connect reached the wrong link'
 
+        if profile in ('default', 'pcap-free'):
+            scoped_capability_failure(binary, report, '--ports', '1', target=f'{SCOPED_RAW_PEER}%{near}')
+            report.update(exit_code=0, status='passed', scoped_paths=dict(
+                selection='exercised', connect='exercised', raw='unsupported_capability'))
+            return
+
         stop, received = threading.Event(), []
         responder = threading.Thread(target=respond, args=(stop, far, received), daemon=True)
         responder.start()
         try:
+            mode = ('--link-mode', 'layer2') if profile == 'layer2' else ()
             records = cli(binary, report, '--output', 'ndjson', 'scan', f'{SCOPED_RAW_PEER}%{near}',
-                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '1000')
+                          '--ports', f'{SCOPED_OPEN},{SCOPED_CLOSED}', '--timeout-ms', '5000', *mode)
         finally:
             stop.set()
             responder.join(timeout=5)
@@ -169,12 +210,13 @@ def scoped_ipv6(binary, report):
         assert set(probes) == {SCOPED_OPEN, SCOPED_CLOSED} and all(scope(probe, near) for probe in probes.values()), \
             'raw probes lost their scope'
         assert {item['destination_port'] for item in received} == set(probes), 'raw probes did not leave the declared link'
-        assert probes[SCOPED_OPEN]['classification'] == 'open' and probes[SCOPED_CLOSED]['classification'] == 'closed', \
+        assert probes[SCOPED_OPEN]['classification'] == expected['raw_open'] and probes[SCOPED_CLOSED]['classification'] == expected['raw_closed'], \
             'raw replies on the declared link were not correlated'
     finally:
         for link, _ in SCOPED_LINKS:
             subprocess.run(['ip', 'link', 'del', link], stderr=subprocess.DEVNULL, timeout=10)
-    report.update(exit_code=0, status='passed')
+    report.update(exit_code=0, status='passed', scoped_paths=dict(
+        selection='exercised', connect='exercised', raw='exercised'))
 
 
 # Launcher-driven CLI scenarios; every other scenario is a native_isolated test.

@@ -138,6 +138,7 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
         ..packetcraftr::route::Options::default()
     };
     scan::Request {
+        target_sources: Vec::new(),
         targets: Selection {
             include: vec![Specification::Target(Target::Address(
                 arguments.addresses.destination,

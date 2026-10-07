@@ -1,0 +1,875 @@
+{
+  "schema": "packetcraftr.native-platform-evidence/v3",
+  "platform": "Linux",
+  "commit": "8e010a0b9eac118aa13384f0b854111a73d47d76",
+  "dirty": false,
+  "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+  "corpus_dataset_version": "1.1.0",
+  "isolation": {
+    "kind": "fresh_network_namespace",
+    "namespace": 4026532317,
+    "parent_namespace": 4026531833
+  },
+  "profiles": [
+    {
+      "name": "portable",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "unshare",
+            "--user",
+            "--map-users=0:1000:1",
+            "--map-groups=0:1000:1",
+            "--setuid=0",
+            "--setgid=0",
+            "--net",
+            "/usr/bin/python3",
+            "/home/ubuntu/code/pcr/1/pcr/scripts/test-target-planning-isolated.py",
+            "--binary",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/portable/packetcraftr",
+            "--profile",
+            "portable",
+            "--report",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/portable/scoped.json",
+            "--parent-namespace",
+            "4026531833"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "PACKETCRAFTR_NATIVE_SCOPED={\"selection\": \"unsupported_capability\", \"connect\": \"unsupported_capability\", \"raw\": \"unsupported_capability\"}\n",
+          "stderr": "",
+          "fixture": {
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833,
+            "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+            "corpus_dataset_version": "1.1.0",
+            "runs": [
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/portable/packetcraftr",
+                  "--output",
+                  "json",
+                  "scan",
+                  "fe80::1%1",
+                  "--list"
+                ],
+                "exit_code": 4,
+                "stdout": "{\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"target plan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/portable/packetcraftr",
+                  "--output",
+                  "json",
+                  "scan",
+                  "fe80::1%1",
+                  "--connect",
+                  "--ports",
+                  "1"
+                ],
+                "exit_code": 4,
+                "stdout": "{\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/portable/packetcraftr",
+                  "--output",
+                  "json",
+                  "scan",
+                  "fe80::1%1",
+                  "--ports",
+                  "1"
+                ],
+                "exit_code": 4,
+                "stdout": "{\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n",
+                "stderr": ""
+              }
+            ],
+            "exit_code": 0,
+            "status": "passed",
+            "scoped_paths": {
+              "selection": "unsupported_capability",
+              "connect": "unsupported_capability",
+              "raw": "unsupported_capability"
+            }
+          },
+          "isolation": {
+            "kind": "fresh_network_namespace",
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833
+          },
+          "scoped_paths": {
+            "selection": "unsupported_capability",
+            "connect": "unsupported_capability",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "04ceee60b754636f52216fb3d218adf4925e11b50b68f72a49c5851a7ef7f7e5",
+        "stderr_sha256": "a41051563a4cb5fc1b1bcdd9aa0ba28ca80f7736d629d90cc138218756e8e3a9"
+      },
+      "binary_sha256": "831d14dc385a2466ac2426ce6767f9aa9a05e1e4aae826c14f58579d92da68c4",
+      "test_binary_sha256": "0a1267a65e135e3e98864a673e81c212df3d1b7fd84d54e0c1c1d79a468bb5ff",
+      "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    },
+    {
+      "name": "default",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "unshare",
+            "--user",
+            "--map-users=0:1000:1",
+            "--map-groups=0:1000:1",
+            "--setuid=0",
+            "--setgid=0",
+            "--net",
+            "/usr/bin/python3",
+            "/home/ubuntu/code/pcr/1/pcr/scripts/test-target-planning-isolated.py",
+            "--binary",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/default/packetcraftr",
+            "--profile",
+            "default",
+            "--report",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/default/scoped.json",
+            "--parent-namespace",
+            "4026531833"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "PACKETCRAFTR_NATIVE_SCOPED={\"selection\": \"exercised\", \"connect\": \"exercised\", \"raw\": \"unsupported_capability\"}\n",
+          "stderr": "",
+          "fixture": {
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833,
+            "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+            "corpus_dataset_version": "1.1.0",
+            "runs": [
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/default/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--list",
+                  "fe80::2%pcrs0",
+                  "fe80::2%3",
+                  "fe80::2%pcrt0"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"origins\":[{\"index\":0,\"source\":\"argument 1\"},{\"index\":1,\"source\":\"argument 2\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"origins\":[{\"index\":2,\"source\":\"argument 3\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"target\":\"fe80::2%pcrs0,fe80::2%3,fe80::2%pcrt0\",\"resolution_performed\":false,\"count\":2,\"duplicates\":[]},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/default/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--connect",
+                  "fe80::2%pcrs0",
+                  "fe80::2%pcrt0",
+                  "--ports",
+                  "8443",
+                  "--timeout-ms",
+                  "1000"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":0,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":true,\"outcome\":\"connected\",\"classification\":\"open\",\"scheduled_at\":{\"unix_seconds\":1791330848,\"nanoseconds\":830428528},\"finished_at\":{\"unix_seconds\":1791330848,\"nanoseconds\":830797230},\"elapsed\":{\"secs\":0,\"nanos\":368779},\"local\":\"[fe80::1%3]:45962\",\"error\":null},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":1,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":false,\"outcome\":\"refused\",\"classification\":\"closed\",\"scheduled_at\":{\"unix_seconds\":1791330848,\"nanoseconds\":832095588},\"finished_at\":{\"unix_seconds\":1791330848,\"nanoseconds\":832234025},\"elapsed\":{\"secs\":0,\"nanos\":138515},\"local\":null,\"error\":{\"kind\":\"ConnectionRefused\",\"os_code\":111,\"message\":\"Connection refused (os error 111)\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"target\":\"fe80::2%pcrs0,fe80::2%pcrt0\",\"resolved_addresses\":[\"fe80::2\",\"fe80::2\"],\"planned_duration\":{\"secs\":2,\"nanos\":0},\"socket_stats\":{\"connections_scheduled\":2,\"connections_attempted\":2,\"connections_succeeded\":1,\"retained_evidence_bytes\":437,\"elapsed\":{\"secs\":0,\"nanos\":5645851},\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":138515},\"avg\":{\"secs\":0,\"nanos\":253647},\"max\":{\"secs\":0,\"nanos\":368779}}}},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/default/packetcraftr",
+                  "--output",
+                  "json",
+                  "scan",
+                  "fe80::3%pcrs0",
+                  "--ports",
+                  "1"
+                ],
+                "exit_code": 4,
+                "stdout": "{\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan execution failed at probe 0\",\n    \"causes\": [\n      \"live packet I/O is unavailable: enable the native-layer2 feature for native packet capture\"\n    ],\n    \"context\": {\n      \"probe_sequence\": 0\n    },\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n",
+                "stderr": ""
+              }
+            ],
+            "exit_code": 0,
+            "status": "passed",
+            "scoped_paths": {
+              "selection": "exercised",
+              "connect": "exercised",
+              "raw": "unsupported_capability"
+            }
+          },
+          "isolation": {
+            "kind": "fresh_network_namespace",
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833
+          },
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "85c749bd1ea953859747d3dbebb92c2a65e4fff40ba7efa586689ad9c9c6d1e3",
+        "stderr_sha256": "22e0df986057b9ba5be07526ac5fb348862a3dedef42108383cc3e088acbb889"
+      },
+      "binary_sha256": "efb5f4970579365c7aeb536f25324e472b13b5cbf865c22e25d644bcb623983c",
+      "test_binary_sha256": "0a1267a65e135e3e98864a673e81c212df3d1b7fd84d54e0c1c1d79a468bb5ff",
+      "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    },
+    {
+      "name": "layer2",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "unshare",
+            "--user",
+            "--map-users=0:1000:1",
+            "--map-groups=0:1000:1",
+            "--setuid=0",
+            "--setgid=0",
+            "--net",
+            "/usr/bin/python3",
+            "/home/ubuntu/code/pcr/1/pcr/scripts/test-target-planning-isolated.py",
+            "--binary",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/layer2/packetcraftr",
+            "--profile",
+            "layer2",
+            "--report",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/layer2/scoped.json",
+            "--parent-namespace",
+            "4026531833"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "PACKETCRAFTR_NATIVE_SCOPED={\"selection\": \"exercised\", \"connect\": \"exercised\", \"raw\": \"exercised\"}\n",
+          "stderr": "",
+          "fixture": {
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833,
+            "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+            "corpus_dataset_version": "1.1.0",
+            "runs": [
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/layer2/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--list",
+                  "fe80::2%pcrs0",
+                  "fe80::2%3",
+                  "fe80::2%pcrt0"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"origins\":[{\"index\":0,\"source\":\"argument 1\"},{\"index\":1,\"source\":\"argument 2\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"origins\":[{\"index\":2,\"source\":\"argument 3\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"target\":\"fe80::2%pcrs0,fe80::2%3,fe80::2%pcrt0\",\"resolution_performed\":false,\"count\":2,\"duplicates\":[]},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/layer2/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--connect",
+                  "fe80::2%pcrs0",
+                  "fe80::2%pcrt0",
+                  "--ports",
+                  "8443",
+                  "--timeout-ms",
+                  "1000"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":0,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":true,\"outcome\":\"connected\",\"classification\":\"open\",\"scheduled_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":277281688},\"finished_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":277645416},\"elapsed\":{\"secs\":0,\"nanos\":363821},\"local\":\"[fe80::1%3]:45974\",\"error\":null},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":1,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":false,\"outcome\":\"refused\",\"classification\":\"closed\",\"scheduled_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":278854645},\"finished_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":279007026},\"elapsed\":{\"secs\":0,\"nanos\":152528},\"local\":null,\"error\":{\"kind\":\"ConnectionRefused\",\"os_code\":111,\"message\":\"Connection refused (os error 111)\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"target\":\"fe80::2%pcrs0,fe80::2%pcrt0\",\"resolved_addresses\":[\"fe80::2\",\"fe80::2\"],\"planned_duration\":{\"secs\":2,\"nanos\":0},\"socket_stats\":{\"connections_scheduled\":2,\"connections_attempted\":2,\"connections_succeeded\":1,\"retained_evidence_bytes\":437,\"elapsed\":{\"secs\":0,\"nanos\":5594306},\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":152528},\"avg\":{\"secs\":0,\"nanos\":258174},\"max\":{\"secs\":0,\"nanos\":363821}}}},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/layer2/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "fe80::3%pcrs0",
+                  "--ports",
+                  "8443,8444",
+                  "--timeout-ms",
+                  "5000",
+                  "--link-mode",
+                  "layer2"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"diagnostic\",\"status\":\"success\",\"result\":{},\"diagnostics\":[{\"code\":\"exchange.integrity_rejected\",\"severity\":\"warning\",\"message\":\"a response whose checksum did not verify was not correlated\"}]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":0,\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"destination_port\":8443,\"attempt\":1,\"status\":\"response\",\"classification\":\"open\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":365591722},\"received_at\":{\"unix_seconds\":1791330850,\"nanoseconds\":416022000},\"latency\":{\"secs\":0,\"nanos\":50429702},\"frame\":{\"timestamp\":{\"unix_seconds\":1791330850,\"nanoseconds\":416022000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":3,\"bytes_hex\":\"d220131629006ed3b363ad6d86dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fbc35000001000000000015012ffffbe800000\"},\"reason\":\"correlated TCP SYN/ACK\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":1,\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"destination_port\":8444,\"attempt\":1,\"status\":\"response\",\"classification\":\"closed\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791330855,\"nanoseconds\":334810019},\"received_at\":{\"unix_seconds\":1791330855,\"nanoseconds\":385284000},\"latency\":{\"secs\":0,\"nanos\":50473754},\"frame\":{\"timestamp\":{\"unix_seconds\":1791330855,\"nanoseconds\":385284000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":3,\"bytes_hex\":\"d220131629006ed3b363ad6d86dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fcc350000010000000000250140000be7c0000\"},\"reason\":\"correlated TCP reset\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":3,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"planned_duration\":{\"secs\":10,\"nanos\":0},\"target\":\"fe80::3%pcrs0\",\"resolved_addresses\":[\"fe80::3\"],\"counts\":{\"open\":1,\"closed\":1,\"filtered\":0,\"unreachable\":0,\"unknown\":0,\"timeout\":0},\"retained_evidence_bytes\":148,\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":50429702},\"avg\":{\"secs\":0,\"nanos\":50451728},\"max\":{\"secs\":0,\"nanos\":50473754}}},\"diagnostics\":[],\"stats\":{\"packets_attempted\":2,\"packets_completed\":2,\"bytes\":148,\"elapsed\":{\"secs\":10,\"nanos\":30224450},\"capture\":{\"received_frames\":13,\"received_bytes\":1034,\"dropped_frames\":0,\"dropped_bytes\":0,\"overflow_events\":0}}}\n",
+                "stderr": ""
+              }
+            ],
+            "responder_received": [
+              {
+                "interface": "pcrs1",
+                "destination_port": 8443,
+                "frame": "6ed3b363ad6dd2201316290086dd6000000000140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fb00000000000000005002ffffce910000"
+              },
+              {
+                "interface": "pcrs1",
+                "destination_port": 8444,
+                "frame": "6ed3b363ad6dd2201316290086dd6000000100140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fc00000001000000005002ffffce8f0000"
+              }
+            ],
+            "exit_code": 0,
+            "status": "passed",
+            "scoped_paths": {
+              "selection": "exercised",
+              "connect": "exercised",
+              "raw": "exercised"
+            }
+          },
+          "isolation": {
+            "kind": "fresh_network_namespace",
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833
+          },
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "exercised"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--features",
+          "native-layer2",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "6e7d496ccb69d2b7a8795991c20161f507733643e68d8fe05a95fd8011fc7411",
+        "stderr_sha256": "fecede7c2157efe2f16c8c8b9dce94b0fb4dd384dca8207046c8bf7636eb0ffe"
+      },
+      "binary_sha256": "dd81b497d5ecc3b4eeff8d93bd004ed4687da568d46c2211906b6302580ed617",
+      "test_binary_sha256": "0a1267a65e135e3e98864a673e81c212df3d1b7fd84d54e0c1c1d79a468bb5ff",
+      "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    },
+    {
+      "name": "pcap-free",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "unshare",
+            "--user",
+            "--map-users=0:1000:1",
+            "--map-groups=0:1000:1",
+            "--setuid=0",
+            "--setgid=0",
+            "--net",
+            "/usr/bin/python3",
+            "/home/ubuntu/code/pcr/1/pcr/scripts/test-target-planning-isolated.py",
+            "--binary",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/pcap-free/packetcraftr",
+            "--profile",
+            "pcap-free",
+            "--report",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/pcap-free/scoped.json",
+            "--parent-namespace",
+            "4026531833"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "PACKETCRAFTR_NATIVE_SCOPED={\"selection\": \"exercised\", \"connect\": \"exercised\", \"raw\": \"unsupported_capability\"}\n",
+          "stderr": "",
+          "fixture": {
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833,
+            "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+            "corpus_dataset_version": "1.1.0",
+            "runs": [
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/pcap-free/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--list",
+                  "fe80::2%pcrs0",
+                  "fe80::2%3",
+                  "fe80::2%pcrt0"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"origins\":[{\"index\":0,\"source\":\"argument 1\"},{\"index\":1,\"source\":\"argument 2\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"origins\":[{\"index\":2,\"source\":\"argument 3\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"target\":\"fe80::2%pcrs0,fe80::2%3,fe80::2%pcrt0\",\"resolution_performed\":false,\"count\":2,\"duplicates\":[]},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/pcap-free/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--connect",
+                  "fe80::2%pcrs0",
+                  "fe80::2%pcrt0",
+                  "--ports",
+                  "8443",
+                  "--timeout-ms",
+                  "1000"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":0,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":true,\"outcome\":\"connected\",\"classification\":\"open\",\"scheduled_at\":{\"unix_seconds\":1791330861,\"nanoseconds\":759962195},\"finished_at\":{\"unix_seconds\":1791330861,\"nanoseconds\":760283441},\"elapsed\":{\"secs\":0,\"nanos\":321397},\"local\":\"[fe80::1%3]:50850\",\"error\":null},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":1,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":false,\"outcome\":\"refused\",\"classification\":\"closed\",\"scheduled_at\":{\"unix_seconds\":1791330861,\"nanoseconds\":761520640},\"finished_at\":{\"unix_seconds\":1791330861,\"nanoseconds\":761646453},\"elapsed\":{\"secs\":0,\"nanos\":125916},\"local\":null,\"error\":{\"kind\":\"ConnectionRefused\",\"os_code\":111,\"message\":\"Connection refused (os error 111)\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"target\":\"fe80::2%pcrs0,fe80::2%pcrt0\",\"resolved_addresses\":[\"fe80::2\",\"fe80::2\"],\"planned_duration\":{\"secs\":2,\"nanos\":0},\"socket_stats\":{\"connections_scheduled\":2,\"connections_attempted\":2,\"connections_succeeded\":1,\"retained_evidence_bytes\":437,\"elapsed\":{\"secs\":0,\"nanos\":5468650},\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":125916},\"avg\":{\"secs\":0,\"nanos\":223656},\"max\":{\"secs\":0,\"nanos\":321397}}}},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/pcap-free/packetcraftr",
+                  "--output",
+                  "json",
+                  "scan",
+                  "fe80::3%pcrs0",
+                  "--ports",
+                  "1"
+                ],
+                "exit_code": 4,
+                "stdout": "{\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan execution failed at probe 0\",\n    \"causes\": [\n      \"live packet I/O is unavailable: enable the native-layer2 feature for native packet capture\"\n    ],\n    \"context\": {\n      \"probe_sequence\": 0\n    },\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n",
+                "stderr": ""
+              }
+            ],
+            "exit_code": 0,
+            "status": "passed",
+            "scoped_paths": {
+              "selection": "exercised",
+              "connect": "exercised",
+              "raw": "unsupported_capability"
+            }
+          },
+          "isolation": {
+            "kind": "fresh_network_namespace",
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833
+          },
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--features",
+          "native-layer3",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "72338c1ce26949d624e1a94575526286f5df1cf54f9833d0ab1e0679b74257de",
+        "stderr_sha256": "22e0df986057b9ba5be07526ac5fb348862a3dedef42108383cc3e088acbb889"
+      },
+      "binary_sha256": "a84e79f791d4bc68cb9212ff93165f95919217cbf1a2596bb709dd1ff291d64c",
+      "test_binary_sha256": "0a1267a65e135e3e98864a673e81c212df3d1b7fd84d54e0c1c1d79a468bb5ff",
+      "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    },
+    {
+      "name": "full-native",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Only M4 scoped target evidence is selected."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "unshare",
+            "--user",
+            "--map-users=0:1000:1",
+            "--map-groups=0:1000:1",
+            "--setuid=0",
+            "--setgid=0",
+            "--net",
+            "/usr/bin/python3",
+            "/home/ubuntu/code/pcr/1/pcr/scripts/test-target-planning-isolated.py",
+            "--binary",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/full-native/packetcraftr",
+            "--profile",
+            "full-native",
+            "--report",
+            "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/full-native/scoped.json",
+            "--parent-namespace",
+            "4026531833"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "PACKETCRAFTR_NATIVE_SCOPED={\"selection\": \"exercised\", \"connect\": \"exercised\", \"raw\": \"exercised\"}\n",
+          "stderr": "",
+          "fixture": {
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833,
+            "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+            "corpus_dataset_version": "1.1.0",
+            "runs": [
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/full-native/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--list",
+                  "fe80::2%pcrs0",
+                  "fe80::2%3",
+                  "fe80::2%pcrt0"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"origins\":[{\"index\":0,\"source\":\"argument 1\"},{\"index\":1,\"source\":\"argument 2\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"target\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"origins\":[{\"index\":2,\"source\":\"argument 3\"}]},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"target_list\",\"target\":\"fe80::2%pcrs0,fe80::2%3,fe80::2%pcrt0\",\"resolution_performed\":false,\"count\":2,\"duplicates\":[]},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/full-native/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "--connect",
+                  "fe80::2%pcrs0",
+                  "fe80::2%pcrt0",
+                  "--ports",
+                  "8443",
+                  "--timeout-ms",
+                  "1000"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":0,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":true,\"outcome\":\"connected\",\"classification\":\"open\",\"scheduled_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":128335164},\"finished_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":129028966},\"elapsed\":{\"secs\":0,\"nanos\":693913},\"local\":\"[fe80::1%3]:54724\",\"error\":null},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"connect_probe\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"sequence\":1,\"address\":\"fe80::2\",\"scope\":{\"zone\":\"pcrt0\",\"interface\":{\"name\":\"pcrt0\",\"index\":5}},\"port\":8443,\"attempt\":1,\"attempted\":true,\"connect_succeeded\":false,\"outcome\":\"refused\",\"classification\":\"closed\",\"scheduled_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":130267762},\"finished_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":130502202},\"elapsed\":{\"secs\":0,\"nanos\":234578},\"local\":null,\"error\":{\"kind\":\"ConnectionRefused\",\"os_code\":111,\"message\":\"Connection refused (os error 111)\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"method\":\"tcp_connect\",\"target\":\"fe80::2%pcrs0,fe80::2%pcrt0\",\"resolved_addresses\":[\"fe80::2\",\"fe80::2\"],\"planned_duration\":{\"secs\":2,\"nanos\":0},\"socket_stats\":{\"connections_scheduled\":2,\"connections_attempted\":2,\"connections_succeeded\":1,\"retained_evidence_bytes\":437,\"elapsed\":{\"secs\":0,\"nanos\":6304962},\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":234578},\"avg\":{\"secs\":0,\"nanos\":464245},\"max\":{\"secs\":0,\"nanos\":693913}}}},\"diagnostics\":[]}\n",
+                "stderr": ""
+              },
+              {
+                "command": [
+                  "/home/ubuntu/code/pcr/1/pcr/target/m4-linux-8e010a0b/full-native/packetcraftr",
+                  "--output",
+                  "ndjson",
+                  "scan",
+                  "fe80::3%pcrs0",
+                  "--ports",
+                  "8443,8444",
+                  "--timeout-ms",
+                  "5000"
+                ],
+                "exit_code": 0,
+                "stdout": "{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":0,\"event\":\"diagnostic\",\"status\":\"success\",\"result\":{},\"diagnostics\":[{\"code\":\"exchange.integrity_rejected\",\"severity\":\"warning\",\"message\":\"a response whose checksum did not verify was not correlated\"}]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":1,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":0,\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"destination_port\":8443,\"attempt\":1,\"status\":\"response\",\"classification\":\"open\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":166899507},\"received_at\":{\"unix_seconds\":1791330863,\"nanoseconds\":217204000},\"latency\":{\"secs\":0,\"nanos\":50304378},\"frame\":{\"timestamp\":{\"unix_seconds\":1791330863,\"nanoseconds\":217204000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":3,\"bytes_hex\":\"e6fe9ecefd7baee70eada3ee86dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fbc35000001000000000015012ffffbe800000\"},\"reason\":\"correlated TCP SYN/ACK\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":2,\"event\":\"probe\",\"status\":\"success\",\"result\":{\"target\":\"fe80::3%pcrs0\",\"probe\":{\"sequence\":1,\"protocol\":\"tcp\",\"destination\":\"fe80::3\",\"scope\":{\"zone\":\"pcrs0\",\"interface\":{\"name\":\"pcrs0\",\"index\":3}},\"destination_port\":8444,\"attempt\":1,\"status\":\"response\",\"classification\":\"closed\",\"responder\":\"fe80::3\",\"sent_at\":{\"unix_seconds\":1791330868,\"nanoseconds\":172101894},\"received_at\":{\"unix_seconds\":1791330868,\"nanoseconds\":222396000},\"latency\":{\"secs\":0,\"nanos\":50293882},\"frame\":{\"timestamp\":{\"unix_seconds\":1791330868,\"nanoseconds\":222396000},\"captured_length\":74,\"original_length\":74,\"link_type\":1,\"interface\":3,\"bytes_hex\":\"e6fe9ecefd7baee70eada3ee86dd6000000000140640fe800000000000000000000000000003fe80000000000000000000000000000120fcc350000010000000000250140000be7c0000\"},\"reason\":\"correlated TCP reset\"}},\"diagnostics\":[]}\n{\"schema\":\"packetcraftr.output/v7\",\"command\":\"scan\",\"mode\":\"stream\",\"sequence\":3,\"event\":\"complete\",\"status\":\"success\",\"result\":{\"planned_duration\":{\"secs\":10,\"nanos\":0},\"target\":\"fe80::3%pcrs0\",\"resolved_addresses\":[\"fe80::3\"],\"counts\":{\"open\":1,\"closed\":1,\"filtered\":0,\"unreachable\":0,\"unknown\":0,\"timeout\":0},\"retained_evidence_bytes\":148,\"rtt\":{\"sent\":2,\"received\":2,\"lost\":0,\"min\":{\"secs\":0,\"nanos\":50293882},\"avg\":{\"secs\":0,\"nanos\":50299130},\"max\":{\"secs\":0,\"nanos\":50304378}}},\"diagnostics\":[],\"stats\":{\"packets_attempted\":2,\"packets_completed\":2,\"bytes\":120,\"elapsed\":{\"secs\":10,\"nanos\":24918592},\"capture\":{\"received_frames\":12,\"received_bytes\":944,\"dropped_frames\":0,\"dropped_bytes\":0,\"overflow_events\":0}}}\n",
+                "stderr": ""
+              }
+            ],
+            "responder_received": [
+              {
+                "interface": "pcrs1",
+                "destination_port": 8443,
+                "frame": "aee70eada3eee6fe9ecefd7b86dd6000000000140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fb00000000000000005002ffffce910000"
+              },
+              {
+                "interface": "pcrs1",
+                "destination_port": 8444,
+                "frame": "aee70eada3eee6fe9ecefd7b86dd6000000100140640fe800000000000000000000000000001fe800000000000000000000000000003c35020fc00000001000000005002ffffce8f0000"
+              }
+            ],
+            "exit_code": 0,
+            "status": "passed",
+            "scoped_paths": {
+              "selection": "exercised",
+              "connect": "exercised",
+              "raw": "exercised"
+            }
+          },
+          "isolation": {
+            "kind": "fresh_network_namespace",
+            "namespace": 4026532317,
+            "parent_namespace": 4026531833
+          },
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "exercised"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--all-features",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "44c61345fd7a31caef9adbf8829672b40af70d79f1a9cbf8957c572be11aa529",
+        "stderr_sha256": "a41051563a4cb5fc1b1bcdd9aa0ba28ca80f7736d629d90cc138218756e8e3a9"
+      },
+      "binary_sha256": "4f2dd8b4c91730de18b5c56e1aab09766ae9e57ab64a6ba0c1a985ced2e16669",
+      "test_binary_sha256": "0a1267a65e135e3e98864a673e81c212df3d1b7fd84d54e0c1c1d79a468bb5ff",
+      "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    }
+  ],
+  "status": "incomplete",
+  "source_report_sha256": "4c5aabf819be7aea573da3e1331d6d1631afc19618cb3e24c43a8e974e285ac9"
+}

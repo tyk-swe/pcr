@@ -826,6 +826,13 @@ a usage error naming `--live` where it used to accept and ignore it.
 
 ## Target manifests, scan list mode, scoped IPv6 targets, and output/v7
 
+`scan::Request` also gains `target_sources: Vec<String>`: pass an empty vector
+to retain ordinal-only diagnostics, or one nonempty source label per included
+declaration (at most 4096 bytes each). The CLI supplies argument positions or
+manifest paths/stdin with physical lines so live raw and connect scans publish
+the same source-aware duplicate warnings as list mode, in text, JSON, and
+NDJSON. Invalid label counts or sizes fail before provider calls.
+
 `scan` accepts repeatable `--targets-file PATH` and `--exclude-file PATH`
 beside positional targets; `-` names redirected standard input, and at most
 one input in an operation may consume stdin across include, exclude, UDP

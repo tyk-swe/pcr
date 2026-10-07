@@ -153,6 +153,7 @@ impl Provider for Faulty {
 
 fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
     let request = Request {
+        target_sources: Vec::new(),
         targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
@@ -244,6 +245,7 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
     };
     let client = client(recorded.clone());
     let request = Request {
+        target_sources: Vec::new(),
         targets: crate::target::Selection {
             include: vec![crate::target::Specification::Target(
                 "fe80::1%fixture0".parse().expect("scoped target"),

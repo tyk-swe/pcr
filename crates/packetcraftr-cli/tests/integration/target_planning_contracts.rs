@@ -31,6 +31,28 @@ fn addresses(json: &Value) -> Vec<&str> {
         .collect()
 }
 
+fn corpus_case(id: &str) -> Value {
+    let corpus: Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json"))
+            .expect("independent target-planning corpus");
+    corpus["target_planning_scenarios"]
+        .as_array()
+        .expect("target scenarios")
+        .iter()
+        .find(|case| case["id"] == id)
+        .expect("declared target fixture")
+        .clone()
+}
+
+fn corpus_strings<'a>(case: &'a Value, field: &str) -> Vec<&'a str> {
+    case[field]
+        .as_array()
+        .expect("corpus strings")
+        .iter()
+        .map(|value| value.as_str().expect("corpus string"))
+        .collect()
+}
+
 #[test]
 fn list_json_reports_targets_origins_and_no_resolution() {
     let output = run_success(&list_arguments(&["192.0.2.1", "10.0.0.0/30", "192.0.2.1"]));
@@ -110,26 +132,22 @@ fn list_text_lists_each_target_with_its_origins() {
 
 #[test]
 fn argument_file_and_stdin_inputs_select_identically() {
-    let positional_out = run_success(&list_arguments(&["192.0.2.9", "10.0.0.0/30", "192.0.2.1"]));
-    let file = manifest_file(b"10.0.0.0/30\n192.0.2.1\n");
+    let case = corpus_case("numeric-source-equivalence");
+    let includes = corpus_strings(&case, "include");
+    let contents = format!("{}\n", includes[1..].join("\n"));
+    let positional_out = run_success(&list_arguments(&includes));
+    let file = manifest_file(contents.as_bytes());
     let file_path = path_text(file.path());
-    let file_out = run_success(&list_arguments(&["192.0.2.9", "--targets-file", file_path]));
+    let file_out = run_success(&list_arguments(&[includes[0], "--targets-file", file_path]));
     let stdin_out = run_with_stdin(
-        &list_arguments(&["192.0.2.9", "--targets-file", "-"]),
-        b"10.0.0.0/30\n192.0.2.1\n",
+        &list_arguments(&[includes[0], "--targets-file", "-"]),
+        contents.as_bytes(),
     );
     assert!(stdin_out.status.success(), "{stdin_out:?}");
     let positional_json = parse_json(&positional_out);
     let file_json = parse_json(&file_out);
     let stdin_json = parse_json(&stdin_out);
-    let expected = [
-        "192.0.2.9",
-        "10.0.0.0",
-        "10.0.0.1",
-        "10.0.0.2",
-        "10.0.0.3",
-        "192.0.2.1",
-    ];
+    let expected = corpus_strings(&case, "expected_addresses");
     assert_eq!(addresses(&positional_json), expected);
     assert_eq!(addresses(&file_json), expected);
     assert_eq!(addresses(&stdin_json), expected);
@@ -168,24 +186,26 @@ fn argument_file_and_stdin_inputs_select_identically() {
 
 #[test]
 fn exclusions_and_family_narrow_the_list() {
-    let output = run_success(&list_arguments(&[
-        "10.0.0.0/30",
-        "--exclude",
-        "10.0.0.1",
-        "--exclude",
-        "10.0.0.2",
-    ]));
+    let case = corpus_case("numeric-narrowing");
+    let mut arguments = corpus_strings(&case, "include");
+    for exclude in corpus_strings(&case, "exclude") {
+        arguments.extend(["--exclude", exclude]);
+    }
+    let output = run_success(&list_arguments(&arguments));
     let json = parse_json(&output);
-    assert_eq!(addresses(&json), ["10.0.0.0", "10.0.0.3"]);
+    assert_eq!(
+        addresses(&json),
+        corpus_strings(&case, "expected_addresses")
+    );
 
-    let output = run_success(&list_arguments(&[
-        "10.0.0.1",
-        "2001:db8::1",
-        "--family",
-        "ipv4",
-    ]));
+    let mut arguments = corpus_strings(&case, "family_include");
+    arguments.extend(["--family", case["family"].as_str().expect("family")]);
+    let output = run_success(&list_arguments(&arguments));
     let json = parse_json(&output);
-    assert_eq!(addresses(&json), ["10.0.0.1"]);
+    assert_eq!(
+        addresses(&json),
+        corpus_strings(&case, "expected_family_addresses")
+    );
 }
 
 #[test]
@@ -468,7 +488,7 @@ fn duplicate_connect_manifest_declarations_are_reported_in_every_format() {
         .expect("local addr")
         .port()
         .to_string();
-    let contents = b"127.0.0.1\n127.0.0.1\n";
+    let contents = b"127.0.0.1\n# second declaration\n127.0.0.1\n";
     let manifest = manifest_file(contents);
     for format in ["text", "json", "ndjson"] {
         for source in [path_text(manifest.path()), "-"] {
@@ -492,10 +512,12 @@ fn duplicate_connect_manifest_declarations_are_reported_in_every_format() {
                 run(&arguments)
             };
             assert!(output.status.success(), "{output:?}");
+            let source_label = if source == "-" { "stdin" } else { source };
+            let expected = format!("target declaration 2 ({source_label}:3) duplicates");
             if format == "text" {
                 let text = output_text(&output);
                 assert!(text.contains("scan.duplicate_declaration"), "{text}");
-                assert!(text.contains("target declaration 2"), "{text}");
+                assert!(text.contains(&expected), "{text}");
                 continue;
             }
             let document = if format == "json" {
@@ -521,7 +543,7 @@ fn duplicate_connect_manifest_declarations_are_reported_in_every_format() {
                 document["diagnostics"][0]["message"]
                     .as_str()
                     .unwrap()
-                    .contains("target declaration 2")
+                    .contains(&expected)
             );
             assert_eq!(
                 document["result"]["socket_stats"]["connections_scheduled"],

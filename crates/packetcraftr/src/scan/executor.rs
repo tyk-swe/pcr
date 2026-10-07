@@ -175,6 +175,7 @@ mod tests {
     fn a_batch_without_exactly_one_probe_is_rejected_before_any_provider_call() {
         let (client, providers) = fake_client();
         let request = Request {
+            target_sources: Vec::new(),
             max_in_flight: 1,
             targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
             udp_payload: bytes::Bytes::new(),

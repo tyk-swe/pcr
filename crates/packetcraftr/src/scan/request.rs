@@ -144,6 +144,10 @@ pub fn select_ports(
 pub struct Request {
     pub max_in_flight: usize,
     pub targets: Selection,
+    /// Source labels in declaration order, such as `inventory.txt:12` or
+    /// `stdin:3`. Empty uses declaration ordinals; otherwise supply one label
+    /// per included specification, each nonempty and at most 4096 bytes.
+    pub target_sources: Vec<String>,
     /// Probed on every target, in order; TCP and UDP endpoints may share a
     /// port and never merge. ICMP echo is portless and stands alone.
     pub endpoints: Vec<ProbeEndpoint>,
@@ -170,6 +174,30 @@ impl Request {
             });
         }
         self.targets.validate().map_err(Error::TargetSelection)?;
+        if !self.target_sources.is_empty()
+            && self.target_sources.len() != self.targets.include.len()
+        {
+            return Err(Error::InvalidLimit {
+                field: "target_sources",
+                value: self.target_sources.len() as u64,
+                reason: format!(
+                    "supply one source label per included declaration ({}), or none",
+                    self.targets.include.len()
+                ),
+            });
+        }
+        for (index, source) in self.target_sources.iter().enumerate() {
+            if source.is_empty() || source.len() > 4096 {
+                return Err(Error::InvalidLimit {
+                    field: "target_sources",
+                    value: source.len() as u64,
+                    reason: format!(
+                        "source label for target declaration {} must contain 1..=4096 bytes",
+                        index + 1
+                    ),
+                });
+            }
+        }
         if self.udp_profiles.len() > packetcraftr_core::document::udp_profiles::MAX_PROFILE_PORTS
             || (!self.udp_profiles.is_empty() && !self.probes(Transport::Udp))
         {
@@ -259,5 +287,23 @@ impl Request {
     pub fn planned_endpoints(&self) -> Result<&[ProbeEndpoint], Error> {
         self.validate()?;
         Ok(&self.endpoints)
+    }
+
+    pub(crate) fn duplicate_diagnostic(
+        &self,
+        index: u32,
+    ) -> packetcraftr_core::diagnostic::Diagnostic {
+        let source = self
+            .target_sources
+            .get(index as usize)
+            .map(|source| format!(" ({source})"))
+            .unwrap_or_default();
+        packetcraftr_core::diagnostic::Diagnostic::warning(
+            "scan.duplicate_declaration",
+            format!(
+                "target declaration {}{source} duplicates an earlier declaration and was coalesced",
+                index + 1
+            ),
+        )
     }
 }

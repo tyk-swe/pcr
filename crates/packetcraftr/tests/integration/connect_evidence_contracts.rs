@@ -49,6 +49,7 @@ fn scoped_evidence_is_charged_before_publication() {
         (2, 2 * cost, 2),
     ] {
         let request = scan::Request {
+            target_sources: Vec::new(),
             targets: target.clone().into(),
             udp_payload: bytes::Bytes::new(),
             udp_profiles: Default::default(),

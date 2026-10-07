@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reviewed, loopback-only macOS/Windows native routes; never substitutes for Linux namespaces."""
+"""Reviewed, host-local macOS/Windows native routes; never substitutes for Linux namespaces."""
 import argparse
 import ctypes
 import json
@@ -10,7 +10,7 @@ import re
 import subprocess
 import uuid
 
-from native_platform_evidence import PROFILES, SCENARIOS, SCHEMA, status_of, validate
+from native_platform_evidence import PROFILES, SCENARIOS, SCHEMA, scoped_paths, status_of, validate
 from validation_evidence import ROOT, digest
 
 FEATURES = {
@@ -43,8 +43,11 @@ def unavailable(scenario, code, reason):
 def unavailable_report(reason):
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=30).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, timeout=30))
+    corpus_path = ROOT / "docs/scanner-corpus.v1.json"
+    corpus = json.loads(corpus_path.read_bytes())
     return dict(schema=SCHEMA, platform=current_platform(), commit=commit, dirty=dirty,
-                isolation=dict(kind="loopback_only" if current_platform() != "Linux" else "unavailable",
+                corpus_sha256=digest(corpus_path), corpus_dataset_version=corpus["dataset_version"],
+                isolation=dict(kind="host_local_only" if current_platform() != "Linux" else "unavailable",
                                external_destinations=False, interface_mutation=False),
                 profiles=[dict(name=profile, status="incomplete", scenarios=[
                     dict(name=name, status="unavailable", reason_code="runtime_evidence_missing", reason=reason)
@@ -87,6 +90,8 @@ def run_scenario(binary, test_binary, scenario, token):
     env = dict(os.environ, PACKETCRAFTR_NATIVE_LOOPBACK_TOKEN=token,
                PACKETCRAFTR_NATIVE_LOOPBACK_PLATFORM=current_platform(), PACKETCRAFTR_NATIVE_CLI=str(binary))
     scenario.update(command=command, execution="privileged_native", privilege_granted=True)
+    for field in ("reason", "reason_code"):
+        scenario.pop(field, None)
     try:
         completed = subprocess.run(command, env=env, cwd=ROOT, capture_output=True, text=True, timeout=30)
         scenario.update(exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
@@ -102,6 +107,8 @@ def run_scenario(binary, test_binary, scenario, token):
             unavailable(scenario, reason["reason_code"], reason["reason"])
         elif re.search(r"\b1 passed; 0 failed; 0 ignored;", completed.stdout):
             scenario["status"] = "exercised"
+            if name == "scoped_ipv6_targets":
+                scenario["scoped_paths"] = scoped_paths(completed.stdout)
         else:
             scenario.update(status="failed", error="zero exit without exactly one exercised test")
     except subprocess.TimeoutExpired as error:
@@ -139,7 +146,8 @@ def execute(args, report):
             if sorted(names) != sorted(SCENARIOS):
                 raise RuntimeError("native executable does not contain the exact declared scenario inventory")
             for scenario in profile["scenarios"]:
-                run_scenario(binary, test_binary, scenario, token)
+                if args.scenario == "all" or args.scenario == scenario["name"]:
+                    run_scenario(binary, test_binary, scenario, token)
         except Exception as error:
             profile["error"] = str(error)
             for scenario in profile["scenarios"]:
@@ -152,6 +160,8 @@ def execute(args, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reviewed-commit")
+    parser.add_argument("--scenario", choices=("all", *SCENARIOS), default="all",
+                        help="run one scenario across all profiles; all others remain explicitly unexercised")
     parser.add_argument("--emit-unavailable", action="store_true",
                         help="publish honest unexercised inventory without building or running native code")
     parser.add_argument("--report", type=pathlib.Path, required=True)

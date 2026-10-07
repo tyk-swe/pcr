@@ -1,0 +1,552 @@
+{
+  "schema": "packetcraftr.native-platform-evidence/v3",
+  "platform": "macOS",
+  "commit": "8e010a0b9eac118aa13384f0b854111a73d47d76",
+  "dirty": false,
+  "corpus_sha256": "fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f",
+  "corpus_dataset_version": "1.1.0",
+  "isolation": {
+    "kind": "host_local_only",
+    "external_destinations": false,
+    "interface_mutation": false
+  },
+  "profiles": [
+    {
+      "name": "portable",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "/Users/runner/work/pcr/pcr/target/debug/deps/native_loopback-a485d70e1f278dba",
+            "--ignored",
+            "--exact",
+            "scoped_ipv6_targets",
+            "--nocapture",
+            "--test-threads=1"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "\nrunning 1 test\ntest scoped_ipv6_targets ... scoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"target plan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"capability.unsupported\",\n    \"kind\": \"capability\",\n    \"message\": \"scan authorization failed\",\n    \"causes\": [\n      \"zone resolution failed for 1\",\n      \"live packet I/O is unavailable: enable the native-route feature for native interface enumeration\"\n    ],\n    \"remediation\": \"enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically\"\n  },\n  \"diagnostics\": []\n}\n\nPACKETCRAFTR_NATIVE_SCOPED={\"selection\":\"unsupported_capability\",\"connect\":\"unsupported_capability\",\"raw\":\"unsupported_capability\"}\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.04s\n\n",
+          "stderr": "",
+          "scoped_paths": {
+            "selection": "unsupported_capability",
+            "connect": "unsupported_capability",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "595569374e68d0c8e2aee3291efd5620534b17da3c8d1b6b045e2d9c2b7f65a8",
+        "stderr_sha256": "525896b8b4370168bca2bcabb8b05fcfaabff0e4cf0c8ae10666d70d3ca912f3"
+      },
+      "test_build": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "packetcraftr-netio",
+          "--no-default-features",
+          "--test",
+          "native_loopback",
+          "--no-run",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "b2e65a0b0bf7edaa6cd7a64dcf8e15210fa24d53d50e61147ddbb9fea4341779",
+        "stderr_sha256": "be6973d282e3629572f155f3be4d97fcaabdb8240c434043b3be3e6c22612711"
+      },
+      "binary_sha256": "f7e0479751f51812ee3b91ec5e71514856c4d98521ee54b63cf06c8406ba96c1",
+      "test_binary_sha256": "ecc606ca508ddca929a00e327a338174d27fbb19fed783d7010308ff3514c5aa"
+    },
+    {
+      "name": "default",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "/Users/runner/work/pcr/pcr/target/debug/deps/native_loopback-d5ec35301cacadb6",
+            "--ignored",
+            "--exact",
+            "scoped_ipv6_targets",
+            "--nocapture",
+            "--test-threads=1"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "\nrunning 1 test\ntest scoped_ipv6_targets ... scoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"target_list\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolution_performed\": false,\n    \"targets\": [\n      {\n        \"method\": \"target_list\",\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"origins\": [\n          {\n            \"index\": 0,\n            \"source\": \"argument 1\"\n          },\n          {\n            \"index\": 1,\n            \"source\": \"argument 2\"\n          }\n        ]\n      }\n    ],\n    \"duplicates\": []\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"tcp_connect\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolved_addresses\": [\n      \"fe80::1\"\n    ],\n    \"planned_duration\": {\n      \"secs\": 1,\n      \"nanos\": 0\n    },\n    \"socket_stats\": {\n      \"connections_scheduled\": 1,\n      \"connections_attempted\": 1,\n      \"connections_succeeded\": 1,\n      \"retained_evidence_bytes\": 198,\n      \"elapsed\": {\n        \"secs\": 0,\n        \"nanos\": 9375500\n      },\n      \"rtt\": {\n        \"sent\": 1,\n        \"received\": 1,\n        \"lost\": 0,\n        \"min\": {\n          \"secs\": 0,\n          \"nanos\": 510125\n        },\n        \"avg\": {\n          \"secs\": 0,\n          \"nanos\": 510125\n        },\n        \"max\": {\n          \"secs\": 0,\n          \"nanos\": 510125\n        }\n      }\n    },\n    \"endpoints\": [\n      {\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"port\": 49175,\n        \"classification\": \"open\",\n        \"probes\": [\n          {\n            \"sequence\": 0,\n            \"address\": \"fe80::1\",\n            \"scope\": {\n              \"zone\": \"lo0\",\n              \"interface\": {\n                \"name\": \"lo0\",\n                \"index\": 1\n              }\n            },\n            \"port\": 49175,\n            \"attempt\": 1,\n            \"attempted\": true,\n            \"connect_succeeded\": true,\n            \"outcome\": \"connected\",\n            \"classification\": \"open\",\n            \"scheduled_at\": {\n              \"unix_seconds\": 1791330984,\n              \"nanoseconds\": 57906000\n            },\n            \"finished_at\": {\n              \"unix_seconds\": 1791330984,\n              \"nanoseconds\": 58416000\n            },\n            \"elapsed\": {\n              \"secs\": 0,\n              \"nanos\": 510125\n            },\n            \"local\": \"[fe80::1%1]:49176\",\n            \"error\": null\n          }\n        ]\n      }\n    ]\n  },\n  \"diagnostics\": []\n}\n\nscoped raw capability: live packet I/O is unavailable: enable the native-layer3 feature for native raw IP transmission\nPACKETCRAFTR_NATIVE_SCOPED={\"selection\":\"exercised\",\"connect\":\"exercised\",\"raw\":\"unsupported_capability\"}\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.05s\n\n",
+          "stderr": "",
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "acdbdbca999115a97439c25929f14edaa25b8dd682c810f99ab30922dd0bf91b",
+        "stderr_sha256": "b0e3f9417e1a38f0119782aba415d164aae42da36ae90370e233cb18e5ef6d44"
+      },
+      "test_build": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "packetcraftr-netio",
+          "--features",
+          "native-route",
+          "--test",
+          "native_loopback",
+          "--no-run",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "e4e872998778c935b1e404e4108c01a2d6f4f55821c4fc40f69d68adae4f1a7a",
+        "stderr_sha256": "75430681d41a63ef5d69f8ade9540b49631a8c68b3c8a1c1a80ec658062e0646"
+      },
+      "binary_sha256": "33eeae46c766045610b3f2190f9b385d03fc7c8aeeaacd253518a24d3fe680c0",
+      "test_binary_sha256": "eab135956929559ca6fa6a24e19d234a04842237fc84ee1bfe656e5f8a9a2e19"
+    },
+    {
+      "name": "layer2",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "/Users/runner/work/pcr/pcr/target/debug/deps/native_loopback-6cc21c46b7651d3f",
+            "--ignored",
+            "--exact",
+            "scoped_ipv6_targets",
+            "--nocapture",
+            "--test-threads=1"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "\nrunning 1 test\ntest scoped_ipv6_targets ... scoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"target_list\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolution_performed\": false,\n    \"targets\": [\n      {\n        \"method\": \"target_list\",\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"origins\": [\n          {\n            \"index\": 0,\n            \"source\": \"argument 1\"\n          },\n          {\n            \"index\": 1,\n            \"source\": \"argument 2\"\n          }\n        ]\n      }\n    ],\n    \"duplicates\": []\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"tcp_connect\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolved_addresses\": [\n      \"fe80::1\"\n    ],\n    \"planned_duration\": {\n      \"secs\": 1,\n      \"nanos\": 0\n    },\n    \"socket_stats\": {\n      \"connections_scheduled\": 1,\n      \"connections_attempted\": 1,\n      \"connections_succeeded\": 1,\n      \"retained_evidence_bytes\": 198,\n      \"elapsed\": {\n        \"secs\": 0,\n        \"nanos\": 12354125\n      },\n      \"rtt\": {\n        \"sent\": 1,\n        \"received\": 1,\n        \"lost\": 0,\n        \"min\": {\n          \"secs\": 0,\n          \"nanos\": 292416\n        },\n        \"avg\": {\n          \"secs\": 0,\n          \"nanos\": 292416\n        },\n        \"max\": {\n          \"secs\": 0,\n          \"nanos\": 292416\n        }\n      }\n    },\n    \"endpoints\": [\n      {\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"port\": 49178,\n        \"classification\": \"open\",\n        \"probes\": [\n          {\n            \"sequence\": 0,\n            \"address\": \"fe80::1\",\n            \"scope\": {\n              \"zone\": \"lo0\",\n              \"interface\": {\n                \"name\": \"lo0\",\n                \"index\": 1\n              }\n            },\n            \"port\": 49178,\n            \"attempt\": 1,\n            \"attempted\": true,\n            \"connect_succeeded\": true,\n            \"outcome\": \"connected\",\n            \"classification\": \"open\",\n            \"scheduled_at\": {\n              \"unix_seconds\": 1791331012,\n              \"nanoseconds\": 602259000\n            },\n            \"finished_at\": {\n              \"unix_seconds\": 1791331012,\n              \"nanoseconds\": 602551000\n            },\n            \"elapsed\": {\n              \"secs\": 0,\n              \"nanos\": 292416\n            },\n            \"local\": \"[fe80::1%1]:49179\",\n            \"error\": null\n          }\n        ]\n      }\n    ]\n  },\n  \"diagnostics\": []\n}\n\nscoped raw capability: live packet I/O is unavailable: enable the native-layer3 feature for native raw IP transmission\nPACKETCRAFTR_NATIVE_SCOPED={\"selection\":\"exercised\",\"connect\":\"exercised\",\"raw\":\"unsupported_capability\"}\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.04s\n\n",
+          "stderr": "",
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--features",
+          "native-layer2",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "1eb56781265f212b7ef0189bbb6a8dfbfd12550e942deae96f89c41bc4689e6a",
+        "stderr_sha256": "2f86930cdc84146ce3175884d6a864b2f630bff7ebac70459fbcfc30af1e184b"
+      },
+      "test_build": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "packetcraftr-netio",
+          "--no-default-features",
+          "--features",
+          "native-layer2",
+          "--test",
+          "native_loopback",
+          "--no-run",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "df65b20150fb478db04b79887ce231157f179a1daefb3f7f0ef8c4ead13b5fb0",
+        "stderr_sha256": "2cd6948bbd6c6cff310124d4b15341a5c3d59f843bab64542179d6eec99ba049"
+      },
+      "binary_sha256": "002de86e3f7d2dab4888f01c059773858b091da6e4d436d9266fb3ee47537813",
+      "test_binary_sha256": "32fee8a360b190b1f199d20cfc57c681728c5b3f3bdd4a74f68312d9401b7cb3"
+    },
+    {
+      "name": "pcap-free",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "/Users/runner/work/pcr/pcr/target/debug/deps/native_loopback-666ec57f34595df6",
+            "--ignored",
+            "--exact",
+            "scoped_ipv6_targets",
+            "--nocapture",
+            "--test-threads=1"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "\nrunning 1 test\ntest scoped_ipv6_targets ... scoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"target_list\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolution_performed\": false,\n    \"targets\": [\n      {\n        \"method\": \"target_list\",\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"origins\": [\n          {\n            \"index\": 0,\n            \"source\": \"argument 1\"\n          },\n          {\n            \"index\": 1,\n            \"source\": \"argument 2\"\n          }\n        ]\n      }\n    ],\n    \"duplicates\": []\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"tcp_connect\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolved_addresses\": [\n      \"fe80::1\"\n    ],\n    \"planned_duration\": {\n      \"secs\": 1,\n      \"nanos\": 0\n    },\n    \"socket_stats\": {\n      \"connections_scheduled\": 1,\n      \"connections_attempted\": 1,\n      \"connections_succeeded\": 1,\n      \"retained_evidence_bytes\": 198,\n      \"elapsed\": {\n        \"secs\": 0,\n        \"nanos\": 7211667\n      },\n      \"rtt\": {\n        \"sent\": 1,\n        \"received\": 1,\n        \"lost\": 0,\n        \"min\": {\n          \"secs\": 0,\n          \"nanos\": 470541\n        },\n        \"avg\": {\n          \"secs\": 0,\n          \"nanos\": 470541\n        },\n        \"max\": {\n          \"secs\": 0,\n          \"nanos\": 470541\n        }\n      }\n    },\n    \"endpoints\": [\n      {\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"port\": 49180,\n        \"classification\": \"open\",\n        \"probes\": [\n          {\n            \"sequence\": 0,\n            \"address\": \"fe80::1\",\n            \"scope\": {\n              \"zone\": \"lo0\",\n              \"interface\": {\n                \"name\": \"lo0\",\n                \"index\": 1\n              }\n            },\n            \"port\": 49180,\n            \"attempt\": 1,\n            \"attempted\": true,\n            \"connect_succeeded\": true,\n            \"outcome\": \"connected\",\n            \"classification\": \"open\",\n            \"scheduled_at\": {\n              \"unix_seconds\": 1791331036,\n              \"nanoseconds\": 94535000\n            },\n            \"finished_at\": {\n              \"unix_seconds\": 1791331036,\n              \"nanoseconds\": 95005000\n            },\n            \"elapsed\": {\n              \"secs\": 0,\n              \"nanos\": 470541\n            },\n            \"local\": \"[fe80::1%1]:49181\",\n            \"error\": null\n          }\n        ]\n      }\n    ]\n  },\n  \"diagnostics\": []\n}\n\nscoped raw capability: live packet I/O is unavailable: Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path\nPACKETCRAFTR_NATIVE_SCOPED={\"selection\":\"exercised\",\"connect\":\"exercised\",\"raw\":\"unsupported_capability\"}\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.04s\n\n",
+          "stderr": "",
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--no-default-features",
+          "--features",
+          "native-layer3",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "bce4a1c17407447a48d04843ceb7b40dc6e429adacd74e22f72a58011c5a16fa",
+        "stderr_sha256": "5dbe89c00fcccba317a6891fa16cfa5d50e4616fc2452a69ae92cdb54b49c92e"
+      },
+      "test_build": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "packetcraftr-netio",
+          "--no-default-features",
+          "--features",
+          "native-layer3",
+          "--test",
+          "native_loopback",
+          "--no-run",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "48e73ed642f26ef3821bee3a81ef76f327eaffd61c90d66dd37a1d01b8392c70",
+        "stderr_sha256": "f4a97f50a7500932624839aca85b10d41c2101df16e83c2414b202266049102a"
+      },
+      "binary_sha256": "443aba1dce73d7b49672a5a22afce4e7b473eb7767285e9acd4c885a307c5f16",
+      "test_binary_sha256": "5f3114e3e5ebef5d74e0cf590d6ca3cb81e87dee2153a076f5f38baa9ac88d58"
+    },
+    {
+      "name": "full-native",
+      "status": "incomplete",
+      "scenarios": [
+        {
+          "name": "loopback_exchange",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "readiness_and_repeated_cleanup",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "idle_deadline_and_cancellation",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "bounded_queue_reports_real_capture_loss",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_set_before_realized_values",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "native_filter_error_releases_admission",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "iface_disappearance_driver_fail_cleans_up",
+          "status": "unavailable",
+          "reason_code": "runtime_evidence_missing",
+          "reason": "Native route has not exercised this scenario."
+        },
+        {
+          "name": "scoped_ipv6_targets",
+          "status": "exercised",
+          "command": [
+            "/Users/runner/work/pcr/pcr/target/debug/deps/native_loopback-c4abe68ebc1d65ab",
+            "--ignored",
+            "--exact",
+            "scoped_ipv6_targets",
+            "--nocapture",
+            "--test-threads=1"
+          ],
+          "execution": "privileged_native",
+          "privilege_granted": true,
+          "exit_code": 0,
+          "stdout": "\nrunning 1 test\ntest scoped_ipv6_targets ... scoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"target_list\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolution_performed\": false,\n    \"targets\": [\n      {\n        \"method\": \"target_list\",\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"origins\": [\n          {\n            \"index\": 0,\n            \"source\": \"argument 1\"\n          },\n          {\n            \"index\": 1,\n            \"source\": \"argument 2\"\n          }\n        ]\n      }\n    ],\n    \"duplicates\": []\n  },\n  \"diagnostics\": []\n}\n\nscoped CLI: {\n  \"schema\": \"packetcraftr.output/v7\",\n  \"command\": \"scan\",\n  \"mode\": \"aggregate\",\n  \"status\": \"success\",\n  \"result\": {\n    \"method\": \"tcp_connect\",\n    \"target\": \"fe80::1%lo0,fe80::1%1\",\n    \"resolved_addresses\": [\n      \"fe80::1\"\n    ],\n    \"planned_duration\": {\n      \"secs\": 1,\n      \"nanos\": 0\n    },\n    \"socket_stats\": {\n      \"connections_scheduled\": 1,\n      \"connections_attempted\": 1,\n      \"connections_succeeded\": 1,\n      \"retained_evidence_bytes\": 198,\n      \"elapsed\": {\n        \"secs\": 0,\n        \"nanos\": 8687125\n      },\n      \"rtt\": {\n        \"sent\": 1,\n        \"received\": 1,\n        \"lost\": 0,\n        \"min\": {\n          \"secs\": 0,\n          \"nanos\": 442708\n        },\n        \"avg\": {\n          \"secs\": 0,\n          \"nanos\": 442708\n        },\n        \"max\": {\n          \"secs\": 0,\n          \"nanos\": 442708\n        }\n      }\n    },\n    \"endpoints\": [\n      {\n        \"address\": \"fe80::1\",\n        \"scope\": {\n          \"zone\": \"lo0\",\n          \"interface\": {\n            \"name\": \"lo0\",\n            \"index\": 1\n          }\n        },\n        \"port\": 49183,\n        \"classification\": \"open\",\n        \"probes\": [\n          {\n            \"sequence\": 0,\n            \"address\": \"fe80::1\",\n            \"scope\": {\n              \"zone\": \"lo0\",\n              \"interface\": {\n                \"name\": \"lo0\",\n                \"index\": 1\n              }\n            },\n            \"port\": 49183,\n            \"attempt\": 1,\n            \"attempted\": true,\n            \"connect_succeeded\": true,\n            \"outcome\": \"connected\",\n            \"classification\": \"open\",\n            \"scheduled_at\": {\n              \"unix_seconds\": 1791331057,\n              \"nanoseconds\": 970607000\n            },\n            \"finished_at\": {\n              \"unix_seconds\": 1791331057,\n              \"nanoseconds\": 971050000\n            },\n            \"elapsed\": {\n              \"secs\": 0,\n              \"nanos\": 442708\n            },\n            \"local\": \"[fe80::1%1]:49184\",\n            \"error\": null\n          }\n        ]\n      }\n    ]\n  },\n  \"diagnostics\": []\n}\n\nscoped raw capability: live packet I/O is unavailable: Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path\nPACKETCRAFTR_NATIVE_SCOPED={\"selection\":\"exercised\",\"connect\":\"exercised\",\"raw\":\"unsupported_capability\"}\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.04s\n\n",
+          "stderr": "",
+          "scoped_paths": {
+            "selection": "exercised",
+            "connect": "exercised",
+            "raw": "unsupported_capability"
+          }
+        }
+      ],
+      "cli_build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "packetcraftr-cli",
+          "--all-features",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "58249d8f1caa1e9290499f2125c140e753d29858444f203bd7341dc50af6fa89",
+        "stderr_sha256": "fed34e17241264a12604177d72b4ad8d3c0e4034b30e61bf6f97bb6eb8dc0640"
+      },
+      "test_build": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "packetcraftr-netio",
+          "--all-features",
+          "--test",
+          "native_loopback",
+          "--no-run",
+          "--message-format=json"
+        ],
+        "exit_code": 0,
+        "execution": "compilation",
+        "stdout_sha256": "c2fc31438c40e60b1014a91975d65483faf9ee31c8729c58ebbf6849faf3778b",
+        "stderr_sha256": "f4cf0bc13af7c75d5af2a5f8efd604aae127788faec949e1399bb0448fc72a37"
+      },
+      "binary_sha256": "f31458f7ea3b09d77708ad74f8e13fe27c0aeaa970c20e48106d9a3b44a44b55",
+      "test_binary_sha256": "1fc9c9685dbf3423b3ba61c617a5c8767183a75e51046a02c72cbfb2840100ee"
+    }
+  ],
+  "status": "incomplete",
+  "reviewed_commit": "8e010a0b9eac118aa13384f0b854111a73d47d76",
+  "source_report_sha256": "5cf15e6ad841070d22492b12d3be7af59cee21dd5695176e872e1c2bc5e1ceaa",
+  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/37549075757"
+}

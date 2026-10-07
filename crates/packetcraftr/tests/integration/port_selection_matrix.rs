@@ -234,6 +234,7 @@ fn no_probe_reaches_an_excluded_port() {
     let request = Request {
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
+        target_sources: Vec::new(),
         address_family: packetcraftr::target::Family::Any,
         endpoints: selected.endpoints,
         attempts: 2,

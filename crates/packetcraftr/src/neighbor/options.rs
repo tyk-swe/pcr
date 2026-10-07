@@ -93,6 +93,23 @@ impl Options {
         }
     }
 
+    /// These options narrowed to one request per fresh resolution, waiting
+    /// at most `attempt_timeout` for a reply while keeping these capture
+    /// bounds. Answers live for the whole operation: an entry that expired
+    /// mid-operation would invite a second request beyond the first.
+    #[must_use]
+    pub(crate) fn one_attempt(&self, attempt_timeout: Duration) -> Self {
+        Self {
+            max_attempts: 1,
+            attempt_timeout: attempt_timeout
+                .min(MAX_CONFIGURED_ATTEMPT_TIMEOUT)
+                .max(Duration::from_nanos(1)),
+            cache_ttl: self.cache_ttl.max(MAX_CONFIGURED_CACHE_TTL),
+            max_cache_entries: self.max_cache_entries.max(MAX_CONFIGURED_CACHE_ENTRIES),
+            ..self.clone()
+        }
+    }
+
     /// The capture bounds a discovery session runs under. Overflow always
     /// fails: a lost frame would make a negative result unverifiable.
     #[must_use]

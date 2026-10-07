@@ -1039,6 +1039,8 @@ fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
         (report.stats.packets_attempted, report.stats.bytes),
         (2, 84)
     );
+    // The paced intervals count in the statistics like the probe runners'.
+    assert_eq!(report.stats.elapsed, Duration::from_millis(200));
     let neighbors = report
         .hosts
         .iter()
@@ -1071,4 +1073,198 @@ fn icmp_discovery_pairs_with_a_multi_port_scan() {
     // The scan's own portless ICMP endpoint still stands alone.
     request.endpoints.insert(0, ProbeEndpoint::Icmp);
     assert!(matches!(request.validate(), Err(Error::InvalidPort { .. })));
+}
+
+#[test]
+fn discovery_and_scan_endpoints_share_the_port_budget() {
+    use super::discovery::{Mode, Options};
+    use crate::probe::ProbeEndpoint;
+    let mut request = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))));
+    request.endpoints = vec![ProbeEndpoint::Udp { port: 80 }];
+    request.discovery = Options {
+        mode: Mode::Before,
+        probes: vec![ProbeEndpoint::Tcp { port: 80 }],
+        ..Options::default()
+    };
+    // Each list fits alone; their distinct union does not.
+    request.limits.max_ports = 1;
+    let error = request
+        .validate()
+        .expect_err("the combined endpoint set exceeds max_ports");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "ports",
+                value: 2,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    request.limits.max_ports = 2;
+    request.validate().expect("two distinct endpoints fit");
+}
+
+#[test]
+fn link_layer_probes_budget_their_implicit_neighbor_resolution() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_probes = 1;
+    let error = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::new(AtomicUsize::new(0)),
+        },
+        &mut NoopClock,
+    )
+    .expect_err("the probe's implicit neighbor request exceeds max_probes");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "probes",
+                value: 2,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "cli.scan_limit"
+    );
+
+    // A layer-3 route resolves no neighbor, so the probe budget stays exact.
+    request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
+    let mut executor = TimeoutExecutor::default();
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("layer-3 probes send no implicit neighbor request");
+    assert_eq!(report.stats.packets_attempted, 1);
+}
+
+/// Answers the answered host's discovery echo and gives each scanned probe a
+/// late frame its outcome does not carry.
+struct SkippedHostExecutor {
+    inner: TimeoutExecutor,
+    answered: Ipv4Addr,
+    bytes: usize,
+}
+
+impl Executor<Batch<Probe>> for SkippedHostExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        let mut execution = self.inner.execute(batch)?;
+        let probe = &batch.probes[0];
+        match (probe.stage, probe.address) {
+            (super::Stage::Discovery, IpAddr::V4(remote)) if remote == self.answered => {
+                if let Some(reply) = execution.sent.first().and_then(|sent| {
+                    echo_reply(sent.built().packet.get::<Icmpv4>()?.body.clone(), remote)
+                }) {
+                    execution.responses.push(crate::exchange::Response {
+                        request_index: 0,
+                        response: decoded(reply, Vec::new()),
+                        latency: Duration::from_millis(1),
+                    });
+                }
+            }
+            (super::Stage::Scan, IpAddr::V4(remote)) => {
+                let mut packet = Packet::new();
+                packet.push(Ipv4 {
+                    source: remote,
+                    destination: Ipv4Addr::new(10, 0, 0, 1),
+                    ..Ipv4::default()
+                });
+                packet.push(Tcp {
+                    source_port: 80,
+                    destination_port: 50_000,
+                    acknowledgment: (probe.sequence as u32).wrapping_add(1),
+                    flags: Tcp::SYN | Tcp::ACK,
+                    ..Tcp::default()
+                });
+                execution
+                    .unsolicited
+                    .push(crate::probe::runner::UnsolicitedCapture {
+                        decoded: decoded_packet(
+                            packet,
+                            UNIX_EPOCH + Duration::from_secs(2),
+                            &vec![0x45_u8; self.bytes],
+                            Vec::new(),
+                        ),
+                        received_at: Some(std::time::Instant::now()),
+                        response_deadline: std::time::Instant::now() + Duration::from_secs(1),
+                        correlation_expired: false,
+                    });
+            }
+            _ => {}
+        }
+        Ok(execution)
+    }
+}
+
+#[test]
+fn skipped_hosts_release_their_evidence_reservation() {
+    use super::discovery::{Mode, Options, State};
+    use crate::probe::ProbeEndpoint;
+    let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
+    let mut request = tcp_scan_request(Target::Address(answered));
+    request.targets = crate::target::Selection {
+        include: [answered, silent]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    request.discovery = Options {
+        mode: Mode::Before,
+        probes: vec![ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    // Exactly the scanned probe's slot plus one captured frame fits.
+    request.collection.capture.snap_length = 64;
+    request.collection.capture.max_bytes = 128;
+    request.limits.max_evidence_bytes = 128;
+    let mut executor = SkippedHostExecutor {
+        inner: TimeoutExecutor::default(),
+        answered: Ipv4Addr::new(192, 0, 2, 10),
+        bytes: 100,
+    };
+    let report = run(
+        &request,
+        &mut Admission::new(&private_policy(), &crate::target::SystemResolver),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("the skipped probe's reservation makes room for late frames");
+
+    assert_eq!(
+        report
+            .hosts
+            .iter()
+            .map(|host| (host.address, host.state))
+            .collect::<Vec<_>>(),
+        [(answered, State::Responded), (silent, State::NoResponse)]
+    );
+    assert_eq!(report.unattributed.len(), 1);
+    assert_eq!(report.unattributed[0].frame.bytes().len(), 100);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "scan.evidence_limit"),
+        "{:?}",
+        report.diagnostics
+    );
 }

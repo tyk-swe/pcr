@@ -300,6 +300,22 @@ impl Request {
                 return invalid(format!("endpoint {endpoint} is listed more than once"));
             }
         }
+        // Discovery probes share the port budget with the scan's endpoints:
+        // the distinct set across both stages counts once toward max_ports.
+        if self.discovery.runs() && !self.discovery.probes.is_empty() {
+            let distinct = self
+                .endpoints
+                .iter()
+                .chain(&self.discovery.probes)
+                .collect::<HashSet<_>>();
+            if distinct.len() > self.limits.max_ports {
+                return Err(Error::InvalidLimit {
+                    field: "ports",
+                    value: u64::try_from(distinct.len()).unwrap_or(u64::MAX),
+                    reason: format!("exceeds max_ports={}", self.limits.max_ports),
+                });
+            }
+        }
         Ok(())
     }
 

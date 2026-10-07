@@ -96,6 +96,8 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     collection: crate::exchange::Collection,
     /// Neighbor captures buffer no more than the scan's evidence bounds.
     neighbor_capture: (usize, usize),
+    /// The wait one implicit neighbor resolution gets per fresh answer.
+    attempt_timeout: Duration,
 }
 
 impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
@@ -115,6 +117,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 request.limits.max_evidence_frames,
                 request.limits.max_evidence_bytes,
             ),
+            attempt_timeout: request.timeout,
         }
     }
 
@@ -124,7 +127,17 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             configured => {
                 let registry: Arc<Registry> =
                     registry::configured(self.client.registry(), &self.bindings)?;
-                configured.insert(self.client.view_with_registry(registry))
+                let mut client = self.client.view_with_registry(registry);
+                // Materializing a probe's link-layer route resolves its
+                // neighbor inside the exchange. The operation's budget
+                // counts at most one request per selected target's neighbor,
+                // so the resolver the exchanges share sends at most one and
+                // keeps the answer for the rest of the operation.
+                client.neighbors = client
+                    .neighbors
+                    .one_attempt(self.attempt_timeout)
+                    .map_err(BoundaryError::from_error)?;
+                configured.insert(client)
             }
         };
         Ok(ExchangeExecutor::new(

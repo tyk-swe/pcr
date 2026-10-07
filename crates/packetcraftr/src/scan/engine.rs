@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
+use packetcraftr_netio::link::Mode;
 
 use crate::clock::Clock;
 use crate::execution::Errors as _;
@@ -141,7 +142,7 @@ where
             }
         }
         if discovered.packets_attempted > 0 && !approved.endpoints.is_empty() {
-            pace(request, clock, deadline, 1)?;
+            pace(request, clock, deadline, 1, &mut stats)?;
         }
     }
     let hosts = composer.finish();
@@ -159,6 +160,12 @@ where
         first_sequence: scan_sequence,
     };
     let scan_probes = scan.probes(request)?;
+    // Skipped hosts hold no response capacity for this stage, whose own
+    // probes are the only outstanding ones left.
+    evidence.reserve_responses(
+        usize::try_from(scan_probes).unwrap_or(usize::MAX),
+        request.collection.capture.snap_length,
+    );
     let scanned = execute(request, executor, clock, deadline, &mut evidence, &scan)?;
     add_stats(
         &mut stats,
@@ -202,7 +209,7 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
         let mut attempts = 0;
         let neighbor = loop {
             if sent {
-                pace(request, clock, deadline, 1)?;
+                pace(request, clock, deadline, 1, stats)?;
             }
             enforce_deadline(&Probes, deadline)?;
             let (neighbor, exchange) = executor
@@ -237,17 +244,19 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
         composer.neighbor(index, neighbor);
     }
     if sent {
-        pace(request, clock, deadline, 1)?;
+        pace(request, clock, deadline, 1, stats)?;
     }
     Ok(())
 }
 
-/// Waits out the request rate for `items` probes already sent.
+/// Waits out the request rate for `items` probes already sent, recording
+/// the pause in the aggregate statistics like the probe runners do.
 fn pace<C: Clock>(
     request: &Request,
     clock: &mut C,
     deadline: &Deadline,
     items: usize,
+    stats: &mut crate::Stats,
 ) -> Result<(), Error> {
     let delay = rate_delay(
         &Probes,
@@ -258,10 +267,20 @@ fn pace<C: Clock>(
     if delay.is_zero() {
         return Ok(());
     }
-    clock.sleep(delay, deadline).map_err(|source| Error::Clock {
-        sequence: 0,
-        source: Box::new(source),
-    })
+    clock
+        .sleep(delay, deadline)
+        .map_err(|source| Error::Clock {
+            sequence: 0,
+            source: Box::new(source),
+        })?;
+    add_stats(
+        stats,
+        &crate::Stats {
+            elapsed: delay,
+            ..crate::Stats::default()
+        },
+        0,
+    )
 }
 
 /// One stage's probes: every endpoint on every target, attempt by attempt,
@@ -563,7 +582,7 @@ fn plan_scan(
         &[]
     };
     let discovery_probes = probe_count(targets.len(), probes.len(), request.attempts)?;
-    let neighbor_requests = if discovery.runs() && discovery.neighbor {
+    let explicit_requests = if discovery.runs() && discovery.neighbor {
         probe_count(targets.len(), 1, request.attempts)?
     } else {
         0
@@ -572,6 +591,18 @@ fn plan_scan(
     let total_probes = discovery_probes
         .checked_add(scan_probes)
         .ok_or_else(overflow)?;
+    // Ordinary probes materialize a link-layer route inside their exchange:
+    // a fresh resolution asks for the target's neighbor, or its gateway's,
+    // with at most one request each. That work is additive to the discovery
+    // stage's own requests, which only ask for the target.
+    let implicit_requests = if total_probes > 0 && request.route.link_mode != Mode::Layer3 {
+        targets.len()
+    } else {
+        0
+    };
+    let neighbor_requests = explicit_requests
+        .checked_add(implicit_requests)
+        .ok_or_else(overflow)?;
     check_probe_count(
         &Probes,
         total_probes
@@ -579,32 +610,50 @@ fn plan_scan(
             .ok_or_else(overflow)?,
         request.limits.max_probes,
     )?;
-    let neighbor_bytes = targets.iter().try_fold(0u64, |total, target| {
+    let neighbor_frames = targets.iter().try_fold(0u64, |total, target| {
         let frame = if target.address.is_ipv4() {
             IPV4_NEIGHBOR_BYTES
         } else {
             IPV6_NEIGHBOR_BYTES
         };
-        total.checked_add(frame.checked_mul(u64::from(request.attempts))?)
+        total.checked_add(frame)
     });
-    let maximum_bytes = maximum_wire_bytes(targets, probes, request)?
-        .checked_add(maximum_wire_bytes(targets, endpoints, request)?)
-        .and_then(|bytes| {
-            bytes.checked_add(if neighbor_requests == 0 {
+    // One target's neighbor bytes cover `attempts` discovery requests plus
+    // at most one implicit request from its probes' materialization.
+    let neighbor_bytes = neighbor_frames
+        .and_then(|per_target| {
+            let explicit = if explicit_requests == 0 {
+                Some(0)
+            } else {
+                per_target.checked_mul(u64::from(request.attempts))
+            }?;
+            explicit.checked_add(if implicit_requests == 0 {
                 0
             } else {
-                neighbor_bytes?
+                per_target
             })
         })
+        .ok_or_else(overflow)?;
+    let maximum_bytes = maximum_wire_bytes(targets, probes, request)?
+        .checked_add(maximum_wire_bytes(targets, endpoints, request)?)
+        .and_then(|bytes| bytes.checked_add(neighbor_bytes))
         .ok_or_else(overflow)?;
     let too_long = || Error::DurationLimit {
         actual: Duration::MAX,
         limit: request.limits.max_duration,
     };
     let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
-    let neighbor_duration = u32::try_from(neighbor_requests)
+    // Discovery requests pace between targets; an implicit resolution waits
+    // only the attempt timeout inside the probe's own exchange.
+    let neighbor_duration = u32::try_from(explicit_requests)
         .ok()
         .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
+        .and_then(|explicit| {
+            u32::try_from(implicit_requests)
+                .ok()
+                .and_then(|requests| request.timeout.checked_mul(requests))
+                .and_then(|implicit| implicit.checked_add(explicit))
+        })
         .ok_or_else(too_long)?;
     let stage_pause = if discovery_probes > 0 && scan_probes > 0 {
         pause

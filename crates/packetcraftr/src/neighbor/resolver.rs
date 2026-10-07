@@ -88,6 +88,17 @@ impl State {
         })
     }
 
+    /// A resolver sharing this cache that sends at most one request per
+    /// fresh resolution, waiting at most `attempt_timeout` for its reply.
+    /// Its answers live for the whole operation, so a resolution never has
+    /// to run twice inside it.
+    pub(crate) fn one_attempt(&self, attempt_timeout: std::time::Duration) -> Result<Self, Error> {
+        Self::try_new(self.options.one_attempt(attempt_timeout)).map(|state| Self {
+            cache: Arc::clone(&self.cache),
+            ..state
+        })
+    }
+
     /// The unexpired cache entry for `request`, without sending anything.
     pub(crate) fn cached(&self, request: &Request) -> Result<Option<MacAddress>, Error> {
         validate_request(request)?;

@@ -490,6 +490,79 @@ fn tcp_and_udp_on_one_port_share_one_budget_and_never_merge() {
 }
 
 #[test]
+fn serial_direct_tcp_and_udp_response_limit_rejects_use_bounded_evidence() {
+    use packetcraftr::probe::ProbeEndpoint;
+
+    for (endpoint, classification, frame_bytes) in [
+        (
+            ProbeEndpoint::Tcp { port: 80 },
+            scan::Classification::Closed,
+            40,
+        ),
+        (
+            ProbeEndpoint::Udp { port: 9999 },
+            scan::Classification::Open,
+            28,
+        ),
+    ] {
+        for (frames, bytes, unmatched, duplicates, limit) in [
+            (2, 1500, 1, 1, None),
+            (1, 1500, 1, 0, Some("exchange.capture_frame_limit")),
+            (2, frame_bytes, 1, 0, Some("exchange.capture_byte_limit")),
+            (2, 1500, 0, 0, Some("exchange.unsolicited_limit")),
+        ] {
+            let mut request = request();
+            request.max_in_flight = 1;
+            request.endpoints = vec![endpoint];
+            request.timeout = Duration::from_secs(1);
+            request.collection.max_responses = 1;
+            request.collection.max_unmatched_frames = unmatched;
+            request.collection.capture.max_frames = frames;
+            request.collection.capture.max_bytes = bytes;
+            request.collection.capture.snap_length = bytes.min(1500);
+            let clock = VirtualClock::default();
+            let state = Arc::new(Mutex::new(State {
+                idle_clock: Some(clock.clone()),
+                tied_resets: true,
+                repeated_udp_replies: true,
+                ..State::default()
+            }));
+            let collector = scan::Collector::default();
+            let report = client(&state)
+                .with_clock(clock)
+                .scan(request, collector.clone())
+                .unwrap();
+            let aggregate = collector.finish(report).unwrap();
+            let probe = &aggregate.endpoints[0].probes[0];
+            assert_eq!(probe.classification, classification);
+            let winner = probe.response.as_ref().expect("first reply is retained");
+            assert_eq!(&winner.bytes()[4..6], &[0, 2]);
+            assert_eq!(aggregate.unattributed.len(), duplicates, "{endpoint:?}");
+            for capture in &aggregate.unattributed {
+                assert_eq!(capture.sequence, Some(probe.sequence));
+                assert_eq!(capture.attribution, scan::Attribution::Duplicate);
+                assert_eq!(&capture.frame.bytes()[4..6], &[0, 1]);
+            }
+            assert_eq!(
+                aggregate.retained_evidence_bytes,
+                (1 + duplicates) * frame_bytes
+            );
+            for code in std::iter::once("exchange.response_limit").chain(limit) {
+                assert_eq!(
+                    aggregate
+                        .diagnostics
+                        .iter()
+                        .filter(|diagnostic| diagnostic.code == code)
+                        .count(),
+                    1,
+                    "{endpoint:?}: {code}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn serial_in_window_reply_rejected_by_response_limit_is_a_duplicate() {
     let mut request = request();
     request.max_in_flight = 1;

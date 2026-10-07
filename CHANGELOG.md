@@ -1890,6 +1890,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Exchanges retain directly correlated TCP and UDP replies rejected by the response
+  limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late
   evidence, and label replies as duplicates only when the probe has a winner.
 - Serial raw scans label in-window replies rejected by the response limit as

@@ -284,15 +284,10 @@ impl Accumulator {
                 if context.window.expired() {
                     return self.expire_decoded(identity, Some(received_at), decoded, context);
                 }
-                if self.response_count >= context.collection.max_responses {
-                    self.diagnostics.push_once(Diagnostic::warning(
-                        "exchange.response_limit",
-                        format!(
-                            "matched response limit {} reached; later responses were not retained",
-                            context.collection.max_responses
-                        ),
-                    ));
+                if self.response_limit_reached(context.collection.max_responses) {
                     self.refuse_reply(request_index, "exchange.response_limit");
+                    let freshness = unsolicited_freshness(Some(received_at), context.sent);
+                    self.retain_unsolicited(identity, decoded, context.collection, freshness);
                     return ProcessOutcome::Continue;
                 }
                 match self.reserve_decoded_evidence(
@@ -417,7 +412,7 @@ impl Accumulator {
                     continue;
                 }
             };
-            if self.workflow_response_limit_reached(max_responses) {
+            if self.response_limit_reached(max_responses) {
                 self.refuse_reply(request_index, "exchange.response_limit");
                 self.queue_unsolicited(candidate);
                 continue;
@@ -456,14 +451,14 @@ impl Accumulator {
         ProcessOutcome::CorrelationDeadlineExpired
     }
 
-    fn workflow_response_limit_reached(&mut self, max_responses: usize) -> bool {
+    fn response_limit_reached(&mut self, max_responses: usize) -> bool {
         if self.response_count < max_responses {
             return false;
         }
         self.diagnostics.push_once(Diagnostic::warning(
             "exchange.response_limit",
             format!(
-                "matched response limit {max_responses} reached; later responses were not retained"
+                "matched response limit {max_responses} reached; later replies are subject to unsolicited evidence limits"
             ),
         ));
         true

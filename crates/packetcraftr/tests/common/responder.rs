@@ -45,6 +45,7 @@ pub(crate) struct State {
     pub(crate) hold_replies_until: usize,
     pub(crate) tied_resets: bool,
     pub(crate) repeated_syn_acks: bool,
+    pub(crate) repeated_udp_replies: bool,
     pub(crate) mismatched_dns_replies: bool,
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
@@ -177,6 +178,27 @@ impl transmit::Provider for Io {
                             ..Default::default()
                         });
                         response.push(dns);
+                        frame(response)
+                    })
+                    .collect()
+            }
+            _ if tcp.is_none() && state.repeated_udp_replies => {
+                let udp = decoded.packet.get::<Udp>().unwrap();
+                [2, 1]
+                    .into_iter()
+                    .map(|identification| {
+                        let mut response = Packet::new();
+                        response.push(Ipv4 {
+                            identification,
+                            source: ip.destination,
+                            destination: ip.source,
+                            ..Default::default()
+                        });
+                        response.push(Udp {
+                            source_port: udp.destination_port,
+                            destination_port: udp.source_port,
+                            ..Default::default()
+                        });
                         frame(response)
                     })
                     .collect()

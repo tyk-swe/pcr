@@ -1890,6 +1890,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `scan --transport` accepts one argument per occurrence, preserving positional
+  targets after the option while retaining comma-separated and repeated values.
+- The output v8 schema accepts port zero in JSON and NDJSON scan listings,
+  matching accepted numeric port selections.
 - Raw scans retain winning replies before duplicates under tight evidence
   budgets, and serial scans retain eligible late unsolicited captures.
 - Unqualified port presets expand in the requested transport order.

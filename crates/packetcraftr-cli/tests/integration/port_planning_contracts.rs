@@ -39,6 +39,37 @@ fn loopback_ports() -> (TcpListener, u16) {
 }
 
 #[test]
+fn transport_options_before_targets_preserve_the_selected_transports() {
+    for (options, expected) in [
+        (
+            &["--transport", "udp"][..],
+            json!([{"transport": "udp", "port": 53, "port_hint": "dns"}]),
+        ),
+        (
+            &["--transport", "udp,tcp"][..],
+            json!([
+                {"transport": "udp", "port": 53, "port_hint": "dns"},
+                {"transport": "tcp", "port": 53, "port_hint": "dns"},
+            ]),
+        ),
+        (
+            &["--transport", "udp", "--transport", "tcp"][..],
+            json!([
+                {"transport": "udp", "port": 53, "port_hint": "dns"},
+                {"transport": "tcp", "port": 53, "port_hint": "dns"},
+            ]),
+        ),
+    ] {
+        let mut arguments = vec!["--output", "json", "scan"];
+        arguments.extend_from_slice(options);
+        arguments.extend_from_slice(&["192.0.2.1", "--list", "--ports", "53"]);
+        let report = parse_json(&run_success(&arguments));
+        assert_eq!(report["result"]["targets"][0]["address"], "192.0.2.1");
+        assert_eq!(report["result"]["ports"]["endpoints"], expected);
+    }
+}
+
+#[test]
 fn listing_publishes_the_exact_endpoints_a_scan_would_probe() {
     let ports = listed_ports(&[
         "--transport",

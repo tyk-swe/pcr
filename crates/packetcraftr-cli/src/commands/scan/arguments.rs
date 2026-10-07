@@ -251,7 +251,13 @@ pub(crate) struct Args {
     pub(crate) max_targets: usize,
     /// TCP SYN, UDP, or ICMP echo probes; TCP and UDP combine in one plan
     /// (`tcp,udp`), while ICMP echo stands alone.
-    #[arg(long, value_enum, value_delimiter = ',', num_args = 1.., default_value = "tcp")]
+    #[arg(
+        long,
+        value_enum,
+        value_delimiter = ',',
+        num_args = 1,
+        default_value = "tcp"
+    )]
     pub(crate) transport: Vec<Transport>,
     /// Exact UDP probe payload in hex, with optional whitespace, colon, or dash separators.
     #[arg(long, value_name = "HEX", conflicts_with = "udp_payload_file")]

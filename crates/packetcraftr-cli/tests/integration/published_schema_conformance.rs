@@ -19,6 +19,33 @@ fn rewrite_v2_validator() -> jsonschema::Validator {
 }
 
 #[test]
+fn scan_listing_accepts_port_zero_in_json_and_ndjson() {
+    for format in ["json", "ndjson"] {
+        let output = common::run_success(&[
+            "--output",
+            format,
+            "scan",
+            "192.0.2.1",
+            "--list",
+            "--ports",
+            "0",
+        ]);
+        let report = if format == "json" {
+            common::parse_json(&output)
+        } else {
+            let records = common::parse_ndjson(&output);
+            let complete = records.last().expect("completion record");
+            assert_eq!(complete["event"], "complete");
+            complete.clone()
+        };
+        assert_eq!(
+            report["result"]["ports"]["endpoints"],
+            json!([{"transport": "tcp", "port": 0}]),
+        );
+    }
+}
+
+#[test]
 fn schema_accepts_based_source_reject_zero() {
     let validator = schema_validator();
     let mut document: Value = serde_json::from_str(include_str!(

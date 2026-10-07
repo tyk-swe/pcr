@@ -12,7 +12,7 @@ use packetcraftr_netio::link::Mode;
 
 use crate::clock::Clock;
 use crate::execution::Errors as _;
-use crate::execution::{publisher, rate_delay};
+use crate::execution::{pause, publisher, rate_delay};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{Batch, check_collection_evidence, check_probe_count, check_probe_duration};
@@ -250,11 +250,13 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
 }
 
 /// Waits out the request rate for `items` probes already sent, recording
-/// the pause in the aggregate statistics like the probe runners do.
+/// the pause in the aggregate statistics like the probe runners do. The
+/// delay is reserved against the deadline before the sleep and the deadline
+/// is enforced again after, so the operation's boundary stays authoritative.
 fn pace<C: Clock>(
     request: &Request,
     clock: &mut C,
-    deadline: &Deadline,
+    deadline: &mut Deadline,
     items: usize,
     stats: &mut crate::Stats,
 ) -> Result<(), Error> {
@@ -267,12 +269,7 @@ fn pace<C: Clock>(
     if delay.is_zero() {
         return Ok(());
     }
-    clock
-        .sleep(delay, deadline)
-        .map_err(|source| Error::Clock {
-            sequence: 0,
-            source: Box::new(source),
-        })?;
+    pause(deadline, clock, delay).map_err(|paused| paused.into_error(&Probes, 0))?;
     add_stats(
         stats,
         &crate::Stats {

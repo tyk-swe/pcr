@@ -110,16 +110,18 @@ building blocks and publishes one host record per target in the
   ARP or NDP attempt: the explicit `neighbor` probe's retries plus at most
   one implicit resolution per target whose probes materialize a link-layer
   route (the exchanges share a narrowed resolver that sends once per
-  neighbor and keeps the answer for the operation). The wire limit includes
-  a worst-case request with the largest VLAN stack, and the worst-case
-  duration includes neighbor attempts and the pause between stages, all
-  inside `--max-probes` and `--max-duration`. The distinct discovery and
-  scan endpoints count toward `--max-ports` as one set. Targets and the
-  operation are authorized before the first frame, ARP and NDP included.
-  Discovery probes take sequences from 0, and the scan continues the same
-  sequence space and shares the evidence budget; hosts the scan skips
-  release their response reservations before the scan stage, and the
-  discovery and stage-transition pauses count in the elapsed statistics.
+  neighbor, keeps the answer for the operation, and captures within the
+  scan's evidence limits). The wire limit includes a worst-case request
+  with the largest VLAN stack, and the worst-case duration includes
+  neighbor attempts and the pause between stages, all inside `--max-probes`
+  and `--max-duration`. The distinct discovery and scan endpoints count
+  toward `--max-ports` as one set. Targets and the operation are authorized
+  before the first frame, ARP and NDP included. Discovery probes take
+  sequences from 0, and the scan continues the same sequence space and
+  shares the evidence budget; hosts the scan skips release their response
+  reservations before the scan stage, and the discovery and
+  stage-transition pauses are reserved against `--max-duration` before they
+  are slept and count in the elapsed statistics.
 - Discovery ports come from `--discovery-ports` through the same
   [M6 selection][m6-selection] as `--ports`, with the scan's `--exclude-ports`
   applied. An exclusion prefixed with a transport discovery does not probe

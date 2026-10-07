@@ -1268,3 +1268,91 @@ fn skipped_hosts_release_their_evidence_reservation() {
         report.diagnostics
     );
 }
+
+/// Answers every neighbor request after marking `work` clock time spent, so
+/// the run can observe work that the plan never predicted.
+struct SlowNeighbors {
+    clock: crate::test_support::RecordingClock,
+    work: Duration,
+}
+
+impl Executor<Batch<Probe>> for SlowNeighbors {
+    fn execute(&mut self, _batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        unreachable!("neighbor-only discovery sends no probe")
+    }
+}
+
+impl Pipelined for SlowNeighbors {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("neighbor-only discovery sends no probe")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        self.clock.advance(self.work);
+        let neighbor = super::discovery::Neighbor {
+            outcome: super::discovery::NeighborOutcome::Resolved(super::discovery::Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+                cached: false,
+            }),
+            attempts: 1,
+            observed_at: UNIX_EPOCH,
+        };
+        let stats = Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: 42,
+            ..Stats::default()
+        };
+        Ok((neighbor, stats))
+    }
+}
+
+#[test]
+fn a_neighbor_pace_that_would_overshoot_the_deadline_is_refused() {
+    use super::discovery::{Mode, Options};
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.endpoints = Vec::new();
+    request.probes_per_second = Some(1);
+    request.limits.max_duration = Duration::from_millis(2_100);
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        ..Options::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    // The resolution's own route and capture work consumes most of the
+    // budget, so the trailing one-second pace cannot fit anymore.
+    let mut executor = SlowNeighbors {
+        clock: clock.clone(),
+        work: Duration::from_millis(1_500),
+    };
+    let error = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect_err("the trailing pace is reserved before it is slept");
+
+    assert!(
+        matches!(error, Error::DurationLimit { .. }),
+        "expected the pace's reservation to hit the duration limit, got {error:?}"
+    );
+}

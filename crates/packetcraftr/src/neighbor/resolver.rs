@@ -89,11 +89,21 @@ impl State {
     }
 
     /// A resolver sharing this cache that sends at most one request per
-    /// fresh resolution, waiting at most `attempt_timeout` for its reply.
-    /// Its answers live for the whole operation, so a resolution never has
-    /// to run twice inside it.
-    pub(crate) fn one_attempt(&self, attempt_timeout: std::time::Duration) -> Result<Self, Error> {
-        Self::try_new(self.options.one_attempt(attempt_timeout)).map(|state| Self {
+    /// fresh resolution, waiting at most `attempt_timeout` for its reply and
+    /// capturing at most `max_frames` frames and `max_bytes` bytes. Its
+    /// answers live for the whole operation, so a resolution never has to
+    /// run twice inside it.
+    pub(crate) fn one_attempt(
+        &self,
+        attempt_timeout: std::time::Duration,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Result<Self, Error> {
+        Self::try_new(
+            self.options
+                .one_attempt(attempt_timeout, max_frames, max_bytes),
+        )
+        .map(|state| Self {
             cache: Arc::clone(&self.cache),
             ..state
         })

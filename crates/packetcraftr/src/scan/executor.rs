@@ -132,10 +132,12 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // neighbor inside the exchange. The operation's budget
                 // counts at most one request per selected target's neighbor,
                 // so the resolver the exchanges share sends at most one and
-                // keeps the answer for the rest of the operation.
+                // keeps the answer for the rest of the operation, bounded
+                // by the scan's evidence limits like an explicit capture.
+                let (max_frames, max_bytes) = self.neighbor_capture;
                 client.neighbors = client
                     .neighbors
-                    .one_attempt(self.attempt_timeout)
+                    .one_attempt(self.attempt_timeout, max_frames, max_bytes)
                     .map_err(BoundaryError::from_error)?;
                 configured.insert(client)
             }

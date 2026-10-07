@@ -1942,6 +1942,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Discovery and stage-transition pauses count in the scan's elapsed
   statistics, and `--reverse-dns` folds the lookups' exchange statistics
   into the reported statistics (elapsed under `--connect`).
+- The implicit neighbor resolution inside a probe send shares the scan's
+  evidence limits instead of the resolver's capture defaults.
 - Exchanges retain directly correlated TCP and UDP replies rejected by the response
   limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late

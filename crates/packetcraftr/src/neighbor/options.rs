@@ -94,11 +94,18 @@ impl Options {
     }
 
     /// These options narrowed to one request per fresh resolution, waiting
-    /// at most `attempt_timeout` for a reply while keeping these capture
-    /// bounds. Answers live for the whole operation: an entry that expired
-    /// mid-operation would invite a second request beyond the first.
+    /// at most `attempt_timeout` for a reply and capturing within
+    /// `max_frames` frames and `max_bytes` bytes — never below the bounds a
+    /// single decodable reply needs. Answers live for the whole operation:
+    /// an entry that expired mid-operation would invite a second request
+    /// beyond the first.
     #[must_use]
-    pub(crate) fn one_attempt(&self, attempt_timeout: Duration) -> Self {
+    pub(crate) fn one_attempt(
+        &self,
+        attempt_timeout: Duration,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Self {
         Self {
             max_attempts: 1,
             attempt_timeout: attempt_timeout
@@ -106,7 +113,15 @@ impl Options {
                 .max(Duration::from_nanos(1)),
             cache_ttl: self.cache_ttl.max(MAX_CONFIGURED_CACHE_TTL),
             max_cache_entries: self.max_cache_entries.max(MAX_CONFIGURED_CACHE_ENTRIES),
-            ..self.clone()
+            max_capture_queue_frames: self.max_capture_queue_frames.min(max_frames).max(1),
+            max_captured_bytes: self
+                .max_captured_bytes
+                .min(max_bytes)
+                .max(MIN_NEIGHBOR_SNAPSHOT_LENGTH),
+            snap_length: self
+                .snap_length
+                .min(max_bytes)
+                .max(MIN_NEIGHBOR_SNAPSHOT_LENGTH),
         }
     }
 
@@ -120,5 +135,34 @@ impl Options {
             snap_length: self.snap_length,
             overflow_policy: capture::OverflowPolicy::Fail,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_attempt_keeps_the_operation_evidence_bounds() {
+        let options = Options::default().one_attempt(Duration::from_secs(5), 4, 256);
+        options.validate().expect("the narrowed options stay valid");
+        assert_eq!(options.max_attempts, 1);
+        assert_eq!(options.max_capture_queue_frames, 4);
+        assert_eq!(options.max_captured_bytes, 256);
+        assert_eq!(options.snap_length, 256);
+        assert_eq!(options.cache_ttl, MAX_CONFIGURED_CACHE_TTL);
+        assert_eq!(options.max_cache_entries, MAX_CONFIGURED_CACHE_ENTRIES);
+        assert_eq!(options.attempt_timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn one_attempt_never_falls_below_what_a_decodable_reply_needs() {
+        let options = Options::default().one_attempt(Duration::from_secs(5), 0, 40);
+        options
+            .validate()
+            .expect("a resolution under tight evidence limits still validates");
+        assert_eq!(options.max_capture_queue_frames, 1);
+        assert_eq!(options.max_captured_bytes, MIN_NEIGHBOR_SNAPSHOT_LENGTH);
+        assert_eq!(options.snap_length, MIN_NEIGHBOR_SNAPSHOT_LENGTH);
     }
 }

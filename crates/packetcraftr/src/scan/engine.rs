@@ -90,6 +90,10 @@ where
         },
         emit,
     );
+    evidence.reserve_responses(
+        approved.total_probes,
+        request.collection.capture.snap_length,
+    );
     for duplicate in &approved.duplicates {
         evidence.emit(
             Event::Diagnostic(packetcraftr_core::diagnostic::Diagnostic::warning(

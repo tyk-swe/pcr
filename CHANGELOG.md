@@ -1890,6 +1890,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Raw scans reserve evidence capacity for outstanding probes before retaining
+  extra replies, so early duplicates cannot crowd out later winning frames.
 - The scan help exclusion example uses `ssh`, which is in the bundled port catalog.
 - `scan --transport` accepts one argument per occurrence, preserving positional
   targets after the option while retaining comma-separated and repeated values.

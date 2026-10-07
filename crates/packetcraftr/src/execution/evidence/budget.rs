@@ -45,6 +45,8 @@ pub(crate) struct EvidenceState {
     budget: RetentionBudget,
     retained_undecoded: usize,
     retained_unattributed: usize,
+    outstanding_responses: usize,
+    max_response_bytes: usize,
     diagnostics: DiagnosticLog,
 }
 
@@ -56,12 +58,25 @@ impl EvidenceState {
             budget: RetentionBudget::default(),
             retained_undecoded: 0,
             retained_unattributed: 0,
+            outstanding_responses: 0,
+            max_response_bytes: 0,
             diagnostics: DiagnosticLog::default(),
         }
     }
 
     pub(crate) fn retain_response(&mut self, frame: &Frame) -> Option<Frame> {
-        self.reserve(frame).then(|| frame.clone())
+        self.reserve(frame, false).then(|| frame.clone())
+    }
+
+    /// Extra replies can use only capacity beyond one maximum-size response
+    /// per outstanding probe. This protects future winners across batches.
+    pub(crate) fn reserve_responses(&mut self, count: usize, max_response_bytes: usize) {
+        self.outstanding_responses = count;
+        self.max_response_bytes = max_response_bytes;
+    }
+
+    pub(crate) fn settle_response(&mut self) {
+        self.outstanding_responses = self.outstanding_responses.saturating_sub(1);
     }
 
     /// Retains a correlated frame no outcome carries. The undecoded count
@@ -78,9 +93,11 @@ impl EvidenceState {
             ));
             return None;
         }
-        let retained = self.retain_response(frame)?;
+        if !self.reserve(frame, true) {
+            return None;
+        }
         self.retained_unattributed += 1;
-        Some(retained)
+        Some(frame.clone())
     }
 
     pub(crate) fn retain_undecoded<S: EvidenceSink>(
@@ -101,7 +118,7 @@ impl EvidenceState {
                 self.publish_diagnostics(|diagnostic| sink.diagnostic(diagnostic))?;
                 break;
             }
-            if self.reserve(&frame) {
+            if self.reserve(&frame, false) {
                 // `reserve` fails once the count reaches `max_frames`, so the
                 // increment cannot overflow.
                 self.retained_undecoded += 1;
@@ -135,16 +152,19 @@ impl EvidenceState {
         self.budget.bytes()
     }
 
-    fn reserve(&mut self, frame: &Frame) -> bool {
+    fn reserve(&mut self, frame: &Frame, extra: bool) -> bool {
         let EvidenceLimits {
             max_frames,
             max_bytes,
             ..
         } = self.limits;
-        let error = match self
-            .budget
-            .reserve(frame.bytes().len(), max_frames, max_bytes)
-        {
+        let reserved_frames = if extra { self.outstanding_responses } else { 0 };
+        let reserved_bytes = reserved_frames.saturating_mul(self.max_response_bytes);
+        let error = match self.budget.reserve(
+            frame.bytes().len(),
+            max_frames.saturating_sub(reserved_frames),
+            max_bytes.saturating_sub(reserved_bytes),
+        ) {
             Ok(()) => return true,
             Err(error) => error,
         };
@@ -155,6 +175,11 @@ impl EvidenceState {
             }
             RetentionError::ByteCountOverflow => {
                 format!("{name} evidence byte accounting overflowed; later frames were omitted")
+            }
+            RetentionError::FrameLimit | RetentionError::ByteLimit if reserved_frames > 0 => {
+                format!(
+                    "{name} evidence limit reached ({max_frames} frame(s) or {max_bytes} byte(s)); capacity for outstanding replies was reserved and extra frames were omitted"
+                )
             }
             RetentionError::FrameLimit | RetentionError::ByteLimit => format!(
                 "{name} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"

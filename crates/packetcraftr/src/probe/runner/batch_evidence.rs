@@ -113,6 +113,10 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
         self.state.retained_evidence_bytes()
     }
 
+    pub(crate) fn reserve_responses(&mut self, count: usize, max_response_bytes: usize) {
+        self.state.reserve_responses(count, max_response_bytes);
+    }
+
     pub(crate) fn into_classifier(self) -> K {
         self.classifier
     }
@@ -188,6 +192,7 @@ where
                 || enforce_deadline(errors, deadline),
                 &mut passed,
             )?;
+            state.settle_response();
             let outcome = match best {
                 None => Outcome::Timeout,
                 Some(candidate) => Outcome::Reply(Reply {

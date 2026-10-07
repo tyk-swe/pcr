@@ -335,6 +335,56 @@ fn extra_replies_are_retained_beside_each_outcome_under_the_undecoded_count() {
 }
 
 #[test]
+fn duplicates_cannot_take_outstanding_winners_evidence_capacity() {
+    for max_in_flight in [1, 2] {
+        for (frames, bytes, duplicates) in [(4, 1500, 0), (8, 160, 0), (5, 1500, 1), (8, 200, 1)] {
+            let mut request = request();
+            request.max_in_flight = max_in_flight;
+            request.limits.max_evidence_frames = frames;
+            request.limits.max_evidence_bytes = bytes;
+            request.limits.max_undecoded = frames;
+            request.collection.capture.max_frames = frames;
+            request.collection.capture.max_bytes = bytes;
+            request.collection.capture.snap_length = bytes.min(1500);
+            request.collection.max_responses = frames;
+            request.collection.max_unmatched_frames = frames;
+            let state = Arc::new(Mutex::new(State {
+                tied_resets: true,
+                ..State::default()
+            }));
+            let aggregate = execute(&request, state).unwrap();
+            assert_eq!(aggregate.endpoints.len(), 4);
+            for endpoint in &aggregate.endpoints {
+                let probe = &endpoint.probes[0];
+                assert_eq!(probe.classification, scan::Classification::Closed);
+                let winner = probe.response.as_ref().unwrap_or_else(|| {
+                    panic!(
+                        "probe {} lost its winner: max_in_flight={max_in_flight}, frames={frames}, bytes={bytes}",
+                        probe.sequence
+                    )
+                });
+                // The second reset wins the stable bytes tie-break (IPv4 identification 1).
+                assert_eq!(&winner.bytes()[4..6], &[0, 1]);
+            }
+            assert_eq!(
+                aggregate.unattributed.len(),
+                duplicates,
+                "max_in_flight={max_in_flight}, frames={frames}, bytes={bytes}"
+            );
+            assert_eq!(aggregate.retained_evidence_bytes, (4 + duplicates) * 40);
+            assert_eq!(
+                aggregate
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.code == "scan.evidence_limit")
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
 fn a_duplicate_cannot_take_the_winners_last_evidence_slot() {
     for (endpoints, frames, bytes) in [(1, 1, 1500), (1, 2, 40), (2, 2, 1500)] {
         let mut request = request();

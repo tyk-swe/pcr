@@ -237,6 +237,7 @@ fn no_probe_reaches_an_excluded_port() {
         target_sources: Vec::new(),
         address_family: packetcraftr::target::Family::Any,
         endpoints: selected.endpoints,
+        discovery: Default::default(),
         attempts: 2,
         timeout: Duration::from_millis(20),
         probes_per_second: None,

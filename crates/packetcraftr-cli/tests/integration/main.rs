@@ -29,6 +29,7 @@ mod connect_scan_contracts;
 mod construction_workflow_contracts;
 mod decode_as_contracts;
 mod dependency_export_contracts;
+mod discovery_contracts;
 mod dissect_input_contracts;
 mod dns_output_contracts;
 mod dns_read_contracts;

@@ -102,6 +102,7 @@ impl std::fmt::Display for Classification {
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
+    pub stage: super::Stage,
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
     pub transport: Transport,
@@ -141,6 +142,11 @@ pub struct Aggregate {
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    /// One record per selected target, in selection order.
+    pub hosts: Vec<super::discovery::Host>,
+    /// Discovery probe outcomes in sequence order, exactly those the hosts
+    /// list; [`Self::endpoints`] holds only the scan stage's.
+    pub discovery: Vec<ProbeEvidence>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Frame>,
     /// Correlated frames no probe outcome carries: late, duplicate, and
@@ -271,6 +277,9 @@ pub struct Report {
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    /// One record per selected target, in selection order.
+    pub hosts: Vec<super::discovery::Host>,
+    /// Counts the scan stage's endpoints only.
     pub counts: ClassificationCounts,
     pub retained_evidence_bytes: usize,
     pub stats: Stats,
@@ -314,6 +323,7 @@ pub(in crate::scan) type EndpointKey = (
 
 #[derive(Default)]
 struct Collected {
+    discovery: Vec<ProbeEvidence>,
     endpoints: Vec<Endpoint>,
     endpoint_indices: HashMap<EndpointKey, usize>,
     probes: u64,
@@ -344,6 +354,10 @@ impl Collected {
 
     fn observe_probe(&mut self, evidence: ProbeEvidence) {
         self.probes = self.probes.saturating_add(1);
+        if evidence.stage == super::Stage::Discovery {
+            self.discovery.push(evidence);
+            return;
+        }
         let address = evidence.address;
         let transport = evidence.transport;
         let port = evidence.port;
@@ -372,6 +386,7 @@ impl Collected {
 impl Collector {
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let Collected {
+            mut discovery,
             mut endpoints,
             probes,
             undecoded,
@@ -398,10 +413,17 @@ impl Collector {
             );
         }
         endpoints.sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+        discovery.sort_by_key(|probe| probe.sequence);
+        super::discovery::check_probes(
+            &report.hosts,
+            discovery.iter().map(|probe| probe.sequence),
+        )?;
         Ok(Aggregate {
             planned_duration: report.planned_duration,
             target: report.target,
             resolved_addresses: report.resolved_addresses,
+            hosts: report.hosts,
+            discovery,
             endpoints,
             undecoded,
             unattributed,

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v8",
+  "schema": "packetcraftr.output/v9",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -17,8 +17,23 @@
         "name": "port-catalog",
         "version": "1.0.0"
       },
-      "excluded_endpoints": 0
+      "excluded_endpoints": 0,
+      "discovery": {
+        "mode": "omitted",
+        "probes": [],
+        "neighbor": false,
+        "unresponsive": "skip"
+      }
     },
+    "hosts": [
+      {
+        "address": "192.168.56.10",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      }
+    ],
     "endpoints": [
       {
         "address": "192.168.56.10",
@@ -39,6 +54,7 @@
         "probes": [
           {
             "sequence": 70000,
+            "stage": "scan",
             "protocol": "tcp",
             "destination": "192.168.56.10",
             "destination_port": 443,

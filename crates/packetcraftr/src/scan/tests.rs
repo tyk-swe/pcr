@@ -54,6 +54,16 @@ impl<E: Executor<Batch<Probe>>> Pipelined for Serial<'_, E> {
     ) -> Result<Stats, BoundaryError> {
         unreachable!("serial fixtures run one probe in flight")
     }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _attempts: u32,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<super::discovery::Neighbor, BoundaryError> {
+        unreachable!("serial fixtures select no neighbor discovery")
+    }
 }
 
 fn run<A, E, C>(
@@ -124,6 +134,7 @@ fn tcp_scan_request(target: Target) -> Request {
         targets: target.into(),
         address_family: Family::Any,
         endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_millis(1),
         probes_per_second: None,
@@ -320,6 +331,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
     let remote = Ipv4Addr::new(192, 0, 2, 2);
     let probe = Probe {
         sequence: 0,
+        stage: super::Stage::Scan,
         address: remote.into(),
         scope: None,
         endpoint: crate::probe::ProbeEndpoint::Tcp { port: 80 },
@@ -335,6 +347,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
         target: "192.0.2.2".into(),
         winners: Default::default(),
         rtt: Default::default(),
+        discovery: Vec::new(),
     };
     for (has_response, correlation_expired, expected) in [
         (false, false, super::Attribution::Late),
@@ -579,6 +592,7 @@ fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Re
         udp_profiles: Default::default(),
         address_family: Family::Any,
         endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
@@ -865,4 +879,58 @@ fn invalid_declaration_sources_fail_before_any_provider_call() {
         ));
         assert!(providers.calls().is_empty());
     }
+}
+
+#[test]
+fn discovery_composes_one_record_per_family_and_scans_only_responders() {
+    use super::discovery::{Mode, Options, Scan, State};
+    let v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let v6: IpAddr = "2001:db8::10".parse().unwrap();
+    let mut request = tcp_scan_request(Target::Address(v4));
+    request.targets = crate::target::Selection {
+        include: [v4, v6]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    request.discovery = Options {
+        mode: Mode::Before,
+        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    // Only IPv4 echoes draw a reply from this fixture.
+    let mut executor = EchoReplyExecutor {
+        inner: TimeoutExecutor::default(),
+        latency: Duration::from_millis(1),
+        copies: 1,
+    };
+    let report = run(
+        &request,
+        &mut Admission::new(&private_policy(), &crate::target::SystemResolver),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("discovery before the scan");
+
+    assert_eq!(
+        executor.inner.batches,
+        [(1, vec![None]), (1, vec![None]), (1, vec![Some(80)])]
+    );
+    let states = report
+        .hosts
+        .iter()
+        .map(|host| (host.address, host.state, host.scan))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        [
+            (v4, State::Responded, Scan::Scanned),
+            (v6, State::NoResponse, Scan::Skipped),
+        ]
+    );
+    assert_eq!(report.hosts[1].probes, [1]);
+    assert_eq!(report.endpoints.len(), 1);
+    assert_eq!(report.endpoints[0].probes[0].sequence, 2);
+    assert_eq!(report.rtt.sent, 3);
 }

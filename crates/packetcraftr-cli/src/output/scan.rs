@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub mod connect;
+pub mod host;
 pub mod list;
 pub mod plan;
 
@@ -140,9 +141,17 @@ impl From<(Transport, IpAddr)> for Protocol {
     }
 }
 
+published_enum! {
+    pub enum Stage from library::Stage {
+        Discovery => "discovery",
+        Scan => "scan",
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
+    pub stage: Stage,
     pub protocol: Protocol,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,6 +201,7 @@ pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub plan: plan::Plan,
+    pub hosts: Vec<host::Host<Probe>>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
     pub unattributed: Vec<Unattributed>,
@@ -222,14 +232,19 @@ impl TryFrom<library::Unattributed> for Unattributed {
 }
 
 impl Report {
+    /// `reverse_dns` holds each host's lookup by position; it is empty when
+    /// none ran.
     pub fn publish(
         aggregate: library::Aggregate,
         plan: plan::Plan,
+        reverse_dns: Vec<Option<host::ReverseDns>>,
     ) -> Result<Published<Self>, Error> {
         let library::Aggregate {
             planned_duration,
             target,
             resolved_addresses,
+            hosts,
+            discovery,
             endpoints,
             undecoded,
             unattributed,
@@ -248,6 +263,13 @@ impl Report {
                 target,
                 resolved_addresses,
                 plan,
+                hosts: host::publish_all(
+                    hosts,
+                    discovery,
+                    |probe| probe.sequence,
+                    Probe::try_from,
+                    reverse_dns,
+                )?,
                 endpoints: endpoint_outputs,
                 undecoded: undecoded
                     .into_iter()
@@ -290,6 +312,7 @@ impl TryFrom<library::Endpoint> for Endpoint {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Sent {
     pub sequence: u64,
+    pub stage: Stage,
     pub protocol: Protocol,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -309,6 +332,7 @@ impl TryFrom<library::SentProbe> for Sent {
         let sent = value.sent;
         Ok(Self {
             sequence: probe.sequence,
+            stage: probe.stage.into(),
             udp_profile: probe
                 .udp_profile
                 .as_ref()
@@ -456,6 +480,7 @@ impl TryFrom<library::ProbeEvidence> for Probe {
     fn try_from(evidence: library::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
             sequence: evidence.sequence,
+            stage: evidence.stage.into(),
             protocol: (evidence.transport, evidence.address).into(),
             destination: evidence.address,
             scope: evidence.scope.as_ref().map(Scope::from),
@@ -497,6 +522,7 @@ pub struct Pending {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FailedProbe {
     pub sequence: u64,
+    pub stage: Stage,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
@@ -539,6 +565,7 @@ impl TryFrom<&library::PipelineFailure> for Failure {
                 .collect::<Result<_, Error>>()?,
             failed_probe: error.failed_probe.as_ref().map(|probe| FailedProbe {
                 sequence: probe.sequence,
+                stage: probe.stage.into(),
                 destination: probe.address,
                 scope: probe.scope.as_ref().map(Scope::from),
                 destination_port: probe.endpoint.port(),

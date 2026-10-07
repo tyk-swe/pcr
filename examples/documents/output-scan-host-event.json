@@ -1,0 +1,75 @@
+{
+  "schema": "packetcraftr.output/v9",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 3,
+  "status": "success",
+  "result": {
+    "address": "192.0.2.10",
+    "discovery": "responded",
+    "scan": "scanned",
+    "reasons": [
+      {
+        "kind": "neighbor_reply",
+        "evidence": "wire",
+        "basis": "direct",
+        "link_address": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          16
+        ],
+        "observed_at": {
+          "unix_seconds": 1783555200,
+          "nanoseconds": 2000000
+        }
+      },
+      {
+        "kind": "tcp_reset",
+        "evidence": "wire",
+        "basis": "direct",
+        "probe": 1,
+        "observed_at": {
+          "unix_seconds": 1783555200,
+          "nanoseconds": 9000000
+        }
+      }
+    ],
+    "neighbor": {
+      "outcome": "resolved",
+      "attempts": 1,
+      "observed_at": {
+        "unix_seconds": 1783555200,
+        "nanoseconds": 2000000
+      },
+      "link": {
+        "address": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          16
+        ],
+        "entry": "fresh"
+      }
+    },
+    "reverse_dns": {
+      "query_name": "10.2.0.192.in-addr.arpa",
+      "status": "completed",
+      "outcome": "response",
+      "response_code": 0,
+      "names": [
+        "host-10.example."
+      ]
+    },
+    "probes": [
+      0,
+      1
+    ]
+  },
+  "diagnostics": [],
+  "event": "host"
+}

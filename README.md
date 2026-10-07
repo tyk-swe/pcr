@@ -249,9 +249,10 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v8`](schemas/packetcraftr.output.v8.schema.json)
-  (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json) and
-  [`v7`](schemas/packetcraftr.output.v7.schema.json) families are retained for
+- Structured command output: [`packetcraftr.output/v9`](schemas/packetcraftr.output.v9.schema.json)
+  (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json),
+  [`v7`](schemas/packetcraftr.output.v7.schema.json), and
+  [`v8`](schemas/packetcraftr.output.v8.schema.json) families are retained for
   previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
@@ -494,6 +495,7 @@ packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
 packetcraftr scan 192.0.2.10 --targets-file targets.txt --exclude-file skip.txt
 printf '192.0.2.10\n192.0.2.11\n' | packetcraftr scan --targets-file -
 packetcraftr scan --list 192.0.2.0/30 10.0.0.1 --output json
+packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
 packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
   --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
 packetcraftr replay capture.pcap --interface 2 --bps 8000000
@@ -513,7 +515,10 @@ packetcraftr capture --interface 1 --write trace.pcapng --rotate-bytes 1048576 -
   sockets and works in the portable profile, while raw scans use
   `--max-in-flight` for a rolling response window. A `--udp-profiles` document
   selects per-port UDP requests and response checks; a matching profile is not
-  authenticated service identity.
+  authenticated service identity. `--discovery before|only|skip` adds a host
+  discovery stage (ICMP echo, TCP, UDP, and ARP/NDP probes) under the same
+  authorization and budgets, and publishes one host record per target with the
+  evidence behind each response; silent hosts stay uncertain, not absent.
 - `traceroute --payload-size`, `--dont-fragment` (IPv4 only), and `--dscp` shape
   the probes, `exchange --stop-when-answered` ends the response window once every
   request has a retained response, and `replay --max-gap-ms` clamps each

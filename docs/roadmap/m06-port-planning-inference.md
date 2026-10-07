@@ -162,8 +162,9 @@ keeping every attempt outcome visible.
   checks capture and transmission in the requested link mode, but a
   capture-capable build run without packet privileges still selects `raw` and
   fails at execution with a capability error.
-- **There is no discovery stage yet.** Exclusions apply before the request
-  exists, and [M5][m5] discovery is required to use the same selection.
+- **Discovery ports follow the same selection.** [M5][m5] discovery takes
+  `--discovery-ports` terms through `scan::select_endpoints` with the scan's
+  `--exclude-ports`, so discovery never probes an excluded port either.
 
 ## Change map
 
@@ -225,7 +226,7 @@ Settled at M6 with the recommended positions:
 - [x] No stage, including discovery, probes an excluded port. Exclusions
       remove endpoints before the request exists, and a
       [matrix contract][selection-matrix] checks the sent wire. [M5][m5]
-      discovery must use the same selection.
+      discovery ports pass through the same selection and exclusions.
 - [x] Conflicting and late or unattributed evidence is retained beside each
       inference, as `conflicting` and `unanswered` sequences and as
       `unattributed` frames carrying their attribution and probe.

@@ -88,6 +88,7 @@ pub(super) fn render_text(
             captured_frame_text(&unattributed.frame)
         ))?;
     }
+    render_hosts_text(&result.plan, &result.hosts)?;
     let rtt = result.rtt;
     write_summary_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
@@ -121,6 +122,27 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
         plan.port_catalog.version,
         plan.excluded_endpoints,
     ))?;
+    let discovery = &plan.discovery;
+    write_stdout_line(format_args!(
+        "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
+        discovery.mode,
+        listed(
+            &discovery
+                .probes
+                .iter()
+                .map(|probe| match probe.port {
+                    Some(port) => format!("{}/{port}", probe.transport),
+                    None => probe.transport.to_string(),
+                })
+                .collect::<Vec<_>>()
+        ),
+        discovery.neighbor,
+        discovery.unresponsive,
+        discovery.reverse_dns.as_ref().map_or_else(
+            || "-".to_owned(),
+            |server| format!("{}:{}", server.server, server.port)
+        ),
+    ))?;
     if let Some(curated) = &plan.curated_udp_payloads {
         write_stdout_line(format_args!(
             "curated-udp-payloads={}/{} applied={} overridden={}",
@@ -131,6 +153,68 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
         ))?;
     }
     Ok(())
+}
+
+/// Host records, when discovery or a reverse lookup was requested; the plan
+/// line already says when neither was.
+fn render_hosts_text<P>(
+    plan: &output::scan::plan::Plan,
+    hosts: &[output::scan::host::Host<P>],
+) -> Result<(), CliError> {
+    if plan.discovery.mode == output::scan::plan::DiscoveryMode::Omitted
+        && plan.discovery.reverse_dns.is_none()
+    {
+        return Ok(());
+    }
+    for host in hosts {
+        let address = match &host.scope {
+            Some(scope) => format!("{}%{}", host.address, scope.zone),
+            None => host.address.to_string(),
+        };
+        write_stdout_line(format_args!(
+            "host {address} discovery={} scan={}",
+            host.discovery, host.scan
+        ))?;
+        if let Some(neighbor) = &host.neighbor {
+            write_stdout_line(format_args!(
+                "  neighbor={} attempts={} link={} next-hop={} next-hop-link={}",
+                neighbor.outcome,
+                neighbor.attempts,
+                link_text(neighbor.link.as_ref()),
+                optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
+                link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
+            ))?;
+        }
+        for reason in &host.reasons {
+            write_stdout_line(format_args!(
+                "  reason={} evidence={} basis={} probe={} link={} observed={}",
+                reason.kind,
+                reason.evidence,
+                reason.basis,
+                optional_display(reason.probe),
+                optional_display(reason.link_address),
+                reason.observed_at,
+            ))?;
+        }
+        if let Some(lookup) = &host.reverse_dns {
+            write_stdout_line(format_args!(
+                "  reverse-dns={} status={} outcome={} names={}{}",
+                lookup.query_name,
+                lookup.status,
+                optional_display(lookup.outcome),
+                listed(&lookup.names),
+                lookup
+                    .error
+                    .as_ref()
+                    .map_or_else(String::new, |error| format!(" error=\"{error}\"")),
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn link_text(link: Option<&output::scan::host::Link>) -> String {
+    optional_display(link.map(|link| format!("{}/{}", link.address, link.entry.as_str())))
 }
 
 /// The inference line beneath an endpoint; the hint is labelled as such so
@@ -177,20 +261,37 @@ pub(super) fn emit_complete(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let super::Streamed {
-        report,
+        mut report,
         endpoints,
         plan,
+        reverse_dns,
     } = streamed;
     for endpoint in endpoints {
         stream.emit_published(output::envelope::Published::<output::scan::Event>::from(
             endpoint,
         ))?;
     }
+    emit_hosts(std::mem::take(&mut report.hosts), reverse_dns, stream)?;
     Ok(
         stream.complete_published(output::envelope::Published::<output::scan::Event>::from((
             report, plan,
         )))?,
     )
+}
+
+/// One `host` record per target after the last probe, before `complete`.
+pub(super) fn emit_hosts(
+    hosts: Vec<packetcraftr::scan::discovery::Host>,
+    reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let mut reverse_dns = reverse_dns.into_iter();
+    for host in hosts {
+        let host = output::scan::host::Host::summarize(host, reverse_dns.next().flatten())
+            .map_err(CliError::classified)?;
+        stream.emit_data(host, Vec::new())?;
+    }
+    Ok(())
 }
 
 pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
@@ -228,6 +329,7 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         ))?;
         render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
     }
+    render_hosts_text(&report.summary.plan, &report.hosts)?;
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",
         report.summary.socket_stats.connections_attempted,

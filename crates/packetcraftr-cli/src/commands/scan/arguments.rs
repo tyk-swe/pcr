@@ -22,6 +22,9 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr scan 192.0.2.10 --ports @all --exclude-ports ssh,8000-8100
   packetcraftr scan 192.0.2.10 --transport udp --ports @infrastructure \
     --curated-udp-payloads
+  packetcraftr scan 192.0.2.0/28 --discovery only --discovery-probes icmp,neighbor
+  packetcraftr scan 192.0.2.0/28 --discovery before --discovery-probes icmp,tcp \
+    --discovery-ports 22,443 --ports @web --reverse-dns 192.0.2.53
 
 Port syntax:
   --ports and --exclude-ports accept comma-separated terms: a u16 port, an
@@ -86,6 +89,25 @@ application reply or its deadline. Profiles do not perform hidden resolution.
 --curated-udp-payloads adds the bundled, versioned payload profiles (named
 curated/...) for the selected UDP ports they cover; an operator profile for the
 same port wins, and results list applied and overridden ports.
+
+Discovery never runs unless selected. --discovery before sends the
+--discovery-probes to every target first and scans only hosts that answered,
+unless --unresponsive-hosts scan; --discovery only stops there and takes no
+--ports; --discovery skip scans every host and records the skip. Every result
+has one host record per target saying whether discovery ran, why the host
+counts as responded (each reason names its wire, socket, or cache evidence and
+whether it is direct, cached, or a possible proxy), and whether the scan probed
+it. A host that did not answer is no_response, never absent; an ICMP error from
+another router is not host evidence. A TCP reset counts: closed, but
+responsive. neighbor sends ARP or NDP with the scan's --attempts and --timeout
+before the other probes; a routed target resolves only its next hop, whose link
+address belongs to the gateway and is never host evidence. --discovery-ports
+takes --ports terms for tcp and udp probes, after --exclude-ports. Discovery and
+the scan share one authorization, sequence space, --max-probes,
+--max-duration, and evidence budget. With --connect only tcp discovery runs,
+and its reasons are socket observations. --reverse-dns sends one PTR question
+per looked-up host through the DNS workflow within the remaining
+--max-duration; names are observations, never authenticated identity.
 ";
 
 /// One `--ports` or `--exclude-ports` term.
@@ -210,6 +232,53 @@ impl From<Method> for packetcraftr::scan::method::Requested {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum Discovery {
+    /// Discover hosts, then scan the ones that answered.
+    Before,
+    /// Discover hosts and probe no port.
+    Only,
+    /// Scan every host and record that discovery was deliberately skipped.
+    Skip,
+}
+
+impl From<Discovery> for packetcraftr::scan::discovery::Mode {
+    fn from(value: Discovery) -> Self {
+        match value {
+            Discovery::Before => Self::Before,
+            Discovery::Only => Self::Only,
+            Discovery::Skip => Self::Skipped,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DiscoveryProbe {
+    /// ICMP or ICMPv6 echo.
+    Icmp,
+    /// ARP or NDP for the target, or for its next hop when it is routed.
+    Neighbor,
+    /// TCP SYN, or a connection with `--connect`, to each discovery port.
+    Tcp,
+    /// UDP to each discovery port.
+    Udp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum UnresponsiveHosts {
+    Skip,
+    Scan,
+}
+
+impl From<UnresponsiveHosts> for packetcraftr::scan::discovery::Unresponsive {
+    fn from(value: UnresponsiveHosts) -> Self {
+        match value {
+            UnresponsiveHosts::Skip => Self::Skip,
+            UnresponsiveHosts::Scan => Self::Scan,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Use ordinary TCP connections without raw packet privileges; the same as
@@ -275,6 +344,45 @@ pub(crate) struct Args {
     /// Terms removed from the expanded selection before planning.
     #[arg(long, value_name = "TERMS", value_delimiter = ',', num_args = 1..)]
     pub(crate) exclude_ports: Vec<PortTerm>,
+    /// Discover hosts `before` the scan or `only`, or `skip` discovery and
+    /// say so; without it, hosts are scanned and labeled not discovered.
+    #[arg(long, value_enum)]
+    pub(crate) discovery: Option<Discovery>,
+    /// Discovery probes: icmp, neighbor, tcp, and udp (default icmp).
+    #[arg(
+        long,
+        value_enum,
+        value_delimiter = ',',
+        num_args = 1,
+        requires = "discovery"
+    )]
+    pub(crate) discovery_probes: Vec<DiscoveryProbe>,
+    /// Port terms for tcp and udp discovery probes, in --ports syntax;
+    /// --exclude-ports applies to them too.
+    #[arg(
+        long,
+        value_name = "TERMS",
+        value_delimiter = ',',
+        num_args = 1..,
+        requires = "discovery"
+    )]
+    pub(crate) discovery_ports: Vec<PortTerm>,
+    /// Whether `--discovery before` skips (default) or scans hosts that did
+    /// not answer.
+    #[arg(long, value_enum, requires = "discovery")]
+    pub(crate) unresponsive_hosts: Option<UnresponsiveHosts>,
+    /// Look up PTR names through this DNS server for hosts that answered
+    /// discovery, or for every host when discovery did not run.
+    #[arg(long, value_name = "SERVER")]
+    pub(crate) reverse_dns: Option<String>,
+    /// DNS server port for --reverse-dns.
+    #[arg(
+        long,
+        value_name = "PORT",
+        default_value_t = packetcraftr::dns::DEFAULT_SERVER_PORT,
+        requires = "reverse_dns"
+    )]
+    pub(crate) reverse_dns_port: u16,
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,

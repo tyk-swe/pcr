@@ -15,9 +15,18 @@ use crate::execution::rate_delay;
 use crate::probe::{Batch, ProbeEndpoint};
 use packetcraftr_core::error::BoundaryError;
 
+/// The workflow stage a probe belongs to. Discovery probes come first and
+/// share one sequence space with the scan probes after them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stage {
+    Discovery,
+    Scan,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
+    pub stage: Stage,
     pub address: IpAddr,
     pub scope: Option<crate::target::ResolvedZone>,
     pub endpoint: ProbeEndpoint,
@@ -76,10 +85,14 @@ pub(super) fn probe_count(
         })
 }
 
+/// One batch per probe, ordered target, attempt, then endpoint, numbered
+/// from `first_sequence`.
 pub(super) fn build_batches<'a>(
     request: &'a Request,
     targets: &'a [crate::target::SelectedAddress],
     endpoints: &'a [ProbeEndpoint],
+    stage: Stage,
+    first_sequence: u64,
 ) -> impl Iterator<Item = Batch<Probe>> + 'a {
     targets
         .iter()
@@ -90,7 +103,7 @@ pub(super) fn build_batches<'a>(
                     .map(move |endpoint| (target, attempt, *endpoint))
             })
         })
-        .zip(0u64..)
+        .zip(first_sequence..)
         .map(move |((target, attempt, endpoint), sequence)| {
             // Payloads and profiles are UDP-only; a TCP endpoint sharing the
             // port number must not inherit them.
@@ -108,6 +121,7 @@ pub(super) fn build_batches<'a>(
             Batch::single(
                 Probe {
                     sequence,
+                    stage,
                     address: target.address,
                     scope: target.scope.clone(),
                     endpoint,
@@ -160,6 +174,7 @@ mod tests {
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
             address_family: Family::Any,
             endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+            discovery: Default::default(),
             attempts: 1,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),

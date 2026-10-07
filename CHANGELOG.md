@@ -8,7 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
-- Structured command output moves to `packetcraftr.output/v8`, which adds
+- Structured command output moves to `packetcraftr.output/v9`, which adds host
+  discovery; the v6, v7, and v8 families and schemas stay frozen. Raw scan
+  results and connect reports gain `hosts`, NDJSON scans gain `host` records,
+  probe records gain `stage`, and `plan` gains `discovery`. `scan::Request`
+  gains `discovery`; `scan::Probe`, both `ProbeEvidence` types, both `Report`
+  types, and both `Aggregate` types gain fields; `scan::Error::MethodTransport`
+  is `MethodProbe`, and `scan::method::select` takes the `&Request`. CLI scan
+  report conversions take the reverse-DNS results. See
+  `docs/migration-unreleased.md`.
+- Structured command output moved to `packetcraftr.output/v8`, which adds
   scanner port planning and inference; the v6 and v7 families and schemas stay
   frozen. `scan::Request` replaces `transport` and `ports` with typed
   `endpoints: Vec<probe::ProbeEndpoint>` that may mix TCP and UDP, and
@@ -709,6 +718,22 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Host discovery (roadmap M5). `scan --discovery before|only|skip` runs a
+  discovery stage before the scan, alone, or records that it was skipped;
+  without the flag hosts are labelled `not_requested`. `--discovery-probes`
+  composes ICMP echo, TCP, UDP, and ARP/NDP `neighbor` probes, and
+  `--discovery-ports` takes `--ports` terms after `--exclude-ports`. Discovery
+  shares the scan's authorization, sequence space, probe, duration, and
+  evidence budgets, and `--unresponsive-hosts skip|scan` decides whether silent
+  hosts are scanned. Each host record states whether discovery ran and whether
+  the scan probed the host, and lists reasons with their evidence (`wire`,
+  `socket`, or `cache`) and basis (`direct`, `cached`, or `possible_proxy`).
+  Closed-but-responsive TCP counts as a response; silence stays uncertain, a
+  router's ICMP error is not host evidence, and a routed gateway's link address
+  is never the target's. `--connect` discovery publishes socket observations.
+  `--reverse-dns SERVER` adds bounded PTR lookups through the DNS workflow as
+  observations, and `dns::ptr_names` extracts PTR names from a validated
+  answer section.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and

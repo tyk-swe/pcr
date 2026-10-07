@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v8",
+  "schema": "packetcraftr.output/v9",
   "command": "scan",
   "mode": "stream",
   "sequence": 0,
@@ -8,6 +8,7 @@
   "result": {
     "sent": {
       "sequence": 0,
+      "stage": "scan",
       "protocol": "tcp",
       "destination": "192.0.2.2",
       "destination_port": 80,

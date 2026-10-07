@@ -13,7 +13,7 @@ use packetcraftr_core::{
 use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
-use super::{Classification, Event, Probe, ProbeEvidence, Reply};
+use super::{Classification, Event, Probe, ProbeEvidence, Reply, Stage};
 use crate::correlation::{Correlation, Transport};
 use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
@@ -88,6 +88,8 @@ pub(super) struct ProbeClassifier<'a> {
     pub(super) target: Arc<str>,
     pub(super) winners: HashMap<super::report::EndpointKey, Classification>,
     pub(super) rtt: RttAccumulator,
+    /// Discovery outcomes not yet composed into host records.
+    pub(super) discovery: Vec<super::discovery::Observation>,
 }
 
 impl Classifier for ProbeClassifier<'_> {
@@ -124,6 +126,7 @@ impl Classifier for ProbeClassifier<'_> {
     ) -> Event {
         let mut evidence = ProbeEvidence {
             sequence: probe.sequence,
+            stage: probe.stage,
             address: probe.address,
             scope: probe.scope.clone(),
             transport: probe.endpoint.transport(),
@@ -156,15 +159,30 @@ impl Classifier for ProbeClassifier<'_> {
             evidence.reason = reply.observation.response.reason.to_owned();
             evidence.application = reply.observation.application;
         }
-        self.winners
-            .entry((
-                evidence.address,
-                evidence.transport,
-                evidence.port,
-                evidence.scope.as_ref().map(|scope| scope.interface.clone()),
-            ))
-            .or_insert(Classification::Timeout)
-            .promote(evidence.classification);
+        match probe.stage {
+            Stage::Scan => self
+                .winners
+                .entry((
+                    evidence.address,
+                    evidence.transport,
+                    evidence.port,
+                    evidence.scope.as_ref().map(|scope| scope.interface.clone()),
+                ))
+                .or_insert(Classification::Timeout)
+                .promote(evidence.classification),
+            Stage::Discovery => self.discovery.push(super::discovery::Observation {
+                sequence: evidence.sequence,
+                address: evidence.address,
+                interface: evidence.scope.as_ref().map(|scope| scope.interface.clone()),
+                response: evidence
+                    .reply
+                    .zip(evidence.responder)
+                    .map(|(reply, responder)| {
+                        (super::discovery::ReasonKind::Reply(reply), responder)
+                    }),
+                observed_at: evidence.received_at.unwrap_or(evidence.sent_at),
+            }),
+        }
         Event::Probe {
             target: Arc::clone(&self.target),
             probe: evidence,

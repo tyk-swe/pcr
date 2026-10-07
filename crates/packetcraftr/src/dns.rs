@@ -63,7 +63,7 @@ pub use report::{
 pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, Request, TransportMode};
 
 pub use plan::{Probe, unpredictable_source_port, unpredictable_transaction_id};
-pub use reverse::reverse_name;
+pub use reverse::{ptr_names, reverse_name};
 
 use packetcraftr_core::protocol::application::dns::{
     Edns, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RECORDS, Name, Record, RecordValue,

@@ -2,12 +2,13 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v8` and
-validate against `schemas/packetcraftr.output.v8.schema.json`. The
-`packetcraftr.output/v6` and `packetcraftr.output/v7` schemas remain frozen and
-available for validating previously emitted output. The current producer and
-bundled examples have moved to v8; consumers pinned to v6 or v7 must explicitly
-support the new family.
+All structured command envelopes now identify `packetcraftr.output/v9` and
+validate against `schemas/packetcraftr.output.v9.schema.json`. The
+`packetcraftr.output/v6`, `packetcraftr.output/v7`, and
+`packetcraftr.output/v8` schemas remain frozen and available for validating
+previously emitted output. The current producer and bundled examples have moved
+to v9; consumers pinned to an earlier family must explicitly support the new
+one.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
@@ -903,7 +904,7 @@ is never replaced: a raw scan in a build without packet capture and transmission
 still fails with `capability.unsupported` (exit 4) after policy review, so a
 policy or budget denial reads the same in every build. `--connect` with UDP or
 ICMP endpoints reports `cli.scan_method` (exit 2, `the tcp_connect scan method
-cannot probe udp endpoints`) instead of `cli.error` with `--connect requires TCP
+cannot send udp probes`) instead of `cli.error` with `--connect requires TCP
 transport`; scripts that match the old code or text need updating. `auto` picks
 raw when the build can capture and transmit in the requested `--link-mode`,
 and otherwise TCP connect when every endpoint is TCP and the route needs no
@@ -950,7 +951,7 @@ duplicates, ICMP beside other endpoints, and more than `limits.max_ports`.
 `scan::select_endpoints(&PortSelection, scan::catalog::bundled(), max_ports)`
 or directly; `scan::select_ports` and `scan::PortSpec` remain for numeric
 lists. `client.scan_connect` rejects non-TCP endpoints with
-`scan::Error::MethodTransport` instead of `InvalidLimit { field: "transport" }`.
+`scan::Error::MethodProbe` instead of `InvalidLimit { field: "transport" }`.
 `scan::Endpoint` and `scan::connect::Endpoint` gain `port_hint` and
 `inference`, `scan::ProbeEvidence` and `scan::CorrelatedResponse` gain the
 typed `reply`, `scan::Aggregate` gains `unattributed`, and `scan::Event` gains
@@ -967,6 +968,72 @@ In `packetcraftr-cli`, output conversions take the published plan:
 `(scan::Report, plan)`, and `output::scan::connect::{Report::publish,
 Summary::new}` replace the `TryFrom`/`From` conversions.
 `output::scan::list::Report::new` takes the optional `Ports` selection.
+
+## Host discovery and output/v9
+
+`scan --discovery before|only|skip` adds a host-discovery stage. Without the
+flag no discovery probe is sent and hosts are labelled `not_requested`;
+`skip` records the operator's decision as `skipped`. Neither claims
+reachability. `before` probes every target, then scans the hosts that
+responded; `--unresponsive-hosts scan` scans the silent ones too, and every
+host left out is published with `scan: "skipped"`. `only` probes no scan
+port, so `--ports` is a usage error and every host is `scan: "not_requested"`.
+
+`--discovery-probes` selects `icmp` (the default), `tcp`, `udp`, and
+`neighbor`. TCP and UDP probes take `--discovery-ports` terms in the
+`--ports` syntax, and the scan's `--exclude-ports` applies to them, so no stage
+probes an excluded port. `neighbor` sends ARP or NDP to each on-link target
+with the scan's `--attempts` and `--timeout`; a routed target resolves only its
+gateway, whose link address is published as the next hop's and never as the
+target's. Discovery and the scan share one authorization, one sequence space,
+`--max-probes`, `--max-duration`, and the evidence budget, and authorization
+precedes every discovery packet, including ARP and NDP. With `--connect` only
+`tcp` discovery runs, through ordinary sockets; `icmp`, `udp`, and `neighbor`
+report `cli.scan_method`. Inconsistent controls report `cli.scan_discovery`
+or `cli.error` (exit 2) before any probe.
+
+`--reverse-dns SERVER` (with `--reverse-dns-port`, default 53) sends one PTR
+question per host through the DNS workflow after the scan: hosts that
+responded when discovery ran, and every host otherwise. Lookups spend what is
+left of `--max-duration`; a lookup that fails or runs out of time is recorded
+on its host and does not fail the scan. Names are what the server answered,
+not authenticated identity. No vendor label is published; MAC addresses are
+link-layer observations.
+
+Output/v9 changes, all additive within the new family:
+
+- Raw scan results and connect reports require `hosts`, one per selected
+  target in selection order: `discovery` (`not_requested`, `skipped`,
+  `responded`, or `no_response`), `scan` (`scanned`, `skipped`, or
+  `not_requested`), `reasons`, the optional `neighbor` outcome and
+  `reverse_dns` lookup, and the discovery `probes`. A `no_response` host is
+  uncertain, never absent. Each reason has a `kind`, the `evidence` behind it
+  (`wire`, `socket`, or `cache`), its `basis` (`direct`, `cached`, or
+  `possible_proxy`), and the discovery `probe` or `link_address` it rests on.
+- NDJSON adds one `host` event per target before `complete`, listing its
+  discovery probe sequences instead of repeating the probes.
+- Probe, `probe_sent`, `connect_probe`, and failed-probe records require
+  `stage` (`discovery` or `scan`). Discovery probes are not grouped into
+  `endpoints`, and endpoint `counts` cover the scan stage only.
+- `plan` requires `discovery`: the `mode` (`omitted`, `skipped`, `before`, or
+  `only`), the selected `probes` and `neighbor` flag, the `unresponsive`
+  choice, and the optional `reverse_dns` server.
+
+In Rust, `scan::Request` gains `discovery: scan::discovery::Options`
+(`Default` omits discovery), and `endpoints` may be empty only for
+`Mode::Only`. `scan::Probe` and both `ProbeEvidence` types gain `stage`;
+`scan::Report`, `scan::connect::Report`, and both `Aggregate` types gain
+`hosts`, and the aggregates gain `discovery` for the discovery probes. Add the
+fields to literals. `scan::Error` gains `InvalidDiscovery` and `Neighbor`, and
+`MethodTransport { method, transport }` is `MethodProbe { method, probe }`.
+`scan::method::select` takes the `&Request` so discovery probes take part in
+method selection. `dns::ptr_names` extracts the PTR names of a validated
+answer section.
+
+In `packetcraftr-cli`, `output::scan::Report::publish` and
+`output::scan::connect::Report::publish` take the reverse-DNS results by host
+position (empty when no lookup ran), and the published `Plan` gains
+`discovery`.
 
 ## Send packet sets
 

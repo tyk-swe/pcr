@@ -11,25 +11,26 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::Errors as _;
-use crate::execution::publisher;
+use crate::execution::{publisher, rate_delay};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{Batch, check_collection_evidence, check_probe_count, check_probe_duration};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::ResolveTarget;
-use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::target::{DeclaredTargets, FamilyGate, SelectedAddress, admit_selection, wire_limits};
 use crate::{Client, Sink};
 
 use super::Error;
 use super::WORKFLOW;
+use super::discovery::{self, Composer};
 use super::error::Probes;
 use super::evidence::ProbeClassifier;
 use super::executor::{ClientExecutor, PipelineEvent, PipelineOptions, Pipelined};
 use super::plan::packet::sent_probe_matches;
-use super::plan::{build_batches, probe_count, worst_case_duration};
+use super::plan::{Stage, build_batches, probe_count, worst_case_duration};
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Probe, Report, Request};
-use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
+use super::{IPV4_NEIGHBOR_BYTES, IPV4_PROBE_BYTES, IPV6_NEIGHBOR_BYTES, IPV6_PROBE_BYTES};
 use crate::probe::{ProbeEndpoint, enforce_deadline};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
@@ -76,7 +77,6 @@ where
 {
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
-    let batches = build_batches(request, &approved.targets, &approved.endpoints);
     enforce_deadline(&Probes, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
@@ -87,6 +87,7 @@ where
             target: Arc::from(approved.declared_target.as_str()),
             winners: HashMap::new(),
             rtt: RttAccumulator::default(),
+            discovery: Vec::new(),
         },
         emit,
     );
@@ -100,26 +101,66 @@ where
             deadline,
         )?;
     }
-    let stats = if request.max_in_flight == 1 {
-        run_batches(
-            batches,
-            request.probes_per_second,
-            deadline,
-            clock,
-            executor,
-            &mut evidence,
-        )
-    } else {
-        run_pipelined(
+    let options = &request.discovery;
+    let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
+    let mut stats = crate::Stats::default();
+    let mut scan_sequence = 0;
+    if options.runs() {
+        if options.neighbor {
+            discover_neighbors(
+                request,
+                &approved.targets,
+                executor,
+                clock,
+                deadline,
+                &mut composer,
+            )?;
+        }
+        let batches: Vec<_> = build_batches(
             request,
-            executor,
-            &mut evidence,
-            deadline,
-            batches,
-            &approved,
+            &approved.targets,
+            &options.probes,
+            Stage::Discovery,
+            0,
         )
-    };
-    let stats = stats?;
+        .collect();
+        scan_sequence = batches.len() as u64;
+        let discovered = execute(request, executor, clock, deadline, &mut evidence, batches)?;
+        add_stats(&mut stats, &discovered, scan_sequence)?;
+        for observation in evidence.classifier_mut().discovery.drain(..) {
+            if !composer.observe(observation) {
+                return Err(Error::IncoherentEvents {
+                    message: "a discovery outcome names no selected target".to_owned(),
+                });
+            }
+        }
+        if discovered.packets_attempted > 0 && !approved.endpoints.is_empty() {
+            pace(request, clock, deadline, 1)?;
+        }
+    }
+    let hosts = composer.finish();
+    let scanned: Vec<_> = approved
+        .targets
+        .iter()
+        .zip(&hosts)
+        .filter(|(_, host)| host.scan == discovery::Scan::Scanned)
+        .map(|(target, _)| target.clone())
+        .collect();
+    let batches: Vec<_> = build_batches(
+        request,
+        &scanned,
+        &approved.endpoints,
+        Stage::Scan,
+        scan_sequence,
+    )
+    .collect();
+    let scan_probes = batches.len() as u64;
+    let scanned = execute(request, executor, clock, deadline, &mut evidence, batches)?;
+    add_stats(
+        &mut stats,
+        &scanned,
+        scan_sequence.saturating_add(scan_probes),
+    )?;
     let retained_evidence_bytes = evidence.retained_evidence_bytes();
     let ProbeClassifier { winners, rtt, .. } = evidence.into_classifier();
     let mut counts = ClassificationCounts::default();
@@ -132,6 +173,7 @@ where
         planned_duration: approved.planned_duration,
         target: approved.declared_target,
         resolved_addresses,
+        hosts,
         counts,
         retained_evidence_bytes,
         stats,
@@ -139,33 +181,130 @@ where
     })
 }
 
-fn run_pipelined<E, F, B>(
+/// Resolves each target's link address in selection order, pacing targets by
+/// the requests the previous one sent.
+fn discover_neighbors<E: Pipelined, C: Clock>(
+    request: &Request,
+    targets: &[SelectedAddress],
+    executor: &mut E,
+    clock: &mut C,
+    deadline: &mut Deadline,
+    composer: &mut Composer,
+) -> Result<(), Error> {
+    let mut previous = 0;
+    for (index, target) in targets.iter().enumerate() {
+        if previous > 0 {
+            pace(request, clock, deadline, previous)?;
+        }
+        enforce_deadline(&Probes, deadline)?;
+        let neighbor = executor
+            .resolve_neighbor(target, request.attempts, request.timeout, deadline)
+            .map_err(|source| Error::Neighbor {
+                address: target.address,
+                source,
+            })?;
+        // A resolver stopped by the deadline reports silence; the deadline
+        // decides instead.
+        enforce_deadline(&Probes, deadline)?;
+        if neighbor.attempts > request.attempts {
+            return Err(Error::InvalidEvidence {
+                sequence: 0,
+                message: format!(
+                    "neighbor discovery of {} sent {} requests for {} attempts",
+                    target.address, neighbor.attempts, request.attempts
+                ),
+            });
+        }
+        previous = neighbor.attempts as usize;
+        composer.neighbor(index, neighbor);
+    }
+    if previous > 0 {
+        pace(request, clock, deadline, previous)?;
+    }
+    Ok(())
+}
+
+/// Waits out the request rate for `items` probes already sent.
+fn pace<C: Clock>(
+    request: &Request,
+    clock: &mut C,
+    deadline: &Deadline,
+    items: usize,
+) -> Result<(), Error> {
+    let delay = rate_delay(
+        &Probes,
+        "probes_per_second",
+        items,
+        request.probes_per_second,
+    )?;
+    if delay.is_zero() {
+        return Ok(());
+    }
+    clock.sleep(delay, deadline).map_err(|source| Error::Clock {
+        sequence: 0,
+        source: Box::new(source),
+    })
+}
+
+fn execute<E, C, F>(
+    request: &Request,
+    executor: &mut E,
+    clock: &mut C,
+    deadline: &mut Deadline,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    batches: Vec<Batch<Probe>>,
+) -> Result<crate::Stats, Error>
+where
+    E: Pipelined,
+    C: Clock,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
+    if batches.is_empty() {
+        Ok(crate::Stats::default())
+    } else if request.max_in_flight == 1 {
+        run_batches(
+            batches,
+            request.probes_per_second,
+            deadline,
+            clock,
+            executor,
+            evidence,
+        )
+    } else {
+        run_pipelined(request, executor, evidence, deadline, batches)
+    }
+}
+
+fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> Result<(), Error> {
+    total
+        .checked_add_assign(stage)
+        .map_err(|_| Error::StatisticsOverflow { sequence })
+}
+
+fn run_pipelined<E, F>(
     request: &Request,
     executor: &mut E,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
     deadline: &Deadline,
-    batches: B,
-    approved: &ApprovedScan,
+    batches: Vec<Batch<Probe>>,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
-    B: Iterator<Item = Batch<Probe>>,
 {
-    let probes_per_target = approved.total_probes / approved.targets.len();
-    let batch_bytes = approved.targets.iter().fold(0usize, |bytes, target| {
-        let scope_bytes = target.scope.as_ref().map_or(0, |scope| {
-            scope
-                .zone
-                .as_str()
-                .len()
-                .saturating_add(scope.interface.name.len())
+    let batch_bytes = batches.iter().fold(0usize, |bytes, batch| {
+        let scope_bytes = batch.probes.iter().fold(0usize, |bytes, probe| {
+            bytes.saturating_add(probe.scope.as_ref().map_or(0, |scope| {
+                scope
+                    .zone
+                    .as_str()
+                    .len()
+                    .saturating_add(scope.interface.name.len())
+            }))
         });
-        bytes.saturating_add(
-            (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
-                .saturating_add(scope_bytes)
-                .saturating_mul(probes_per_target),
-        )
+        bytes
+            .saturating_add(std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>())
+            .saturating_add(scope_bytes)
     });
     if batch_bytes > request.limits.max_prepared_bytes {
         return Err(Error::PipelineExecution {
@@ -175,7 +314,6 @@ where
             ),
         });
     }
-    let batches: Vec<_> = batches.collect();
     let mut completed = vec![false; batches.len()];
     let mut confirmed = vec![false; batches.len()];
     let mut sent_bytes = 0u64;
@@ -280,9 +418,10 @@ where
 struct ApprovedScan {
     planned_duration: std::time::Duration,
     declared_target: String,
-    targets: Vec<crate::target::SelectedAddress>,
+    targets: Vec<SelectedAddress>,
     duplicates: Vec<u32>,
     endpoints: Vec<ProbeEndpoint>,
+    /// Discovery and scan probes, without neighbor requests.
     total_probes: usize,
 }
 
@@ -294,6 +433,7 @@ impl ApprovedScan {
 
 struct ScanPlan {
     total_probes: usize,
+    neighbor_requests: usize,
     maximum_bytes: u64,
     worst_case: Duration,
 }
@@ -321,22 +461,11 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
             max_targets: request.limits.max_targets,
         },
         Error::TargetSelection,
-        |selected| {
-            let total_probes =
-                probe_count(selected.targets.len(), endpoints.len(), request.attempts)?;
-            check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
-            let maximum_bytes = maximum_wire_bytes(&selected.targets, &endpoints, request)?;
-            let worst_case = worst_case_duration(request, total_probes)?;
-            check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
-            Ok(ScanPlan {
-                total_probes,
-                maximum_bytes,
-                worst_case,
-            })
-        },
+        |selected| plan_scan(request, &selected.targets, &endpoints),
         |plan| {
             Ok(wire_limits(
-                u64::try_from(plan.total_probes).unwrap_or(u64::MAX),
+                u64::try_from(plan.total_probes.saturating_add(plan.neighbor_requests))
+                    .unwrap_or(u64::MAX),
                 plan.maximum_bytes,
             ))
         },
@@ -361,8 +490,94 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
     })
 }
 
+/// Plans discovery and the scan as one budget: their probes, neighbor
+/// requests, wire bytes, and worst-case durations must fit the request's
+/// limits together, before discovery decides which hosts are scanned.
+fn plan_scan(
+    request: &Request,
+    targets: &[SelectedAddress],
+    endpoints: &[ProbeEndpoint],
+) -> Result<ScanPlan, Error> {
+    let overflow = || Error::InvalidLimit {
+        field: "probes",
+        value: u64::MAX,
+        reason: "probe-count arithmetic overflowed".to_owned(),
+    };
+    let discovery = &request.discovery;
+    let probes = if discovery.runs() {
+        discovery.probes.as_slice()
+    } else {
+        &[]
+    };
+    let discovery_probes = probe_count(targets.len(), probes.len(), request.attempts)?;
+    let neighbor_requests = if discovery.runs() && discovery.neighbor {
+        probe_count(targets.len(), 1, request.attempts)?
+    } else {
+        0
+    };
+    let scan_probes = probe_count(targets.len(), endpoints.len(), request.attempts)?;
+    let total_probes = discovery_probes
+        .checked_add(scan_probes)
+        .ok_or_else(overflow)?;
+    check_probe_count(
+        &Probes,
+        total_probes
+            .checked_add(neighbor_requests)
+            .ok_or_else(overflow)?,
+        request.limits.max_probes,
+    )?;
+    let neighbor_bytes = targets.iter().try_fold(0u64, |total, target| {
+        let frame = if target.address.is_ipv4() {
+            IPV4_NEIGHBOR_BYTES
+        } else {
+            IPV6_NEIGHBOR_BYTES
+        };
+        total.checked_add(frame.checked_mul(u64::from(request.attempts))?)
+    });
+    let maximum_bytes = maximum_wire_bytes(targets, probes, request)?
+        .checked_add(maximum_wire_bytes(targets, endpoints, request)?)
+        .and_then(|bytes| {
+            bytes.checked_add(if neighbor_requests == 0 {
+                0
+            } else {
+                neighbor_bytes?
+            })
+        })
+        .ok_or_else(overflow)?;
+    let too_long = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    };
+    let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+    let neighbor_duration = u32::try_from(neighbor_requests)
+        .ok()
+        .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
+        .ok_or_else(too_long)?;
+    let stage_pause = if discovery_probes > 0 && scan_probes > 0 {
+        pause
+    } else {
+        Duration::ZERO
+    };
+    let worst_case = [
+        worst_case_duration(request, discovery_probes)?,
+        neighbor_duration,
+        stage_pause,
+        worst_case_duration(request, scan_probes)?,
+    ]
+    .into_iter()
+    .try_fold(Duration::ZERO, Duration::checked_add)
+    .ok_or_else(too_long)?;
+    check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
+    Ok(ScanPlan {
+        total_probes,
+        neighbor_requests,
+        maximum_bytes,
+        worst_case,
+    })
+}
+
 fn maximum_wire_bytes(
-    targets: &[crate::target::SelectedAddress],
+    targets: &[SelectedAddress],
     endpoints: &[ProbeEndpoint],
     request: &Request,
 ) -> Result<u64, Error> {

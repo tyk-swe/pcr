@@ -156,6 +156,7 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
             packetcraftr::probe::Transport::Udp => ProbeEndpoint::Udp { port: PORT },
             packetcraftr::probe::Transport::Icmp => ProbeEndpoint::Icmp,
         }],
+        discovery: Default::default(),
         attempts: 1,
         timeout: TIMEOUT,
         probes_per_second: None,

@@ -46,6 +46,10 @@ impl AuthorizedRoute {
     pub(crate) fn interface(&self) -> &interface::Id {
         &self.plan.decision.interface
     }
+
+    pub(crate) fn plan(&self) -> &route::Plan {
+        &self.plan
+    }
 }
 
 /// The exact wire bytes one admitted packet charged to the cumulative budget.

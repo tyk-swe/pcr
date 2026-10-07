@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v8.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v9.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,10 +36,39 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v9
+
+`packetcraftr.output/v9` is the current production family. It preserves every
+v8 meaning and adds host discovery:
+
+- a required `hosts` list on raw scan results and connect reports, and one
+  `host` stream record per target before `complete`. Each host states whether
+  discovery ran (`discovery`: `not_requested`, `skipped`, `responded`, or
+  `no_response`) and whether the scan stage probed it (`scan`: `scanned`,
+  `skipped`, or `not_requested`). `no_response` is an uncertain observation,
+  never absence, and `not_requested` or `skipped` claims no reachability;
+- `reasons` for each responded host, each with a `kind`, the `evidence` behind
+  it (`wire`, `socket`, or `cache`), and its `basis` (`direct`, `cached`, or
+  `possible_proxy`). A `possible_proxy` basis flags a link address that also
+  answered for another address of the same family, as a target or a gateway;
+  it does not assert a cause;
+- an optional `neighbor` outcome (`resolved`, `silent`, `routed`, or
+  `not_applicable`). A routed target's `next_hop` link address is the
+  gateway's, never the target's identity;
+- an optional `reverse_dns` lookup with the PTR `names` the server answered.
+  Names are observations, not authenticated identity;
+- a required `stage` (`discovery` or `scan`) on probe, `probe_sent`,
+  `connect_probe`, and failed-probe records. Endpoints and their `counts`
+  cover the scan stage only; and
+- a required `discovery` object in `plan`.
+
+[Scanner evidence](scanner-evidence.md#host-observations) defines the host
+vocabulary.
+
 ## Output family v8
 
-`packetcraftr.output/v8` is the current production family. It preserves every
-v7 meaning and adds scanner port planning and inference:
+`packetcraftr.output/v8` is frozen. It preserves every v7 meaning and adds
+scanner port planning and inference:
 
 - a required `plan` on raw scan results, NDJSON scan `complete`, and connect
   summaries: the requested and selected scan `method` (with the reason when

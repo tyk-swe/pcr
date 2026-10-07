@@ -20,8 +20,13 @@ use packetcraftr_core::error::BoundaryError;
 
 use super::Probe;
 use super::Request;
+use super::discovery::{Link, Neighbor, NeighborOutcome, NextHop};
 use super::evidence::classify_response;
 use super::plan::packet::sent_probe_matches;
+use crate::target::SelectedAddress;
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::link::Mode;
+use std::time::SystemTime;
 
 pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",
@@ -67,6 +72,17 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         options: PipelineOptions,
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError>;
+
+    /// Resolves `target`'s link address, or its next hop's when it is routed,
+    /// sending at most `attempts` requests. Silence is an outcome, not an
+    /// error.
+    fn resolve_neighbor(
+        &mut self,
+        target: &SelectedAddress,
+        attempts: u32,
+        timeout: Duration,
+        deadline: &Deadline,
+    ) -> Result<Neighbor, BoundaryError>;
 }
 
 pub(crate) struct ClientExecutor<'c, P, K> {
@@ -157,6 +173,100 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
     ) -> Result<Stats, BoundaryError> {
         pipeline::run(&self.exchange()?, batches, options, emit)
     }
+
+    fn resolve_neighbor(
+        &mut self,
+        target: &SelectedAddress,
+        attempts: u32,
+        timeout: Duration,
+        deadline: &Deadline,
+    ) -> Result<Neighbor, BoundaryError> {
+        let client = self.client;
+        let probe = Probe {
+            sequence: 0,
+            stage: super::Stage::Discovery,
+            address: target.address,
+            scope: target.scope.clone(),
+            endpoint: crate::probe::ProbeEndpoint::Icmp,
+            attempt: 1,
+            udp_payload: bytes::Bytes::new(),
+            udp_profile: None,
+        };
+        let packet = probe.packet();
+        let interface = target.scope.as_ref().map(|scope| &scope.interface);
+        let planned = client
+            .admitting(&self.send, 1, deadline)
+            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
+            .map_err(BoundaryError::from_error)?;
+        let not_applicable = || Neighbor {
+            outcome: NeighborOutcome::NotApplicable,
+            attempts: 0,
+            observed_at: SystemTime::now(),
+        };
+        if !planned.plan().decision.capability.supports(Mode::Layer2) {
+            return Ok(not_applicable());
+        }
+        // Only a link-layer plan names the neighbor a frame would be sent to.
+        let send = crate::send::Options {
+            plan: crate::route::Options {
+                link_mode: Mode::Layer2,
+                ..self.send.plan.clone()
+            },
+            ..self.send.clone()
+        };
+        let route = client
+            .admitting(&send, 1, deadline)
+            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
+            .map_err(BoundaryError::from_error)?;
+        let plan = route.plan().clone();
+        let Some(neighbor) = plan
+            .neighbor_target
+            .filter(|_| plan.needs_neighbor_resolution())
+        else {
+            return Ok(not_applicable());
+        };
+        let providers = &client.providers;
+        let state = client
+            .neighbors
+            .exchange(attempts, timeout)
+            .map_err(BoundaryError::from_error)?;
+        let resolved = crate::route::materialize(
+            plan,
+            &state.over(providers.transmit(), providers.capture()),
+            deadline,
+        );
+        let observed_at = SystemTime::now();
+        let (link, attempts) = match resolved {
+            Ok(materialized) => {
+                let resolution = materialized.neighbor_resolution.ok_or_else(|| {
+                    EXECUTOR_FAULT.invalid("neighbor discovery returned no resolution")
+                })?;
+                let link = Link {
+                    address: resolution.mac_address,
+                    cached: resolution.cache_hit,
+                };
+                (Some(link), resolution.attempts)
+            }
+            Err(crate::route::Error::Neighbor(error)) => match *error {
+                crate::neighbor::Error::NotFound { attempts, .. } => (None, attempts),
+                error => return Err(BoundaryError::from_error(error)),
+            },
+            Err(error) => return Err(BoundaryError::from_error(error)),
+        };
+        let outcome = if neighbor == target.address {
+            link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved)
+        } else {
+            NeighborOutcome::Routed(NextHop {
+                address: neighbor,
+                link,
+            })
+        };
+        Ok(Neighbor {
+            outcome,
+            attempts,
+            observed_at,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +292,7 @@ mod tests {
             udp_profiles: Default::default(),
             address_family: Family::Any,
             endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+            discovery: Default::default(),
             attempts: 1,
             timeout: Duration::from_millis(20),
             probes_per_second: None,

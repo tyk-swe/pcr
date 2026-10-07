@@ -148,9 +148,11 @@ pub struct Request {
     /// `stdin:3`. Empty uses declaration ordinals; otherwise supply one label
     /// per included specification, each nonempty and at most 4096 bytes.
     pub target_sources: Vec<String>,
-    /// Probed on every target, in order; TCP and UDP endpoints may share a
-    /// port and never merge. ICMP echo is portless and stands alone.
+    /// Probed on every scanned target, in order; TCP and UDP endpoints may
+    /// share a port and never merge. ICMP echo is portless and stands alone.
+    /// Empty only for discovery-only requests.
     pub endpoints: Vec<ProbeEndpoint>,
+    pub discovery: super::discovery::Options,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
@@ -247,18 +249,38 @@ impl Request {
             });
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
+        self.discovery.validate(
+            self.attempts,
+            self.timeout,
+            &self.route,
+            self.limits.max_ports,
+        )?;
         self.validate_endpoints()
     }
 
-    /// Whether any endpoint uses `transport`.
+    /// Whether any scan endpoint or discovery probe uses `transport`.
     pub fn probes(&self, transport: Transport) -> bool {
+        let discovery = if self.discovery.runs() {
+            self.discovery.probes.as_slice()
+        } else {
+            &[]
+        };
         self.endpoints
             .iter()
+            .chain(discovery)
             .any(|endpoint| endpoint.transport() == transport)
     }
 
     fn validate_endpoints(&self) -> Result<(), Error> {
         let invalid = |message: String| Err(Error::InvalidPort { message });
+        if self.discovery.mode == super::discovery::Mode::Only {
+            if self.endpoints.is_empty() {
+                return Ok(());
+            }
+            return Err(Error::InvalidDiscovery {
+                message: "discovery-only requests probe no scan endpoint".to_owned(),
+            });
+        }
         if self.endpoints.is_empty() {
             return invalid("TCP and UDP scans require at least one destination port".to_owned());
         }

@@ -94,6 +94,9 @@ fn every_published_declared_schema() {
     let v7_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v7.schema.json"
     ));
+    let v8_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v8.schema.json"
+    ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
@@ -121,7 +124,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v8" => output_validator,
+            "packetcraftr.output/v9" => output_validator,
+            "packetcraftr.output/v8" => &v8_validator,
             "packetcraftr.output/v7" => &v7_validator,
             "packetcraftr.output/v6" => &v6_validator,
             "packetcraftr.packet/v2" => &packet_validator,

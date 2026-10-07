@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::time::Instant;
+
 use packetcraftr::scan::connect;
 
 use crate::output::{self, contract::Format};
@@ -10,6 +12,7 @@ use crate::{errors::CliError, rendering::StreamEncoder};
 pub(super) fn run(
     request: &packetcraftr::scan::Request,
     plan: output::scan::plan::Plan,
+    lookup: Option<&super::reverse::Lookup>,
     policy: crate::command_options::HostnamePolicyArgs,
     format: Format,
     stream: &StreamEncoder,
@@ -28,16 +31,21 @@ pub(super) fn run(
         crate::commands::execution::Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
+                let started = Instant::now();
                 let collector = connect::Collector::default();
                 let report = client
                     .scan_connect(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
-                collector.finish(report).map_err(CliError::classified)
+                let aggregate = collector.finish(report).map_err(CliError::classified)?;
+                let names =
+                    super::reverse::names(lookup, &client, &aggregate.report.hosts, started);
+                Ok((aggregate, names))
             }),
             run_with_events: Box::new({
                 let plan = plan.clone();
                 let client = &client;
                 move |mut emit| {
+                    let started = Instant::now();
                     // Probe events stream as they settle; the tracker keeps
                     // only what each endpoint's inference needs.
                     let tracker = connect::Collector::default();
@@ -51,27 +59,29 @@ pub(super) fn run(
                     let aggregate = tracker
                         .finish(report.clone())
                         .map_err(CliError::classified)?;
+                    let reverse_dns = super::reverse::names(lookup, client, &report.hosts, started);
                     Ok(Streamed {
                         report,
                         endpoints: aggregate.endpoints,
                         plan,
+                        reverse_dns,
                     })
                 }
             }),
             on_event: emit_event,
             into_result: Box::new({
                 let plan = plan.clone();
-                move |mut aggregate| {
+                move |(mut aggregate, names)| {
                     let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
-                    output::scan::connect::Report::publish(aggregate, plan)
+                    output::scan::connect::Report::publish(aggregate, plan, names)
                         .map(|report| output::envelope::Published::new(report, diagnostics))
                         .map_err(CliError::classified)
                 }
             }),
-            render_text: Box::new(move |mut aggregate, _| {
+            render_text: Box::new(move |(mut aggregate, names), _| {
                 let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
                 super::rendering::render_connect_text(
-                    &output::scan::connect::Report::publish(aggregate, plan)
+                    &output::scan::connect::Report::publish(aggregate, plan, names)
                         .map_err(CliError::classified)?,
                 )?;
                 crate::rendering::render_diagnostics_text(&diagnostics)
@@ -81,6 +91,7 @@ pub(super) fn run(
                     mut report,
                     endpoints,
                     plan,
+                    reverse_dns,
                 } = streamed;
                 for endpoint in endpoints {
                     stream.emit_data(
@@ -88,6 +99,11 @@ pub(super) fn run(
                         Vec::new(),
                     )?;
                 }
+                super::rendering::emit_hosts(
+                    std::mem::take(&mut report.hosts),
+                    reverse_dns,
+                    stream,
+                )?;
                 let diagnostics = std::mem::take(&mut report.diagnostics);
                 stream
                     .complete(
@@ -104,6 +120,7 @@ struct Streamed {
     report: connect::Report,
     endpoints: Vec<connect::Endpoint>,
     plan: output::scan::plan::Plan,
+    reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
 }
 
 fn emit_event(event: connect::Event, stream: &StreamEncoder) -> Result<(), CliError> {

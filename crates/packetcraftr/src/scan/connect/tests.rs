@@ -161,6 +161,7 @@ fn scan_with_fault(fault: Fault) -> (Result<Aggregate, Error>, usize) {
         endpoints: [80, 81, 82]
             .map(|port| crate::probe::ProbeEndpoint::Tcp { port })
             .to_vec(),
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_secs(5),
         probes_per_second: None,
@@ -256,6 +257,7 @@ fn connect_reaches_the_provider_with_the_scoped_socket() {
         udp_profiles: Default::default(),
         address_family: crate::target::Family::Any,
         endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_secs(5),
         probes_per_second: None,

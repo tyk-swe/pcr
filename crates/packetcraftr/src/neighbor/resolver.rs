@@ -69,6 +69,24 @@ impl State {
         })
     }
 
+    /// A resolver sharing this cache that sends at most `max_attempts`
+    /// requests and waits `attempt_timeout` for each.
+    pub(crate) fn exchange(
+        &self,
+        max_attempts: u32,
+        attempt_timeout: std::time::Duration,
+    ) -> Result<Self, Error> {
+        Self::try_new(Options {
+            max_attempts,
+            attempt_timeout,
+            ..self.options.clone()
+        })
+        .map(|state| Self {
+            cache: Arc::clone(&self.cache),
+            ..state
+        })
+    }
+
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
         Active {
             transmit,

@@ -303,8 +303,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 let report = client
                     .scan(request.clone(), collector.clone())
                     .map_err(rendering::scan_error)?;
-                let aggregate = collector.finish(report).map_err(rendering::scan_error)?;
-                let names = reverse::names(lookup, &client, &aggregate.hosts, started);
+                let mut aggregate = collector.finish(report).map_err(rendering::scan_error)?;
+                // The lookups' sends, bytes, and time count in this scan's
+                // reported statistics.
+                let (names, lookups) = reverse::names(lookup, &client, &aggregate.hosts, started);
+                aggregate
+                    .stats
+                    .checked_add_assign(&lookups)
+                    .map_err(|error| CliError::caused(Kind::Internal, &error))?;
                 Ok((aggregate, names))
             }),
             run_with_events: Box::new({
@@ -317,7 +323,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     // attempt without its frame, for the endpoint inferences.
                     let tracker = packetcraftr::scan::Collector::default();
                     let mut tracked = tracker.clone();
-                    let report = client
+                    let mut report = client
                         .scan(request.clone(), move |event: packetcraftr::scan::Event| {
                             if let packetcraftr::scan::Event::Probe { target, probe } = &event {
                                 let probe = packetcraftr::scan::ProbeEvidence {
@@ -338,7 +344,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     let aggregate = tracker
                         .finish(report.clone())
                         .map_err(rendering::scan_error)?;
-                    let reverse_dns = reverse::names(lookup, client, &report.hosts, started);
+                    // The lookups' sends, bytes, and time count in this
+                    // scan's reported statistics.
+                    let (reverse_dns, lookups) =
+                        reverse::names(lookup, client, &report.hosts, started);
+                    report
+                        .stats
+                        .checked_add_assign(&lookups)
+                        .map_err(|error| CliError::caused(Kind::Internal, &error))?;
                     Ok(Streamed {
                         report,
                         endpoints: aggregate.endpoints,

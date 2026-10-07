@@ -107,12 +107,19 @@ building blocks and publishes one host record per target in the
 - One authorization and one budget cover both stages. The
   [scan engine][scan-engine] plans discovery probes, neighbor requests, and
   scan probes as a single `admit_selection`. The probe count includes every
-  ARP or NDP attempt, the wire limit includes a worst-case request with the
-  largest VLAN stack, and the worst-case duration includes neighbor attempts
-  and the pause between stages, all inside `--max-probes` and
-  `--max-duration`. Targets and the operation are authorized before the first
-  frame, ARP and NDP included. Discovery probes take sequences from 0, and the
-  scan continues the same sequence space and shares the evidence budget.
+  ARP or NDP attempt: the explicit `neighbor` probe's retries plus at most
+  one implicit resolution per target whose probes materialize a link-layer
+  route (the exchanges share a narrowed resolver that sends once per
+  neighbor and keeps the answer for the operation). The wire limit includes
+  a worst-case request with the largest VLAN stack, and the worst-case
+  duration includes neighbor attempts and the pause between stages, all
+  inside `--max-probes` and `--max-duration`. The distinct discovery and
+  scan endpoints count toward `--max-ports` as one set. Targets and the
+  operation are authorized before the first frame, ARP and NDP included.
+  Discovery probes take sequences from 0, and the scan continues the same
+  sequence space and shares the evidence budget; hosts the scan skips
+  release their response reservations before the scan stage, and the
+  discovery and stage-transition pauses count in the elapsed statistics.
 - Discovery ports come from `--discovery-ports` through the same
   [M6 selection][m6-selection] as `--ports`, with the scan's `--exclude-ports`
   applied. An exclusion prefixed with a transport discovery does not probe
@@ -155,7 +162,8 @@ building blocks and publishes one host record per target in the
   `--max-duration`. The raw method sends UDP with TCP fallback (UDP only under
   route overrides), and `--connect` uses TCP. Each host carries its question's
   status, outcome, response code, and PTR names, with failures recorded per
-  host.
+  host. The lookups' exchange statistics count in the command's reported
+  statistics.
 - Link addresses are published only from the explicit `neighbor` probe. No
   vendor data set is accepted under the [data policy][data-policy], so no
   vendor label is published.

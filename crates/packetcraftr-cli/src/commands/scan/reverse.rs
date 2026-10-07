@@ -60,16 +60,18 @@ impl Lookup {
 
     /// Looks up hosts that responded to discovery, or every host when
     /// discovery did not run; a host discovery found silent is not looked
-    /// up. Returns one entry per host. A failed batch fails its questions
+    /// up. Returns one entry per host plus the exchanges' statistics for
+    /// the command's own accounting. A failed batch fails its questions
     /// rather than the scan, whose evidence is already measured.
     pub(super) fn run(
         &self,
         client: &Client,
         hosts: &[Host],
         started: Instant,
-    ) -> Vec<Option<ReverseDns>> {
+    ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
         let deadline = started.checked_add(self.template.limits.max_duration);
         let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
+        let mut statistics = packetcraftr::Stats::default();
         let selected: Vec<usize> = hosts
             .iter()
             .enumerate()
@@ -89,14 +91,22 @@ impl Lookup {
             })
         };
         for chunk in selected.chunks(batch::MAX_QUESTIONS) {
-            std::thread::sleep(pause.min(remaining()));
+            let waited = pause.min(remaining());
+            if !waited.is_zero() {
+                std::thread::sleep(waited);
+                statistics.elapsed = statistics.elapsed.saturating_add(waited);
+            }
             let remaining = remaining();
             let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
-            for (&index, lookup) in chunk.iter().zip(self.lookup(client, &addresses, remaining)) {
+            let (lookups, stats) = self.lookup(client, &addresses, remaining);
+            for (&index, lookup) in chunk.iter().zip(lookups) {
                 names[index] = Some(lookup);
             }
+            // A failed batch reports no statistics; the bounded questions
+            // cannot overflow these counters.
+            let _ = statistics.checked_add_assign(&stats);
         }
-        names
+        (names, statistics)
     }
 
     fn lookup(
@@ -104,14 +114,17 @@ impl Lookup {
         client: &Client,
         addresses: &[IpAddr],
         remaining: Duration,
-    ) -> Vec<ReverseDns> {
+    ) -> (Vec<ReverseDns>, packetcraftr::Stats) {
         let ended = |status, error: Option<String>| {
-            addresses
-                .iter()
-                .map(|address| {
-                    ReverseDns::ended(dns::reverse_name(*address), status, error.clone())
-                })
-                .collect()
+            (
+                addresses
+                    .iter()
+                    .map(|address| {
+                        ReverseDns::ended(dns::reverse_name(*address), status, error.clone())
+                    })
+                    .collect(),
+                packetcraftr::Stats::default(),
+            )
         };
         if remaining.is_zero() {
             return ended(QuestionStatus::Unattempted, None);
@@ -129,11 +142,14 @@ impl Lookup {
             .dns_batch(batch::Request { questions }, collector.clone())
             .and_then(|report| collector.finish(report))
         {
-            Ok(aggregate) => aggregate
-                .questions
-                .into_iter()
-                .map(ReverseDns::from)
-                .collect(),
+            Ok(aggregate) => (
+                aggregate
+                    .questions
+                    .into_iter()
+                    .map(ReverseDns::from)
+                    .collect(),
+                aggregate.stats,
+            ),
             Err(error) => ended(QuestionStatus::Failed, Some(error.to_string())),
         }
     }
@@ -161,12 +177,15 @@ impl Lookup {
     }
 }
 
-/// Each host's lookup by position, or nothing when no server was requested.
+/// Each host's lookup by position, or nothing when no server was requested,
+/// plus the lookups' exchange statistics.
 pub(super) fn names(
     lookup: Option<&Lookup>,
     client: &Client,
     hosts: &[Host],
     started: Instant,
-) -> Vec<Option<ReverseDns>> {
-    lookup.map_or_else(Vec::new, |lookup| lookup.run(client, hosts, started))
+) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
+    lookup.map_or_else(Default::default, |lookup| {
+        lookup.run(client, hosts, started)
+    })
 }

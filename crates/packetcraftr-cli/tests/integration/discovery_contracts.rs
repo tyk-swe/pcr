@@ -278,6 +278,22 @@ fn discovery_controls_fail_before_any_probe() {
             "discovery-only requests scan no host",
         ),
         (
+            &[
+                "--discovery",
+                "before",
+                "--discovery-probes",
+                "tcp",
+                "--discovery-ports",
+                "22",
+                "--ports",
+                "80",
+                "--max-ports",
+                "1",
+            ],
+            "cli.scan_limit",
+            "exceeds max_ports=1",
+        ),
+        (
             &["--list", "--discovery", "before"],
             "cli.error",
             "--list sends no probe",

@@ -1931,6 +1931,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Scans budget each target's implicit link-layer neighbor resolution: one
+  request joins `max_probes`, its worst-case frame joins the wire bytes, its
+  attempt timeout joins `max_duration`, and a narrowed resolver caps every
+  selected neighbor at a single request for the operation.
+- `scan --discovery` validates the distinct discovery and scan endpoint set
+  against `max_ports` instead of each stage's list alone.
+- Hosts discovery skipped release their response reservations before the
+  scan stage, so that capacity cannot crowd out late and duplicate frames.
+- Discovery and stage-transition pauses count in the scan's elapsed
+  statistics, and `--reverse-dns` folds the lookups' exchange statistics
+  into the reported statistics (elapsed under `--connect`).
 - Exchanges retain directly correlated TCP and UDP replies rejected by the response
   limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late

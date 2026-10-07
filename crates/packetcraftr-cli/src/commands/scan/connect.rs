@@ -36,9 +36,16 @@ pub(super) fn run(
                 let report = client
                     .scan_connect(request.clone(), collector.clone())
                     .map_err(CliError::classified)?;
-                let aggregate = collector.finish(report).map_err(CliError::classified)?;
-                let names =
+                let mut aggregate = collector.finish(report).map_err(CliError::classified)?;
+                // Socket statistics have no packet counters for the
+                // lookups' exchanges; their time still counts in elapsed.
+                let (names, lookups) =
                     super::reverse::names(lookup, &client, &aggregate.report.hosts, started);
+                aggregate.report.stats.elapsed = aggregate
+                    .report
+                    .stats
+                    .elapsed
+                    .saturating_add(lookups.elapsed);
                 Ok((aggregate, names))
             }),
             run_with_events: Box::new({
@@ -50,7 +57,7 @@ pub(super) fn run(
                     // only what each endpoint's inference needs.
                     let tracker = connect::Collector::default();
                     let mut tracked = tracker.clone();
-                    let report = client
+                    let mut report = client
                         .scan_connect(request.clone(), move |event: connect::Event| {
                             packetcraftr::Sink::publish(&mut tracked, event.clone())?;
                             emit(event)
@@ -59,7 +66,11 @@ pub(super) fn run(
                     let aggregate = tracker
                         .finish(report.clone())
                         .map_err(CliError::classified)?;
-                    let reverse_dns = super::reverse::names(lookup, client, &report.hosts, started);
+                    // Socket statistics have no packet counters for the
+                    // lookups' exchanges; their time still counts in elapsed.
+                    let (reverse_dns, lookups) =
+                        super::reverse::names(lookup, client, &report.hosts, started);
+                    report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
                     Ok(Streamed {
                         report,
                         endpoints: aggregate.endpoints,

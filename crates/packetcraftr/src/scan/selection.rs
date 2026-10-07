@@ -172,9 +172,12 @@ fn expand(
                 else {
                     continue;
                 };
-                let entry = catalog
-                    .named(member_transport, member)
-                    .expect("validated catalogs resolve every preset member");
+                let entry = catalog.named(member_transport, member).ok_or_else(|| {
+                    invalid(format!(
+                        "port preset {name:?} member {transport}/{member} is not in catalog {}",
+                        catalog.version
+                    ))
+                })?;
                 visit(endpoint(transport, entry.port));
                 matched = true;
             }

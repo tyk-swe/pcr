@@ -441,3 +441,112 @@ fn a_reply_after_a_definitive_outcome_is_retained_as_late() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn settled_packets_stay_within_the_preparation_budget() {
+    use packetcraftr::{evidence::SentPacket, probe::ProbeEndpoint};
+    use std::sync::Weak;
+
+    let mut request = request();
+    request.endpoints = (45000..=45511)
+        .map(|port| ProbeEndpoint::Udp { port })
+        .collect();
+    request.max_in_flight = 512;
+    request.udp_payload = bytes::Bytes::from(vec![0; 1400]);
+    request.limits.max_prepared_bytes = 400_000;
+    let budget = request.limits.max_prepared_bytes;
+    let count = request.endpoints.len();
+    let clock = VirtualClock::default();
+    let state = Arc::new(Mutex::new(State {
+        idle_clock: Some(clock.clone()),
+        ..State::default()
+    }));
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            max_packets_per_operation: count as u64,
+            max_bytes_per_operation: count as u64 * 1500,
+            ..Default::default()
+        },
+        common::providers(Routes, Io(Arc::clone(&state))),
+    )
+    .with_clock(clock);
+    let peak = Arc::new(Mutex::new(0usize));
+    let observed_peak = Arc::clone(&peak);
+    let mut sent: Vec<Weak<SentPacket>> = Vec::new();
+    let report = client
+        .scan(request, move |event| {
+            if let scan::Event::Sent(probe) = event {
+                sent.push(Arc::downgrade(&probe.sent));
+            }
+            // Weak references observe pipeline ownership without retaining packets.
+            sent.retain(|packet| packet.strong_count() > 0);
+            let bytes = sent
+                .iter()
+                .filter_map(Weak::upgrade)
+                .map(|packet| packet.built().bytes.len())
+                .sum();
+            let mut peak = observed_peak.lock().unwrap();
+            *peak = (*peak).max(bytes);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(report.stats.packets_completed, count as u64);
+    assert!(report.stats.bytes > budget as u64);
+    assert!(
+        *peak.lock().unwrap() <= budget,
+        "retained sent wire alone must fit within the preparation budget"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!(state.sends, count);
+    assert_eq!(state.shutdowns, state.armed);
+}
+
+#[test]
+fn pre_send_frames_delivered_after_settlement_are_not_late_evidence() {
+    use packetcraftr::Sink;
+
+    let stale = Instant::now() - Duration::from_secs(1);
+    let state = Arc::new(Mutex::new(State {
+        repeated_syn_acks: true,
+        ..State::default()
+    }));
+    let capture = Arc::clone(&state);
+    let collector = scan::Collector::default();
+    let mut sink = collector.clone();
+    let report = client(&state)
+        .scan(request(), move |event| {
+            if let scan::Event::Probe { probe, .. } = &event
+                && probe.sequence == 0
+            {
+                // The trailing reply matches the probe that just settled,
+                // but its capture marker predates that probe's transmission.
+                let mut state = capture.lock().unwrap();
+                state.replies.front_mut().unwrap().received_at = Some(stale);
+            }
+            sink.publish(event)
+        })
+        .unwrap();
+    let aggregate = collector.finish(report).unwrap();
+
+    assert!(
+        aggregate
+            .endpoints
+            .iter()
+            .all(|endpoint| endpoint.classification == scan::Classification::Open)
+    );
+    let mut late: Vec<_> = aggregate
+        .unattributed
+        .iter()
+        .map(|frame| (frame.sequence, frame.attribution))
+        .collect();
+    late.sort_unstable_by_key(|(sequence, _)| *sequence);
+    assert_eq!(
+        late,
+        [
+            (Some(1), scan::Attribution::Late),
+            (Some(2), scan::Attribution::Late),
+        ]
+    );
+}

@@ -1890,6 +1890,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Pipelined raw scans keep settled packets charged against the preparation byte
+  budget and evict the oldest cached packets when admission needs space.
+- Raw scans reject pre-send capture markers when matching settled probes, so
+  stale frames cannot consume late-reply evidence budgets.
+- Port selection returns an error instead of panicking when a caller-supplied
+  catalog preset references a missing entry.
 - TCP connect scans report coalesced duplicate target declarations in text,
   JSON, and NDJSON completion diagnostics.
 - Invalid target-planning durations report the requested milliseconds instead

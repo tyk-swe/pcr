@@ -181,9 +181,10 @@ struct Pipeline<'a, P: PacketProviders, K> {
     spacing: Duration,
     stats: Stats,
     pending: BTreeMap<usize, Pending>,
-    /// The last `max_in_flight` settled probes, so a reply that arrives
-    /// after its probe settled is retained as late rather than dropped.
-    recent: VecDeque<(usize, Arc<SentPacket>)>,
+    /// Up to `max_in_flight` settled probes and their memory charges, so
+    /// replies after settlement can be retained as late. Admission evicts
+    /// the oldest cached probes when the preparation budget needs space.
+    recent: VecDeque<(usize, Arc<SentPacket>, usize)>,
     retained: usize,
     evidence: RetentionBudget,
     failed_probe: Option<Probe>,
@@ -324,10 +325,18 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         while !draining_captures
             && self.pending.len() < self.options.max_in_flight
             && self.executor.client.now() >= self.next_send
-            && let Some(probe) = self.admitted.next_if(|probe| {
-                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
-            })
         {
+            while self.admitted.peek().is_some_and(|probe| {
+                self.retained.saturating_add(probe.memory) > self.options.max_prepared_bytes
+            }) && let Some((_, _, charge)) = self.recent.pop_front()
+            {
+                self.retained -= charge;
+            }
+            let Some(probe) = self.admitted.next_if(|probe| {
+                self.retained.saturating_add(probe.memory) <= self.options.max_prepared_bytes
+            }) else {
+                break;
+            };
             self.send(probe)?;
             if !self.spacing.is_zero() {
                 break;
@@ -510,13 +519,14 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
                 .iter()
                 .filter(|(_, entry)| received > entry.deadline)
                 .map(|(index, entry)| (*index, &entry.sent));
-            let recent = self.recent.iter().map(|(index, sent)| (*index, sent));
+            let recent = self.recent.iter().map(|(index, sent, _)| (*index, sent));
             let settled = settled(
                 expired.chain(recent),
                 &self.planned,
                 &self.executor.client.registry,
                 &decoded,
                 &self.plan.interfaces[source],
+                received,
             );
             return match settled.as_slice() {
                 [] => Ok(()),
@@ -636,14 +646,15 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .pending
             .remove(&index)
             .expect("completed pending probe");
-        self.retained -= entry.charge;
         if let Some(response) = entry.last_response {
             self.evidence.release(response.bytes().len());
         }
-        if self.recent.len() == self.options.max_in_flight {
-            self.recent.pop_front();
+        if self.recent.len() == self.options.max_in_flight
+            && let Some((_, _, charge)) = self.recent.pop_front()
+        {
+            self.retained -= charge;
         }
-        self.recent.push_back((index, entry.sent));
+        self.recent.push_back((index, entry.sent, entry.charge));
         self.failed_probe = None;
         Ok(())
     }

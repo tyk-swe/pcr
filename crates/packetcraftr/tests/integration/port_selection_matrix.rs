@@ -188,6 +188,30 @@ fn unknown_names_presets_and_empty_results_are_rejected() {
 }
 
 #[test]
+fn unresolved_preset_members_return_an_error_in_includes_and_exclusions() {
+    let mut catalog = catalog::bundled().clone();
+    catalog.entries.retain(|entry| entry.name != "http");
+    for exclude in [false, true] {
+        let mut selection = PortSelection {
+            transports: vec![Transport::Tcp],
+            include: vec![term(None, "@web")],
+            exclude: Vec::new(),
+        };
+        if exclude {
+            selection.include = vec![term(None, "22")];
+            selection.exclude = vec![term(None, "@web")];
+        }
+        let error = select_endpoints(&selection, &catalog, 1024).unwrap_err();
+        let scan::Error::InvalidPort { message } = error else {
+            panic!("expected an invalid port error: {error}");
+        };
+        assert!(message.contains("web"), "{message}");
+        assert!(message.contains("http"), "{message}");
+        assert!(message.contains("tcp"), "{message}");
+    }
+}
+
+#[test]
 fn no_probe_reaches_an_excluded_port() {
     let selected = select(&[Transport::Tcp], &[(None, "80-84")], &[(None, "82")], 1024).unwrap();
     let state = Arc::new(Mutex::new(State::default()));

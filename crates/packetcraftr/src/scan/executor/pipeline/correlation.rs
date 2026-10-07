@@ -87,18 +87,20 @@ pub(super) fn candidates(
 }
 
 /// Probes past their response window that a frame correlates with: the
-/// frame is a reply too late to be their outcome.
+/// frame was captured after transmission but is too late to be their outcome.
 pub(super) fn settled<'s>(
     settled: impl IntoIterator<Item = (usize, &'s Arc<SentPacket>)>,
     planned: &[Planned<'_>],
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
     native_interface: &packetcraftr_netio::interface::Id,
+    received: Instant,
 ) -> Vec<usize> {
     settled
         .into_iter()
         .filter(|(index, sent)| {
             sent.route().plan.decision.interface == *native_interface
+                && received >= sent.timing().freshness_marker().monotonic()
                 && Observation::observe(
                     registry,
                     planned[*index].probe,

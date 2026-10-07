@@ -704,6 +704,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   sockets, and pinned raw delivery/capability checks across every feature profile.
   Evidence v3 binds the executable and independent corpus digests and distinguishes
   each scoped path; focused M4 runs do not claim completion of broader M3 tests.
+- M4 target-planning acceptance is complete: bounded manifests, packet-free
+  listing, provenance, and scoped IPv6 pass the relevant Linux/macOS/Windows
+  profiles. Recorded native and corpus evidence remains in the roadmap;
+  broader M2/M3 validation and documented native capability limits remain open.
 - Scanner corpus dataset 1.1.0 includes M4 numeric manifest and scoped fixture
   ground truth, with schema-checked expectations consumed by the existing suites.
 

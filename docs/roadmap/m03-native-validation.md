@@ -157,10 +157,13 @@ Raw-source restrictions are recorded as the capability limits they are.
 ## Notes
 
 The reviewed-native route, scenario executable (`native_loopback.rs`), and
-validators are implemented; macOS/Windows recordings and interface isolation
-evidence are still pending real runner executions, so M3 stays **In
-progress**. The scoped IPv6 runtime gap remains documented rather than
-claimed until the added `scoped_ipv6_targets` scenario runs on each platform.
+validators are implemented. [M4 acceptance records](evidence/m04/README.md)
+now prove the scoped IPv6 scenario across five profiles on Linux, macOS
+ARM/Intel, and Windows for clean revision
+`8e010a0b9eac118aa13384f0b854111a73d47d76`. Focused host reports deliberately
+leave the other seven scenarios unexecuted. The broader macOS/Windows native
+inventory, interface-isolation evidence, and administrator-owned protection
+controls remain incomplete, so M3 stays **In progress**.
 
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md

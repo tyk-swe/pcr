@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M1][m1] | [M5][m5] |
+| Complete | [M1][m1] | [M5][m5] |
 
 At this milestone's start, PacketcraftR bounded target expansion, deduplicated,
 applied numeric exclusions, and filtered address families. Targets reached a
@@ -156,10 +156,11 @@ Settled at M4 with the recommended positions:
       supplied as arguments, a file, or standard input (one ingestion path
       builds `Selection`; `-` is a single stdin consumer across include,
       exclude, payload, and profile inputs).
-- [ ] A scoped IPv6 target reaches its socket or route with its scope intact,
+- [x] A scoped IPv6 target reaches its socket or route with its scope intact,
       with runtime evidence on each platform that supports it; elsewhere it
-      publishes a capability failure. **Linux and capability failures are
-      done; macOS and Windows evidence is [blocked](#blockers).** Injected
+      publishes a capability failure. Clean five-profile Linux, macOS ARM,
+      macOS Intel, and Windows records are preserved in the
+      [acceptance evidence](evidence/m04/README.md). Injected
       providers record a `SocketAddrV6` carrying the resolved `scope_id` and
       raw plans routed on the resolved interface. On Linux, the isolated
       launcher's `scoped_ipv6_targets` scenario ([native
@@ -172,8 +173,8 @@ Settled at M4 with the recommended positions:
       (`target::plan` test).
 - [x] The [gap matrix][matrix] target rows are updated against the reviewed
       revision: files/stdin, bulk listing, and scoped targets are `Present
-      with constraints`, with macOS/Windows runtime evidence still explicitly
-      pending rather than presenting implementation as milestone completion.
+      with constraints`, with scoped runtime evidence on every supported
+      platform and broader M2/M3 gates still explicitly open.
 
 ## Ground-truth inventory
 
@@ -184,49 +185,51 @@ two-link scoped conditions. Numeric CLI contracts and native scoped suites read
 those expectations; native records include the corpus revision and SHA-256.
 The listener/responder conditions are the oracle, not agreement with Nmap.
 
-## Validation recorded on 2026-10-06
+## Validation recorded on 2026-10-07
 
-For clean implementation revision `7b1ea0f072a4860e23fff5a51a5de9497ee75c55`:
+Clean implementation and fixture revision
+`8e010a0b9eac118aa13384f0b854111a73d47d76` passes every M4 exit criterion.
+The [checked-in acceptance records](evidence/m04/README.md) preserve corpus
+identity, executable digests, commands, exit codes, process output, scope-path
+markers, namespace identities, and per-case benchmark measurements.
 
-- Workspace rustfmt, all-target/all-feature Clippy with `-D warnings`, and
-  all-feature Cargo tests passed. Python evidence contracts passed (22 tests),
-  as did the four-crate dependency-direction check.
-- The target-planning CLI contracts passed in full-native and portable
-  builds (16 tests each).
-- The isolated Linux launcher passed all eight native scenarios, including
-  scoped list aliases, distinct links, scoped connect outcomes, and raw SYN
-  route/correlation ground truth. Local report:
-  `target/m4-linux-native-preserved.json`; preserved executed CLI:
-  `target/m4-binaries/linux-cli-full-native-7b1ea0f0`.
-- Executed CLI SHA-256:
-  `e0ff301e399a5881d78b6e6b8100d6f0e58ea3b55def075ac409f74fda89ccc4`;
-  native-test SHA-256:
-  `49fd4866b70bccbe043d9aa9f7c9994b464f29cc73c42450c53f0c9991c8f0ff`.
-  The scoped record binds corpus dataset 1.1.0 and its SHA-256
-  `fac45068f39ff4a70bbfa969ebf677eee9e19bcddb9b5d47982477326950764f`.
-- A real portable Linux CLI returned `capability.unsupported` for scoped list
-  selection. Native host validation now requires that error independently for
-  list, connect, and raw requests, not inferred results for unexecuted paths.
+- `cargo fmt --all -- --check`, workspace all-target/all-feature Clippy with
+  `-D warnings`, and all-feature workspace tests passed. Python evidence
+  contracts passed (22 tests), as did the four-crate dependency-direction check.
+  The 16 target-planning CLI contracts passed in full-native and portable builds.
+- Linux passed all eight isolated native scenarios. The focused five-profile
+  run separately verified scoped list aliases, distinct zones, connect outcomes,
+  and supported raw route/correlation behavior. Layer 2 uses its explicit link
+  mode and an independent NDP/TCP responder; pcap-free reports unavailable
+  capture instead of a network timeout.
+- [Reviewed-native run 37549075757](https://github.com/tyk-swe/pcr/actions/runs/37549075757)
+  passed on macOS ARM, macOS Intel, and Windows for the same clean revision.
+  All five profiles actually executed their scoped scenario on each runner.
+  Supported profiles exercised native interface selection and scoped TCP
+  sockets; Windows pcap-free/full-native also delivered exact raw IPv6 UDP
+  through a pinned route to an independently bound local receiver.
+- Portable profiles independently executed list, connect, and raw requests and
+  returned `capability.unsupported`. macOS complete-header Layer 3 IPv6 remains
+  an explicit capability limit. Focused v3 reports remain globally incomplete
+  because the seven broader M3 scenarios were deliberately unselected; all 20
+  M4 platform/architecture/profile scenarios are exercised, with zero failed
+  or unavailable scenarios.
+- Corpus dataset 1.1.0 retains independent numeric, manifest, and scoped
+  expectations. The refreshed benchmark ran three repetitions of 88 cells
+  in a private loopback namespace: all 264 published outcomes matched their
+  provisioned expectations. IPv4 and IPv6 each passed 6 connect, 108 raw-scan,
+  and 18 traceroute case-runs. Work, latency, charged retained bytes, and peak
+  process memory are retained per case. Raw/traceroute benchmarks use injected
+  providers; connect benchmarks use native sockets. Nmap comparison was not run.
 
-These ignored local artifacts are not hosted release evidence. No macOS or
-Windows runtime result is claimed, and the broader M2/M3 gates remain open.
+The M4 gate is complete. M2's broader differential-comparison work and M3's
+broader native inventories and administrator-owned protection controls remain
+separate open milestones.
 
 ## Blockers
 
-- **macOS and Windows scoped runtime evidence.** The host-local native suite
-  now includes `scoped_ipv6_targets` in every profile, with v3 evidence that
-  separately records list selection, scoped sockets, and pinned raw routes /
-  raw IPv6 UDP delivery or a capability failure. The manual reviewed-native
-  workflow can run this scenario alone without claiming broader M3 completion.
-  A clean exact-reviewed-commit execution on each platform remains required;
-  implementation and Linux compilation are not that runtime evidence.
+None for M4. The native capability limits above remain documented constraints.
 
-Live raw and connect duplicate warnings now retain argument or manifest/stdin
-labels and physical lines via bounded `scan::Request.target_sources`. Contract
-regressions cover every CLI format, and invalid label counts or sizes fail before
-provider calls.
-
-[compatibility]: ../consumer-compatibility.md
 [m1]: m01-claims-evidence.md
 [m3]: m03-native-validation.md
 [m5]: m05-host-discovery.md

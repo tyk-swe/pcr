@@ -5,6 +5,7 @@ use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::packet::MacAddress;
+use packetcraftr_netio::interface;
 
 use super::{
     Basis, Composer, Evidence, Host, Link, Mode, Neighbor, NeighborOutcome, NextHop, Observation,
@@ -38,8 +39,16 @@ fn observation(sequence: u64, target: &str, response: Option<(ReasonKind, &str)>
 }
 
 fn neighbor(outcome: NeighborOutcome) -> Neighbor {
+    neighbor_on(outcome, 2)
+}
+
+fn neighbor_on(outcome: NeighborOutcome, index: u32) -> Neighbor {
     Neighbor {
         outcome,
+        interface: interface::Id {
+            name: format!("eth{index}"),
+            index,
+        },
         attempts: 1,
         observed_at: SystemTime::UNIX_EPOCH,
     }
@@ -214,6 +223,35 @@ fn a_dual_stack_host_and_its_own_routes_are_not_proxies() {
         assert_eq!(host.reasons[0].link_address, Some(GATEWAY_MAC));
     }
     assert!(hosts[2].reasons.is_empty());
+}
+
+#[test]
+fn one_link_address_on_separate_interfaces_is_not_a_proxy() {
+    let addresses = ["192.0.2.10", "192.0.2.11", "198.51.100.7"];
+    let mut composer = Composer::new(&targets(&addresses), Mode::Only, Unresponsive::Skip);
+    // Separate links may reuse a link address, so neither these targets nor
+    // the next hop another link reports answer for each other.
+    composer.neighbor(0, neighbor_on(resolved(1, false), 2));
+    composer.neighbor(1, neighbor_on(resolved(1, false), 3));
+    composer.neighbor(
+        2,
+        neighbor_on(
+            NeighborOutcome::Routed(NextHop {
+                address: address("192.0.2.1"),
+                link: Some(Link {
+                    address: GATEWAY_MAC,
+                    cached: false,
+                }),
+            }),
+            4,
+        ),
+    );
+    let hosts = composer.finish();
+
+    for host in &hosts[..2] {
+        assert_eq!(host.reasons[0].basis, Basis::Direct);
+        assert_eq!(host.reasons[0].link_address, Some(GATEWAY_MAC));
+    }
 }
 
 #[test]

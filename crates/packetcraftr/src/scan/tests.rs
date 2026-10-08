@@ -106,10 +106,18 @@ impl Pipelined for ScriptedNeighbors {
         };
         let neighbor = super::discovery::Neighbor {
             outcome,
+            interface: fixture_interface(),
             attempts,
             observed_at: UNIX_EPOCH,
         };
         Ok((neighbor, stats))
+    }
+}
+
+fn fixture_interface() -> packetcraftr_netio::interface::Id {
+    packetcraftr_netio::interface::Id {
+        name: "fixture0".to_owned(),
+        index: 1,
     }
 }
 
@@ -1044,7 +1052,12 @@ fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
     let neighbors = report
         .hosts
         .iter()
-        .map(|host| (host.state, host.neighbor.map(|neighbor| neighbor.attempts)))
+        .map(|host| {
+            (
+                host.state,
+                host.neighbor.as_ref().map(|neighbor| neighbor.attempts),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         neighbors,
@@ -1454,6 +1467,7 @@ impl Pipelined for SlowNeighbors {
                 address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
                 cached: false,
             }),
+            interface: fixture_interface(),
             attempts: 1,
             observed_at: UNIX_EPOCH,
         };

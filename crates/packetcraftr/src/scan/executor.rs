@@ -26,6 +26,7 @@ use super::plan::packet::sent_probe_matches;
 use crate::neighbor::Resolver as _;
 use crate::target::SelectedAddress;
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::interface;
 use packetcraftr_netio::link::Mode;
 use std::time::SystemTime;
 
@@ -225,16 +226,18 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .admitting(&self.send, 1, deadline)
             .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
             .map_err(BoundaryError::from_error)?;
-        let unsent = |outcome| {
+        let unsent = |outcome, interface: &interface::Id| {
             let neighbor = Neighbor {
                 outcome,
+                interface: interface.clone(),
                 attempts: 0,
                 observed_at: SystemTime::now(),
             };
             Ok((neighbor, Stats::default()))
         };
-        if !planned.plan().decision.capability.supports(Mode::Layer2) {
-            return unsent(NeighborOutcome::NotApplicable);
+        let decision = &planned.plan().decision;
+        if !decision.capability.supports(Mode::Layer2) {
+            return unsent(NeighborOutcome::NotApplicable, &decision.interface);
         }
         // Only a link-layer plan names the neighbor a frame would be sent to.
         let send = crate::send::Options {
@@ -250,7 +253,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .map_err(BoundaryError::from_error)?;
         let plan = route.plan();
         if !plan.needs_neighbor_resolution() {
-            return unsent(NeighborOutcome::NotApplicable);
+            return unsent(NeighborOutcome::NotApplicable, &plan.decision.interface);
         }
         let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
         if request.target != target.address {
@@ -264,10 +267,13 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                     address,
                     cached: true,
                 });
-            return unsent(NeighborOutcome::Routed(NextHop {
-                address: request.target,
-                link,
-            }));
+            return unsent(
+                NeighborOutcome::Routed(NextHop {
+                    address: request.target,
+                    link,
+                }),
+                &request.interface,
+            );
         }
         // The resolver sends exactly this frame, so its final bytes are checked
         // like a prepared packet's. An NDP solicitation goes to the target's
@@ -330,6 +336,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         };
         let neighbor = Neighbor {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
+            interface: request.interface.clone(),
             attempts,
             observed_at: observed_at.unwrap_or_else(SystemTime::now),
         };

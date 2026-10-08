@@ -133,9 +133,11 @@ pub enum NeighborOutcome {
 }
 
 /// One neighbor-discovery observation for a host.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Neighbor {
     pub outcome: NeighborOutcome,
+    /// The interface the host's route selected, where any reply was observed.
+    pub interface: interface::Id,
     /// Requests sent; zero when the cache answered or nothing was sent.
     pub attempts: u32,
     /// When the fresh reply was captured, or when the outcome was settled.
@@ -249,29 +251,37 @@ impl Composer {
     }
 
     pub(in crate::scan) fn finish(mut self) -> Vec<Host> {
-        // Every address each link address answered for, as a target or as a
-        // routed target's next hop.
-        let mut claims: HashMap<MacAddress, Vec<IpAddr>> = HashMap::new();
+        // Every address each link address answered for on each interface,
+        // as a target or as a routed target's next hop. Separate links may
+        // reuse a link address, so only claims on one interface are shared.
+        let mut claims: HashMap<(interface::Id, MacAddress), Vec<IpAddr>> = HashMap::new();
         for host in &self.hosts {
-            let claim = match host.neighbor.map(|neighbor| neighbor.outcome) {
-                Some(NeighborOutcome::Resolved(link)) => Some((link.address, host.address)),
-                Some(NeighborOutcome::Routed(NextHop {
+            let Some(neighbor) = &host.neighbor else {
+                continue;
+            };
+            let claim = match neighbor.outcome {
+                NeighborOutcome::Resolved(link) => Some((link.address, host.address)),
+                NeighborOutcome::Routed(NextHop {
                     address,
                     link: Some(link),
-                })) => Some((link.address, address)),
+                }) => Some((link.address, address)),
                 _ => None,
             };
             if let Some((link, address)) = claim {
-                claims.entry(link).or_default().push(address);
+                claims
+                    .entry((neighbor.interface.clone(), link))
+                    .or_default()
+                    .push(address);
             }
         }
         for host in &mut self.hosts {
             host.probes.sort_unstable();
             host.reasons.sort_by_key(|reason| reason.probe);
-            if let (Some(link), Some(neighbor)) = (resolved(host), host.neighbor) {
+            if let (Some(link), Some(neighbor)) = (resolved(host), &host.neighbor) {
                 // A dual-stack host answers for each family from one link
                 // address, so only another address of the same family counts.
-                let shared = claims.get(&link.address).is_some_and(|addresses| {
+                let claim = (neighbor.interface.clone(), link.address);
+                let shared = claims.get(&claim).is_some_and(|addresses| {
                     addresses.iter().any(|address| {
                         *address != host.address && address.is_ipv4() == host.address.is_ipv4()
                     })
@@ -320,13 +330,13 @@ impl Composer {
 /// the scan stage cannot send it probes whatever the unresponsive policy is.
 fn unsendable(host: &Host) -> bool {
     matches!(
-        host.neighbor.map(|neighbor| neighbor.outcome),
+        host.neighbor.as_ref().map(|neighbor| neighbor.outcome),
         Some(NeighborOutcome::Silent)
     )
 }
 
 fn resolved(host: &Host) -> Option<Link> {
-    match host.neighbor?.outcome {
+    match host.neighbor.as_ref()?.outcome {
         NeighborOutcome::Resolved(link) => Some(link),
         NeighborOutcome::Silent | NeighborOutcome::Routed(_) | NeighborOutcome::NotApplicable => {
             None

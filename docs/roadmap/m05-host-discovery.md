@@ -145,13 +145,14 @@ building blocks and publishes one host record per target in the
   error from another responder stays probe evidence and is not a reason. Each
   reason carries its `evidence` (`wire`, `socket`, or `cache`) and `basis`. A
   neighbor reply is `direct`, a cache entry is `cached`, and a link address
-  that also answered for another address of the same family, as a target or a
-  gateway, is `possible_proxy`. No cause is asserted. A host is `responded`
-  with at least one reason and `no_response` otherwise, and `not_requested` or
-  `skipped` when no stage ran. Its `scan` disposition is `scanned`, `skipped`,
-  or `not_requested`; a `no_response` host is `skipped` when the request
-  skips unresponsive hosts or when its own link address stayed silent, so no
-  frame could be sent to it under `--unresponsive-hosts scan` either.
+  that also answered for another address of the same family on the same
+  interface, as a target or a gateway, is `possible_proxy`. No cause is
+  asserted. A host is `responded` with at least one reason and `no_response`
+  otherwise, and `not_requested` or `skipped` when no stage ran. Its `scan`
+  disposition is `scanned`, `skipped`, or `not_requested`; a `no_response` host
+  is `skipped` when the request skips unresponsive hosts or when its own link
+  address stayed silent, so no frame could be sent to it under
+  `--unresponsive-hosts scan` either.
 - The ordinary-socket path runs TCP discovery through `--connect` and the
   [connect engine][connect-engine]. A refused or completed connection is a
   `socket` reason, and one socket operation covers both stages. ICMP, UDP, and

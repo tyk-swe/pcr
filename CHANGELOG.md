@@ -1952,6 +1952,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Link-layer raw scans reject evidence limits too small to hold a neighbor
   reply before sending, as explicit neighbor discovery does, instead of
   silently raising them for the implicit resolution.
+- Host discovery reports a possible proxy only when addresses share a link
+  address on the same interface; `scan::discovery::Neighbor` gains the
+  `interface` its route selected.
 - Exchanges retain directly correlated TCP and UDP replies rejected by the response
   limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late

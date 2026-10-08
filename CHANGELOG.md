@@ -8,6 +8,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
+  capture cleanup failed.
 - Structured command output moves to `packetcraftr.output/v9`, which adds host
   discovery; the v6, v7, and v8 families and schemas stay frozen. Raw scan
   results and connect reports gain `hosts`, NDJSON scans gain `host` records,
@@ -2029,6 +2031,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   route sends.
 - A DNS query whose next hop never answered counts that neighbor request, its
   capture counters, and its wait in the failed question's statistics.
+- A DNS query whose neighbor capture failed to shut down counts the requests
+  that resolution sent in the failed question's statistics.
 - A DNS query that fails after its route's neighbor requests, even when the
   deadline, a cancellation, or the pause after an answered request decides
   its error, counts those requests in the failed question's statistics.

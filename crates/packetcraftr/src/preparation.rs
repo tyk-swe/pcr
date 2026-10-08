@@ -425,28 +425,38 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
     }
 }
 
-/// The requests a resolution that `request` asked for sent before it failed
-/// unanswered.
+/// The requests a resolution that `request` asked for sent before it failed,
+/// unanswered or while its capture was cleaned up.
 fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) -> crate::Stats {
     let (route::Error::Neighbor(neighbor), Some(request)) = (error, request) else {
         return crate::Stats::default();
     };
-    let crate::neighbor::Error::NotFound {
-        attempts,
-        capture_statistics,
-        ..
-    } = &**neighbor
-    else {
-        return crate::Stats::default();
-    };
-    let attempts = u64::from(*attempts);
+    let (attempts, capture) = requests_sent(neighbor);
+    let attempts = u64::from(attempts);
     let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len() as u64);
     crate::Stats {
         packets_attempted: attempts,
         packets_completed: attempts,
         bytes: attempts.saturating_mul(frame_bytes),
-        capture: *capture_statistics,
+        capture,
         ..crate::Stats::default()
+    }
+}
+
+/// The requests a failed resolution sent, with its capture's counters when
+/// they were settled.
+fn requests_sent(error: &crate::neighbor::Error) -> (u32, packetcraftr_netio::capture::Stats) {
+    use crate::neighbor::Error;
+    match error {
+        Error::NotFound {
+            attempts,
+            capture_statistics,
+            ..
+        } => (*attempts, *capture_statistics),
+        // A failed shutdown leaves the capture's counters unsettled.
+        Error::Cleanup { attempts, .. } => (*attempts, Default::default()),
+        Error::OperationAndCleanup { operation, .. } => requests_sent(operation),
+        _ => (0, Default::default()),
     }
 }
 
@@ -707,6 +717,58 @@ mod tests {
             })
             .push(Raw::new(Bytes::from_static(payload)));
         packet
+    }
+
+    #[test]
+    fn requests_before_a_failed_cleanup_count_with_the_failure() {
+        use packetcraftr_core::frame::LinkType;
+        use packetcraftr_core::packet::MacAddress;
+
+        use crate::neighbor::{Error, Request};
+
+        let request = Request {
+            interface: packetcraftr_netio::interface::Id {
+                name: "fixture0".to_owned(),
+                index: 1,
+            },
+            interface_source: Ipv4Addr::new(192, 0, 2, 2).into(),
+            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
+            target: Ipv4Addr::new(192, 0, 2, 1).into(),
+            vlan_tags: Vec::new(),
+            mtu: 1500,
+            link_type: LinkType::ETHERNET,
+        };
+        let cleanup = || packetcraftr_netio::Error::UnresolvedLinkMode;
+        let not_found = Error::NotFound {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            attempts: 2,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+        };
+        let spent = |error: Error| {
+            super::unanswered(&route::Error::Neighbor(Box::new(error)), Some(&request))
+        };
+
+        let answered = spent(Error::Cleanup {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            attempts: 1,
+            source: cleanup(),
+        });
+        assert_eq!((answered.packets_attempted, answered.bytes), (1, 60));
+        let unanswered = spent(Error::OperationAndCleanup {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            operation: Box::new(not_found),
+            cleanup: cleanup(),
+        });
+        assert_eq!((unanswered.packets_attempted, unanswered.bytes), (2, 120));
+        assert_eq!(unanswered.capture.received_frames, 3);
     }
 
     #[test]

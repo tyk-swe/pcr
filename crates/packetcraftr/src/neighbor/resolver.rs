@@ -240,10 +240,11 @@ where
         let outcome = match (primary, cleanup) {
             (Ok(outcome), Ok(())) => outcome,
             (Err(error), Ok(())) => return Err(error),
-            (Ok(_), Err(cleanup)) => {
+            (Ok(outcome), Err(cleanup)) => {
                 return Err(Error::Cleanup {
                     interface: request.interface.name.clone(),
                     target: request.target,
+                    attempts: outcome.attempts,
                     source: cleanup,
                 });
             }

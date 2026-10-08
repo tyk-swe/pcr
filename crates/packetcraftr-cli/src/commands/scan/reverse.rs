@@ -97,6 +97,13 @@ impl Lookup {
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
         let authorized = self.authorize(client.policy(), hosts);
+        // Questions the policy refused are never sent, so no batch waits for
+        // them.
+        let pause = if authorized.is_ok() {
+            pause
+        } else {
+            Duration::ZERO
+        };
         batched(
             hosts,
             pause,
@@ -379,6 +386,34 @@ mod tests {
         assert_eq!(
             lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS / 2)),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn refused_lookups_wait_for_no_batch() {
+        let mut lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        lookup.template.queries_per_second = Some(1);
+        // The policy refuses the lookups, so nothing is sent.
+        let client = crate::system::client(
+            packetcraftr_core::protocol::builtin::registry(),
+            packet_budget(1),
+            crate::system::Runtime::Client,
+        );
+        let (names, stats) = lookup.run(
+            &client,
+            &responding(batch::MAX_QUESTIONS + 1),
+            Instant::now(),
+        );
+        assert!(
+            names
+                .iter()
+                .flatten()
+                .all(|name| name.status == QuestionStatus::Failed)
+        );
+        assert_eq!(
+            stats.elapsed,
+            Duration::ZERO,
+            "no batch waits for questions that are never sent"
         );
     }
 

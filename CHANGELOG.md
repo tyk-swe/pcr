@@ -2033,7 +2033,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `capability.dns_scope` instead of failing each lookup after the scan.
 - `scan --reverse-dns` authorizes all its lookups as one operation before the
   first batch, so more than 256 lookups no longer restart the `--max-packets`
-  and `--max-bytes` budgets with each batch.
+  and `--max-bytes` budgets with each batch; lookups the policy refuses wait
+  for no `--rate` pause.
 - `scan --reverse-dns` on a link-layer route budgets a neighbor request before
   each UDP query against `--max-packets` and `--max-bytes`.
 - Text scan output shows when each neighbor outcome was `observed`, and its

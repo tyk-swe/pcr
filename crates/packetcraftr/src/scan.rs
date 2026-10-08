@@ -19,12 +19,6 @@ pub const MAX_UDP_PAYLOAD_BYTES: usize =
 // without options, with the IPv4 allowance including minimum Ethernet padding.
 const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
-// Allowance for one ARP request or NDP neighbor solicitation: Ethernet
-// padding for ARP, a source link-address option for NDP, and the largest
-// VLAN tag stack a route may add to either.
-const VLAN_STACK_BYTES: u64 = 4 * crate::neighbor::MAX_VLAN_TAGS as u64;
-const IPV4_NEIGHBOR_BYTES: u64 = 60 + VLAN_STACK_BYTES;
-const IPV6_NEIGHBOR_BYTES: u64 = 14 + 40 + 32 + VLAN_STACK_BYTES;
 const WORKFLOW: Workflow = Workflow::Scan;
 
 pub mod catalog;

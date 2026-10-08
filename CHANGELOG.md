@@ -737,7 +737,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   every neighbor request a workflow's route resolves, as scans always do.
   `Client::with_scan_neighbors` bounds and paces a client's neighbor
   resolutions as a scan's. `dns::batch::limits` totals the traffic limits of
-  questions a workflow splits across batches.
+  questions a workflow splits across batches, including the neighbor request
+  a link-layer route may send before each UDP packet.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -2031,6 +2032,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `scan --reverse-dns` authorizes all its lookups as one operation before the
   first batch, so more than 256 lookups no longer restart the `--max-packets`
   and `--max-bytes` budgets with each batch.
+- `scan --reverse-dns` on a link-layer route budgets a neighbor request before
+  each UDP query against `--max-packets` and `--max-bytes`.
 - Text scan output shows when each neighbor outcome was `observed`, and its
   summary counts the operation's completed packets, which include discovery,
   neighbor, and reverse-DNS traffic, instead of calling them probes.

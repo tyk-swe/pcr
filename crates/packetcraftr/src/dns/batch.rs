@@ -9,7 +9,7 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::{Context, Executor, Shared};
-use crate::policy::{Authorizer, DnsOperation, Operation};
+use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
 use crate::target::{ResolveTarget, approve_operation};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
@@ -75,19 +75,53 @@ impl Request {
 /// The traffic limits `questions` need together, for a workflow that splits
 /// more questions than one batch takes across batches to authorize once, as
 /// one operation, before the first; each batch still authorizes its own.
+///
+/// The limits include the neighbor request a link-layer route may send
+/// before each UDP packet.
 pub fn limits<Q>(questions: impl IntoIterator<Item = Q>) -> Result<DnsOperation, Error>
 where
     Q: Borrow<super::Request>,
 {
     let mut failure = None;
     let operations = questions.into_iter().map_while(|question| {
-        PreparedOperation::new(question.borrow())
-            .map(|prepared| prepared.limits)
+        let question = question.borrow();
+        PreparedOperation::new(question)
+            .and_then(|prepared| with_neighbor_requests(question, prepared.limits))
             .map_err(|error| failure = Some(error))
             .ok()
     });
     let limits = batch_limits(operations)?;
     failure.map_or(Ok(limits), Err)
+}
+
+/// Charges one neighbor request before each of a question's UDP packets
+/// whose route may resolve a link-layer neighbor: an unanswered request is
+/// not remembered, so every packet may ask again.
+fn with_neighbor_requests(
+    question: &super::Request,
+    limits: DnsOperation,
+) -> Result<DnsOperation, Error> {
+    if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
+        return Ok(limits);
+    }
+    // A server of unknown family is charged the larger solicitation.
+    let request_bytes = match &question.server {
+        crate::target::Target::Address(std::net::IpAddr::V4(_)) => {
+            crate::neighbor::IPV4_REQUEST_BYTES
+        }
+        _ => crate::neighbor::IPV6_REQUEST_BYTES,
+    };
+    let udp = limits.udp();
+    let packets = udp.packets().checked_mul(2).ok_or(LimitOverflow)?;
+    let bytes = udp
+        .packets()
+        .checked_mul(request_bytes)
+        .and_then(|requests| requests.checked_add(udp.wire_bytes()))
+        .ok_or(LimitOverflow)?;
+    Ok(DnsOperation::new(
+        WireLimits::new(packets, bytes),
+        limits.tcp(),
+    )?)
 }
 
 #[derive(Clone, Debug)]

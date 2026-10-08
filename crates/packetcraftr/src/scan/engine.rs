@@ -32,7 +32,8 @@ use super::plan::packet::sent_probe_matches;
 use super::plan::{Stage, build_batches, probe_count, worst_case_duration};
 use super::report::RttAccumulator;
 use super::{ClassificationCounts, Event, Probe, Report, Request};
-use super::{IPV4_NEIGHBOR_BYTES, IPV4_PROBE_BYTES, IPV6_NEIGHBOR_BYTES, IPV6_PROBE_BYTES};
+use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
+use crate::neighbor::{IPV4_REQUEST_BYTES, IPV6_REQUEST_BYTES};
 use crate::probe::{ProbeEndpoint, enforce_deadline};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
@@ -866,9 +867,9 @@ fn plan_scan(
     )?;
     let neighbor_frames = resolvable.iter().try_fold(0u64, |total, target| {
         let frame = if target.address.is_ipv4() {
-            IPV4_NEIGHBOR_BYTES
+            IPV4_REQUEST_BYTES
         } else {
-            IPV6_NEIGHBOR_BYTES
+            IPV6_REQUEST_BYTES
         };
         total.checked_add(frame)
     });

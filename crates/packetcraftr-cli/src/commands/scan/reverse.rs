@@ -314,9 +314,9 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn every_batch_of_lookups_shares_one_policy_budget() {
-        let lookup = Lookup {
+    /// A UDP lookup of a documentation server over `link_mode`.
+    fn udp_lookup(link_mode: packetcraftr_netio::link::Mode) -> Lookup {
+        Lookup {
             template: dns::Request {
                 server: packetcraftr::target::Target::Address(IpAddr::V4(Ipv4Addr::new(
                     192, 0, 2, 53,
@@ -334,14 +334,26 @@ mod tests {
                 timeout: Duration::from_millis(20),
                 queries_per_second: None,
                 limits: dns::Limits::default(),
-                route: packetcraftr::route::Options::default(),
+                route: packetcraftr::route::Options {
+                    link_mode,
+                    ..packetcraftr::route::Options::default()
+                },
                 collection: packetcraftr::exchange::Collection::default(),
             },
-        };
-        let policy = packetcraftr::policy::Policy {
-            max_packets_per_operation: u64::try_from(batch::MAX_QUESTIONS).unwrap(),
+        }
+    }
+
+    fn packet_budget(packets: usize) -> packetcraftr::policy::Policy {
+        packetcraftr::policy::Policy {
+            max_packets_per_operation: u64::try_from(packets).unwrap(),
             ..packetcraftr::policy::Policy::default()
-        };
+        }
+    }
+
+    #[test]
+    fn every_batch_of_lookups_shares_one_policy_budget() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let policy = packet_budget(batch::MAX_QUESTIONS);
         assert_eq!(
             lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS)),
             Ok(())
@@ -351,6 +363,22 @@ mod tests {
             lookup
                 .authorize(&policy, &responding(2 * batch::MAX_QUESTIONS))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn link_layer_lookups_budget_a_neighbor_request_per_query() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Auto);
+        // Enough for the queries alone, not for a neighbor request before each.
+        let policy = packet_budget(batch::MAX_QUESTIONS);
+        assert!(
+            lookup
+                .authorize(&policy, &responding(batch::MAX_QUESTIONS))
+                .is_err()
+        );
+        assert_eq!(
+            lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS / 2)),
+            Ok(())
         );
     }
 

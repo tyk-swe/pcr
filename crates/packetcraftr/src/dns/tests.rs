@@ -1099,3 +1099,31 @@ fn a_querys_neighbor_request_counts_in_its_statistics() {
         "the exchange's window already spans the resolution's wait"
     );
 }
+
+#[test]
+fn batch_limits_charge_a_neighbor_request_before_each_udp_packet() {
+    use packetcraftr_netio::link::Mode;
+    let limits = |address: &str, link_mode| {
+        let mut question = dns_request(address.parse().expect("documentation address"));
+        question.attempts = 2;
+        question.route.link_mode = link_mode;
+        super::batch::limits([question])
+            .expect("one question fits")
+            .limits()
+    };
+    for (address, request_bytes) in [
+        ("192.0.2.53", crate::neighbor::IPV4_REQUEST_BYTES),
+        ("2001:db8::53", crate::neighbor::IPV6_REQUEST_BYTES),
+    ] {
+        let direct = limits(address, Mode::Layer3);
+        for link_mode in [Mode::Auto, Mode::Layer2] {
+            let resolved = limits(address, link_mode);
+            assert_eq!(resolved.packets(), direct.packets() * 2, "{address}");
+            assert_eq!(
+                resolved.wire_bytes(),
+                direct.wire_bytes() + direct.packets() * request_bytes,
+                "{address}"
+            );
+        }
+    }
+}

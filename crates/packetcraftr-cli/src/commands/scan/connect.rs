@@ -48,9 +48,14 @@ pub(super) fn run(
                     super::reverse::last_transmission(
                         aggregate.report.stats.connections_attempted > 0,
                         aggregate
-                            .endpoints
+                            .discovery
                             .iter()
-                            .flat_map(|endpoint| &endpoint.probes)
+                            .chain(
+                                aggregate
+                                    .endpoints
+                                    .iter()
+                                    .flat_map(|endpoint| &endpoint.probes),
+                            )
                             .map(|probe| probe.scheduled_at),
                     ),
                 );
@@ -91,7 +96,16 @@ pub(super) fn run(
                         started,
                         super::reverse::last_transmission(
                             report.stats.connections_attempted > 0,
-                            [],
+                            aggregate
+                                .discovery
+                                .iter()
+                                .chain(
+                                    aggregate
+                                        .endpoints
+                                        .iter()
+                                        .flat_map(|endpoint| &endpoint.probes),
+                                )
+                                .map(|probe| probe.scheduled_at),
                         ),
                     );
                     if let Some(lookups) = &lookups {

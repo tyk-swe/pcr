@@ -2045,6 +2045,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   scan's or the previous batch's last transmission, and none before its first
   batch when the scan transmitted nothing, as when every neighbor answer was
   cached.
+- `scan --reverse-dns` paces its first batch from the scan's last
+  transmission including discovery probes, and from the collected probes of a
+  streamed scan too, instead of waiting a full pause.
 - `scan --reverse-dns` spaces a fresh neighbor request from the query behind
   it at the scan's `--rate`.
 - Host discovery reports a possible proxy only when addresses share a link

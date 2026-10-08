@@ -332,9 +332,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     reverse::last_transmission(
                         aggregate.stats.packets_attempted > 0,
                         aggregate
-                            .endpoints
+                            .discovery
                             .iter()
-                            .flat_map(|endpoint| &endpoint.probes)
+                            .chain(
+                                aggregate
+                                    .endpoints
+                                    .iter()
+                                    .flat_map(|endpoint| &endpoint.probes),
+                            )
                             .map(|probe| probe.sent_at),
                     ),
                 );
@@ -382,7 +387,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                         client,
                         &report.hosts,
                         started,
-                        reverse::last_transmission(report.stats.packets_attempted > 0, []),
+                        reverse::last_transmission(
+                            report.stats.packets_attempted > 0,
+                            aggregate
+                                .discovery
+                                .iter()
+                                .chain(
+                                    aggregate
+                                        .endpoints
+                                        .iter()
+                                        .flat_map(|endpoint| &endpoint.probes),
+                                )
+                                .map(|probe| probe.sent_at),
+                        ),
                     );
                     report
                         .stats

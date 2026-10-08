@@ -254,7 +254,8 @@ operational metadata, not a port-state claim.
 | --- | --- |
 | `plan.method` | Metadata: the `requested` and `selected` scan method, and the `reason` automatic selection chose it. An explicit method is never replaced. |
 | `plan.port_catalog` | Metadata: the catalog data set and version that names, presets, and hints came from. |
-| `plan.excluded_endpoints` | Metadata: endpoints removed by `--exclude-ports` after expansion and before planning. |
+| `plan.excluded_endpoints` | Metadata: scan endpoints removed by `--exclude-ports` after expansion and before planning. |
+| `plan.discovery.excluded_endpoints` | Metadata: discovery endpoints removed by `--exclude-ports` after expansion and before planning. |
 | `plan.curated_udp_payloads` | Metadata: the curated payload data set and version, and the UDP ports where it was `applied` or `overridden` by an operator profile. |
 | `endpoints[].port_hint` | Metadata: the catalog name for the endpoint's transport and port. It is a hint, not service identification. |
 | `endpoints[].inference` | Port inference: the [inferred state](#port-inference). |

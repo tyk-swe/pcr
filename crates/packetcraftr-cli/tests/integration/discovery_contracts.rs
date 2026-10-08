@@ -80,6 +80,7 @@ fn a_refused_discovery_probe_marks_the_host_responded_before_the_scan() {
             "mode": "before",
             "probes": [{"transport": "tcp", "port": closed.parse::<u16>().unwrap()}],
             "neighbor": false,
+            "excluded_endpoints": 0,
             "unresponsive": "skip",
         })
     );
@@ -206,6 +207,32 @@ fn an_unanswered_reverse_lookup_is_recorded_without_failing_the_scan() {
     assert_eq!(lookup["status"], "completed");
     assert_eq!(lookup["outcome"], "network_failure");
     assert_eq!(lookup["names"], json!([]));
+}
+
+#[test]
+fn the_plan_counts_discovery_exclusions_apart_from_the_scan() {
+    let (_listener, closed) = loopback_ports();
+    let discovery_ports = format!("{closed},9");
+    let report = scan_json(&[
+        "--discovery",
+        "only",
+        "--discovery-probes",
+        "tcp",
+        "--discovery-ports",
+        &discovery_ports,
+        "--exclude-ports",
+        "9",
+    ]);
+    let plan = &report["result"]["plan"];
+    assert_eq!(
+        plan["excluded_endpoints"], 0,
+        "the scan stage selected none"
+    );
+    assert_eq!(plan["discovery"]["excluded_endpoints"], 1);
+    assert_eq!(
+        plan["discovery"]["probes"],
+        json!([{"transport": "tcp", "port": closed}])
+    );
 }
 
 #[test]

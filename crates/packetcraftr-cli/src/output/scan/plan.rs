@@ -100,6 +100,9 @@ pub struct Discovery {
     pub probes: Vec<DiscoveryProbe>,
     /// Whether ARP or NDP ran before the probes.
     pub neighbor: bool,
+    /// Distinct expanded discovery endpoints `--exclude-ports` removed
+    /// before planning; the plan's own count covers the scan stage.
+    pub excluded_endpoints: usize,
     pub unresponsive: Unresponsive,
     /// The server PTR lookups asked; absent when none were requested.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,6 +113,7 @@ impl Discovery {
     #[must_use]
     pub fn new(
         options: &library::discovery::Options,
+        excluded_endpoints: usize,
         reverse_dns: Option<ReverseDnsServer>,
     ) -> Self {
         Self {
@@ -123,6 +127,7 @@ impl Discovery {
                 })
                 .collect(),
             neighbor: options.neighbor,
+            excluded_endpoints,
             unresponsive: options.unresponsive.into(),
             reverse_dns,
         }
@@ -135,7 +140,8 @@ pub struct Plan {
     pub method: Method,
     /// The catalog behind port names, presets, and `port_hint`s.
     pub port_catalog: DataSet,
-    /// Distinct expanded endpoints `--exclude-ports` removed before planning.
+    /// Distinct expanded scan endpoints `--exclude-ports` removed before
+    /// planning; `discovery` counts its own.
     pub excluded_endpoints: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curated_udp_payloads: Option<CuratedPayloads>,

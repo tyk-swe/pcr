@@ -232,6 +232,7 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
                 "mode": "omitted",
                 "probes": [],
                 "neighbor": false,
+                "excluded_endpoints": 0,
                 "unresponsive": "skip",
             },
         })

@@ -13052,6 +13052,7 @@
         "mode",
         "probes",
         "neighbor",
+        "excluded_endpoints",
         "unresponsive"
       ],
       "properties": {
@@ -13091,6 +13092,10 @@
         "neighbor": {
           "type": "boolean",
           "description": "Whether ARP or NDP ran before the probes."
+        },
+        "excluded_endpoints": {
+          "$ref": "#/$defs/uint64",
+          "description": "Distinct expanded discovery endpoints --exclude-ports removed before planning; the plan's own excluded_endpoints covers the scan stage."
         },
         "unresponsive": {
           "enum": [

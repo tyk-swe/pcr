@@ -23,6 +23,7 @@
         "mode": "omitted",
         "probes": [],
         "neighbor": false,
+        "excluded_endpoints": 0,
         "unresponsive": "skip"
       }
     },

@@ -161,7 +161,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             stream,
         );
     }
-    let discovery = discovery_options(
+    let (discovery, discovery_excluded) = discovery_options(
         discovery,
         &discovery_probes,
         discovery_ports,
@@ -254,6 +254,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         curated_udp_payloads: curated,
         discovery: output::scan::plan::Discovery::new(
             &request.discovery,
+            discovery_excluded,
             reverse_dns
                 .as_ref()
                 .map(|server| output::scan::plan::ReverseDnsServer {
@@ -405,9 +406,10 @@ fn transports(requested: &[arguments::Transport]) -> Result<Vec<Transport>, CliE
     Ok(transports)
 }
 
-/// The discovery stage the flags select. Port probes take --discovery-ports
-/// through the scan's catalog and --exclude-ports, so discovery never probes
-/// an excluded endpoint; ICMP echo is the default probe.
+/// The discovery stage the flags select, with the endpoints --exclude-ports
+/// removed from it. Port probes take --discovery-ports through the scan's
+/// catalog and --exclude-ports, so discovery never probes an excluded
+/// endpoint; ICMP echo is the default probe.
 fn discovery_options(
     mode: Option<arguments::Discovery>,
     probes: &[arguments::DiscoveryProbe],
@@ -415,9 +417,9 @@ fn discovery_options(
     exclude_ports: &[arguments::PortTerm],
     unresponsive: Option<arguments::UnresponsiveHosts>,
     max_ports: usize,
-) -> Result<discovery::Options, CliError> {
+) -> Result<(discovery::Options, usize), CliError> {
     let Some(mode) = mode else {
-        return Ok(discovery::Options::default());
+        return Ok((discovery::Options::default(), 0));
     };
     let mut options = discovery::Options {
         mode: mode.into(),
@@ -459,7 +461,7 @@ fn discovery_options(
                 "--discovery-ports needs tcp or udp among --discovery-probes",
             ));
         }
-        return Ok(options);
+        return Ok((options, 0));
     }
     if ports.is_empty() {
         return Err(CliError::new(
@@ -495,7 +497,7 @@ fn discovery_options(
         )
     })?;
     options.probes.extend(selected.endpoints);
-    Ok(options)
+    Ok((options, selected.excluded))
 }
 
 fn select_endpoints(

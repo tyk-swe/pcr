@@ -1937,6 +1937,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   selected neighbor at a single request for the operation.
 - `scan --discovery` validates the distinct discovery and scan endpoint set
   against `max_ports` instead of each stage's list alone.
+- `plan.discovery.excluded_endpoints` counts the discovery endpoints
+  `--exclude-ports` removed, which `plan.excluded_endpoints` (the scan stage)
+  never reported.
 - Hosts discovery skipped release their response reservations before the
   scan stage, so that capacity cannot crowd out late and duplicate frames.
 - Discovery and stage-transition pauses count in the scan's elapsed

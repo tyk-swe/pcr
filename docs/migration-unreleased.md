@@ -1019,8 +1019,10 @@ Output/v9 changes, all additive within the new family:
   `stage` (`discovery` or `scan`). Discovery probes are not grouped into
   `endpoints`, and endpoint `counts` cover the scan stage only.
 - `plan` requires `discovery`: the `mode` (`omitted`, `skipped`, `before`, or
-  `only`), the selected `probes` and `neighbor` flag, the `unresponsive`
-  choice, and the optional `reverse_dns` server.
+  `only`), the selected `probes` and `neighbor` flag, the
+  `excluded_endpoints` `--exclude-ports` removed from discovery (the plan's
+  own count covers the scan stage), the `unresponsive` choice, and the
+  optional `reverse_dns` server.
 
 In Rust, `scan::Request` gains `discovery: scan::discovery::Options`
 (`Default` omits discovery), and `endpoints` may be empty only for

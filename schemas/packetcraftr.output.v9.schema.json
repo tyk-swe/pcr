@@ -13148,8 +13148,7 @@
       "required": [
         "kind",
         "evidence",
-        "basis",
-        "observed_at"
+        "basis"
       ],
       "properties": {
         "kind": {
@@ -13191,7 +13190,8 @@
           "$ref": "#/$defs/macAddress"
         },
         "observed_at": {
-          "$ref": "#/$defs/timestamp"
+          "$ref": "#/$defs/timestamp",
+          "description": "When the evidence was captured; absent for a reply whose capture carried no wall-clock time."
         }
       },
       "additionalProperties": true
@@ -13201,8 +13201,7 @@
       "required": [
         "outcome",
         "interface",
-        "attempts",
-        "observed_at"
+        "attempts"
       ],
       "properties": {
         "outcome": {
@@ -13223,7 +13222,8 @@
           "maximum": 4294967295
         },
         "observed_at": {
-          "$ref": "#/$defs/timestamp"
+          "$ref": "#/$defs/timestamp",
+          "description": "When the evidence was captured; absent for a reply whose capture carried no wall-clock time."
         },
         "link": {
           "$ref": "#/$defs/scanHostLink"

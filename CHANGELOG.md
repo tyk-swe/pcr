@@ -1974,6 +1974,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Explicit neighbor discovery covers the neighbor requests the probes would
   otherwise send, so the plan no longer charges them twice against
   `max_probes`, wire bytes, and duration.
+- Host `neighbor.observed_at` and a neighbor reason's `observed_at` are absent
+  for a reply whose capture carried no wall-clock time, instead of the time
+  the outcome was settled.
 - `scan --reverse-dns` lookups on a raw route authorize the neighbor request
   they resolve, such as a gateway's, as the scan's probes do.
 - Host discovery reports a possible proxy only when addresses share a link

@@ -100,7 +100,9 @@ pub struct Reason {
     /// The link address a neighbor reason observed: an observation, never
     /// the host's identity.
     pub link_address: Option<MacAddress>,
-    pub observed_at: SystemTime,
+    /// When the evidence was captured; absent for a reply whose capture
+    /// carried no wall-clock time.
+    pub observed_at: Option<SystemTime>,
 }
 
 /// A link-layer address and whether it came from the neighbor cache.
@@ -140,8 +142,9 @@ pub struct Neighbor {
     pub interface: interface::Id,
     /// Requests sent; zero when the cache answered or nothing was sent.
     pub attempts: u32,
-    /// When the fresh reply was captured, or when the outcome was settled.
-    pub observed_at: SystemTime,
+    /// When the fresh reply was captured, or when the outcome was settled;
+    /// absent for a reply whose capture carried no wall-clock time.
+    pub observed_at: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,7 +247,7 @@ impl Composer {
                 basis: Basis::Direct,
                 probe: Some(observation.sequence),
                 link_address: None,
-                observed_at: observation.observed_at,
+                observed_at: Some(observation.observed_at),
             });
         }
         true

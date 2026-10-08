@@ -50,7 +50,7 @@ fn neighbor_on(outcome: NeighborOutcome, index: u32) -> Neighbor {
             index,
         },
         attempts: 1,
-        observed_at: SystemTime::UNIX_EPOCH,
+        observed_at: Some(SystemTime::UNIX_EPOCH),
     }
 }
 

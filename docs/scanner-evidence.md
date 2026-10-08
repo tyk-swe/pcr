@@ -333,8 +333,8 @@ Host records use their own fields instead of re-encoding the attempt
 | `reasons[].kind` | The reply behind the reason: a discovery probe's typed reply (`icmp_echo_reply`, `tcp_syn_ack`, `tcp_reset`, `udp_payload`, `icmp_port_unreachable`, and the other attempt replies), `tcp_connected` or `tcp_refused` from an ordinary socket, or `neighbor_reply` or `neighbor_cache`. |
 | `reasons[].evidence` | `wire` for a captured reply, `socket` for an operating-system connect result, and `cache` for a neighbor cache entry. |
 | `reasons[].basis` | `direct` for the host's own answer, `cached` for a neighbor cache entry an earlier reply left, and `possible_proxy` for a link address that also answered for another address of the same family on the same interface, as a target or as a gateway. |
-| `reasons[].probe`, `link_address`, `observed_at` | Metadata: the discovery probe sequence or the neighbor link address the reason rests on, and when it was observed. |
-| `neighbor` | Host observation: the explicit ARP or NDP outcome (`resolved`, `silent`, `routed`, or `not_applicable`), the `interface` the host's route selected, the request `attempts`, the host's `link` when resolved, and the `next_hop` when routed. A link `entry` is `fresh` or `cached`. |
+| `reasons[].probe`, `link_address`, `observed_at` | Metadata: the discovery probe sequence or the neighbor link address the reason rests on, and when it was observed, absent for a reply whose capture carried no wall-clock time. |
+| `neighbor` | Host observation: the explicit ARP or NDP outcome (`resolved`, `silent`, `routed`, or `not_applicable`), the `interface` the host's route selected, the request `attempts`, when it was `observed_at` (absent for a reply whose capture carried no wall-clock time), the host's `link` when resolved, and the `next_hop` when routed. A link `entry` is `fresh` or `cached`. |
 | `reverse_dns` | Enrichment observation: the PTR question, its status and outcome, and the `names` the server answered. |
 | `probes` | Metadata: the discovery probes, embedded in JSON and listed by sequence in `host` stream records. |
 

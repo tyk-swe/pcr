@@ -305,6 +305,29 @@ fn neighbor_replies_and_cache_entries_are_distinct_evidence() {
 }
 
 #[test]
+fn a_neighbor_reply_without_a_capture_time_is_published_untimed() {
+    let steps = Steps::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(FixedRoutes, RecordingTransmit::untimed(steps.clone())),
+    );
+    let report = scan_with(&client, neighbor_only(&[FIRST]));
+    assert_eq!(steps.take(), [Step::Neighbor(address(FIRST))]);
+    let host = &report.hosts[0];
+    let neighbor = host.neighbor.as_ref().expect("neighbor record");
+    assert!(
+        matches!(
+            neighbor.outcome,
+            scan::discovery::NeighborOutcome::Resolved(link) if !link.cached
+        ),
+        "{neighbor:?}"
+    );
+    assert_eq!(neighbor.observed_at, None, "no settlement time stands in");
+    assert_eq!(host.reasons[0].observed_at, None);
+}
+
+#[test]
 fn a_pipelined_stage_over_its_preparation_limit_sends_no_neighbor_request() {
     let steps = Steps::default();
     let client = Client::new(

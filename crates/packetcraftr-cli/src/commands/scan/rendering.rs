@@ -194,7 +194,7 @@ fn render_hosts_text<P>(
                 reason.basis,
                 optional_display(reason.probe),
                 optional_display(reason.link_address),
-                reason.observed_at,
+                optional_display(reason.observed_at.as_ref()),
             ))?;
         }
         if let Some(lookup) = &host.reverse_dns {

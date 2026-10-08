@@ -241,12 +241,23 @@ pub(crate) struct RecordingTransmit {
     live: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
     replies: Arc<Mutex<Replies>>,
+    untimed: bool,
 }
 
 impl RecordingTransmit {
     pub(crate) fn new(steps: Steps) -> Self {
         Self {
             steps,
+            ..Self::default()
+        }
+    }
+
+    /// Answers neighbor requests with replies whose capture carries no
+    /// wall-clock time.
+    pub(crate) fn untimed(steps: Steps) -> Self {
+        Self {
+            steps,
+            untimed: true,
             ..Self::default()
         }
     }
@@ -268,8 +279,12 @@ impl transmit::Provider for RecordingTransmit {
         match arp_reply(bytes) {
             Some((target, reply)) => {
                 self.steps.push(Step::Neighbor(IpAddr::V4(target)));
-                let reply = Frame::new(SystemTime::now(), LinkType::ETHERNET, reply)
-                    .expect("ARP reply fixture");
+                let reply = if self.untimed {
+                    Frame::without_timestamp(LinkType::ETHERNET, reply)
+                } else {
+                    Frame::new(SystemTime::now(), LinkType::ETHERNET, reply)
+                }
+                .expect("ARP reply fixture");
                 let replies = self.replies.lock().expect("replies lock").clone();
                 replies
                     .lock()

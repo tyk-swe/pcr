@@ -270,7 +270,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 outcome,
                 interface: interface.clone(),
                 attempts: 0,
-                observed_at: SystemTime::now(),
+                observed_at: Some(SystemTime::now()),
             };
             Ok((neighbor, Stats::default()))
         };
@@ -331,13 +331,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         let elapsed = started.elapsed();
         let (link, attempts, capture, observed_at) = match resolved {
             Ok(resolution) => {
-                // The resolver retains the matching reply last whenever it
+                // A fresh reply was observed when it was captured, which a
+                // capture without wall-clock time leaves unknown. The
+                // resolver retains the matching reply last whenever it
                 // retains it at all.
-                let replied_at = resolution
-                    .captured
-                    .last()
-                    .and_then(|frame| frame.timestamp)
-                    .filter(|_| !resolution.cache_hit);
+                let observed_at = if resolution.cache_hit {
+                    Some(SystemTime::now())
+                } else {
+                    resolution.captured.last().and_then(|frame| frame.timestamp)
+                };
                 let link = Link {
                     address: resolution.mac_address,
                     cached: resolution.cache_hit,
@@ -346,14 +348,14 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                     Some(link),
                     resolution.attempts,
                     resolution.capture_statistics,
-                    replied_at,
+                    observed_at,
                 )
             }
             Err(crate::neighbor::Error::NotFound {
                 attempts,
                 capture_statistics,
                 ..
-            }) => (None, attempts, capture_statistics, None),
+            }) => (None, attempts, capture_statistics, Some(SystemTime::now())),
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
         let stats = neighbor_stats(attempts, &frame, elapsed, capture);
@@ -361,7 +363,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
             interface: request.interface.clone(),
             attempts,
-            observed_at: observed_at.unwrap_or_else(SystemTime::now),
+            observed_at,
         };
         Ok((neighbor, stats))
     }

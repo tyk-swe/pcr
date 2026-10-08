@@ -108,7 +108,7 @@ impl Pipelined for ScriptedNeighbors {
             outcome,
             interface: fixture_interface(),
             attempts,
-            observed_at: UNIX_EPOCH,
+            observed_at: Some(UNIX_EPOCH),
         };
         Ok((neighbor, stats))
     }
@@ -1609,7 +1609,7 @@ impl Pipelined for SlowNeighbors {
             }),
             interface: fixture_interface(),
             attempts: 1,
-            observed_at: UNIX_EPOCH,
+            observed_at: Some(UNIX_EPOCH),
         };
         let stats = Stats {
             packets_attempted: 1,

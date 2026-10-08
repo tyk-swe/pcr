@@ -86,7 +86,9 @@ pub struct Reason {
     /// The link address a neighbor reason observed, never the host's identity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link_address: Option<MacAddress>,
-    pub observed_at: Timestamp,
+    /// Absent for a reply whose capture carried no wall-clock time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<Timestamp>,
 }
 
 impl TryFrom<discovery::Reason> for Reason {
@@ -99,7 +101,7 @@ impl TryFrom<discovery::Reason> for Reason {
             basis: reason.basis.into(),
             probe: reason.probe,
             link_address: reason.link_address.map(Into::into),
-            observed_at: reason.observed_at.try_into()?,
+            observed_at: reason.observed_at.map(Timestamp::try_from).transpose()?,
         })
     }
 }
@@ -158,7 +160,9 @@ pub struct Neighbor {
     /// The interface the host's route selected, where any reply was observed.
     pub interface: InterfaceId,
     pub attempts: u32,
-    pub observed_at: Timestamp,
+    /// Absent for a reply whose capture carried no wall-clock time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<Timestamp>,
     /// The host's own link address; present when `outcome` is `resolved`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<Link>,
@@ -189,7 +193,7 @@ impl TryFrom<discovery::Neighbor> for Neighbor {
             outcome,
             interface: neighbor.interface.into(),
             attempts: neighbor.attempts,
-            observed_at: neighbor.observed_at.try_into()?,
+            observed_at: neighbor.observed_at.map(Timestamp::try_from).transpose()?,
             link,
             next_hop,
         })
@@ -357,12 +361,30 @@ mod tests {
                 index: 1,
             },
             attempts: 1,
-            observed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+            observed_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
         };
         let published = serde_json::to_value(Neighbor::try_from(neighbor).unwrap()).unwrap();
         assert_eq!(
             published["interface"],
             json!({"name": "fixture0", "index": 1})
         );
+    }
+
+    #[test]
+    fn an_untimed_neighbor_reply_omits_its_observation_time() {
+        let neighbor = discovery::Neighbor {
+            outcome: discovery::NeighborOutcome::Resolved(discovery::Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 1]),
+                cached: false,
+            }),
+            interface: interface::Id {
+                name: "fixture0".into(),
+                index: 1,
+            },
+            attempts: 1,
+            observed_at: None,
+        };
+        let published = serde_json::to_value(Neighbor::try_from(neighbor).unwrap()).unwrap();
+        assert!(published.get("observed_at").is_none(), "{published}");
     }
 }

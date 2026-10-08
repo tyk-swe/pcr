@@ -2020,6 +2020,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   route sends.
 - A DNS query whose next hop never answered counts that neighbor request, its
   capture counters, and its wait in the failed question's statistics.
+- A DNS query that fails after its route's neighbor requests, even when the
+  deadline, a cancellation, or the pause after an answered request decides
+  its error, counts those requests in the failed question's statistics.
 - `scan --reverse-dns` keeps PTR names across every lookup within the
   scan's evidence byte limit; `reverse_dns.names_truncated`, also shown in
   text output, marks an answer whose later names it dropped.

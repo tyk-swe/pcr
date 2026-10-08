@@ -752,6 +752,92 @@ fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
     assert_eq!(report.stats.packets_completed, 3);
 }
 
+/// A clock whose every wait fails.
+#[derive(Clone, Copy, Debug, Default)]
+struct BrokenClock;
+
+#[derive(Debug, thiserror::Error)]
+#[error("the fixture clock cannot wait")]
+struct BrokenWait;
+
+impl packetcraftr::clock::Clock for BrokenClock {
+    type Error = BrokenWait;
+
+    fn sleep(
+        &self,
+        _: Duration,
+        _: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), BrokenWait> {
+        Err(BrokenWait)
+    }
+}
+
+/// One UDP query through the gateway, from a client bounded by a scan at one
+/// probe per second.
+fn query_through_gateway<K: packetcraftr::clock::Clock>(
+    transmit: RecordingTransmit,
+    clock: K,
+) -> packetcraftr::dns::batch::Report {
+    let mut scan = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    scan.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    scan.probes_per_second = Some(1);
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(GatewayRoutes, transmit),
+    )
+    .with_clock(clock)
+    .with_scan_neighbors(&scan)
+    .expect("the scan's neighbor bounds are valid");
+    let question = packetcraftr::dns::Request {
+        server: packetcraftr::target::Target::Address(address(FIRST)),
+        transport: packetcraftr::dns::TransportMode::Udp,
+        route: scan.route.clone(),
+        ..common::dns::tcp_request("example.test")
+    };
+    client
+        .dns_batch(
+            packetcraftr::dns::batch::Request {
+                questions: vec![question],
+            },
+            packetcraftr::dns::batch::Collector::default(),
+        )
+        .expect("a failed question leaves the batch's report")
+}
+
+#[test]
+fn a_failed_query_counts_the_neighbor_request_its_route_sent() {
+    // The gateway never answers.
+    let steps = Steps::default();
+    let silent = query_through_gateway(
+        RecordingTransmit::silent(steps.clone()),
+        packetcraftr::clock::SystemClock,
+    );
+    assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
+    // The gateway answers, then the pause before the query fails.
+    let paced = query_through_gateway(RecordingTransmit::new(steps.clone()), BrokenClock);
+    assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
+
+    for report in [silent, paced] {
+        assert_eq!(
+            report.questions[0].status,
+            packetcraftr::dns::batch::QuestionStatus::Failed
+        );
+        assert_eq!(report.stats.packets_attempted, 1);
+        assert_eq!(
+            report.stats.bytes, 60,
+            "one ARP request, padded to the minimum Ethernet frame"
+        );
+    }
+}
+
 #[test]
 fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
     let send_echo = |client: &Client<_, common::clock::VirtualClock>, plan: &route::Options| {

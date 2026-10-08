@@ -388,30 +388,65 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             .client
             .neighbors
             .over(providers.transmit(), providers.capture());
+        let request = plan
+            .needs_neighbor_resolution()
+            .then(|| route::neighbor_request(&plan))
+            .transpose()?;
         let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
             route::materialize(plan, &neighbors, deadline)
         }) {
             Ok(route) => route,
             Err(error) => {
-                self.check()?;
-                return Err(error.into());
+                let spent = unanswered(&error, request.as_ref());
+                let error = self.check().err().unwrap_or_else(|| error.into());
+                return Err(error.after_neighbor_requests(spent));
             }
         };
-        if route
-            .neighbor_resolution
-            .as_ref()
-            .is_some_and(|resolution| resolution.attempts > 0)
-        {
-            self.pace_neighbor_request()?;
-        }
-        let built =
-            self.materializer()
-                .link(packet, &route, build_context, preliminary_build, || {
-                    self.check()
-                })?;
-        self.check()?;
-        self.authorize_built(&built, &route.plan)?;
+        // Whatever fails after the route's requests went out still reports
+        // them.
+        let spent = route.neighbor_stats()?;
+        let built = (|| {
+            if spent.packets_attempted > 0 {
+                self.pace_neighbor_request()?;
+            }
+            let built = self.materializer().link(
+                packet,
+                &route,
+                build_context,
+                preliminary_build,
+                || self.check(),
+            )?;
+            self.check()?;
+            self.authorize_built(&built, &route.plan)?;
+            Ok(built)
+        })()
+        .map_err(|error: Error| error.after_neighbor_requests(spent))?;
         Ok(PreparedPacket { built, route })
+    }
+}
+
+/// The requests a resolution that `request` asked for sent before it failed
+/// unanswered.
+fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) -> crate::Stats {
+    let (route::Error::Neighbor(neighbor), Some(request)) = (error, request) else {
+        return crate::Stats::default();
+    };
+    let crate::neighbor::Error::NotFound {
+        attempts,
+        capture_statistics,
+        ..
+    } = &**neighbor
+    else {
+        return crate::Stats::default();
+    };
+    let attempts = u64::from(*attempts);
+    let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len() as u64);
+    crate::Stats {
+        packets_attempted: attempts,
+        packets_completed: attempts,
+        bytes: attempts.saturating_mul(frame_bytes),
+        capture: *capture_statistics,
+        ..crate::Stats::default()
     }
 }
 

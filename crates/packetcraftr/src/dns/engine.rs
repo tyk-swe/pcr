@@ -228,64 +228,26 @@ struct ProbeAttempt {
     attempt_deadline: Deadline,
 }
 
-/// The requests a query's route sent to a next hop that never answered, as
-/// the error that failed the query reports them. A DNS query declares no link
-/// layer, so each request is an untagged Ethernet frame.
-fn unanswered_neighbor(error: &Error) -> Option<Stats> {
-    let Error::Execution { source, .. } = error else {
-        return None;
-    };
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(source);
-    let not_found = std::iter::from_fn(|| {
+/// The neighbor requests a failed query's route sent, which the error its
+/// exchange returned carries.
+fn spent_on_neighbors(error: &BoundaryError) -> Option<Stats> {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    std::iter::from_fn(|| {
         let current = cause?;
         cause = current.source();
         Some(current)
     })
     .find_map(|cause| {
-        let neighbor = match cause.downcast_ref::<crate::Error>() {
-            Some(crate::Error::Plan(crate::route::Error::Neighbor(neighbor))) => neighbor,
-            _ => match cause.downcast_ref::<crate::route::Error>() {
-                Some(crate::route::Error::Neighbor(neighbor)) => neighbor,
-                _ => return cause.downcast_ref::<crate::neighbor::Error>(),
-            },
+        // Transparent wrappers forward their sources, so the carrier is found
+        // as the error a chain link holds rather than as a link of its own.
+        let error = match cause.downcast_ref::<crate::exchange::Error>() {
+            Some(crate::exchange::Error::Preparation(error)) => error,
+            _ => cause.downcast_ref::<crate::Error>()?,
         };
-        Some(&**neighbor)
-    })?;
-    let crate::neighbor::Error::NotFound {
-        target,
-        attempts,
-        capture_statistics,
-        ..
-    } = not_found
-    else {
-        return None;
-    };
-    let source = match target {
-        IpAddr::V4(_) => IpAddr::from([192, 0, 2, 2]),
-        IpAddr::V6(_) => IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, 2]),
-    };
-    // Only the target's family and the framing size a request; the sources
-    // stand in for the route's.
-    let frame = crate::neighbor::request_frame(&crate::neighbor::Request {
-        interface: packetcraftr_netio::interface::Id {
-            name: String::new(),
-            index: 0,
-        },
-        interface_source: source,
-        interface_mac: packetcraftr_core::packet::MacAddress([0x02, 0, 0, 0, 0, 1]),
-        target: *target,
-        vlan_tags: Vec::new(),
-        mtu: 1500,
-        link_type: packetcraftr_core::frame::LinkType::ETHERNET,
-    })
-    .ok()?;
-    let attempts = u64::from(*attempts);
-    Some(Stats {
-        packets_attempted: attempts,
-        packets_completed: attempts,
-        bytes: attempts.saturating_mul(frame.len() as u64),
-        capture: *capture_statistics,
-        ..Stats::default()
+        match error {
+            crate::Error::NeighborSpent(spent) => Some(spent.stats.clone()),
+            _ => None,
+        }
     })
 }
 
@@ -455,17 +417,22 @@ where
         // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
         let mut attempt_deadline = Deadline::new(self.request.timeout);
         let started = self.execution.now();
+        let mut spent = None;
         let stepped = self.execution.step(
             probe.attempt,
             self.request.timeout,
             &mut *self.executor,
             |executor, grant| {
-                executor.execute(&Exchange {
+                let execution = executor.execute(&Exchange {
                     probe: probe.clone(),
                     timeout: grant.timeout,
                     limits,
                     permit: grant.permit,
-                })
+                });
+                // Read before the step can replace the error with the
+                // deadline's or the cancellation's.
+                spent = execution.as_ref().err().and_then(spent_on_neighbors);
+                execution
             },
             |_, execution, grant, _| {
                 validate_dns_execution(probe, execution, limits, grant.timeout)
@@ -474,8 +441,9 @@ where
         let (execution, grant) = match stepped {
             Ok(stepped) => stepped,
             Err(error) => {
-                // A silent next hop still spent its requests and their wait.
-                if let Some(mut neighbor) = unanswered_neighbor(&error) {
+                // A failed query still spent its route's neighbor requests
+                // and their wait.
+                if let Some(mut neighbor) = spent {
                     neighbor.elapsed = self.execution.now().saturating_duration_since(started);
                     self.execution.account(probe.attempt, &neighbor)?;
                 }

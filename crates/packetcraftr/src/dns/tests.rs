@@ -288,15 +288,20 @@ impl Executor<Exchange> for ResolvedGatewayExecutor {
     }
 }
 
-/// Sends one ARP request to a gateway that never answers, spending `wait`.
+/// Sends one ARP request to a gateway that never answers, spending `wait`,
+/// and cancels the operation as it fails when given its signal.
 struct SilentGatewayExecutor {
     clock: crate::test_support::RecordingClock,
     wait: Duration,
+    cancel: Option<packetcraftr_core::budget::Cancellation>,
 }
 
 impl Executor<Exchange> for SilentGatewayExecutor {
     fn execute(&mut self, _exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         self.clock.advance(self.wait);
+        if let Some(signal) = &self.cancel {
+            signal.cancel();
+        }
         let silence = crate::neighbor::Error::NotFound {
             interface: "fixture0".into(),
             target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
@@ -308,9 +313,20 @@ impl Executor<Exchange> for SilentGatewayExecutor {
                 ..Default::default()
             },
         };
-        Err(BoundaryError::from_error(crate::Error::Plan(
-            crate::route::Error::Neighbor(Box::new(silence)),
-        )))
+        let spent = crate::Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: 60,
+            capture: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+            ..crate::Stats::default()
+        };
+        Err(BoundaryError::from_error(
+            crate::Error::Plan(crate::route::Error::Neighbor(Box::new(silence)))
+                .after_neighbor_requests(spent),
+        ))
     }
 }
 
@@ -1099,6 +1115,7 @@ fn a_silent_next_hop_counts_its_request_in_the_failed_querys_statistics() {
     let mut executor = SilentGatewayExecutor {
         clock: clock.clone(),
         wait: Duration::from_millis(5),
+        cancel: None,
     };
     let report = run_batch(
         &[dns_request(address)],
@@ -1121,6 +1138,44 @@ fn a_silent_next_hop_counts_its_request_in_the_failed_querys_statistics() {
     );
     assert_eq!(report.stats.capture.received_frames, 3);
     assert_eq!(report.stats.elapsed, Duration::from_millis(5));
+}
+
+#[test]
+fn a_query_cancelled_after_its_neighbor_request_still_counts_it() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let signal = packetcraftr_core::budget::Cancellation::default();
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut executor = SilentGatewayExecutor {
+        clock: clock.clone(),
+        wait: Duration::from_millis(5),
+        cancel: Some(signal.clone()),
+    };
+    let request = super::batch::Request {
+        questions: vec![dns_request(address)],
+    };
+    let mut deadline =
+        Deadline::new(request.max_duration().expect("bounded")).with_cancellation(Some(signal));
+    let report = super::batch::run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("a cancelled question leaves the batch's report");
+
+    // The cancellation decides the question's error, which the step reports
+    // instead of the exchange's; the request it sent still counts.
+    assert_eq!(
+        report.questions[0].status,
+        super::batch::QuestionStatus::Failed
+    );
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert_eq!(report.stats.bytes, 60);
+    assert_eq!(report.stats.capture.received_frames, 3);
 }
 
 #[test]

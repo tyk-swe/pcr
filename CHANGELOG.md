@@ -2049,7 +2049,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   transmission including discovery probes, and from the collected probes of a
   streamed scan too, instead of waiting a full pause.
 - `scan --reverse-dns` spaces a fresh neighbor request from the query behind
-  it at the scan's `--rate`.
+  it at the scan's `--rate`, counting the resolution's own wait toward that
+  pause.
+- `scan --reverse-dns` paces each batch from the previous one's last send even
+  when its TCP lookups count no packets, and from a connect scan's last
+  attempted connection rather than one it never attempted.
+- `scan --reverse-dns` marks lookups whose remaining time cannot hold one
+  question's planned attempts `unattempted` instead of `failed`.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

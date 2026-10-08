@@ -56,6 +56,7 @@ pub(super) fn run(
                                     .iter()
                                     .flat_map(|endpoint| &endpoint.probes),
                             )
+                            .filter(|probe| probe.attempted)
                             .map(|probe| probe.scheduled_at),
                     ),
                 );
@@ -105,6 +106,7 @@ pub(super) fn run(
                                         .iter()
                                         .flat_map(|endpoint| &endpoint.probes),
                                 )
+                                .filter(|probe| probe.attempted)
                                 .map(|probe| probe.scheduled_at),
                         ),
                     );

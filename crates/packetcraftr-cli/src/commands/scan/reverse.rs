@@ -210,6 +210,9 @@ impl Lookup {
                     sent,
                 )
             }
+            // A window too short for one question's planned attempts sends
+            // none of them.
+            Err(dns::Error::DurationLimit { .. }) => ended(QuestionStatus::Unattempted, None),
             Err(error) => ended(QuestionStatus::Failed, Some(error.to_string())),
         }
     }
@@ -283,7 +286,8 @@ fn batched(
         }
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
         let (lookups, stats, sent) = lookup(&addresses, remaining());
-        if stats.packets_attempted > 0 {
+        // A TCP lookup counts no packets but still reports when it sent.
+        if sent.is_some() || stats.packets_attempted > 0 {
             last_sent = Some(sent.unwrap_or_else(SystemTime::now));
         }
         for (&index, mut lookup) in chunk.iter().zip(lookups) {
@@ -552,6 +556,48 @@ mod tests {
         );
         let owed = waited(Some(SystemTime::now()), pause);
         assert!(!owed.is_zero() && owed <= pause, "{owed:?}");
+    }
+
+    #[test]
+    fn a_batch_counting_no_packets_still_spaces_the_next_from_its_sends() {
+        let hosts = responding(batch::MAX_QUESTIONS + 1);
+        let pause = Duration::from_millis(50);
+        let (_, stats) = batched(
+            &hosts,
+            pause,
+            None,
+            Instant::now().checked_add(Duration::from_secs(60)),
+            &Cancellation::default(),
+            usize::MAX,
+            // A TCP lookup reports its send but no packets.
+            |addresses, _| {
+                let lookups = addresses.iter().map(|_| answered(&[])).collect();
+                (
+                    lookups,
+                    packetcraftr::Stats::default(),
+                    Some(SystemTime::now()),
+                )
+            },
+        );
+        assert!(
+            stats.elapsed > Duration::ZERO,
+            "the second batch waits for the first's send"
+        );
+    }
+
+    #[test]
+    fn a_window_too_short_for_one_question_leaves_its_lookups_unattempted() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let client = budget_client(batch::MAX_QUESTIONS, 1);
+        let addresses = [IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))];
+        let (records, stats, sent) = lookup.lookup(&client, &addresses, Duration::from_millis(1));
+        assert_eq!(
+            records[0].status,
+            QuestionStatus::Unattempted,
+            "{:?}",
+            records[0]
+        );
+        assert_eq!((stats.packets_attempted, sent), (0, None));
     }
 
     #[test]

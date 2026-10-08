@@ -333,8 +333,9 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
 
     /// Spaces a packet from the neighbor request its route just sent, within
     /// the preparation deadline.
-    fn pace_neighbor_request(&self) -> Result<(), Error> {
-        let pause = self.client.neighbor_pause;
+    fn pace_neighbor_request(&self, spent: std::time::Duration) -> Result<(), Error> {
+        // The resolution's own wait already spaced its request from the packet.
+        let pause = self.client.neighbor_pause.saturating_sub(spent);
         if pause.is_zero() {
             return Ok(());
         }
@@ -392,6 +393,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             .needs_neighbor_resolution()
             .then(|| route::neighbor_request(&plan))
             .transpose()?;
+        let began = self.client.now();
         let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
             route::materialize(plan, &neighbors, deadline)
         }) {
@@ -407,7 +409,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         let spent = route.neighbor_stats()?;
         let built = (|| {
             if spent.packets_attempted > 0 {
-                self.pace_neighbor_request()?;
+                self.pace_neighbor_request(self.client.now().saturating_duration_since(began))?;
             }
             let built = self.materializer().link(
                 packet,

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::dns::{self, batch};
 use packetcraftr::scan::discovery::{Host, State};
+use packetcraftr_core::budget::Cancellation;
 
 use crate::errors::CliError;
 use crate::output::dns::QuestionStatus;
@@ -83,15 +84,6 @@ impl Lookup {
         started: Instant,
     ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
         let deadline = started.checked_add(self.template.limits.max_duration);
-        let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
-        let mut statistics = packetcraftr::Stats::default();
-        let mut name_budget = self.template.limits.max_evidence_bytes;
-        let selected: Vec<usize> = hosts
-            .iter()
-            .enumerate()
-            .filter(|(_, host)| host.state != State::NoResponse)
-            .map(|(index, _)| index)
-            .collect();
         // A batch paces its own questions; this pause keeps the scan's rate
         // between the scan's last probe and each batch's first question.
         let pause = self
@@ -99,29 +91,14 @@ impl Lookup {
             .queries_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
-        let remaining = || {
-            deadline.map_or(Duration::ZERO, |deadline| {
-                deadline.saturating_duration_since(Instant::now())
-            })
-        };
-        for chunk in selected.chunks(batch::MAX_QUESTIONS) {
-            let waited = pause.min(remaining());
-            if !waited.is_zero() {
-                std::thread::sleep(waited);
-                statistics.elapsed = statistics.elapsed.saturating_add(waited);
-            }
-            let remaining = remaining();
-            let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
-            let (lookups, stats) = self.lookup(client, &addresses, remaining);
-            for (&index, mut lookup) in chunk.iter().zip(lookups) {
-                retain_names(&mut lookup, &mut name_budget);
-                names[index] = Some(lookup);
-            }
-            // A failed batch reports no statistics; the bounded questions
-            // cannot overflow these counters.
-            let _ = statistics.checked_add_assign(&stats);
-        }
-        (names, statistics)
+        batched(
+            hosts,
+            pause,
+            deadline,
+            crate::cancellation::signal(),
+            self.template.limits.max_evidence_bytes,
+            |addresses, remaining| self.lookup(client, addresses, remaining),
+        )
     }
 
     fn lookup(
@@ -192,6 +169,53 @@ impl Lookup {
     }
 }
 
+/// Looks `hosts` up in batches spaced by `pause` until `deadline`, keeping
+/// their names within `name_budget` bytes. Once `cancellation` fires no batch
+/// waits or sends: each remaining question has no time left and is
+/// unattempted.
+fn batched(
+    hosts: &[Host],
+    pause: Duration,
+    deadline: Option<Instant>,
+    cancellation: &Cancellation,
+    mut name_budget: usize,
+    mut lookup: impl FnMut(&[IpAddr], Duration) -> (Vec<ReverseDns>, packetcraftr::Stats),
+) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
+    let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
+    let mut statistics = packetcraftr::Stats::default();
+    let selected: Vec<usize> = hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, host)| host.state != State::NoResponse)
+        .map(|(index, _)| index)
+        .collect();
+    let remaining = || {
+        if cancellation.is_cancelled() {
+            return Duration::ZERO;
+        }
+        deadline.map_or(Duration::ZERO, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        })
+    };
+    for chunk in selected.chunks(batch::MAX_QUESTIONS) {
+        let waited = pause.min(remaining());
+        if !waited.is_zero() {
+            std::thread::sleep(waited);
+            statistics.elapsed = statistics.elapsed.saturating_add(waited);
+        }
+        let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
+        let (lookups, stats) = lookup(&addresses, remaining());
+        for (&index, mut lookup) in chunk.iter().zip(lookups) {
+            retain_names(&mut lookup, &mut name_budget);
+            names[index] = Some(lookup);
+        }
+        // A failed batch reports no statistics; the bounded questions
+        // cannot overflow these counters.
+        let _ = statistics.checked_add_assign(&stats);
+    }
+    (names, statistics)
+}
+
 /// Keeps `lookup`'s names while what they occupy fits `budget`, marking the
 /// lookup when later names were dropped.
 fn retain_names(lookup: &mut ReverseDns, budget: &mut usize) {
@@ -238,6 +262,51 @@ mod tests {
                 None,
             )
         }
+    }
+
+    #[test]
+    fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
+        let hosts: Vec<Host> = (0..=batch::MAX_QUESTIONS)
+            .map(|index| Host {
+                address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, u8::try_from(index % 256).unwrap())),
+                scope: None,
+                state: State::Responded,
+                reasons: Vec::new(),
+                neighbor: None,
+                scan: packetcraftr::scan::discovery::Scan::Scanned,
+                probes: Vec::new(),
+            })
+            .collect();
+        let hour = Duration::from_secs(3600);
+        let run = |cancellation: &Cancellation, pause| {
+            let mut windows = Vec::new();
+            let (names, _) = batched(
+                &hosts,
+                pause,
+                Instant::now().checked_add(hour),
+                cancellation,
+                usize::MAX,
+                |addresses, remaining| {
+                    windows.push(remaining);
+                    let lookups = addresses.iter().map(|_| answered(&[])).collect();
+                    (lookups, packetcraftr::Stats::default())
+                },
+            );
+            assert!(
+                names.iter().all(Option::is_some),
+                "every host keeps a record"
+            );
+            windows
+        };
+
+        let live = run(&Cancellation::default(), Duration::ZERO);
+        assert_eq!(live.len(), 2);
+        assert!(live.iter().all(|remaining| !remaining.is_zero()));
+
+        // An hour's pause before the second batch would hold the test.
+        let cancelled = Cancellation::default();
+        cancelled.cancel();
+        assert_eq!(run(&cancelled, hour), [Duration::ZERO, Duration::ZERO]);
     }
 
     #[test]

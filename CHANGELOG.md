@@ -1998,6 +1998,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `scan --reverse-dns` keeps PTR names across every lookup within the
   scan's evidence byte limit; `reverse_dns.names_truncated`, also shown in
   text output, marks an answer whose later names it dropped.
+- A cancelled `scan --reverse-dns` waits for and sends no further lookup
+  batch; its remaining questions end unattempted.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

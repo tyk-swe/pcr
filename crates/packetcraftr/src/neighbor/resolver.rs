@@ -58,6 +58,9 @@ pub(crate) trait Resolver {
 pub(crate) struct State {
     options: Options,
     cache: Arc<NeighborCache>,
+    /// One operation's answers, kept for the whole operation so the shared
+    /// cache never holds an entry longer, or more entries, than configured.
+    operation: Option<Arc<NeighborCache>>,
 }
 
 impl State {
@@ -66,6 +69,7 @@ impl State {
         Ok(Self {
             options,
             cache: Arc::new(NeighborCache::default()),
+            operation: None,
         })
     }
 
@@ -84,6 +88,7 @@ impl State {
         )
         .map(|state| Self {
             cache: Arc::clone(&self.cache),
+            operation: self.operation.clone(),
             ..state
         })
     }
@@ -91,8 +96,8 @@ impl State {
     /// A resolver sharing this cache that sends at most one request per
     /// fresh resolution, waiting at most `attempt_timeout` for its reply and
     /// capturing at most `max_frames` frames and `max_bytes` bytes. Its
-    /// answers live for the whole operation, so a resolution never has to
-    /// run twice inside it.
+    /// answers also live in a cache of its own for the whole operation, so a
+    /// resolution never has to run twice inside it.
     pub(crate) fn one_attempt(
         &self,
         attempt_timeout: std::time::Duration,
@@ -105,6 +110,7 @@ impl State {
         )
         .map(|state| Self {
             cache: Arc::clone(&self.cache),
+            operation: Some(self.operation.clone().unwrap_or_default()),
             ..state
         })
     }
@@ -112,7 +118,23 @@ impl State {
     /// The unexpired cache entry for `request`, without sending anything.
     pub(crate) fn cached(&self, request: &Request) -> Result<Option<MacAddress>, Error> {
         validate_request(request)?;
-        self.cache.get(&NeighborCacheKey::from(request))
+        self.lookup(&NeighborCacheKey::from(request))
+    }
+
+    fn lookup(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, Error> {
+        if let Some(operation) = &self.operation
+            && let Some(mac_address) = operation.get(key)?
+        {
+            return Ok(Some(mac_address));
+        }
+        self.cache.get(key)
+    }
+
+    fn remember(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), Error> {
+        if let Some(operation) = &self.operation {
+            operation.insert(mac_address, key.clone(), &self.options.for_operation())?;
+        }
+        self.cache.insert(mac_address, key, &self.options)
     }
 
     pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
@@ -144,7 +166,7 @@ where
     fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
-        if let Some(mac_address) = self.state.cache.get(&cache_key)? {
+        if let Some(mac_address) = self.state.lookup(&cache_key)? {
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
@@ -222,9 +244,7 @@ where
                 capture_statistics: statistics,
             });
         };
-        self.state
-            .cache
-            .insert(mac_address, cache_key, &self.state.options)?;
+        self.state.remember(mac_address, cache_key)?;
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,

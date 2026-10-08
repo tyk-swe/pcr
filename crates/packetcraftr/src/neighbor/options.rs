@@ -96,9 +96,7 @@ impl Options {
     /// These options narrowed to one request per fresh resolution, waiting
     /// at most `attempt_timeout` for a reply and capturing within
     /// `max_frames` frames and `max_bytes` bytes. Limits too small for a
-    /// decodable reply fail validation rather than being raised. Answers
-    /// live for the whole operation: an entry that expired mid-operation
-    /// would invite a second request beyond the first.
+    /// decodable reply fail validation rather than being raised.
     #[must_use]
     pub(crate) fn one_attempt(
         &self,
@@ -110,9 +108,19 @@ impl Options {
             attempt_timeout: attempt_timeout
                 .min(MAX_CONFIGURED_ATTEMPT_TIMEOUT)
                 .max(Duration::from_nanos(1)),
-            cache_ttl: self.cache_ttl.max(MAX_CONFIGURED_CACHE_TTL),
-            max_cache_entries: self.max_cache_entries.max(MAX_CONFIGURED_CACHE_ENTRIES),
             ..self.single_attempt(attempt_timeout, max_frames, max_bytes)
+        }
+    }
+
+    /// These options with cache limits that keep every answer for a whole
+    /// operation: an entry that expired mid-operation would invite a second
+    /// request beyond the first.
+    #[must_use]
+    pub(super) fn for_operation(&self) -> Self {
+        Self {
+            cache_ttl: MAX_CONFIGURED_CACHE_TTL,
+            max_cache_entries: MAX_CONFIGURED_CACHE_ENTRIES,
+            ..self.clone()
         }
     }
 
@@ -141,8 +149,11 @@ mod tests {
         assert_eq!(options.max_capture_queue_frames, 4);
         assert_eq!(options.max_captured_bytes, 256);
         assert_eq!(options.snap_length, 256);
-        assert_eq!(options.cache_ttl, MAX_CONFIGURED_CACHE_TTL);
-        assert_eq!(options.max_cache_entries, MAX_CONFIGURED_CACHE_ENTRIES);
+        assert_eq!(options.cache_ttl, Options::default().cache_ttl);
+        assert_eq!(
+            options.max_cache_entries,
+            Options::default().max_cache_entries
+        );
         assert_eq!(options.attempt_timeout, Duration::from_secs(5));
     }
 

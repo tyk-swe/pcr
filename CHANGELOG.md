@@ -1955,6 +1955,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   sleep and the deadline is enforced again afterward.
 - The implicit neighbor resolution inside a probe send shares the scan's
   evidence limits instead of the resolver's capture defaults.
+- A scan keeps its operation-wide neighbor answers in a cache of its own, so a
+  reused client's shared neighbor cache keeps its configured TTL and entry limit.
 - Link-layer raw scans reject evidence limits too small to hold a neighbor
   reply before sending, as explicit neighbor discovery does, instead of
   silently raising them for the implicit resolution.

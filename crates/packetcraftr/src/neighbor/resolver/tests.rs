@@ -570,3 +570,51 @@ fn req_dl_before_configured_budget() {
     assert!(attempts <= 1, "deadline allowed {attempts} attempts");
     assert_eq!(layer2.sent().len(), usize::try_from(attempts).unwrap());
 }
+
+#[test]
+fn an_operation_keeps_its_answers_without_stretching_the_shared_cache() {
+    let shared = State::try_new(Options {
+        max_cache_entries: 1,
+        ..test_options(1)
+    })
+    .expect("valid options");
+    let operation = shared
+        .one_attempt(Duration::from_millis(100), 4, 512)
+        .expect("valid narrowed options");
+    let first = request();
+    let second = Request {
+        target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 3)),
+        ..request()
+    };
+    let link = MacAddress([0x02, 0, 0, 0, 0, 2]);
+    for request in [&first, &second] {
+        operation
+            .remember(link, NeighborCacheKey::from(request))
+            .expect("cache insert");
+    }
+
+    assert_eq!(shared.cached(&first).expect("lookup"), None);
+    assert_eq!(shared.cached(&second).expect("lookup"), Some(link));
+    let explicit = operation
+        .single_attempt(Duration::from_millis(100), 4, 512)
+        .expect("valid narrowed options");
+    for request in [&first, &second] {
+        assert_eq!(operation.cached(request).expect("lookup"), Some(link));
+        assert_eq!(explicit.cached(request).expect("lookup"), Some(link));
+    }
+
+    let brief = State::try_new(Options {
+        cache_ttl: Duration::from_millis(1),
+        ..test_options(1)
+    })
+    .expect("valid options");
+    let operation = brief
+        .one_attempt(Duration::from_millis(100), 4, 512)
+        .expect("valid narrowed options");
+    operation
+        .remember(link, NeighborCacheKey::from(&first))
+        .expect("cache insert");
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(brief.cached(&first).expect("lookup"), None);
+    assert_eq!(operation.cached(&first).expect("lookup"), Some(link));
+}

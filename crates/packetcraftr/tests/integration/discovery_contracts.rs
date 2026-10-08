@@ -501,6 +501,26 @@ fn through(gateway: &str) -> Decision {
 }
 
 #[test]
+fn neighbor_discovery_of_a_multicast_target_needs_no_reply_sized_capture() {
+    let (client, steps) = layer2_client(Policy {
+        allow_public_destinations: true,
+        ..Policy::default()
+    });
+    let mut request = neighbor_only(&["233.252.0.1"]);
+    // Too short for a neighbor reply, which a multicast target is never sent.
+    request.collection.capture.snap_length = 64;
+    let report = scan_with(&client, request);
+    assert!(steps.take().is_empty());
+    assert_eq!(
+        report.hosts[0]
+            .neighbor
+            .as_ref()
+            .map(|neighbor| neighbor.outcome),
+        Some(NeighborOutcome::NotApplicable)
+    );
+}
+
+#[test]
 fn a_routed_gateway_answer_is_not_host_evidence() {
     let steps = Steps::default();
     let client = Client::new(

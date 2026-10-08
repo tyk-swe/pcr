@@ -80,8 +80,7 @@ where
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
     let options = &request.discovery;
-    executor
-        .resolves_neighbors(approved.resolves_next_hops || (options.runs() && options.neighbor));
+    executor.resolves_neighbors(approved.resolves_neighbors);
     enforce_deadline(&Probes, deadline)?;
     if request.max_in_flight > 1 {
         // Each stage is admitted for every target before any neighbor request
@@ -665,8 +664,9 @@ struct ApprovedScan {
     endpoints: Vec<ProbeEndpoint>,
     /// Discovery and scan probes, without neighbor requests.
     total_probes: usize,
-    /// Whether any probe resolves a link-layer neighbor before it is sent.
-    resolves_next_hops: bool,
+    /// Whether explicit discovery or any probe resolves a link-layer
+    /// neighbor.
+    resolves_neighbors: bool,
 }
 
 impl ApprovedScan {
@@ -677,7 +677,7 @@ impl ApprovedScan {
 
 struct ScanPlan {
     total_probes: usize,
-    resolves_next_hops: bool,
+    resolves_neighbors: bool,
     neighbor_requests: usize,
     maximum_bytes: u64,
     worst_case: Duration,
@@ -732,7 +732,7 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
         duplicates: selected.duplicates,
         endpoints,
         total_probes: plan.total_probes,
-        resolves_next_hops: plan.resolves_next_hops,
+        resolves_neighbors: plan.resolves_neighbors,
     })
 }
 
@@ -767,6 +767,22 @@ fn plan_scan(
     } else {
         0
     };
+    if explicit_requests > 0 {
+        // Each attempt is one resolver request bounded like a probe.
+        crate::neighbor::Options::default()
+            .single_attempt(
+                request.timeout,
+                request.limits.max_evidence_frames,
+                request.limits.max_evidence_bytes,
+                request.collection.capture.snap_length,
+            )
+            .validate()
+            .map_err(|source| Error::InvalidDiscovery {
+                message: format!(
+                    "neighbor discovery cannot use the scan timeout, snap length, and evidence limits: {source}"
+                ),
+            })?;
+    }
     let scan_probes = probe_count(targets.len(), endpoints.len(), request.attempts)?;
     let total_probes = discovery_probes
         .checked_add(scan_probes)
@@ -880,7 +896,7 @@ fn plan_scan(
     check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
     Ok(ScanPlan {
         total_probes,
-        resolves_next_hops,
+        resolves_neighbors: resolves_next_hops || explicit_requests > 0,
         neighbor_requests,
         maximum_bytes,
         worst_case,

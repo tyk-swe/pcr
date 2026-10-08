@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::IpAddr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::interface;
@@ -287,12 +287,7 @@ fn limits() -> crate::scan::Limits {
 }
 
 fn validate(options: &Options) -> Result<(), Error> {
-    options.validate(
-        Duration::from_secs(1),
-        2048,
-        &crate::route::Options::default(),
-        &limits(),
-    )
+    options.validate(&crate::route::Options::default(), &limits())
 }
 
 #[test]
@@ -360,32 +355,5 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
         link_mode: packetcraftr_netio::link::Mode::Layer3,
         ..Default::default()
     };
-    assert!(
-        neighbor
-            .validate(Duration::from_secs(1), 2048, &layer3, &limits())
-            .is_err()
-    );
-    // The resolver's own bounds apply to the scan's timeout and evidence
-    // limits.
-    let default_route = crate::route::Options::default();
-    assert!(
-        neighbor
-            .validate(Duration::from_secs(31), 2048, &default_route, &limits())
-            .is_err()
-    );
-    let unsnappable = crate::scan::Limits {
-        max_evidence_bytes: 64,
-        ..limits()
-    };
-    assert!(
-        neighbor
-            .validate(Duration::from_secs(1), 2048, &default_route, &unsnappable)
-            .is_err()
-    );
-    assert!(
-        neighbor
-            .validate(Duration::from_secs(1), 64, &default_route, &limits())
-            .is_err(),
-        "the scan's snap length bounds each reply like its evidence limits"
-    );
+    assert!(neighbor.validate(&layer3, &limits()).is_err());
 }

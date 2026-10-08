@@ -1316,6 +1316,54 @@ fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_target() {
     .expect("two echoes fit max_probes = 2");
 }
 
+#[test]
+fn explicit_neighbor_limits_bind_only_a_target_whose_neighbor_resolves() {
+    use super::discovery::{Mode, NeighborOutcome, Options};
+    use crate::probe::ProbeEndpoint;
+    fn run_on(target: IpAddr) -> Result<(), Error> {
+        let mut request = tcp_scan_request(Target::Address(target));
+        request.discovery = Options {
+            mode: Mode::Only,
+            neighbor: true,
+            probes: vec![ProbeEndpoint::Icmp],
+            ..Options::default()
+        };
+        request.endpoints.clear();
+        // Too short for a neighbor reply, though not for an echo.
+        request.collection.capture.snap_length = 64;
+        let mut executor = LateEchoNeighbors {
+            neighbors: ScriptedNeighbors {
+                outcomes: [NeighborOutcome::NotApplicable].into(),
+                ..ScriptedNeighbors::default()
+            },
+            bytes: 64,
+            ..LateEchoNeighbors::default()
+        };
+        let mut clock = crate::test_support::RecordingClock::default();
+        let mut deadline = clock.deadline(request.limits.max_duration);
+        engine::run(
+            &request,
+            &mut AddressListAuthorizer {
+                addresses: vec![target],
+            },
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut clock,
+            &mut deadline,
+            |_, _| Ok(()),
+        )
+        .map(drop)
+    }
+    assert!(matches!(
+        run_on(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
+        Err(Error::InvalidDiscovery { .. })
+    ));
+    // A multicast target's link address follows from its own, so no
+    // neighbor capture needs to hold a reply.
+    run_on(IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1)))
+        .expect("no neighbor capture bounds a multicast target");
+}
+
 /// Answers the answered host's discovery echo and gives each scanned probe a
 /// late frame its outcome does not carry.
 struct SkippedHostExecutor {

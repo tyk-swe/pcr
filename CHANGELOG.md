@@ -1984,7 +1984,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   reported `no_response` and skipped instead of failing the whole scan.
 - Multicast targets, which need no neighbor resolution, no longer charge
   implicit or explicit neighbor requests to the plan or need evidence and
-  snap limits that hold a neighbor reply.
+  snap limits that hold a neighbor reply, even when discovery selects
+  `neighbor` for multicast targets alone.
 - A scan measures its neighbor waits with the client's clock.
 - Pipelined raw scans admit each stage's probes for all its targets, charging
   the routes and packets the pipeline itself prepares, before explicit

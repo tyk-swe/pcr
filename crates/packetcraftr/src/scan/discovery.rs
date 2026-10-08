@@ -6,7 +6,6 @@ mod host;
 mod tests;
 
 use std::collections::HashSet;
-use std::time::Duration;
 
 pub use host::{
     Basis, Evidence, Host, Link, Neighbor, NeighborOutcome, NextHop, Reason, ReasonKind, Scan,
@@ -65,8 +64,6 @@ impl Options {
 
     pub(super) fn validate(
         &self,
-        timeout: Duration,
-        snap_length: usize,
         route: &crate::route::Options,
         limits: &super::Limits,
     ) -> Result<(), Error> {
@@ -103,24 +100,8 @@ impl Options {
                 message: format!("discovery probe {duplicate} is listed more than once"),
             });
         }
-        if self.neighbor {
-            if route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
-                return invalid("neighbor discovery needs a link-layer route");
-            }
-            // Each attempt is one resolver request bounded like a probe.
-            crate::neighbor::Options::default()
-                .single_attempt(
-                    timeout,
-                    limits.max_evidence_frames,
-                    limits.max_evidence_bytes,
-                    snap_length,
-                )
-                .validate()
-                .map_err(|source| Error::InvalidDiscovery {
-                    message: format!(
-                        "neighbor discovery cannot use the scan timeout, snap length, and evidence limits: {source}"
-                    ),
-                })?;
+        if self.neighbor && route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
+            return invalid("neighbor discovery needs a link-layer route");
         }
         Ok(())
     }

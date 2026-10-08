@@ -87,10 +87,12 @@ impl Lookup {
         client: &Client,
         hosts: &[Host],
         started: Instant,
+        preceded: bool,
     ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
         let deadline = started.checked_add(self.template.limits.max_duration);
         // A batch paces its own questions; this pause keeps the scan's rate
-        // between the scan's last probe and each batch's first question.
+        // between the last transmission before a batch, if `preceded` by the
+        // scan's or sent by an earlier batch, and the batch's first question.
         let pause = self
             .template
             .queries_per_second
@@ -107,6 +109,7 @@ impl Lookup {
         batched(
             hosts,
             pause,
+            preceded,
             deadline,
             crate::cancellation::signal(),
             self.template.limits.max_evidence_bytes,
@@ -229,6 +232,7 @@ impl Lookup {
 fn batched(
     hosts: &[Host],
     pause: Duration,
+    preceded: bool,
     deadline: Option<Instant>,
     cancellation: &Cancellation,
     mut name_budget: usize,
@@ -250,14 +254,20 @@ fn batched(
             deadline.saturating_duration_since(Instant::now())
         })
     };
+    let mut owed = preceded;
     for chunk in selected.chunks(batch::MAX_QUESTIONS) {
-        let waited = pause.min(remaining());
+        let waited = if owed {
+            pause.min(remaining())
+        } else {
+            Duration::ZERO
+        };
         if !waited.is_zero() {
             std::thread::sleep(waited);
             statistics.elapsed = statistics.elapsed.saturating_add(waited);
         }
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
         let (lookups, stats) = lookup(&addresses, remaining());
+        owed = stats.packets_attempted > 0;
         for (&index, mut lookup) in chunk.iter().zip(lookups) {
             retain_names(&mut lookup, &mut name_budget);
             names[index] = Some(lookup);
@@ -296,11 +306,12 @@ pub(super) fn names(
     client: &Client,
     hosts: &[Host],
     started: Instant,
+    preceded: bool,
 ) -> (Vec<Option<ReverseDns>>, Option<packetcraftr::Stats>) {
     let Some(lookup) = lookup else {
         return Default::default();
     };
-    let (names, stats) = lookup.run(client, hosts, started);
+    let (names, stats) = lookup.run(client, hosts, started, preceded);
     let looked_up = names.iter().any(Option::is_some);
     (names, looked_up.then_some(stats))
 }
@@ -424,11 +435,11 @@ mod tests {
                 ..host
             })
             .collect();
-        let (records, stats) = names(Some(&lookup), &client, &silent, Instant::now());
+        let (records, stats) = names(Some(&lookup), &client, &silent, Instant::now(), true);
         assert_eq!(records, [None, None]);
         assert_eq!(stats, None, "no lookup ran, so none has statistics");
         // A refused lookup still leaves a record, and its statistics.
-        let (records, stats) = names(Some(&lookup), &client, &responding(1), Instant::now());
+        let (records, stats) = names(Some(&lookup), &client, &responding(1), Instant::now(), true);
         assert!(records[0].is_some());
         assert!(stats.is_some());
     }
@@ -447,6 +458,7 @@ mod tests {
             &client,
             &responding(batch::MAX_QUESTIONS + 1),
             Instant::now(),
+            true,
         );
         assert!(
             names
@@ -473,6 +485,30 @@ mod tests {
     }
 
     #[test]
+    fn a_first_batch_after_no_transmission_waits_no_pause() {
+        let hour = Duration::from_secs(3600);
+        let waited = |preceded, pause| {
+            let (_, stats) = batched(
+                &responding(1),
+                pause,
+                preceded,
+                Instant::now().checked_add(hour),
+                &Cancellation::default(),
+                usize::MAX,
+                |addresses, _| {
+                    let lookups = addresses.iter().map(|_| answered(&[])).collect();
+                    (lookups, packetcraftr::Stats::default())
+                },
+            );
+            stats.elapsed
+        };
+
+        let pause = Duration::from_millis(10);
+        assert_eq!(waited(false, pause), Duration::ZERO);
+        assert_eq!(waited(true, pause), pause);
+    }
+
+    #[test]
     fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
         let hosts = responding(batch::MAX_QUESTIONS + 1);
         let hour = Duration::from_secs(3600);
@@ -481,6 +517,7 @@ mod tests {
             let (names, _) = batched(
                 &hosts,
                 pause,
+                true,
                 Instant::now().checked_add(hour),
                 cancellation,
                 usize::MAX,

@@ -324,7 +324,13 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 let mut aggregate = collector.finish(report).map_err(rendering::scan_error)?;
                 // The lookups' sends, bytes, and time count in this scan's
                 // reported statistics.
-                let (names, lookups) = reverse::names(lookup, &client, &aggregate.hosts, started);
+                let (names, lookups) = reverse::names(
+                    lookup,
+                    &client,
+                    &aggregate.hosts,
+                    started,
+                    aggregate.stats.packets_attempted > 0,
+                );
                 aggregate
                     .stats
                     .checked_add_assign(&lookups.unwrap_or_default())
@@ -364,8 +370,13 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                         .map_err(rendering::scan_error)?;
                     // The lookups' sends, bytes, and time count in this
                     // scan's reported statistics.
-                    let (reverse_dns, lookups) =
-                        reverse::names(lookup, client, &report.hosts, started);
+                    let (reverse_dns, lookups) = reverse::names(
+                        lookup,
+                        client,
+                        &report.hosts,
+                        started,
+                        report.stats.packets_attempted > 0,
+                    );
                     report
                         .stats
                         .checked_add_assign(&lookups.unwrap_or_default())

@@ -40,8 +40,13 @@ pub(super) fn run(
                 // Socket statistics have no packet counters for the
                 // lookups' exchanges, which publish their own; their time
                 // still counts in elapsed.
-                let (names, lookups) =
-                    super::reverse::names(lookup, &client, &aggregate.report.hosts, started);
+                let (names, lookups) = super::reverse::names(
+                    lookup,
+                    &client,
+                    &aggregate.report.hosts,
+                    started,
+                    aggregate.report.stats.connections_attempted > 0,
+                );
                 if let Some(lookups) = &lookups {
                     aggregate.report.stats.elapsed = aggregate
                         .report
@@ -72,8 +77,13 @@ pub(super) fn run(
                     // Socket statistics have no packet counters for the
                     // lookups' exchanges, which publish their own; their time
                     // still counts in elapsed.
-                    let (reverse_dns, lookups) =
-                        super::reverse::names(lookup, client, &report.hosts, started);
+                    let (reverse_dns, lookups) = super::reverse::names(
+                        lookup,
+                        client,
+                        &report.hosts,
+                        started,
+                        report.stats.connections_attempted > 0,
+                    );
                     if let Some(lookups) = &lookups {
                         report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
                     }

@@ -54,29 +54,7 @@ pub(super) fn render_text(
         ))?;
         render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
         for evidence in &endpoint.probes {
-            write_stdout_line(format_args!(
-                "  sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
-                evidence.sequence,
-                evidence.attempt,
-                evidence.status.as_str(),
-                evidence.classification.as_str(),
-                evidence.sent_at,
-                optional_display(evidence.received_at),
-                optional_display(evidence.responder),
-                optional_duration(evidence.latency),
-                evidence.reason,
-            ))?;
-            if let Some(application) = &evidence.application {
-                write_stdout_line(format_args!(
-                    "    profile={} validation={}: {}",
-                    application.profile,
-                    application.status.as_str(),
-                    application.reason
-                ))?;
-            }
-            if let Some(frame) = &evidence.frame {
-                write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
-            }
+            render_probe_text("  ", evidence)?;
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
@@ -88,7 +66,9 @@ pub(super) fn render_text(
             captured_frame_text(&unattributed.frame)
         ))?;
     }
-    render_hosts_text(&result.plan, &result.hosts)?;
+    render_hosts_text(&result.plan, &result.hosts, |probe| {
+        render_probe_text("  probe ", probe)
+    })?;
     let rtt = result.rtt;
     write_summary_line(format_args!(
         // The totals span discovery, neighbor requests, and enrichment too.
@@ -161,6 +141,7 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
 fn render_hosts_text<P>(
     plan: &output::scan::plan::Plan,
     hosts: &[output::scan::host::Host<P>],
+    probe_text: impl Fn(&P) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
     if plan.discovery.mode == output::scan::plan::DiscoveryMode::Omitted
         && plan.discovery.reverse_dns.is_none()
@@ -190,11 +171,62 @@ fn render_hosts_text<P>(
                 optional_display(reason.observed_at.as_ref()),
             ))?;
         }
+        // Discovery probes belong to no endpoint, so their evidence is shown
+        // with the host it decided.
+        for probe in &host.probes {
+            probe_text(probe)?;
+        }
         if let Some(lookup) = &host.reverse_dns {
             write_stdout_line(format_args!("  {}", reverse_dns_text(lookup)))?;
         }
     }
     Ok(())
+}
+
+/// A raw probe's evidence line after `lead`, with any application and frame
+/// lines beneath it.
+fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "{lead}sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+        evidence.sequence,
+        evidence.attempt,
+        evidence.status.as_str(),
+        evidence.classification.as_str(),
+        evidence.sent_at,
+        optional_display(evidence.received_at),
+        optional_display(evidence.responder),
+        optional_duration(evidence.latency),
+        evidence.reason,
+    ))?;
+    let nested = " ".repeat(lead.len() + 2);
+    if let Some(application) = &evidence.application {
+        write_stdout_line(format_args!(
+            "{nested}profile={} validation={}: {}",
+            application.profile,
+            application.status.as_str(),
+            application.reason
+        ))?;
+    }
+    if let Some(frame) = &evidence.frame {
+        write_stdout_line(format_args!("{nested}frame {}", captured_frame_text(frame)))?;
+    }
+    Ok(())
+}
+
+/// A connect discovery probe's evidence line.
+fn connect_probe_text(probe: &output::scan::connect::Probe) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "  probe sequence={} port={} attempt={} outcome={} classification={} scheduled={} finished={} elapsed={} error={}",
+        probe.sequence,
+        probe.port,
+        probe.attempt,
+        probe.outcome,
+        probe.classification,
+        probe.scheduled_at,
+        optional_display(probe.finished_at.as_ref()),
+        duration_text(probe.elapsed),
+        optional_display(probe.error.as_ref().map(|error| &error.kind)),
+    ))
 }
 
 /// A host's neighbor line, with when its outcome was observed: a silent,
@@ -345,7 +377,7 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         ))?;
         render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
     }
-    render_hosts_text(&report.summary.plan, &report.hosts)?;
+    render_hosts_text(&report.summary.plan, &report.hosts, connect_probe_text)?;
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",
         report.summary.socket_stats.connections_attempted,

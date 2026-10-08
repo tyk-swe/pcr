@@ -215,6 +215,37 @@ fn an_unanswered_reverse_lookup_is_recorded_without_failing_the_scan() {
 }
 
 #[test]
+fn text_output_shows_each_hosts_discovery_probes() {
+    let (_listener, closed) = loopback_ports();
+    let ports = closed.to_string();
+    let output = run_success(&[
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--discovery",
+        "only",
+        "--discovery-probes",
+        "tcp",
+        "--discovery-ports",
+        &ports,
+        "--timeout-ms",
+        CONNECT_TIMEOUT_MS,
+    ]);
+    let text = String::from_utf8(output.stdout).unwrap();
+    let host = text
+        .lines()
+        .position(|line| line.starts_with("host 127.0.0.1 "))
+        .unwrap_or_else(|| panic!("no host line in {text:?}"));
+    let probe = text.lines().nth(host + 2).unwrap_or_default();
+    assert!(
+        probe.starts_with(&format!(
+            "  probe sequence=0 port={closed} attempt=1 outcome=refused "
+        )),
+        "the refusal that decided the host follows its reason: {text:?}"
+    );
+}
+
+#[test]
 fn the_plan_counts_discovery_exclusions_apart_from_the_scan() {
     let (_listener, closed) = loopback_ports();
     let discovery_ports = format!("{closed},9");

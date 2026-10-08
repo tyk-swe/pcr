@@ -38,7 +38,8 @@ pub(super) fn run(
                     .map_err(CliError::classified)?;
                 let mut aggregate = collector.finish(report).map_err(CliError::classified)?;
                 // Socket statistics have no packet counters for the
-                // lookups' exchanges; their time still counts in elapsed.
+                // lookups' exchanges, which publish their own; their time
+                // still counts in elapsed.
                 let (names, lookups) =
                     super::reverse::names(lookup, &client, &aggregate.report.hosts, started);
                 aggregate.report.stats.elapsed = aggregate
@@ -46,7 +47,7 @@ pub(super) fn run(
                     .stats
                     .elapsed
                     .saturating_add(lookups.elapsed);
-                Ok((aggregate, names))
+                Ok((aggregate, names, lookup.is_some().then_some(lookups)))
             }),
             run_with_events: Box::new({
                 let plan = plan.clone();
@@ -67,7 +68,8 @@ pub(super) fn run(
                         .finish(report.clone())
                         .map_err(CliError::classified)?;
                     // Socket statistics have no packet counters for the
-                    // lookups' exchanges; their time still counts in elapsed.
+                    // lookups' exchanges, which publish their own; their time
+                    // still counts in elapsed.
                     let (reverse_dns, lookups) =
                         super::reverse::names(lookup, client, &report.hosts, started);
                     report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
@@ -76,23 +78,24 @@ pub(super) fn run(
                         endpoints: aggregate.endpoints,
                         plan,
                         reverse_dns,
+                        reverse_dns_stats: lookup.is_some().then_some(lookups),
                     })
                 }
             }),
             on_event: emit_event,
             into_result: Box::new({
                 let plan = plan.clone();
-                move |(mut aggregate, names)| {
+                move |(mut aggregate, names, lookups)| {
                     let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
-                    output::scan::connect::Report::publish(aggregate, plan, names)
+                    output::scan::connect::Report::publish(aggregate, plan, names, lookups)
                         .map(|report| output::envelope::Published::new(report, diagnostics))
                         .map_err(CliError::classified)
                 }
             }),
-            render_text: Box::new(move |(mut aggregate, names), _| {
+            render_text: Box::new(move |(mut aggregate, names, lookups), _| {
                 let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
                 super::rendering::render_connect_text(
-                    &output::scan::connect::Report::publish(aggregate, plan, names)
+                    &output::scan::connect::Report::publish(aggregate, plan, names, lookups)
                         .map_err(CliError::classified)?,
                 )?;
                 crate::rendering::render_diagnostics_text(&diagnostics)
@@ -103,6 +106,7 @@ pub(super) fn run(
                     endpoints,
                     plan,
                     reverse_dns,
+                    reverse_dns_stats,
                 } = streamed;
                 for endpoint in endpoints {
                     stream.emit_data(
@@ -118,7 +122,7 @@ pub(super) fn run(
                 let diagnostics = std::mem::take(&mut report.diagnostics);
                 stream
                     .complete(
-                        output::scan::connect::Summary::new(report, plan),
+                        output::scan::connect::Summary::new(report, plan, reverse_dns_stats),
                         diagnostics,
                     )
                     .map_err(CliError::from)
@@ -132,6 +136,7 @@ struct Streamed {
     endpoints: Vec<connect::Endpoint>,
     plan: output::scan::plan::Plan,
     reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
+    reverse_dns_stats: Option<packetcraftr::Stats>,
 }
 
 fn emit_event(event: connect::Event, stream: &StreamEncoder) -> Result<(), CliError> {

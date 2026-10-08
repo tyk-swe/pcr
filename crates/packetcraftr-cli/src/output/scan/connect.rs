@@ -119,9 +119,17 @@ pub struct Summary {
     pub planned_duration: Duration,
     pub plan: super::plan::Plan,
     pub socket_stats: Stats,
+    /// The reverse-DNS lookups' packet statistics, which socket statistics
+    /// cannot hold; absent when no lookup ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse_dns_stats: Option<packetcraftr::Stats>,
 }
 impl Summary {
-    pub fn new(report: connect::Report, plan: super::plan::Plan) -> Self {
+    pub fn new(
+        report: connect::Report,
+        plan: super::plan::Plan,
+        reverse_dns_stats: Option<packetcraftr::Stats>,
+    ) -> Self {
         Self {
             method: "tcp_connect",
             target: report.target,
@@ -129,6 +137,7 @@ impl Summary {
             planned_duration: report.planned_duration,
             plan,
             socket_stats: report.stats.into(),
+            reverse_dns_stats,
         }
     }
 }
@@ -140,12 +149,14 @@ pub struct Report {
     pub endpoints: Vec<Endpoint>,
 }
 impl Report {
-    /// `reverse_dns` holds each host's lookup by position; it is empty when
-    /// none ran.
+    /// `reverse_dns` holds each host's lookup by position and
+    /// `reverse_dns_stats` their packet statistics; both are empty when none
+    /// ran.
     pub fn publish(
         aggregate: connect::Aggregate,
         plan: super::plan::Plan,
         reverse_dns: Vec<Option<super::host::ReverseDns>>,
+        reverse_dns_stats: Option<packetcraftr::Stats>,
     ) -> Result<Self, Error> {
         let connect::Aggregate {
             mut report,
@@ -160,7 +171,7 @@ impl Report {
                 Probe::try_from,
                 reverse_dns,
             )?,
-            summary: Summary::new(report, plan),
+            summary: Summary::new(report, plan, reverse_dns_stats),
             endpoints: endpoints
                 .into_iter()
                 .map(|endpoint| {

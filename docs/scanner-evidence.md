@@ -197,8 +197,10 @@ about the target:
   capture path delivered or lost.
 - `resolved_addresses`, `target`, `planned_duration`, `socket_stats`
   (`connections_scheduled`, `connections_attempted`, `connections_succeeded`,
-  `elapsed`, `rtt`), and the envelope fields `schema`, `command`, `mode`,
-  `sequence`, `event`, `resources`: operation metadata.
+  `elapsed`, `rtt`), a connect scan's `reverse_dns_stats` (the lookups'
+  execution accounting, which socket statistics cannot hold), and the
+  envelope fields `schema`, `command`, `mode`, `sequence`, `event`,
+  `resources`: operation metadata.
 
 ## Operational failures
 

@@ -8541,6 +8541,10 @@
         "socket_stats": {
           "$ref": "#/$defs/scanConnectStatistics"
         },
+        "reverse_dns_stats": {
+          "$ref": "#/$defs/operationStats",
+          "description": "Packet statistics of the reverse-DNS lookups, which socket statistics cannot hold; absent when no lookup ran."
+        },
         "plan": {
           "$ref": "#/$defs/scanPlan"
         }
@@ -8577,6 +8581,10 @@
         },
         "socket_stats": {
           "$ref": "#/$defs/scanConnectStatistics"
+        },
+        "reverse_dns_stats": {
+          "$ref": "#/$defs/operationStats",
+          "description": "Packet statistics of the reverse-DNS lookups, which socket statistics cannot hold; absent when no lookup ran."
         },
         "endpoints": {
           "type": "array",

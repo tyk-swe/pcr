@@ -2031,6 +2031,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   instead of failing each lookup after the scan.
 - `scan --reverse-dns` with a scoped server fails before any probe with
   `capability.dns_scope` instead of failing each lookup after the scan.
+- Connect scans with `--reverse-dns` publish the lookups' packet statistics
+  as `reverse_dns_stats` instead of dropping all but their elapsed time.
 - `scan --reverse-dns` authorizes all its lookups as one operation before the
   first batch, so more than 256 lookups no longer restart the `--max-packets`
   and `--max-bytes` budgets with each batch; lookups the policy refuses wait

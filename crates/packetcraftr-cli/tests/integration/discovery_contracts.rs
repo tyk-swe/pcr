@@ -186,6 +186,11 @@ fn reverse_names_come_from_the_dns_workflow_as_observations() {
             "names": ["loopback.example."],
         })
     );
+    // Socket statistics cannot hold the lookup's exchange, so it reports apart.
+    let lookups = &result["reverse_dns_stats"];
+    assert!(lookups["bytes"].as_u64().unwrap() > 0, "{lookups}");
+    let without = scan_json(&["--ports", &open]);
+    assert!(without["result"].get("reverse_dns_stats").is_none());
 }
 
 #[test]

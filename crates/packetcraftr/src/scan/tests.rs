@@ -1275,6 +1275,47 @@ fn multicast_targets_budget_and_bound_no_neighbor_request() {
     assert_eq!(report.stats.packets_attempted, 1);
 }
 
+#[test]
+fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_target() {
+    use super::discovery::{Mode, NeighborOutcome, Options};
+    use crate::probe::ProbeEndpoint;
+    let target = IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        probes: vec![ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    request.endpoints.clear();
+    request.attempts = 2;
+    // Two echoes and no neighbor request: the target's link address follows
+    // from its own.
+    request.limits.max_probes = 2;
+    let mut executor = LateEchoNeighbors {
+        neighbors: ScriptedNeighbors {
+            outcomes: [NeighborOutcome::NotApplicable].into(),
+            ..ScriptedNeighbors::default()
+        },
+        bytes: 64,
+        ..LateEchoNeighbors::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("two echoes fit max_probes = 2");
+}
+
 /// Answers the answered host's discovery echo and gives each scanned probe a
 /// late frame its outcome does not carry.
 struct SkippedHostExecutor {

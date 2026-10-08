@@ -756,8 +756,14 @@ fn plan_scan(
         &[]
     };
     let discovery_probes = probe_count(targets.len(), probes.len(), request.attempts)?;
+    // A multicast target's link address follows from its own, so neither
+    // discovery nor a stage asks for its neighbor.
+    let resolvable: Vec<&SelectedAddress> = targets
+        .iter()
+        .filter(|target| !target.address.is_multicast())
+        .collect();
     let explicit_requests = if discovery.runs() && discovery.neighbor {
-        probe_count(targets.len(), 1, request.attempts)?
+        probe_count(resolvable.len(), 1, request.attempts)?
     } else {
         0
     };
@@ -768,20 +774,14 @@ fn plan_scan(
     // Each stage resolves its probes' link-layer neighbors before sending
     // them: a fresh resolution asks for the target's neighbor, or its
     // gateway's, with at most one request each.
-    // A multicast target's link address follows from its own, so only the
-    // other targets' neighbors are resolved.
-    let resolvable = targets
-        .iter()
-        .filter(|target| !target.address.is_multicast())
-        .count();
     let resolves_next_hops =
-        total_probes > 0 && request.route.link_mode != Mode::Layer3 && resolvable > 0;
+        total_probes > 0 && request.route.link_mode != Mode::Layer3 && !resolvable.is_empty();
     // Explicit neighbor discovery runs first and covers those requests: an
     // answer stays in the operation's cache, a silent target is sent nothing
     // more, and a routed target, which it sends nothing, needs at most one
     // request for its gateway within its `attempts`.
     let implicit_requests = if resolves_next_hops && explicit_requests == 0 {
-        resolvable
+        resolvable.len()
     } else {
         0
     };
@@ -819,7 +819,7 @@ fn plan_scan(
             .ok_or_else(overflow)?,
         request.limits.max_probes,
     )?;
-    let neighbor_frames = targets.iter().try_fold(0u64, |total, target| {
+    let neighbor_frames = resolvable.iter().try_fold(0u64, |total, target| {
         let frame = if target.address.is_ipv4() {
             IPV4_NEIGHBOR_BYTES
         } else {

@@ -113,13 +113,14 @@ impl Options {
     }
 
     /// These options with cache limits that keep every answer for a whole
-    /// operation: an entry that expired mid-operation would invite a second
-    /// request beyond the first.
+    /// operation resolving up to `max_neighbors` neighbors: an entry that
+    /// expired or was evicted mid-operation would invite a second request
+    /// beyond the first.
     #[must_use]
-    pub(super) fn for_operation(&self) -> Self {
+    pub(super) fn for_operation(&self, max_neighbors: usize) -> Self {
         Self {
             cache_ttl: MAX_CONFIGURED_CACHE_TTL,
-            max_cache_entries: MAX_CONFIGURED_CACHE_ENTRIES,
+            max_cache_entries: max_neighbors.max(self.max_cache_entries),
             ..self.clone()
         }
     }
@@ -155,6 +156,21 @@ mod tests {
             Options::default().max_cache_entries
         );
         assert_eq!(options.attempt_timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn an_operation_keeps_an_answer_for_every_neighbor_it_may_resolve() {
+        let options = Options::default();
+        let neighbors = MAX_CONFIGURED_CACHE_ENTRIES + 1;
+        assert_eq!(
+            options.for_operation(neighbors).max_cache_entries,
+            neighbors
+        );
+        assert_eq!(
+            options.for_operation(1).max_cache_entries,
+            options.max_cache_entries
+        );
+        assert_eq!(options.for_operation(1).cache_ttl, MAX_CONFIGURED_CACHE_TTL);
     }
 
     #[test]

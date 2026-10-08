@@ -1958,6 +1958,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   evidence limits instead of the resolver's capture defaults.
 - A scan keeps its operation-wide neighbor answers in a cache of its own, so a
   reused client's shared neighbor cache keeps its configured TTL and entry limit.
+- A scan's operation-wide neighbor cache holds an answer for every target
+  the scan may admit, so a scan beyond the configured cache limit never
+  evicts an answer and requests it again.
 - Link-layer raw scans reject evidence limits too small to hold a neighbor
   reply before sending, as explicit neighbor discovery does, instead of
   silently raising them for the implicit resolution.

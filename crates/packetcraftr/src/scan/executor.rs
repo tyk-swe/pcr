@@ -109,10 +109,53 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     configured: Option<Client<P, K>>,
     send: crate::send::Options,
     collection: crate::exchange::Collection,
-    /// Neighbor captures buffer no more than the scan's evidence bounds.
-    neighbor_capture: (usize, usize),
-    /// The wait one implicit neighbor resolution gets per fresh answer.
+    neighbors: NeighborBounds,
+}
+
+/// How a scan bounds every neighbor resolution of its operation.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NeighborBounds {
+    link_mode: Mode,
+    /// The wait one resolution gets per fresh answer.
     attempt_timeout: Duration,
+    /// Neighbor captures buffer no more than the scan's evidence bounds.
+    max_frames: usize,
+    max_bytes: usize,
+    /// Each admitted target has at most one neighbor the operation resolves.
+    max_neighbors: usize,
+}
+
+impl NeighborBounds {
+    pub(crate) fn of(request: &Request) -> Self {
+        Self {
+            link_mode: request.route.link_mode,
+            attempt_timeout: request.timeout,
+            max_frames: request.limits.max_evidence_frames,
+            max_bytes: request.limits.max_evidence_bytes,
+            max_neighbors: request.limits.max_targets,
+        }
+    }
+
+    /// `neighbors` narrowed for the operation. The operation's budget counts
+    /// at most one request per admitted target's neighbor, so the narrowed
+    /// resolver sends at most one per fresh answer and keeps the answer for
+    /// the rest of the operation, bounded by the scan's evidence limits like
+    /// an explicit capture. A layer-3 route resolves no neighbor, so its
+    /// evidence limits need not hold a reply.
+    pub(crate) fn narrow(
+        self,
+        neighbors: &crate::neighbor::State,
+    ) -> Result<crate::neighbor::State, crate::neighbor::Error> {
+        if self.link_mode == Mode::Layer3 {
+            return Ok(neighbors.clone());
+        }
+        neighbors.one_attempt(
+            self.attempt_timeout,
+            self.max_frames,
+            self.max_bytes,
+            self.max_neighbors,
+        )
+    }
 }
 
 impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
@@ -128,11 +171,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 allow_permissive_live: false,
             },
             collection: request.collection.clone(),
-            neighbor_capture: (
-                request.limits.max_evidence_frames,
-                request.limits.max_evidence_bytes,
-            ),
-            attempt_timeout: request.timeout,
+            neighbors: NeighborBounds::of(request),
         }
     }
 
@@ -154,20 +193,11 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // so its neighbor request is authorized like the explicit one.
                 client.authorize_neighbor_requests = true;
                 // A stage resolves each probe's link-layer neighbor before
-                // its exchanges. The operation's budget counts at most one
-                // request per selected target's neighbor, so the resolver
-                // they share sends at most one and keeps the answer for the
-                // rest of the operation, bounded by the scan's evidence
-                // limits like an explicit capture.
-                // A layer-3 route resolves no neighbor, so its evidence
-                // limits need not hold a reply.
-                if self.send.plan.link_mode != Mode::Layer3 {
-                    let (max_frames, max_bytes) = self.neighbor_capture;
-                    client.neighbors = client
-                        .neighbors
-                        .one_attempt(self.attempt_timeout, max_frames, max_bytes)
-                        .map_err(BoundaryError::from_error)?;
-                }
+                // its exchanges, through the resolver they all share.
+                client.neighbors = self
+                    .neighbors
+                    .narrow(&client.neighbors)
+                    .map_err(BoundaryError::from_error)?;
                 configured.insert(client)
             }
         })
@@ -259,7 +289,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         deadline: &Deadline,
     ) -> Result<(Neighbor, Stats), BoundaryError> {
         let base = self.send.clone();
-        let (max_frames, max_bytes) = self.neighbor_capture;
+        let (max_frames, max_bytes) = (self.neighbors.max_frames, self.neighbors.max_bytes);
         // The operation's client keeps every answer for its probes.
         let client = self.configured()?;
         let packet = route_probe(target).packet();

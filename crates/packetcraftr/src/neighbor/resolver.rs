@@ -61,6 +61,9 @@ pub(crate) struct State {
     /// One operation's answers, kept for the whole operation so the shared
     /// cache never holds an entry longer, or more entries, than configured.
     operation: Option<Arc<NeighborCache>>,
+    /// The most answers the operation keeps: at least one per neighbor it
+    /// may resolve, so no answer is evicted and requested again.
+    operation_entries: usize,
 }
 
 impl State {
@@ -70,6 +73,7 @@ impl State {
             options,
             cache: Arc::new(NeighborCache::default()),
             operation: None,
+            operation_entries: 0,
         })
     }
 
@@ -89,6 +93,7 @@ impl State {
         .map(|state| Self {
             cache: Arc::clone(&self.cache),
             operation: self.operation.clone(),
+            operation_entries: self.operation_entries,
             ..state
         })
     }
@@ -97,12 +102,14 @@ impl State {
     /// fresh resolution, waiting at most `attempt_timeout` for its reply and
     /// capturing at most `max_frames` frames and `max_bytes` bytes. Its
     /// answers also live in a cache of its own for the whole operation, so a
-    /// resolution never has to run twice inside it.
+    /// resolution never has to run twice inside it, sized for at least
+    /// `max_neighbors` answers.
     pub(crate) fn one_attempt(
         &self,
         attempt_timeout: std::time::Duration,
         max_frames: usize,
         max_bytes: usize,
+        max_neighbors: usize,
     ) -> Result<Self, Error> {
         Self::try_new(
             self.options
@@ -111,6 +118,7 @@ impl State {
         .map(|state| Self {
             cache: Arc::clone(&self.cache),
             operation: Some(self.operation.clone().unwrap_or_default()),
+            operation_entries: max_neighbors.max(self.operation_entries),
             ..state
         })
     }
@@ -132,14 +140,22 @@ impl State {
         // The operation keeps a shared answer it relied on, so the entry's
         // expiry cannot invite another request within the operation.
         if let Some(mac_address) = shared {
-            operation.insert(mac_address, key.clone(), &self.options.for_operation())?;
+            operation.insert(
+                mac_address,
+                key.clone(),
+                &self.options.for_operation(self.operation_entries),
+            )?;
         }
         Ok(shared)
     }
 
     fn remember(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), Error> {
         if let Some(operation) = &self.operation {
-            operation.insert(mac_address, key.clone(), &self.options.for_operation())?;
+            operation.insert(
+                mac_address,
+                key.clone(),
+                &self.options.for_operation(self.operation_entries),
+            )?;
         }
         self.cache.insert(mac_address, key, &self.options)
     }

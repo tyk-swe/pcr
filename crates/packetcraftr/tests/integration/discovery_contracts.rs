@@ -16,6 +16,7 @@ use packetcraftr::scan::{self, Reply, Request, Stage, connect};
 use packetcraftr::target::{Family, Specification, Target};
 use packetcraftr::{ProviderSet, route};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_netio::interface::Id;
@@ -399,6 +400,50 @@ fn unauthorized_targets_draw_no_neighbor_request() {
         Err(scan::Error::Authorization(_))
     ));
     assert!(steps.take().is_empty());
+}
+
+#[test]
+fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
+    let steps = Steps::default();
+    let client = |allowed: &[&str]| {
+        Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: allowed
+                    .iter()
+                    .map(|text| DestinationConstraint::Exact(address(text)))
+                    .collect(),
+                ..Policy::default()
+            },
+            common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+        )
+    };
+    let mut request = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    let error = client(&[FIRST])
+        .scan(request.clone(), scan::Collector::default())
+        .expect_err("the policy denies the gateway the probe resolves");
+    assert_eq!(
+        error.classification().code,
+        "policy.destination_not_allowed",
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty());
+
+    client(&[FIRST, GATEWAY])
+        .scan(request, scan::Collector::default())
+        .expect("an authorized gateway is resolved");
+    assert!(matches!(
+        steps.take().as_slice(),
+        [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
+    ));
 }
 
 fn connect_scan(request: Request) -> (Result<connect::Aggregate, scan::Error>, Vec<SocketAddr>) {

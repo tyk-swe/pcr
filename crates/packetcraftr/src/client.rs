@@ -24,6 +24,10 @@ pub struct Client<P, K = SystemClock> {
     /// Scoping it here keeps one client's publication failures out of every other client.
     pub(crate) runtime: Runtime,
     pub(crate) neighbors: neighbor::State,
+    /// Whether materialization authorizes each neighbor request like a
+    /// prepared packet before resolving it, so a next hop the policy denies
+    /// is never sent one.
+    pub(crate) authorize_neighbor_requests: bool,
     pub(crate) interfaces: route::ResolvedInterface,
     pub(crate) cancellation: Option<Cancellation>,
 }
@@ -37,6 +41,7 @@ impl<P> Client<P> {
             clock: SystemClock,
             runtime: Runtime::default(),
             neighbors: neighbor::State::default(),
+            authorize_neighbor_requests: false,
             interfaces: route::ResolvedInterface::default(),
             cancellation: None,
         }
@@ -53,6 +58,7 @@ impl<P, K: Clock> Client<P, K> {
             clock,
             runtime: self.runtime,
             neighbors: self.neighbors,
+            authorize_neighbor_requests: self.authorize_neighbor_requests,
             interfaces: self.interfaces,
             cancellation: self.cancellation,
         }
@@ -120,6 +126,7 @@ impl<P, K: Clock> Client<P, K> {
             clock: self.clock.clone(),
             runtime: self.runtime.clone(),
             neighbors: self.neighbors.clone(),
+            authorize_neighbor_requests: self.authorize_neighbor_requests,
             interfaces: self.interfaces.clone(),
             cancellation: self.cancellation.clone(),
         }

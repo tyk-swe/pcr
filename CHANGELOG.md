@@ -1958,6 +1958,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Link-layer raw scans reject evidence limits too small to hold a neighbor
   reply before sending, as explicit neighbor discovery does, instead of
   silently raising them for the implicit resolution.
+- Raw scans authorize the neighbor request a probe's route resolves, such as
+  a gateway's, against the destination allowlist and the route's sources
+  before sending it, as explicit neighbor discovery does.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

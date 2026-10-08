@@ -350,7 +350,9 @@ The record keeps these rules:
 - `not_requested` and `skipped` are labels, not measurements.
 - A routed target is sent no neighbor request. Its gateway appears under
   `neighbor.next_hop`, with a link address only when the neighbor cache
-  already holds one, and never as the target's link or a reason. A target
+  already holds one, and never as the target's link or a reason. A probe to
+  a routed target still resolves the gateway, and that request is sent only
+  when the policy authorizes the gateway like any destination. A target
   whose own neighbor reply carries the same link address as another address
   of the same family on the same interface, whether a target or a next hop,
   is flagged `possible_proxy`; PacketcraftR does not assert a cause. A

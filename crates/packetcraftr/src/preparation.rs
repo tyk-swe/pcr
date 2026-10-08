@@ -339,6 +339,13 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             preliminary_build,
         } = admitted;
         self.check()?;
+        if self.client.authorize_neighbor_requests && plan.needs_neighbor_resolution() {
+            authorize_neighbor_request(
+                &self.client.policy,
+                &route::neighbor_request(&plan)?,
+                &plan,
+            )?;
+        }
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
         let providers = &self.client.providers;
@@ -364,6 +371,21 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         self.authorize_built(&built, &route.plan)?;
         Ok(PreparedPacket { built, route })
     }
+}
+
+/// Authorizes the neighbor request `plan` resolves before the resolver sends
+/// it: the address it asks for and every source of the exact frame. An NDP
+/// solicitation goes to the target's solicited-node group, so the address it
+/// asks for is authorized rather than the group.
+pub(crate) fn authorize_neighbor_request(
+    policy: &Policy,
+    request: &crate::neighbor::Request,
+    plan: &route::Plan,
+) -> Result<(), Error> {
+    let frame = crate::neighbor::request_frame(request).map_err(route::Error::from)?;
+    let decoded = crate::policy::decode_wire(request.link_type, &frame)?;
+    policy.authorize_destination(request.target)?;
+    Ok(policy.authorize_packet_sources(&decoded.packet, plan)?)
 }
 
 pub(crate) struct Admitting<'c, P, K> {

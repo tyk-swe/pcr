@@ -129,6 +129,9 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 let registry: Arc<Registry> =
                     registry::configured(self.client.registry(), &self.bindings)?;
                 let mut client = self.client.view_with_registry(registry);
+                // A probe's next hop may be a gateway no target authorized,
+                // so its neighbor request is authorized like the explicit one.
+                client.authorize_neighbor_requests = true;
                 // Materializing a probe's link-layer route resolves its
                 // neighbor inside the exchange. The operation's budget
                 // counts at most one request per selected target's neighbor,
@@ -276,18 +279,10 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             );
         }
         // The resolver sends exactly this frame, so its final bytes are checked
-        // like a prepared packet's. An NDP solicitation goes to the target's
-        // solicited-node group, so the address it asks for is authorized
-        // rather than the group, and every source must be the route's own.
-        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
-        crate::policy::decode_wire(request.link_type, &frame)
-            .and_then(|decoded| {
-                client.policy.authorize_destination(request.target)?;
-                client
-                    .policy
-                    .authorize_packet_sources(&decoded.packet, plan)
-            })
+        // like a prepared packet's.
+        crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
             .map_err(BoundaryError::from_error)?;
+        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
         let (max_frames, max_bytes) = self.neighbor_capture;
         let state = client
             .neighbors

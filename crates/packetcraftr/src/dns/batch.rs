@@ -72,13 +72,13 @@ impl Request {
     }
 }
 
-/// The traffic limits `questions` need together, for a workflow that splits
-/// more questions than one batch takes across batches to authorize once, as
-/// one operation, before the first; each batch still authorizes its own.
-///
-/// The limits include the neighbor request a link-layer route may send
-/// before each UDP packet.
-pub fn limits<Q>(questions: impl IntoIterator<Item = Q>) -> Result<DnsOperation, Error>
+/// The traffic limits `questions` need together, including the
+/// `neighbor_attempts` requests a link-layer route may send before each UDP
+/// packet.
+pub(crate) fn limits<Q>(
+    questions: impl IntoIterator<Item = Q>,
+    neighbor_attempts: u64,
+) -> Result<DnsOperation, Error>
 where
     Q: Borrow<super::Request>,
 {
@@ -86,7 +86,9 @@ where
     let operations = questions.into_iter().map_while(|question| {
         let question = question.borrow();
         PreparedOperation::new(question)
-            .and_then(|prepared| with_neighbor_requests(question, prepared.limits))
+            .and_then(|prepared| {
+                with_neighbor_requests(question, prepared.limits, neighbor_attempts)
+            })
             .map_err(|error| failure = Some(error))
             .ok()
     });
@@ -94,12 +96,13 @@ where
     failure.map_or(Ok(limits), Err)
 }
 
-/// Charges one neighbor request before each of a question's UDP packets
-/// whose route may resolve a link-layer neighbor: an unanswered request is
-/// not remembered, so every packet may ask again.
+/// Charges `attempts` neighbor requests before each of a question's UDP
+/// packets whose route may resolve a link-layer neighbor: an unanswered
+/// resolution is not remembered, so every packet may ask again.
 fn with_neighbor_requests(
     question: &super::Request,
     limits: DnsOperation,
+    attempts: u64,
 ) -> Result<DnsOperation, Error> {
     if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
         return Ok(limits);
@@ -112,9 +115,9 @@ fn with_neighbor_requests(
         _ => crate::neighbor::IPV6_REQUEST_BYTES,
     };
     let udp = limits.udp();
-    let packets = udp.packets().checked_mul(2).ok_or(LimitOverflow)?;
-    let bytes = udp
-        .packets()
+    let requests = udp.packets().checked_mul(attempts).ok_or(LimitOverflow)?;
+    let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
+    let bytes = requests
         .checked_mul(request_bytes)
         .and_then(|requests| requests.checked_add(udp.wire_bytes()))
         .ok_or(LimitOverflow)?;

@@ -96,7 +96,7 @@ impl Lookup {
             .queries_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
-        let authorized = self.authorize(client.policy(), hosts);
+        let authorized = self.authorize(client, hosts);
         // Questions the policy refused are never sent, so no batch waits for
         // them.
         let pause = if authorized.is_ok() {
@@ -132,11 +132,7 @@ impl Lookup {
     /// Authorizes every lookup `hosts` may need as one operation, so that
     /// splitting them into batches never restarts the policy's packet and
     /// byte budgets.
-    fn authorize(
-        &self,
-        policy: &packetcraftr::policy::Policy,
-        hosts: &[Host],
-    ) -> Result<(), String> {
+    fn authorize(&self, client: &Client, hosts: &[Host]) -> Result<(), String> {
         let mut failure = None;
         let questions = hosts
             .iter()
@@ -146,11 +142,14 @@ impl Lookup {
                     .map_err(|error| failure = Some(error.to_string()))
                     .ok()
             });
-        let limits = batch::limits(questions).map_err(|error| error.to_string());
+        let limits = client
+            .dns_limits(questions)
+            .map_err(|error| error.to_string());
         if let Some(error) = failure {
             return Err(error);
         }
-        policy
+        client
+            .policy()
             .authorize(packetcraftr::policy::Operation::Dns(limits?))
             .map_err(|error| error.to_string())
     }
@@ -291,16 +290,19 @@ fn retain_names(lookup: &mut ReverseDns, budget: &mut usize) {
 }
 
 /// Each host's lookup by position, or nothing when no server was requested,
-/// plus the lookups' exchange statistics.
+/// plus the lookups' exchange statistics, absent when no host was looked up.
 pub(super) fn names(
     lookup: Option<&Lookup>,
     client: &Client,
     hosts: &[Host],
     started: Instant,
-) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
-    lookup.map_or_else(Default::default, |lookup| {
-        lookup.run(client, hosts, started)
-    })
+) -> (Vec<Option<ReverseDns>>, Option<packetcraftr::Stats>) {
+    let Some(lookup) = lookup else {
+        return Default::default();
+    };
+    let (names, stats) = lookup.run(client, hosts, started);
+    let looked_up = names.iter().any(Option::is_some);
+    (names, looked_up.then_some(stats))
 }
 
 #[cfg(test)]
@@ -357,36 +359,78 @@ mod tests {
         }
     }
 
+    /// A client whose policy allows `packets` per operation and whose
+    /// resolver sends up to `neighbor_attempts` requests per resolution.
+    fn budget_client(packets: usize, neighbor_attempts: u32) -> Client {
+        crate::system::client(
+            packetcraftr_core::protocol::builtin::registry(),
+            packet_budget(packets),
+            crate::system::Runtime::Client,
+        )
+        .with_neighbor_options(packetcraftr::neighbor::Options {
+            max_attempts: neighbor_attempts,
+            ..packetcraftr::neighbor::Options::default()
+        })
+        .expect("valid resolver options")
+    }
+
     #[test]
     fn every_batch_of_lookups_shares_one_policy_budget() {
         let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
-        let policy = packet_budget(batch::MAX_QUESTIONS);
+        let client = budget_client(batch::MAX_QUESTIONS, 3);
         assert_eq!(
-            lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS)),
+            lookup.authorize(&client, &responding(batch::MAX_QUESTIONS)),
             Ok(())
         );
         // Two batches, each within the budget alone, exceed it together.
         assert!(
             lookup
-                .authorize(&policy, &responding(2 * batch::MAX_QUESTIONS))
+                .authorize(&client, &responding(2 * batch::MAX_QUESTIONS))
                 .is_err()
         );
     }
 
     #[test]
-    fn link_layer_lookups_budget_a_neighbor_request_per_query() {
+    fn link_layer_lookups_budget_every_neighbor_attempt_per_query() {
         let lookup = udp_lookup(packetcraftr_netio::link::Mode::Auto);
-        // Enough for the queries alone, not for a neighbor request before each.
-        let policy = packet_budget(batch::MAX_QUESTIONS);
-        assert!(
-            lookup
-                .authorize(&policy, &responding(batch::MAX_QUESTIONS))
-                .is_err()
+        // Enough for the queries alone, not for the requests before each.
+        let budget = batch::MAX_QUESTIONS;
+        for (attempts, fits) in [(1, budget / 2), (3, budget / 4)] {
+            let client = budget_client(budget, attempts);
+            assert_eq!(
+                lookup.authorize(&client, &responding(fits)),
+                Ok(()),
+                "{attempts}"
+            );
+            assert!(
+                lookup.authorize(&client, &responding(fits + 1)).is_err(),
+                "{attempts}"
+            );
+        }
+    }
+
+    #[test]
+    fn hosts_that_never_responded_report_no_lookup_statistics() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let client = crate::system::client(
+            packetcraftr_core::protocol::builtin::registry(),
+            packet_budget(1),
+            crate::system::Runtime::Client,
         );
-        assert_eq!(
-            lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS / 2)),
-            Ok(())
-        );
+        let silent: Vec<Host> = responding(2)
+            .into_iter()
+            .map(|host| Host {
+                state: State::NoResponse,
+                ..host
+            })
+            .collect();
+        let (records, stats) = names(Some(&lookup), &client, &silent, Instant::now());
+        assert_eq!(records, [None, None]);
+        assert_eq!(stats, None, "no lookup ran, so none has statistics");
+        // A refused lookup still leaves a record, and its statistics.
+        let (records, stats) = names(Some(&lookup), &client, &responding(1), Instant::now());
+        assert!(records[0].is_some());
+        assert!(stats.is_some());
     }
 
     #[test]

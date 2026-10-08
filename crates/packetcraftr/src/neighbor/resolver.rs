@@ -128,6 +128,11 @@ impl State {
         })
     }
 
+    /// The most requests one resolution sends.
+    pub(crate) fn max_attempts(&self) -> u32 {
+        self.options.max_attempts
+    }
+
     /// The unexpired cache entry for `request`, without sending anything.
     pub(crate) fn cached(&self, request: &Request) -> Result<Option<MacAddress>, Error> {
         validate_request(request)?;

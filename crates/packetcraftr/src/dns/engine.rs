@@ -65,6 +65,22 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
         )
     }
 
+    /// The traffic limits `questions` need together, for a workflow that
+    /// splits more questions than one batch takes across batches to
+    /// authorize once, as one operation, before the first; each batch still
+    /// authorizes its own. The limits include every request this client's
+    /// neighbor resolver may send before each UDP packet on a link-layer
+    /// route.
+    pub fn dns_limits<Q>(
+        &self,
+        questions: impl IntoIterator<Item = Q>,
+    ) -> Result<DnsOperation, Error>
+    where
+        Q: std::borrow::Borrow<Request>,
+    {
+        batch::limits(questions, u64::from(self.neighbors.max_attempts()))
+    }
+
     /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
     /// Question failures are reported in the returned [`batch::Report`], not as errors.
     pub fn dns_batch<S>(&self, request: batch::Request, sink: S) -> Result<batch::Report, Error>

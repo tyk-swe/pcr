@@ -42,12 +42,14 @@ pub(super) fn run(
                 // still counts in elapsed.
                 let (names, lookups) =
                     super::reverse::names(lookup, &client, &aggregate.report.hosts, started);
-                aggregate.report.stats.elapsed = aggregate
-                    .report
-                    .stats
-                    .elapsed
-                    .saturating_add(lookups.elapsed);
-                Ok((aggregate, names, lookup.is_some().then_some(lookups)))
+                if let Some(lookups) = &lookups {
+                    aggregate.report.stats.elapsed = aggregate
+                        .report
+                        .stats
+                        .elapsed
+                        .saturating_add(lookups.elapsed);
+                }
+                Ok((aggregate, names, lookups))
             }),
             run_with_events: Box::new({
                 let plan = plan.clone();
@@ -72,13 +74,15 @@ pub(super) fn run(
                     // still counts in elapsed.
                     let (reverse_dns, lookups) =
                         super::reverse::names(lookup, client, &report.hosts, started);
-                    report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
+                    if let Some(lookups) = &lookups {
+                        report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
+                    }
                     Ok(Streamed {
                         report,
                         endpoints: aggregate.endpoints,
                         plan,
                         reverse_dns,
-                        reverse_dns_stats: lookup.is_some().then_some(lookups),
+                        reverse_dns_stats: lookups,
                     })
                 }
             }),

@@ -327,7 +327,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 let (names, lookups) = reverse::names(lookup, &client, &aggregate.hosts, started);
                 aggregate
                     .stats
-                    .checked_add_assign(&lookups)
+                    .checked_add_assign(&lookups.unwrap_or_default())
                     .map_err(|error| CliError::caused(Kind::Internal, &error))?;
                 Ok((aggregate, names))
             }),
@@ -368,7 +368,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                         reverse::names(lookup, client, &report.hosts, started);
                     report
                         .stats
-                        .checked_add_assign(&lookups)
+                        .checked_add_assign(&lookups.unwrap_or_default())
                         .map_err(|error| CliError::caused(Kind::Internal, &error))?;
                     Ok(Streamed {
                         report,

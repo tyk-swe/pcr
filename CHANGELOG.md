@@ -736,9 +736,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   answer section. `Client::with_neighbor_request_authorization` authorizes
   every neighbor request a workflow's route resolves, as scans always do.
   `Client::with_scan_neighbors` bounds and paces a client's neighbor
-  resolutions as a scan's. `dns::batch::limits` totals the traffic limits of
-  questions a workflow splits across batches, including the neighbor request
-  a link-layer route may send before each UDP packet.
+  resolutions as a scan's. `Client::dns_limits` totals the traffic limits of
+  questions a workflow splits across batches, including every request the
+  client's neighbor resolver may send before each UDP packet on a link-layer
+  route. A failure after a packet's route sent neighbor requests reads and
+  classifies as before but wraps as `Error::NeighborSpent`, which carries
+  their statistics.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -2040,13 +2043,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `scan --reverse-dns` with a scoped server fails before any probe with
   `capability.dns_scope` instead of failing each lookup after the scan.
 - Connect scans with `--reverse-dns` publish the lookups' packet statistics
-  as `reverse_dns_stats` instead of dropping all but their elapsed time.
+  as `reverse_dns_stats` instead of dropping all but their elapsed time; the
+  field stays absent when no host was looked up.
 - `scan --reverse-dns` authorizes all its lookups as one operation before the
   first batch, so more than 256 lookups no longer restart the `--max-packets`
   and `--max-bytes` budgets with each batch; lookups the policy refuses wait
   for no `--rate` pause.
-- `scan --reverse-dns` on a link-layer route budgets a neighbor request before
-  each UDP query against `--max-packets` and `--max-bytes`.
+- `scan --reverse-dns` on a link-layer route budgets every request the
+  client's neighbor resolver may send before each UDP query against
+  `--max-packets` and `--max-bytes`.
 - Text scan output shows when each neighbor outcome was `observed`, and its
   summary counts the operation's completed packets, which include discovery,
   neighbor, and reverse-DNS traffic, instead of calling them probes.

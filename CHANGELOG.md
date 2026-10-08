@@ -1966,6 +1966,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Link-layer raw scans reject evidence limits too small to hold a neighbor
   reply before sending, as explicit neighbor discovery does, instead of
   silently raising them for the implicit resolution.
+- Neighbor captures, explicit or implicit, cut frames at the scan's
+  `--snap-length` instead of the resolver's default, and a link-layer scan
+  rejects a snap length too short for a neighbor reply before sending.
 - Raw scans authorize the neighbor request a probe's route resolves, such as
   a gateway's, against the destination allowlist and the route's sources
   before sending it, as explicit neighbor discovery does.

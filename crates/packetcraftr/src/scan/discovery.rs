@@ -66,6 +66,7 @@ impl Options {
     pub(super) fn validate(
         &self,
         timeout: Duration,
+        snap_length: usize,
         route: &crate::route::Options,
         limits: &super::Limits,
     ) -> Result<(), Error> {
@@ -112,11 +113,12 @@ impl Options {
                     timeout,
                     limits.max_evidence_frames,
                     limits.max_evidence_bytes,
+                    snap_length,
                 )
                 .validate()
                 .map_err(|source| Error::InvalidDiscovery {
                     message: format!(
-                        "neighbor discovery cannot use the scan timeout and evidence limits: {source}"
+                        "neighbor discovery cannot use the scan timeout, snap length, and evidence limits: {source}"
                     ),
                 })?;
         }

@@ -289,6 +289,7 @@ fn limits() -> crate::scan::Limits {
 fn validate(options: &Options) -> Result<(), Error> {
     options.validate(
         Duration::from_secs(1),
+        2048,
         &crate::route::Options::default(),
         &limits(),
     )
@@ -361,7 +362,7 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
     };
     assert!(
         neighbor
-            .validate(Duration::from_secs(1), &layer3, &limits())
+            .validate(Duration::from_secs(1), 2048, &layer3, &limits())
             .is_err()
     );
     // The resolver's own bounds apply to the scan's timeout and evidence
@@ -369,7 +370,7 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
     let default_route = crate::route::Options::default();
     assert!(
         neighbor
-            .validate(Duration::from_secs(31), &default_route, &limits())
+            .validate(Duration::from_secs(31), 2048, &default_route, &limits())
             .is_err()
     );
     let unsnappable = crate::scan::Limits {
@@ -378,7 +379,13 @@ fn options_reject_probes_that_would_not_run_or_cannot_be_bounded() {
     };
     assert!(
         neighbor
-            .validate(Duration::from_secs(1), &default_route, &unsnappable)
+            .validate(Duration::from_secs(1), 2048, &default_route, &unsnappable)
             .is_err()
+    );
+    assert!(
+        neighbor
+            .validate(Duration::from_secs(1), 64, &default_route, &limits())
+            .is_err(),
+        "the scan's snap length bounds each reply like its evidence limits"
     );
 }

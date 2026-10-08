@@ -121,6 +121,8 @@ pub(crate) struct NeighborBounds {
     /// Neighbor captures buffer no more than the scan's evidence bounds.
     max_frames: usize,
     max_bytes: usize,
+    /// Nor does any captured frame exceed the scan's snap length.
+    snap_length: usize,
     /// Each admitted target has at most one neighbor the operation resolves.
     max_neighbors: usize,
 }
@@ -132,6 +134,7 @@ impl NeighborBounds {
             attempt_timeout: request.timeout,
             max_frames: request.limits.max_evidence_frames,
             max_bytes: request.limits.max_evidence_bytes,
+            snap_length: request.collection.capture.snap_length,
             max_neighbors: request.limits.max_targets,
         }
     }
@@ -153,6 +156,7 @@ impl NeighborBounds {
             self.attempt_timeout,
             self.max_frames,
             self.max_bytes,
+            self.snap_length,
             self.max_neighbors,
         )
     }
@@ -289,7 +293,12 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         deadline: &Deadline,
     ) -> Result<(Neighbor, Stats), BoundaryError> {
         let base = self.send.clone();
-        let (max_frames, max_bytes) = (self.neighbors.max_frames, self.neighbors.max_bytes);
+        let NeighborBounds {
+            max_frames,
+            max_bytes,
+            snap_length,
+            ..
+        } = self.neighbors;
         // The operation's client keeps every answer for its probes.
         let client = self.configured()?;
         let packet = route_probe(target).packet();
@@ -354,7 +363,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
         let state = client
             .neighbors
-            .single_attempt(timeout, max_frames, max_bytes)
+            .single_attempt(timeout, max_frames, max_bytes, snap_length)
             .map_err(BoundaryError::from_error)?;
         let providers = &client.providers;
         let started = std::time::Instant::now();

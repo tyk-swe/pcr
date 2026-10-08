@@ -249,8 +249,12 @@ impl Request {
             });
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
-        self.discovery
-            .validate(self.timeout, &self.route, &self.limits)?;
+        self.discovery.validate(
+            self.timeout,
+            self.collection.capture.snap_length,
+            &self.route,
+            &self.limits,
+        )?;
         self.validate_endpoints()
     }
 

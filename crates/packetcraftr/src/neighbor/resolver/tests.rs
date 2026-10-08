@@ -579,7 +579,7 @@ fn an_operation_keeps_an_answer_per_neighbor_without_stretching_the_shared_cache
     })
     .expect("valid options");
     let operation = shared
-        .one_attempt(Duration::from_millis(100), 4, 512, 2)
+        .one_attempt(Duration::from_millis(100), 4, 512, 512, 2)
         .expect("valid narrowed options");
     let first = request();
     let second = Request {
@@ -596,7 +596,7 @@ fn an_operation_keeps_an_answer_per_neighbor_without_stretching_the_shared_cache
     assert_eq!(shared.cached(&first).expect("lookup"), None);
     assert_eq!(shared.cached(&second).expect("lookup"), Some(link));
     let explicit = operation
-        .single_attempt(Duration::from_millis(100), 4, 512)
+        .single_attempt(Duration::from_millis(100), 4, 512, 512)
         .expect("valid narrowed options");
     for request in [&first, &second] {
         assert_eq!(operation.cached(request).expect("lookup"), Some(link));
@@ -609,7 +609,7 @@ fn an_operation_keeps_an_answer_per_neighbor_without_stretching_the_shared_cache
     })
     .expect("valid options");
     let operation = brief
-        .one_attempt(Duration::from_millis(100), 4, 512, 1)
+        .one_attempt(Duration::from_millis(100), 4, 512, 512, 1)
         .expect("valid narrowed options");
     operation
         .remember(link, NeighborCacheKey::from(&first))
@@ -631,7 +631,7 @@ fn an_operation_keeps_a_shared_answer_it_relied_on() {
         .remember(link, NeighborCacheKey::from(&request()))
         .expect("cache insert");
     let operation = brief
-        .one_attempt(Duration::from_millis(100), 4, 512, 1)
+        .one_attempt(Duration::from_millis(100), 4, 512, 512, 1)
         .expect("valid narrowed options");
     assert_eq!(operation.cached(&request()).expect("lookup"), Some(link));
 

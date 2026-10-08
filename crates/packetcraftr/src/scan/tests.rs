@@ -1219,6 +1219,39 @@ fn link_layer_probes_reject_evidence_limits_too_small_for_a_neighbor_reply() {
     assert_eq!(report.stats.packets_attempted, 1);
 }
 
+#[test]
+fn link_layer_probes_reject_a_snap_length_too_short_for_a_neighbor_reply() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(address));
+    // The evidence limits hold a reply; only the requested snap cannot.
+    request.collection.capture.snap_length = 64;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let error = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
+        &mut NoopClock,
+    )
+    .expect_err("an implicit neighbor capture is cut at the scan's snap length");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "snap_length",
+                value: 64,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
 /// Answers the answered host's discovery echo and gives each scanned probe a
 /// late frame its outcome does not carry.
 struct SkippedHostExecutor {
@@ -1295,7 +1328,9 @@ fn skipped_hosts_release_their_evidence_reservation() {
         probes: vec![ProbeEndpoint::Icmp],
         ..Options::default()
     };
-    // Exactly the scanned probe's slot plus one captured frame fits.
+    // Exactly the scanned probe's slot plus one captured frame fits. A
+    // layer-3 route resolves no neighbor, so a reply need not fit the snap.
+    request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
     request.collection.capture.snap_length = 64;
     request.collection.capture.max_bytes = 128;
     request.limits.max_evidence_bytes = 128;
@@ -1519,10 +1554,11 @@ fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
         ..Options::default()
     };
     request.endpoints.clear();
-    // Exactly the answered echo's slot plus one captured frame fits.
-    request.collection.capture.snap_length = 64;
-    request.collection.capture.max_bytes = 128;
-    request.limits.max_evidence_bytes = 128;
+    // Exactly the answered echo's slot plus one captured frame fits, and
+    // the snap length holds a neighbor reply.
+    request.collection.capture.snap_length = 128;
+    request.collection.capture.max_bytes = 256;
+    request.limits.max_evidence_bytes = 256;
     let mut executor = LateEchoNeighbors {
         neighbors: ScriptedNeighbors {
             outcomes: [
@@ -1535,7 +1571,7 @@ fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
             .into(),
             ..ScriptedNeighbors::default()
         },
-        bytes: 64,
+        bytes: 128,
         ..LateEchoNeighbors::default()
     };
     let mut diagnostics = Vec::new();

@@ -236,6 +236,29 @@ fn the_plan_counts_discovery_exclusions_apart_from_the_scan() {
 }
 
 #[test]
+fn a_scoped_reverse_dns_server_fails_before_any_probe() {
+    for transport in [&[][..], &["--connect"]] {
+        let mut command = vec!["--output", "json", "scan", "192.0.2.1"];
+        command.extend_from_slice(transport);
+        command.extend_from_slice(&["--reverse-dns", "fe80::1%eth9", "--ports", "80"]);
+        let output = run(&command);
+        assert_eq!(output.status.code(), Some(4), "{transport:?}: {output:?}");
+        let error = &parse_json(&output)["error"];
+        assert_eq!(
+            error["code"], "capability.dns_scope",
+            "{transport:?}: {error}"
+        );
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("scoped link-local DNS server fe80::1%eth9"),
+            "{transport:?}: {error}"
+        );
+    }
+}
+
+#[test]
 fn discovery_controls_fail_before_any_probe() {
     for (arguments, code, message) in [
         (

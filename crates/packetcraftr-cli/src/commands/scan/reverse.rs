@@ -27,13 +27,18 @@ pub(super) struct Lookup {
 
 impl Lookup {
     /// Rejects a template no question could use, such as a zero server
-    /// port, before the scan sends anything.
+    /// port or a scoped server, before the scan sends anything.
     pub(super) fn new(
         server: packetcraftr::target::Target,
         server_port: u16,
         transport: dns::TransportMode,
         scan: &packetcraftr::scan::Request,
     ) -> Result<Self, CliError> {
+        if let packetcraftr::target::Target::ScopedAddress(scoped) = &server {
+            return Err(CliError::classified(dns::Error::ScopedServer {
+                server: scoped.to_string(),
+            }));
+        }
         let lookup = Self {
             template: dns::Request {
                 server,

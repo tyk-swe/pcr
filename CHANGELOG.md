@@ -1980,6 +1980,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - A raw scan probe whose route changed to a neighbor its stage did not
   resolve fails with `io.route_changed` instead of sending an unpaced,
   uncounted neighbor request.
+- A raw scan sends at most one neighbor request per target across discovery
+  and the scan, as its plan budgets; a later stage whose route needs another
+  neighbor fails with `io.route_changed`.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
 - A scan waits out a transmission's `--rate` pause just before the next one,

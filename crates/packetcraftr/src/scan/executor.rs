@@ -6,6 +6,7 @@ mod registry;
 
 pub(super) use pipeline::limit;
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -143,6 +144,10 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     /// The route [`Pipelined::requests_neighbor`] last found, which the
     /// resolution after it reuses instead of routing the target again.
     routed: Option<(IpAddr, Option<interface::Id>, bool, Pending)>,
+    /// The targets a neighbor request was already sent for, explicitly or
+    /// before a stage. The plan budgets no second, so a later stage whose
+    /// route needs another neighbor fails instead of sending it.
+    requested: HashSet<(IpAddr, Option<interface::Id>)>,
 }
 
 /// What resolving a target's next hop found.
@@ -220,6 +225,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             collection: request.collection.clone(),
             neighbors: NeighborBounds::of(request),
             routed: None,
+            requested: HashSet::new(),
         }
     }
 
@@ -337,6 +343,14 @@ enum Pending {
     Unsent(NeighborOutcome, interface::Id),
     /// This request would be sent over this plan, unless already answered.
     Request(crate::neighbor::Request, Box<crate::route::Plan>),
+}
+
+/// Identifies `target` among the operation's neighbor requests.
+fn requested(target: &SelectedAddress) -> (IpAddr, Option<interface::Id>) {
+    (
+        target.address,
+        target.scope.as_ref().map(|scope| scope.interface.clone()),
+    )
 }
 
 /// A probe that routes like any of `target`'s, for finding its neighbor.
@@ -496,6 +510,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             }) => (None, attempts, capture_statistics, Some(SystemTime::now())),
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
+        if attempts > 0 {
+            self.requested.insert(requested(target));
+        }
         let stats = neighbor_stats(attempts, &frame, elapsed, capture);
         let neighbor = Neighbor {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
@@ -527,6 +544,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         {
             return Ok(NextHopResolution::default());
         }
+        if self.requested.contains(&requested(target)) {
+            return Err(BoundaryError::from_error(
+                crate::Error::UnresolvedNeighbor {
+                    target: request.target,
+                    interface: request.interface.name.clone(),
+                },
+            ));
+        }
+        let client = self.configured()?;
         crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
             .map_err(BoundaryError::from_error)?;
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
@@ -552,6 +578,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
                 (attempts, capture, Some(BoundaryError::from_error(error)))
             }
         };
+        if attempts > 0 {
+            self.requested.insert(requested(target));
+        }
         Ok(NextHopResolution {
             stats: neighbor_stats(attempts, &frame, elapsed, capture),
             silence,

@@ -465,7 +465,9 @@ impl Provider for GatewayRoutes {
 
 /// Routes the first lookup through `GATEWAY` and every later one through
 /// another gateway.
-struct MovingGateway(Arc<AtomicUsize>);
+/// Routes through `GATEWAY` for the first `.1` lookups, then through
+/// `MOVED_GATEWAY`.
+struct MovingGateway(Arc<AtomicUsize>, usize);
 
 impl Provider for MovingGateway {
     type Error = Infallible;
@@ -477,8 +479,8 @@ impl Provider for MovingGateway {
         _: Option<IpAddr>,
         _: &Deadline,
     ) -> Result<Decision, Infallible> {
-        let first = self.0.fetch_add(1, Ordering::Relaxed) == 0;
-        Ok(through(if first { GATEWAY } else { MOVED_GATEWAY }))
+        let stable = self.0.fetch_add(1, Ordering::Relaxed) < self.1;
+        Ok(through(if stable { GATEWAY } else { MOVED_GATEWAY }))
     }
 }
 
@@ -587,7 +589,7 @@ fn a_route_moved_after_its_stage_resolved_sends_no_unaccounted_neighbor_request(
         builtin::registry(),
         Policy::default(),
         common::providers(
-            MovingGateway(Arc::clone(&lookups)),
+            MovingGateway(Arc::clone(&lookups), 1),
             RecordingTransmit::new(steps.clone()),
         ),
     );
@@ -607,6 +609,60 @@ fn a_route_moved_after_its_stage_resolved_sends_no_unaccounted_neighbor_request(
     assert!(lookups.load(Ordering::Relaxed) > 1);
     // Only the stage's own, accounted request reached the wire.
     assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
+}
+
+#[test]
+fn a_route_moved_between_stages_sends_no_second_neighbor_request() {
+    let scan = |stable| {
+        let steps = Steps::default();
+        let client = Client::new(
+            builtin::registry(),
+            Policy::default(),
+            common::providers(
+                MovingGateway(Arc::new(AtomicUsize::new(0)), stable),
+                RecordingTransmit::new(steps.clone()),
+            ),
+        );
+        let mut request = request(
+            &[FIRST],
+            vec![tcp(443)],
+            discovery(Mode::Before, vec![ProbeEndpoint::Icmp]),
+        );
+        request.discovery.unresponsive = Unresponsive::Scan;
+        request.route = route::Options {
+            link_mode: LinkMode::Layer2,
+            ..route::Options::default()
+        };
+        (
+            client.scan(request, scan::Collector::default()),
+            steps.take(),
+        )
+    };
+
+    let (stable, steps) = scan(usize::MAX);
+    assert_eq!(
+        stable
+            .expect("a stable route scans")
+            .stats
+            .packets_attempted,
+        3
+    );
+    assert!(matches!(
+        steps.as_slice(),
+        [Step::Neighbor(gateway), Step::Transmit(_), Step::Transmit(_)] if *gateway == address(GATEWAY)
+    ));
+    // The discovery stage's lookups see the first gateway; the scan stage's
+    // see another, whose request the plan never budgeted.
+    let (moved, steps) = scan(2);
+    let error = moved.expect_err("the scan stage's route needs a second neighbor");
+    assert_eq!(error.classification().code, "io.route_changed", "{error}");
+    assert!(
+        matches!(
+            steps.as_slice(),
+            [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
+        ),
+        "{steps:?}"
+    );
 }
 
 #[test]

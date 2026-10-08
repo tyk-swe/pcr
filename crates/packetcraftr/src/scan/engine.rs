@@ -354,8 +354,24 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
-        Ok(crate::Stats::default())
-    } else if request.max_in_flight == 1 {
+        return Ok(crate::Stats::default());
+    }
+    // Every probe's neighbor is resolved before any probe arms a capture, so
+    // no resolution's capture overlaps a probe's and each request joins the
+    // stage's statistics.
+    let mut stats = crate::Stats::default();
+    for target in plan.targets {
+        enforce_deadline(&Probes, deadline)?;
+        let resolved = executor
+            .resolve_next_hop(target, deadline)
+            .map_err(|source| Error::Neighbor {
+                address: target.address,
+                source,
+            })?;
+        add_stats(&mut stats, &resolved, plan.first_sequence)?;
+    }
+    enforce_deadline(&Probes, deadline)?;
+    let probes = if request.max_in_flight == 1 {
         run_batches(
             plan.batches(request),
             request.probes_per_second,
@@ -366,7 +382,9 @@ where
         )
     } else {
         run_pipelined(request, executor, evidence, deadline, plan)
-    }
+    }?;
+    add_stats(&mut stats, &probes, plan.first_sequence)?;
+    Ok(stats)
 }
 
 fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> Result<(), Error> {
@@ -619,9 +637,9 @@ fn plan_scan(
     let total_probes = discovery_probes
         .checked_add(scan_probes)
         .ok_or_else(overflow)?;
-    // Ordinary probes materialize a link-layer route inside their exchange:
-    // a fresh resolution asks for the target's neighbor, or its gateway's,
-    // with at most one request each. That work is additive to the discovery
+    // Each stage resolves its probes' link-layer neighbors before sending
+    // them: a fresh resolution asks for the target's neighbor, or its
+    // gateway's, with at most one request each. That work is additive to the discovery
     // stage's own requests, which only ask for the target.
     let implicit_requests = if total_probes > 0 && request.route.link_mode != Mode::Layer3 {
         targets.len()
@@ -663,7 +681,7 @@ fn plan_scan(
         total.checked_add(frame)
     });
     // One target's neighbor bytes cover `attempts` discovery requests plus
-    // at most one implicit request from its probes' materialization.
+    // at most one implicit request for its probes' neighbor.
     let neighbor_bytes = neighbor_frames
         .and_then(|per_target| {
             let explicit = if explicit_requests == 0 {
@@ -688,7 +706,7 @@ fn plan_scan(
     };
     let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
     // Discovery requests pace between targets; an implicit resolution waits
-    // only the attempt timeout inside the probe's own exchange.
+    // only the attempt timeout before its stage's probes.
     let neighbor_duration = u32::try_from(explicit_requests)
         .ok()
         .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))

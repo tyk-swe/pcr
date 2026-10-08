@@ -674,11 +674,11 @@ fn scoped_raw_scan_routes_on_the_resolved_interface() {
         name: "fixture0".to_owned(),
         index: 1,
     };
-    providers
-        .routes
-        .lock()
-        .expect("routes")
-        .push_back(scoped_v6_route(fixture.clone()));
+    // The stage routes the target for its neighbor, then for its probe.
+    providers.routes.lock().expect("routes").extend([
+        scoped_v6_route(fixture.clone()),
+        scoped_v6_route(fixture.clone()),
+    ]);
     let collector = Collector::default();
     let request = scoped_request(
         crate::target::Selection {
@@ -802,7 +802,10 @@ fn scoped_window_routes_each_target_on_its_own_interface() {
         index: 3,
     };
     let fake = crate::test_support::FakeProviders::default();
+    // The stage routes each target for its neighbor, then for its probe.
     fake.routes.lock().expect("routes").extend([
+        scoped_v6_route(alpha.clone()),
+        scoped_v6_route(beta.clone()),
         scoped_v6_route(alpha.clone()),
         scoped_v6_route(beta.clone()),
     ]);
@@ -867,7 +870,7 @@ fn scoped_window_routes_each_target_on_its_own_interface() {
         .collect();
     let mut routed = routed;
     routed.sort();
-    assert_eq!(routed, [2, 3]);
+    assert_eq!(routed, [2, 2, 3, 3]);
 }
 
 #[test]

@@ -238,6 +238,8 @@ type Replies = Arc<Mutex<VecDeque<capture::Captured>>>;
 pub(crate) struct RecordingTransmit {
     steps: Steps,
     armed: Arc<AtomicUsize>,
+    live: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
     replies: Arc<Mutex<Replies>>,
 }
 
@@ -251,6 +253,11 @@ impl RecordingTransmit {
 
     pub(crate) fn armed(&self) -> usize {
         self.armed.load(Ordering::SeqCst)
+    }
+
+    /// The most captures that were armed at once.
+    pub(crate) fn peak_armed(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
     }
 }
 
@@ -284,6 +291,8 @@ impl capture::Provider for RecordingTransmit {
         _deadline: &Deadline,
     ) -> Result<Self::Capture, LiveIoError> {
         self.armed.fetch_add(1, Ordering::SeqCst);
+        let live = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(live, Ordering::SeqCst);
         let replies = Replies::default();
         *self.replies.lock().expect("replies lock") = Arc::clone(&replies);
         Ok(ReplyCapture {
@@ -294,6 +303,7 @@ impl capture::Provider for RecordingTransmit {
                 native: Default::default(),
             },
             replies,
+            live: Arc::clone(&self.live),
         })
     }
 }
@@ -337,6 +347,13 @@ fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
 pub(crate) struct ReplyCapture {
     metadata: capture::Metadata,
     replies: Replies,
+    live: Arc<AtomicUsize>,
+}
+
+impl Drop for ReplyCapture {
+    fn drop(&mut self) {
+        self.live.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl capture::Session for ReplyCapture {

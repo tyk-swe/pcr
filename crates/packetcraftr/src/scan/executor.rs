@@ -75,9 +75,6 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError>;
 
-    /// Resolves `target`'s link address, or its next hop's when it is routed,
-    /// sending at most `attempts` requests. Silence is an outcome, not an
-    /// error.
     /// Sends at most one ARP or NDP request for `target` and reports what
     /// it learned with the exchange's statistics. A routed target's next hop
     /// is never sent a request.
@@ -87,6 +84,20 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         timeout: Duration,
         deadline: &Deadline,
     ) -> Result<(Neighbor, Stats), BoundaryError>;
+
+    /// Resolves the neighbor `target`'s probes send their frames to, its own
+    /// or its gateway's, unless the operation already knows it, and reports
+    /// the request's statistics. A stage resolves its targets before any
+    /// probe arms a capture, so each probe's materialization finds the
+    /// answer cached. Executors whose probes resolve no neighbor report
+    /// nothing.
+    fn resolve_next_hop(
+        &mut self,
+        _target: &SelectedAddress,
+        _deadline: &Deadline,
+    ) -> Result<Stats, BoundaryError> {
+        Ok(Stats::default())
+    }
 }
 
 pub(crate) struct ClientExecutor<'c, P, K> {
@@ -123,7 +134,14 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
     }
 
     fn exchange(&mut self) -> Result<ExchangeExecutor<'_, P, K>, BoundaryError> {
-        let client = match &mut self.configured {
+        let (send, collection) = (self.send.clone(), self.collection.clone());
+        Ok(ExchangeExecutor::new(self.configured()?, send, collection))
+    }
+
+    /// The client every exchange and neighbor resolution of the operation
+    /// shares.
+    fn configured(&mut self) -> Result<&Client<P, K>, BoundaryError> {
+        Ok(match &mut self.configured {
             Some(client) => client,
             configured => {
                 let registry: Arc<Registry> =
@@ -132,12 +150,12 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // A probe's next hop may be a gateway no target authorized,
                 // so its neighbor request is authorized like the explicit one.
                 client.authorize_neighbor_requests = true;
-                // Materializing a probe's link-layer route resolves its
-                // neighbor inside the exchange. The operation's budget
-                // counts at most one request per selected target's neighbor,
-                // so the resolver the exchanges share sends at most one and
-                // keeps the answer for the rest of the operation, bounded
-                // by the scan's evidence limits like an explicit capture.
+                // A stage resolves each probe's link-layer neighbor before
+                // its exchanges. The operation's budget counts at most one
+                // request per selected target's neighbor, so the resolver
+                // they share sends at most one and keeps the answer for the
+                // rest of the operation, bounded by the scan's evidence
+                // limits like an explicit capture.
                 // A layer-3 route resolves no neighbor, so its evidence
                 // limits need not hold a reply.
                 if self.send.plan.link_mode != Mode::Layer3 {
@@ -149,12 +167,37 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 }
                 configured.insert(client)
             }
-        };
-        Ok(ExchangeExecutor::new(
-            client,
-            self.send.clone(),
-            self.collection.clone(),
-        ))
+        })
+    }
+}
+
+/// A probe that routes like any of `target`'s, for finding its neighbor.
+fn route_probe(target: &SelectedAddress) -> Probe {
+    Probe {
+        sequence: 0,
+        stage: super::Stage::Discovery,
+        address: target.address,
+        scope: target.scope.clone(),
+        endpoint: crate::probe::ProbeEndpoint::Icmp,
+        attempt: 1,
+        udp_payload: bytes::Bytes::new(),
+        udp_profile: None,
+    }
+}
+
+/// The statistics of a resolution that sent `attempts` copies of `frame`.
+fn neighbor_stats(
+    attempts: u32,
+    frame: &bytes::Bytes,
+    elapsed: Duration,
+    capture: packetcraftr_netio::capture::Stats,
+) -> Stats {
+    Stats {
+        packets_attempted: u64::from(attempts),
+        packets_completed: u64::from(attempts),
+        bytes: u64::from(attempts).saturating_mul(frame.len() as u64),
+        elapsed,
+        capture,
     }
 }
 
@@ -212,21 +255,14 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         timeout: Duration,
         deadline: &Deadline,
     ) -> Result<(Neighbor, Stats), BoundaryError> {
-        let client = self.client;
-        let probe = Probe {
-            sequence: 0,
-            stage: super::Stage::Discovery,
-            address: target.address,
-            scope: target.scope.clone(),
-            endpoint: crate::probe::ProbeEndpoint::Icmp,
-            attempt: 1,
-            udp_payload: bytes::Bytes::new(),
-            udp_profile: None,
-        };
-        let packet = probe.packet();
+        let base = self.send.clone();
+        let (max_frames, max_bytes) = self.neighbor_capture;
+        // The operation's client keeps every answer for its probes.
+        let client = self.configured()?;
+        let packet = route_probe(target).packet();
         let interface = target.scope.as_ref().map(|scope| &scope.interface);
         let planned = client
-            .admitting(&self.send, 1, deadline)
+            .admitting(&base, 1, deadline)
             .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
             .map_err(BoundaryError::from_error)?;
         let unsent = |outcome, interface: &interface::Id| {
@@ -246,9 +282,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         let send = crate::send::Options {
             plan: crate::route::Options {
                 link_mode: Mode::Layer2,
-                ..self.send.plan.clone()
+                ..base.plan.clone()
             },
-            ..self.send.clone()
+            ..base.clone()
         };
         let route = client
             .admitting(&send, 1, deadline)
@@ -283,7 +319,6 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
             .map_err(BoundaryError::from_error)?;
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
-        let (max_frames, max_bytes) = self.neighbor_capture;
         let state = client
             .neighbors
             .single_attempt(timeout, max_frames, max_bytes)
@@ -321,14 +356,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             }) => (None, attempts, capture_statistics, None),
             Err(error) => return Err(BoundaryError::from_error(error)),
         };
-        let frame_bytes = frame.len();
-        let stats = Stats {
-            packets_attempted: u64::from(attempts),
-            packets_completed: u64::from(attempts),
-            bytes: u64::from(attempts).saturating_mul(frame_bytes as u64),
-            elapsed,
-            capture,
-        };
+        let stats = neighbor_stats(attempts, &frame, elapsed, capture);
         let neighbor = Neighbor {
             outcome: link.map_or(NeighborOutcome::Silent, NeighborOutcome::Resolved),
             interface: request.interface.clone(),
@@ -336,6 +364,53 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             observed_at: observed_at.unwrap_or_else(SystemTime::now),
         };
         Ok((neighbor, stats))
+    }
+
+    fn resolve_next_hop(
+        &mut self,
+        target: &SelectedAddress,
+        deadline: &Deadline,
+    ) -> Result<Stats, BoundaryError> {
+        if self.send.plan.link_mode == Mode::Layer3 {
+            return Ok(Stats::default());
+        }
+        let send = self.send.clone();
+        let client = self.configured()?;
+        let packet = route_probe(target).packet();
+        let interface = target.scope.as_ref().map(|scope| &scope.interface);
+        let route = client
+            .admitting(&send, 1, deadline)
+            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
+            .map_err(BoundaryError::from_error)?;
+        let plan = route.plan();
+        if !plan.needs_neighbor_resolution() {
+            return Ok(Stats::default());
+        }
+        let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
+        if client
+            .neighbors
+            .cached(&request)
+            .map_err(BoundaryError::from_error)?
+            .is_some()
+        {
+            return Ok(Stats::default());
+        }
+        crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
+            .map_err(BoundaryError::from_error)?;
+        let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
+        let providers = &client.providers;
+        let started = std::time::Instant::now();
+        let resolution = client
+            .neighbors
+            .over(providers.transmit(), providers.capture())
+            .resolve(&request, deadline)
+            .map_err(BoundaryError::from_error)?;
+        Ok(neighbor_stats(
+            resolution.attempts,
+            &frame,
+            started.elapsed(),
+            resolution.capture_statistics,
+        ))
     }
 }
 

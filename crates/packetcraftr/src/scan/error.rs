@@ -48,7 +48,7 @@ pub enum Error {
     Family { family: &'static str },
     #[error("scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("neighbor discovery of {address} failed")]
+    #[error("resolving the neighbor of {address} failed")]
     Neighbor {
         address: std::net::IpAddr,
         #[source]

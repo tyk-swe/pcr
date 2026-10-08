@@ -449,6 +449,49 @@ fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
 }
 
 #[test]
+fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
+    let steps = Steps::default();
+    let io = RecordingTransmit::new(steps.clone());
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: [FIRST, SECOND, GATEWAY]
+                .iter()
+                .map(|text| DestinationConstraint::Exact(address(text)))
+                .collect(),
+            ..Policy::default()
+        },
+        common::providers(GatewayRoutes, io.clone()),
+    );
+    let mut request = request(
+        &[FIRST, SECOND],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    request.max_in_flight = 2;
+    let report = client
+        .scan(request, scan::Collector::default())
+        .expect("the gateway is authorized");
+
+    let steps = steps.take();
+    assert!(
+        matches!(
+            steps.as_slice(),
+            [Step::Neighbor(gateway), Step::Transmit(_), Step::Transmit(_)]
+                if *gateway == address(GATEWAY)
+        ),
+        "{steps:?}"
+    );
+    assert_eq!(io.peak_armed(), 1, "the gateway's capture ended first");
+    assert_eq!(report.stats.packets_attempted, 3);
+    assert_eq!(report.stats.packets_completed, 3);
+}
+
+#[test]
 fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
     let steps = Steps::default();
     let client = || {

@@ -1964,6 +1964,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Raw scans authorize the neighbor request a probe's route resolves, such as
   a gateway's, against the destination allowlist and the route's sources
   before sending it, as explicit neighbor discovery does.
+- Raw scans resolve each stage's link-layer neighbors before its probes arm
+  a capture, so a pipelined scan's neighbor capture never overlaps its probe
+  captures, and those requests count in the scan's statistics.
 - `scan --reverse-dns` lookups on a raw route authorize the neighbor request
   they resolve, such as a gateway's, as the scan's probes do.
 - Host discovery reports a possible proxy only when addresses share a link

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::borrow::Borrow;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
@@ -8,7 +9,7 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::{Context, Executor, Shared};
-use crate::policy::{Authorizer, Operation};
+use crate::policy::{Authorizer, DnsOperation, Operation};
 use crate::target::{ResolveTarget, approve_operation};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
@@ -69,6 +70,24 @@ impl Request {
             .min()
             .expect("a validated batch is non-empty"))
     }
+}
+
+/// The traffic limits `questions` need together, for a workflow that splits
+/// more questions than one batch takes across batches to authorize once, as
+/// one operation, before the first; each batch still authorizes its own.
+pub fn limits<Q>(questions: impl IntoIterator<Item = Q>) -> Result<DnsOperation, Error>
+where
+    Q: Borrow<super::Request>,
+{
+    let mut failure = None;
+    let operations = questions.into_iter().map_while(|question| {
+        PreparedOperation::new(question.borrow())
+            .map(|prepared| prepared.limits)
+            .map_err(|error| failure = Some(error))
+            .ok()
+    });
+    let limits = batch_limits(operations)?;
+    failure.map_or(Ok(limits), Err)
 }
 
 #[derive(Clone, Debug)]

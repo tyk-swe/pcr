@@ -736,7 +736,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   answer section. `Client::with_neighbor_request_authorization` authorizes
   every neighbor request a workflow's route resolves, as scans always do.
   `Client::with_scan_neighbors` bounds and paces a client's neighbor
-  resolutions as a scan's.
+  resolutions as a scan's. `dns::batch::limits` totals the traffic limits of
+  questions a workflow splits across batches.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -2021,6 +2022,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   instead of failing each lookup after the scan.
 - `scan --reverse-dns` with a scoped server fails before any probe with
   `capability.dns_scope` instead of failing each lookup after the scan.
+- `scan --reverse-dns` authorizes all its lookups as one operation before the
+  first batch, so more than 256 lookups no longer restart the `--max-packets`
+  and `--max-bytes` budgets with each batch.
 - NDJSON workflows check for cancellation after their last event, so a scan
   cancelled during `--reverse-dns` fails with `io.cancelled` instead of
   completing with unattempted lookups.

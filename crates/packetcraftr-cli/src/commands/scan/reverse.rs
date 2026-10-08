@@ -96,14 +96,56 @@ impl Lookup {
             .queries_per_second
             .and_then(|rate| Duration::from_secs(1).checked_div(rate))
             .unwrap_or_default();
+        let authorized = self.authorize(client.policy(), hosts);
         batched(
             hosts,
             pause,
             deadline,
             crate::cancellation::signal(),
             self.template.limits.max_evidence_bytes,
-            |addresses, remaining| self.lookup(client, addresses, remaining),
+            |addresses, remaining| match &authorized {
+                Ok(()) => self.lookup(client, addresses, remaining),
+                Err(error) => (
+                    addresses
+                        .iter()
+                        .map(|address| {
+                            ReverseDns::ended(
+                                dns::reverse_name(*address),
+                                QuestionStatus::Failed,
+                                Some(error.clone()),
+                            )
+                        })
+                        .collect(),
+                    packetcraftr::Stats::default(),
+                ),
+            },
         )
+    }
+
+    /// Authorizes every lookup `hosts` may need as one operation, so that
+    /// splitting them into batches never restarts the policy's packet and
+    /// byte budgets.
+    fn authorize(
+        &self,
+        policy: &packetcraftr::policy::Policy,
+        hosts: &[Host],
+    ) -> Result<(), String> {
+        let mut failure = None;
+        let questions = hosts
+            .iter()
+            .filter(|host| host.state != State::NoResponse)
+            .map_while(|host| {
+                self.question(host.address, self.template.limits.max_duration)
+                    .map_err(|error| failure = Some(error.to_string()))
+                    .ok()
+            });
+        let limits = batch::limits(questions).map_err(|error| error.to_string());
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        policy
+            .authorize(packetcraftr::policy::Operation::Dns(limits?))
+            .map_err(|error| error.to_string())
     }
 
     fn lookup(
@@ -258,6 +300,60 @@ pub(super) fn names(
 mod tests {
     use super::*;
 
+    fn responding(count: usize) -> Vec<Host> {
+        (0..count)
+            .map(|index| Host {
+                address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, u8::try_from(index % 256).unwrap())),
+                scope: None,
+                state: State::Responded,
+                reasons: Vec::new(),
+                neighbor: None,
+                scan: packetcraftr::scan::discovery::Scan::Scanned,
+                probes: Vec::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_batch_of_lookups_shares_one_policy_budget() {
+        let lookup = Lookup {
+            template: dns::Request {
+                server: packetcraftr::target::Target::Address(IpAddr::V4(Ipv4Addr::new(
+                    192, 0, 2, 53,
+                ))),
+                address_family: packetcraftr::target::Family::Any,
+                server_port: dns::DEFAULT_SERVER_PORT,
+                source_port: 0,
+                query_name: String::new(),
+                query_type: dns::QueryType::PTR,
+                transaction_id: 0,
+                recursion_desired: true,
+                edns: None,
+                transport: dns::TransportMode::Udp,
+                attempts: 1,
+                timeout: Duration::from_millis(20),
+                queries_per_second: None,
+                limits: dns::Limits::default(),
+                route: packetcraftr::route::Options::default(),
+                collection: packetcraftr::exchange::Collection::default(),
+            },
+        };
+        let policy = packetcraftr::policy::Policy {
+            max_packets_per_operation: u64::try_from(batch::MAX_QUESTIONS).unwrap(),
+            ..packetcraftr::policy::Policy::default()
+        };
+        assert_eq!(
+            lookup.authorize(&policy, &responding(batch::MAX_QUESTIONS)),
+            Ok(())
+        );
+        // Two batches, each within the budget alone, exceed it together.
+        assert!(
+            lookup
+                .authorize(&policy, &responding(2 * batch::MAX_QUESTIONS))
+                .is_err()
+        );
+    }
+
     fn answered(names: &[&str]) -> ReverseDns {
         ReverseDns {
             names: names.iter().map(|name| (*name).to_owned()).collect(),
@@ -271,17 +367,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
-        let hosts: Vec<Host> = (0..=batch::MAX_QUESTIONS)
-            .map(|index| Host {
-                address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, u8::try_from(index % 256).unwrap())),
-                scope: None,
-                state: State::Responded,
-                reasons: Vec::new(),
-                neighbor: None,
-                scan: packetcraftr::scan::discovery::Scan::Scanned,
-                probes: Vec::new(),
-            })
-            .collect();
+        let hosts = responding(batch::MAX_QUESTIONS + 1);
         let hour = Duration::from_secs(3600);
         let run = |cancellation: &Cancellation, pause| {
             let mut windows = Vec::new();

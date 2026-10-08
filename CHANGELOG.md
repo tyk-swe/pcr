@@ -1996,6 +1996,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   neighbor-only discovery, neither waits nor plans a pause after it, and a
   target answered without a request, such as a multicast, routed, or cached
   one, waits for none.
+- A scan counts a neighbor request's wait for its reply toward the `--rate`
+  pause before the next transmission, and its plan charges a paced request the
+  longer of its timeout and the pause instead of both.
 - A discovery target whose next hop never answers a neighbor request is
   reported `no_response` and skipped instead of failing the whole scan.
 - A scan whose implicit neighbor resolution outlasts `max_duration` fails with

@@ -1881,6 +1881,58 @@ fn the_last_neighbor_request_owes_no_pause() {
 }
 
 #[test]
+fn a_neighbor_replys_wait_counts_toward_the_next_pause() {
+    use super::discovery::{Mode, Options};
+    let targets = [
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)),
+    ];
+    let mut request = tcp_scan_request(Target::Address(targets[0]));
+    request.targets = crate::target::Selection {
+        include: targets
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .into(),
+        exclude: Vec::new(),
+    };
+    request.endpoints = Vec::new();
+    request.probes_per_second = Some(1);
+    request.timeout = Duration::from_secs(2);
+    // Two two-second waits, the first already spacing the second request
+    // beyond its one-second pause.
+    request.limits.max_duration = Duration::from_millis(4_100);
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        ..Options::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let mut executor = SlowNeighbors {
+        clock: clock.clone(),
+        work: Duration::from_secs(2),
+    };
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: targets.to_vec(),
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the reply's wait satisfies the rate");
+
+    assert_eq!(report.stats.packets_attempted, 2);
+    assert_eq!(
+        clock.delays(),
+        [],
+        "the first reply took longer than a pause"
+    );
+}
+
+#[test]
 fn a_neighbor_answered_without_a_request_waits_no_pause() {
     use super::discovery::{Link, Mode, NeighborOutcome, Options};
     let unicast = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));

@@ -653,14 +653,18 @@ fn plan_scan(
         .ok_or_else(overflow)?;
     // Each stage resolves its probes' link-layer neighbors before sending
     // them: a fresh resolution asks for the target's neighbor, or its
-    // gateway's, with at most one request each. That work is additive to the discovery
-    // stage's own requests, which only ask for the target.
-    let implicit_requests = if total_probes > 0 && request.route.link_mode != Mode::Layer3 {
+    // gateway's, with at most one request each.
+    let resolves_next_hops = total_probes > 0 && request.route.link_mode != Mode::Layer3;
+    // Explicit neighbor discovery runs first and covers those requests: an
+    // answer stays in the operation's cache, a silent target is sent nothing
+    // more, and a routed target, which it sends nothing, needs at most one
+    // request for its gateway within its `attempts`.
+    let implicit_requests = if resolves_next_hops && explicit_requests == 0 {
         targets.len()
     } else {
         0
     };
-    if implicit_requests > 0 {
+    if resolves_next_hops {
         // Those requests capture within the evidence limits, which must hold
         // a decodable reply just as explicit neighbor discovery requires.
         crate::neighbor::Options::default()

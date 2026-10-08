@@ -1971,6 +1971,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   budgets their pauses.
 - Pipelined raw scans check the preparation limit before any neighbor
   request.
+- Explicit neighbor discovery covers the neighbor requests the probes would
+  otherwise send, so the plan no longer charges them twice against
+  `max_probes`, wire bytes, and duration.
 - `scan --reverse-dns` lookups on a raw route authorize the neighbor request
   they resolve, such as a gateway's, as the scan's probes do.
 - Host discovery reports a possible proxy only when addresses share a link

@@ -122,12 +122,19 @@ impl State {
     }
 
     fn lookup(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, Error> {
-        if let Some(operation) = &self.operation
-            && let Some(mac_address) = operation.get(key)?
-        {
+        let Some(operation) = &self.operation else {
+            return self.cache.get(key);
+        };
+        if let Some(mac_address) = operation.get(key)? {
             return Ok(Some(mac_address));
         }
-        self.cache.get(key)
+        let shared = self.cache.get(key)?;
+        // The operation keeps a shared answer it relied on, so the entry's
+        // expiry cannot invite another request within the operation.
+        if let Some(mac_address) = shared {
+            operation.insert(mac_address, key.clone(), &self.options.for_operation())?;
+        }
+        Ok(shared)
     }
 
     fn remember(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), Error> {

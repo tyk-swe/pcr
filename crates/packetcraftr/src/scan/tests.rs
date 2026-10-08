@@ -1732,3 +1732,48 @@ fn an_implicit_neighbor_request_paces_like_a_probe() {
     );
     assert_eq!(report.stats.packets_attempted, 2);
 }
+
+#[test]
+fn explicit_neighbor_discovery_covers_the_implicit_resolution_budget() {
+    use super::discovery::{Link, Mode, NeighborOutcome, Options};
+    use crate::probe::ProbeEndpoint;
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        probes: vec![ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    request.endpoints.clear();
+    // One neighbor request and one echo: the echo's stage finds the
+    // discovered answer instead of asking again.
+    request.limits.max_probes = 2;
+    let mut executor = LateEchoNeighbors {
+        neighbors: ScriptedNeighbors {
+            outcomes: [NeighborOutcome::Resolved(Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+                cached: false,
+            })]
+            .into(),
+            ..ScriptedNeighbors::default()
+        },
+        bytes: 64,
+        ..LateEchoNeighbors::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("two frames fit max_probes = 2");
+    assert_eq!(report.stats.packets_attempted, 2);
+}

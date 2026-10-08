@@ -618,3 +618,28 @@ fn an_operation_keeps_its_answers_without_stretching_the_shared_cache() {
     assert_eq!(brief.cached(&first).expect("lookup"), None);
     assert_eq!(operation.cached(&first).expect("lookup"), Some(link));
 }
+
+#[test]
+fn an_operation_keeps_a_shared_answer_it_relied_on() {
+    let brief = State::try_new(Options {
+        cache_ttl: Duration::from_millis(20),
+        ..test_options(1)
+    })
+    .expect("valid options");
+    let link = MacAddress([0x02, 0, 0, 0, 0, 2]);
+    brief
+        .remember(link, NeighborCacheKey::from(&request()))
+        .expect("cache insert");
+    let operation = brief
+        .one_attempt(Duration::from_millis(100), 4, 512)
+        .expect("valid narrowed options");
+    assert_eq!(operation.cached(&request()).expect("lookup"), Some(link));
+
+    std::thread::sleep(Duration::from_millis(40));
+    assert_eq!(brief.cached(&request()).expect("lookup"), None);
+    assert_eq!(
+        operation.cached(&request()).expect("lookup"),
+        Some(link),
+        "the shared entry's expiry invites no second request"
+    );
+}

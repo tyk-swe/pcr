@@ -88,6 +88,19 @@ impl Pipelined for ScriptedNeighbors {
         unreachable!("neighbor-only discovery sends no probe")
     }
 
+    fn requests_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _explicit: bool,
+        _deadline: &Deadline,
+    ) -> Result<bool, BoundaryError> {
+        use super::discovery::NeighborOutcome;
+        Ok(matches!(
+            self.outcomes.front(),
+            Some(NeighborOutcome::Resolved(_) | NeighborOutcome::Silent)
+        ))
+    }
+
     fn resolve_neighbor(
         &mut self,
         target: &crate::target::SelectedAddress,
@@ -1047,14 +1060,15 @@ fn neighbor_requests_are_paced_retried_and_counted_like_probes() {
 
     // A silent neighbor is asked again; a routed target's gateway never is.
     assert_eq!(executor.calls, [on_link, on_link, routed]);
-    // One interval follows each request; nothing was sent for the last.
-    assert_eq!(clock.delays(), [Duration::from_millis(100); 2]);
+    // An interval spaces the retry from the first request; the routed target
+    // is sent nothing, so no interval follows the last request.
+    assert_eq!(clock.delays(), [Duration::from_millis(100)]);
     assert_eq!(
         (report.stats.packets_attempted, report.stats.bytes),
         (2, 84)
     );
     // The paced intervals count in the statistics like the probe runners'.
-    assert_eq!(report.stats.elapsed, Duration::from_millis(200));
+    assert_eq!(report.stats.elapsed, Duration::from_millis(100));
     let neighbors = report
         .hosts
         .iter()
@@ -1281,44 +1295,48 @@ fn multicast_and_broadcast_targets_budget_and_bound_no_neighbor_request() {
 }
 
 #[test]
-fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_target() {
+fn explicit_neighbor_discovery_budgets_no_request_for_a_multicast_or_broadcast_target() {
     use super::discovery::{Mode, NeighborOutcome, Options};
     use crate::probe::ProbeEndpoint;
-    let target = IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1));
-    let mut request = tcp_scan_request(Target::Address(target));
-    request.discovery = Options {
-        mode: Mode::Only,
-        neighbor: true,
-        probes: vec![ProbeEndpoint::Icmp],
-        ..Options::default()
-    };
-    request.endpoints.clear();
-    request.attempts = 2;
-    // Two echoes and no neighbor request: the target's link address follows
-    // from its own.
-    request.limits.max_probes = 2;
-    let mut executor = LateEchoNeighbors {
-        neighbors: ScriptedNeighbors {
-            outcomes: [NeighborOutcome::NotApplicable].into(),
-            ..ScriptedNeighbors::default()
-        },
-        bytes: 64,
-        ..LateEchoNeighbors::default()
-    };
-    let mut clock = crate::test_support::RecordingClock::default();
-    let mut deadline = clock.deadline(request.limits.max_duration);
-    engine::run(
-        &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![target],
-        },
-        &packetcraftr_core::protocol::builtin::registry(),
-        &mut executor,
-        &mut clock,
-        &mut deadline,
-        |_, _| Ok(()),
-    )
-    .expect("two echoes fit max_probes = 2");
+    for target in [
+        IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1)),
+        IpAddr::V4(Ipv4Addr::BROADCAST),
+    ] {
+        let mut request = tcp_scan_request(Target::Address(target));
+        request.discovery = Options {
+            mode: Mode::Only,
+            neighbor: true,
+            probes: vec![ProbeEndpoint::Icmp],
+            ..Options::default()
+        };
+        request.endpoints.clear();
+        request.attempts = 2;
+        // Two echoes and no neighbor request: the target's link address follows
+        // from its own.
+        request.limits.max_probes = 2;
+        let mut executor = LateEchoNeighbors {
+            neighbors: ScriptedNeighbors {
+                outcomes: [NeighborOutcome::NotApplicable].into(),
+                ..ScriptedNeighbors::default()
+            },
+            bytes: 64,
+            ..LateEchoNeighbors::default()
+        };
+        let mut clock = crate::test_support::RecordingClock::default();
+        let mut deadline = clock.deadline(request.limits.max_duration);
+        engine::run(
+            &request,
+            &mut AddressListAuthorizer {
+                addresses: vec![target],
+            },
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut clock,
+            &mut deadline,
+            |_, _| Ok(()),
+        )
+        .expect("two echoes fit max_probes = 2");
+    }
 }
 
 #[test]
@@ -1860,6 +1878,57 @@ fn the_last_neighbor_request_owes_no_pause() {
 
     assert_eq!(report.stats.packets_attempted, 1);
     assert_eq!(clock.delays(), [], "no transmission follows the request");
+}
+
+#[test]
+fn a_neighbor_answered_without_a_request_waits_no_pause() {
+    use super::discovery::{Link, Mode, NeighborOutcome, Options};
+    let unicast = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let multicast = IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1));
+    let mut request = tcp_scan_request(Target::Address(unicast));
+    request.targets = crate::target::Selection {
+        include: [unicast, multicast]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .into(),
+        exclude: Vec::new(),
+    };
+    request.endpoints = Vec::new();
+    request.probes_per_second = Some(1);
+    // Shorter than one pause, which only spaces a request from the next.
+    request.limits.max_duration = Duration::from_millis(500);
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        ..Options::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let mut executor = ScriptedNeighbors {
+        outcomes: [
+            NeighborOutcome::Resolved(Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+                cached: false,
+            }),
+            NeighborOutcome::NotApplicable,
+        ]
+        .into(),
+        ..ScriptedNeighbors::default()
+    };
+    engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![unicast, multicast],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the multicast target sends nothing the request's pause must precede");
+
+    assert_eq!(executor.calls, [unicast, multicast]);
+    assert_eq!(clock.delays(), [], "no request follows the first");
 }
 
 /// Spends `work` of the operation's time on a next hop's one request, which

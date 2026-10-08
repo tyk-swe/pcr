@@ -6,6 +6,7 @@ mod registry;
 
 pub(super) use pipeline::limit;
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -113,6 +114,19 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         Ok(NextHopResolution::default())
     }
 
+    /// Whether resolving `target`'s neighbor, explicitly as discovery does or
+    /// for its probes, would send a request, so the engine waits out a pause
+    /// owed by an earlier transmission only before one. Executors that cannot
+    /// tell assume it would.
+    fn requests_neighbor(
+        &mut self,
+        _target: &SelectedAddress,
+        _explicit: bool,
+        _deadline: &Deadline,
+    ) -> Result<bool, BoundaryError> {
+        Ok(true)
+    }
+
     /// Learns whether any probe of the operation resolves a link-layer
     /// neighbor, before the first resolution or exchange. Bounds that could
     /// not hold a reply then never apply to a resolver no probe uses.
@@ -126,6 +140,9 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     send: crate::send::Options,
     collection: crate::exchange::Collection,
     neighbors: NeighborBounds,
+    /// The route [`Pipelined::requests_neighbor`] last found, which the
+    /// resolution after it reuses instead of routing the target again.
+    routed: Option<(IpAddr, Option<interface::Id>, bool, Pending)>,
 }
 
 /// What resolving a target's next hop found.
@@ -202,6 +219,7 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             },
             collection: request.collection.clone(),
             neighbors: NeighborBounds::of(request),
+            routed: None,
         }
     }
 
@@ -234,6 +252,91 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
             }
         })
     }
+
+    /// Routes `target` and finds the neighbor request its resolution would
+    /// send: explicitly, discovery asks only for the target's own link
+    /// address, and reports any other outcome; for probes, the request goes
+    /// to whatever next hop their route names.
+    fn pending(
+        &mut self,
+        target: &SelectedAddress,
+        explicit: bool,
+        deadline: &Deadline,
+    ) -> Result<Pending, BoundaryError> {
+        let scope = target.scope.as_ref().map(|scope| scope.interface.clone());
+        if let Some((address, routed_scope, routed_explicit, pending)) = self.routed.take()
+            && (address, &routed_scope, routed_explicit) == (target.address, &scope, explicit)
+        {
+            return Ok(pending);
+        }
+        let base = self.send.clone();
+        let client = self.configured()?;
+        let packet = route_probe(target).packet();
+        let interface = target.scope.as_ref().map(|scope| &scope.interface);
+        let route_with = |send: &crate::send::Options| {
+            client
+                .admitting(send, 1, deadline)
+                .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
+                .map_err(BoundaryError::from_error)
+        };
+        let planned = route_with(&base)?;
+        let route = if explicit {
+            let decision = &planned.plan().decision;
+            if !decision.capability.supports(Mode::Layer2) {
+                return Ok(Pending::Unsent(
+                    NeighborOutcome::NotApplicable,
+                    decision.interface.clone(),
+                ));
+            }
+            // Only a link-layer plan names the neighbor a frame would be sent to.
+            route_with(&crate::send::Options {
+                plan: crate::route::Options {
+                    link_mode: Mode::Layer2,
+                    ..base.plan.clone()
+                },
+                ..base.clone()
+            })?
+        } else {
+            planned
+        };
+        let plan = route.plan();
+        if !plan.needs_neighbor_resolution() {
+            return Ok(Pending::Unsent(
+                NeighborOutcome::NotApplicable,
+                plan.decision.interface.clone(),
+            ));
+        }
+        let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
+        if explicit && request.target != target.address {
+            // The gateway is not a selected target, so it is never sent a
+            // request; only an entry another exchange cached is reported.
+            let link = client
+                .neighbors
+                .cached(&request)
+                .map_err(BoundaryError::from_error)?
+                .map(|address| Link {
+                    address,
+                    cached: true,
+                });
+            return Ok(Pending::Unsent(
+                NeighborOutcome::Routed(NextHop {
+                    address: request.target,
+                    link,
+                }),
+                request.interface,
+            ));
+        }
+        Ok(Pending::Request(request, Box::new(plan.clone())))
+    }
+}
+
+/// Where a target's neighbor resolution stands once its route is known.
+#[derive(Clone)]
+enum Pending {
+    /// No request is sent; an explicit resolution reports this outcome.
+    Unsent(NeighborOutcome, interface::Id),
+    /// This request would be sent over this plan, unless already answered.
+    Request(crate::neighbor::Request, Box<crate::route::Plan>),
 }
 
 /// A probe that routes like any of `target`'s, for finding its neighbor.
@@ -328,7 +431,19 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         timeout: Duration,
         deadline: &Deadline,
     ) -> Result<(Neighbor, Stats), BoundaryError> {
-        let base = self.send.clone();
+        let (request, plan) = match self.pending(target, true, deadline)? {
+            Pending::Request(request, plan) => (request, plan),
+            Pending::Unsent(outcome, interface) => {
+                let neighbor = Neighbor {
+                    outcome,
+                    interface,
+                    attempts: 0,
+                    observed_at: Some(SystemTime::now()),
+                };
+                return Ok((neighbor, Stats::default()));
+            }
+        };
+        let plan = &*plan;
         let NeighborBounds {
             max_frames,
             max_bytes,
@@ -337,61 +452,6 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         } = self.neighbors;
         // The operation's client keeps every answer for its probes.
         let client = self.configured()?;
-        let packet = route_probe(target).packet();
-        let interface = target.scope.as_ref().map(|scope| &scope.interface);
-        let planned = client
-            .admitting(&base, 1, deadline)
-            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
-            .map_err(BoundaryError::from_error)?;
-        let unsent = |outcome, interface: &interface::Id| {
-            let neighbor = Neighbor {
-                outcome,
-                interface: interface.clone(),
-                attempts: 0,
-                observed_at: Some(SystemTime::now()),
-            };
-            Ok((neighbor, Stats::default()))
-        };
-        let decision = &planned.plan().decision;
-        if !decision.capability.supports(Mode::Layer2) {
-            return unsent(NeighborOutcome::NotApplicable, &decision.interface);
-        }
-        // Only a link-layer plan names the neighbor a frame would be sent to.
-        let send = crate::send::Options {
-            plan: crate::route::Options {
-                link_mode: Mode::Layer2,
-                ..base.plan.clone()
-            },
-            ..base.clone()
-        };
-        let route = client
-            .admitting(&send, 1, deadline)
-            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
-            .map_err(BoundaryError::from_error)?;
-        let plan = route.plan();
-        if !plan.needs_neighbor_resolution() {
-            return unsent(NeighborOutcome::NotApplicable, &plan.decision.interface);
-        }
-        let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
-        if request.target != target.address {
-            // The gateway is not a selected target, so it is never sent a
-            // request; only an entry another exchange cached is reported.
-            let link = client
-                .neighbors
-                .cached(&request)
-                .map_err(BoundaryError::from_error)?
-                .map(|address| Link {
-                    address,
-                    cached: true,
-                });
-            return unsent(
-                NeighborOutcome::Routed(NextHop {
-                    address: request.target,
-                    link,
-                }),
-                &request.interface,
-            );
-        }
         // The resolver sends exactly this frame, so its final bytes are checked
         // like a prepared packet's.
         crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
@@ -454,19 +514,11 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         if self.send.plan.link_mode == Mode::Layer3 {
             return Ok(NextHopResolution::default());
         }
-        let send = self.send.clone();
-        let client = self.configured()?;
-        let packet = route_probe(target).packet();
-        let interface = target.scope.as_ref().map(|scope| &scope.interface);
-        let route = client
-            .admitting(&send, 1, deadline)
-            .and_then(|admitting| admitting.route_on(&packet, target.address, interface))
-            .map_err(BoundaryError::from_error)?;
-        let plan = route.plan();
-        if !plan.needs_neighbor_resolution() {
+        let Pending::Request(request, plan) = self.pending(target, false, deadline)? else {
             return Ok(NextHopResolution::default());
-        }
-        let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
+        };
+        let plan = &*plan;
+        let client = self.configured()?;
         if client
             .neighbors
             .cached(&request)
@@ -504,6 +556,30 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             stats: neighbor_stats(attempts, &frame, elapsed, capture),
             silence,
         })
+    }
+
+    fn requests_neighbor(
+        &mut self,
+        target: &SelectedAddress,
+        explicit: bool,
+        deadline: &Deadline,
+    ) -> Result<bool, BoundaryError> {
+        if !explicit && self.send.plan.link_mode == Mode::Layer3 {
+            return Ok(false);
+        }
+        let pending = self.pending(target, explicit, deadline)?;
+        let scope = target.scope.as_ref().map(|scope| scope.interface.clone());
+        self.routed = Some((target.address, scope, explicit, pending.clone()));
+        let Pending::Request(request, _) = pending else {
+            return Ok(false);
+        };
+        // An answer the operation already holds is reported without a request.
+        let client = self.configured()?;
+        Ok(client
+            .neighbors
+            .cached(&request)
+            .map_err(BoundaryError::from_error)?
+            .is_none())
     }
 
     fn resolves_neighbors(&mut self, resolves: bool) {

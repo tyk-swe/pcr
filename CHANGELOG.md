@@ -1984,7 +1984,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   budgets their pauses.
 - A scan waits out a transmission's `--rate` pause just before the next one,
   so a neighbor request that is the operation's last transmission, as in
-  neighbor-only discovery, neither waits nor plans a pause after it.
+  neighbor-only discovery, neither waits nor plans a pause after it, and a
+  target answered without a request, such as a multicast, routed, or cached
+  one, waits for none.
 - A discovery target whose next hop never answers a neighbor request is
   reported `no_response` and skipped instead of failing the whole scan.
 - A scan whose implicit neighbor resolution outlasts `max_duration` fails with

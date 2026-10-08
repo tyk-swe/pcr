@@ -316,7 +316,11 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
     for (index, target) in targets.iter().enumerate() {
         let mut attempts = 0;
         let neighbor = loop {
-            settle(request, clock, deadline, owed, stats)?;
+            // A pause owed by an earlier request is waited out only before
+            // another; a target answered without one leaves it owed.
+            if requests_neighbor(executor, target, true, deadline)? {
+                settle(request, clock, deadline, owed, stats)?;
+            }
             enforce_deadline(&Probes, deadline)?;
             let (neighbor, exchange) = executor
                 .resolve_neighbor(target, request.timeout, deadline)
@@ -470,6 +474,21 @@ where
     Ok(probes)
 }
 
+/// Whether resolving `target`'s neighbor would send a request.
+fn requests_neighbor<E: Pipelined>(
+    executor: &mut E,
+    target: &SelectedAddress,
+    explicit: bool,
+    deadline: &Deadline,
+) -> Result<bool, Error> {
+    executor
+        .requests_neighbor(target, explicit, deadline)
+        .map_err(|source| Error::Neighbor {
+            address: target.address,
+            source,
+        })
+}
+
 /// Resolves `target`'s next hop before its stage arms any capture, so no
 /// resolution's capture overlaps a probe's and each request joins `stats`.
 /// Returns why the target is unreachable when its next hop stayed silent.
@@ -484,7 +503,9 @@ fn reach_next_hop<E: Pipelined, C: Clock>(
     owed: &mut usize,
     sequence: u64,
 ) -> Result<Option<BoundaryError>, Error> {
-    settle(request, clock, deadline, owed, stats)?;
+    if requests_neighbor(executor, target, false, deadline)? {
+        settle(request, clock, deadline, owed, stats)?;
+    }
     enforce_deadline(&Probes, deadline)?;
     let resolved = executor
         .resolve_next_hop(target, deadline)

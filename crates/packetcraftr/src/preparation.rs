@@ -92,6 +92,7 @@ impl Admitted {
 pub(crate) struct PreparedPacket {
     built: BuiltPacket,
     route: route::Materialized,
+    neighbor_elapsed: std::time::Duration,
 }
 
 impl PreparedPacket {
@@ -118,12 +119,17 @@ impl PreparedPacket {
             check()?;
             io.send(frame)?
         };
-        Ok(SentPacket::try_new(self.built, self.route, report)?)
+        Ok(SentPacket::try_new(self.built, self.route, report)?
+            .with_neighbor_elapsed(self.neighbor_elapsed))
     }
 
     #[cfg(test)]
     pub(crate) fn fixture(built: BuiltPacket, route: route::Materialized) -> Self {
-        Self { built, route }
+        Self {
+            built,
+            route,
+            neighbor_elapsed: std::time::Duration::ZERO,
+        }
     }
 }
 
@@ -353,6 +359,7 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             .client
             .neighbors
             .over(providers.transmit(), providers.capture());
+        let started = self.client.now();
         let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
             route::materialize(plan, &neighbors, deadline)
         }) {
@@ -362,6 +369,11 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
                 return Err(error.into());
             }
         };
+        let neighbor_elapsed = if route.neighbor_resolution.is_some() {
+            self.client.now().saturating_duration_since(started)
+        } else {
+            std::time::Duration::ZERO
+        };
         let built =
             self.materializer()
                 .link(packet, &route, build_context, preliminary_build, || {
@@ -369,7 +381,11 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
                 })?;
         self.check()?;
         self.authorize_built(&built, &route.plan)?;
-        Ok(PreparedPacket { built, route })
+        Ok(PreparedPacket {
+            built,
+            route,
+            neighbor_elapsed,
+        })
     }
 }
 

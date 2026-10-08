@@ -410,16 +410,15 @@ where
             },
         )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
-        // The neighbor requests the query's route sent count with the query.
-        let neighbor =
-            execution
-                .sent
-                .route()
-                .neighbor_stats()
-                .map_err(|source| Error::Execution {
-                    attempt: probe.attempt,
-                    source: BoundaryError::from_error(source),
-                })?;
+        // The neighbor requests the query's route sent, and their wait, count
+        // with the query.
+        let neighbor = execution
+            .sent
+            .neighbor_stats()
+            .map_err(|source| Error::Execution {
+                attempt: probe.attempt,
+                source: BoundaryError::from_error(source),
+            })?;
         self.execution.account(probe.attempt, &neighbor)?;
         Ok(ProbeAttempt {
             execution,

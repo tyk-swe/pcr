@@ -1995,6 +1995,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   one request within the scan's timeout and evidence limits, reusing the
   scan's answers, and DNS statistics count the neighbor requests a query's
   route sends.
+- DNS statistics include the time a query's route waited to resolve its
+  neighbor, not only that resolution's packets and bytes.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

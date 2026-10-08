@@ -326,6 +326,31 @@ fn discovery_controls_fail_before_any_probe() {
             "--list sends no probe",
         ),
         (
+            &[
+                "--reverse-dns",
+                "127.0.0.1",
+                "--reverse-dns-port",
+                "0",
+                "--ports",
+                "80",
+            ],
+            "cli.dns_limit",
+            "DNS server port must be non-zero",
+        ),
+        (
+            &[
+                "--connect",
+                "--reverse-dns",
+                "127.0.0.1",
+                "--reverse-dns-port",
+                "0",
+                "--ports",
+                "80",
+            ],
+            "cli.dns_limit",
+            "DNS server port must be non-zero",
+        ),
+        (
             &["--discovery-probes", "tcp", "--ports", "80"],
             "cli.error",
             "--discovery <DISCOVERY>",

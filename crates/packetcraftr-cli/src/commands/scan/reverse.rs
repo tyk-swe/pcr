@@ -5,12 +5,13 @@
 //! so the policy authorizes the server and every query is bounded like any
 //! other.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use packetcraftr::dns::{self, batch};
 use packetcraftr::scan::discovery::{Host, State};
 
+use crate::errors::CliError;
 use crate::output::dns::QuestionStatus;
 use crate::output::scan::host::ReverseDns;
 use crate::system::Client;
@@ -24,13 +25,15 @@ pub(super) struct Lookup {
 }
 
 impl Lookup {
+    /// Rejects a template no question could use, such as a zero server
+    /// port, before the scan sends anything.
     pub(super) fn new(
         server: packetcraftr::target::Target,
         server_port: u16,
         transport: dns::TransportMode,
         scan: &packetcraftr::scan::Request,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, CliError> {
+        let lookup = Self {
             template: dns::Request {
                 server,
                 address_family: packetcraftr::target::Family::Any,
@@ -55,7 +58,16 @@ impl Lookup {
                 route: scan.route.clone(),
                 collection: scan.collection.clone(),
             },
-        }
+        };
+        lookup
+            .question(
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                lookup.template.limits.max_duration,
+            )
+            .map_err(CliError::classified)?
+            .validate()
+            .map_err(CliError::classified)?;
+        Ok(lookup)
     }
 
     /// Looks up hosts that responded to discovery, or every host when

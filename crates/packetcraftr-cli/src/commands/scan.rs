@@ -265,14 +265,16 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     };
     let reverse_dns = reverse_dns.map(parse_target).transpose()?;
     if selected_method == method::Method::Connect {
-        let lookup = reverse_dns.map(|server| {
-            reverse::Lookup::new(
-                server,
-                reverse_dns_port,
-                packetcraftr::dns::TransportMode::Tcp,
-                &request,
-            )
-        });
+        let lookup = reverse_dns
+            .map(|server| {
+                reverse::Lookup::new(
+                    server,
+                    reverse_dns_port,
+                    packetcraftr::dns::TransportMode::Tcp,
+                    &request,
+                )
+            })
+            .transpose()?;
         return connect::run(&request, plan, lookup.as_ref(), policy, format, stream);
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
@@ -283,14 +285,16 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         ..request
     };
     // DNS over TCP cannot follow a packet route override.
-    let lookup = reverse_dns.map(|server| {
-        let transport = if route.supports_kernel_tcp() {
-            packetcraftr::dns::TransportMode::UdpThenTcp
-        } else {
-            packetcraftr::dns::TransportMode::Udp
-        };
-        reverse::Lookup::new(server, reverse_dns_port, transport, &request)
-    });
+    let lookup = reverse_dns
+        .map(|server| {
+            let transport = if route.supports_kernel_tcp() {
+                packetcraftr::dns::TransportMode::UdpThenTcp
+            } else {
+                packetcraftr::dns::TransportMode::Udp
+            };
+            reverse::Lookup::new(server, reverse_dns_port, transport, &request)
+        })
+        .transpose()?;
     let lookup = lookup.as_ref();
     execution::run_workflow(
         format,

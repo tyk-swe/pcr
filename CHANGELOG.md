@@ -1966,6 +1966,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `interface` its route selected.
 - Host `neighbor` records publish the `interface` their route selected, so
   consumers can tell which link a `possible_proxy` basis compared.
+- `scan --reverse-dns-port 0` fails before any probe as a DNS limit error
+  instead of failing each lookup after the scan.
 - NDJSON workflows check for cancellation after their last event, so a scan
   cancelled during `--reverse-dns` fails with `io.cancelled` instead of
   completing with unattempted lookups.

@@ -733,7 +733,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   is never the target's. `--connect` discovery publishes socket observations.
   `--reverse-dns SERVER` adds bounded PTR lookups through the DNS workflow as
   observations, and `dns::ptr_names` extracts PTR names from a validated
-  answer section.
+  answer section. `Client::with_neighbor_request_authorization` authorizes
+  every neighbor request a workflow's route resolves, as scans always do.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -1963,6 +1964,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Raw scans authorize the neighbor request a probe's route resolves, such as
   a gateway's, against the destination allowlist and the route's sources
   before sending it, as explicit neighbor discovery does.
+- `scan --reverse-dns` lookups on a raw route authorize the neighbor request
+  they resolve, such as a gateway's, as the scan's probes do.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

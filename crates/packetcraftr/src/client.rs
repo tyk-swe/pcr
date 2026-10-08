@@ -76,6 +76,15 @@ impl<P, K: Clock> Client<P, K> {
         self
     }
 
+    /// Authorizes every neighbor request a workflow's route resolves, such
+    /// as a gateway's, against the destination allowlist and the route's
+    /// sources before sending it, as scans always do.
+    #[must_use]
+    pub fn with_neighbor_request_authorization(mut self) -> Self {
+        self.authorize_neighbor_requests = true;
+        self
+    }
+
     /// Replaces the neighbor-resolution bounds and starts a fresh neighbor cache under them.
     pub fn with_neighbor_options(
         mut self,

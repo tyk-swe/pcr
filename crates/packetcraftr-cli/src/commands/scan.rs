@@ -278,7 +278,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         return connect::run(&request, plan, lookup.as_ref(), policy, format, stream);
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
-    let client = workflow.client(Runtime::Workflow);
+    // Reverse-DNS lookups can share the scan's next hop, so their neighbor
+    // requests are authorized like its probes'.
+    let client = workflow
+        .client(Runtime::Workflow)
+        .with_neighbor_request_authorization();
     let request = packetcraftr::scan::Request {
         route: workflow.route,
         collection: workflow.collection,

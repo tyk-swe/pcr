@@ -18,7 +18,9 @@ use packetcraftr::{ProviderSet, route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
+use packetcraftr_core::protocol::network::{Icmpv4, Ipv4};
 use packetcraftr_netio::interface::Id;
 use packetcraftr_netio::link::{Capability, Mode as LinkMode};
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
@@ -440,6 +442,60 @@ fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
     client(&[FIRST, GATEWAY])
         .scan(request, scan::Collector::default())
         .expect("an authorized gateway is resolved");
+    assert!(matches!(
+        steps.take().as_slice(),
+        [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
+    ));
+}
+
+#[test]
+fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
+    let steps = Steps::default();
+    let client = || {
+        Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: vec![DestinationConstraint::Exact(address(FIRST))],
+                ..Policy::default()
+            },
+            common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+        )
+    };
+    let send = |client: &Client<common::FakeProviders<GatewayRoutes, RecordingTransmit>>| {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            destination: FIRST.parse().unwrap(),
+            ..Ipv4::default()
+        });
+        packet.push(Icmpv4 {
+            icmp_type: 8,
+            ..Icmpv4::default()
+        });
+        client.send(
+            packetcraftr::send::Request::packet(
+                packet,
+                packetcraftr::send::Options {
+                    plan: route::Options {
+                        link_mode: LinkMode::Layer2,
+                        ..route::Options::default()
+                    },
+                    ..packetcraftr::send::Options::default()
+                },
+            ),
+            packetcraftr::send::Collector::default(),
+        )
+    };
+
+    let error = send(&client().with_neighbor_request_authorization())
+        .expect_err("the policy denies the gateway the send resolves");
+    assert_eq!(
+        error.classification().code,
+        "policy.destination_not_allowed",
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty());
+
+    send(&client()).expect("other clients resolve the gateway as before");
     assert!(matches!(
         steps.take().as_slice(),
         [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)

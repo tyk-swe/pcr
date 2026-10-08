@@ -180,6 +180,9 @@ impl Classifier for ProbeClassifier<'_> {
                     .map(|(reply, responder)| {
                         (super::discovery::ReasonKind::Reply(reply), responder)
                     }),
+                // Validation rejects a matched reply without a capture
+                // timestamp, so only a probe with no reply, which yields no
+                // reason, falls back to its send time.
                 observed_at: evidence.received_at.unwrap_or(evidence.sent_at),
             }),
         }

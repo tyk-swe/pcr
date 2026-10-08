@@ -622,6 +622,80 @@ fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
 }
 
 #[test]
+fn a_client_bounded_by_a_scan_paces_a_neighbor_request_like_a_probe() {
+    let send_echo = |client: &Client<_, common::clock::VirtualClock>, plan: &route::Options| {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            destination: FIRST.parse().unwrap(),
+            ..Ipv4::default()
+        });
+        packet.push(Icmpv4 {
+            icmp_type: 8,
+            ..Icmpv4::default()
+        });
+        client
+            .send(
+                packetcraftr::send::Request::packet(
+                    packet,
+                    packetcraftr::send::Options {
+                        plan: plan.clone(),
+                        ..packetcraftr::send::Options::default()
+                    },
+                ),
+                packetcraftr::send::Collector::default(),
+            )
+            .expect("the gateway answers");
+    };
+    let mut scan = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    scan.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    scan.probes_per_second = Some(10);
+
+    for bounded in [false, true] {
+        let steps = Steps::default();
+        let clock = common::clock::VirtualClock::default();
+        let client = Client::new(
+            builtin::registry(),
+            Policy::default(),
+            common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+        )
+        .with_clock(clock.clone());
+        let client = if bounded {
+            client
+                .with_scan_neighbors(&scan)
+                .expect("the scan's evidence limits hold a reply")
+        } else {
+            client
+        };
+        send_echo(&client, &scan.route);
+        send_echo(&client, &scan.route);
+        assert!(
+            matches!(
+                steps.take().as_slice(),
+                [Step::Neighbor(_), Step::Transmit(_), Step::Transmit(_)]
+            ),
+            "the second packet reuses the answer"
+        );
+        let expected: &[Duration] = if bounded {
+            &[Duration::from_millis(100)]
+        } else {
+            &[]
+        };
+        assert_eq!(
+            clock.delays(),
+            expected,
+            "only a scan's bounds space the packet from its fresh request"
+        );
+    }
+}
+
+#[test]
 fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
     let steps = Steps::default();
     let client = Client::new(

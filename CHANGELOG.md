@@ -735,8 +735,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   observations, and `dns::ptr_names` extracts PTR names from a validated
   answer section. `Client::with_neighbor_request_authorization` authorizes
   every neighbor request a workflow's route resolves, as scans always do.
-  `Client::with_scan_neighbors` bounds a client's neighbor resolutions as a
-  scan's.
+  `Client::with_scan_neighbors` bounds and paces a client's neighbor
+  resolutions as a scan's.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -2006,6 +2006,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   text output, marks an answer whose later names it dropped.
 - A cancelled `scan --reverse-dns` waits for and sends no further lookup
   batch; its remaining questions end unattempted.
+- `scan --reverse-dns` spaces a fresh neighbor request from the query behind
+  it at the scan's `--rate`.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

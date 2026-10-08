@@ -28,6 +28,9 @@ pub struct Client<P, K = SystemClock> {
     /// prepared packet before resolving it, so a next hop the policy denies
     /// is never sent one.
     pub(crate) authorize_neighbor_requests: bool,
+    /// How long a packet waits behind a neighbor request its own route just
+    /// sent, so the request spends the workflow's rate like a packet.
+    pub(crate) neighbor_pause: Duration,
     pub(crate) interfaces: route::ResolvedInterface,
     pub(crate) cancellation: Option<Cancellation>,
 }
@@ -42,6 +45,7 @@ impl<P> Client<P> {
             runtime: Runtime::default(),
             neighbors: neighbor::State::default(),
             authorize_neighbor_requests: false,
+            neighbor_pause: Duration::ZERO,
             interfaces: route::ResolvedInterface::default(),
             cancellation: None,
         }
@@ -59,6 +63,7 @@ impl<P, K: Clock> Client<P, K> {
             runtime: self.runtime,
             neighbors: self.neighbors,
             authorize_neighbor_requests: self.authorize_neighbor_requests,
+            neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces,
             cancellation: self.cancellation,
         }
@@ -87,14 +92,19 @@ impl<P, K: Clock> Client<P, K> {
 
     /// Bounds every neighbor resolution as a scan of `request` does: one
     /// request per fresh answer, within the scan's timeout and evidence
-    /// limits, with each answer kept while this client lives. Lookups after
-    /// a scan on this client, such as its reverse-DNS names, then reuse the
-    /// scan's answers and stay within its bounds.
+    /// limits, with each answer kept while this client lives, and each
+    /// request paced like a probe at the scan's rate. Lookups after a scan on
+    /// this client, such as its reverse-DNS names, then reuse the scan's
+    /// answers and stay within its bounds.
     pub fn with_scan_neighbors(
         mut self,
         request: &crate::scan::Request,
     ) -> Result<Self, neighbor::Error> {
         self.neighbors = crate::scan::NeighborBounds::of(request).narrow(&self.neighbors)?;
+        self.neighbor_pause = request
+            .probes_per_second
+            .and_then(|rate| Duration::from_secs(1).checked_div(rate))
+            .unwrap_or_default();
         Ok(self)
     }
 
@@ -149,6 +159,7 @@ impl<P, K: Clock> Client<P, K> {
             runtime: self.runtime.clone(),
             neighbors: self.neighbors.clone(),
             authorize_neighbor_requests: self.authorize_neighbor_requests,
+            neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces.clone(),
             cancellation: self.cancellation.clone(),
         }

@@ -331,6 +331,26 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         })
     }
 
+    /// Spaces a packet from the neighbor request its route just sent, within
+    /// the preparation deadline.
+    fn pace_neighbor_request(&self) -> Result<(), Error> {
+        let pause = self.client.neighbor_pause;
+        if pause.is_zero() {
+            return Ok(());
+        }
+        self.check()?;
+        self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
+            let pause = pause.min(deadline.remaining().unwrap_or_default());
+            self.client
+                .clock
+                .sleep(pause, deadline)
+                .map_err(|source| Error::Clock {
+                    source: Box::new(source),
+                })
+        })?;
+        self.check()
+    }
+
     fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         let Admitted {
             packet,
@@ -362,6 +382,13 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
                 return Err(error.into());
             }
         };
+        if route
+            .neighbor_resolution
+            .as_ref()
+            .is_some_and(|resolution| resolution.attempts > 0)
+        {
+            self.pace_neighbor_request()?;
+        }
         let built =
             self.materializer()
                 .link(packet, &route, build_context, preliminary_build, || {

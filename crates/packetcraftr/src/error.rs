@@ -41,6 +41,11 @@ pub enum Error {
         "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
     )]
     PacketExceedsMtu { actual: usize, mtu: u32 },
+    #[error("neighbor pacing clock failed")]
+    Clock {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 impl Classified for Error {
@@ -69,6 +74,13 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
+            Self::Clock { .. } => Classification::new(
+                "io.neighbor_clock",
+                Kind::Io,
+                Some(
+                    "inspect the pacing clock and account for the neighbor requests already transmitted",
+                ),
+            ),
         }
     }
 
@@ -82,6 +94,7 @@ impl Classified for Error {
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
+            | Self::Clock { .. }
             | Self::Cancelled(_) => None,
         }
     }

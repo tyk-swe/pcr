@@ -305,6 +305,36 @@ fn neighbor_replies_and_cache_entries_are_distinct_evidence() {
 }
 
 #[test]
+fn a_pipelined_stage_over_its_preparation_limit_sends_no_neighbor_request() {
+    let steps = Steps::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+    );
+    let mut request = request(
+        &[FIRST, SECOND],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    request.max_in_flight = 2;
+    request.limits.max_prepared_bytes = 64;
+    let result = client.scan(request, scan::Collector::default());
+    assert!(
+        matches!(result, Err(scan::Error::PipelineExecution { .. })),
+        "{result:?}"
+    );
+    assert!(
+        steps.take().is_empty(),
+        "the preparation limit precedes the gateway's request"
+    );
+}
+
+#[test]
 fn one_link_address_for_several_targets_is_a_possible_proxy() {
     let (client, _) = layer2_client(Policy::default());
     let report = scan_with(&client, neighbor_only(&[FIRST, SECOND]));

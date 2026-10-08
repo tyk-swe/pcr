@@ -356,6 +356,9 @@ where
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
+    if request.max_in_flight > 1 {
+        check_prepared_descriptions(request, plan)?;
+    }
     // Every probe's neighbor is resolved before any probe arms a capture, so
     // no resolution's capture overlaps a probe's and each request joins the
     // stage's statistics.
@@ -393,18 +396,9 @@ fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> R
         .map_err(|_| Error::StatisticsOverflow { sequence })
 }
 
-fn run_pipelined<E, F>(
-    request: &Request,
-    executor: &mut E,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
-    deadline: &Deadline,
-    plan: &StagePlan<'_>,
-) -> Result<crate::Stats, Error>
-where
-    E: Pipelined,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    // Checked before any description is built.
+/// Rejects a pipelined stage whose batch descriptions would exceed the
+/// preparation limit, before any neighbor request or description.
+fn check_prepared_descriptions(request: &Request, plan: &StagePlan<'_>) -> Result<(), Error> {
     let probes_per_target = plan
         .endpoints
         .len()
@@ -431,6 +425,20 @@ where
             ),
         });
     }
+    Ok(())
+}
+
+fn run_pipelined<E, F>(
+    request: &Request,
+    executor: &mut E,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
+    deadline: &Deadline,
+    plan: &StagePlan<'_>,
+) -> Result<crate::Stats, Error>
+where
+    E: Pipelined,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
     let batches: Vec<_> = plan.batches(request).collect();
     let mut completed = vec![false; batches.len()];
     let mut confirmed = vec![false; batches.len()];

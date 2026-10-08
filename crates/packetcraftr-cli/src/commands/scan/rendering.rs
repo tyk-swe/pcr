@@ -26,14 +26,8 @@ pub(super) fn render_text(
         comma_separated(&result.resolved_addresses)
     ))?;
     write_stdout_line(format_args!(
-        "planned timeout+pacing {}; achieved {:.2} probes/s over {}",
-        duration_text(result.planned_duration),
-        if stats.elapsed.is_zero() {
-            0.0
-        } else {
-            stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
-        },
-        duration_text(stats.elapsed)
+        "{}",
+        throughput_text(result.planned_duration, &stats)
     ))?;
     render_plan_text(&result.plan)?;
     for endpoint in &result.endpoints {
@@ -241,6 +235,21 @@ fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
         optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
         link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
         optional_display(neighbor.observed_at.as_ref()),
+    )
+}
+
+/// The planned duration against the operation's achieved packet rate, which
+/// spans discovery, neighbor requests, and enrichment as well as probes.
+fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats) -> String {
+    format!(
+        "planned timeout+pacing {}; achieved {:.2} packets/s over {}",
+        duration_text(planned),
+        if stats.elapsed.is_zero() {
+            0.0
+        } else {
+            stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
+        },
+        duration_text(stats.elapsed)
     )
 }
 
@@ -475,6 +484,18 @@ mod tests {
             "{text}"
         );
         assert!(neighbor_text(&neighbor(None)).ends_with(" observed=none"));
+    }
+
+    #[test]
+    fn text_throughput_counts_the_operations_packets() {
+        let stats = output::envelope::Stats {
+            packets_completed: 6,
+            elapsed: std::time::Duration::from_secs(2),
+            ..Default::default()
+        };
+        let text = throughput_text(std::time::Duration::from_secs(1), &stats);
+
+        assert!(text.contains("achieved 3.00 packets/s"), "{text}");
     }
 
     #[test]

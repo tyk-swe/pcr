@@ -2055,6 +2055,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Text scan output shows when each neighbor outcome was `observed`, and its
   summary counts the operation's completed packets, which include discovery,
   neighbor, and reverse-DNS traffic, instead of calling them probes.
+- Text scan output reports its achieved rate in packets per second, since the
+  operation's completed packets include discovery, neighbor, and reverse-DNS
+  traffic, instead of calling them probes.
 - Text scan output shows each host's discovery probes, with their status,
   timing, responder, and frame, which no endpoint line carries.
 - NDJSON workflows check for cancellation after their last event, so a scan

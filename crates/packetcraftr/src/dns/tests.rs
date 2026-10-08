@@ -281,8 +281,7 @@ impl Executor<Exchange> for ResolvedGatewayExecutor {
             capture_statistics: packetcraftr_netio::capture::Stats::default(),
         });
         Ok(ExchangeEvidence {
-            sent: crate::test_support::sent_packet_over(exchange.probe.packet(), route)
-                .with_neighbor_elapsed(Duration::from_millis(5)),
+            sent: crate::test_support::sent_packet_over(exchange.probe.packet(), route),
             ..TrustedReceiptExecutor.execute(exchange)?
         })
     }
@@ -1096,8 +1095,7 @@ fn a_querys_neighbor_request_counts_in_its_statistics() {
         "one ARP request, padded to the minimum Ethernet frame"
     );
     assert_eq!(
-        routed.elapsed,
-        direct.elapsed + Duration::from_millis(5),
-        "the resolution's wait before the query"
+        routed.elapsed, direct.elapsed,
+        "the exchange's window already spans the resolution's wait"
     );
 }

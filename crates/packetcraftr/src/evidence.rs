@@ -212,8 +212,6 @@ pub struct SentPacket {
     route: crate::route::Materialized,
     report: TransmissionReport,
     frame: Frame,
-    /// How long resolving the route's neighbor waited before the send.
-    neighbor_elapsed: Duration,
 }
 
 impl SentPacket {
@@ -237,21 +235,6 @@ impl SentPacket {
             route,
             report,
             frame,
-            neighbor_elapsed: Duration::ZERO,
-        })
-    }
-
-    pub(crate) fn with_neighbor_elapsed(mut self, elapsed: Duration) -> Self {
-        self.neighbor_elapsed = elapsed;
-        self
-    }
-
-    /// The neighbor requests resolving this packet's route sent, and how long
-    /// they waited before it was sent.
-    pub(crate) fn neighbor_stats(&self) -> Result<crate::Stats, crate::route::Error> {
-        Ok(crate::Stats {
-            elapsed: self.neighbor_elapsed,
-            ..self.route.neighbor_stats()?
         })
     }
 

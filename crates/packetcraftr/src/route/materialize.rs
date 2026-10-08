@@ -70,8 +70,8 @@ pub struct Materialized {
 
 impl Materialized {
     /// The neighbor requests resolving this route sent; a cached answer sent
-    /// none. Their wait, which precedes the exchange's, is the sent packet's
-    /// to report.
+    /// none. Their wait falls within the exchange's window, which opens
+    /// before materialization, so the exchange's elapsed already covers it.
     pub(crate) fn neighbor_stats(&self) -> Result<crate::Stats, Error> {
         let Some(resolution) = &self.neighbor_resolution else {
             return Ok(crate::Stats::default());

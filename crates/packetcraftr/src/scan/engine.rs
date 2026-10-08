@@ -786,11 +786,14 @@ fn plan_scan(
         &[]
     };
     let discovery_probes = probe_count(targets.len(), probes.len(), request.attempts)?;
-    // A multicast target's link address follows from its own, so neither
-    // discovery nor a stage asks for its neighbor.
+    // A multicast or limited-broadcast target's link address follows from its
+    // own, so neither discovery nor a stage asks for its neighbor.
     let resolvable: Vec<&SelectedAddress> = targets
         .iter()
-        .filter(|target| !target.address.is_multicast())
+        .filter(|target| {
+            !target.address.is_multicast()
+                && target.address != IpAddr::from(std::net::Ipv4Addr::BROADCAST)
+        })
         .collect();
     let explicit_requests = if discovery.runs() && discovery.neighbor {
         probe_count(resolvable.len(), 1, request.attempts)?

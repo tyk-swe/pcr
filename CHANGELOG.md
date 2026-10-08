@@ -1990,10 +1990,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - A scan whose implicit neighbor resolution outlasts `max_duration` fails with
   its duration limit instead of reporting the unanswered target
   `no_response`.
-- Multicast targets, which need no neighbor resolution, no longer charge
-  implicit or explicit neighbor requests to the plan or need evidence and
-  snap limits that hold a neighbor reply, even when discovery selects
-  `neighbor` for multicast targets alone.
+- Multicast and limited-broadcast targets, which need no neighbor
+  resolution, no longer charge implicit or explicit neighbor requests to the
+  plan or need evidence and snap limits that hold a neighbor reply, even when
+  discovery selects `neighbor` for such targets alone.
 - A scan measures its neighbor waits with the client's clock.
 - Pipelined raw scans admit each stage's probes for all its targets, charging
   the routes and packets the pipeline itself prepares, before explicit

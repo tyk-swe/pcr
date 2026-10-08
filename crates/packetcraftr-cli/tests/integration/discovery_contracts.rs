@@ -259,6 +259,20 @@ fn a_scoped_reverse_dns_server_fails_before_any_probe() {
 }
 
 #[test]
+fn an_unscoped_link_local_reverse_dns_server_fails_before_any_probe() {
+    // No transport, TCP included, is ever handed a server it cannot reach.
+    for transport in [&[][..], &["--connect"]] {
+        let mut command = vec!["--output", "json", "scan", "192.0.2.1"];
+        command.extend_from_slice(transport);
+        command.extend_from_slice(&["--reverse-dns", "fe80::53", "--ports", "80"]);
+        let output = run(&command);
+        assert_eq!(output.status.code(), Some(2), "{transport:?}: {output:?}");
+        let error = &parse_json(&output)["error"];
+        assert_eq!(error["code"], "cli.live_target", "{transport:?}: {error}");
+    }
+}
+
+#[test]
 fn discovery_controls_fail_before_any_probe() {
     for (arguments, code, message) in [
         (

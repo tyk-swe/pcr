@@ -2034,8 +2034,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   text output, marks an answer whose later names it dropped.
 - A cancelled `scan --reverse-dns` waits for and sends no further lookup
   batch; its remaining questions end unattempted.
-- `scan --reverse-dns` waits no `--rate` pause before its first batch when the
-  scan transmitted nothing, as when every neighbor answer was cached.
+- `scan --reverse-dns` waits only what remains of its `--rate` pause since the
+  scan's or the previous batch's last transmission, and none before its first
+  batch when the scan transmitted nothing, as when every neighbor answer was
+  cached.
 - `scan --reverse-dns` spaces a fresh neighbor request from the query behind
   it at the scan's `--rate`.
 - Host discovery reports a possible proxy only when addresses share a link

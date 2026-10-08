@@ -45,7 +45,14 @@ pub(super) fn run(
                     &client,
                     &aggregate.report.hosts,
                     started,
-                    aggregate.report.stats.connections_attempted > 0,
+                    super::reverse::last_transmission(
+                        aggregate.report.stats.connections_attempted > 0,
+                        aggregate
+                            .endpoints
+                            .iter()
+                            .flat_map(|endpoint| &endpoint.probes)
+                            .map(|probe| probe.scheduled_at),
+                    ),
                 );
                 if let Some(lookups) = &lookups {
                     aggregate.report.stats.elapsed = aggregate
@@ -82,7 +89,10 @@ pub(super) fn run(
                         client,
                         &report.hosts,
                         started,
-                        report.stats.connections_attempted > 0,
+                        super::reverse::last_transmission(
+                            report.stats.connections_attempted > 0,
+                            [],
+                        ),
                     );
                     if let Some(lookups) = &lookups {
                         report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);

@@ -6,7 +6,7 @@
 //! other.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use packetcraftr::dns::{self, batch};
 use packetcraftr::scan::discovery::{Host, State};
@@ -87,12 +87,12 @@ impl Lookup {
         client: &Client,
         hosts: &[Host],
         started: Instant,
-        preceded: bool,
+        last_sent: Option<SystemTime>,
     ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
         let deadline = started.checked_add(self.template.limits.max_duration);
         // A batch paces its own questions; this pause keeps the scan's rate
-        // between the last transmission before a batch, if `preceded` by the
-        // scan's or sent by an earlier batch, and the batch's first question.
+        // between the last transmission before a batch, `last_sent` by the scan
+        // or sent by an earlier batch, and the batch's first question.
         let pause = self
             .template
             .queries_per_second
@@ -109,7 +109,7 @@ impl Lookup {
         batched(
             hosts,
             pause,
-            preceded,
+            last_sent,
             deadline,
             crate::cancellation::signal(),
             self.template.limits.max_evidence_bytes,
@@ -127,6 +127,7 @@ impl Lookup {
                         })
                         .collect(),
                     packetcraftr::Stats::default(),
+                    None,
                 ),
             },
         )
@@ -162,7 +163,7 @@ impl Lookup {
         client: &Client,
         addresses: &[IpAddr],
         remaining: Duration,
-    ) -> (Vec<ReverseDns>, packetcraftr::Stats) {
+    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<SystemTime>) {
         let ended = |status, error: Option<String>| {
             (
                 addresses
@@ -172,6 +173,7 @@ impl Lookup {
                     })
                     .collect(),
                 packetcraftr::Stats::default(),
+                None,
             )
         };
         if remaining.is_zero() {
@@ -190,14 +192,24 @@ impl Lookup {
             .dns_batch(batch::Request { questions }, collector.clone())
             .and_then(|report| collector.finish(report))
         {
-            Ok(aggregate) => (
-                aggregate
+            Ok(aggregate) => {
+                let sent = aggregate
                     .questions
-                    .into_iter()
-                    .map(ReverseDns::from)
-                    .collect(),
-                aggregate.stats,
-            ),
+                    .iter()
+                    .filter_map(|question| question.result.as_ref())
+                    .flat_map(dns::Aggregate::attempts)
+                    .filter_map(dns::AttemptEvidence::sent_at)
+                    .max();
+                (
+                    aggregate
+                        .questions
+                        .into_iter()
+                        .map(ReverseDns::from)
+                        .collect(),
+                    aggregate.stats,
+                    sent,
+                )
+            }
             Err(error) => ended(QuestionStatus::Failed, Some(error.to_string())),
         }
     }
@@ -232,11 +244,14 @@ impl Lookup {
 fn batched(
     hosts: &[Host],
     pause: Duration,
-    preceded: bool,
+    last_sent: Option<SystemTime>,
     deadline: Option<Instant>,
     cancellation: &Cancellation,
     mut name_budget: usize,
-    mut lookup: impl FnMut(&[IpAddr], Duration) -> (Vec<ReverseDns>, packetcraftr::Stats),
+    mut lookup: impl FnMut(
+        &[IpAddr],
+        Duration,
+    ) -> (Vec<ReverseDns>, packetcraftr::Stats, Option<SystemTime>),
 ) -> (Vec<Option<ReverseDns>>, packetcraftr::Stats) {
     let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
     let mut statistics = packetcraftr::Stats::default();
@@ -254,20 +269,23 @@ fn batched(
             deadline.saturating_duration_since(Instant::now())
         })
     };
-    let mut owed = preceded;
+    let mut last_sent = last_sent;
     for chunk in selected.chunks(batch::MAX_QUESTIONS) {
-        let waited = if owed {
-            pause.min(remaining())
-        } else {
-            Duration::ZERO
-        };
+        // Only what remains of the pause since the last transmission is owed;
+        // its replies' wait already spaced it from this batch.
+        let owed = last_sent.map_or(Duration::ZERO, |sent| {
+            pause.saturating_sub(SystemTime::now().duration_since(sent).unwrap_or_default())
+        });
+        let waited = owed.min(remaining());
         if !waited.is_zero() {
             std::thread::sleep(waited);
             statistics.elapsed = statistics.elapsed.saturating_add(waited);
         }
         let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
-        let (lookups, stats) = lookup(&addresses, remaining());
-        owed = stats.packets_attempted > 0;
+        let (lookups, stats, sent) = lookup(&addresses, remaining());
+        if stats.packets_attempted > 0 {
+            last_sent = Some(sent.unwrap_or_else(SystemTime::now));
+        }
         for (&index, mut lookup) in chunk.iter().zip(lookups) {
             retain_names(&mut lookup, &mut name_budget);
             names[index] = Some(lookup);
@@ -306,14 +324,23 @@ pub(super) fn names(
     client: &Client,
     hosts: &[Host],
     started: Instant,
-    preceded: bool,
+    last_sent: Option<SystemTime>,
 ) -> (Vec<Option<ReverseDns>>, Option<packetcraftr::Stats>) {
     let Some(lookup) = lookup else {
         return Default::default();
     };
-    let (names, stats) = lookup.run(client, hosts, started, preceded);
+    let (names, stats) = lookup.run(client, hosts, started, last_sent);
     let looked_up = names.iter().any(Option::is_some);
     (names, looked_up.then_some(stats))
+}
+
+/// When the transmission before the lookups was sent: the latest of `sent`,
+/// or now when packets were `attempted` at no known time.
+pub(super) fn last_transmission(
+    attempted: bool,
+    sent: impl IntoIterator<Item = SystemTime>,
+) -> Option<SystemTime> {
+    attempted.then(|| sent.into_iter().max().unwrap_or_else(SystemTime::now))
 }
 
 #[cfg(test)]
@@ -435,11 +462,23 @@ mod tests {
                 ..host
             })
             .collect();
-        let (records, stats) = names(Some(&lookup), &client, &silent, Instant::now(), true);
+        let (records, stats) = names(
+            Some(&lookup),
+            &client,
+            &silent,
+            Instant::now(),
+            Some(SystemTime::now()),
+        );
         assert_eq!(records, [None, None]);
         assert_eq!(stats, None, "no lookup ran, so none has statistics");
         // A refused lookup still leaves a record, and its statistics.
-        let (records, stats) = names(Some(&lookup), &client, &responding(1), Instant::now(), true);
+        let (records, stats) = names(
+            Some(&lookup),
+            &client,
+            &responding(1),
+            Instant::now(),
+            Some(SystemTime::now()),
+        );
         assert!(records[0].is_some());
         assert!(stats.is_some());
     }
@@ -458,7 +497,7 @@ mod tests {
             &client,
             &responding(batch::MAX_QUESTIONS + 1),
             Instant::now(),
-            true,
+            Some(SystemTime::now()),
         );
         assert!(
             names
@@ -485,27 +524,34 @@ mod tests {
     }
 
     #[test]
-    fn a_first_batch_after_no_transmission_waits_no_pause() {
+    fn a_batch_waits_only_what_remains_of_the_pause() {
         let hour = Duration::from_secs(3600);
-        let waited = |preceded, pause| {
+        let waited = |last_sent, pause| {
             let (_, stats) = batched(
                 &responding(1),
                 pause,
-                preceded,
+                last_sent,
                 Instant::now().checked_add(hour),
                 &Cancellation::default(),
                 usize::MAX,
                 |addresses, _| {
                     let lookups = addresses.iter().map(|_| answered(&[])).collect();
-                    (lookups, packetcraftr::Stats::default())
+                    (lookups, packetcraftr::Stats::default(), None)
                 },
             );
             stats.elapsed
         };
 
-        let pause = Duration::from_millis(10);
-        assert_eq!(waited(false, pause), Duration::ZERO);
-        assert_eq!(waited(true, pause), pause);
+        let pause = Duration::from_millis(50);
+        assert_eq!(waited(None, pause), Duration::ZERO);
+        // A transmission a whole pause ago, such as a probe whose reply took
+        // that long, already satisfied the rate.
+        assert_eq!(
+            waited(SystemTime::now().checked_sub(pause), pause),
+            Duration::ZERO
+        );
+        let owed = waited(Some(SystemTime::now()), pause);
+        assert!(!owed.is_zero() && owed <= pause, "{owed:?}");
     }
 
     #[test]
@@ -517,14 +563,14 @@ mod tests {
             let (names, _) = batched(
                 &hosts,
                 pause,
-                true,
+                Some(SystemTime::now()),
                 Instant::now().checked_add(hour),
                 cancellation,
                 usize::MAX,
                 |addresses, remaining| {
                     windows.push(remaining);
                     let lookups = addresses.iter().map(|_| answered(&[])).collect();
-                    (lookups, packetcraftr::Stats::default())
+                    (lookups, packetcraftr::Stats::default(), None)
                 },
             );
             assert!(

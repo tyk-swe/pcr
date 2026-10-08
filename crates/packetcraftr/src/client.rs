@@ -28,6 +28,10 @@ pub struct Client<P, K = SystemClock> {
     /// prepared packet before resolving it, so a next hop the policy denies
     /// is never sent one.
     pub(crate) authorize_neighbor_requests: bool,
+    /// Whether every neighbor a packet's route needs was resolved, accounted,
+    /// before preparation, which then sends no request of its own: a route
+    /// needing another neighbor changed after its resolution.
+    pub(crate) neighbors_resolved_ahead: bool,
     /// How long a packet waits behind a neighbor request its own route just
     /// sent, so the request spends the workflow's rate like a packet.
     pub(crate) neighbor_pause: Duration,
@@ -45,6 +49,7 @@ impl<P> Client<P> {
             runtime: Runtime::default(),
             neighbors: neighbor::State::default(),
             authorize_neighbor_requests: false,
+            neighbors_resolved_ahead: false,
             neighbor_pause: Duration::ZERO,
             interfaces: route::ResolvedInterface::default(),
             cancellation: None,
@@ -63,6 +68,7 @@ impl<P, K: Clock> Client<P, K> {
             runtime: self.runtime,
             neighbors: self.neighbors,
             authorize_neighbor_requests: self.authorize_neighbor_requests,
+            neighbors_resolved_ahead: self.neighbors_resolved_ahead,
             neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces,
             cancellation: self.cancellation,
@@ -159,6 +165,7 @@ impl<P, K: Clock> Client<P, K> {
             runtime: self.runtime.clone(),
             neighbors: self.neighbors.clone(),
             authorize_neighbor_requests: self.authorize_neighbor_requests,
+            neighbors_resolved_ahead: self.neighbors_resolved_ahead,
             neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces.clone(),
             cancellation: self.cancellation.clone(),

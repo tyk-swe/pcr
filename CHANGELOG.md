@@ -1975,6 +1975,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Raw scans resolve each stage's link-layer neighbors before its probes arm
   a capture, so a pipelined scan's neighbor capture never overlaps its probe
   captures, and those requests count in the scan's statistics.
+- A raw scan probe whose route changed to a neighbor its stage did not
+  resolve fails with `io.route_changed` instead of sending an unpaced,
+  uncounted neighbor request.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
 - A discovery target whose next hop never answers a neighbor request is

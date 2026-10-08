@@ -359,6 +359,21 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             preliminary_build,
         } = admitted;
         self.check()?;
+        if self.client.neighbors_resolved_ahead && plan.needs_neighbor_resolution() {
+            let request = route::neighbor_request(&plan)?;
+            if self
+                .client
+                .neighbors
+                .cached(&request)
+                .map_err(route::Error::from)?
+                .is_none()
+            {
+                return Err(Error::UnresolvedNeighbor {
+                    target: request.target,
+                    interface: request.interface.name,
+                });
+            }
+        }
         if self.client.authorize_neighbor_requests && plan.needs_neighbor_resolution() {
             authorize_neighbor_request(
                 &self.client.policy,

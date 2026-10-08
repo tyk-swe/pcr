@@ -223,7 +223,9 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // so its neighbor request is authorized like the explicit one.
                 client.authorize_neighbor_requests = true;
                 // A stage resolves each probe's link-layer neighbor before
-                // its exchanges, through the resolver they all share.
+                // its exchanges, through the resolver they all share, so a
+                // probe whose route now needs another sends it no request.
+                client.neighbors_resolved_ahead = true;
                 client.neighbors = self
                     .neighbors
                     .narrow(&client.neighbors)

@@ -41,6 +41,11 @@ pub enum Error {
         "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
     )]
     PacketExceedsMtu { actual: usize, mtu: u32 },
+    #[error("the route now needs neighbor {target} on {interface}, which was not resolved ahead")]
+    UnresolvedNeighbor {
+        target: std::net::IpAddr,
+        interface: String,
+    },
     #[error("neighbor pacing clock failed")]
     Clock {
         #[source]
@@ -74,6 +79,11 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
+            Self::UnresolvedNeighbor { .. } => Classification::new(
+                "io.route_changed",
+                Kind::Io,
+                Some("retry once the route to the target is stable"),
+            ),
             Self::Clock { .. } => Classification::new(
                 "io.neighbor_clock",
                 Kind::Io,
@@ -94,6 +104,7 @@ impl Classified for Error {
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
+            | Self::UnresolvedNeighbor { .. }
             | Self::Clock { .. }
             | Self::Cancelled(_) => None,
         }

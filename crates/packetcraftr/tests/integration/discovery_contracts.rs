@@ -3,6 +3,7 @@
 
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ use crate::common::{
 const FIRST: &str = "192.0.2.10";
 const SECOND: &str = "192.0.2.11";
 const GATEWAY: &str = "192.0.2.1";
+const MOVED_GATEWAY: &str = "192.0.2.254";
 
 fn address(text: &str) -> IpAddr {
     text.parse().unwrap()
@@ -457,21 +459,44 @@ impl Provider for GatewayRoutes {
         _: Option<IpAddr>,
         _: &Deadline,
     ) -> Result<Decision, Infallible> {
-        Ok(Decision {
-            interface: Id {
-                name: "fixture0".to_owned(),
-                index: 1,
-            },
-            source_mac: Some(INTERFACE_MAC),
-            selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
-            preferred_source: None,
-            next_hop: Some(address(GATEWAY)),
-            selection_reason: SelectionReason::Gateway,
-            destination_scope: Scope::Global,
-            mtu: 1_500,
-            capability: Capability::Layer2AndLayer3,
-            link_type: LinkType::ETHERNET,
-        })
+        Ok(through(GATEWAY))
+    }
+}
+
+/// Routes the first lookup through `GATEWAY` and every later one through
+/// another gateway.
+struct MovingGateway(Arc<AtomicUsize>);
+
+impl Provider for MovingGateway {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        _: IpAddr,
+        _: Option<&Id>,
+        _: Option<IpAddr>,
+        _: &Deadline,
+    ) -> Result<Decision, Infallible> {
+        let first = self.0.fetch_add(1, Ordering::Relaxed) == 0;
+        Ok(through(if first { GATEWAY } else { MOVED_GATEWAY }))
+    }
+}
+
+fn through(gateway: &str) -> Decision {
+    Decision {
+        interface: Id {
+            name: "fixture0".to_owned(),
+            index: 1,
+        },
+        source_mac: Some(INTERFACE_MAC),
+        selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
+        preferred_source: None,
+        next_hop: Some(address(gateway)),
+        selection_reason: SelectionReason::Gateway,
+        destination_scope: Scope::Global,
+        mtu: 1_500,
+        capability: Capability::Layer2AndLayer3,
+        link_type: LinkType::ETHERNET,
     }
 }
 
@@ -532,6 +557,36 @@ fn unauthorized_targets_draw_no_neighbor_request() {
         Err(scan::Error::Authorization(_))
     ));
     assert!(steps.take().is_empty());
+}
+
+#[test]
+fn a_route_moved_after_its_stage_resolved_sends_no_unaccounted_neighbor_request() {
+    let steps = Steps::default();
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(
+            MovingGateway(Arc::clone(&lookups)),
+            RecordingTransmit::new(steps.clone()),
+        ),
+    );
+    let mut request = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    let error = client
+        .scan(request, scan::Collector::default())
+        .expect_err("the probe's route needs a neighbor its stage never resolved");
+    assert_eq!(error.classification().code, "io.route_changed", "{error}");
+    assert!(lookups.load(Ordering::Relaxed) > 1);
+    // Only the stage's own, accounted request reached the wire.
+    assert_eq!(steps.take(), [Step::Neighbor(address(GATEWAY))]);
 }
 
 #[test]

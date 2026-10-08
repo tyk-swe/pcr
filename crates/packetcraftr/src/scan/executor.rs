@@ -78,6 +78,17 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError>;
 
+    /// Admits a pipelined stage's probes as [`Self::execute_pipeline`]
+    /// would, sending nothing, so its preparation limit fails before any
+    /// traffic. Executors that charge no preparation admit every stage.
+    fn admit_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: &PipelineOptions,
+    ) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+
     /// Sends at most one ARP or NDP request for `target` and reports what
     /// it learned with the exchange's statistics. A routed target's next hop
     /// is never sent a request.
@@ -284,6 +295,14 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
     ) -> Result<Stats, BoundaryError> {
         pipeline::run(&self.exchange()?, batches, options, emit)
+    }
+
+    fn admit_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+    ) -> Result<(), BoundaryError> {
+        pipeline::admit(&self.exchange()?, batches, options)
     }
 
     fn resolve_neighbor(

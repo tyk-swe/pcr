@@ -802,8 +802,11 @@ fn scoped_window_routes_each_target_on_its_own_interface() {
         index: 3,
     };
     let fake = crate::test_support::FakeProviders::default();
-    // The stage routes each target for its neighbor, then for its probe.
+    // The pipelined stage routes each target to admit it before any traffic,
+    // then for its neighbor, then for its probe.
     fake.routes.lock().expect("routes").extend([
+        scoped_v6_route(alpha.clone()),
+        scoped_v6_route(beta.clone()),
         scoped_v6_route(alpha.clone()),
         scoped_v6_route(beta.clone()),
         scoped_v6_route(alpha.clone()),
@@ -870,7 +873,7 @@ fn scoped_window_routes_each_target_on_its_own_interface() {
         .collect();
     let mut routed = routed;
     routed.sort();
-    assert_eq!(routed, [2, 2, 3, 3]);
+    assert_eq!(routed, [2, 2, 2, 3, 3, 3]);
 }
 
 #[test]

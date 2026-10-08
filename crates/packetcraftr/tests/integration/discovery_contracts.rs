@@ -361,20 +361,24 @@ fn a_pipelined_stage_over_its_preparation_limit_sends_no_neighbor_request() {
 
 #[test]
 fn explicit_neighbor_discovery_waits_for_the_preparation_limit() {
-    let (client, steps) = layer2_client(Policy::default());
-    let mut request = neighbor_only(&[FIRST, SECOND]);
-    request.discovery.probes = vec![ProbeEndpoint::Icmp];
-    request.max_in_flight = 2;
-    request.limits.max_prepared_bytes = 64;
-    let result = client.scan(request, scan::Collector::default());
-    assert!(
-        matches!(result, Err(scan::Error::PipelineExecution { .. })),
-        "{result:?}"
-    );
-    assert!(
-        steps.take().is_empty(),
-        "the preparation limit precedes the targets' own requests"
-    );
+    // 64 bytes cannot hold the batch descriptions; 4096 hold them but not
+    // the routes and packets the pipeline itself charges.
+    for max_prepared_bytes in [64, 4096] {
+        let (client, steps) = layer2_client(Policy::default());
+        let mut request = neighbor_only(&[FIRST, SECOND]);
+        request.discovery.probes = vec![ProbeEndpoint::Icmp];
+        request.max_in_flight = 2;
+        request.limits.max_prepared_bytes = max_prepared_bytes;
+        let result = client.scan(request, scan::Collector::default());
+        assert!(
+            matches!(result, Err(scan::Error::PipelineExecution { .. })),
+            "{max_prepared_bytes}: {result:?}"
+        );
+        assert!(
+            steps.take().is_empty(),
+            "{max_prepared_bytes}: the preparation limit precedes the targets' own requests"
+        );
+    }
 }
 
 fn pipeline_failure(error: &scan::Error) -> Option<&scan::PipelineFailure> {

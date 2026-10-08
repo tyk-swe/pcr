@@ -80,12 +80,26 @@ where
     let approved = approve_scan(request, authorizer, deadline)?;
     enforce_deadline(&Probes, deadline)?;
     if request.max_in_flight > 1 {
-        // Each stage is checked for every target before any neighbor request
+        // Each stage is admitted for every target before any neighbor request
         // or probe, though discovery may leave the scan fewer.
+        let mut first_sequence = 0;
         if request.discovery.runs() {
-            check_prepared_descriptions(request, &approved.targets, &request.discovery.probes)?;
+            let discovery = StagePlan {
+                targets: &approved.targets,
+                endpoints: &request.discovery.probes,
+                stage: Stage::Discovery,
+                first_sequence,
+            };
+            admit_pipelined(request, executor, deadline, &discovery)?;
+            first_sequence = discovery.probes(request)?;
         }
-        check_prepared_descriptions(request, &approved.targets, &approved.endpoints)?;
+        let scan = StagePlan {
+            targets: &approved.targets,
+            endpoints: &approved.endpoints,
+            stage: Stage::Scan,
+            first_sequence,
+        };
+        admit_pipelined(request, executor, deadline, &scan)?;
     }
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
@@ -420,6 +434,46 @@ fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> R
         .map_err(|_| Error::StatisticsOverflow { sequence })
 }
 
+/// Rejects a pipelined stage over its preparation limit without sending
+/// anything: first by its batch descriptions, before they are built, then
+/// by the pipeline's own admission of its probes.
+fn admit_pipelined<E: Pipelined>(
+    request: &Request,
+    executor: &mut E,
+    deadline: &Deadline,
+    plan: &StagePlan<'_>,
+) -> Result<(), Error> {
+    if plan.targets.is_empty() || plan.endpoints.is_empty() {
+        return Ok(());
+    }
+    check_prepared_descriptions(request, plan.targets, plan.endpoints)?;
+    let batches: Vec<_> = plan.batches(request).collect();
+    executor
+        .admit_pipeline(
+            &batches,
+            &pipeline_options(request, deadline, crate::Stats::default())?,
+        )
+        .map_err(|source| Error::PipelineExecution { source })
+}
+
+fn pipeline_options(
+    request: &Request,
+    deadline: &Deadline,
+    preceding: crate::Stats,
+) -> Result<PipelineOptions, Error> {
+    Ok(PipelineOptions {
+        max_in_flight: request.max_in_flight,
+        probes_per_second: request.probes_per_second,
+        max_duration: deadline
+            .remaining()
+            .map_err(|error| Probes.duration_limit(0, error))?,
+        max_prepared_bytes: request.limits.max_prepared_bytes,
+        max_evidence_frames: request.limits.max_evidence_frames,
+        max_evidence_bytes: request.limits.max_evidence_bytes,
+        preceding,
+    })
+}
+
 /// Rejects a pipelined stage whose batch descriptions for `targets` would
 /// exceed the preparation limit.
 fn check_prepared_descriptions(
@@ -469,18 +523,7 @@ where
     let mut completed = vec![false; batches.len()];
     let mut confirmed = vec![false; batches.len()];
     let mut sent_bytes = 0u64;
-    let remaining = deadline
-        .remaining()
-        .map_err(|error| Probes.duration_limit(0, error))?;
-    let settings = PipelineOptions {
-        max_in_flight: request.max_in_flight,
-        probes_per_second: request.probes_per_second,
-        max_duration: remaining,
-        max_prepared_bytes: request.limits.max_prepared_bytes,
-        max_evidence_frames: request.limits.max_evidence_frames,
-        max_evidence_bytes: request.limits.max_evidence_bytes,
-        preceding,
-    };
+    let settings = pipeline_options(request, deadline, preceding)?;
     let result = executor.execute_pipeline(&batches, settings, &mut |event| {
         let invalid = |index| {
             packetcraftr_core::error::BoundaryError::from_error(Error::InvalidEvidence {

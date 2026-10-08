@@ -1977,8 +1977,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   captures, and those requests count in the scan's statistics.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
-- Pipelined raw scans check each stage's preparation limit for all its
-  targets before explicit neighbor discovery or any other request.
+- Pipelined raw scans admit each stage's probes for all its targets, charging
+  the routes and packets the pipeline itself prepares, before explicit
+  neighbor discovery or any other request.
 - A pipelined scan's failure `stats` include the traffic before the failed
   pipeline, such as discovery probes and neighbor requests, instead of only
   that pipeline's.

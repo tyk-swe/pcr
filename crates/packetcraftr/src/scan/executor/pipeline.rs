@@ -166,6 +166,27 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     pipeline.finish(result)
 }
 
+/// Admits `batches` as [`run`] would and keeps nothing, so a stage over its
+/// preparation limit fails before anything is sent.
+pub(super) fn admit<P: PacketProviders, K: Clock>(
+    executor: &ExchangeExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+) -> Result<(), BoundaryError> {
+    validate_options(batches, options)?;
+    let deadline = executor
+        .client
+        .now()
+        .checked_add(options.max_duration)
+        .ok_or_else(|| limit("duration", max_wait_secs()))?;
+    let planned = batches
+        .iter()
+        .map(Planned::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let preparation = until(executor.client, deadline);
+    prepare::plan(executor, &planned, options, deadline, &preparation).map(drop)
+}
+
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
 
 struct Pipeline<'a, P: PacketProviders, K> {

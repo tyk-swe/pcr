@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::link::Mode;
 
@@ -78,6 +79,9 @@ where
 {
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
+    let options = &request.discovery;
+    executor
+        .resolves_neighbors(approved.resolves_next_hops || (options.runs() && options.neighbor));
     enforce_deadline(&Probes, deadline)?;
     if request.max_in_flight > 1 {
         // Each stage is admitted for every target before any neighbor request
@@ -124,7 +128,6 @@ where
             deadline,
         )?;
     }
-    let options = &request.discovery;
     let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
     let mut stats = crate::Stats::default();
     let mut scan_sequence = 0;
@@ -141,9 +144,20 @@ where
                 &mut stats,
             )?;
         }
-        // A target whose own link address stayed silent accepts no frame:
-        // its IP probes would only fail to materialize, so they are skipped
-        // and the host keeps its `no_response` record.
+        if !options.probes.is_empty() {
+            for (index, target) in approved.targets.iter().enumerate() {
+                if sendable[index]
+                    && reach_next_hop(request, executor, clock, deadline, target, &mut stats, 0)?
+                        .is_some()
+                {
+                    sendable[index] = false;
+                    composer.unreachable(index);
+                }
+            }
+        }
+        // A target whose own link address, or next hop, stayed silent accepts
+        // no frame: its IP probes would only fail to materialize, so they are
+        // skipped and the host keeps its `no_response` record.
         let probe_targets: Vec<_> = approved
             .targets
             .iter()
@@ -158,21 +172,20 @@ where
             first_sequence: 0,
         };
         scan_sequence = discovery.probes(request)?;
-        if options.neighbor {
-            // Probes skipped after a silent neighbor hold no response
-            // capacity; only the remaining targets' probes are outstanding.
-            let scan_probes = probe_count(
-                probe_targets.len(),
-                approved.endpoints.len(),
-                request.attempts,
-            )?;
-            evidence.reserve_responses(
-                usize::try_from(scan_sequence)
-                    .unwrap_or(usize::MAX)
-                    .saturating_add(scan_probes),
-                request.collection.capture.snap_length,
-            );
-        }
+        // Probes skipped after a silent neighbor or next hop hold no
+        // response capacity; only the remaining targets' probes are
+        // outstanding.
+        let scan_probes = probe_count(
+            probe_targets.len(),
+            approved.endpoints.len(),
+            request.attempts,
+        )?;
+        evidence.reserve_responses(
+            usize::try_from(scan_sequence)
+                .unwrap_or(usize::MAX)
+                .saturating_add(scan_probes),
+            request.collection.capture.snap_length,
+        );
         let discovered = execute(
             request,
             executor,
@@ -202,6 +215,26 @@ where
         .filter(|(_, host)| host.scan == discovery::Scan::Scanned)
         .map(|(target, _)| target.clone())
         .collect();
+    if !approved.endpoints.is_empty() {
+        for target in &scanned {
+            // Discovery answers for a target it reached; without it, a
+            // scan target no frame can reach fails the scan.
+            if let Some(source) = reach_next_hop(
+                request,
+                executor,
+                clock,
+                deadline,
+                target,
+                &mut stats,
+                scan_sequence,
+            )? {
+                return Err(Error::Neighbor {
+                    address: target.address,
+                    source,
+                });
+            }
+        }
+    }
     let scan = StagePlan {
         targets: &scanned,
         endpoints: &approved.endpoints,
@@ -388,26 +421,6 @@ where
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
-    // Every probe's neighbor is resolved before any probe arms a capture, so
-    // no resolution's capture overlaps a probe's and each request joins the
-    // stage's statistics.
-    let mut stats = crate::Stats::default();
-    for target in plan.targets {
-        enforce_deadline(&Probes, deadline)?;
-        let resolved = executor
-            .resolve_next_hop(target, deadline)
-            .map_err(|source| Error::Neighbor {
-                address: target.address,
-                source,
-            })?;
-        add_stats(&mut stats, &resolved, plan.first_sequence)?;
-        // A request spends the rate like a probe, so it is spaced from the
-        // next request or the stage's first probe.
-        if resolved.packets_attempted > 0 {
-            let requests = usize::try_from(resolved.packets_attempted).unwrap_or(usize::MAX);
-            pace(request, clock, deadline, requests, &mut stats)?;
-        }
-    }
     enforce_deadline(&Probes, deadline)?;
     let probes = if request.max_in_flight == 1 {
         run_batches(
@@ -420,12 +433,45 @@ where
         )
     } else {
         // A pipeline's failure reports the operation's traffic before it too.
-        let mut preceding = preceding.clone();
-        add_stats(&mut preceding, &stats, plan.first_sequence)?;
-        run_pipelined(request, executor, evidence, deadline, plan, preceding)
+        run_pipelined(
+            request,
+            executor,
+            evidence,
+            deadline,
+            plan,
+            preceding.clone(),
+        )
     }?;
-    add_stats(&mut stats, &probes, plan.first_sequence)?;
-    Ok(stats)
+    Ok(probes)
+}
+
+/// Resolves `target`'s next hop before its stage arms any capture, so no
+/// resolution's capture overlaps a probe's and each request joins `stats`.
+/// Returns why the target is unreachable when its next hop stayed silent.
+fn reach_next_hop<E: Pipelined, C: Clock>(
+    request: &Request,
+    executor: &mut E,
+    clock: &mut C,
+    deadline: &mut Deadline,
+    target: &SelectedAddress,
+    stats: &mut crate::Stats,
+    sequence: u64,
+) -> Result<Option<BoundaryError>, Error> {
+    enforce_deadline(&Probes, deadline)?;
+    let resolved = executor
+        .resolve_next_hop(target, deadline)
+        .map_err(|source| Error::Neighbor {
+            address: target.address,
+            source,
+        })?;
+    add_stats(stats, &resolved.stats, sequence)?;
+    // A request spends the rate like a probe, so it is spaced from the next
+    // request or the stage's first probe.
+    if resolved.stats.packets_attempted > 0 {
+        let requests = usize::try_from(resolved.stats.packets_attempted).unwrap_or(usize::MAX);
+        pace(request, clock, deadline, requests, stats)?;
+    }
+    Ok(resolved.silence)
 }
 
 fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> Result<(), Error> {
@@ -619,6 +665,8 @@ struct ApprovedScan {
     endpoints: Vec<ProbeEndpoint>,
     /// Discovery and scan probes, without neighbor requests.
     total_probes: usize,
+    /// Whether any probe resolves a link-layer neighbor before it is sent.
+    resolves_next_hops: bool,
 }
 
 impl ApprovedScan {
@@ -629,6 +677,7 @@ impl ApprovedScan {
 
 struct ScanPlan {
     total_probes: usize,
+    resolves_next_hops: bool,
     neighbor_requests: usize,
     maximum_bytes: u64,
     worst_case: Duration,
@@ -683,6 +732,7 @@ fn approve_scan<A: Authorizer + ResolveTarget>(
         duplicates: selected.duplicates,
         endpoints,
         total_probes: plan.total_probes,
+        resolves_next_hops: plan.resolves_next_hops,
     })
 }
 
@@ -718,13 +768,20 @@ fn plan_scan(
     // Each stage resolves its probes' link-layer neighbors before sending
     // them: a fresh resolution asks for the target's neighbor, or its
     // gateway's, with at most one request each.
-    let resolves_next_hops = total_probes > 0 && request.route.link_mode != Mode::Layer3;
+    // A multicast target's link address follows from its own, so only the
+    // other targets' neighbors are resolved.
+    let resolvable = targets
+        .iter()
+        .filter(|target| !target.address.is_multicast())
+        .count();
+    let resolves_next_hops =
+        total_probes > 0 && request.route.link_mode != Mode::Layer3 && resolvable > 0;
     // Explicit neighbor discovery runs first and covers those requests: an
     // answer stays in the operation's cache, a silent target is sent nothing
     // more, and a routed target, which it sends nothing, needs at most one
     // request for its gateway within its `attempts`.
     let implicit_requests = if resolves_next_hops && explicit_requests == 0 {
-        targets.len()
+        resolvable
     } else {
         0
     };
@@ -823,6 +880,7 @@ fn plan_scan(
     check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
     Ok(ScanPlan {
         total_probes,
+        resolves_next_hops,
         neighbor_requests,
         maximum_bytes,
         worst_case,

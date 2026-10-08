@@ -109,9 +109,14 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         &mut self,
         _target: &SelectedAddress,
         _deadline: &Deadline,
-    ) -> Result<Stats, BoundaryError> {
-        Ok(Stats::default())
+    ) -> Result<NextHopResolution, BoundaryError> {
+        Ok(NextHopResolution::default())
     }
+
+    /// Learns whether any probe of the operation resolves a link-layer
+    /// neighbor, before the first resolution or exchange. Bounds that could
+    /// not hold a reply then never apply to a resolver no probe uses.
+    fn resolves_neighbors(&mut self, _resolves: bool) {}
 }
 
 pub(crate) struct ClientExecutor<'c, P, K> {
@@ -123,10 +128,20 @@ pub(crate) struct ClientExecutor<'c, P, K> {
     neighbors: NeighborBounds,
 }
 
+/// What resolving a target's next hop found.
+#[derive(Debug, Default)]
+pub(crate) struct NextHopResolution {
+    /// The requests it sent.
+    pub(crate) stats: Stats,
+    /// Why no frame can reach the target: its next hop stayed silent.
+    pub(crate) silence: Option<BoundaryError>,
+}
+
 /// How a scan bounds every neighbor resolution of its operation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NeighborBounds {
-    link_mode: Mode,
+    /// Whether any probe resolves a neighbor; a layer-3 route never does.
+    resolves: bool,
     /// The wait one resolution gets per fresh answer.
     attempt_timeout: Duration,
     /// Neighbor captures buffer no more than the scan's evidence bounds.
@@ -141,7 +156,7 @@ pub(crate) struct NeighborBounds {
 impl NeighborBounds {
     pub(crate) fn of(request: &Request) -> Self {
         Self {
-            link_mode: request.route.link_mode,
+            resolves: request.route.link_mode != Mode::Layer3,
             attempt_timeout: request.timeout,
             max_frames: request.limits.max_evidence_frames,
             max_bytes: request.limits.max_evidence_bytes,
@@ -154,13 +169,13 @@ impl NeighborBounds {
     /// at most one request per admitted target's neighbor, so the narrowed
     /// resolver sends at most one per fresh answer and keeps the answer for
     /// the rest of the operation, bounded by the scan's evidence limits like
-    /// an explicit capture. A layer-3 route resolves no neighbor, so its
-    /// evidence limits need not hold a reply.
+    /// an explicit capture. An operation that resolves no neighbor, such as
+    /// one on a layer-3 route, need not hold a reply within its limits.
     pub(crate) fn narrow(
         self,
         neighbors: &crate::neighbor::State,
     ) -> Result<crate::neighbor::State, crate::neighbor::Error> {
-        if self.link_mode == Mode::Layer3 {
+        if !self.resolves {
             return Ok(neighbors.clone());
         }
         neighbors.one_attempt(
@@ -385,11 +400,11 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .single_attempt(timeout, max_frames, max_bytes, snap_length)
             .map_err(BoundaryError::from_error)?;
         let providers = &client.providers;
-        let started = std::time::Instant::now();
+        let started = client.now();
         let resolved = state
             .over(providers.transmit(), providers.capture())
             .resolve(&request, deadline);
-        let elapsed = started.elapsed();
+        let elapsed = client.now().saturating_duration_since(started);
         let (link, attempts, capture, observed_at) = match resolved {
             Ok(resolution) => {
                 // A fresh reply was observed when it was captured, which a
@@ -433,9 +448,9 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         &mut self,
         target: &SelectedAddress,
         deadline: &Deadline,
-    ) -> Result<Stats, BoundaryError> {
+    ) -> Result<NextHopResolution, BoundaryError> {
         if self.send.plan.link_mode == Mode::Layer3 {
-            return Ok(Stats::default());
+            return Ok(NextHopResolution::default());
         }
         let send = self.send.clone();
         let client = self.configured()?;
@@ -447,7 +462,7 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .map_err(BoundaryError::from_error)?;
         let plan = route.plan();
         if !plan.needs_neighbor_resolution() {
-            return Ok(Stats::default());
+            return Ok(NextHopResolution::default());
         }
         let request = crate::route::neighbor_request(plan).map_err(BoundaryError::from_error)?;
         if client
@@ -456,24 +471,41 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
             .map_err(BoundaryError::from_error)?
             .is_some()
         {
-            return Ok(Stats::default());
+            return Ok(NextHopResolution::default());
         }
         crate::preparation::authorize_neighbor_request(&client.policy, &request, plan)
             .map_err(BoundaryError::from_error)?;
         let frame = crate::neighbor::request_frame(&request).map_err(BoundaryError::from_error)?;
         let providers = &client.providers;
-        let started = std::time::Instant::now();
-        let resolution = client
+        let started = client.now();
+        let resolved = client
             .neighbors
             .over(providers.transmit(), providers.capture())
-            .resolve(&request, deadline)
-            .map_err(BoundaryError::from_error)?;
-        Ok(neighbor_stats(
-            resolution.attempts,
-            &frame,
-            started.elapsed(),
-            resolution.capture_statistics,
-        ))
+            .resolve(&request, deadline);
+        let elapsed = client.now().saturating_duration_since(started);
+        let (attempts, capture, silence) = match resolved {
+            Ok(resolution) => (resolution.attempts, resolution.capture_statistics, None),
+            Err(error) => {
+                let crate::neighbor::Error::NotFound {
+                    attempts,
+                    capture_statistics,
+                    ..
+                } = &error
+                else {
+                    return Err(BoundaryError::from_error(error));
+                };
+                let (attempts, capture) = (*attempts, *capture_statistics);
+                (attempts, capture, Some(BoundaryError::from_error(error)))
+            }
+        };
+        Ok(NextHopResolution {
+            stats: neighbor_stats(attempts, &frame, elapsed, capture),
+            silence,
+        })
+    }
+
+    fn resolves_neighbors(&mut self, resolves: bool) {
+        self.neighbors.resolves &= resolves;
     }
 }
 

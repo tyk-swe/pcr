@@ -1977,6 +1977,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   captures, and those requests count in the scan's statistics.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
+- A discovery target whose next hop never answers a neighbor request is
+  reported `no_response` and skipped instead of failing the whole scan.
+- Multicast targets, which need no neighbor resolution, no longer charge
+  neighbor requests to the plan or need evidence and snap limits that hold a
+  neighbor reply.
+- A scan measures its neighbor waits with the client's clock.
 - Pipelined raw scans admit each stage's probes for all its targets, charging
   the routes and packets the pipeline itself prepares, before explicit
   neighbor discovery or any other request.

@@ -161,3 +161,56 @@ fn nbr_disc_bounded_by_xchg_dl() {
     );
     assert!(elapsed < attempt_timeout / 2, "{elapsed:?}");
 }
+
+#[test]
+fn a_scans_neighbor_wait_is_measured_by_the_clients_clock() {
+    use packetcraftr::scan;
+    use packetcraftr::target::{Family, Selection, Target};
+
+    let link = SilentLink::default();
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        policy::Policy::default(),
+        common::providers(FixedRoutes, link.clone()),
+    )
+    .with_clock(link.clock.clone());
+    let timeout = Duration::from_millis(200);
+    let request = scan::Request {
+        target_sources: Vec::new(),
+        max_in_flight: 1,
+        targets: Selection::from(Target::Address("192.0.2.10".parse().unwrap())),
+        address_family: Family::Any,
+        endpoints: Vec::new(),
+        discovery: scan::discovery::Options {
+            mode: scan::discovery::Mode::Only,
+            probes: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
+            ..scan::discovery::Options::default()
+        },
+        attempts: 1,
+        timeout,
+        probes_per_second: None,
+        udp_payload: Default::default(),
+        udp_profiles: Default::default(),
+        limits: scan::Limits {
+            max_duration: Duration::from_secs(3),
+            ..Default::default()
+        },
+        route: packetcraftr::route::Options {
+            link_mode: Mode::Layer2,
+            ..Default::default()
+        },
+        collection: packetcraftr::exchange::Collection::default(),
+    };
+
+    let report = client
+        .scan(request, scan::Collector::default())
+        .expect("a silent neighbor leaves its host unresponsive");
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert!(
+        // The capture's waits approach the attempt timeout on that clock,
+        // however little wall time they took.
+        report.stats.elapsed >= timeout * 9 / 10,
+        "the wait the client's clock saw is reported: {:?}",
+        report.stats.elapsed
+    );
+}

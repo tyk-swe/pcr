@@ -792,3 +792,48 @@ fn ordinary_sockets_refuse_raw_discovery_probes_before_connecting() {
         assert!(connects.is_empty());
     }
 }
+
+#[test]
+fn a_silent_next_hop_leaves_its_host_unresponsive_and_unscanned() {
+    for (mode, endpoints, scan) in [
+        (Mode::Only, Vec::new(), Scan::NotRequested),
+        (Mode::Before, vec![tcp(443)], Scan::Skipped),
+    ] {
+        let steps = Steps::default();
+        let client = Client::new(
+            builtin::registry(),
+            Policy::default(),
+            common::providers(FixedRoutes, RecordingTransmit::silent(steps.clone())),
+        );
+        let mut request = request(
+            &[FIRST, SECOND],
+            endpoints,
+            discovery(mode, vec![ProbeEndpoint::Icmp]),
+        );
+        if mode == Mode::Before {
+            // Even a request that scans unresponsive hosts cannot frame a
+            // probe for a target whose next hop never answered.
+            request.discovery.unresponsive = Unresponsive::Scan;
+        }
+        request.route = route::Options {
+            link_mode: LinkMode::Layer2,
+            ..route::Options::default()
+        };
+        let report = client
+            .scan(request, scan::Collector::default())
+            .expect("a silent next hop ends its host's discovery, not the scan");
+        assert_eq!(
+            steps.take(),
+            [
+                Step::Neighbor(address(FIRST)),
+                Step::Neighbor(address(SECOND))
+            ],
+            "{mode:?}"
+        );
+        assert_eq!(report.stats.packets_attempted, 2, "{mode:?}");
+        for host in &report.hosts {
+            assert_eq!(host.state, State::NoResponse, "{mode:?}");
+            assert_eq!(host.scan, scan, "{mode:?}");
+        }
+    }
+}

@@ -1255,6 +1255,26 @@ fn link_layer_probes_reject_a_snap_length_too_short_for_a_neighbor_reply() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
+#[test]
+fn multicast_targets_budget_and_bound_no_neighbor_request() {
+    // A multicast destination's link address follows from its own.
+    let address = IpAddr::V4(Ipv4Addr::new(233, 252, 0, 1));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_probes = 1;
+    request.collection.capture.snap_length = 64;
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TimeoutExecutor::default(),
+        &mut NoopClock,
+    )
+    .expect("a multicast probe needs no neighbor request or reply");
+    assert_eq!(report.stats.packets_attempted, 1);
+}
+
 /// Answers the answered host's discovery echo and gives each scanned probe a
 /// late frame its outcome does not carry.
 struct SkippedHostExecutor {
@@ -1734,12 +1754,15 @@ impl Pipelined for FreshNextHops {
         &mut self,
         _target: &crate::target::SelectedAddress,
         _deadline: &Deadline,
-    ) -> Result<Stats, BoundaryError> {
-        Ok(Stats {
-            packets_attempted: 1,
-            packets_completed: 1,
-            bytes: 42,
-            ..Stats::default()
+    ) -> Result<super::executor::NextHopResolution, BoundaryError> {
+        Ok(super::executor::NextHopResolution {
+            stats: Stats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: 42,
+                ..Stats::default()
+            },
+            silence: None,
         })
     }
 }

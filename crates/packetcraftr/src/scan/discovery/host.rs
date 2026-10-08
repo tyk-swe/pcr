@@ -179,6 +179,8 @@ pub(in crate::scan) struct Composer {
     unresponsive: Unresponsive,
     hosts: Vec<Host>,
     indices: HashMap<(IpAddr, Option<interface::Id>), usize>,
+    /// Targets whose next hop stayed silent, so no frame could reach them.
+    unreachable: Vec<bool>,
 }
 
 impl Composer {
@@ -217,6 +219,15 @@ impl Composer {
             unresponsive,
             hosts,
             indices,
+            unreachable: vec![false; targets.len()],
+        }
+    }
+
+    /// Records that the next hop of the target at `index` stayed silent, so
+    /// none of its probes could be sent.
+    pub(in crate::scan) fn unreachable(&mut self, index: usize) {
+        if let Some(unreachable) = self.unreachable.get_mut(index) {
+            *unreachable = true;
         }
     }
 
@@ -277,7 +288,7 @@ impl Composer {
                     .push(address);
             }
         }
-        for host in &mut self.hosts {
+        for (host, unreachable) in self.hosts.iter_mut().zip(&self.unreachable) {
             host.probes.sort_unstable();
             host.reasons.sort_by_key(|reason| reason.probe);
             if let (Some(link), Some(neighbor)) = (resolved(host), &host.neighbor) {
@@ -318,7 +329,9 @@ impl Composer {
                 Mode::Only => Scan::NotRequested,
                 Mode::Before
                     if host.state == State::NoResponse
-                        && (self.unresponsive == Unresponsive::Skip || unsendable(host)) =>
+                        && (self.unresponsive == Unresponsive::Skip
+                            || *unreachable
+                            || unsendable(host)) =>
                 {
                     Scan::Skipped
                 }

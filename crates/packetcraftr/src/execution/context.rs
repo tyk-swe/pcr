@@ -98,6 +98,10 @@ where
         self.deadline
     }
 
+    pub(crate) fn now(&self) -> std::time::Instant {
+        self.clock.now()
+    }
+
     pub(crate) fn into_stats(self) -> Stats {
         self.stats
     }

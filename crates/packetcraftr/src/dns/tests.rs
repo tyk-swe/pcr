@@ -52,6 +52,7 @@ macro_rules! udp_only {
 udp_only!(
     TrustedReceiptExecutor,
     ResolvedGatewayExecutor,
+    SilentGatewayExecutor,
     InvalidResponseIndexExecutor,
     SelectionDeadlineExecutor,
     ClassifiedResponseExecutor,
@@ -284,6 +285,32 @@ impl Executor<Exchange> for ResolvedGatewayExecutor {
             sent: crate::test_support::sent_packet_over(exchange.probe.packet(), route),
             ..TrustedReceiptExecutor.execute(exchange)?
         })
+    }
+}
+
+/// Sends one ARP request to a gateway that never answers, spending `wait`.
+struct SilentGatewayExecutor {
+    clock: crate::test_support::RecordingClock,
+    wait: Duration,
+}
+
+impl Executor<Exchange> for SilentGatewayExecutor {
+    fn execute(&mut self, _exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
+        self.clock.advance(self.wait);
+        let silence = crate::neighbor::Error::NotFound {
+            interface: "fixture0".into(),
+            target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            attempts: 1,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+        };
+        Err(BoundaryError::from_error(crate::Error::Plan(
+            crate::route::Error::Neighbor(Box::new(silence)),
+        )))
     }
 }
 
@@ -1062,6 +1089,38 @@ fn batch_reject_invalid_before_effects() {
         authorizer.targets.is_empty(),
         "no resolution side effect ran"
     );
+}
+
+#[test]
+fn a_silent_next_hop_counts_its_request_in_the_failed_querys_statistics() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut executor = SilentGatewayExecutor {
+        clock: clock.clone(),
+        wait: Duration::from_millis(5),
+    };
+    let report = run_batch(
+        &[dns_request(address)],
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut executor,
+        &mut clock,
+    )
+    .expect("a failed question leaves the batch's report");
+
+    assert_eq!(
+        report.questions[0].status,
+        super::batch::QuestionStatus::Failed
+    );
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert_eq!(report.stats.packets_completed, 1);
+    assert_eq!(
+        report.stats.bytes, 60,
+        "one ARP request, padded to the minimum Ethernet frame"
+    );
+    assert_eq!(report.stats.capture.received_frames, 3);
+    assert_eq!(report.stats.elapsed, Duration::from_millis(5));
 }
 
 #[test]

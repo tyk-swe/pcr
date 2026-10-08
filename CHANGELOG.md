@@ -2018,6 +2018,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   one request within the scan's timeout and evidence limits, reusing the
   scan's answers, and DNS statistics count the neighbor requests a query's
   route sends.
+- A DNS query whose next hop never answered counts that neighbor request, its
+  capture counters, and its wait in the failed question's statistics.
 - `scan --reverse-dns` keeps PTR names across every lookup within the
   scan's evidence byte limit; `reverse_dns.names_truncated`, also shown in
   text output, marks an answer whose later names it dropped.

@@ -242,6 +242,7 @@ pub(crate) struct RecordingTransmit {
     peak: Arc<AtomicUsize>,
     replies: Arc<Mutex<Replies>>,
     untimed: bool,
+    silent: bool,
 }
 
 impl RecordingTransmit {
@@ -262,6 +263,15 @@ impl RecordingTransmit {
         }
     }
 
+    /// Records neighbor requests without answering them.
+    pub(crate) fn silent(steps: Steps) -> Self {
+        Self {
+            steps,
+            silent: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn armed(&self) -> usize {
         self.armed.load(Ordering::SeqCst)
     }
@@ -277,6 +287,9 @@ impl transmit::Provider for RecordingTransmit {
         let bytes = frame.bytes();
         let report = transmit::Submission::start().complete(bytes.len(), bytes.clone());
         match arp_reply(bytes) {
+            Some((target, _)) if self.silent => {
+                self.steps.push(Step::Neighbor(IpAddr::V4(target)));
+            }
             Some((target, reply)) => {
                 self.steps.push(Step::Neighbor(IpAddr::V4(target)));
                 let reply = if self.untimed {

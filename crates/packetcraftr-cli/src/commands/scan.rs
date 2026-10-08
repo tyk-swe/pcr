@@ -288,6 +288,15 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         collection: workflow.collection,
         ..request
     };
+    // The lookups resolve any next hop within the scan's bounds, reusing its
+    // answers; without them the scan bounds its own resolutions.
+    let client = if reverse_dns.is_some() {
+        client
+            .with_scan_neighbors(&request)
+            .map_err(CliError::classified)?
+    } else {
+        client
+    };
     // DNS over TCP cannot follow a packet route override.
     let lookup = reverse_dns
         .map(|server| {

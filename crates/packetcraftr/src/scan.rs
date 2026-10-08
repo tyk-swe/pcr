@@ -55,6 +55,8 @@ pub use report::{
 pub use request::{Limits, PortSpec, Request, select_ports};
 pub use selection::{MAX_PORT_TERMS, PortSelection, Selected, Selector, Term, select_endpoints};
 
+pub(crate) use executor::NeighborBounds;
+
 /// A bundled data set a result drew on, named with its own version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DataSet {

@@ -69,6 +69,27 @@ pub struct Materialized {
 }
 
 impl Materialized {
+    /// The neighbor requests resolving this route sent; a cached answer sent
+    /// none. Their wait precedes, and is not part of, the exchange's.
+    pub(crate) fn neighbor_stats(&self) -> Result<crate::Stats, Error> {
+        let Some(resolution) = &self.neighbor_resolution else {
+            return Ok(crate::Stats::default());
+        };
+        let attempts = u64::from(resolution.attempts);
+        let frame_bytes = if attempts == 0 {
+            0
+        } else {
+            neighbor::request_frame(&neighbor_request(&self.plan)?)?.len() as u64
+        };
+        Ok(crate::Stats {
+            packets_attempted: attempts,
+            packets_completed: attempts,
+            bytes: attempts.saturating_mul(frame_bytes),
+            capture: resolution.capture_statistics,
+            ..crate::Stats::default()
+        })
+    }
+
     pub fn transmit_route(&self) -> transmit::Route<'_> {
         transmit::Route {
             decision: &self.plan.decision,

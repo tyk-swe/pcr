@@ -618,6 +618,56 @@ fn a_stage_resolves_its_gateway_before_any_capture_and_counts_the_request() {
 }
 
 #[test]
+fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
+    let steps = Steps::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(GatewayRoutes, RecordingTransmit::silent(steps.clone())),
+    );
+    let mut scan = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    scan.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    scan.timeout = Duration::from_millis(20);
+    let client = client
+        .with_scan_neighbors(&scan)
+        .expect("the scan's evidence limits hold a reply");
+
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        destination: FIRST.parse().unwrap(),
+        ..Ipv4::default()
+    });
+    packet.push(Icmpv4 {
+        icmp_type: 8,
+        ..Icmpv4::default()
+    });
+    client
+        .send(
+            packetcraftr::send::Request::packet(
+                packet,
+                packetcraftr::send::Options {
+                    plan: scan.route.clone(),
+                    ..packetcraftr::send::Options::default()
+                },
+            ),
+            packetcraftr::send::Collector::default(),
+        )
+        .expect_err("the gateway never answers");
+    assert_eq!(
+        steps.take(),
+        vec![Step::Neighbor(address(GATEWAY))],
+        "one request within the scan's timeout, not the resolver's default attempts"
+    );
+}
+
+#[test]
 fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
     let steps = Steps::default();
     let client = || {

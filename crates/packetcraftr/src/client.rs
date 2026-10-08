@@ -85,6 +85,19 @@ impl<P, K: Clock> Client<P, K> {
         self
     }
 
+    /// Bounds every neighbor resolution as a scan of `request` does: one
+    /// request per fresh answer, within the scan's timeout and evidence
+    /// limits, with each answer kept while this client lives. Lookups after
+    /// a scan on this client, such as its reverse-DNS names, then reuse the
+    /// scan's answers and stay within its bounds.
+    pub fn with_scan_neighbors(
+        mut self,
+        request: &crate::scan::Request,
+    ) -> Result<Self, neighbor::Error> {
+        self.neighbors = crate::scan::NeighborBounds::of(request).narrow(&self.neighbors)?;
+        Ok(self)
+    }
+
     /// Replaces the neighbor-resolution bounds and starts a fresh neighbor cache under them.
     pub fn with_neighbor_options(
         mut self,

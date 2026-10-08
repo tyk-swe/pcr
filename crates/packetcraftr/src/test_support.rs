@@ -430,11 +430,15 @@ impl<S: Step> Executor<S> for RejectingExecutor {
 }
 
 pub(crate) fn sent_packet(packet: Packet) -> SentPacket {
+    sent_packet_over(packet, materialized_route())
+}
+
+pub(crate) fn sent_packet_over(packet: Packet, route: crate::route::Materialized) -> SentPacket {
     use packetcraftr_netio::transmit::Submission;
 
     let built = built_packet(packet);
     let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
-    SentPacket::try_new(built, materialized_route(), report).expect("valid trusted sent fixture")
+    SentPacket::try_new(built, route, report).expect("valid trusted sent fixture")
 }
 
 fn built_packet(packet: Packet) -> BuiltPacket {
@@ -446,7 +450,7 @@ fn built_packet(packet: Packet) -> BuiltPacket {
         .expect("sent-packet fixture must build")
 }
 
-fn materialized_route() -> crate::route::Materialized {
+pub(crate) fn materialized_route() -> crate::route::Materialized {
     use packetcraftr_netio::{link::Mode, route::Decision};
 
     use crate::route::{Materialized, Plan};

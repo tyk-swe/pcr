@@ -8,6 +8,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
@@ -409,6 +410,17 @@ where
             },
         )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
+        // The neighbor requests the query's route sent count with the query.
+        let neighbor =
+            execution
+                .sent
+                .route()
+                .neighbor_stats()
+                .map_err(|source| Error::Execution {
+                    attempt: probe.attempt,
+                    source: BoundaryError::from_error(source),
+                })?;
+        self.execution.account(probe.attempt, &neighbor)?;
         Ok(ProbeAttempt {
             execution,
             timeout: grant.timeout,

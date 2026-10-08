@@ -51,6 +51,7 @@ macro_rules! udp_only {
 
 udp_only!(
     TrustedReceiptExecutor,
+    ResolvedGatewayExecutor,
     InvalidResponseIndexExecutor,
     SelectionDeadlineExecutor,
     ClassifiedResponseExecutor,
@@ -255,6 +256,33 @@ impl Executor<Exchange> for TrustedReceiptExecutor {
                 elapsed: Duration::from_millis(1),
                 ..Stats::default()
             },
+        })
+    }
+}
+
+/// Sends each query through a gateway its route resolved with one request.
+struct ResolvedGatewayExecutor;
+
+impl Executor<Exchange> for ResolvedGatewayExecutor {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
+        use packetcraftr_core::packet::MacAddress;
+
+        let mut route = crate::test_support::materialized_route();
+        route.plan.decision.source_mac = Some(MacAddress([0x02, 0, 0, 0, 0, 1]));
+        route.plan.decision.link_type = LinkType::ETHERNET;
+        route.plan.neighbor_source = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)));
+        route.plan.neighbor_target = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
+        route.neighbor_resolution = Some(crate::neighbor::Resolution {
+            mac_address: MacAddress([0x02, 0, 0, 0, 0, 2]),
+            attempts: 1,
+            cache_hit: false,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats::default(),
+        });
+        Ok(ExchangeEvidence {
+            sent: crate::test_support::sent_packet_over(exchange.probe.packet(), route),
+            ..TrustedReceiptExecutor.execute(exchange)?
         })
     }
 }
@@ -1033,5 +1061,37 @@ fn batch_reject_invalid_before_effects() {
     assert!(
         authorizer.targets.is_empty(),
         "no resolution side effect ran"
+    );
+}
+
+#[test]
+fn a_querys_neighbor_request_counts_in_its_statistics() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let request = dns_request(address);
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let direct = run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut TrustedReceiptExecutor,
+        &mut NoopClock,
+    )
+    .expect("an unanswered query completes");
+    let routed = run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut ResolvedGatewayExecutor,
+        &mut NoopClock,
+    )
+    .expect("an unanswered query completes");
+
+    let (direct, routed) = (&direct.report().stats, &routed.report().stats);
+    assert_eq!(routed.packets_attempted, direct.packets_attempted + 1);
+    assert_eq!(routed.packets_completed, direct.packets_completed + 1);
+    assert_eq!(
+        routed.bytes,
+        direct.bytes + 60,
+        "one ARP request, padded to the minimum Ethernet frame"
     );
 }

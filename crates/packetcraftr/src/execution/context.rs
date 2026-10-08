@@ -108,6 +108,11 @@ where
             .map_err(|source| self.errors.interrupted(step, source))
     }
 
+    /// Counts work a step did besides its execution.
+    pub(crate) fn account(&mut self, step: R::Step, stats: &Stats) -> Result<(), R::Error> {
+        self.merge(step, stats)
+    }
+
     /// On overflow the merged statistics are left untouched.
     fn merge(&mut self, step: R::Step, stats: &Stats) -> Result<(), R::Error> {
         self.stats

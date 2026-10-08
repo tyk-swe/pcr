@@ -359,27 +359,27 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             preliminary_build,
         } = admitted;
         self.check()?;
-        if self.client.neighbors_resolved_ahead && plan.needs_neighbor_resolution() {
+        // Only a request about to be sent is checked: a cached answer sends
+        // nothing to the neighbor.
+        if (self.client.neighbors_resolved_ahead || self.client.authorize_neighbor_requests)
+            && plan.needs_neighbor_resolution()
+        {
             let request = route::neighbor_request(&plan)?;
-            if self
+            let cached = self
                 .client
                 .neighbors
                 .cached(&request)
                 .map_err(route::Error::from)?
-                .is_none()
-            {
+                .is_some();
+            if !cached && self.client.neighbors_resolved_ahead {
                 return Err(Error::UnresolvedNeighbor {
                     target: request.target,
                     interface: request.interface.name,
                 });
             }
-        }
-        if self.client.authorize_neighbor_requests && plan.needs_neighbor_resolution() {
-            authorize_neighbor_request(
-                &self.client.policy,
-                &route::neighbor_request(&plan)?,
-                &plan,
-            )?;
+            if !cached {
+                authorize_neighbor_request(&self.client.policy, &request, &plan)?;
+            }
         }
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.

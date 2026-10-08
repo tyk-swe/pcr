@@ -1977,6 +1977,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Raw scans authorize the neighbor request a probe's route resolves, such as
   a gateway's, against the destination allowlist and the route's sources
   before sending it, as explicit neighbor discovery does.
+- A raw scan whose next hop's answer is cached authorizes no neighbor request,
+  so a cached gateway the policy does not allow no longer fails a scan that
+  sends it nothing.
 - Raw scans resolve each stage's link-layer neighbors before its probes arm
   a capture, so a pipelined scan's neighbor capture never overlaps its probe
   captures, and those requests count in the scan's statistics.

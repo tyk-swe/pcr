@@ -963,6 +963,60 @@ fn a_client_bounded_by_a_scan_sends_one_request_to_a_silent_gateway() {
 }
 
 #[test]
+fn a_cached_gateway_needs_no_authorization_to_scan_through() {
+    let steps = Steps::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy {
+            allowed_destinations: vec![DestinationConstraint::Exact(address(FIRST))],
+            ..Policy::default()
+        },
+        common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+    );
+    let route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    // A send, which authorizes no neighbor request, warms the shared cache.
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        destination: FIRST.parse().unwrap(),
+        ..Ipv4::default()
+    });
+    packet.push(Icmpv4 {
+        icmp_type: 8,
+        ..Icmpv4::default()
+    });
+    client
+        .send(
+            packetcraftr::send::Request::packet(
+                packet,
+                packetcraftr::send::Options {
+                    plan: route.clone(),
+                    ..packetcraftr::send::Options::default()
+                },
+            ),
+            packetcraftr::send::Collector::default(),
+        )
+        .expect("a send resolves the gateway");
+    assert!(matches!(
+        steps.take().as_slice(),
+        [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
+    ));
+
+    let mut request = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route;
+    client
+        .scan(request, scan::Collector::default())
+        .expect("no request goes to the denied gateway whose answer is cached");
+    assert!(matches!(steps.take().as_slice(), [Step::Transmit(_)]));
+}
+
+#[test]
 fn a_client_authorizing_neighbor_requests_denies_any_workflows_gateway() {
     let steps = Steps::default();
     let client = || {

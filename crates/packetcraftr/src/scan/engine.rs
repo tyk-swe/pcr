@@ -613,6 +613,22 @@ fn plan_scan(
     } else {
         0
     };
+    if implicit_requests > 0 {
+        // Those requests capture within the evidence limits, which must hold
+        // a decodable reply just as explicit neighbor discovery requires.
+        crate::neighbor::Options::default()
+            .one_attempt(
+                request.timeout,
+                request.limits.max_evidence_frames,
+                request.limits.max_evidence_bytes,
+            )
+            .validate()
+            .map_err(|source| Error::InvalidLimit {
+                field: "max_evidence_bytes",
+                value: u64::try_from(request.limits.max_evidence_bytes).unwrap_or(u64::MAX),
+                reason: format!("cannot hold an implicit neighbor resolution: {source}"),
+            })?;
+    }
     let neighbor_requests = explicit_requests
         .checked_add(implicit_requests)
         .ok_or_else(overflow)?;

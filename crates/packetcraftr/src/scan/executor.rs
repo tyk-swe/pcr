@@ -134,11 +134,15 @@ impl<'c, P: PacketProviders, K: Clock> ClientExecutor<'c, P, K> {
                 // so the resolver the exchanges share sends at most one and
                 // keeps the answer for the rest of the operation, bounded
                 // by the scan's evidence limits like an explicit capture.
-                let (max_frames, max_bytes) = self.neighbor_capture;
-                client.neighbors = client
-                    .neighbors
-                    .one_attempt(self.attempt_timeout, max_frames, max_bytes)
-                    .map_err(BoundaryError::from_error)?;
+                // A layer-3 route resolves no neighbor, so its evidence
+                // limits need not hold a reply.
+                if self.send.plan.link_mode != Mode::Layer3 {
+                    let (max_frames, max_bytes) = self.neighbor_capture;
+                    client.neighbors = client
+                        .neighbors
+                        .one_attempt(self.attempt_timeout, max_frames, max_bytes)
+                        .map_err(BoundaryError::from_error)?;
+                }
                 configured.insert(client)
             }
         };

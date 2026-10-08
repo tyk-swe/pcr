@@ -1949,6 +1949,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   sleep and the deadline is enforced again afterward.
 - The implicit neighbor resolution inside a probe send shares the scan's
   evidence limits instead of the resolver's capture defaults.
+- Link-layer raw scans reject evidence limits too small to hold a neighbor
+  reply before sending, as explicit neighbor discovery does, instead of
+  silently raising them for the implicit resolution.
 - Exchanges retain directly correlated TCP and UDP replies rejected by the response
   limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late

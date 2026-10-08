@@ -1155,6 +1155,54 @@ fn link_layer_probes_budget_their_implicit_neighbor_resolution() {
     assert_eq!(report.stats.packets_attempted, 1);
 }
 
+#[test]
+fn link_layer_probes_reject_evidence_limits_too_small_for_a_neighbor_reply() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.collection.capture.snap_length = 64;
+    request.collection.capture.max_bytes = 64;
+    request.limits.max_evidence_bytes = 64;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let error = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
+        &mut NoopClock,
+    )
+    .expect_err("an implicit neighbor reply cannot fit in 64 evidence bytes");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "max_evidence_bytes",
+                value: 64,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    // A layer-3 route resolves no neighbor, so the same limits suffice.
+    request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TimeoutExecutor::default(),
+        &mut NoopClock,
+    )
+    .expect("layer-3 probes capture no neighbor reply");
+    assert_eq!(report.stats.packets_attempted, 1);
+}
+
 /// Answers the answered host's discovery echo and gives each scanned probe a
 /// late frame its outcome does not carry.
 struct SkippedHostExecutor {

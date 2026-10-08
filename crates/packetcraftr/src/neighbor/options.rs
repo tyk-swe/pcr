@@ -95,10 +95,10 @@ impl Options {
 
     /// These options narrowed to one request per fresh resolution, waiting
     /// at most `attempt_timeout` for a reply and capturing within
-    /// `max_frames` frames and `max_bytes` bytes — never below the bounds a
-    /// single decodable reply needs. Answers live for the whole operation:
-    /// an entry that expired mid-operation would invite a second request
-    /// beyond the first.
+    /// `max_frames` frames and `max_bytes` bytes. Limits too small for a
+    /// decodable reply fail validation rather than being raised. Answers
+    /// live for the whole operation: an entry that expired mid-operation
+    /// would invite a second request beyond the first.
     #[must_use]
     pub(crate) fn one_attempt(
         &self,
@@ -107,21 +107,12 @@ impl Options {
         max_bytes: usize,
     ) -> Self {
         Self {
-            max_attempts: 1,
             attempt_timeout: attempt_timeout
                 .min(MAX_CONFIGURED_ATTEMPT_TIMEOUT)
                 .max(Duration::from_nanos(1)),
             cache_ttl: self.cache_ttl.max(MAX_CONFIGURED_CACHE_TTL),
             max_cache_entries: self.max_cache_entries.max(MAX_CONFIGURED_CACHE_ENTRIES),
-            max_capture_queue_frames: self.max_capture_queue_frames.min(max_frames).max(1),
-            max_captured_bytes: self
-                .max_captured_bytes
-                .min(max_bytes)
-                .max(MIN_NEIGHBOR_SNAPSHOT_LENGTH),
-            snap_length: self
-                .snap_length
-                .min(max_bytes)
-                .max(MIN_NEIGHBOR_SNAPSHOT_LENGTH),
+            ..self.single_attempt(attempt_timeout, max_frames, max_bytes)
         }
     }
 
@@ -156,13 +147,16 @@ mod tests {
     }
 
     #[test]
-    fn one_attempt_never_falls_below_what_a_decodable_reply_needs() {
-        let options = Options::default().one_attempt(Duration::from_secs(5), 0, 40);
-        options
-            .validate()
-            .expect("a resolution under tight evidence limits still validates");
-        assert_eq!(options.max_capture_queue_frames, 1);
-        assert_eq!(options.max_captured_bytes, MIN_NEIGHBOR_SNAPSHOT_LENGTH);
-        assert_eq!(options.snap_length, MIN_NEIGHBOR_SNAPSHOT_LENGTH);
+    fn one_attempt_rejects_limits_too_small_for_a_reply() {
+        let unsnappable = Options::default().one_attempt(Duration::from_secs(5), 4, 40);
+        assert_eq!(unsnappable.max_captured_bytes, 40);
+        assert_eq!(unsnappable.snap_length, 40);
+        assert!(unsnappable.validate().is_err());
+        assert!(
+            Options::default()
+                .one_attempt(Duration::from_secs(5), 0, 256)
+                .validate()
+                .is_err()
+        );
     }
 }

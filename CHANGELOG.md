@@ -1958,6 +1958,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.
+- Host `neighbor` records publish the `interface` their route selected, so
+  consumers can tell which link a `possible_proxy` basis compared.
 - NDJSON workflows check for cancellation after their last event, so a scan
   cancelled during `--reverse-dns` fails with `io.cancelled` instead of
   completing with unattempted lookups.

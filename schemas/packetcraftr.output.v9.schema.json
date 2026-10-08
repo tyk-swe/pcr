@@ -13200,6 +13200,7 @@
       "type": "object",
       "required": [
         "outcome",
+        "interface",
         "attempts",
         "observed_at"
       ],
@@ -13211,6 +13212,10 @@
             "routed",
             "not_applicable"
           ]
+        },
+        "interface": {
+          "$ref": "#/$defs/interfaceId",
+          "description": "The interface the host's route selected, where any reply was observed. Possible proxies share a link address on one interface."
         },
         "attempts": {
           "type": "integer",

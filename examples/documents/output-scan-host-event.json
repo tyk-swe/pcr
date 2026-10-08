@@ -39,6 +39,10 @@
     ],
     "neighbor": {
       "outcome": "resolved",
+      "interface": {
+        "name": "fixture0",
+        "index": 1
+      },
       "attempts": 1,
       "observed_at": {
         "unix_seconds": 1783555200,

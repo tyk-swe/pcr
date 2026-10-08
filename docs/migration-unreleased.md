@@ -1008,8 +1008,8 @@ Output/v9 changes, all additive within the new family:
 - Raw scan results and connect reports require `hosts`, one per selected
   target in selection order: `discovery` (`not_requested`, `skipped`,
   `responded`, or `no_response`), `scan` (`scanned`, `skipped`, or
-  `not_requested`), `reasons`, the optional `neighbor` outcome and
-  `reverse_dns` lookup, and the discovery `probes`. A `no_response` host is
+  `not_requested`), `reasons`, the optional `neighbor` outcome with its
+  `interface` and the `reverse_dns` lookup, and the discovery `probes`. A `no_response` host is
   uncertain, never absent. Each reason has a `kind`, the `evidence` behind it
   (`wire`, `socket`, or `cache`), its `basis` (`direct`, `cached`, or
   `possible_proxy`), and the discovery `probe` or `link_address` it rests on.

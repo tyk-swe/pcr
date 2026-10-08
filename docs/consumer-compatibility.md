@@ -50,12 +50,12 @@ v8 meaning and adds host discovery:
 - `reasons` for each responded host, each with a `kind`, the `evidence` behind
   it (`wire`, `socket`, or `cache`), and its `basis` (`direct`, `cached`, or
   `possible_proxy`). A `possible_proxy` basis flags a link address that also
-  answered for another address of the same family, as a target or a gateway;
-  it does not assert a cause;
+  answered for another address of the same family on the same interface, as
+  a target or a gateway; it does not assert a cause;
 - an optional `neighbor` outcome (`resolved`, `silent`, `routed`, or
-  `not_applicable`). A routed target's `next_hop` is its gateway, sent no
-  request; its link address, present only when already cached, is never the
-  target's identity;
+  `not_applicable`) with the `interface` the host's route selected. A routed
+  target's `next_hop` is its gateway, sent no request; its link address,
+  present only when already cached, is never the target's identity;
 - an optional `reverse_dns` lookup with the PTR `names` the server answered.
   Names are observations, not authenticated identity;
 - a required `stage` (`discovery` or `scan`) on probe, `probe_sent`,

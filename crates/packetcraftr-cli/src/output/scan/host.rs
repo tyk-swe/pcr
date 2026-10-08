@@ -17,7 +17,7 @@ use super::Scope;
 use crate::output::contract::Error;
 use crate::output::dns::{Outcome, QuestionStatus};
 use crate::output::frame::Timestamp;
-use crate::output::network::MacAddress;
+use crate::output::network::{InterfaceId, MacAddress};
 use crate::output::stream::StreamRecord;
 
 published_enum! {
@@ -151,10 +151,12 @@ pub struct NextHop {
     pub link: Option<Link>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Neighbor {
     /// `resolved`, `silent`, `routed`, or `not_applicable`.
     pub outcome: &'static str,
+    /// The interface the host's route selected, where any reply was observed.
+    pub interface: InterfaceId,
     pub attempts: u32,
     pub observed_at: Timestamp,
     /// The host's own link address; present when `outcome` is `resolved`.
@@ -185,6 +187,7 @@ impl TryFrom<discovery::Neighbor> for Neighbor {
         };
         Ok(Self {
             outcome,
+            interface: neighbor.interface.into(),
             attempts: neighbor.attempts,
             observed_at: neighbor.observed_at.try_into()?,
             link,
@@ -333,4 +336,33 @@ pub(super) fn publish_all<E, P>(
             Host::publish(host, probes, reverse_dns.next().flatten())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use packetcraftr::scan::discovery;
+    use packetcraftr_netio::interface;
+    use serde_json::json;
+
+    use super::Neighbor;
+
+    #[test]
+    fn a_neighbor_publishes_the_interface_its_reply_was_observed_on() {
+        let neighbor = discovery::Neighbor {
+            outcome: discovery::NeighborOutcome::Silent,
+            interface: interface::Id {
+                name: "fixture0".into(),
+                index: 1,
+            },
+            attempts: 1,
+            observed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        };
+        let published = serde_json::to_value(Neighbor::try_from(neighbor).unwrap()).unwrap();
+        assert_eq!(
+            published["interface"],
+            json!({"name": "fixture0", "index": 1})
+        );
+    }
 }

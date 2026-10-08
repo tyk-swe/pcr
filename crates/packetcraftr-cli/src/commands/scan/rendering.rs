@@ -177,8 +177,9 @@ fn render_hosts_text<P>(
         ))?;
         if let Some(neighbor) = &host.neighbor {
             write_stdout_line(format_args!(
-                "  neighbor={} attempts={} link={} next-hop={} next-hop-link={}",
+                "  neighbor={} interface={} attempts={} link={} next-hop={} next-hop-link={}",
                 neighbor.outcome,
+                neighbor.interface.name,
                 neighbor.attempts,
                 link_text(neighbor.link.as_ref()),
                 optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),

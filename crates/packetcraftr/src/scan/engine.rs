@@ -79,6 +79,14 @@ where
     enforce_deadline(&Probes, deadline)?;
     let approved = approve_scan(request, authorizer, deadline)?;
     enforce_deadline(&Probes, deadline)?;
+    if request.max_in_flight > 1 {
+        // Each stage is checked for every target before any neighbor request
+        // or probe, though discovery may leave the scan fewer.
+        if request.discovery.runs() {
+            check_prepared_descriptions(request, &approved.targets, &request.discovery.probes)?;
+        }
+        check_prepared_descriptions(request, &approved.targets, &approved.endpoints)?;
+    }
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
         Probes,
@@ -356,9 +364,6 @@ where
     if plan.targets.is_empty() || plan.endpoints.is_empty() {
         return Ok(crate::Stats::default());
     }
-    if request.max_in_flight > 1 {
-        check_prepared_descriptions(request, plan)?;
-    }
     // Every probe's neighbor is resolved before any probe arms a capture, so
     // no resolution's capture overlaps a probe's and each request joins the
     // stage's statistics.
@@ -402,14 +407,15 @@ fn add_stats(total: &mut crate::Stats, stage: &crate::Stats, sequence: u64) -> R
         .map_err(|_| Error::StatisticsOverflow { sequence })
 }
 
-/// Rejects a pipelined stage whose batch descriptions would exceed the
-/// preparation limit, before any neighbor request or description.
-fn check_prepared_descriptions(request: &Request, plan: &StagePlan<'_>) -> Result<(), Error> {
-    let probes_per_target = plan
-        .endpoints
-        .len()
-        .saturating_mul(request.attempts as usize);
-    let batch_bytes = plan.targets.iter().fold(0usize, |bytes, target| {
+/// Rejects a pipelined stage whose batch descriptions for `targets` would
+/// exceed the preparation limit.
+fn check_prepared_descriptions(
+    request: &Request,
+    targets: &[SelectedAddress],
+    endpoints: &[ProbeEndpoint],
+) -> Result<(), Error> {
+    let probes_per_target = endpoints.len().saturating_mul(request.attempts as usize);
+    let batch_bytes = targets.iter().fold(0usize, |bytes, target| {
         let scope_bytes = target.scope.as_ref().map_or(0, |scope| {
             scope
                 .zone

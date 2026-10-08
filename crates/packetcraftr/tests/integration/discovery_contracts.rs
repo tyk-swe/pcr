@@ -358,6 +358,24 @@ fn a_pipelined_stage_over_its_preparation_limit_sends_no_neighbor_request() {
 }
 
 #[test]
+fn explicit_neighbor_discovery_waits_for_the_preparation_limit() {
+    let (client, steps) = layer2_client(Policy::default());
+    let mut request = neighbor_only(&[FIRST, SECOND]);
+    request.discovery.probes = vec![ProbeEndpoint::Icmp];
+    request.max_in_flight = 2;
+    request.limits.max_prepared_bytes = 64;
+    let result = client.scan(request, scan::Collector::default());
+    assert!(
+        matches!(result, Err(scan::Error::PipelineExecution { .. })),
+        "{result:?}"
+    );
+    assert!(
+        steps.take().is_empty(),
+        "the preparation limit precedes the targets' own requests"
+    );
+}
+
+#[test]
 fn one_link_address_for_several_targets_is_a_possible_proxy() {
     let (client, _) = layer2_client(Policy::default());
     let report = scan_with(&client, neighbor_only(&[FIRST, SECOND]));

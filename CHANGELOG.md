@@ -1969,8 +1969,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   captures, and those requests count in the scan's statistics.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
-- Pipelined raw scans check the preparation limit before any neighbor
-  request.
+- Pipelined raw scans check each stage's preparation limit for all its
+  targets before explicit neighbor discovery or any other request.
 - Explicit neighbor discovery covers the neighbor requests the probes would
   otherwise send, so the plan no longer charges them twice against
   `max_probes`, wire bytes, and duration.

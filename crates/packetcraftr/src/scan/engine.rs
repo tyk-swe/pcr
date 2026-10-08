@@ -129,6 +129,9 @@ where
     }
     let mut composer = Composer::new(&approved.targets, options.mode, options.unresponsive);
     let mut stats = crate::Stats::default();
+    // Transmissions whose rate pause is still owed, waited out just before
+    // the next one so the operation's last transmission leaves no pause.
+    let mut owed = 0;
     let mut scan_sequence = 0;
     if options.runs() {
         let mut sendable = vec![true; approved.targets.len()];
@@ -141,13 +144,16 @@ where
                 deadline,
                 &mut composer,
                 &mut stats,
+                &mut owed,
             )?;
         }
         if !options.probes.is_empty() {
             for (index, target) in approved.targets.iter().enumerate() {
                 if sendable[index]
-                    && reach_next_hop(request, executor, clock, deadline, target, &mut stats, 0)?
-                        .is_some()
+                    && reach_next_hop(
+                        request, executor, clock, deadline, target, &mut stats, &mut owed, 0,
+                    )?
+                    .is_some()
                 {
                     sendable[index] = false;
                     composer.unreachable(index);
@@ -185,6 +191,9 @@ where
                 .saturating_add(scan_probes),
             request.collection.capture.snap_length,
         );
+        if !probe_targets.is_empty() && !options.probes.is_empty() {
+            settle(request, clock, deadline, &mut owed, &mut stats)?;
+        }
         let discovered = execute(
             request,
             executor,
@@ -202,8 +211,8 @@ where
                 });
             }
         }
-        if discovered.packets_attempted > 0 && !approved.endpoints.is_empty() {
-            pace(request, clock, deadline, 1, &mut stats)?;
+        if discovered.packets_attempted > 0 {
+            owed += 1;
         }
     }
     let hosts = composer.finish();
@@ -225,6 +234,7 @@ where
                 deadline,
                 target,
                 &mut stats,
+                &mut owed,
                 scan_sequence,
             )? {
                 return Err(Error::Neighbor {
@@ -247,6 +257,9 @@ where
         usize::try_from(scan_probes).unwrap_or(usize::MAX),
         request.collection.capture.snap_length,
     );
+    if !scanned.is_empty() && !approved.endpoints.is_empty() {
+        settle(request, clock, deadline, &mut owed, &mut stats)?;
+    }
     let scanned = execute(
         request,
         executor,
@@ -287,6 +300,7 @@ where
 ///
 /// Returns the targets a frame can still be sent to: a target whose own
 /// resolution stayed silent accepts nothing, so later stages skip it.
+#[allow(clippy::too_many_arguments)]
 fn discover_neighbors<E: Pipelined, C: Clock>(
     request: &Request,
     targets: &[SelectedAddress],
@@ -295,15 +309,13 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
     deadline: &mut Deadline,
     composer: &mut Composer,
     stats: &mut crate::Stats,
+    owed: &mut usize,
 ) -> Result<Vec<bool>, Error> {
     let mut sendable = vec![true; targets.len()];
-    let mut sent = false;
     for (index, target) in targets.iter().enumerate() {
         let mut attempts = 0;
         let neighbor = loop {
-            if sent {
-                pace(request, clock, deadline, 1, stats)?;
-            }
+            settle(request, clock, deadline, owed, stats)?;
             enforce_deadline(&Probes, deadline)?;
             let (neighbor, exchange) = executor
                 .resolve_neighbor(target, request.timeout, deadline)
@@ -324,7 +336,8 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
                 });
             }
             add_stats(stats, &exchange, 0)?;
-            sent = neighbor.attempts > 0;
+            let sent = neighbor.attempts > 0;
+            *owed += usize::from(sent);
             attempts += neighbor.attempts;
             let silent = matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
             if !silent || !sent || attempts >= request.attempts {
@@ -337,10 +350,22 @@ fn discover_neighbors<E: Pipelined, C: Clock>(
         sendable[index] = !matches!(neighbor.outcome, discovery::NeighborOutcome::Silent);
         composer.neighbor(index, neighbor);
     }
-    if sent {
-        pace(request, clock, deadline, 1, stats)?;
-    }
     Ok(sendable)
+}
+
+/// Waits out the rate for the `owed` transmissions sent since the last
+/// wait, just before the next one is sent.
+fn settle<C: Clock>(
+    request: &Request,
+    clock: &mut C,
+    deadline: &mut Deadline,
+    owed: &mut usize,
+    stats: &mut crate::Stats,
+) -> Result<(), Error> {
+    match std::mem::take(owed) {
+        0 => Ok(()),
+        items => pace(request, clock, deadline, items, stats),
+    }
 }
 
 /// Waits out the request rate for `items` probes already sent, recording
@@ -447,6 +472,7 @@ where
 /// Resolves `target`'s next hop before its stage arms any capture, so no
 /// resolution's capture overlaps a probe's and each request joins `stats`.
 /// Returns why the target is unreachable when its next hop stayed silent.
+#[allow(clippy::too_many_arguments)]
 fn reach_next_hop<E: Pipelined, C: Clock>(
     request: &Request,
     executor: &mut E,
@@ -454,8 +480,10 @@ fn reach_next_hop<E: Pipelined, C: Clock>(
     deadline: &mut Deadline,
     target: &SelectedAddress,
     stats: &mut crate::Stats,
+    owed: &mut usize,
     sequence: u64,
 ) -> Result<Option<BoundaryError>, Error> {
+    settle(request, clock, deadline, owed, stats)?;
     enforce_deadline(&Probes, deadline)?;
     let resolved = executor
         .resolve_next_hop(target, deadline)
@@ -463,13 +491,14 @@ fn reach_next_hop<E: Pipelined, C: Clock>(
             address: target.address,
             source,
         })?;
+    // A resolver stopped by the deadline reports silence; the deadline
+    // decides instead.
+    enforce_deadline(&Probes, deadline)?;
     add_stats(stats, &resolved.stats, sequence)?;
     // A request spends the rate like a probe, so it is spaced from the next
     // request or the stage's first probe.
-    if resolved.stats.packets_attempted > 0 {
-        let requests = usize::try_from(resolved.stats.packets_attempted).unwrap_or(usize::MAX);
-        pace(request, clock, deadline, requests, stats)?;
-    }
+    let requests = usize::try_from(resolved.stats.packets_attempted).unwrap_or(usize::MAX);
+    *owed = owed.saturating_add(requests);
     Ok(resolved.silence)
 }
 
@@ -868,15 +897,24 @@ fn plan_scan(
         limit: request.limits.max_duration,
     };
     let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
-    // Every neighbor request waits its attempt timeout and paces like a probe.
-    let neighbor_duration = u32::try_from(explicit_requests)
+    // Every neighbor request waits its attempt timeout and paces like a probe,
+    // except a last request no probe follows.
+    let neighbor_requests = explicit_requests
+        .checked_add(implicit_requests)
+        .ok_or_else(too_long)?;
+    let neighbor_pauses = if total_probes == 0 {
+        neighbor_requests.saturating_sub(1)
+    } else {
+        neighbor_requests
+    };
+    let neighbor_duration = u32::try_from(neighbor_requests)
         .ok()
-        .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
-        .and_then(|explicit| {
-            u32::try_from(implicit_requests)
+        .and_then(|requests| request.timeout.checked_mul(requests))
+        .and_then(|waits| {
+            u32::try_from(neighbor_pauses)
                 .ok()
-                .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
-                .and_then(|implicit| implicit.checked_add(explicit))
+                .and_then(|pauses| pause.checked_mul(pauses))
+                .and_then(|pauses| pauses.checked_add(waits))
         })
         .ok_or_else(too_long)?;
     let stage_pause = if discovery_probes > 0 && scan_probes > 0 {

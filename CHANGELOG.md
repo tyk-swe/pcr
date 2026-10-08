@@ -1981,8 +1981,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   uncounted neighbor request.
 - A stage's neighbor requests pace like probes under `--rate`, and the plan
   budgets their pauses.
+- A scan waits out a transmission's `--rate` pause just before the next one,
+  so a neighbor request that is the operation's last transmission, as in
+  neighbor-only discovery, neither waits nor plans a pause after it.
 - A discovery target whose next hop never answers a neighbor request is
   reported `no_response` and skipped instead of failing the whole scan.
+- A scan whose implicit neighbor resolution outlasts `max_duration` fails with
+  its duration limit instead of reporting the unanswered target
+  `no_response`.
 - Multicast targets, which need no neighbor resolution, no longer charge
   implicit or explicit neighbor requests to the plan or need evidence and
   snap limits that hold a neighbor reply, even when discovery selects

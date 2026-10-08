@@ -1772,8 +1772,18 @@ impl Pipelined for SlowNeighbors {
 #[test]
 fn a_neighbor_pace_that_would_overshoot_the_deadline_is_refused() {
     use super::discovery::{Mode, Options};
-    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let mut request = tcp_scan_request(Target::Address(target));
+    let targets = [
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)),
+    ];
+    let mut request = tcp_scan_request(Target::Address(targets[0]));
+    request.targets = crate::target::Selection {
+        include: targets
+            .iter()
+            .map(|address| crate::target::Specification::Target(Target::Address(*address)))
+            .collect(),
+        exclude: Vec::new(),
+    };
     request.endpoints = Vec::new();
     request.probes_per_second = Some(1);
     request.limits.max_duration = Duration::from_millis(2_100);
@@ -1784,11 +1794,138 @@ fn a_neighbor_pace_that_would_overshoot_the_deadline_is_refused() {
     };
     let mut clock = crate::test_support::RecordingClock::default();
     let mut deadline = clock.deadline(request.limits.max_duration);
-    // The resolution's own route and capture work consumes most of the
-    // budget, so the trailing one-second pace cannot fit anymore.
+    // The first resolution's own route and capture work consumes most of the
+    // budget, so the one-second pace before the second request cannot fit
+    // anymore.
     let mut executor = SlowNeighbors {
         clock: clock.clone(),
         work: Duration::from_millis(1_500),
+    };
+    let error = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: targets.to_vec(),
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect_err("the pace is reserved before it is slept");
+
+    assert!(
+        matches!(error, Error::DurationLimit { .. }),
+        "expected the pace's reservation to hit the duration limit, got {error:?}"
+    );
+}
+
+#[test]
+fn the_last_neighbor_request_owes_no_pause() {
+    use super::discovery::{Mode, Options};
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.endpoints = Vec::new();
+    request.probes_per_second = Some(1);
+    // Shorter than one pause, which only spaces a request from the next.
+    request.limits.max_duration = Duration::from_millis(500);
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        ..Options::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let mut executor = SlowNeighbors {
+        clock: clock.clone(),
+        work: Duration::ZERO,
+    };
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("a lone request plans and sends without a pause");
+
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert_eq!(clock.delays(), [], "no transmission follows the request");
+}
+
+/// Spends `work` of the operation's time on a next hop's one request, which
+/// stays silent.
+struct ExhaustingNextHops {
+    clock: crate::test_support::RecordingClock,
+    work: Duration,
+}
+
+impl Executor<Batch<Probe>> for ExhaustingNextHops {
+    fn execute(&mut self, _batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        unreachable!("an unreachable target is sent no probe")
+    }
+}
+
+impl Pipelined for ExhaustingNextHops {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        unreachable!("the request selects no neighbor discovery")
+    }
+
+    fn resolve_next_hop(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _deadline: &Deadline,
+    ) -> Result<super::executor::NextHopResolution, BoundaryError> {
+        self.clock.advance(self.work);
+        Ok(super::executor::NextHopResolution {
+            stats: Stats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: 42,
+                ..Stats::default()
+            },
+            silence: Some(BoundaryError::from_error(Error::InvalidEvidence {
+                sequence: 0,
+                message: "the next hop stayed silent".to_owned(),
+            })),
+        })
+    }
+}
+
+#[test]
+fn a_next_hop_silent_past_the_deadline_fails_the_scan() {
+    use super::discovery::{Mode, Options};
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.endpoints = Vec::new();
+    request.discovery = Options {
+        mode: Mode::Only,
+        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let mut executor = ExhaustingNextHops {
+        clock: clock.clone(),
+        work: request.limits.max_duration + Duration::from_millis(1),
     };
     let error = engine::run(
         &request,
@@ -1801,11 +1938,11 @@ fn a_neighbor_pace_that_would_overshoot_the_deadline_is_refused() {
         &mut deadline,
         |_, _| Ok(()),
     )
-    .expect_err("the trailing pace is reserved before it is slept");
+    .expect_err("silence the deadline cut short is no host evidence");
 
     assert!(
         matches!(error, Error::DurationLimit { .. }),
-        "expected the pace's reservation to hit the duration limit, got {error:?}"
+        "expected the deadline to decide, got {error:?}"
     );
 }
 

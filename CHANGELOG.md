@@ -1942,6 +1942,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   never reported.
 - Hosts discovery skipped release their response reservations before the
   scan stage, so that capacity cannot crowd out late and duplicate frames.
+- Targets whose own link-layer resolution stayed silent release their
+  response reservations before the discovery probes, so tight evidence limits
+  keep the remaining hosts' late and duplicate frames.
 - Discovery and stage-transition pauses count in the scan's elapsed
   statistics, and `--reverse-dns` folds the lookups' exchange statistics
   into the reported statistics (elapsed under `--connect`).

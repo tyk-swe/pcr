@@ -1432,6 +1432,143 @@ fn a_silent_neighbor_sends_no_ip_probes_and_is_never_scanned() {
     );
 }
 
+/// Scripts neighbor outcomes per call and answers each discovery echo in
+/// time, then again with a late frame its outcome does not carry.
+#[derive(Default)]
+struct LateEchoNeighbors {
+    neighbors: ScriptedNeighbors,
+    inner: TimeoutExecutor,
+    bytes: usize,
+}
+
+impl Executor<Batch<Probe>> for LateEchoNeighbors {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        let mut execution = self.inner.execute(batch)?;
+        let IpAddr::V4(remote) = batch.probes[0].address else {
+            return Ok(execution);
+        };
+        let Some(reply) = execution
+            .sent
+            .first()
+            .and_then(|sent| echo_reply(sent.built().packet.get::<Icmpv4>()?.body.clone(), remote))
+        else {
+            return Ok(execution);
+        };
+        execution
+            .unsolicited
+            .push(crate::probe::runner::UnsolicitedCapture {
+                decoded: decoded_packet(
+                    reply.clone(),
+                    UNIX_EPOCH + Duration::from_secs(2),
+                    &vec![0x45_u8; self.bytes],
+                    Vec::new(),
+                ),
+                received_at: Some(std::time::Instant::now()),
+                response_deadline: std::time::Instant::now() + Duration::from_secs(1),
+                correlation_expired: false,
+            });
+        execution.responses.push(crate::exchange::Response {
+            request_index: 0,
+            response: decoded(reply, Vec::new()),
+            latency: Duration::from_millis(1),
+        });
+        Ok(execution)
+    }
+}
+
+impl Pipelined for LateEchoNeighbors {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        target: &crate::target::SelectedAddress,
+        timeout: Duration,
+        deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        self.neighbors.resolve_neighbor(target, timeout, deadline)
+    }
+}
+
+#[test]
+fn a_silent_neighbors_skipped_probes_release_their_evidence_reservation() {
+    use super::discovery::{Link, Mode, NeighborOutcome, Options, State};
+    use crate::probe::ProbeEndpoint;
+    let silent = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let answered = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11));
+    let mut request = tcp_scan_request(Target::Address(answered));
+    request.targets = crate::target::Selection {
+        include: [silent, answered]
+            .map(|address| crate::target::Specification::Target(Target::Address(address)))
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    request.discovery = Options {
+        mode: Mode::Only,
+        neighbor: true,
+        probes: vec![ProbeEndpoint::Icmp],
+        ..Options::default()
+    };
+    request.endpoints.clear();
+    // Exactly the answered echo's slot plus one captured frame fits.
+    request.collection.capture.snap_length = 64;
+    request.collection.capture.max_bytes = 128;
+    request.limits.max_evidence_bytes = 128;
+    let mut executor = LateEchoNeighbors {
+        neighbors: ScriptedNeighbors {
+            outcomes: [
+                NeighborOutcome::Silent,
+                NeighborOutcome::Resolved(Link {
+                    address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+                    cached: false,
+                }),
+            ]
+            .into(),
+            ..ScriptedNeighbors::default()
+        },
+        bytes: 64,
+        ..LateEchoNeighbors::default()
+    };
+    let mut diagnostics = Vec::new();
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![silent, answered],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+        &mut Deadline::new(request.limits.max_duration),
+        |event, _| {
+            if let Event::Diagnostic(diagnostic) = event {
+                diagnostics.push(diagnostic.code);
+            }
+            Ok(())
+        },
+    )
+    .expect("a silent neighbor keeps its record without aborting the scan");
+
+    assert!(
+        diagnostics.is_empty(),
+        "the late echo fits once the skipped probe holds no reservation: {diagnostics:?}"
+    );
+
+    assert_eq!(
+        report
+            .hosts
+            .iter()
+            .map(|host| (host.address, host.state))
+            .collect::<Vec<_>>(),
+        [(silent, State::NoResponse), (answered, State::Responded)]
+    );
+}
+
 /// Answers every neighbor request after marking `work` clock time spent, so
 /// the run can observe work that the plan never predicted.
 struct SlowNeighbors {

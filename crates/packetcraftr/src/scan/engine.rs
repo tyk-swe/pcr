@@ -136,6 +136,21 @@ where
             first_sequence: 0,
         };
         scan_sequence = discovery.probes(request)?;
+        if options.neighbor {
+            // Probes skipped after a silent neighbor hold no response
+            // capacity; only the remaining targets' probes are outstanding.
+            let scan_probes = probe_count(
+                probe_targets.len(),
+                approved.endpoints.len(),
+                request.attempts,
+            )?;
+            evidence.reserve_responses(
+                usize::try_from(scan_sequence)
+                    .unwrap_or(usize::MAX)
+                    .saturating_add(scan_probes),
+                request.collection.capture.snap_length,
+            );
+        }
         let discovered = execute(
             request,
             executor,

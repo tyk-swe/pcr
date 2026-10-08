@@ -109,6 +109,7 @@ impl Lookup {
         batched(
             hosts,
             pause,
+            self.batch_size(),
             last_sent,
             deadline,
             crate::cancellation::signal(),
@@ -179,11 +180,7 @@ impl Lookup {
         if remaining.is_zero() {
             return ended(QuestionStatus::Unattempted, None);
         }
-        let questions = match addresses
-            .iter()
-            .map(|address| self.question(*address, remaining))
-            .collect::<Result<Vec<_>, _>>()
-        {
+        let questions = match self.questions(addresses, remaining) {
             Ok(questions) => questions,
             Err(error) => return ended(QuestionStatus::Failed, Some(error.to_string())),
         };
@@ -193,13 +190,7 @@ impl Lookup {
             .and_then(|report| collector.finish(report))
         {
             Ok(aggregate) => {
-                let sent = aggregate
-                    .questions
-                    .iter()
-                    .filter_map(|question| question.result.as_ref())
-                    .flat_map(dns::Aggregate::attempts)
-                    .filter_map(dns::AttemptEvidence::sent_at)
-                    .max();
+                let sent = last_batch_send(&aggregate.questions, &aggregate.stats);
                 (
                     aggregate
                         .questions
@@ -215,6 +206,38 @@ impl Lookup {
             Err(dns::Error::DurationLimit { .. }) => ended(QuestionStatus::Unattempted, None),
             Err(error) => ended(QuestionStatus::Failed, Some(error.to_string())),
         }
+    }
+
+    /// One batch's questions. A batch retains every question's evidence
+    /// until it ends, so they share the scan's evidence limits rather than
+    /// each taking them whole.
+    fn questions(
+        &self,
+        addresses: &[IpAddr],
+        remaining: Duration,
+    ) -> Result<Vec<dns::Request>, packetcraftr_core::error::BoundaryError> {
+        let share = addresses.len().max(1);
+        addresses
+            .iter()
+            .map(|address| {
+                self.question(*address, remaining).map(|mut question| {
+                    question.limits.max_evidence_frames /= share;
+                    question.limits.max_evidence_bytes /= share;
+                    question
+                })
+            })
+            .collect()
+    }
+
+    /// The most lookups one batch holds, so that each question's share of
+    /// the scan's evidence limits still holds a frame.
+    fn batch_size(&self) -> usize {
+        let limits = &self.template.limits;
+        let snap_length = self.template.collection.capture.snap_length.max(1);
+        batch::MAX_QUESTIONS
+            .min(limits.max_evidence_frames)
+            .min(limits.max_evidence_bytes / snap_length)
+            .max(1)
     }
 
     fn question(
@@ -244,9 +267,11 @@ impl Lookup {
 /// their names within `name_budget` bytes. Once `cancellation` fires no batch
 /// waits or sends: each remaining question has no time left and is
 /// unattempted.
+#[allow(clippy::too_many_arguments)]
 fn batched(
     hosts: &[Host],
     pause: Duration,
+    batch_size: usize,
     last_sent: Option<SystemTime>,
     deadline: Option<Instant>,
     cancellation: &Cancellation,
@@ -273,7 +298,7 @@ fn batched(
         })
     };
     let mut last_sent = last_sent;
-    for chunk in selected.chunks(batch::MAX_QUESTIONS) {
+    for chunk in selected.chunks(batch_size) {
         // Only what remains of the pause since the last transmission is owed;
         // its replies' wait already spaced it from this batch.
         let owed = last_sent.map_or(Duration::ZERO, |sent| {
@@ -336,6 +361,27 @@ pub(super) fn names(
     let (names, stats) = lookup.run(client, hosts, started, last_sent);
     let looked_up = names.iter().any(Option::is_some);
     (names, looked_up.then_some(stats))
+}
+
+/// When a batch last sent. A failed question keeps no attempt evidence, so a
+/// batch that failed one after sending anything is taken to have sent last as
+/// it ended, which spaces the next batch at least as far as its rate needs.
+fn last_batch_send(
+    questions: &[batch::Question<dns::Aggregate>],
+    stats: &packetcraftr::Stats,
+) -> Option<SystemTime> {
+    let failed = questions
+        .iter()
+        .any(|question| question.status == batch::QuestionStatus::Failed);
+    if failed && (stats.bytes > 0 || stats.packets_attempted > 0) {
+        return Some(SystemTime::now());
+    }
+    questions
+        .iter()
+        .filter_map(|question| question.result.as_ref())
+        .flat_map(dns::Aggregate::attempts)
+        .filter_map(dns::AttemptEvidence::sent_at)
+        .max()
 }
 
 /// When the transmission before the lookups was sent: the latest of `sent`,
@@ -534,6 +580,7 @@ mod tests {
             let (_, stats) = batched(
                 &responding(1),
                 pause,
+                batch::MAX_QUESTIONS,
                 last_sent,
                 Instant::now().checked_add(hour),
                 &Cancellation::default(),
@@ -565,6 +612,7 @@ mod tests {
         let (_, stats) = batched(
             &hosts,
             pause,
+            batch::MAX_QUESTIONS,
             None,
             Instant::now().checked_add(Duration::from_secs(60)),
             &Cancellation::default(),
@@ -601,6 +649,53 @@ mod tests {
     }
 
     #[test]
+    fn a_batchs_questions_share_the_scans_evidence_limits() {
+        let mut lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let snap_length = lookup.template.collection.capture.snap_length;
+        lookup.template.limits.max_evidence_frames = 1_000;
+        lookup.template.limits.max_evidence_bytes = 4 * snap_length;
+        assert_eq!(lookup.batch_size(), 4, "each share still holds a frame");
+        lookup.template.limits.max_evidence_bytes = 1_000 * snap_length;
+        lookup.template.limits.max_evidence_frames = 3;
+        assert_eq!(lookup.batch_size(), 3);
+
+        lookup.template.limits.max_evidence_frames = 1_000;
+        let addresses: Vec<IpAddr> = (1..=4)
+            .map(|host| IpAddr::V4(Ipv4Addr::new(192, 0, 2, host)))
+            .collect();
+        let questions = lookup
+            .questions(&addresses, Duration::from_secs(1))
+            .expect("questions build");
+        let frames: usize = questions.iter().map(|q| q.limits.max_evidence_frames).sum();
+        let bytes: usize = questions.iter().map(|q| q.limits.max_evidence_bytes).sum();
+        assert_eq!((frames, bytes), (1_000, 1_000 * snap_length));
+    }
+
+    #[test]
+    fn a_question_that_failed_after_sending_paces_from_the_batchs_end() {
+        let failed = batch::Question::<dns::Aggregate> {
+            query_name: dns::reverse_name(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
+            query_type: dns::QueryType::PTR,
+            transaction_id: 0,
+            status: batch::QuestionStatus::Failed,
+            result: None,
+            error: None,
+        };
+        let before = SystemTime::now();
+        let sent_tcp = packetcraftr::Stats {
+            bytes: 64,
+            ..packetcraftr::Stats::default()
+        };
+        let sent = last_batch_send(std::slice::from_ref(&failed), &sent_tcp);
+        assert!(sent.is_some_and(|sent| sent >= before), "{sent:?}");
+        assert_eq!(
+            last_batch_send(&[failed], &packetcraftr::Stats::default()),
+            None,
+            "a question that failed before sending paces nothing"
+        );
+    }
+
+    #[test]
     fn a_cancelled_scan_waits_for_and_sends_no_further_batch() {
         let hosts = responding(batch::MAX_QUESTIONS + 1);
         let hour = Duration::from_secs(3600);
@@ -609,6 +704,7 @@ mod tests {
             let (names, _) = batched(
                 &hosts,
                 pause,
+                batch::MAX_QUESTIONS,
                 Some(SystemTime::now()),
                 Instant::now().checked_add(hour),
                 cancellation,

@@ -1215,6 +1215,24 @@ fn a_querys_neighbor_request_counts_in_its_statistics() {
 }
 
 #[test]
+fn batch_limits_charge_no_neighbor_request_for_a_multicast_or_broadcast_server() {
+    let udp =
+        |limits: crate::policy::DnsOperation| (limits.udp().packets(), limits.udp().wire_bytes());
+    for address in [
+        IpAddr::V4(Ipv4Addr::new(224, 0, 0, 251)),
+        IpAddr::V4(Ipv4Addr::BROADCAST),
+        "ff02::fb".parse().expect("multicast address"),
+    ] {
+        let mut request = dns_request(address);
+        request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
+        let direct = super::batch::limits([&request], 3).expect("limits");
+        request.route.link_mode = packetcraftr_netio::link::Mode::Layer2;
+        let linked = super::batch::limits([&request], 3).expect("limits");
+        assert_eq!(udp(linked), udp(direct), "{address}");
+    }
+}
+
+#[test]
 fn batch_limits_charge_every_neighbor_attempt_before_each_udp_packet() {
     use packetcraftr_netio::link::Mode;
     let limits = |address: &str, link_mode, neighbor_attempts| {

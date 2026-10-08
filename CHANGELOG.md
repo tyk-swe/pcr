@@ -2056,6 +2056,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   attempted connection rather than one it never attempted.
 - `scan --reverse-dns` marks lookups whose remaining time cannot hold one
   question's planned attempts `unattempted` instead of `failed`.
+- `scan --reverse-dns` splits its lookups into batches whose questions share
+  the scan's evidence limits, instead of each question retaining up to the
+  whole limit until its batch ends.
+- `scan --reverse-dns` paces the next batch from the end of one whose question
+  failed after sending, since a failed question keeps no send time.
+- Link-layer `scan --reverse-dns` budgets no neighbor request before a query
+  to a multicast or limited-broadcast server, which resolves none.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.
@@ -2081,6 +2088,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Text scan output reports its achieved rate in packets per second, since the
   operation's completed packets include discovery, neighbor, and reverse-DNS
   traffic, instead of calling them probes.
+- Text scan output labels its planned duration as the scan's and its achieved
+  rate as the operation's, since enrichment is planned separately.
 - Text scan output shows each host's discovery probes, with their status,
   timing, responder, and frame, which no endpoint line carries.
 - NDJSON workflows check for cancellation after their last event, so a scan

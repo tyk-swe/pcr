@@ -107,6 +107,14 @@ fn with_neighbor_requests(
     if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
         return Ok(limits);
     }
+    // A multicast or limited-broadcast server's link address follows from its
+    // own, so no request precedes a query to it.
+    if let crate::target::Target::Address(address) = &question.server
+        && (address.is_multicast()
+            || *address == std::net::IpAddr::from(std::net::Ipv4Addr::BROADCAST))
+    {
+        return Ok(limits);
+    }
     // A server of unknown family is charged the larger solicitation.
     let request_bytes = match &question.server {
         crate::target::Target::Address(std::net::IpAddr::V4(_)) => {

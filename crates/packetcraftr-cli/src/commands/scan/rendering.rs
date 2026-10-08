@@ -238,11 +238,12 @@ fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
     )
 }
 
-/// The planned duration against the operation's achieved packet rate, which
-/// spans discovery, neighbor requests, and enrichment as well as probes.
+/// The scan's planned duration against the operation's achieved packet rate,
+/// which spans discovery, neighbor requests, and enrichment as well as probes;
+/// the plan covers discovery and the scan, not enrichment.
 fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats) -> String {
     format!(
-        "planned timeout+pacing {}; achieved {:.2} packets/s over {}",
+        "scan planned timeout+pacing {}; operation achieved {:.2} packets/s over {}",
         duration_text(planned),
         if stats.elapsed.is_zero() {
             0.0
@@ -495,7 +496,8 @@ mod tests {
         };
         let text = throughput_text(std::time::Duration::from_secs(1), &stats);
 
-        assert!(text.contains("achieved 3.00 packets/s"), "{text}");
+        assert!(text.starts_with("scan planned "), "{text}");
+        assert!(text.contains("operation achieved 3.00 packets/s"), "{text}");
     }
 
     #[test]

@@ -2025,6 +2025,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `scan --reverse-dns` authorizes all its lookups as one operation before the
   first batch, so more than 256 lookups no longer restart the `--max-packets`
   and `--max-bytes` budgets with each batch.
+- Text scan output shows when each neighbor outcome was `observed`, and its
+  summary counts the operation's completed packets, which include discovery,
+  neighbor, and reverse-DNS traffic, instead of calling them probes.
 - NDJSON workflows check for cancellation after their last event, so a scan
   cancelled during `--reverse-dns` fails with `io.cancelled` instead of
   completing with unattempted lookups.

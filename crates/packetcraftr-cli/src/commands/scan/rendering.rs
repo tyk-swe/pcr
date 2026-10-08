@@ -91,7 +91,8 @@ pub(super) fn render_text(
     render_hosts_text(&result.plan, &result.hosts)?;
     let rtt = result.rtt;
     write_summary_line(format_args!(
-        "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
+        // The totals span discovery, neighbor requests, and enrichment too.
+        "scanned {} endpoint(s); the operation completed {} packet(s), {} byte(s)",
         result.endpoints.len(),
         stats.packets_completed,
         stats.bytes
@@ -176,15 +177,7 @@ fn render_hosts_text<P>(
             host.discovery, host.scan
         ))?;
         if let Some(neighbor) = &host.neighbor {
-            write_stdout_line(format_args!(
-                "  neighbor={} interface={} attempts={} link={} next-hop={} next-hop-link={}",
-                neighbor.outcome,
-                neighbor.interface.name,
-                neighbor.attempts,
-                link_text(neighbor.link.as_ref()),
-                optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
-                link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
-            ))?;
+            write_stdout_line(format_args!("  {}", neighbor_text(neighbor)))?;
         }
         for reason in &host.reasons {
             write_stdout_line(format_args!(
@@ -202,6 +195,21 @@ fn render_hosts_text<P>(
         }
     }
     Ok(())
+}
+
+/// A host's neighbor line, with when its outcome was observed: a silent,
+/// routed, or inapplicable outcome has no reason that would carry it.
+fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
+    format!(
+        "neighbor={} interface={} attempts={} link={} next-hop={} next-hop-link={} observed={}",
+        neighbor.outcome,
+        neighbor.interface.name,
+        neighbor.attempts,
+        link_text(neighbor.link.as_ref()),
+        optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
+        link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
+        optional_display(neighbor.observed_at.as_ref()),
+    )
 }
 
 /// A host's reverse-DNS line, which marks names the scan's evidence byte
@@ -409,6 +417,32 @@ mod tests {
                 format!("fe80::1%beta {endpoint_name} classification=filtered"),
             );
         }
+    }
+
+    #[test]
+    fn text_neighbors_carry_their_observation_time() {
+        let neighbor = |observed_at| {
+            output::scan::host::Neighbor::try_from(packetcraftr::scan::discovery::Neighbor {
+                outcome: packetcraftr::scan::discovery::NeighborOutcome::Silent,
+                interface: packetcraftr_netio::interface::Id {
+                    name: "fixture0".to_owned(),
+                    index: 1,
+                },
+                attempts: 1,
+                observed_at,
+            })
+            .expect("a representable neighbor")
+        };
+        let observed = neighbor(Some(std::time::UNIX_EPOCH));
+        let text = neighbor_text(&observed);
+        assert!(
+            text.ends_with(&format!(
+                " observed={}",
+                observed.observed_at.as_ref().expect("observed")
+            )),
+            "{text}"
+        );
+        assert!(neighbor_text(&neighbor(None)).ends_with(" observed=none"));
     }
 
     #[test]

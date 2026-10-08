@@ -13287,6 +13287,10 @@
             "minLength": 1
           }
         },
+        "names_truncated": {
+          "const": true,
+          "description": "Present when the scan's evidence byte limit, which bounds the names kept across every lookup, dropped later names of this answer."
+        },
         "error": {
           "type": "string"
         }

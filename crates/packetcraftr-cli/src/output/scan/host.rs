@@ -212,8 +212,16 @@ pub struct ReverseDns {
     pub response_code: Option<u16>,
     /// Distinct PTR names in answer order, each with its trailing dot.
     pub names: Vec<String>,
+    /// Whether the scan's evidence byte limit, which bounds the names kept
+    /// across every lookup, dropped later names of this answer.
+    #[serde(skip_serializing_if = "is_false")]
+    pub names_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl ReverseDns {
@@ -226,6 +234,7 @@ impl ReverseDns {
             outcome: None,
             response_code: None,
             names: Vec::new(),
+            names_truncated: false,
             error,
         }
     }
@@ -250,6 +259,7 @@ impl From<dns::batch::Question<dns::Aggregate>> for ReverseDns {
                         .collect()
                 })
                 .unwrap_or_default(),
+            names_truncated: false,
             error: question.error.as_ref().map(ToString::to_string),
         }
     }

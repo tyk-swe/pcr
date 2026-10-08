@@ -74,7 +74,8 @@ impl Lookup {
     /// discovery did not run; a host discovery found silent is not looked
     /// up. Returns one entry per host plus the exchanges' statistics for
     /// the command's own accounting. A failed batch fails its questions
-    /// rather than the scan, whose evidence is already measured.
+    /// rather than the scan, whose evidence is already measured. The scan's
+    /// evidence byte limit bounds the names kept across every lookup.
     pub(super) fn run(
         &self,
         client: &Client,
@@ -84,6 +85,7 @@ impl Lookup {
         let deadline = started.checked_add(self.template.limits.max_duration);
         let mut names: Vec<Option<ReverseDns>> = hosts.iter().map(|_| None).collect();
         let mut statistics = packetcraftr::Stats::default();
+        let mut name_budget = self.template.limits.max_evidence_bytes;
         let selected: Vec<usize> = hosts
             .iter()
             .enumerate()
@@ -111,7 +113,8 @@ impl Lookup {
             let remaining = remaining();
             let addresses: Vec<IpAddr> = chunk.iter().map(|&index| hosts[index].address).collect();
             let (lookups, stats) = self.lookup(client, &addresses, remaining);
-            for (&index, lookup) in chunk.iter().zip(lookups) {
+            for (&index, mut lookup) in chunk.iter().zip(lookups) {
+                retain_names(&mut lookup, &mut name_budget);
                 names[index] = Some(lookup);
             }
             // A failed batch reports no statistics; the bounded questions
@@ -189,6 +192,26 @@ impl Lookup {
     }
 }
 
+/// Keeps `lookup`'s names while what they occupy fits `budget`, marking the
+/// lookup when later names were dropped.
+fn retain_names(lookup: &mut ReverseDns, budget: &mut usize) {
+    let kept = lookup
+        .names
+        .iter()
+        .take_while(|name| {
+            let held = size_of::<String>().saturating_add(name.len());
+            budget
+                .checked_sub(held)
+                .map(|left| *budget = left)
+                .is_some()
+        })
+        .count();
+    if kept < lookup.names.len() {
+        lookup.names.truncate(kept);
+        lookup.names_truncated = true;
+    }
+}
+
 /// Each host's lookup by position, or nothing when no server was requested,
 /// plus the lookups' exchange statistics.
 pub(super) fn names(
@@ -200,4 +223,47 @@ pub(super) fn names(
     lookup.map_or_else(Default::default, |lookup| {
         lookup.run(client, hosts, started)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn answered(names: &[&str]) -> ReverseDns {
+        ReverseDns {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            ..ReverseDns::ended(
+                "10.2.0.192.in-addr.arpa.".to_owned(),
+                QuestionStatus::Completed,
+                None,
+            )
+        }
+    }
+
+    #[test]
+    fn names_beyond_the_scans_evidence_bytes_are_dropped_and_marked() {
+        let held = |name: &str| size_of::<String>() + name.len();
+        let mut budget = held("a.example.") + held("b.example.");
+        let mut first = answered(&["a.example."]);
+        retain_names(&mut first, &mut budget);
+        assert_eq!(first.names, ["a.example."]);
+        assert!(!first.names_truncated);
+
+        // The budget spans lookups: the next host keeps only what remains.
+        let mut second = answered(&["b.example.", "c.example."]);
+        retain_names(&mut second, &mut budget);
+        assert_eq!(second.names, ["b.example."]);
+        assert!(second.names_truncated);
+        assert_eq!(budget, 0);
+
+        let mut third = answered(&["d.example."]);
+        retain_names(&mut third, &mut budget);
+        assert!(third.names.is_empty());
+        assert!(third.names_truncated);
+
+        // A lookup without names drops nothing.
+        let mut empty = answered(&[]);
+        retain_names(&mut empty, &mut budget);
+        assert!(!empty.names_truncated);
+    }
 }

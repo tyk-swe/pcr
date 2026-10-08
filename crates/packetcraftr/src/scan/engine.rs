@@ -372,6 +372,12 @@ where
                 source,
             })?;
         add_stats(&mut stats, &resolved, plan.first_sequence)?;
+        // A request spends the rate like a probe, so it is spaced from the
+        // next request or the stage's first probe.
+        if resolved.packets_attempted > 0 {
+            let requests = usize::try_from(resolved.packets_attempted).unwrap_or(usize::MAX);
+            pace(request, clock, deadline, requests, &mut stats)?;
+        }
     }
     enforce_deadline(&Probes, deadline)?;
     let probes = if request.max_in_flight == 1 {
@@ -713,15 +719,14 @@ fn plan_scan(
         limit: request.limits.max_duration,
     };
     let pause = rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
-    // Discovery requests pace between targets; an implicit resolution waits
-    // only the attempt timeout before its stage's probes.
+    // Every neighbor request waits its attempt timeout and paces like a probe.
     let neighbor_duration = u32::try_from(explicit_requests)
         .ok()
         .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
         .and_then(|explicit| {
             u32::try_from(implicit_requests)
                 .ok()
-                .and_then(|requests| request.timeout.checked_mul(requests))
+                .and_then(|requests| request.timeout.checked_add(pause)?.checked_mul(requests))
                 .and_then(|implicit| implicit.checked_add(explicit))
         })
         .ok_or_else(too_long)?;

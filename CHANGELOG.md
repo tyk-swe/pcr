@@ -1967,6 +1967,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Raw scans resolve each stage's link-layer neighbors before its probes arm
   a capture, so a pipelined scan's neighbor capture never overlaps its probe
   captures, and those requests count in the scan's statistics.
+- A stage's neighbor requests pace like probes under `--rate`, and the plan
+  budgets their pauses.
 - Pipelined raw scans check the preparation limit before any neighbor
   request.
 - `scan --reverse-dns` lookups on a raw route authorize the neighbor request

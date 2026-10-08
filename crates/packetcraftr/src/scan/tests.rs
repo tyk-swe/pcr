@@ -1660,3 +1660,75 @@ fn a_neighbor_pace_that_would_overshoot_the_deadline_is_refused() {
         "expected the pace's reservation to hit the duration limit, got {error:?}"
     );
 }
+
+/// Answers every probe with silence after its next hop's resolution sent
+/// one request.
+#[derive(Default)]
+struct FreshNextHops(TimeoutExecutor);
+
+impl Executor<Batch<Probe>> for FreshNextHops {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.0.execute(batch)
+    }
+}
+
+impl Pipelined for FreshNextHops {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        unreachable!("the request selects no neighbor discovery")
+    }
+
+    fn resolve_next_hop(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _deadline: &Deadline,
+    ) -> Result<Stats, BoundaryError> {
+        Ok(Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: 42,
+            ..Stats::default()
+        })
+    }
+}
+
+#[test]
+fn an_implicit_neighbor_request_paces_like_a_probe() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.probes_per_second = Some(10);
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut FreshNextHops::default(),
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the scan fits its budget");
+
+    assert_eq!(
+        clock.delays(),
+        [Duration::from_millis(100)],
+        "the request is spaced from the stage's probe"
+    );
+    assert_eq!(report.stats.packets_attempted, 2);
+}

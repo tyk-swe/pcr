@@ -1971,6 +1971,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   budgets their pauses.
 - Pipelined raw scans check each stage's preparation limit for all its
   targets before explicit neighbor discovery or any other request.
+- A pipelined scan's failure `stats` include the traffic before the failed
+  pipeline, such as discovery probes and neighbor requests, instead of only
+  that pipeline's.
 - Explicit neighbor discovery covers the neighbor requests the probes would
   otherwise send, so the plan no longer charges them twice against
   `max_probes`, wire bytes, and duration.

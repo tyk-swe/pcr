@@ -16,7 +16,9 @@ use packetcraftr::scan::{self, Reply, Request, Stage, connect};
 use packetcraftr::target::{Family, Specification, Target};
 use packetcraftr::{ProviderSet, route};
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::Classified;
+use packetcraftr_core::error::{
+    BoundaryError, Classification as ErrorClassification, Classified, Kind,
+};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -373,6 +375,59 @@ fn explicit_neighbor_discovery_waits_for_the_preparation_limit() {
         steps.take().is_empty(),
         "the preparation limit precedes the targets' own requests"
     );
+}
+
+fn pipeline_failure(error: &scan::Error) -> Option<&scan::PipelineFailure> {
+    use std::error::Error as _;
+    let mut source = error.source();
+    while let Some(error) = source {
+        if let Some(failure) = error.downcast_ref::<scan::PipelineFailure>() {
+            return Some(failure);
+        }
+        source = error.source();
+    }
+    None
+}
+
+#[test]
+fn a_pipeline_failure_reports_the_traffic_before_it() {
+    let steps = Steps::default();
+    let client = Client::new(
+        builtin::registry(),
+        Policy::default(),
+        common::providers(GatewayRoutes, RecordingTransmit::new(steps.clone())),
+    );
+    let mut request = request(
+        &[FIRST],
+        Vec::new(),
+        discovery(Mode::Only, vec![ProbeEndpoint::Icmp]),
+    );
+    request.route = route::Options {
+        link_mode: LinkMode::Layer2,
+        ..route::Options::default()
+    };
+    request.max_in_flight = 2;
+    let refuse_sends = |event: scan::Event| match event {
+        scan::Event::Sent(_) => Err(BoundaryError::new(
+            "fixture sink failed",
+            ErrorClassification::new("io.fixture_sink", Kind::Io, None),
+            Vec::new(),
+        )),
+        _ => Ok(()),
+    };
+    let error = client
+        .scan(request, refuse_sends)
+        .expect_err("the sink refuses the probe's send");
+    let failure = pipeline_failure(&error).expect("the pipeline failed");
+    assert!(
+        matches!(
+            steps.take().as_slice(),
+            [Step::Neighbor(_), Step::Transmit(_)]
+        ),
+        "the gateway's request precedes the probe"
+    );
+    assert_eq!(failure.stats.packets_attempted, 2, "{:?}", failure.stats);
+    assert_eq!(failure.stats.packets_completed, 2, "{:?}", failure.stats);
 }
 
 #[test]

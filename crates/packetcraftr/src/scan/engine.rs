@@ -166,6 +166,7 @@ where
             deadline,
             &mut evidence,
             &discovery,
+            &stats,
         )?;
         add_stats(&mut stats, &discovered, scan_sequence)?;
         for observation in evidence.classifier_mut().discovery.drain(..) {
@@ -200,7 +201,15 @@ where
         usize::try_from(scan_probes).unwrap_or(usize::MAX),
         request.collection.capture.snap_length,
     );
-    let scanned = execute(request, executor, clock, deadline, &mut evidence, &scan)?;
+    let scanned = execute(
+        request,
+        executor,
+        clock,
+        deadline,
+        &mut evidence,
+        &scan,
+        &stats,
+    )?;
     add_stats(
         &mut stats,
         &scanned,
@@ -355,6 +364,7 @@ fn execute<E, C, F>(
     deadline: &mut Deadline,
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
     plan: &StagePlan<'_>,
+    preceding: &crate::Stats,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
@@ -395,7 +405,10 @@ where
             evidence,
         )
     } else {
-        run_pipelined(request, executor, evidence, deadline, plan)
+        // A pipeline's failure reports the operation's traffic before it too.
+        let mut preceding = preceding.clone();
+        add_stats(&mut preceding, &stats, plan.first_sequence)?;
+        run_pipelined(request, executor, evidence, deadline, plan, preceding)
     }?;
     add_stats(&mut stats, &probes, plan.first_sequence)?;
     Ok(stats)
@@ -446,6 +459,7 @@ fn run_pipelined<E, F>(
     evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
     deadline: &Deadline,
     plan: &StagePlan<'_>,
+    preceding: crate::Stats,
 ) -> Result<crate::Stats, Error>
 where
     E: Pipelined,
@@ -465,6 +479,7 @@ where
         max_prepared_bytes: request.limits.max_prepared_bytes,
         max_evidence_frames: request.limits.max_evidence_frames,
         max_evidence_bytes: request.limits.max_evidence_bytes,
+        preceding,
     };
     let result = executor.execute_pipeline(&batches, settings, &mut |event| {
         let invalid = |index| {

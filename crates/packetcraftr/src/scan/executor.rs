@@ -35,7 +35,7 @@ pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use one correlated probe per scan batch and retain at least one response",
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PipelineOptions {
     pub(crate) max_in_flight: usize,
     pub(crate) probes_per_second: Option<u32>,
@@ -43,6 +43,9 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_prepared_bytes: usize,
     pub(crate) max_evidence_frames: usize,
     pub(crate) max_evidence_bytes: usize,
+    /// The operation's statistics before this pipeline, which its failure
+    /// reports with its own.
+    pub(crate) preceding: Stats,
 }
 
 #[derive(Clone, Debug)]

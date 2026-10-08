@@ -1996,8 +1996,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   scan's answers, and DNS statistics count the neighbor requests a query's
   route sends.
 - `scan --reverse-dns` keeps PTR names across every lookup within the
-  scan's evidence byte limit; `reverse_dns.names_truncated` marks an answer
-  whose later names it dropped.
+  scan's evidence byte limit; `reverse_dns.names_truncated`, also shown in
+  text output, marks an answer whose later names it dropped.
 - Host discovery reports a possible proxy only when addresses share a link
   address on the same interface; `scan::discovery::Neighbor` gains the
   `interface` its route selected.

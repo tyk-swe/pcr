@@ -198,20 +198,27 @@ fn render_hosts_text<P>(
             ))?;
         }
         if let Some(lookup) = &host.reverse_dns {
-            write_stdout_line(format_args!(
-                "  reverse-dns={} status={} outcome={} names={}{}",
-                lookup.query_name,
-                lookup.status,
-                optional_display(lookup.outcome),
-                listed(&lookup.names),
-                lookup
-                    .error
-                    .as_ref()
-                    .map_or_else(String::new, |error| format!(" error=\"{error}\"")),
-            ))?;
+            write_stdout_line(format_args!("  {}", reverse_dns_text(lookup)))?;
         }
     }
     Ok(())
+}
+
+/// A host's reverse-DNS line, which marks names the scan's evidence byte
+/// limit dropped so a partial list never reads as the whole answer.
+fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
+    format!(
+        "reverse-dns={} status={} outcome={} names={} names_truncated={}{}",
+        lookup.query_name,
+        lookup.status,
+        optional_display(lookup.outcome),
+        listed(&lookup.names),
+        lookup.names_truncated,
+        lookup
+            .error
+            .as_ref()
+            .map_or_else(String::new, |error| format!(" error=\"{error}\"")),
+    )
 }
 
 fn link_text(link: Option<&output::scan::host::Link>) -> String {
@@ -402,6 +409,24 @@ mod tests {
                 format!("fe80::1%beta {endpoint_name} classification=filtered"),
             );
         }
+    }
+
+    #[test]
+    fn text_reverse_dns_discloses_dropped_names() {
+        let lookup = output::scan::host::ReverseDns {
+            names: vec!["a.example.".to_owned()],
+            names_truncated: true,
+            ..output::scan::host::ReverseDns::ended(
+                "10.2.0.192.in-addr.arpa".to_owned(),
+                crate::output::dns::QuestionStatus::Completed,
+                None,
+            )
+        };
+        assert_eq!(
+            reverse_dns_text(&lookup),
+            "reverse-dns=10.2.0.192.in-addr.arpa status=completed outcome=none \
+             names=a.example. names_truncated=true",
+        );
     }
 
     #[test]

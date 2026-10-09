@@ -28,6 +28,7 @@ struct FakeTcp {
     peer: Option<SocketAddr>,
     pending_cancellation: Option<PendingCancellation>,
     dns_reply: Option<DnsReply>,
+    timeout_after_response: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +96,7 @@ impl tcp::Provider for FakeTcp {
             writes: Arc::clone(&self.writes),
             peer: self.peer.unwrap_or(endpoint),
             dns_reply: self.dns_reply,
+            timeout_after_response: self.timeout_after_response,
         })
     }
 }
@@ -104,10 +106,16 @@ struct FakeStream {
     writes: Arc<Mutex<Vec<Vec<u8>>>>,
     peer: SocketAddr,
     dns_reply: Option<DnsReply>,
+    timeout_after_response: bool,
 }
 
 impl Read for FakeStream {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.timeout_after_response
+            && self.response.position() == self.response.get_ref().len() as u64
+        {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
         self.response.read(bytes)
     }
 }
@@ -1041,6 +1049,56 @@ fn ssh_identification_completes_even_when_binary_data_arrives_in_the_same_read()
         report.records[0].candidates[0].version.as_deref(),
         Some("9.8p1")
     );
+}
+
+#[test]
+fn malformed_ssh_line_completes_without_waiting_for_the_peer_to_close() {
+    let response = b"SSH-2.0-OpenSSH_9.8p1\n";
+    let tcp = FakeTcp {
+        timeout_after_response: true,
+        ..FakeTcp::replying([response.to_vec()])
+    };
+    let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "ssh-banner");
+    let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+    let evidence = &report.records[0].probes[0];
+    assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+    assert_eq!(evidence.observation.outcome, ObservationOutcome::Malformed);
+    assert_eq!(evidence.response, response);
+    assert!(evidence.identification.candidates.is_empty());
+    assert_eq!(report.records[0].outcome, identify::Outcome::Malformed);
+}
+
+#[test]
+fn mapped_exact_allowlist_survives_final_native_peer_authorization() {
+    for (requested, allowed) in [
+        ("[::ffff:127.0.0.1]:38080", "::ffff:127.0.0.1"),
+        ("127.0.0.1:38080", "::ffff:127.0.0.1"),
+        ("[::ffff:127.0.0.1]:38080", "127.0.0.1"),
+    ] {
+        let tcp = FakeTcp {
+            peer: Some("127.0.0.1:38080".parse().unwrap()),
+            ..FakeTcp::replying([b"HTTP/1.0 200 OK\r\nServer: nginx/1.27.2\r\n\r\n".to_vec()])
+        };
+        let policy = Policy {
+            allowed_destinations: vec![allowed.parse().unwrap()],
+            ..Policy::default()
+        };
+        let mut request = request(vec![identify::Endpoint {
+            address: requested.parse().unwrap(),
+            transport: identify::Transport::Tcp,
+        }]);
+        corpus_with(&mut request, "http-head");
+        let report = Client::new(
+            builtin::registry(),
+            policy,
+            ProviderSet::tcp(tcp.clone(), ()).with_udp(FakeUdp::default()),
+        )
+        .identify(&request)
+        .unwrap();
+        assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+        assert_eq!(*tcp.writes.lock().unwrap(), [b"HEAD / HTTP/1.0\r\n\r\n"]);
+    }
 }
 
 #[test]

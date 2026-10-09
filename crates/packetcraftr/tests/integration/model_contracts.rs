@@ -15,6 +15,27 @@ use packetcraftr_core::error::{Classified, Kind};
 
 const LIVE: Duration = Duration::from_secs(30);
 
+#[test]
+fn exact_destination_constraints_match_mapped_ipv4_symmetrically() {
+    for allowed in ["127.0.0.1", "::ffff:127.0.0.1"] {
+        let policy = policy::Policy {
+            allowed_destinations: vec![allowed.parse().unwrap()],
+            ..policy::Policy::default()
+        };
+        for accepted in ["127.0.0.1", "::ffff:127.0.0.1"] {
+            policy
+                .authorize_destination(accepted.parse().unwrap())
+                .unwrap();
+        }
+        for rejected in ["127.0.0.2", "::ffff:127.0.0.2", "::1", "::127.0.0.1"] {
+            assert!(matches!(
+                policy.authorize_destination(rejected.parse().unwrap()),
+                Err(policy::Error::DestinationNotAllowed { .. })
+            ));
+        }
+    }
+}
+
 struct FixedResolver(Vec<IpAddr>);
 
 impl Resolver for FixedResolver {

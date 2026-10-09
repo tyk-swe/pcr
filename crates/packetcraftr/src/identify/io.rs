@@ -234,7 +234,7 @@ fn complete(probe: &Probe, bytes: &[u8]) -> bool {
     match probe.request {
         Request::Banner {} => bytes
             .split_inclusive(|byte| *byte == b'\n')
-            .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\r\n")),
+            .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\n")),
         Request::HttpHead {} => bytes.windows(4).any(|window| window == b"\r\n\r\n"),
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))

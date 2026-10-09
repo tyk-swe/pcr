@@ -18,7 +18,7 @@ data set regardless of how useful it is.
 | Port data | Port planning and named selections ([M6][m6-catalog]) | Port-to-service-name catalog, curated selection lists, UDP probe payloads |
 | Service data | Service/version identification ([M8][m8], [M9][m9]) | Probe payloads, response match patterns, product/version metadata |
 | OS data | OS identification ([M10][m10]) | Stack fingerprints and match rules |
-| Vendor data | Discovery enrichment ([M5][m5]) | MAC/OUI prefix assignments |
+| Vendor data | Discovery enrichment ([M5][m5]); none bundled, so host records publish link addresses without vendor labels | MAC/OUI prefix assignments |
 
 The kind decides the review focus (for example, payload bytes are creative
 content in a way bare port numbers are not), but every kind carries the same

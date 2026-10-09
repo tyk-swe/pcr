@@ -51,6 +51,8 @@ macro_rules! udp_only {
 
 udp_only!(
     TrustedReceiptExecutor,
+    ResolvedGatewayExecutor,
+    SilentGatewayExecutor,
     InvalidResponseIndexExecutor,
     SelectionDeadlineExecutor,
     ClassifiedResponseExecutor,
@@ -256,6 +258,75 @@ impl Executor<Exchange> for TrustedReceiptExecutor {
                 ..Stats::default()
             },
         })
+    }
+}
+
+/// Sends each query through a gateway its route resolved with one request.
+struct ResolvedGatewayExecutor;
+
+impl Executor<Exchange> for ResolvedGatewayExecutor {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
+        use packetcraftr_core::packet::MacAddress;
+
+        let mut route = crate::test_support::materialized_route();
+        route.plan.decision.source_mac = Some(MacAddress([0x02, 0, 0, 0, 0, 1]));
+        route.plan.decision.link_type = LinkType::ETHERNET;
+        route.plan.neighbor_source = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)));
+        route.plan.neighbor_target = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
+        route.neighbor_resolution = Some(crate::neighbor::Resolution {
+            mac_address: MacAddress([0x02, 0, 0, 0, 0, 2]),
+            attempts: 1,
+            cache_hit: false,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats::default(),
+        });
+        Ok(ExchangeEvidence {
+            sent: crate::test_support::sent_packet_over(exchange.probe.packet(), route),
+            ..TrustedReceiptExecutor.execute(exchange)?
+        })
+    }
+}
+
+/// Sends one ARP request to a gateway that never answers, spending `wait`,
+/// and cancels the operation as it fails when given its signal.
+struct SilentGatewayExecutor {
+    clock: crate::test_support::RecordingClock,
+    wait: Duration,
+    cancel: Option<packetcraftr_core::budget::Cancellation>,
+}
+
+impl Executor<Exchange> for SilentGatewayExecutor {
+    fn execute(&mut self, _exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
+        self.clock.advance(self.wait);
+        if let Some(signal) = &self.cancel {
+            signal.cancel();
+        }
+        let silence = crate::neighbor::Error::NotFound {
+            interface: "fixture0".into(),
+            target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            attempts: 1,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+        };
+        let spent = crate::Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: 60,
+            capture: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+            ..crate::Stats::default()
+        };
+        Err(BoundaryError::from_error(
+            crate::Error::Plan(crate::route::Error::Neighbor(Box::new(silence)))
+                .after_neighbor_requests(spent),
+        ))
     }
 }
 
@@ -1034,4 +1105,161 @@ fn batch_reject_invalid_before_effects() {
         authorizer.targets.is_empty(),
         "no resolution side effect ran"
     );
+}
+
+#[test]
+fn a_silent_next_hop_counts_its_request_in_the_failed_querys_statistics() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut executor = SilentGatewayExecutor {
+        clock: clock.clone(),
+        wait: Duration::from_millis(5),
+        cancel: None,
+    };
+    let report = run_batch(
+        &[dns_request(address)],
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut executor,
+        &mut clock,
+    )
+    .expect("a failed question leaves the batch's report");
+
+    assert_eq!(
+        report.questions[0].status,
+        super::batch::QuestionStatus::Failed
+    );
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert_eq!(report.stats.packets_completed, 1);
+    assert_eq!(
+        report.stats.bytes, 60,
+        "one ARP request, padded to the minimum Ethernet frame"
+    );
+    assert_eq!(report.stats.capture.received_frames, 3);
+    assert_eq!(report.stats.elapsed, Duration::from_millis(5));
+}
+
+#[test]
+fn a_query_cancelled_after_its_neighbor_request_still_counts_it() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let signal = packetcraftr_core::budget::Cancellation::default();
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut executor = SilentGatewayExecutor {
+        clock: clock.clone(),
+        wait: Duration::from_millis(5),
+        cancel: Some(signal.clone()),
+    };
+    let request = super::batch::Request {
+        questions: vec![dns_request(address)],
+    };
+    let mut deadline =
+        Deadline::new(request.max_duration().expect("bounded")).with_cancellation(Some(signal));
+    let report = super::batch::run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("a cancelled question leaves the batch's report");
+
+    // The cancellation decides the question's error, which the step reports
+    // instead of the exchange's; the request it sent still counts.
+    assert_eq!(
+        report.questions[0].status,
+        super::batch::QuestionStatus::Failed
+    );
+    assert_eq!(report.stats.packets_attempted, 1);
+    assert_eq!(report.stats.bytes, 60);
+    assert_eq!(report.stats.capture.received_frames, 3);
+}
+
+#[test]
+fn a_querys_neighbor_request_counts_in_its_statistics() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let request = dns_request(address);
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let direct = run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut TrustedReceiptExecutor,
+        &mut NoopClock,
+    )
+    .expect("an unanswered query completes");
+    let routed = run(
+        &request,
+        &mut RecordingAuthorizer::new(address),
+        &registry,
+        &mut ResolvedGatewayExecutor,
+        &mut NoopClock,
+    )
+    .expect("an unanswered query completes");
+
+    let (direct, routed) = (&direct.report().stats, &routed.report().stats);
+    assert_eq!(routed.packets_attempted, direct.packets_attempted + 1);
+    assert_eq!(routed.packets_completed, direct.packets_completed + 1);
+    assert_eq!(
+        routed.bytes,
+        direct.bytes + 60,
+        "one ARP request, padded to the minimum Ethernet frame"
+    );
+    assert_eq!(
+        routed.elapsed, direct.elapsed,
+        "the exchange's window already spans the resolution's wait"
+    );
+}
+
+#[test]
+fn batch_limits_charge_no_neighbor_request_for_a_multicast_or_broadcast_server() {
+    let udp =
+        |limits: crate::policy::DnsOperation| (limits.udp().packets(), limits.udp().wire_bytes());
+    for address in [
+        IpAddr::V4(Ipv4Addr::new(224, 0, 0, 251)),
+        IpAddr::V4(Ipv4Addr::BROADCAST),
+        "ff02::fb".parse().expect("multicast address"),
+    ] {
+        let mut request = dns_request(address);
+        request.route.link_mode = packetcraftr_netio::link::Mode::Layer3;
+        let direct = super::batch::limits([&request], 3).expect("limits");
+        request.route.link_mode = packetcraftr_netio::link::Mode::Layer2;
+        let linked = super::batch::limits([&request], 3).expect("limits");
+        assert_eq!(udp(linked), udp(direct), "{address}");
+    }
+}
+
+#[test]
+fn batch_limits_charge_every_neighbor_attempt_before_each_udp_packet() {
+    use packetcraftr_netio::link::Mode;
+    let limits = |address: &str, link_mode, neighbor_attempts| {
+        let mut question = dns_request(address.parse().expect("documentation address"));
+        question.attempts = 2;
+        question.route.link_mode = link_mode;
+        super::batch::limits([question], neighbor_attempts)
+            .expect("one question fits")
+            .limits()
+    };
+    for (address, request_bytes) in [
+        ("192.0.2.53", crate::neighbor::IPV4_REQUEST_BYTES),
+        ("2001:db8::53", crate::neighbor::IPV6_REQUEST_BYTES),
+    ] {
+        let direct = limits(address, Mode::Layer3, 3);
+        for (link_mode, attempts) in [(Mode::Auto, 1), (Mode::Layer2, 3)] {
+            let resolved = limits(address, link_mode, attempts);
+            assert_eq!(
+                resolved.packets(),
+                direct.packets() * (1 + attempts),
+                "{address}"
+            );
+            assert_eq!(
+                resolved.wire_bytes(),
+                direct.wire_bytes() + direct.packets() * attempts * request_bytes,
+                "{address}"
+            );
+        }
+    }
 }

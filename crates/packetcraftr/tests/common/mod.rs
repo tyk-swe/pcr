@@ -238,7 +238,11 @@ type Replies = Arc<Mutex<VecDeque<capture::Captured>>>;
 pub(crate) struct RecordingTransmit {
     steps: Steps,
     armed: Arc<AtomicUsize>,
+    live: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
     replies: Arc<Mutex<Replies>>,
+    untimed: bool,
+    silent: bool,
 }
 
 impl RecordingTransmit {
@@ -249,8 +253,32 @@ impl RecordingTransmit {
         }
     }
 
+    /// Answers neighbor requests with replies whose capture carries no
+    /// wall-clock time.
+    pub(crate) fn untimed(steps: Steps) -> Self {
+        Self {
+            steps,
+            untimed: true,
+            ..Self::default()
+        }
+    }
+
+    /// Records neighbor requests without answering them.
+    pub(crate) fn silent(steps: Steps) -> Self {
+        Self {
+            steps,
+            silent: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn armed(&self) -> usize {
         self.armed.load(Ordering::SeqCst)
+    }
+
+    /// The most captures that were armed at once.
+    pub(crate) fn peak_armed(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
     }
 }
 
@@ -259,10 +287,17 @@ impl transmit::Provider for RecordingTransmit {
         let bytes = frame.bytes();
         let report = transmit::Submission::start().complete(bytes.len(), bytes.clone());
         match arp_reply(bytes) {
+            Some((target, _)) if self.silent => {
+                self.steps.push(Step::Neighbor(IpAddr::V4(target)));
+            }
             Some((target, reply)) => {
                 self.steps.push(Step::Neighbor(IpAddr::V4(target)));
-                let reply = Frame::new(SystemTime::now(), LinkType::ETHERNET, reply)
-                    .expect("ARP reply fixture");
+                let reply = if self.untimed {
+                    Frame::without_timestamp(LinkType::ETHERNET, reply)
+                } else {
+                    Frame::new(SystemTime::now(), LinkType::ETHERNET, reply)
+                }
+                .expect("ARP reply fixture");
                 let replies = self.replies.lock().expect("replies lock").clone();
                 replies
                     .lock()
@@ -284,6 +319,8 @@ impl capture::Provider for RecordingTransmit {
         _deadline: &Deadline,
     ) -> Result<Self::Capture, LiveIoError> {
         self.armed.fetch_add(1, Ordering::SeqCst);
+        let live = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(live, Ordering::SeqCst);
         let replies = Replies::default();
         *self.replies.lock().expect("replies lock") = Arc::clone(&replies);
         Ok(ReplyCapture {
@@ -294,6 +331,7 @@ impl capture::Provider for RecordingTransmit {
                 native: Default::default(),
             },
             replies,
+            live: Arc::clone(&self.live),
         })
     }
 }
@@ -337,6 +375,13 @@ fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
 pub(crate) struct ReplyCapture {
     metadata: capture::Metadata,
     replies: Replies,
+    live: Arc<AtomicUsize>,
+}
+
+impl Drop for ReplyCapture {
+    fn drop(&mut self) {
+        self.live.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl capture::Session for ReplyCapture {

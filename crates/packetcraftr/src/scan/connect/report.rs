@@ -42,6 +42,7 @@ impl Outcome {
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
+    pub stage: super::super::Stage,
     pub endpoint: SocketAddr,
     pub scope: Option<crate::target::ResolvedZone>,
     pub attempt: u32,
@@ -75,6 +76,9 @@ pub enum Event {
 pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    /// One record per selected target, in selection order. Their reasons
+    /// are socket observations.
+    pub hosts: Vec<super::super::discovery::Host>,
     pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub planned_duration: Duration,
     pub stats: Stats,
@@ -97,6 +101,9 @@ pub struct Endpoint {
 #[derive(Clone, Debug)]
 pub struct Aggregate {
     pub report: Report,
+    /// Discovery connections in sequence order, exactly those the hosts
+    /// list; [`Self::endpoints`] holds only the scan stage's.
+    pub discovery: Vec<ProbeEvidence>,
     pub endpoints: Vec<Endpoint>,
 }
 
@@ -125,6 +132,13 @@ impl Collector {
             });
         }
         probes.sort_by_key(|probe| probe.sequence);
+        let (discovery, probes): (Vec<_>, Vec<_>) = probes
+            .into_iter()
+            .partition(|probe| probe.stage == super::super::Stage::Discovery);
+        super::super::discovery::check_probes(
+            &report.hosts,
+            discovery.iter().map(|probe| probe.sequence),
+        )?;
         let mut endpoints: Vec<Endpoint> = Vec::new();
         let mut indices = HashMap::new();
         for probe in probes {
@@ -151,6 +165,10 @@ impl Collector {
                     .map(|probe| (probe.sequence, probe.outcome)),
             );
         }
-        Ok(Aggregate { report, endpoints })
+        Ok(Aggregate {
+            report,
+            discovery,
+            endpoints,
+        })
     }
 }

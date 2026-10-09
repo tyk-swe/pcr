@@ -61,16 +61,91 @@ impl From<library::profile::curated::Merged> for CuratedPayloads {
     }
 }
 
+published_enum! {
+    pub enum DiscoveryMode from library::discovery::Mode {
+        Omitted => "omitted",
+        Skipped => "skipped",
+        Before => "before",
+        Only => "only",
+    }
+}
+
+published_enum! {
+    pub enum Unresponsive from library::discovery::Unresponsive {
+        Skip => "skip",
+        Scan => "scan",
+    }
+}
+
+/// One discovery probe; `port` is absent for ICMP echo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct DiscoveryProbe {
+    pub transport: Transport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ReverseDnsServer {
+    pub server: String,
+    pub port: u16,
+}
+
+/// Whether discovery ran, with which probes, and what the scan did with
+/// hosts that did not answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Discovery {
+    pub mode: DiscoveryMode,
+    /// The probes each host received, in order, after any neighbor request.
+    pub probes: Vec<DiscoveryProbe>,
+    /// Whether ARP or NDP ran before the probes.
+    pub neighbor: bool,
+    /// Distinct expanded discovery endpoints `--exclude-ports` removed
+    /// before planning; the plan's own count covers the scan stage.
+    pub excluded_endpoints: usize,
+    pub unresponsive: Unresponsive,
+    /// The server PTR lookups asked; absent when none were requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse_dns: Option<ReverseDnsServer>,
+}
+
+impl Discovery {
+    #[must_use]
+    pub fn new(
+        options: &library::discovery::Options,
+        excluded_endpoints: usize,
+        reverse_dns: Option<ReverseDnsServer>,
+    ) -> Self {
+        Self {
+            mode: options.mode.into(),
+            probes: options
+                .probes
+                .iter()
+                .map(|probe| DiscoveryProbe {
+                    transport: probe.transport(),
+                    port: probe.port(),
+                })
+                .collect(),
+            neighbor: options.neighbor,
+            excluded_endpoints,
+            unresponsive: options.unresponsive.into(),
+            reverse_dns,
+        }
+    }
+}
+
 /// Published once per scan, beside its results.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Plan {
     pub method: Method,
     /// The catalog behind port names, presets, and `port_hint`s.
     pub port_catalog: DataSet,
-    /// Distinct expanded endpoints `--exclude-ports` removed before planning.
+    /// Distinct expanded scan endpoints `--exclude-ports` removed before
+    /// planning; `discovery` counts its own.
     pub excluded_endpoints: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curated_udp_payloads: Option<CuratedPayloads>,
+    pub discovery: Discovery,
 }
 
 /// The port endpoints a scan would probe on every target, after exclusions.

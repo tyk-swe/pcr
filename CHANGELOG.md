@@ -8,7 +8,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
-- Structured command output moves to `packetcraftr.output/v8`, which adds
+- `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
+  capture cleanup failed.
+- Structured command output moves to `packetcraftr.output/v9`, which adds host
+  discovery; the v6, v7, and v8 families and schemas stay frozen. Raw scan
+  results and connect reports gain `hosts`, NDJSON scans gain `host` records,
+  probe records gain `stage`, and `plan` gains `discovery`. `scan::Request`
+  gains `discovery`; `scan::Probe`, both `ProbeEvidence` types, both `Report`
+  types, and both `Aggregate` types gain fields; `scan::Error::MethodTransport`
+  is `MethodProbe`, and `scan::method::select` takes the `&Request`. CLI scan
+  report conversions take the reverse-DNS results. See
+  `docs/migration-unreleased.md`.
+- Structured command output moved to `packetcraftr.output/v8`, which adds
   scanner port planning and inference; the v6 and v7 families and schemas stay
   frozen. `scan::Request` replaces `transport` and `ports` with typed
   `endpoints: Vec<probe::ProbeEndpoint>` that may mix TCP and UDP, and
@@ -709,6 +720,30 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Host discovery (roadmap M5). `scan --discovery before|only|skip` runs a
+  discovery stage before the scan, alone, or records that it was skipped;
+  without the flag hosts are labelled `not_requested`. `--discovery-probes`
+  composes ICMP echo, TCP, UDP, and ARP/NDP `neighbor` probes, and
+  `--discovery-ports` takes `--ports` terms after `--exclude-ports`. Discovery
+  shares the scan's authorization, sequence space, probe, duration, and
+  evidence budgets, and `--unresponsive-hosts skip|scan` decides whether silent
+  hosts are scanned. Each host record states whether discovery ran and whether
+  the scan probed the host, and lists reasons with their evidence (`wire`,
+  `socket`, or `cache`) and basis (`direct`, `cached`, or `possible_proxy`).
+  Closed-but-responsive TCP counts as a response; silence stays uncertain, a
+  router's ICMP error is not host evidence, and a routed gateway's link address
+  is never the target's. `--connect` discovery publishes socket observations.
+  `--reverse-dns SERVER` adds bounded PTR lookups through the DNS workflow as
+  observations, and `dns::ptr_names` extracts PTR names from a validated
+  answer section. `Client::with_neighbor_request_authorization` authorizes
+  every neighbor request a workflow's route resolves, as scans always do.
+  `Client::with_scan_neighbors` bounds and paces a client's neighbor
+  resolutions as a scan's. `Client::dns_limits` totals the traffic limits of
+  questions a workflow splits across batches, including every request the
+  client's neighbor resolver may send before each UDP packet on a link-layer
+  route. A failure after a packet's route sent neighbor requests reads and
+  classifies as before but wraps as `Error::NeighborSpent`, which carries
+  their statistics.
 - Scanner port planning and state inference (roadmap M6). `scan --ports`
   accepts catalog names (`ssh`), `@presets` (`@web`, `@mail`,
   `@name-services`, `@infrastructure`, `@legacy-services`, `@all`), and
@@ -1906,6 +1941,160 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Scans budget each target's implicit link-layer neighbor resolution: one
+  request joins `max_probes`, its worst-case frame joins the wire bytes, its
+  attempt timeout joins `max_duration`, and a narrowed resolver caps every
+  selected neighbor at a single request for the operation.
+- `scan --discovery` validates the distinct discovery and scan endpoint set
+  against `max_ports` instead of each stage's list alone.
+- `plan.discovery.excluded_endpoints` counts the discovery endpoints
+  `--exclude-ports` removed, which `plan.excluded_endpoints` (the scan stage)
+  never reported.
+- Hosts discovery skipped release their response reservations before the
+  scan stage, so that capacity cannot crowd out late and duplicate frames.
+- Targets whose own link-layer resolution stayed silent release their
+  response reservations before the discovery probes, so tight evidence limits
+  keep the remaining hosts' late and duplicate frames.
+- Discovery and stage-transition pauses count in the scan's elapsed
+  statistics, and `--reverse-dns` folds the lookups' exchange statistics
+  into the reported statistics (elapsed under `--connect`).
+- A host whose own link-layer resolution stayed silent no longer aborts the
+  scan: it is sent no discovery or scan probes and keeps `no_response` with
+  `scan: skipped`, even under `--unresponsive-hosts scan`.
+- Discovery pacing pauses are reserved against `--max-duration` before the
+  sleep and the deadline is enforced again afterward.
+- The implicit neighbor resolution inside a probe send shares the scan's
+  evidence limits instead of the resolver's capture defaults.
+- A scan keeps its operation-wide neighbor answers in a cache of its own, so a
+  reused client's shared neighbor cache keeps its configured TTL and entry limit.
+- A scan's operation-wide neighbor cache holds an answer for every target
+  the scan may admit, so a scan beyond the configured cache limit never
+  evicts an answer and requests it again.
+- Link-layer raw scans reject evidence limits too small to hold a neighbor
+  reply before sending, as explicit neighbor discovery does, instead of
+  silently raising them for the implicit resolution.
+- Neighbor captures, explicit or implicit, cut frames at the scan's
+  `--snap-length` instead of the resolver's default, and a link-layer scan
+  rejects a snap length too short for a neighbor reply before sending.
+- Raw scans authorize the neighbor request a probe's route resolves, such as
+  a gateway's, against the destination allowlist and the route's sources
+  before sending it, as explicit neighbor discovery does.
+- A raw scan whose next hop's answer is cached authorizes no neighbor request,
+  so a cached gateway the policy does not allow no longer fails a scan that
+  sends it nothing.
+- Raw scans resolve each stage's link-layer neighbors before its probes arm
+  a capture, so a pipelined scan's neighbor capture never overlaps its probe
+  captures, and those requests count in the scan's statistics.
+- A raw scan probe whose route changed to a neighbor its stage did not
+  resolve fails with `io.route_changed` instead of sending an unpaced,
+  uncounted neighbor request.
+- A raw scan sends at most one neighbor request per target across discovery
+  and the scan, as its plan budgets; a later stage whose route needs another
+  neighbor fails with `io.route_changed`.
+- A stage's neighbor requests pace like probes under `--rate`, and the plan
+  budgets their pauses.
+- A scan waits out a transmission's `--rate` pause just before the next one,
+  so a neighbor request that is the operation's last transmission, as in
+  neighbor-only discovery, neither waits nor plans a pause after it, and a
+  target answered without a request, such as a multicast, routed, or cached
+  one, waits for none.
+- A scan counts a neighbor request's wait for its reply toward the `--rate`
+  pause before the next transmission, and its plan charges a paced request the
+  longer of its timeout and the pause instead of both.
+- A discovery target whose next hop never answers a neighbor request is
+  reported `no_response` and skipped instead of failing the whole scan.
+- A scan whose implicit neighbor resolution outlasts `max_duration` fails with
+  its duration limit instead of reporting the unanswered target
+  `no_response`.
+- Multicast and limited-broadcast targets, which need no neighbor
+  resolution, no longer charge implicit or explicit neighbor requests to the
+  plan or need evidence and snap limits that hold a neighbor reply, even when
+  discovery selects `neighbor` for such targets alone.
+- A scan measures its neighbor waits with the client's clock.
+- Pipelined raw scans admit each stage's probes for all its targets, charging
+  the routes and packets the pipeline itself prepares, before explicit
+  neighbor discovery or any other request.
+- A pipelined scan's failure `stats` include the traffic before the failed
+  pipeline, such as discovery probes and neighbor requests, instead of only
+  that pipeline's.
+- Explicit neighbor discovery covers the neighbor requests the probes would
+  otherwise send, so the plan no longer charges them twice against
+  `max_probes`, wire bytes, and duration.
+- Host `neighbor.observed_at` and a neighbor reason's `observed_at` are absent
+  for a reply whose capture carried no wall-clock time, instead of the time
+  the outcome was settled.
+- `scan --reverse-dns` lookups on a raw route authorize the neighbor request
+  they resolve, such as a gateway's, as the scan's probes do.
+- `scan --reverse-dns` lookups on a raw route resolve their next hop with
+  one request within the scan's timeout and evidence limits, reusing the
+  scan's answers, and DNS statistics count the neighbor requests a query's
+  route sends.
+- A DNS query whose next hop never answered counts that neighbor request, its
+  capture counters, and its wait in the failed question's statistics.
+- A DNS query whose neighbor capture failed to shut down counts the requests
+  that resolution sent in the failed question's statistics.
+- A DNS query that fails after its route's neighbor requests, even when the
+  deadline, a cancellation, or the pause after an answered request decides
+  its error, counts those requests in the failed question's statistics.
+- `scan --reverse-dns` keeps PTR names across every lookup within the
+  scan's evidence byte limit; `reverse_dns.names_truncated`, also shown in
+  text output, marks an answer whose later names it dropped.
+- A cancelled `scan --reverse-dns` waits for and sends no further lookup
+  batch; its remaining questions end unattempted.
+- `scan --reverse-dns` waits only what remains of its `--rate` pause since the
+  scan's or the previous batch's last transmission, and none before its first
+  batch when the scan transmitted nothing, as when every neighbor answer was
+  cached.
+- `scan --reverse-dns` paces its first batch from the scan's last
+  transmission including discovery probes, and from the collected probes of a
+  streamed scan too, instead of waiting a full pause.
+- `scan --reverse-dns` spaces a fresh neighbor request from the query behind
+  it at the scan's `--rate`, counting the resolution's own wait toward that
+  pause.
+- `scan --reverse-dns` paces each batch from the previous one's last send even
+  when its TCP lookups count no packets, and from a connect scan's last
+  attempted connection rather than one it never attempted.
+- `scan --reverse-dns` marks lookups whose remaining time cannot hold one
+  question's planned attempts `unattempted` instead of `failed`.
+- `scan --reverse-dns` splits its lookups into batches whose questions share
+  the scan's evidence limits, instead of each question retaining up to the
+  whole limit until its batch ends.
+- `scan --reverse-dns` paces the next batch from the end of one whose question
+  failed after sending, since a failed question keeps no send time.
+- Link-layer `scan --reverse-dns` budgets no neighbor request before a query
+  to a multicast or limited-broadcast server, which resolves none.
+- Host discovery reports a possible proxy only when addresses share a link
+  address on the same interface; `scan::discovery::Neighbor` gains the
+  `interface` its route selected.
+- Host `neighbor` records publish the `interface` their route selected, so
+  consumers can tell which link a `possible_proxy` basis compared.
+- `scan --reverse-dns-port 0` fails before any probe as a DNS limit error
+  instead of failing each lookup after the scan.
+- `scan --reverse-dns` with a scoped server fails before any probe with
+  `capability.dns_scope` instead of failing each lookup after the scan.
+- Connect scans with `--reverse-dns` publish the lookups' packet statistics
+  as `reverse_dns_stats` instead of dropping all but their elapsed time; the
+  field stays absent when no host was looked up.
+- `scan --reverse-dns` authorizes all its lookups as one operation before the
+  first batch, so more than 256 lookups no longer restart the `--max-packets`
+  and `--max-bytes` budgets with each batch; lookups the policy refuses wait
+  for no `--rate` pause.
+- `scan --reverse-dns` on a link-layer route budgets every request the
+  client's neighbor resolver may send before each UDP query against
+  `--max-packets` and `--max-bytes`.
+- Text scan output shows when each neighbor outcome was `observed`, and its
+  summary counts the operation's completed packets, which include discovery,
+  neighbor, and reverse-DNS traffic, instead of calling them probes.
+- Text scan output reports its achieved rate in packets per second, since the
+  operation's completed packets include discovery, neighbor, and reverse-DNS
+  traffic, instead of calling them probes.
+- Text scan output labels its planned duration as the scan's and its achieved
+  rate as the operation's, since enrichment is planned separately.
+- Text scan output shows each host's discovery probes, with their status,
+  timing, responder, and frame, which no endpoint line carries.
+- NDJSON workflows check for cancellation after their last event, so a scan
+  cancelled during `--reverse-dns` fails with `io.cancelled` instead of
+  completing with unattempted lookups.
 - Exchanges retain directly correlated TCP and UDP replies rejected by the response
   limit as bounded unsolicited evidence, so serial scans can report duplicates.
 - Serial raw scans retain queued replies processed after expiration as late

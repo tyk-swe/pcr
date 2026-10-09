@@ -58,7 +58,7 @@ pub mod traceroute;
 mod test_support;
 
 pub use client::Client;
-pub use error::Error;
+pub use error::{Error, NeighborSpent};
 pub use execution::Sink;
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, Providers, SystemProviders, TargetProviders,

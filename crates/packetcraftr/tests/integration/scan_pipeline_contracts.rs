@@ -54,6 +54,7 @@ fn request() -> Request {
         endpoints: [80, 81, 82, 83]
             .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
             .to_vec(),
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_millis(20),
         probes_per_second: None,

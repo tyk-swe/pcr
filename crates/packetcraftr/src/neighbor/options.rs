@@ -74,6 +74,61 @@ impl Options {
         Ok(())
     }
 
+    /// These options narrowed to one request that waits `attempt_timeout`,
+    /// capturing at most `max_frames` frames and `max_bytes` bytes, each cut
+    /// at `snap_length`.
+    #[must_use]
+    pub(crate) fn single_attempt(
+        &self,
+        attempt_timeout: Duration,
+        max_frames: usize,
+        max_bytes: usize,
+        snap_length: usize,
+    ) -> Self {
+        Self {
+            max_attempts: 1,
+            attempt_timeout,
+            max_capture_queue_frames: self.max_capture_queue_frames.min(max_frames),
+            max_captured_bytes: self.max_captured_bytes.min(max_bytes),
+            snap_length: self.snap_length.min(max_bytes).min(snap_length),
+            ..self.clone()
+        }
+    }
+
+    /// These options narrowed to one request per fresh resolution, waiting
+    /// at most `attempt_timeout` for a reply and capturing within
+    /// `max_frames` frames and `max_bytes` bytes, each cut at `snap_length`.
+    /// Limits too small for a decodable reply fail validation rather than
+    /// being raised.
+    #[must_use]
+    pub(crate) fn one_attempt(
+        &self,
+        attempt_timeout: Duration,
+        max_frames: usize,
+        max_bytes: usize,
+        snap_length: usize,
+    ) -> Self {
+        Self {
+            attempt_timeout: attempt_timeout
+                .min(MAX_CONFIGURED_ATTEMPT_TIMEOUT)
+                .max(Duration::from_nanos(1)),
+            ..self.single_attempt(attempt_timeout, max_frames, max_bytes, snap_length)
+        }
+    }
+
+    /// These options with cache limits that keep every answer for a whole
+    /// operation resolving up to `max_neighbors` neighbors: an entry that
+    /// expired or was evicted mid-operation would invite a second request
+    /// beyond the first.
+    #[must_use]
+    pub(super) fn for_operation(&self, max_neighbors: usize) -> Self {
+        Self {
+            cache_ttl: MAX_CONFIGURED_CACHE_TTL,
+            max_cache_entries: max_neighbors.max(self.max_cache_entries),
+            ..self.clone()
+        }
+    }
+
     /// The capture bounds a discovery session runs under. Overflow always
     /// fails: a lost frame would make a negative result unverifiable.
     #[must_use]
@@ -84,5 +139,69 @@ impl Options {
             snap_length: self.snap_length,
             overflow_policy: capture::OverflowPolicy::Fail,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_attempt_keeps_the_operation_evidence_bounds() {
+        let options = Options::default().one_attempt(Duration::from_secs(5), 4, 256, 2048);
+        options.validate().expect("the narrowed options stay valid");
+        assert_eq!(options.max_attempts, 1);
+        assert_eq!(options.max_capture_queue_frames, 4);
+        assert_eq!(options.max_captured_bytes, 256);
+        assert_eq!(options.snap_length, 256);
+        assert_eq!(options.cache_ttl, Options::default().cache_ttl);
+        assert_eq!(
+            options.max_cache_entries,
+            Options::default().max_cache_entries
+        );
+        assert_eq!(options.attempt_timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn one_attempt_cuts_frames_at_the_requested_snap_length() {
+        let options = Options::default().one_attempt(Duration::from_secs(5), 4, 4096, 128);
+        options.validate().expect("128 bytes hold a reply");
+        assert_eq!(options.snap_length, 128);
+        assert!(
+            Options::default()
+                .one_attempt(Duration::from_secs(5), 4, 4096, 64)
+                .validate()
+                .is_err(),
+            "a snap length too short for a reply is rejected, not raised"
+        );
+    }
+
+    #[test]
+    fn an_operation_keeps_an_answer_for_every_neighbor_it_may_resolve() {
+        let options = Options::default();
+        let neighbors = MAX_CONFIGURED_CACHE_ENTRIES + 1;
+        assert_eq!(
+            options.for_operation(neighbors).max_cache_entries,
+            neighbors
+        );
+        assert_eq!(
+            options.for_operation(1).max_cache_entries,
+            options.max_cache_entries
+        );
+        assert_eq!(options.for_operation(1).cache_ttl, MAX_CONFIGURED_CACHE_TTL);
+    }
+
+    #[test]
+    fn one_attempt_rejects_limits_too_small_for_a_reply() {
+        let unsnappable = Options::default().one_attempt(Duration::from_secs(5), 4, 40, 2048);
+        assert_eq!(unsnappable.max_captured_bytes, 40);
+        assert_eq!(unsnappable.snap_length, 40);
+        assert!(unsnappable.validate().is_err());
+        assert!(
+            Options::default()
+                .one_attempt(Duration::from_secs(5), 0, 256, 2048)
+                .validate()
+                .is_err()
+        );
     }
 }

@@ -32,7 +32,7 @@ pub(super) struct AdmittedProbe {
 pub(super) fn plan<'c, P: PacketProviders, K: Clock>(
     executor: &'c ExchangeExecutor<'_, P, K>,
     planned: &[Planned<'_>],
-    options: PipelineOptions,
+    options: &PipelineOptions,
     deadline: Instant,
     preparation: &'c Deadline,
 ) -> Result<Plan<'c, P, K>, BoundaryError> {

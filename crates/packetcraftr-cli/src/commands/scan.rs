@@ -7,6 +7,7 @@ mod list;
 mod payload;
 mod profiles;
 mod rendering;
+mod reverse;
 
 use crate::output::contract::Format;
 
@@ -14,11 +15,14 @@ use crate::output;
 
 use packetcraftr_core::error::{Classified, Kind};
 
-use packetcraftr::probe::Transport;
-use packetcraftr::scan::{method, profile::curated};
+use std::time::Instant;
+
+use packetcraftr::probe::{ProbeEndpoint, Transport};
+use packetcraftr::scan::{discovery, method, profile::curated};
 
 use self::arguments::Args;
 use super::execution;
+use crate::command_options::parse_target;
 use crate::errors::CliError;
 use crate::input::manifest;
 use crate::rendering::StreamEncoder;
@@ -81,6 +85,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         family,
         ports,
         exclude_ports,
+        discovery,
+        discovery_probes,
+        discovery_ports,
+        unresponsive_hosts,
+        reverse_dns,
+        reverse_dns_port,
         attempts,
         timeout,
         rate,
@@ -123,6 +133,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     selection.targets.validate().map_err(CliError::classified)?;
     let targets = selection.targets;
     if list {
+        if discovery.is_some() || reverse_dns.is_some() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--list sends no probe; remove --discovery and --reverse-dns",
+            ));
+        }
         // Listing needs no ports, but publishes the selection when given one
         // so the reviewed scope is exactly what a scan would probe.
         let ports = if ports.is_empty() && exclude_ports.is_empty() {
@@ -145,13 +161,26 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             stream,
         );
     }
-    let udp = transports.contains(&Transport::Udp);
+    let (discovery, discovery_excluded) = discovery_options(
+        discovery,
+        &discovery_probes,
+        discovery_ports,
+        &exclude_ports,
+        unresponsive_hosts,
+        max_ports,
+    )?;
+    let scanning = discovery.mode != discovery::Mode::Only;
+    let udp = (scanning && transports.contains(&Transport::Udp))
+        || discovery
+            .probes
+            .iter()
+            .any(|probe| probe.transport() == Transport::Udp);
     let udp_payload = payload::read(udp, udp_payload_hex.as_deref(), udp_payload_file.as_deref())?;
     let operator_profiles = profiles::load(udp_profiles.as_deref(), udp)?;
     if curated_udp_payloads && !udp {
         return Err(CliError::new(
             Kind::Usage,
-            "--curated-udp-payloads requires --transport udp",
+            "--curated-udp-payloads requires UDP scan or discovery probes",
         ));
     }
     let queue_limits = limits.into_limits();
@@ -166,9 +195,27 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_undecoded,
     };
     scan_limits.validate().map_err(CliError::classified)?;
-    let selected = select_endpoints(&transports, ports, exclude_ports, max_ports)?;
+    let selected = if scanning {
+        select_endpoints(&transports, ports, exclude_ports, max_ports)?
+    } else if !ports.is_empty() {
+        return Err(CliError::new(
+            Kind::Usage,
+            "--discovery only probes no scan port; remove --ports",
+        ));
+    } else {
+        packetcraftr::scan::Selected {
+            endpoints: Vec::new(),
+            excluded: 0,
+        }
+    };
     let (udp_profiles, curated) = if curated_udp_payloads {
-        let mut merged = curated::merge(operator_profiles, &selected.endpoints);
+        let mut planned = selected.endpoints.clone();
+        for probe in &discovery.probes {
+            if !planned.contains(probe) {
+                planned.push(*probe);
+            }
+        }
+        let mut merged = curated::merge(operator_profiles, &planned);
         let profiles = std::mem::take(&mut merged.profiles);
         (profiles, Some(merged.into()))
     } else {
@@ -182,6 +229,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         udp_profiles,
         address_family: family.into(),
         endpoints: selected.endpoints,
+        discovery,
         attempts,
         timeout: timeout.timeout(),
         probes_per_second: rate,
@@ -191,7 +239,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     };
     let selection = method::select(
         requested,
-        &request.endpoints,
+        &request,
         method::Capabilities {
             raw: raw_capability(route.link_mode.into()),
             packet_route: !route.supports_kernel_tcp(),
@@ -204,17 +252,63 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         port_catalog: packetcraftr::scan::catalog::data_set().into(),
         excluded_endpoints: selected.excluded,
         curated_udp_payloads: curated,
+        discovery: output::scan::plan::Discovery::new(
+            &request.discovery,
+            discovery_excluded,
+            reverse_dns
+                .as_ref()
+                .map(|server| output::scan::plan::ReverseDnsServer {
+                    server: server.clone(),
+                    port: reverse_dns_port,
+                }),
+        ),
     };
+    let reverse_dns = reverse_dns.map(parse_target).transpose()?;
     if selected_method == method::Method::Connect {
-        return connect::run(&request, plan, policy, format, stream);
+        let lookup = reverse_dns
+            .map(|server| {
+                reverse::Lookup::new(
+                    server,
+                    reverse_dns_port,
+                    packetcraftr::dns::TransportMode::Tcp,
+                    &request,
+                )
+            })
+            .transpose()?;
+        return connect::run(&request, plan, lookup.as_ref(), policy, format, stream);
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
-    let client = workflow.client(Runtime::Workflow);
+    // Reverse-DNS lookups can share the scan's next hop, so their neighbor
+    // requests are authorized like its probes'.
+    let client = workflow
+        .client(Runtime::Workflow)
+        .with_neighbor_request_authorization();
     let request = packetcraftr::scan::Request {
         route: workflow.route,
         collection: workflow.collection,
         ..request
     };
+    // The lookups resolve any next hop within the scan's bounds, reusing its
+    // answers; without them the scan bounds its own resolutions.
+    let client = if reverse_dns.is_some() {
+        client
+            .with_scan_neighbors(&request)
+            .map_err(CliError::classified)?
+    } else {
+        client
+    };
+    // DNS over TCP cannot follow a packet route override.
+    let lookup = reverse_dns
+        .map(|server| {
+            let transport = if route.supports_kernel_tcp() {
+                packetcraftr::dns::TransportMode::UdpThenTcp
+            } else {
+                packetcraftr::dns::TransportMode::Udp
+            };
+            reverse::Lookup::new(server, reverse_dns_port, transport, &request)
+        })
+        .transpose()?;
+    let lookup = lookup.as_ref();
     execution::run_workflow(
         format,
         stream,
@@ -222,22 +316,50 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         execution::Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
+                let started = Instant::now();
                 let collector = packetcraftr::scan::Collector::default();
                 let report = client
                     .scan(request.clone(), collector.clone())
                     .map_err(rendering::scan_error)?;
-                collector.finish(report).map_err(rendering::scan_error)
+                let mut aggregate = collector.finish(report).map_err(rendering::scan_error)?;
+                // The lookups' sends, bytes, and time count in this scan's
+                // reported statistics.
+                let (names, lookups) = reverse::names(
+                    lookup,
+                    &client,
+                    &aggregate.hosts,
+                    started,
+                    reverse::last_transmission(
+                        aggregate.stats.packets_attempted > 0,
+                        aggregate
+                            .discovery
+                            .iter()
+                            .chain(
+                                aggregate
+                                    .endpoints
+                                    .iter()
+                                    .flat_map(|endpoint| &endpoint.probes),
+                            )
+                            .map(|probe| probe.sent_at),
+                    ),
+                );
+                aggregate
+                    .stats
+                    .checked_add_assign(&lookups.unwrap_or_default())
+                    .map_err(|error| CliError::caused(Kind::Internal, &error))?;
+                Ok((aggregate, names))
             }),
             run_with_events: Box::new({
                 let plan = plan.clone();
                 let client = &client;
                 let request = &request;
                 move |mut emit| {
+                    let started = Instant::now();
                     // Events stream as they settle; the tracker keeps each
                     // attempt without its frame, for the endpoint inferences.
                     let tracker = packetcraftr::scan::Collector::default();
                     let mut tracked = tracker.clone();
-                    let report = client
+                    let mut report = client
                         .scan(request.clone(), move |event: packetcraftr::scan::Event| {
                             if let packetcraftr::scan::Event::Probe { target, probe } = &event {
                                 let probe = packetcraftr::scan::ProbeEvidence {
@@ -258,23 +380,50 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     let aggregate = tracker
                         .finish(report.clone())
                         .map_err(rendering::scan_error)?;
+                    // The lookups' sends, bytes, and time count in this
+                    // scan's reported statistics.
+                    let (reverse_dns, lookups) = reverse::names(
+                        lookup,
+                        client,
+                        &report.hosts,
+                        started,
+                        reverse::last_transmission(
+                            report.stats.packets_attempted > 0,
+                            aggregate
+                                .discovery
+                                .iter()
+                                .chain(
+                                    aggregate
+                                        .endpoints
+                                        .iter()
+                                        .flat_map(|endpoint| &endpoint.probes),
+                                )
+                                .map(|probe| probe.sent_at),
+                        ),
+                    );
+                    report
+                        .stats
+                        .checked_add_assign(&lookups.unwrap_or_default())
+                        .map_err(|error| CliError::caused(Kind::Internal, &error))?;
                     Ok(Streamed {
                         report,
                         endpoints: aggregate.endpoints,
                         plan,
+                        reverse_dns,
                     })
                 }
             }),
             on_event: rendering::emit_event,
             into_result: Box::new({
                 let plan = plan.clone();
-                move |report| {
-                    output::scan::Report::publish(report, plan).map_err(CliError::classified)
+                move |(report, names)| {
+                    output::scan::Report::publish(report, plan, names).map_err(CliError::classified)
                 }
             }),
-            render_text: Box::new(move |report, _| {
+            render_text: Box::new(move |(report, names), _| {
                 rendering::render_text(
-                    output::scan::Report::publish(report, plan).map_err(CliError::classified)?,
+                    output::scan::Report::publish(report, plan, names)
+                        .map_err(CliError::classified)?,
                 )
             }),
             complete: rendering::emit_complete,
@@ -286,6 +435,8 @@ pub(super) struct Streamed {
     pub(super) report: packetcraftr::scan::Report,
     pub(super) endpoints: Vec<packetcraftr::scan::Endpoint>,
     pub(super) plan: output::scan::plan::Plan,
+    /// Each host's PTR lookup, by position; empty when none ran.
+    pub(super) reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
 }
 
 /// The requested transports in first-seen order. ICMP echo is portless and
@@ -305,6 +456,100 @@ fn transports(requested: &[arguments::Transport]) -> Result<Vec<Transport>, CliE
         ));
     }
     Ok(transports)
+}
+
+/// The discovery stage the flags select, with the endpoints --exclude-ports
+/// removed from it. Port probes take --discovery-ports through the scan's
+/// catalog and --exclude-ports, so discovery never probes an excluded
+/// endpoint; ICMP echo is the default probe.
+fn discovery_options(
+    mode: Option<arguments::Discovery>,
+    probes: &[arguments::DiscoveryProbe],
+    ports: Vec<arguments::PortTerm>,
+    exclude_ports: &[arguments::PortTerm],
+    unresponsive: Option<arguments::UnresponsiveHosts>,
+    max_ports: usize,
+) -> Result<(discovery::Options, usize), CliError> {
+    let Some(mode) = mode else {
+        return Ok((discovery::Options::default(), 0));
+    };
+    let mut options = discovery::Options {
+        mode: mode.into(),
+        unresponsive: unresponsive.map_or_else(Default::default, Into::into),
+        ..discovery::Options::default()
+    };
+    let probes = if probes.is_empty() && options.runs() {
+        &[arguments::DiscoveryProbe::Icmp][..]
+    } else {
+        probes
+    };
+    let mut transports = Vec::new();
+    for probe in probes {
+        let transport = match probe {
+            arguments::DiscoveryProbe::Neighbor => {
+                options.neighbor = true;
+                continue;
+            }
+            arguments::DiscoveryProbe::Icmp => Transport::Icmp,
+            arguments::DiscoveryProbe::Tcp => Transport::Tcp,
+            arguments::DiscoveryProbe::Udp => Transport::Udp,
+        };
+        if !transports.contains(&transport) {
+            transports.push(transport);
+        }
+    }
+    // ICMP echo is portless and leads; port probes follow in term order.
+    if let Some(index) = transports
+        .iter()
+        .position(|transport| *transport == Transport::Icmp)
+    {
+        transports.remove(index);
+        options.probes.push(ProbeEndpoint::Icmp);
+    }
+    if transports.is_empty() {
+        if !ports.is_empty() {
+            return Err(CliError::new(
+                Kind::Usage,
+                "--discovery-ports needs tcp or udp among --discovery-probes",
+            ));
+        }
+        return Ok((options, 0));
+    }
+    if ports.is_empty() {
+        return Err(CliError::new(
+            Kind::Usage,
+            "tcp and udp discovery probes need --discovery-ports",
+        ));
+    }
+    // An exclusion prefixed with a transport discovery does not probe
+    // applies only to the scan's endpoints.
+    let exclude = exclude_ports
+        .iter()
+        .filter(|term| {
+            term.0
+                .transport
+                .is_none_or(|transport| transports.contains(&transport))
+        })
+        .map(|term| term.0.clone())
+        .collect();
+    let selected = packetcraftr::scan::select_endpoints(
+        &packetcraftr::scan::PortSelection {
+            transports,
+            include: ports.into_iter().map(|term| term.0).collect(),
+            exclude,
+        },
+        packetcraftr::scan::catalog::bundled(),
+        max_ports,
+    )
+    .map_err(|error| {
+        CliError::from_classification(
+            error.classification(),
+            format!("--discovery-ports: {error}"),
+            error.causes(),
+        )
+    })?;
+    options.probes.extend(selected.endpoints);
+    Ok((options, selected.excluded))
 }
 
 fn select_endpoints(

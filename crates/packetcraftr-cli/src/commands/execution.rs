@@ -44,11 +44,14 @@ where
         output::contract::Format::Ndjson => {
             let events = stream.clone();
             let on_event = hooks.on_event;
-            let cancellation = cancellation.clone();
+            let emitting = cancellation.clone();
             let summary = (hooks.run_with_events)(Box::new(move |event| {
-                emission_check(&cancellation).map_err(CliError::into_boundary_error)?;
+                emission_check(&emitting).map_err(CliError::into_boundary_error)?;
                 on_event(event, &events).map_err(CliError::into_boundary_error)
             }))?;
+            // Work after the last event, such as enrichment, can observe a
+            // cancellation no emission did; no terminal record follows it.
+            emission_check(cancellation)?;
             (hooks.complete)(summary, stream)
         }
         wide => {
@@ -144,6 +147,33 @@ mod tests {
         assert_eq!(error.exit_code(), 5, "io.cancelled keeps the I/O exit code");
         let records = output.records();
         assert_eq!(records.len(), 1, "the cancelled second event never emits");
+        assert_eq!(records[0]["result"], 10);
+        assert!(stream.is_open(), "a cancelled run emits no terminal record");
+    }
+
+    #[test]
+    fn cancellation_after_the_last_event_fails_before_the_terminal_record() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let cancellation = Cancellation::default();
+        let injector = cancellation.clone();
+        let log = RefCell::new(Vec::new());
+        let error = run_workflow(
+            Format::Ndjson,
+            &stream,
+            &cancellation,
+            hooks(&log, move |mut emit| {
+                emit(10).map_err(CliError::classified)?;
+                // Enrichment that degrades a cancellation into partial
+                // results still returns a summary.
+                injector.cancel();
+                Ok(0_u64)
+            }),
+        )
+        .expect_err("the cancellation fails the run");
+
+        assert_eq!(error.exit_code(), 5, "io.cancelled keeps the I/O exit code");
+        let records = output.records();
+        assert_eq!(records.len(), 1);
         assert_eq!(records[0]["result"], 10);
         assert!(stream.is_open(), "a cancelled run emits no terminal record");
     }

@@ -148,9 +148,11 @@ pub struct Request {
     /// `stdin:3`. Empty uses declaration ordinals; otherwise supply one label
     /// per included specification, each nonempty and at most 4096 bytes.
     pub target_sources: Vec<String>,
-    /// Probed on every target, in order; TCP and UDP endpoints may share a
-    /// port and never merge. ICMP echo is portless and stands alone.
+    /// Probed on every scanned target, in order; TCP and UDP endpoints may
+    /// share a port and never merge. ICMP echo is portless and stands alone.
+    /// Empty only for discovery-only requests.
     pub endpoints: Vec<ProbeEndpoint>,
+    pub discovery: super::discovery::Options,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     pub udp_payload: bytes::Bytes,
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
@@ -247,22 +249,39 @@ impl Request {
             });
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
+        self.discovery.validate(&self.route, &self.limits)?;
         self.validate_endpoints()
     }
 
-    /// Whether any endpoint uses `transport`.
+    /// Whether any scan endpoint or discovery probe uses `transport`.
     pub fn probes(&self, transport: Transport) -> bool {
+        let discovery = if self.discovery.runs() {
+            self.discovery.probes.as_slice()
+        } else {
+            &[]
+        };
         self.endpoints
             .iter()
+            .chain(discovery)
             .any(|endpoint| endpoint.transport() == transport)
     }
 
     fn validate_endpoints(&self) -> Result<(), Error> {
         let invalid = |message: String| Err(Error::InvalidPort { message });
+        if self.discovery.mode == super::discovery::Mode::Only {
+            if self.endpoints.is_empty() {
+                return Ok(());
+            }
+            return Err(Error::InvalidDiscovery {
+                message: "discovery-only requests probe no scan endpoint".to_owned(),
+            });
+        }
         if self.endpoints.is_empty() {
             return invalid("TCP and UDP scans require at least one destination port".to_owned());
         }
-        if self.probes(Transport::Icmp) && self.endpoints.len() > 1 {
+        // Discovery may pair ICMP echo with port probes; only the scan's
+        // portless ICMP endpoint stands alone.
+        if self.endpoints.contains(&ProbeEndpoint::Icmp) && self.endpoints.len() > 1 {
             return invalid(
                 "ICMP scans are portless and do not accept destination ports".to_owned(),
             );
@@ -278,6 +297,22 @@ impl Request {
         for endpoint in &self.endpoints {
             if !seen.insert(*endpoint) {
                 return invalid(format!("endpoint {endpoint} is listed more than once"));
+            }
+        }
+        // Discovery probes share the port budget with the scan's endpoints:
+        // the distinct set across both stages counts once toward max_ports.
+        if self.discovery.runs() && !self.discovery.probes.is_empty() {
+            let distinct = self
+                .endpoints
+                .iter()
+                .chain(&self.discovery.probes)
+                .collect::<HashSet<_>>();
+            if distinct.len() > self.limits.max_ports {
+                return Err(Error::InvalidLimit {
+                    field: "ports",
+                    value: u64::try_from(distinct.len()).unwrap_or(u64::MAX),
+                    reason: format!("exceeds max_ports={}", self.limits.max_ports),
+                });
             }
         }
         Ok(())

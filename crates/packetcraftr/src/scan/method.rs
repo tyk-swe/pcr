@@ -10,8 +10,8 @@
 
 use packetcraftr_netio::Unsupported;
 
-use super::Error;
-use crate::probe::{ProbeEndpoint, Transport};
+use super::{Error, Request};
+use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Method {
@@ -68,9 +68,10 @@ pub struct Capabilities {
     pub packet_route: bool,
 }
 
+/// Selects the method for `request`'s scan endpoints and discovery probes.
 pub fn select(
     requested: Requested,
-    endpoints: &[ProbeEndpoint],
+    request: &Request,
     capabilities: Capabilities,
 ) -> Result<Selection, Error> {
     let Capabilities { raw, packet_route } = capabilities;
@@ -82,10 +83,10 @@ pub fn select(
     match requested {
         Requested::Raw => Ok(explicit(Method::Raw)),
         Requested::Connect => {
-            if let Some(transport) = unconnectable(endpoints) {
-                return Err(Error::MethodTransport {
+            if let Some(probe) = unconnectable(request) {
+                return Err(Error::MethodProbe {
                     method: Method::Connect.as_str(),
-                    transport: transport.as_str(),
+                    probe,
                 });
             }
             if packet_route {
@@ -94,24 +95,22 @@ pub fn select(
             Ok(explicit(Method::Connect))
         }
         Requested::Automatic => {
-            let (method, reason) = match (raw, unconnectable(endpoints)) {
+            let (method, reason) = match (raw, unconnectable(request)) {
                 (Ok(()), _) => (
                     Method::Raw,
                     "this build captures and transmits crafted packets".to_owned(),
                 ),
                 (Err(source), None) if !packet_route => (
                     Method::Connect,
-                    format!(
-                        "{source}; every endpoint is TCP, which an ordinary connection can probe"
-                    ),
+                    format!("{source}; every probe is TCP, which an ordinary connection can send"),
                 ),
                 (Err(source), None) => (
                     Method::Raw,
                     format!("{source}; only the raw method can use the requested packet route"),
                 ),
-                (Err(source), Some(transport)) => (
+                (Err(source), Some(probe)) => (
                     Method::Raw,
-                    format!("{source}; only the raw method can probe {transport} endpoints"),
+                    format!("{source}; only the raw method can send {probe} probes"),
                 ),
             };
             Ok(Selection {
@@ -123,12 +122,22 @@ pub fn select(
     }
 }
 
-/// The first endpoint transport an ordinary TCP connection cannot probe.
-fn unconnectable(endpoints: &[ProbeEndpoint]) -> Option<Transport> {
-    endpoints
+/// The first probe kind an ordinary TCP connection cannot send.
+pub(super) fn unconnectable(request: &Request) -> Option<&'static str> {
+    let discovery = &request.discovery;
+    let probes = if discovery.runs() {
+        discovery.probes.as_slice()
+    } else {
+        &[]
+    };
+    request
+        .endpoints
         .iter()
+        .chain(probes)
         .map(|endpoint| endpoint.transport())
         .find(|transport| *transport != Transport::Tcp)
+        .map(Transport::as_str)
+        .or_else(|| (discovery.runs() && discovery.neighbor).then_some("neighbor"))
 }
 
 #[cfg(test)]

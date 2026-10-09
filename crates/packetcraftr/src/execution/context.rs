@@ -98,6 +98,10 @@ where
         self.deadline
     }
 
+    pub(crate) fn now(&self) -> std::time::Instant {
+        self.clock.now()
+    }
+
     pub(crate) fn into_stats(self) -> Stats {
         self.stats
     }
@@ -106,6 +110,11 @@ where
         self.deadline
             .enforce()
             .map_err(|source| self.errors.interrupted(step, source))
+    }
+
+    /// Counts work a step did besides its execution.
+    pub(crate) fn account(&mut self, step: R::Step, stats: &Stats) -> Result<(), R::Error> {
+        self.merge(step, stats)
     }
 
     /// On overflow the merged statistics are left untouched.

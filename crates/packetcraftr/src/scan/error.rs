@@ -29,16 +29,18 @@ pub enum Error {
     },
     #[error("invalid scan ports: {message}")]
     InvalidPort { message: String },
+    #[error("invalid host discovery: {message}")]
+    InvalidDiscovery { message: String },
     #[error("scan timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("scan duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("TCP connect uses kernel route and source selection")]
     UnsupportedTcpRoute,
-    #[error("the {method} scan method cannot probe {transport} endpoints")]
-    MethodTransport {
+    #[error("the {method} scan method cannot send {probe} probes")]
+    MethodProbe {
         method: &'static str,
-        transport: &'static str,
+        probe: &'static str,
     },
     #[error("scan authorization failed")]
     Authorization(#[source] BoundaryError),
@@ -46,6 +48,12 @@ pub enum Error {
     Family { family: &'static str },
     #[error("scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
+    #[error("resolving the neighbor of {address} failed")]
+    Neighbor {
+        address: std::net::IpAddr,
+        #[source]
+        source: BoundaryError,
+    },
     #[error("scan pipeline execution failed")]
     PipelineExecution {
         #[source]
@@ -127,10 +135,17 @@ impl Classified for Error {
                 Kind::Capability,
                 Some("omit packet interface/source/link overrides for ordinary TCP"),
             ),
-            Self::MethodTransport { .. } => Classification::new(
+            Self::MethodProbe { .. } => Classification::new(
                 "cli.scan_method",
                 Kind::Usage,
-                Some("probe UDP and ICMP endpoints with the raw method"),
+                Some("probe UDP and ICMP endpoints and discover neighbors with the raw method"),
+            ),
+            Self::InvalidDiscovery { .. } => Classification::new(
+                "cli.scan_discovery",
+                Kind::Usage,
+                Some(
+                    "select discovery probes only when discovery runs, and no scan ports with discovery only",
+                ),
             ),
             Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }
@@ -143,6 +158,7 @@ impl Classified for Error {
                 ),
             ),
             Self::Authorization(source)
+            | Self::Neighbor { source, .. }
             | Self::PipelineExecution { source }
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
@@ -179,6 +195,7 @@ impl Classified for Error {
     fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Authorization(source)
+            | Self::Neighbor { source, .. }
             | Self::Output { source }
             | Self::PipelineExecution { source } => source.context(),
             Self::Execution { sequence, .. }
@@ -192,6 +209,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(source)
+            | Self::Neighbor { source, .. }
             | Self::PipelineExecution { source }
             | Self::Execution { source, .. }
             | Self::Output { source } => source.as_causes(),

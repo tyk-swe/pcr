@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::borrow::Borrow;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
@@ -8,7 +9,7 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::{Context, Executor, Shared};
-use crate::policy::{Authorizer, Operation};
+use crate::policy::{Authorizer, DnsOperation, LimitOverflow, Operation, WireLimits};
 use crate::target::{ResolveTarget, approve_operation};
 use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
@@ -69,6 +70,69 @@ impl Request {
             .min()
             .expect("a validated batch is non-empty"))
     }
+}
+
+/// The traffic limits `questions` need together, including the
+/// `neighbor_attempts` requests a link-layer route may send before each UDP
+/// packet.
+pub(crate) fn limits<Q>(
+    questions: impl IntoIterator<Item = Q>,
+    neighbor_attempts: u64,
+) -> Result<DnsOperation, Error>
+where
+    Q: Borrow<super::Request>,
+{
+    let mut failure = None;
+    let operations = questions.into_iter().map_while(|question| {
+        let question = question.borrow();
+        PreparedOperation::new(question)
+            .and_then(|prepared| {
+                with_neighbor_requests(question, prepared.limits, neighbor_attempts)
+            })
+            .map_err(|error| failure = Some(error))
+            .ok()
+    });
+    let limits = batch_limits(operations)?;
+    failure.map_or(Ok(limits), Err)
+}
+
+/// Charges `attempts` neighbor requests before each of a question's UDP
+/// packets whose route may resolve a link-layer neighbor: an unanswered
+/// resolution is not remembered, so every packet may ask again.
+fn with_neighbor_requests(
+    question: &super::Request,
+    limits: DnsOperation,
+    attempts: u64,
+) -> Result<DnsOperation, Error> {
+    if question.route.link_mode == packetcraftr_netio::link::Mode::Layer3 {
+        return Ok(limits);
+    }
+    // A multicast or limited-broadcast server's link address follows from its
+    // own, so no request precedes a query to it.
+    if let crate::target::Target::Address(address) = &question.server
+        && (address.is_multicast()
+            || *address == std::net::IpAddr::from(std::net::Ipv4Addr::BROADCAST))
+    {
+        return Ok(limits);
+    }
+    // A server of unknown family is charged the larger solicitation.
+    let request_bytes = match &question.server {
+        crate::target::Target::Address(std::net::IpAddr::V4(_)) => {
+            crate::neighbor::IPV4_REQUEST_BYTES
+        }
+        _ => crate::neighbor::IPV6_REQUEST_BYTES,
+    };
+    let udp = limits.udp();
+    let requests = udp.packets().checked_mul(attempts).ok_or(LimitOverflow)?;
+    let packets = udp.packets().checked_add(requests).ok_or(LimitOverflow)?;
+    let bytes = requests
+        .checked_mul(request_bytes)
+        .and_then(|requests| requests.checked_add(udp.wire_bytes()))
+        .ok_or(LimitOverflow)?;
+    Ok(DnsOperation::new(
+        WireLimits::new(packets, bytes),
+        limits.tcp(),
+    )?)
 }
 
 #[derive(Clone, Debug)]

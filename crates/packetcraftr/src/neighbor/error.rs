@@ -59,6 +59,8 @@ pub enum Error {
     Cleanup {
         interface: String,
         target: IpAddr,
+        /// Requests sent before the cleanup failed.
+        attempts: u32,
         #[source]
         source: packetcraftr_netio::Error,
     },

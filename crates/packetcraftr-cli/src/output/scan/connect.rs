@@ -54,6 +54,7 @@ pub struct SocketError {
 #[derive(Clone, Debug, Serialize)]
 pub struct Probe {
     pub sequence: u64,
+    pub stage: super::Stage,
     pub address: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<super::Scope>,
@@ -74,6 +75,7 @@ impl TryFrom<connect::ProbeEvidence> for Probe {
     fn try_from(probe: connect::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
             sequence: probe.sequence,
+            stage: probe.stage.into(),
             address: probe.endpoint.ip(),
             scope: probe.scope.as_ref().map(super::Scope::from),
             port: probe.endpoint.port(),
@@ -117,9 +119,17 @@ pub struct Summary {
     pub planned_duration: Duration,
     pub plan: super::plan::Plan,
     pub socket_stats: Stats,
+    /// The reverse-DNS lookups' packet statistics, which socket statistics
+    /// cannot hold; absent when no lookup ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse_dns_stats: Option<packetcraftr::Stats>,
 }
 impl Summary {
-    pub fn new(report: connect::Report, plan: super::plan::Plan) -> Self {
+    pub fn new(
+        report: connect::Report,
+        plan: super::plan::Plan,
+        reverse_dns_stats: Option<packetcraftr::Stats>,
+    ) -> Self {
         Self {
             method: "tcp_connect",
             target: report.target,
@@ -127,6 +137,7 @@ impl Summary {
             planned_duration: report.planned_duration,
             plan,
             socket_stats: report.stats.into(),
+            reverse_dns_stats,
         }
     }
 }
@@ -134,14 +145,34 @@ impl Summary {
 pub struct Report {
     #[serde(flatten)]
     pub summary: Summary,
+    pub hosts: Vec<super::host::Host<Probe>>,
     pub endpoints: Vec<Endpoint>,
 }
 impl Report {
-    pub fn publish(aggregate: connect::Aggregate, plan: super::plan::Plan) -> Result<Self, Error> {
+    /// `reverse_dns` holds each host's lookup by position and
+    /// `reverse_dns_stats` their packet statistics; both are empty when none
+    /// ran.
+    pub fn publish(
+        aggregate: connect::Aggregate,
+        plan: super::plan::Plan,
+        reverse_dns: Vec<Option<super::host::ReverseDns>>,
+        reverse_dns_stats: Option<packetcraftr::Stats>,
+    ) -> Result<Self, Error> {
+        let connect::Aggregate {
+            mut report,
+            discovery,
+            endpoints,
+        } = aggregate;
         Ok(Self {
-            summary: Summary::new(aggregate.report, plan),
-            endpoints: aggregate
-                .endpoints
+            hosts: super::host::publish_all(
+                std::mem::take(&mut report.hosts),
+                discovery,
+                |probe| probe.sequence,
+                Probe::try_from,
+                reverse_dns,
+            )?,
+            summary: Summary::new(report, plan, reverse_dns_stats),
+            endpoints: endpoints
                 .into_iter()
                 .map(|endpoint| {
                     Ok(Endpoint {

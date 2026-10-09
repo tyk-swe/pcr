@@ -166,6 +166,27 @@ pub(super) fn run<P: PacketProviders, K: Clock>(
     pipeline.finish(result)
 }
 
+/// Admits `batches` as [`run`] would and keeps nothing, so a stage over its
+/// preparation limit fails before anything is sent.
+pub(super) fn admit<P: PacketProviders, K: Clock>(
+    executor: &ExchangeExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+) -> Result<(), BoundaryError> {
+    validate_options(batches, options)?;
+    let deadline = executor
+        .client
+        .now()
+        .checked_add(options.max_duration)
+        .ok_or_else(|| limit("duration", max_wait_secs()))?;
+    let planned = batches
+        .iter()
+        .map(Planned::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let preparation = until(executor.client, deadline);
+    prepare::plan(executor, &planned, options, deadline, &preparation).map(drop)
+}
+
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
 
 struct Pipeline<'a, P: PacketProviders, K> {
@@ -213,7 +234,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .iter()
             .map(Planned::new)
             .collect::<Result<Vec<_>, _>>()?;
-        let mut plan = prepare::plan(executor, &planned, options, deadline, preparation)?;
+        let mut plan = prepare::plan(executor, &planned, &options, deadline, preparation)?;
         let request = GroupRequest {
             interfaces: plan.interfaces.clone(),
             limits: executor.collection.capture,
@@ -235,6 +256,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .max()
             .expect("validated capture group contains a source")
             * source_count;
+        let seen = SeenFrames::new(options.max_evidence_frames);
         Ok(Self {
             executor,
             batches,
@@ -252,7 +274,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             retained: plan.base_bytes,
             evidence: RetentionBudget::default(),
             failed_probe: None,
-            seen: SeenFrames::new(options.max_evidence_frames),
+            seen,
             diagnostics: HashSet::new(),
             next: 0,
             next_send: started,
@@ -747,17 +769,23 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             }
             Ok(())
         });
-        match result {
-            Ok(()) => Ok(self.stats),
-            Err(source) => Err(BoundaryError::from_error(PipelineFailure {
-                source,
-                stats: self.stats,
-                pending: pending_evidence(&self.pending, &self.planned),
-                failed_probe: self.failed_probe,
-                capture_sources,
-                cleanup,
-            })),
+        let Err(source) = result else {
+            return Ok(self.stats);
+        };
+        // The failure reports the operation's traffic before this pipeline
+        // too, or only this pipeline's should the sum overflow.
+        let mut stats = self.options.preceding;
+        if stats.checked_add_assign(&self.stats).is_err() {
+            stats = self.stats;
         }
+        Err(BoundaryError::from_error(PipelineFailure {
+            source,
+            stats,
+            pending: pending_evidence(&self.pending, &self.planned),
+            failed_probe: self.failed_probe,
+            capture_sources,
+            cleanup,
+        }))
     }
 }
 fn pending_evidence(

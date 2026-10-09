@@ -8,6 +8,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
@@ -62,6 +63,22 @@ impl<P: PacketProviders + TargetProviders + TcpProviders, K: Clock> Client<P, K>
             &mut deadline,
             publish,
         )
+    }
+
+    /// The traffic limits `questions` need together, for a workflow that
+    /// splits more questions than one batch takes across batches to
+    /// authorize once, as one operation, before the first; each batch still
+    /// authorizes its own. The limits include every request this client's
+    /// neighbor resolver may send before each UDP packet on a link-layer
+    /// route.
+    pub fn dns_limits<Q>(
+        &self,
+        questions: impl IntoIterator<Item = Q>,
+    ) -> Result<DnsOperation, Error>
+    where
+        Q: std::borrow::Borrow<Request>,
+    {
+        batch::limits(questions, u64::from(self.neighbors.max_attempts()))
     }
 
     /// Runs DNS questions in input order under one deadline: the shortest `limits.max_duration`.
@@ -225,6 +242,29 @@ struct ProbeAttempt {
     execution: ExchangeEvidence,
     timeout: Duration,
     attempt_deadline: Deadline,
+}
+
+/// The neighbor requests a failed query's route sent, which the error its
+/// exchange returned carries.
+fn spent_on_neighbors(error: &BoundaryError) -> Option<Stats> {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    std::iter::from_fn(|| {
+        let current = cause?;
+        cause = current.source();
+        Some(current)
+    })
+    .find_map(|cause| {
+        // Transparent wrappers forward their sources, so the carrier is found
+        // as the error a chain link holds rather than as a link of its own.
+        let error = match cause.downcast_ref::<crate::exchange::Error>() {
+            Some(crate::exchange::Error::Preparation(error)) => error,
+            _ => cause.downcast_ref::<crate::Error>()?,
+        };
+        match error {
+            crate::Error::NeighborSpent(spent) => Some(spent.stats.clone()),
+            _ => None,
+        }
+    })
 }
 
 impl<A, E, C, F> Retries<'_, A, E, C, F>
@@ -392,23 +432,53 @@ where
         let limits = self.request.limits;
         // The attempt window is shared with a TCP fallback, which gets only what the exchange left.
         let mut attempt_deadline = Deadline::new(self.request.timeout);
-        let (execution, grant) = self.execution.step(
+        let started = self.execution.now();
+        let mut spent = None;
+        let stepped = self.execution.step(
             probe.attempt,
             self.request.timeout,
             &mut *self.executor,
             |executor, grant| {
-                executor.execute(&Exchange {
+                let execution = executor.execute(&Exchange {
                     probe: probe.clone(),
                     timeout: grant.timeout,
                     limits,
                     permit: grant.permit,
-                })
+                });
+                // Read before the step can replace the error with the
+                // deadline's or the cancellation's.
+                spent = execution.as_ref().err().and_then(spent_on_neighbors);
+                execution
             },
             |_, execution, grant, _| {
                 validate_dns_execution(probe, execution, limits, grant.timeout)
             },
-        )?;
+        );
+        let (execution, grant) = match stepped {
+            Ok(stepped) => stepped,
+            Err(error) => {
+                // A failed query still spent its route's neighbor requests
+                // and their wait.
+                if let Some(mut neighbor) = spent {
+                    neighbor.elapsed = self.execution.now().saturating_duration_since(started);
+                    self.execution.account(probe.attempt, &neighbor)?;
+                }
+                return Err(error);
+            }
+        };
         let _ = attempt_deadline.account(execution.stats.elapsed);
+        // The neighbor requests the query's route sent count with the query;
+        // the exchange's elapsed already spans their wait.
+        let neighbor =
+            execution
+                .sent
+                .route()
+                .neighbor_stats()
+                .map_err(|source| Error::Execution {
+                    attempt: probe.attempt,
+                    source: BoundaryError::from_error(source),
+                })?;
+        self.execution.account(probe.attempt, &neighbor)?;
         Ok(ProbeAttempt {
             execution,
             timeout: grant.timeout,

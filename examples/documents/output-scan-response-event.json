@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v8",
+  "schema": "packetcraftr.output/v9",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
@@ -8,6 +8,7 @@
     "target": "192.168.56.10",
     "probe": {
       "sequence": 70000,
+      "stage": "scan",
       "protocol": "tcp",
       "destination": "192.168.56.10",
       "destination_port": 443,

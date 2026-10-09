@@ -16,8 +16,9 @@ The four vocabularies are:
   publishes it as each endpoint's `inference` ([port inference](#port-inference)).
   Conflicting attempts remain visible beside it.
 - **Host observations.** Evidence that a host answered, by which probe, and
-  whether the evidence is direct, a cached next hop, or a proxy reply. No
-  current output publishes a host record.
+  whether the evidence is direct, a cached neighbor entry, or a possible proxy
+  reply. Output/v9 publishes one host record per target
+  ([host observations](#host-observations)).
 - **Operational failures.** A missing backend, a refused permission, a
   policy limit, an exhausted budget, an operation deadline, or a
   cancellation. These are never expressed as network observations.
@@ -44,6 +45,7 @@ aggregate `scan` result, from
 | Field | Role |
 | --- | --- |
 | `sequence` | Metadata: operation-local coordinate identifying the attempt. |
+| `stage` | Metadata: `discovery` or `scan`; both stages share one sequence space. |
 | `protocol` | Metadata: derived from transport and address family (`tcp`, `udp`, `icmpv4`, `icmpv6`). |
 | `destination`, `destination_port` | Metadata: the addressed endpoint the attempt targeted. |
 | `attempt` | Metadata: retry ordinal for this endpoint. |
@@ -88,6 +90,7 @@ via [`output::scan::connect::Probe`][connect-output].
 | Field | Role |
 | --- | --- |
 | `sequence` | Metadata: operation-local coordinate. |
+| `stage` | Metadata: `discovery` or `scan`, as for packet attempts. |
 | `address`, `port` | Metadata: the socket endpoint attempted. |
 | `attempt` | Metadata: retry ordinal. |
 | `attempted` | Attempt observation: whether the provider issued the socket call at all. `false` means no network claim exists for this record. |
@@ -194,8 +197,10 @@ about the target:
   capture path delivered or lost.
 - `resolved_addresses`, `target`, `planned_duration`, `socket_stats`
   (`connections_scheduled`, `connections_attempted`, `connections_succeeded`,
-  `elapsed`, `rtt`), and the envelope fields `schema`, `command`, `mode`,
-  `sequence`, `event`, `resources`: operation metadata.
+  `elapsed`, `rtt`), a connect scan's `reverse_dns_stats` (the lookups'
+  execution accounting, which socket statistics cannot hold), and the
+  envelope fields `schema`, `command`, `mode`, `sequence`, `event`,
+  `resources`: operation metadata.
 
 ## Operational failures
 
@@ -212,7 +217,7 @@ A failed packet scan attaches its partial evidence under `error.scan`
 | `stats` | Metadata: execution accounting up to the failure. |
 | `pending[].sent` | Metadata: each confirmed transmission still awaiting attribution (a `probe_sent`-shaped record). |
 | `pending[].response` | Metadata: a captured response for that probe that was not yet attributed, if one was retained. |
-| `failed_probe` | Metadata: the probe coordinates (`sequence`, `destination`, `destination_port`, `transport`, `attempt`) at which execution failed. |
+| `failed_probe` | Metadata: the probe coordinates (`sequence`, `stage`, `destination`, `destination_port`, `transport`, `attempt`) at which execution failed. |
 | `capture_sources[]` | Metadata: per-source capture state — `interface` (`name`, `index`), `ready`, `shutdown_confirmed`, `statistics_valid`, `statistics` — recording how much evidence the failure preserved. |
 
 Error codes keep failure kinds distinct from observations: authorization and
@@ -251,7 +256,8 @@ operational metadata, not a port-state claim.
 | --- | --- |
 | `plan.method` | Metadata: the `requested` and `selected` scan method, and the `reason` automatic selection chose it. An explicit method is never replaced. |
 | `plan.port_catalog` | Metadata: the catalog data set and version that names, presets, and hints came from. |
-| `plan.excluded_endpoints` | Metadata: endpoints removed by `--exclude-ports` after expansion and before planning. |
+| `plan.excluded_endpoints` | Metadata: scan endpoints removed by `--exclude-ports` after expansion and before planning. |
+| `plan.discovery.excluded_endpoints` | Metadata: discovery endpoints removed by `--exclude-ports` after expansion and before planning. |
 | `plan.curated_udp_payloads` | Metadata: the curated payload data set and version, and the UDP ports where it was `applied` or `overridden` by an operator profile. |
 | `endpoints[].port_hint` | Metadata: the catalog name for the endpoint's transport and port. It is a hint, not service identification. |
 | `endpoints[].inference` | Port inference: the [inferred state](#port-inference). |
@@ -315,16 +321,65 @@ PacketcraftR has no `unfiltered` label, which needs an ACK or window scan
 
 ## Host observations
 
-This vocabulary has no producer yet. The layer exists in the model so that
-[M5][m5] host records add fields in their own shapes instead of re-encoding
-`classification`, `responder`, or `reason` values that already mean attempt
-outcomes.
+[M5][m5] host discovery publishes one record per selected target, in selection
+order: `hosts[]` in raw scan results and connect reports, and a `host` stream
+record before `complete` ([library][discovery-host], [output][host-output]).
+Host records use their own fields instead of re-encoding the attempt
+`classification`, `responder`, or `reason` of the discovery probes they cite.
+
+| Field | Role |
+| --- | --- |
+| `discovery` | Host observation: `responded` when at least one reason exists, `no_response` when discovery ran and none does, `not_requested` when the request omitted discovery, and `skipped` when it skipped discovery explicitly. |
+| `scan` | Metadata: `scanned`, `skipped` (discovery found no response and the request left such hosts out), or `not_requested` (discovery-only). |
+| `reasons[]` | Host observation: why the host counts as responded. |
+| `reasons[].kind` | The reply behind the reason: a discovery probe's typed reply (`icmp_echo_reply`, `tcp_syn_ack`, `tcp_reset`, `udp_payload`, `icmp_port_unreachable`, and the other attempt replies), `tcp_connected` or `tcp_refused` from an ordinary socket, or `neighbor_reply` or `neighbor_cache`. |
+| `reasons[].evidence` | `wire` for a captured reply, `socket` for an operating-system connect result, and `cache` for a neighbor cache entry. |
+| `reasons[].basis` | `direct` for the host's own answer, `cached` for a neighbor cache entry an earlier reply left, and `possible_proxy` for a link address that also answered for another address of the same family on the same interface, as a target or as a gateway. |
+| `reasons[].probe`, `link_address`, `observed_at` | Metadata: the discovery probe sequence or the neighbor link address the reason rests on, and when it was observed, absent for a reply whose capture carried no wall-clock time. |
+| `neighbor` | Host observation: the explicit ARP or NDP outcome (`resolved`, `silent`, `routed`, or `not_applicable`), the `interface` the host's route selected, the request `attempts`, when it was `observed_at` (absent for a reply whose capture carried no wall-clock time), the host's `link` when resolved, and the `next_hop` when routed. A link `entry` is `fresh` or `cached`. |
+| `reverse_dns` | Enrichment observation: the PTR question, its status and outcome, and the `names` the server answered. The scan's evidence byte limit bounds the names kept across every lookup; `names_truncated` marks an answer whose later names it dropped. |
+| `probes` | Metadata: the discovery probes, embedded in JSON and listed by sequence in `host` stream records. |
+
+The record keeps these rules:
+
+- A reason needs a reply from the target itself. A discovery probe's reply
+  from another responder, such as a router's ICMP error, is kept on the probe
+  but gives the host no reason.
+- A TCP reset, an ICMP port unreachable from the host, and a refused
+  connection are host responsiveness even though the port is closed.
+- `no_response` means the host stayed silent to every selected discovery
+  probe within its budget. It is uncertain, never absent.
+- `not_requested` and `skipped` are labels, not measurements.
+- A routed target is sent no neighbor request. Its gateway appears under
+  `neighbor.next_hop`, with a link address only when the neighbor cache
+  already holds one, and never as the target's link or a reason. A probe to
+  a routed target still resolves the gateway before its stage sends any
+  probe, and that request is sent only when the policy authorizes the
+  gateway like any destination; it counts in `stats`. A target
+  whose own neighbor reply carries the same link address as another address
+  of the same family on the same interface, whether a target or a next hop,
+  is flagged `possible_proxy`; PacketcraftR does not assert a cause. A
+  dual-stack host answering for one IPv4 and one IPv6 address, or a gateway
+  that is itself a target, stays `direct`.
+- Ordinary-socket discovery (`--connect`) publishes `socket` evidence only.
+  The operating system reports the endpoint's own answer; which device sent it
+  is not observable through a socket.
+- Reverse names and link addresses are observations. They are never
+  authenticated identity, and no vendor label is published until a vendor
+  data set has a provenance record under the [data policy][data-policy].
+
+Every discovery probe carries `stage: "discovery"` and every scan probe
+`stage: "scan"` in one sequence space. Endpoints and their `counts` hold only
+scan-stage probes; discovery probes appear only in host records.
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs
 [connect-output]: ../crates/packetcraftr-cli/src/output/scan/connect.rs
 [connect-report]: ../crates/packetcraftr/src/scan/connect/report.rs
 [correlation]: ../crates/packetcraftr/src/correlation.rs
+[data-policy]: scanner-data-policy.md
+[discovery-host]: ../crates/packetcraftr/src/scan/discovery/host.rs
+[host-output]: ../crates/packetcraftr-cli/src/output/scan/host.rs
 [m1]: roadmap/m01-claims-evidence.md
 [m5]: roadmap/m05-host-discovery.md
 [m6]: roadmap/m06-port-planning-inference.md

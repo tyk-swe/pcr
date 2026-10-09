@@ -482,6 +482,7 @@ fn scan_port_80(
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
         address_family: Family::Any,
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        discovery: Default::default(),
         attempts: 1,
         timeout: WINDOW,
         probes_per_second: None,

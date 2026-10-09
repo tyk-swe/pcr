@@ -202,6 +202,7 @@ fn request() -> scan::Request {
         endpoints: (1..=32)
             .map(|port| packetcraftr::probe::ProbeEndpoint::Tcp { port })
             .collect(),
+        discovery: Default::default(),
         attempts: 1,
         timeout: Duration::from_millis(50),
         probes_per_second: None,

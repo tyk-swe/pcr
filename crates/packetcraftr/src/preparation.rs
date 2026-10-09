@@ -46,6 +46,10 @@ impl AuthorizedRoute {
     pub(crate) fn interface(&self) -> &interface::Id {
         &self.plan.decision.interface
     }
+
+    pub(crate) fn plan(&self) -> &route::Plan {
+        &self.plan
+    }
 }
 
 /// The exact wire bytes one admitted packet charged to the cumulative budget.
@@ -327,6 +331,27 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
         })
     }
 
+    /// Spaces a packet from the neighbor request its route just sent, within
+    /// the preparation deadline.
+    fn pace_neighbor_request(&self, spent: std::time::Duration) -> Result<(), Error> {
+        // The resolution's own wait already spaced its request from the packet.
+        let pause = self.client.neighbor_pause.saturating_sub(spent);
+        if pause.is_zero() {
+            return Ok(());
+        }
+        self.check()?;
+        self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
+            let pause = pause.min(deadline.remaining().unwrap_or_default());
+            self.client
+                .clock
+                .sleep(pause, deadline)
+                .map_err(|source| Error::Clock {
+                    source: Box::new(source),
+                })
+        })?;
+        self.check()
+    }
+
     fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         let Admitted {
             packet,
@@ -335,6 +360,28 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             preliminary_build,
         } = admitted;
         self.check()?;
+        // Only a request about to be sent is checked: a cached answer sends
+        // nothing to the neighbor.
+        if (self.client.neighbors_resolved_ahead || self.client.authorize_neighbor_requests)
+            && plan.needs_neighbor_resolution()
+        {
+            let request = route::neighbor_request(&plan)?;
+            let cached = self
+                .client
+                .neighbors
+                .cached(&request)
+                .map_err(route::Error::from)?
+                .is_some();
+            if !cached && self.client.neighbors_resolved_ahead {
+                return Err(Error::UnresolvedNeighbor {
+                    target: request.target,
+                    interface: request.interface.name,
+                });
+            }
+            if !cached {
+                authorize_neighbor_request(&self.client.policy, &request, &plan)?;
+            }
+        }
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
         let providers = &self.client.providers;
@@ -342,24 +389,92 @@ impl<'c, P: PacketProviders, K: Clock> Stages<'c, P, K> {
             .client
             .neighbors
             .over(providers.transmit(), providers.capture());
+        let request = plan
+            .needs_neighbor_resolution()
+            .then(|| route::neighbor_request(&plan))
+            .transpose()?;
+        let began = self.client.now();
         let route = match self.within(packetcraftr_netio::deadline::MAX_WAIT, |deadline| {
             route::materialize(plan, &neighbors, deadline)
         }) {
             Ok(route) => route,
             Err(error) => {
-                self.check()?;
-                return Err(error.into());
+                let spent = unanswered(&error, request.as_ref());
+                let error = self.check().err().unwrap_or_else(|| error.into());
+                return Err(error.after_neighbor_requests(spent));
             }
         };
-        let built =
-            self.materializer()
-                .link(packet, &route, build_context, preliminary_build, || {
-                    self.check()
-                })?;
-        self.check()?;
-        self.authorize_built(&built, &route.plan)?;
+        // Whatever fails after the route's requests went out still reports
+        // them.
+        let spent = route.neighbor_stats()?;
+        let built = (|| {
+            if spent.packets_attempted > 0 {
+                self.pace_neighbor_request(self.client.now().saturating_duration_since(began))?;
+            }
+            let built = self.materializer().link(
+                packet,
+                &route,
+                build_context,
+                preliminary_build,
+                || self.check(),
+            )?;
+            self.check()?;
+            self.authorize_built(&built, &route.plan)?;
+            Ok(built)
+        })()
+        .map_err(|error: Error| error.after_neighbor_requests(spent))?;
         Ok(PreparedPacket { built, route })
     }
+}
+
+/// The requests a resolution that `request` asked for sent before it failed,
+/// unanswered or while its capture was cleaned up.
+fn unanswered(error: &route::Error, request: Option<&crate::neighbor::Request>) -> crate::Stats {
+    let (route::Error::Neighbor(neighbor), Some(request)) = (error, request) else {
+        return crate::Stats::default();
+    };
+    let (attempts, capture) = requests_sent(neighbor);
+    let attempts = u64::from(attempts);
+    let frame_bytes = crate::neighbor::request_frame(request).map_or(0, |frame| frame.len() as u64);
+    crate::Stats {
+        packets_attempted: attempts,
+        packets_completed: attempts,
+        bytes: attempts.saturating_mul(frame_bytes),
+        capture,
+        ..crate::Stats::default()
+    }
+}
+
+/// The requests a failed resolution sent, with its capture's counters when
+/// they were settled.
+fn requests_sent(error: &crate::neighbor::Error) -> (u32, packetcraftr_netio::capture::Stats) {
+    use crate::neighbor::Error;
+    match error {
+        Error::NotFound {
+            attempts,
+            capture_statistics,
+            ..
+        } => (*attempts, *capture_statistics),
+        // A failed shutdown leaves the capture's counters unsettled.
+        Error::Cleanup { attempts, .. } => (*attempts, Default::default()),
+        Error::OperationAndCleanup { operation, .. } => requests_sent(operation),
+        _ => (0, Default::default()),
+    }
+}
+
+/// Authorizes the neighbor request `plan` resolves before the resolver sends
+/// it: the address it asks for and every source of the exact frame. An NDP
+/// solicitation goes to the target's solicited-node group, so the address it
+/// asks for is authorized rather than the group.
+pub(crate) fn authorize_neighbor_request(
+    policy: &Policy,
+    request: &crate::neighbor::Request,
+    plan: &route::Plan,
+) -> Result<(), Error> {
+    let frame = crate::neighbor::request_frame(request).map_err(route::Error::from)?;
+    let decoded = crate::policy::decode_wire(request.link_type, &frame)?;
+    policy.authorize_destination(request.target)?;
+    Ok(policy.authorize_packet_sources(&decoded.packet, plan)?)
 }
 
 pub(crate) struct Admitting<'c, P, K> {
@@ -604,6 +719,58 @@ mod tests {
             })
             .push(Raw::new(Bytes::from_static(payload)));
         packet
+    }
+
+    #[test]
+    fn requests_before_a_failed_cleanup_count_with_the_failure() {
+        use packetcraftr_core::frame::LinkType;
+        use packetcraftr_core::packet::MacAddress;
+
+        use crate::neighbor::{Error, Request};
+
+        let request = Request {
+            interface: packetcraftr_netio::interface::Id {
+                name: "fixture0".to_owned(),
+                index: 1,
+            },
+            interface_source: Ipv4Addr::new(192, 0, 2, 2).into(),
+            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
+            target: Ipv4Addr::new(192, 0, 2, 1).into(),
+            vlan_tags: Vec::new(),
+            mtu: 1500,
+            link_type: LinkType::ETHERNET,
+        };
+        let cleanup = || packetcraftr_netio::Error::UnresolvedLinkMode;
+        let not_found = Error::NotFound {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            attempts: 2,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: packetcraftr_netio::capture::Stats {
+                received_frames: 3,
+                ..Default::default()
+            },
+        };
+        let spent = |error: Error| {
+            super::unanswered(&route::Error::Neighbor(Box::new(error)), Some(&request))
+        };
+
+        let answered = spent(Error::Cleanup {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            attempts: 1,
+            source: cleanup(),
+        });
+        assert_eq!((answered.packets_attempted, answered.bytes), (1, 60));
+        let unanswered = spent(Error::OperationAndCleanup {
+            interface: "fixture0".to_owned(),
+            target: request.target,
+            operation: Box::new(not_found),
+            cleanup: cleanup(),
+        });
+        assert_eq!((unanswered.packets_attempted, unanswered.bytes), (2, 120));
+        assert_eq!(unanswered.capture.received_frames, 3);
     }
 
     #[test]

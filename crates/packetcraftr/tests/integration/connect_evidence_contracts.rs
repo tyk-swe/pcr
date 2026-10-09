@@ -55,6 +55,7 @@ fn scoped_evidence_is_charged_before_publication() {
             udp_profiles: Default::default(),
             address_family: Family::Any,
             endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 443 }],
+            discovery: Default::default(),
             attempts,
             timeout: Duration::from_secs(5),
             probes_per_second: None,

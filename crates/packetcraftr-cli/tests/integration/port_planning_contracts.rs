@@ -173,7 +173,7 @@ fn port_terms_fail_before_planning_when_they_select_nothing_usable() {
         ),
         (
             &["--ports", "53", "--curated-udp-payloads"],
-            "--curated-udp-payloads requires --transport udp",
+            "--curated-udp-payloads requires UDP scan or discovery probes",
         ),
         (
             &["--ports", "tcp-x:1"],
@@ -196,7 +196,7 @@ fn port_terms_fail_before_planning_when_they_select_nothing_usable() {
             "tcp-connect",
         ],
         "cli.scan_method",
-        "the tcp_connect scan method cannot probe udp endpoints",
+        "the tcp_connect scan method cannot send udp probes",
     );
 }
 
@@ -228,7 +228,25 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
             "method": {"requested": "tcp_connect", "selected": "tcp_connect"},
             "port_catalog": {"name": "port-catalog", "version": "1.0.0"},
             "excluded_endpoints": 0,
+            "discovery": {
+                "mode": "omitted",
+                "probes": [],
+                "neighbor": false,
+                "excluded_endpoints": 0,
+                "unresponsive": "skip",
+            },
         })
+    );
+    assert_eq!(
+        result["hosts"],
+        json!([{
+            "address": "127.0.0.1",
+            "discovery": "not_requested",
+            "scan": "scanned",
+            "reasons": [],
+            "probes": [],
+        }]),
+        "a scan without discovery says so instead of claiming reachability"
     );
     let endpoints = result["endpoints"].as_array().unwrap();
     assert_eq!(endpoints.len(), 2);
@@ -296,6 +314,7 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
             "connect_probe",
             "connect_endpoint",
             "connect_endpoint",
+            "host",
             "complete"
         ]
     );
@@ -316,8 +335,9 @@ fn connect_endpoints_publish_inference_beside_every_attempt() {
     );
     assert_eq!(records[2]["result"]["inference"]["state"], "open");
     assert_eq!(records[3]["result"]["inference"]["state"], "closed");
+    assert_eq!(records[4]["result"]["discovery"], "not_requested");
     assert_eq!(
-        records[4]["result"]["plan"]["method"],
+        records[5]["result"]["plan"]["method"],
         json!({"requested": "tcp_connect", "selected": "tcp_connect"})
     );
 
@@ -401,7 +421,7 @@ fn raw_scans_without_packet_io_fail_unless_automatic_selection_was_requested() {
         method["reason"]
             .as_str()
             .unwrap()
-            .contains("every endpoint is TCP"),
+            .contains("every probe is TCP"),
         "{method}"
     );
     assert_eq!(

@@ -41,6 +41,53 @@ pub enum Error {
         "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
     )]
     PacketExceedsMtu { actual: usize, mtu: u32 },
+    #[error("the route now needs neighbor {target} on {interface}, which was not resolved ahead")]
+    UnresolvedNeighbor {
+        target: std::net::IpAddr,
+        interface: String,
+    },
+    #[error("neighbor pacing clock failed")]
+    Clock {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// A failure after the packet's route sent neighbor requests.
+    #[error(transparent)]
+    NeighborSpent(Box<NeighborSpent>),
+}
+
+/// A failure that followed the neighbor requests a packet's route sent. It
+/// reads and classifies as that failure; the requests' statistics travel with
+/// it, so a workflow can count the traffic it spent.
+#[derive(Debug)]
+pub struct NeighborSpent {
+    pub(crate) stats: crate::Stats,
+    pub(crate) error: Error,
+}
+
+impl std::fmt::Display for NeighborSpent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for NeighborSpent {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.error)
+    }
+}
+
+impl Error {
+    /// `self`, carrying the neighbor requests `spent` before it.
+    pub(crate) fn after_neighbor_requests(self, spent: crate::Stats) -> Self {
+        if spent.packets_attempted == 0 {
+            return self;
+        }
+        Self::NeighborSpent(Box::new(NeighborSpent {
+            stats: spent,
+            error: self,
+        }))
+    }
 }
 
 impl Classified for Error {
@@ -69,6 +116,19 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
+            Self::UnresolvedNeighbor { .. } => Classification::new(
+                "io.route_changed",
+                Kind::Io,
+                Some("retry once the route to the target is stable"),
+            ),
+            Self::NeighborSpent(spent) => spent.error.classification(),
+            Self::Clock { .. } => Classification::new(
+                "io.neighbor_clock",
+                Kind::Io,
+                Some(
+                    "inspect the pacing clock and account for the neighbor requests already transmitted",
+                ),
+            ),
         }
     }
 
@@ -78,10 +138,13 @@ impl Classified for Error {
             Self::Plan(error) => error.context(),
             Self::Policy(error) => error.context(),
             Self::Io(error) => error.context(),
+            Self::NeighborSpent(spent) => spent.error.context(),
             Self::Build(_)
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
+            | Self::UnresolvedNeighbor { .. }
+            | Self::Clock { .. }
             | Self::Cancelled(_) => None,
         }
     }
@@ -93,6 +156,7 @@ impl Classified for Error {
             Self::Build(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
+            Self::NeighborSpent(spent) => spent.error.causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

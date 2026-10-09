@@ -45,6 +45,7 @@ fn attempt_expires_clock_before_operation_dl() {
         udp_profiles: Default::default(),
         address_family: Family::Any,
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 53 }],
+        discovery: Default::default(),
         attempts: 1,
         timeout,
         probes_per_second: None,

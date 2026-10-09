@@ -26,14 +26,8 @@ pub(super) fn render_text(
         comma_separated(&result.resolved_addresses)
     ))?;
     write_stdout_line(format_args!(
-        "planned timeout+pacing {}; achieved {:.2} probes/s over {}",
-        duration_text(result.planned_duration),
-        if stats.elapsed.is_zero() {
-            0.0
-        } else {
-            stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
-        },
-        duration_text(stats.elapsed)
+        "{}",
+        throughput_text(result.planned_duration, &stats)
     ))?;
     render_plan_text(&result.plan)?;
     for endpoint in &result.endpoints {
@@ -54,29 +48,7 @@ pub(super) fn render_text(
         ))?;
         render_inference_text(endpoint.port_hint, endpoint.inference.as_ref())?;
         for evidence in &endpoint.probes {
-            write_stdout_line(format_args!(
-                "  sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
-                evidence.sequence,
-                evidence.attempt,
-                evidence.status.as_str(),
-                evidence.classification.as_str(),
-                evidence.sent_at,
-                optional_display(evidence.received_at),
-                optional_display(evidence.responder),
-                optional_duration(evidence.latency),
-                evidence.reason,
-            ))?;
-            if let Some(application) = &evidence.application {
-                write_stdout_line(format_args!(
-                    "    profile={} validation={}: {}",
-                    application.profile,
-                    application.status.as_str(),
-                    application.reason
-                ))?;
-            }
-            if let Some(frame) = &evidence.frame {
-                write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
-            }
+            render_probe_text("  ", evidence)?;
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
@@ -88,9 +60,13 @@ pub(super) fn render_text(
             captured_frame_text(&unattributed.frame)
         ))?;
     }
+    render_hosts_text(&result.plan, &result.hosts, |probe| {
+        render_probe_text("  probe ", probe)
+    })?;
     let rtt = result.rtt;
     write_summary_line(format_args!(
-        "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
+        // The totals span discovery, neighbor requests, and enrichment too.
+        "scanned {} endpoint(s); the operation completed {} packet(s), {} byte(s)",
         result.endpoints.len(),
         stats.packets_completed,
         stats.bytes
@@ -121,6 +97,27 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
         plan.port_catalog.version,
         plan.excluded_endpoints,
     ))?;
+    let discovery = &plan.discovery;
+    write_stdout_line(format_args!(
+        "discovery={} probes={} neighbor={} unresponsive={} reverse-dns={}",
+        discovery.mode,
+        listed(
+            &discovery
+                .probes
+                .iter()
+                .map(|probe| match probe.port {
+                    Some(port) => format!("{}/{port}", probe.transport),
+                    None => probe.transport.to_string(),
+                })
+                .collect::<Vec<_>>()
+        ),
+        discovery.neighbor,
+        discovery.unresponsive,
+        discovery.reverse_dns.as_ref().map_or_else(
+            || "-".to_owned(),
+            |server| format!("{}:{}", server.server, server.port)
+        ),
+    ))?;
     if let Some(curated) = &plan.curated_udp_payloads {
         write_stdout_line(format_args!(
             "curated-udp-payloads={}/{} applied={} overridden={}",
@@ -131,6 +128,151 @@ pub(super) fn render_plan_text(plan: &output::scan::plan::Plan) -> Result<(), Cl
         ))?;
     }
     Ok(())
+}
+
+/// Host records, when discovery or a reverse lookup was requested; the plan
+/// line already says when neither was.
+fn render_hosts_text<P>(
+    plan: &output::scan::plan::Plan,
+    hosts: &[output::scan::host::Host<P>],
+    probe_text: impl Fn(&P) -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    if plan.discovery.mode == output::scan::plan::DiscoveryMode::Omitted
+        && plan.discovery.reverse_dns.is_none()
+    {
+        return Ok(());
+    }
+    for host in hosts {
+        let address = match &host.scope {
+            Some(scope) => format!("{}%{}", host.address, scope.zone),
+            None => host.address.to_string(),
+        };
+        write_stdout_line(format_args!(
+            "host {address} discovery={} scan={}",
+            host.discovery, host.scan
+        ))?;
+        if let Some(neighbor) = &host.neighbor {
+            write_stdout_line(format_args!("  {}", neighbor_text(neighbor)))?;
+        }
+        for reason in &host.reasons {
+            write_stdout_line(format_args!(
+                "  reason={} evidence={} basis={} probe={} link={} observed={}",
+                reason.kind,
+                reason.evidence,
+                reason.basis,
+                optional_display(reason.probe),
+                optional_display(reason.link_address),
+                optional_display(reason.observed_at.as_ref()),
+            ))?;
+        }
+        // Discovery probes belong to no endpoint, so their evidence is shown
+        // with the host it decided.
+        for probe in &host.probes {
+            probe_text(probe)?;
+        }
+        if let Some(lookup) = &host.reverse_dns {
+            write_stdout_line(format_args!("  {}", reverse_dns_text(lookup)))?;
+        }
+    }
+    Ok(())
+}
+
+/// A raw probe's evidence line after `lead`, with any application and frame
+/// lines beneath it.
+fn render_probe_text(lead: &str, evidence: &output::scan::Probe) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "{lead}sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+        evidence.sequence,
+        evidence.attempt,
+        evidence.status.as_str(),
+        evidence.classification.as_str(),
+        evidence.sent_at,
+        optional_display(evidence.received_at),
+        optional_display(evidence.responder),
+        optional_duration(evidence.latency),
+        evidence.reason,
+    ))?;
+    let nested = " ".repeat(lead.len() + 2);
+    if let Some(application) = &evidence.application {
+        write_stdout_line(format_args!(
+            "{nested}profile={} validation={}: {}",
+            application.profile,
+            application.status.as_str(),
+            application.reason
+        ))?;
+    }
+    if let Some(frame) = &evidence.frame {
+        write_stdout_line(format_args!("{nested}frame {}", captured_frame_text(frame)))?;
+    }
+    Ok(())
+}
+
+/// A connect discovery probe's evidence line.
+fn connect_probe_text(probe: &output::scan::connect::Probe) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "  probe sequence={} port={} attempt={} outcome={} classification={} scheduled={} finished={} elapsed={} error={}",
+        probe.sequence,
+        probe.port,
+        probe.attempt,
+        probe.outcome,
+        probe.classification,
+        probe.scheduled_at,
+        optional_display(probe.finished_at.as_ref()),
+        duration_text(probe.elapsed),
+        optional_display(probe.error.as_ref().map(|error| &error.kind)),
+    ))
+}
+
+/// A host's neighbor line, with when its outcome was observed: a silent,
+/// routed, or inapplicable outcome has no reason that would carry it.
+fn neighbor_text(neighbor: &output::scan::host::Neighbor) -> String {
+    format!(
+        "neighbor={} interface={} attempts={} link={} next-hop={} next-hop-link={} observed={}",
+        neighbor.outcome,
+        neighbor.interface.name,
+        neighbor.attempts,
+        link_text(neighbor.link.as_ref()),
+        optional_display(neighbor.next_hop.as_ref().map(|hop| hop.address)),
+        link_text(neighbor.next_hop.as_ref().and_then(|hop| hop.link.as_ref())),
+        optional_display(neighbor.observed_at.as_ref()),
+    )
+}
+
+/// The scan's planned duration against the operation's achieved packet rate,
+/// which spans discovery, neighbor requests, and enrichment as well as probes;
+/// the plan covers discovery and the scan, not enrichment.
+fn throughput_text(planned: std::time::Duration, stats: &output::envelope::Stats) -> String {
+    format!(
+        "scan planned timeout+pacing {}; operation achieved {:.2} packets/s over {}",
+        duration_text(planned),
+        if stats.elapsed.is_zero() {
+            0.0
+        } else {
+            stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
+        },
+        duration_text(stats.elapsed)
+    )
+}
+
+/// A host's reverse-DNS line, which marks names the scan's evidence byte
+/// limit dropped so a partial list never reads as the whole answer.
+fn reverse_dns_text(lookup: &output::scan::host::ReverseDns) -> String {
+    format!(
+        "reverse-dns={} status={} outcome={} names={} names_truncated={}{}",
+        lookup.query_name,
+        lookup.status,
+        optional_display(lookup.outcome),
+        listed(&lookup.names),
+        lookup.names_truncated,
+        lookup
+            .error
+            .as_ref()
+            .map_or_else(String::new, |error| format!(" error=\"{error}\"")),
+    )
+}
+
+fn link_text(link: Option<&output::scan::host::Link>) -> String {
+    optional_display(link.map(|link| format!("{}/{}", link.address, link.entry.as_str())))
 }
 
 /// The inference line beneath an endpoint; the hint is labelled as such so
@@ -177,20 +319,37 @@ pub(super) fn emit_complete(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let super::Streamed {
-        report,
+        mut report,
         endpoints,
         plan,
+        reverse_dns,
     } = streamed;
     for endpoint in endpoints {
         stream.emit_published(output::envelope::Published::<output::scan::Event>::from(
             endpoint,
         ))?;
     }
+    emit_hosts(std::mem::take(&mut report.hosts), reverse_dns, stream)?;
     Ok(
         stream.complete_published(output::envelope::Published::<output::scan::Event>::from((
             report, plan,
         )))?,
     )
+}
+
+/// One `host` record per target after the last probe, before `complete`.
+pub(super) fn emit_hosts(
+    hosts: Vec<packetcraftr::scan::discovery::Host>,
+    reverse_dns: Vec<Option<output::scan::host::ReverseDns>>,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let mut reverse_dns = reverse_dns.into_iter();
+    for host in hosts {
+        let host = output::scan::host::Host::summarize(host, reverse_dns.next().flatten())
+            .map_err(CliError::classified)?;
+        stream.emit_data(host, Vec::new())?;
+    }
+    Ok(())
 }
 
 pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
@@ -228,6 +387,7 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         ))?;
         render_inference_text(endpoint.port_hint, Some(&endpoint.inference))?;
     }
+    render_hosts_text(&report.summary.plan, &report.hosts, connect_probe_text)?;
     write_stdout_line(format_args!(
         "{} socket connections attempted; {} succeeded; elapsed {}",
         report.summary.socket_stats.connections_attempted,
@@ -299,6 +459,63 @@ mod tests {
                 format!("fe80::1%beta {endpoint_name} classification=filtered"),
             );
         }
+    }
+
+    #[test]
+    fn text_neighbors_carry_their_observation_time() {
+        let neighbor = |observed_at| {
+            output::scan::host::Neighbor::try_from(packetcraftr::scan::discovery::Neighbor {
+                outcome: packetcraftr::scan::discovery::NeighborOutcome::Silent,
+                interface: packetcraftr_netio::interface::Id {
+                    name: "fixture0".to_owned(),
+                    index: 1,
+                },
+                attempts: 1,
+                observed_at,
+            })
+            .expect("a representable neighbor")
+        };
+        let observed = neighbor(Some(std::time::UNIX_EPOCH));
+        let text = neighbor_text(&observed);
+        assert!(
+            text.ends_with(&format!(
+                " observed={}",
+                observed.observed_at.as_ref().expect("observed")
+            )),
+            "{text}"
+        );
+        assert!(neighbor_text(&neighbor(None)).ends_with(" observed=none"));
+    }
+
+    #[test]
+    fn text_throughput_counts_the_operations_packets() {
+        let stats = output::envelope::Stats {
+            packets_completed: 6,
+            elapsed: std::time::Duration::from_secs(2),
+            ..Default::default()
+        };
+        let text = throughput_text(std::time::Duration::from_secs(1), &stats);
+
+        assert!(text.starts_with("scan planned "), "{text}");
+        assert!(text.contains("operation achieved 3.00 packets/s"), "{text}");
+    }
+
+    #[test]
+    fn text_reverse_dns_discloses_dropped_names() {
+        let lookup = output::scan::host::ReverseDns {
+            names: vec!["a.example.".to_owned()],
+            names_truncated: true,
+            ..output::scan::host::ReverseDns::ended(
+                "10.2.0.192.in-addr.arpa".to_owned(),
+                crate::output::dns::QuestionStatus::Completed,
+                None,
+            )
+        };
+        assert_eq!(
+            reverse_dns_text(&lookup),
+            "reverse-dns=10.2.0.192.in-addr.arpa status=completed outcome=none \
+             names=a.example. names_truncated=true",
+        );
     }
 
     #[test]

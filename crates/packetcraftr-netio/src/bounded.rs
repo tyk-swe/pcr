@@ -10,13 +10,16 @@ use bytes::Bytes;
 use packetcraftr_core::budget::{Deadline, Interrupted};
 
 /// Checks numeric peer identity without treating IPv6 flow information or an
-/// irrelevant non-link-local unicast scope ID as part of the peer address. Link-local
-/// and multicast scopes remain exact; addresses and ports always remain exact.
+/// irrelevant non-link-local unicast scope ID as part of the peer address.
+/// IPv4-mapped addresses identify the same IPv4 peer. Link-local and multicast
+/// scopes remain exact; canonical addresses and ports always remain exact.
 pub fn same_peer(expected: SocketAddr, actual: SocketAddr) -> bool {
+    let expected = socket_endpoint(expected);
+    let actual = socket_endpoint(actual);
     if expected.ip() != actual.ip() || expected.port() != actual.port() {
         return false;
     }
-    match (socket_endpoint(expected), socket_endpoint(actual)) {
+    match (expected, actual) {
         (SocketAddr::V6(expected), SocketAddr::V6(actual)) => {
             expected.scope_id() == actual.scope_id()
         }
@@ -24,14 +27,16 @@ pub fn same_peer(expected: SocketAddr, actual: SocketAddr) -> bool {
     }
 }
 
-/// Removes only irrelevant scope IDs before socket setup. Some kernels reject
-/// these instead of ignoring them, even for an existing loopback interface.
+/// Selects the native address family for mapped IPv4 and removes irrelevant
+/// scope IDs before socket setup. Native IPv6 flow information is preserved.
 pub(crate) fn socket_endpoint(mut endpoint: SocketAddr) -> SocketAddr {
-    if let SocketAddr::V6(address) = &mut endpoint
-        && !address.ip().is_unicast_link_local()
-        && !address.ip().is_multicast()
-    {
-        address.set_scope_id(0);
+    if let SocketAddr::V6(address) = &mut endpoint {
+        if let Some(ip) = address.ip().to_ipv4_mapped() {
+            return SocketAddr::from((ip, address.port()));
+        }
+        if !address.ip().is_unicast_link_local() && !address.ip().is_multicast() {
+            address.set_scope_id(0);
+        }
     }
     endpoint
 }
@@ -99,6 +104,17 @@ mod tests {
         }
         let ipv4 = "192.0.2.1:80".parse().unwrap();
         assert_eq!(socket_endpoint(ipv4), ipv4);
+        let mapped = SocketAddr::V6(SocketAddrV6::new(
+            "::ffff:192.0.2.1".parse().unwrap(),
+            80,
+            123,
+            7,
+        ));
+        assert_eq!(socket_endpoint(mapped), ipv4);
+        assert!(same_peer(mapped, ipv4));
+        assert!(same_peer(ipv4, mapped));
+        assert!(!same_peer(mapped, "192.0.2.2:80".parse().unwrap()));
+        assert!(!same_peer(mapped, "192.0.2.1:81".parse().unwrap()));
     }
 
     #[test]
@@ -111,9 +127,13 @@ mod tests {
         assert!(!same_peer(expected, "[ff02::1%8]:80".parse().unwrap()));
         assert!(!same_peer(expected, "[ff02::1%7]:81".parse().unwrap()));
         assert!(!same_peer(expected, "[ff02::2%7]:80".parse().unwrap()));
-        assert!(!same_peer(
+        assert!(same_peer(
             "127.0.0.1:80".parse().unwrap(),
             "[::ffff:127.0.0.1]:80".parse().unwrap()
+        ));
+        assert!(!same_peer(
+            "127.0.0.1:80".parse().unwrap(),
+            "[::127.0.0.1]:80".parse().unwrap()
         ));
     }
 }

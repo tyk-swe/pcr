@@ -77,53 +77,67 @@ fn connected_udp_filters_other_peers_and_preserves_oversized_prefix() {
 }
 
 #[test]
-fn connected_udp_accepts_an_irrelevant_ipv6_scope_normalized_by_the_socket() {
-    let server = UdpSocket::bind("[::1]:0").unwrap();
-    server
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
-    let std::net::SocketAddr::V6(mut endpoint) = server.local_addr().unwrap() else {
-        unreachable!("IPv6 fixture");
-    };
-    // This is deliberately not an interface-selection hint: loopback scopes
-    // are irrelevant to peer identity and must be cleared before socket setup.
-    endpoint.set_scope_id(7);
-    let responder = std::thread::spawn(move || {
-        let mut buffer = [0; 16];
-        let (count, peer) = server.recv_from(&mut buffer).unwrap();
-        assert_eq!(&buffer[..count], b"query");
-        server.send_to(b"reply", peer).unwrap();
-    });
-    let result = udp::SystemProvider.exchange(
-        endpoint.into(),
-        b"query",
-        32,
-        &Deadline::new(Duration::from_secs(3)),
-    );
-    let responder_result = responder.join();
-    let reply = result.expect("scoped IPv6 loopback exchange");
-    responder_result.unwrap();
-    assert_eq!(reply.exchange.response.as_ref(), b"reply");
-    assert!(matches!(reply.exchange.outcome, Outcome::Complete));
+fn connected_udp_normalizes_scopes_and_mapped_ipv4_before_socket_setup() {
+    for address in ["[::1]:0", "127.0.0.1:0"] {
+        let server = UdpSocket::bind(address).unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let local = server.local_addr().unwrap();
+        let mut endpoint = match local {
+            std::net::SocketAddr::V6(endpoint) => endpoint,
+            std::net::SocketAddr::V4(endpoint) => {
+                std::net::SocketAddrV6::new(endpoint.ip().to_ipv6_mapped(), endpoint.port(), 123, 0)
+            }
+        };
+        // This is deliberately not an interface-selection hint: loopback scopes
+        // are irrelevant to peer identity and must be cleared before socket setup.
+        endpoint.set_scope_id(7);
+        let responder = std::thread::spawn(move || {
+            let mut buffer = [0; 16];
+            let (count, peer) = server.recv_from(&mut buffer).unwrap();
+            assert_eq!(&buffer[..count], b"query");
+            server.send_to(b"reply", peer).unwrap();
+        });
+        let result = udp::SystemProvider.exchange(
+            endpoint.into(),
+            b"query",
+            32,
+            &Deadline::new(Duration::from_secs(3)),
+        );
+        let responder_result = responder.join();
+        let reply = result.expect("scoped IPv6 loopback exchange");
+        responder_result.unwrap();
+        assert_eq!(reply.peer, local);
+        assert_eq!(reply.exchange.response.as_ref(), b"reply");
+        assert!(matches!(reply.exchange.outcome, Outcome::Complete));
+    }
 }
 
 #[test]
-fn connected_tcp_accepts_an_irrelevant_ipv6_scope_before_socket_setup() {
+fn connected_tcp_normalizes_scopes_and_mapped_ipv4_before_socket_setup() {
     use packetcraftr_netio::tcp::Stream as _;
 
-    let server = TcpListener::bind("[::1]:0").unwrap();
-    let std::net::SocketAddr::V6(mut endpoint) = server.local_addr().unwrap() else {
-        unreachable!("IPv6 fixture");
-    };
-    endpoint.set_scope_id(7);
-    let stream = tcp::SystemProvider
-        .connect(endpoint.into(), &Deadline::new(Duration::from_secs(3)))
-        .expect("scoped IPv6 loopback connection");
-    assert!(packetcraftr_netio::bounded::same_peer(
-        endpoint.into(),
-        stream.peer_addr().unwrap()
-    ));
-    assert!(stream.local_addr().unwrap().ip().is_loopback());
+    for address in ["[::1]:0", "127.0.0.1:0"] {
+        let server = TcpListener::bind(address).unwrap();
+        let local = server.local_addr().unwrap();
+        let mut endpoint = match local {
+            std::net::SocketAddr::V6(endpoint) => endpoint,
+            std::net::SocketAddr::V4(endpoint) => {
+                std::net::SocketAddrV6::new(endpoint.ip().to_ipv6_mapped(), endpoint.port(), 123, 0)
+            }
+        };
+        endpoint.set_scope_id(7);
+        let stream = tcp::SystemProvider
+            .connect(endpoint.into(), &Deadline::new(Duration::from_secs(3)))
+            .expect("scoped IPv6 loopback connection");
+        assert!(packetcraftr_netio::bounded::same_peer(
+            endpoint.into(),
+            stream.peer_addr().unwrap()
+        ));
+        assert!(stream.local_addr().unwrap().ip().is_loopback());
+        assert_eq!(stream.peer_addr().unwrap(), local);
+    }
 }
 
 #[test]

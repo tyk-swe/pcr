@@ -57,13 +57,14 @@ impl Provider for SystemProvider {
             return Err(Error::Limit);
         }
         crate::deadline::remaining(deadline)?;
-        let bind = if endpoint.is_ipv4() {
+        let destination = crate::bounded::socket_endpoint(endpoint);
+        let bind = if destination.is_ipv4() {
             SocketAddr::from(([0, 0, 0, 0], 0))
         } else {
             SocketAddr::from(([0u16; 8], 0))
         };
         let socket = UdpSocket::bind(bind)?;
-        socket.connect(crate::bounded::socket_endpoint(endpoint))?;
+        socket.connect(destination)?;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
         if !crate::bounded::same_peer(endpoint, peer) {

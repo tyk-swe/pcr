@@ -4,6 +4,7 @@
 """Failure-path contracts for the service identification acceptance runner."""
 
 import importlib.util
+import errno
 import json
 from pathlib import Path
 import subprocess
@@ -17,6 +18,34 @@ MODULE_PATH = Path(__file__).with_name("test-service-identification.py")
 SPEC = importlib.util.spec_from_file_location("service_identification_acceptance", MODULE_PATH)
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
+
+
+class FakePeer:
+    """Preserve the reviewed exchange while controlling shutdown/drain faults."""
+
+    def __init__(self, phase=None, error=None, extra=b""):
+        self.phase = phase
+        self.error = error
+        self.extra = extra
+        self.reads = 0
+        self.sent = []
+        self.shutdown_modes = []
+
+    def recv(self, _size):
+        self.reads += 1
+        if self.reads == 1:
+            return RUNNER.HTTP_REQUEST
+        if self.phase == "drain":
+            raise self.error
+        return self.extra
+
+    def sendall(self, data):
+        self.sent.append(data)
+
+    def shutdown(self, mode):
+        self.shutdown_modes.append(mode)
+        if self.phase == "shutdown":
+            raise self.error
 
 
 class AcceptanceContracts(unittest.TestCase):
@@ -100,6 +129,42 @@ class AcceptanceContracts(unittest.TestCase):
             self.assertEqual(report["profiles"], [])
             self.assertIn("clean worktree", report["error"])
             build.assert_not_called()
+
+    def exchange(self, peer, capped=True):
+        fixture = object.__new__(RUNNER.Fixture)
+        fixture.scenario = {"probe": "http-head", "reply": RUNNER.HTTP}
+        if capped:
+            fixture.scenario["read_limit"] = 24
+        fixture.requests = []
+        fixture.replies = []
+        try:
+            fixture.serve_tcp(peer)
+        finally:
+            self.assertEqual(fixture.requests, [RUNNER.HTTP_REQUEST])
+            self.assertEqual(fixture.replies, [RUNNER.HTTP])
+            self.assertEqual(peer.sent, [RUNNER.HTTP])
+            self.assertEqual(peer.shutdown_modes, [RUNNER.socket.SHUT_WR])
+
+    def test_bounded_reader_accepts_only_expected_shutdown_and_drain_disconnects(self):
+        for phase in ("shutdown", "drain"):
+            for number in (errno.ENOTCONN, errno.ECONNRESET, errno.ECONNABORTED, 10057, 10054, 10053):
+                with self.subTest(phase=phase, errno=number):
+                    self.exchange(FakePeer(phase, OSError(number, "fixture disconnect")))
+            error = OSError(errno.EIO, "fixture Win32 disconnect")
+            error.winerror = 10057
+            with self.subTest(phase=phase, winerror=10057):
+                self.exchange(FakePeer(phase, error))
+
+    def test_uncapped_disconnects_and_unexpected_errors_remain_failures(self):
+        for phase in ("shutdown", "drain"):
+            with self.subTest(phase=phase, uncapped=True), self.assertRaises(OSError):
+                self.exchange(FakePeer(phase, OSError(errno.ENOTCONN, "fixture disconnect")), capped=False)
+            with self.subTest(phase=phase, unexpected_errno=True), self.assertRaises(OSError):
+                self.exchange(FakePeer(phase, OSError(errno.EIO, "fixture fault")))
+
+    def test_connected_bounded_reader_still_rejects_extra_request_bytes(self):
+        with self.assertRaisesRegex(ValueError, "after the reviewed probe"):
+            self.exchange(FakePeer(extra=b"unexpected request"))
 
 
 if __name__ == "__main__":

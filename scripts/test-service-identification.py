@@ -12,6 +12,7 @@ the Rust contract suite owns full JSON-schema validation.
 import argparse
 import copy
 import datetime
+import errno
 import json
 import os
 from pathlib import Path
@@ -35,6 +36,8 @@ PROFILES = {
 HTTP = b"HTTP/1.1 200 OK\r\nServer: nginx/1.28.0\r\n\r\n"
 SSH = b"SSH-2.0-OpenSSH_9.8 fixture\r\n"
 HTTP_REQUEST = b"HEAD / HTTP/1.0\r\n\r\n"
+PEER_DISCONNECT_ERRNOS = {errno.ENOTCONN, errno.ECONNRESET, errno.ECONNABORTED}
+PEER_DISCONNECT_WINERRORS = {10057, 10054, 10053}
 
 
 def require(condition, message):
@@ -200,12 +203,17 @@ class Fixture:
             peer.sendall(response[1:])
         else:
             peer.sendall(response)
-        peer.shutdown(socket.SHUT_WR)
         try:
+            peer.shutdown(socket.SHUT_WR)
             extra = peer.recv(256)
-        except (ConnectionResetError, ConnectionAbortedError):
+        except OSError as error:
             # Closing a bounded reader with unread reply bytes may reset TCP.
-            if not scenario.get("read_limit"):
+            disconnected = (
+                error.errno in PEER_DISCONNECT_ERRNOS
+                or error.errno in PEER_DISCONNECT_WINERRORS
+                or getattr(error, "winerror", None) in PEER_DISCONNECT_WINERRORS
+            )
+            if not scenario.get("read_limit") or not disconnected:
                 raise
             extra = b""
         require(not extra, "the client transmitted bytes after the reviewed probe")

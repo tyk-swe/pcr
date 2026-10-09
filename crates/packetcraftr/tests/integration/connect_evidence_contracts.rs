@@ -57,6 +57,7 @@ fn scoped_evidence_is_charged_before_publication() {
             endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 443 }],
             discovery: Default::default(),
             attempts,
+            adaptive: None,
             timeout: Duration::from_secs(5),
             probes_per_second: None,
             max_in_flight: 1,

@@ -187,6 +187,7 @@ fn a_scans_neighbor_wait_is_measured_by_the_clients_clock() {
             ..scan::discovery::Options::default()
         },
         attempts: 1,
+        adaptive: None,
         timeout,
         probes_per_second: None,
         udp_payload: Default::default(),

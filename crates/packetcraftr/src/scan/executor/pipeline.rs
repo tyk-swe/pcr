@@ -27,6 +27,7 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{self, Group, GroupRequest, Session as _},
     deadline::MAX_WAIT,
+    interface,
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
@@ -102,6 +103,11 @@ fn validate_options(
             "max_duration",
             max_wait_secs(),
             !options.max_duration.is_zero() && options.max_duration <= MAX_WAIT,
+        ),
+        (
+            "host_deadlines",
+            batches.len(),
+            options.host_deadlines.is_empty() || options.host_deadlines.len() == batches.len(),
         ),
     ];
     match bounds.into_iter().find(|(_, _, holds)| !holds) {
@@ -185,6 +191,98 @@ pub(super) fn admit<P: PacketProviders, K: Clock>(
         .collect::<Result<Vec<_>, _>>()?;
     let preparation = until(executor.client, deadline);
     prepare::plan(executor, &planned, options, deadline, &preparation).map(drop)
+}
+
+pub(in crate::scan) struct AdaptiveAdmission {
+    interfaces: Vec<interface::Id>,
+    track_interfaces: bool,
+    max_description_bytes: usize,
+    max_route_bytes: usize,
+    max_probe_bytes: usize,
+}
+
+impl AdaptiveAdmission {
+    pub(in crate::scan) fn new(effective_wave: usize) -> Self {
+        Self {
+            interfaces: Vec::new(),
+            track_interfaces: effective_wave > capture::MAX_SOURCES,
+            max_description_bytes: 0,
+            max_route_bytes: 0,
+            max_probe_bytes: 0,
+        }
+    }
+
+    pub(in crate::scan) fn check(
+        &self,
+        wave_len: usize,
+        host_count: usize,
+        options: &PipelineOptions,
+    ) -> Result<(), BoundaryError> {
+        let bound = wave_len
+            .saturating_mul(self.max_description_bytes)
+            .saturating_add(
+                wave_len
+                    .min(host_count)
+                    .saturating_mul(self.max_route_bytes),
+            )
+            .saturating_add(self.max_probe_bytes);
+        if bound > options.max_prepared_bytes {
+            return Err(limit("prepared descriptions", options.max_prepared_bytes));
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
+    executor: &ExchangeExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+    summary: &mut AdaptiveAdmission,
+) -> Result<(), BoundaryError> {
+    validate_options(batches, options)?;
+    let deadline = executor
+        .client
+        .now()
+        .checked_add(options.max_duration)
+        .ok_or_else(|| limit("duration", max_wait_secs()))?;
+    let planned = batches
+        .iter()
+        .map(Planned::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    for planned in &planned {
+        let scope_bytes = planned.probe.scope.as_ref().map_or(0, |scope| {
+            scope
+                .zone
+                .as_str()
+                .len()
+                .saturating_add(scope.interface.name.len())
+        });
+        summary.max_description_bytes = summary
+            .max_description_bytes
+            .max(384usize.saturating_add(scope_bytes));
+    }
+    let preparation = until(executor.client, deadline);
+    let plan = prepare::plan(executor, &planned, options, deadline, &preparation)?;
+    for route in plan.routes.values() {
+        summary.max_route_bytes = summary
+            .max_route_bytes
+            .max(2048usize.saturating_add(route.interface().name.len()));
+    }
+    for probe in &plan.probes {
+        summary.max_probe_bytes = summary.max_probe_bytes.max(probe.memory);
+    }
+    if summary.track_interfaces {
+        for interface in &plan.interfaces {
+            if !summary.interfaces.contains(interface) {
+                summary.interfaces.push(interface.clone());
+                if summary.interfaces.len() > capture::MAX_SOURCES {
+                    return Err(limit("capture interfaces", capture::MAX_SOURCES));
+                }
+            }
+        }
+    }
+    drop(plan);
+    Ok(())
 }
 
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;
@@ -368,11 +466,27 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         Ok(())
     }
 
+    fn host_deadline(&self, index: usize) -> Option<Instant> {
+        self.options.host_deadlines.get(index).copied().flatten()
+    }
+
+    fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
+        self.failed_probe = None;
+        (self.emit)(PipelineEvent::Omitted { index })?;
+        self.next += 1;
+        Ok(())
+    }
+
     fn send(&mut self, AdmittedProbe { cost, memory }: AdmittedProbe) -> Result<(), BoundaryError> {
         let client = self.executor.client;
         check(client, self.deadline)?;
-        let batch = &self.batches[self.next];
-        let probe = self.planned[self.next].probe;
+        let index = self.next;
+        let host_deadline = self.host_deadline(index);
+        if host_deadline.is_some_and(|limit| client.now() >= limit) {
+            return self.omit(index);
+        }
+        let batch = &self.batches[index];
+        let probe = self.planned[index].probe;
         self.failed_probe = Some(probe.clone());
         let prepared = self
             .plan
@@ -397,6 +511,9 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             ));
         }
         check(client, self.deadline)?;
+        if host_deadline.is_some_and(|limit| client.now() >= limit) {
+            return self.omit(index);
+        }
         self.stats.packets_attempted += 1;
         let sent = Arc::new(
             prepared
@@ -416,6 +533,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .checked_add(batch.timeout)
             .ok_or_else(|| limit("probe timeout", max_wait_secs()))?
             .min(self.deadline);
+        let end = host_deadline.map_or(end, |limit| end.min(limit));
         self.pending.insert(
             self.next,
             Pending {
@@ -535,6 +653,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             &self.plan.interfaces[source],
             received,
         );
+
         if candidates.is_empty() {
             // Pending probes whose window closed have not settled yet, but
             // a frame after their deadline cannot be their outcome either.
@@ -807,3 +926,6 @@ fn pending_evidence(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

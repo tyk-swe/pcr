@@ -39,15 +39,19 @@ struct Arguments {
     transport: packetcraftr::probe::Transport,
     window: usize,
     workflow: Workflow,
+    adaptive: bool,
 }
 
 fn parse_arguments(arguments: &[String]) -> Result<Arguments, String> {
-    let usage = "usage: scanner_fixture CONDITION FAMILY TRANSPORT WINDOW [traceroute]";
+    let usage = "usage: scanner_fixture CONDITION FAMILY TRANSPORT WINDOW [traceroute|adaptive]";
     match arguments {
         [condition, family, transport, window] | [condition, family, transport, window, ..]
-            if arguments.len() == 4 || (arguments.len() == 5 && arguments[4] == "traceroute") =>
+            if arguments.len() == 4
+                || (arguments.len() == 5
+                    && matches!(arguments[4].as_str(), "traceroute" | "adaptive")) =>
         {
-            let traceroute = arguments.len() == 5;
+            let traceroute = arguments.get(4).is_some_and(|value| value == "traceroute");
+            let adaptive = arguments.get(4).is_some_and(|value| value == "adaptive");
             let (family_label, addresses) = FamilyAddresses::parse(family)?;
             let transport = match transport.as_str() {
                 "tcp" => packetcraftr::probe::Transport::Tcp,
@@ -82,6 +86,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Arguments, String> {
                 } else {
                     Workflow::RawScan
                 },
+                adaptive,
             })
         }
         _ => Err(usage.to_owned()),
@@ -106,6 +111,7 @@ struct Record {
     transport: &'static str,
     window: usize,
     workflow: &'static str,
+    scheduling_mode: &'static str,
     execution: &'static str,
     observation: Observation,
     packets_attempted: u64,
@@ -158,6 +164,15 @@ fn scan_request(arguments: &Arguments) -> scan::Request {
         }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: arguments.adaptive.then_some(scan::Adaptive {
+            min_timeout: Duration::from_millis(10),
+            max_timeout: TIMEOUT,
+            min_window: 1,
+            initial_window: arguments.window,
+            host_timeout: MAX_DURATION,
+            retry_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(1),
+        }),
         timeout: TIMEOUT,
         probes_per_second: None,
         max_in_flight: arguments.window,
@@ -328,6 +343,11 @@ fn run(arguments: &Arguments) -> Result<Record, String> {
         workflow: match arguments.workflow {
             Workflow::RawScan => "raw_scan",
             Workflow::Traceroute => "traceroute",
+        },
+        scheduling_mode: if arguments.adaptive {
+            "adaptive"
+        } else {
+            "fixed"
         },
         execution: "injected_provider",
         observation,

@@ -82,6 +82,7 @@ pub struct Report {
     pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub planned_duration: Duration,
     pub stats: Stats,
+    pub scheduling: super::super::Scheduling,
 }
 
 #[derive(Clone, Debug)]

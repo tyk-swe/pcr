@@ -47,6 +47,7 @@ fn attempt_expires_clock_before_operation_dl() {
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 53 }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout,
         probes_per_second: None,
         max_in_flight: 1,

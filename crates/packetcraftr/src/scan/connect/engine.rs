@@ -14,6 +14,7 @@ use crate::providers::{TargetProviders, TcpOf, TcpProviders};
 use crate::{
     Client, Sink,
     clock::Clock,
+    execution::Errors as _,
     execution::rate_delay,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{ProbeEndpoint, enforce_deadline},
@@ -24,7 +25,7 @@ use packetcraftr_core::error::BoundaryError;
 
 use super::super::discovery::{Composer, Observation, ReasonKind, Scan};
 use super::super::error::Probes;
-use super::super::plan::{probe_count, worst_case_duration};
+use super::super::plan::{adaptive_worst_case_duration, probe_count, worst_case_duration};
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request, Stage};
 use super::{Event, Outcome, ProbeEvidence, Report, Stats};
@@ -55,7 +56,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     }
 }
 
-struct Active<S> {
+pub(super) struct Active<S> {
     pending: tcp::PendingConnect<S>,
     sequence: u64,
     stage: Stage,
@@ -65,6 +66,7 @@ struct Active<S> {
     started: Instant,
     scheduled_at: SystemTime,
     timeout: Duration,
+    selection: Option<super::super::adaptive::Selection>,
 }
 fn invalid(field: &'static str, value: usize, reason: &str) -> Error {
     Error::InvalidLimit {
@@ -83,7 +85,7 @@ fn execution(
     }
 }
 
-struct Planned {
+pub(super) struct Planned {
     /// Discovery ports, probed on every target before the scan stage.
     discovery: Vec<u16>,
     /// Scan ports, probed on the targets discovery leaves to the scan.
@@ -94,10 +96,11 @@ struct Planned {
     planned_duration: Duration,
 }
 
-fn planned<A: Authorizer + ResolveTarget>(
+pub(super) fn planned<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,
+    active_size: usize,
 ) -> Result<(Vec<SelectedAddress>, Planned), Error> {
     let tcp_ports = |endpoints: &[ProbeEndpoint]| -> Vec<u16> {
         endpoints
@@ -119,13 +122,6 @@ fn planned<A: Authorizer + ResolveTarget>(
     };
     if request.route.requires_packet_route() {
         return Err(Error::UnsupportedTcpRoute);
-    }
-    if request.max_in_flight > tcp::MAX_PENDING_CONNECTIONS {
-        return Err(invalid(
-            "max_in_flight",
-            request.max_in_flight,
-            "TCP connect is capped at 16 concurrent native operations",
-        ));
     }
     if ports.contains(&0) || discovery.contains(&0) {
         return Err(invalid("port", 0, "TCP connect requires nonzero ports"));
@@ -154,10 +150,16 @@ fn planned<A: Authorizer + ResolveTarget>(
             } else {
                 Duration::ZERO
             };
+            let stage_duration = |probes| {
+                request.adaptive.map_or_else(
+                    || worst_case_duration(request, probes),
+                    |adaptive| adaptive_worst_case_duration(request, &adaptive, probes),
+                )
+            };
             let planned_duration = [
-                worst_case_duration(request, discovery_count)?,
+                stage_duration(discovery_count)?,
                 stage_pause,
-                worst_case_duration(request, scan_count)?,
+                stage_duration(scan_count)?,
             ]
             .into_iter()
             .try_fold(Duration::ZERO, Duration::checked_add)
@@ -174,6 +176,42 @@ fn planned<A: Authorizer + ResolveTarget>(
             // operation covers every target on every port of either stage.
             let mut every_port = discovery.clone();
             every_port.extend(ports.iter().filter(|port| !discovery.contains(port)));
+            let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
+            let charge = request
+                .adaptive
+                .map(|_| {
+                    super::super::adaptive::state_charge(
+                        targets,
+                        every_port.len(),
+                        effective,
+                        super::super::adaptive::scoped_bytes(&selected.targets),
+                        0,
+                    )
+                })
+                .unwrap_or(0)
+                .saturating_add(
+                    targets
+                        .saturating_mul(every_port.len())
+                        .saturating_mul(std::mem::size_of::<SocketAddr>()),
+                )
+                .saturating_add(
+                    targets
+                        .saturating_mul(std::mem::size_of::<SelectedAddress>())
+                        .saturating_mul(2),
+                )
+                .saturating_add(
+                    (discovery.len().saturating_add(ports.len()))
+                        .saturating_mul(std::mem::size_of::<u16>()),
+                )
+                .saturating_add(effective.saturating_mul(active_size));
+            if charge > request.limits.max_prepared_bytes {
+                return Err(Error::PipelineExecution {
+                    source: crate::scan::executor::limit(
+                        "prepared descriptions",
+                        request.limits.max_prepared_bytes,
+                    ),
+                });
+            }
             let endpoints = selected
                 .targets
                 .iter()
@@ -208,11 +246,10 @@ fn planned<A: Authorizer + ResolveTarget>(
     Ok((selected.targets, planned))
 }
 
-/// One stage's connections: each endpoint once per attempt, attempt-major,
-/// numbered from `first_sequence`.
 struct StagePlan<'a> {
     stage: Stage,
-    endpoints: Vec<(SocketAddr, Option<crate::target::ResolvedZone>)>,
+    targets: &'a [SelectedAddress],
+    ports: &'a [u16],
     first_sequence: u64,
     count: usize,
     delay: Duration,
@@ -224,29 +261,34 @@ impl<'a> StagePlan<'a> {
         request: &Request,
         planned: &'a Planned,
         stage: Stage,
-        targets: &[SelectedAddress],
+        targets: &'a [SelectedAddress],
         first_sequence: u64,
     ) -> Result<Self, Error> {
         let ports = match stage {
-            Stage::Discovery => &planned.discovery,
-            Stage::Scan => &planned.ports,
+            Stage::Discovery => planned.discovery.as_slice(),
+            Stage::Scan => planned.ports.as_slice(),
         };
-        let endpoints: Vec<_> = targets
-            .iter()
-            .flat_map(|target| {
-                ports
-                    .iter()
-                    .map(move |port| (socket_endpoint(target, *port), target.scope.clone()))
-            })
-            .collect();
         Ok(Self {
             stage,
-            count: probe_count(endpoints.len(), 1, request.attempts)?,
-            endpoints,
+            count: probe_count(
+                targets.len().saturating_mul(ports.len()),
+                1,
+                request.attempts,
+            )?,
+            targets,
+            ports,
             first_sequence,
             delay: planned.delay,
             limits: &planned.limits,
         })
+    }
+
+    fn endpoint(&self, position: usize) -> (SocketAddr, Option<crate::target::ResolvedZone>) {
+        let target = &self.targets[position / self.ports.len()];
+        (
+            socket_endpoint(target, self.ports[position % self.ports.len()]),
+            target.scope.clone(),
+        )
     }
 }
 
@@ -265,6 +307,7 @@ fn socket_endpoint(selected: &crate::target::SelectedAddress, port: u16) -> Sock
 /// `None` means every native connect admission is still held, for example by
 /// a cancelled attempt whose provider call has not returned or a finished one
 /// whose worker has not yet released it, so the caller retries this endpoint.
+#[allow(clippy::too_many_arguments)]
 fn admit_next<Q, A>(
     request: &Request,
     stage: &StagePlan<'_>,
@@ -272,6 +315,7 @@ fn admit_next<Q, A>(
     authorizer: &mut A,
     deadline: &Deadline,
     provider: &Arc<Q>,
+    budget: &tcp::ConnectBudget,
     clock: &impl Clock,
 ) -> Result<Option<Active<Q::Stream>>, Error>
 where
@@ -279,8 +323,9 @@ where
     Q::Stream: 'static,
     A: Authorizer + ResolveTarget,
 {
-    let (endpoint, scope) = stage.endpoints[next % stage.endpoints.len()].clone();
-    let attempt = (next / stage.endpoints.len()) as u32 + 1;
+    let endpoints = stage.targets.len() * stage.ports.len();
+    let (endpoint, scope) = stage.endpoint(next % endpoints);
+    let attempt = (next / endpoints) as u32 + 1;
     let sequence = stage.first_sequence + next as u64;
     let final_endpoints = [endpoint];
     let operation = SocketOperation::new(&final_endpoints, *stage.limits)
@@ -289,7 +334,7 @@ where
     let timeout = deadline.bounded_timeout(request.timeout)?;
     let admitted = clock.now();
     let scheduled_at = SystemTime::now();
-    let pending = match tcp::start_connect(
+    let pending = match budget.start(
         Arc::clone(provider),
         endpoint,
         &Deadline::new(timeout).with_cancellation(deadline.cancellation().cloned()),
@@ -308,6 +353,7 @@ where
         started: admitted,
         scheduled_at,
         timeout,
+        selection: None,
     }))
 }
 
@@ -315,25 +361,26 @@ fn settle_active<S: tcp::Stream>(
     active: &mut Vec<Active<S>>,
     index: usize,
     now: Instant,
-) -> Result<Option<ProbeEvidence>, Error> {
+) -> Result<Option<(Active<S>, ProbeEvidence)>, Error> {
     let result = active[index]
         .pending
         .poll()
         .map_err(|source| execution(active[index].sequence, source))?;
     if let Some(result) = result {
         let entry = active.remove(index);
-        return Ok(Some(finish_probe(entry, result)?));
+        let probe = finish_probe(&entry, result)?;
+        return Ok(Some((entry, probe)));
     }
     if now.saturating_duration_since(active[index].started) < active[index].timeout {
         return Ok(None);
     }
     let mut entry = active.remove(index);
     let attempted = entry.pending.cancel();
-    Ok(Some(ProbeEvidence {
+    let probe = ProbeEvidence {
         sequence: entry.sequence,
         stage: entry.stage,
         endpoint: entry.endpoint,
-        scope: entry.scope,
+        scope: entry.scope.clone(),
         attempt: entry.attempt,
         attempted,
         connect_succeeded: None,
@@ -343,7 +390,8 @@ fn settle_active<S: tcp::Stream>(
         elapsed: now.saturating_duration_since(entry.started),
         local: None,
         error: None,
-    }))
+    };
+    Ok(Some((entry, probe)))
 }
 
 /// Totals shared by both stages.
@@ -352,10 +400,12 @@ struct Progress {
     rtt: RttAccumulator,
     evidence_bytes: usize,
     next_start: Instant,
+    peak: usize,
+    retries: usize,
     discovery: Vec<Observation>,
 }
 
-fn run<Q, A, C, F>(
+pub(super) fn run<Q, A, C, F>(
     request: &Request,
     authorizer: &mut A,
     provider: &Arc<Q>,
@@ -372,12 +422,23 @@ where
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
     enforce_deadline(&Probes, deadline)?;
-    let (targets, planned) = planned(request, authorizer, deadline)?;
+    let (targets, planned) = planned(
+        request,
+        authorizer,
+        deadline,
+        std::mem::size_of::<Active<Q::Stream>>(),
+    )?;
+    let budget = tcp::ConnectBudget::new(request.max_in_flight);
+    let mut controller = request.adaptive.map(|config| {
+        super::super::adaptive::Controller::new(config, request.timeout, request.max_in_flight)
+    });
     let mut progress = Progress {
         stats: Stats::default(),
         rtt: RttAccumulator::default(),
         evidence_bytes: 0,
         next_start: clock.now(),
+        peak: 0,
+        retries: 0,
         discovery: Vec::new(),
     };
     let options = &request.discovery;
@@ -389,10 +450,12 @@ where
         &discovery,
         authorizer,
         provider,
+        &budget,
         clock,
         deadline,
         &mut progress,
         &mut emit,
+        controller.as_mut(),
     )?;
     for observation in progress.discovery.drain(..) {
         if !composer.observe(observation) {
@@ -401,7 +464,17 @@ where
             });
         }
     }
-    let hosts = composer.finish();
+    if let Some(controller) = &controller {
+        for (index, target) in targets.iter().enumerate() {
+            if controller
+                .find(target)
+                .is_some_and(|host| controller.is_incomplete(host))
+            {
+                composer.incomplete(index);
+            }
+        }
+    }
+    let mut hosts = composer.finish();
     let scanned: Vec<_> = targets
         .iter()
         .zip(&hosts)
@@ -414,21 +487,40 @@ where
         &scan,
         authorizer,
         provider,
+        &budget,
         clock,
         deadline,
         &mut progress,
         &mut emit,
+        controller.as_mut(),
     )?;
+    if let Some(controller) = &controller {
+        for (index, target) in targets.iter().enumerate() {
+            if controller
+                .find(target)
+                .is_some_and(|host| controller.is_incomplete(host))
+            {
+                hosts[index].scan = Scan::Incomplete;
+            }
+        }
+    }
     enforce_deadline(&Probes, deadline)?;
     let Progress {
         mut stats,
         rtt,
         evidence_bytes,
+        peak,
+        retries,
         ..
     } = progress;
     stats.elapsed = clock.now().saturating_duration_since(started);
     stats.rtt = rtt.finish();
     stats.retained_evidence_bytes = evidence_bytes;
+    let ceilings = (Some(budget.capacity()), Some(tcp::MAX_PENDING_CONNECTIONS));
+    let scheduling = match controller {
+        Some(controller) => controller.finish(ceilings),
+        None => super::super::adaptive::fixed_scheduling(ceilings, peak, retries),
+    };
     Ok(Report {
         target: request.targets.to_string(),
         resolved_addresses: targets.iter().map(|target| target.address).collect(),
@@ -436,6 +528,7 @@ where
         diagnostics: planned.diagnostics,
         planned_duration: planned.planned_duration,
         stats,
+        scheduling,
     })
 }
 
@@ -445,10 +538,12 @@ fn run_stage<Q, A, C, F>(
     stage: &StagePlan<'_>,
     authorizer: &mut A,
     provider: &Arc<Q>,
+    budget: &tcp::ConnectBudget,
     clock: &C,
     deadline: &mut Deadline,
     progress: &mut Progress,
     emit: &mut F,
+    controller: Option<&mut super::super::adaptive::Controller>,
 ) -> Result<(), Error>
 where
     Q: Provider + 'static,
@@ -457,22 +552,28 @@ where
     C: Clock,
     F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
+    if let Some(controller) = controller {
+        return run_stage_adaptive(
+            request, stage, authorizer, provider, budget, clock, deadline, progress, emit,
+            controller,
+        );
+    }
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
+    let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
         enforce_deadline(&Probes, deadline)?;
         let mut admission_held = false;
-        while next < stage.count
-            && active.len() < request.max_in_flight
-            && clock.now() >= progress.next_start
-        {
-            let Some(admitted) =
-                admit_next(request, stage, next, authorizer, deadline, provider, clock)?
+        while next < stage.count && active.len() < effective && clock.now() >= progress.next_start {
+            let Some(admitted) = admit_next(
+                request, stage, next, authorizer, deadline, provider, budget, clock,
+            )?
             else {
                 admission_held = true;
                 break;
             };
             active.push(admitted);
+            progress.peak = progress.peak.max(active.len());
             progress.stats.connections_scheduled += 1;
             next += 1;
             progress.next_start = clock
@@ -483,7 +584,7 @@ where
         let mut index = 0;
         while index < active.len() {
             enforce_deadline(&Probes, deadline)?;
-            let Some(probe) = settle_active(&mut active, index, clock.now())? else {
+            let Some((_, probe)) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
             };
@@ -492,7 +593,7 @@ where
         }
         if next < stage.count || !active.is_empty() {
             let mut wait = Duration::from_millis(1);
-            if next < stage.count && active.len() < request.max_in_flight && !admission_held {
+            if next < stage.count && active.len() < effective && !admission_held {
                 wait = wait.min(progress.next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
@@ -505,6 +606,196 @@ where
         }
     }
     Ok(())
+}
+
+pub(super) fn connect_outcome(probe: &ProbeEvidence) -> super::super::adaptive::Outcome {
+    if !probe.attempted {
+        return super::super::adaptive::Outcome::Omitted;
+    }
+    match probe.outcome {
+        Outcome::Connected | Outcome::Refused => super::super::adaptive::Outcome::Reply {
+            latency: probe.elapsed,
+            responder: probe.endpoint.ip(),
+            control: false,
+        },
+        Outcome::TimedOut | Outcome::DeadlineExpired => super::super::adaptive::Outcome::Silent,
+        Outcome::Unreachable | Outcome::LocalError => super::super::adaptive::Outcome::Aborted,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_stage_adaptive<Q, A, C, F>(
+    request: &Request,
+    stage: &StagePlan<'_>,
+    authorizer: &mut A,
+    provider: &Arc<Q>,
+    budget: &tcp::ConnectBudget,
+    clock: &C,
+    deadline: &mut Deadline,
+    progress: &mut Progress,
+    emit: &mut F,
+    controller: &mut super::super::adaptive::Controller,
+) -> Result<(), Error>
+where
+    Q: Provider + 'static,
+    Q::Stream: 'static,
+    A: Authorizer + ResolveTarget,
+    C: Clock,
+    F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
+{
+    let mut work = controller.open_stage(
+        stage.targets,
+        stage.ports.len(),
+        request.attempts,
+        stage.first_sequence,
+        clock.now(),
+    );
+    let mut active: Vec<Active<Q::Stream>> = Vec::new();
+    loop {
+        enforce_deadline(&Probes, deadline)?;
+        let mut index = 0;
+        let mut settled = Vec::new();
+        while index < active.len() {
+            enforce_deadline(&Probes, deadline)?;
+            let Some((entry, probe)) = settle_active(&mut active, index, clock.now())? else {
+                index += 1;
+                continue;
+            };
+            if let Some(selection) = entry.selection {
+                if probe.attempted {
+                    controller.note_attempted(selection);
+                } else {
+                    controller.mark_incomplete(selection.host);
+                }
+                settled.push((selection, connect_outcome(&probe)));
+            }
+            record(request, progress, &probe)?;
+            emit(probe, deadline)?;
+        }
+        let settled_at = clock.now();
+        for (selection, outcome) in settled {
+            controller.settle(&mut work, selection, outcome, settled_at);
+        }
+        if work.done() && active.is_empty() {
+            return Ok(());
+        }
+        let now = clock.now();
+        let remaining = deadline
+            .remaining()
+            .map_err(|error| Probes.duration_limit(0, error))?;
+        let operation_end = now
+            .checked_add(remaining)
+            .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
+        let capacity = controller
+            .window()
+            .min(request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS))
+            .saturating_sub(active.len());
+        let wave = controller.select(&mut work, now, operation_end, capacity);
+        let mut admission_held = false;
+        let mut paced_out = false;
+        for mut selection in wave.selections {
+            if clock.now() >= selection.host_deadline {
+                controller.mark_incomplete(selection.host);
+                controller.settle(
+                    &mut work,
+                    selection,
+                    super::super::adaptive::Outcome::Omitted,
+                    clock.now(),
+                );
+                continue;
+            }
+            if clock.now() < progress.next_start {
+                paced_out = true;
+                break;
+            }
+            let (endpoint, scope) =
+                stage.endpoint(selection.slot * stage.ports.len() + selection.endpoint);
+            let sequence = selection.sequence;
+            let final_endpoints = [endpoint];
+            let operation = SocketOperation::new(&final_endpoints, *stage.limits)
+                .map_err(|source| execution(sequence, source))?;
+            approve_operation(authorizer, Operation::Socket(operation), deadline, &Probes)?;
+            let now = clock.now();
+            let host_remaining = selection.host_deadline.saturating_duration_since(now);
+            if host_remaining.is_zero() {
+                controller.mark_incomplete(selection.host);
+                controller.settle(
+                    &mut work,
+                    selection,
+                    super::super::adaptive::Outcome::Omitted,
+                    clock.now(),
+                );
+                continue;
+            }
+            if !controller.host_gap_ready(selection.host, now) {
+                paced_out = true;
+                break;
+            }
+            let timeout = deadline
+                .bounded_timeout(selection.timeout)
+                .map_err(|error| Probes.duration_limit(sequence, error))?
+                .min(host_remaining);
+            selection.host_limited = selection.host_limited || timeout < selection.timeout;
+            let admitted = clock.now();
+            let scheduled_at = SystemTime::now();
+            let pending = match budget.start(
+                Arc::clone(provider),
+                endpoint,
+                &Deadline::new(timeout).with_cancellation(deadline.cancellation().cloned()),
+            ) {
+                Ok(pending) => pending,
+                Err(tcp::Error::Capacity { .. }) => {
+                    admission_held = true;
+                    break;
+                }
+                Err(source) => return Err(execution(sequence, source)),
+            };
+            controller.admitted(&mut work, selection);
+            controller.commit_attempt(&mut work, selection, admitted);
+            active.push(Active {
+                pending,
+                sequence,
+                stage: stage.stage,
+                endpoint,
+                scope,
+                attempt: selection.attempt,
+                started: admitted,
+                scheduled_at,
+                timeout,
+                selection: Some(selection),
+            });
+            progress.stats.connections_scheduled += 1;
+            progress.peak = progress.peak.max(active.len());
+            controller.observe_active(active.len());
+            progress.next_start = clock
+                .now()
+                .checked_add(stage.delay)
+                .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
+        }
+        if work.done() && active.is_empty() {
+            return Ok(());
+        }
+        let mut wait = Duration::from_millis(1);
+        if let Some(ready) = wave.next_ready {
+            wait = wait.min(ready.saturating_duration_since(clock.now()));
+        }
+        if paced_out {
+            wait = wait.min(progress.next_start.saturating_duration_since(clock.now()));
+        }
+        for entry in &active {
+            wait = wait.min((entry.started + entry.timeout).saturating_duration_since(clock.now()));
+        }
+        if admission_held && active.is_empty() && !wave.done {
+            wait = wait.max(Duration::from_millis(1));
+        }
+        if !wait.is_zero() {
+            deadline.start_accounting(Duration::ZERO)?;
+            clock.sleep(wait, deadline).map_err(|source| Error::Clock {
+                sequence: stage.first_sequence,
+                source: Box::new(source),
+            })?;
+        }
+    }
 }
 
 /// Charges one settled probe to the evidence budget and the statistics, and
@@ -538,6 +829,7 @@ fn record(request: &Request, progress: &mut Progress, probe: &ProbeEvidence) -> 
         })?;
     let stats = &mut progress.stats;
     stats.connections_attempted += u64::from(probe.attempted);
+    progress.retries += usize::from(probe.attempted && probe.attempt > 1);
     stats.connections_succeeded += u64::from(probe.connect_succeeded == Some(true));
     if probe.attempted {
         progress.rtt.note_sent();
@@ -571,7 +863,7 @@ fn record(request: &Request, progress: &mut Progress, probe: &ProbeEvidence) -> 
 }
 
 fn finish_probe<S: tcp::Stream>(
-    entry: Active<S>,
+    entry: &Active<S>,
     result: tcp::ConnectOutcome<S>,
 ) -> Result<ProbeEvidence, Error> {
     // Settled attempts keep the worker's completion time; publishing earlier
@@ -581,7 +873,7 @@ fn finish_probe<S: tcp::Stream>(
         sequence: entry.sequence,
         stage: entry.stage,
         endpoint: entry.endpoint,
-        scope: entry.scope,
+        scope: entry.scope.clone(),
         attempt: entry.attempt,
         attempted: result.attempted,
         connect_succeeded: Some(result.result.is_ok()),

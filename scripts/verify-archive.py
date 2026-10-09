@@ -18,6 +18,7 @@ ASSETS = (
     'schemas/packetcraftr.output.v7.schema.json',
     'schemas/packetcraftr.output.v8.schema.json',
     'schemas/packetcraftr.output.v9.schema.json',
+    'schemas/packetcraftr.output.v10.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
     'examples/consumers/forwarding.py',
@@ -103,7 +104,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v9'
+        if (record.get('schema') != 'packetcraftr.output/v10'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):

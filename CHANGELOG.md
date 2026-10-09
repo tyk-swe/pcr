@@ -10,6 +10,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
   capture cleanup failed.
+- Structured command output moves to `packetcraftr.output/v10`, which adds a
+  required `scheduling` object on raw scan results, NDJSON scan `complete`
+  records, and connect reports; the v6 through v9 families and schemas stay
+  frozen. Host `scan` gains `incomplete`. `scan::Request` gains `adaptive:
+  Option<scan::Adaptive>`; `scan::Report`, `scan::Aggregate`,
+  `scan::connect::Report`, and `scan::discovery::Scan` gain scheduling and
+  incomplete members; and
+  `netio::tcp` gains `ConnectBudget`, whose internal leases bound
+  operation-scoped connect admission beside `start_connect`. See
+  `docs/migration-unreleased.md`.
 - Structured command output moves to `packetcraftr.output/v9`, which adds host
   discovery; the v6, v7, and v8 families and schemas stay frozen. Raw scan
   results and connect reports gain `hosts`, NDJSON scans gain `host` records,
@@ -719,6 +729,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   `&Bytes`. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- `scan --adaptive` opts raw and `--connect` scans into adaptive scheduling:
+  per-attempt timeouts follow a bounded per-host RTO estimate inside
+  `--min-timeout-ms`/`--max-timeout-ms`, an additive-increase
+  multiplicative-decrease window starts at `--initial-window` and stays between
+  `--min-window` and the unchanged `--max-in-flight` ceiling, every host
+  gets an absolute deadline (`--host-timeout-ms`, defaulting to the operation
+  duration) checked before preparation and again at transmission, silent
+  probes retry with bounded exponential backoff
+  (`--retry-backoff-ms`/`--max-backoff-ms`), and a
+  `suspected_response_rate_limit` condition is published from control replies
+  beside losses, never from silence alone. Tuning options require
+  `--adaptive`; the fixed scheduler remains the default, and
+  `observed_peak_window` reports the largest pending count actually held, not
+  achieved throughput.
 
 - Host discovery (roadmap M5). `scan --discovery before|only|skip` runs a
   discovery stage before the scan, alone, or records that it was skipped;
@@ -1941,6 +1966,20 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Adaptive raw scans admit the conservative worst live wave before any traffic:
+  the per-probe and per-route maxima retained across wave-sized chunks plus
+  capture interface unions, so a scan over the `capture.interfaces` source
+  bound or `max_prepared_bytes` fails during admission instead of
+  materializing it mid-operation.
+- Adaptive probe sequences stay preauthorized over the original target order:
+  hosts filtered by neighbor or discovery work leave stable ordinal holes, so
+  live wire identities (source ports, identifications, DNS transaction ids)
+  match exactly what admission prepared.
+- Connect scans retain pending-connect records only up to
+  `min(--max-in-flight, 16)`, an explicit 16-record descriptor ceiling beneath
+  the process worker ceiling, so a configured window above it cannot retain
+  completed records beyond what the pool can describe; the operation-level
+  `ConnectBudget` lease and reported window ceilings are unchanged.
 - Scans budget each target's implicit link-layer neighbor resolution: one
   request joins `max_probes`, its worst-case frame joins the wire bytes, its
   attempt timeout joins `max_duration`, and a narrowed resolver caps every

@@ -21,6 +21,7 @@ const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
+mod adaptive;
 pub mod catalog;
 pub mod connect;
 pub mod discovery;
@@ -38,6 +39,7 @@ mod selection;
 #[cfg(test)]
 mod tests;
 
+pub use adaptive::{Adaptive, Condition, ConditionKind, HostIdentity, Scheduling, SchedulingMode};
 pub use error::{Error, PipelineFailure};
 pub use evidence::{CorrelatedResponse, classify_response};
 pub use inference::{Inference, Rule, State};

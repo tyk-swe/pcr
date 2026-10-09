@@ -34,6 +34,7 @@ published_enum! {
         Scanned => "scanned",
         Skipped => "skipped",
         NotRequested => "not_requested",
+        Incomplete => "incomplete",
     }
 }
 

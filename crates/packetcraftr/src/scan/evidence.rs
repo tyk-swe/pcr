@@ -5,6 +5,7 @@ use crate::execution::evidence::Passed;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, packet::Packet, registry::Registry,
@@ -83,6 +84,15 @@ impl Observation {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Feedback {
+    pub(super) sequence: u64,
+    pub(super) latency: Duration,
+    pub(super) reply: Reply,
+    pub(super) responder: IpAddr,
+    pub(super) received_at: Option<SystemTime>,
+}
+
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
@@ -90,6 +100,8 @@ pub(super) struct ProbeClassifier<'a> {
     pub(super) rtt: RttAccumulator,
     /// Discovery outcomes not yet composed into host records.
     pub(super) discovery: Vec<super::discovery::Observation>,
+    pub(super) feedback: Option<(Vec<Feedback>, usize)>,
+    pub(super) adaptive_attempts: Option<u32>,
 }
 
 impl Classifier for ProbeClassifier<'_> {
@@ -116,6 +128,16 @@ impl Classifier for ProbeClassifier<'_> {
 
     fn responder(&self, observation: &Observation) -> IpAddr {
         observation.response.responder
+    }
+
+    fn canceled_responses(&self, probe: &Probe, outcome: &Outcome<Self::Observation>) -> usize {
+        let Some(max_attempts) = self.adaptive_attempts else {
+            return 0;
+        };
+        if !matches!(outcome, Outcome::Reply(_)) {
+            return 0;
+        }
+        usize::try_from(max_attempts.saturating_sub(probe.attempt)).unwrap_or(0)
     }
 
     fn evidence(
@@ -147,6 +169,18 @@ impl Classifier for ProbeClassifier<'_> {
                 .map(|profile| profile.not_observed()),
         };
         self.rtt.note_sent();
+        if let Outcome::Reply(reply) = &outcome
+            && let Some((feedback, cap)) = &mut self.feedback
+            && feedback.len() < *cap
+        {
+            feedback.push(Feedback {
+                sequence: probe.sequence,
+                latency: reply.latency,
+                reply: reply.observation.response.reply,
+                responder: reply.observation.response.responder,
+                received_at: reply.received_at,
+            });
+        }
         if let Outcome::Reply(reply) = outcome {
             self.rtt.note_received(reply.latency);
             evidence.status = ProbeStatus::Response;

@@ -265,6 +265,7 @@ fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
         udp_profiles: Default::default(),
         address_family: Family::Any,
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         limits: scan::Limits {

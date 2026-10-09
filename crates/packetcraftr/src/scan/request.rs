@@ -158,6 +158,7 @@ pub struct Request {
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
     pub address_family: Family,
     pub attempts: u32,
+    pub adaptive: Option<super::Adaptive>,
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
@@ -247,6 +248,9 @@ impl Request {
                 value: self.timeout,
                 maximum: MAX_WAIT,
             });
+        }
+        if let Some(adaptive) = &self.adaptive {
+            adaptive.validate(self)?;
         }
         check_rate(&Probes, "probes_per_second", self.probes_per_second)?;
         self.discovery.validate(&self.route, &self.limits)?;

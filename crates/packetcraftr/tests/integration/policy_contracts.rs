@@ -140,6 +140,7 @@ fn denied_address_never_reaches_providers() {
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         limits: Default::default(),

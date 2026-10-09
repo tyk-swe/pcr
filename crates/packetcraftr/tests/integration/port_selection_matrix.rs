@@ -239,6 +239,7 @@ fn no_probe_reaches_an_excluded_port() {
         endpoints: selected.endpoints,
         discovery: Default::default(),
         attempts: 2,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         udp_payload: Default::default(),

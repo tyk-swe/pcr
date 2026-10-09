@@ -2,13 +2,12 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v9` and
-validate against `schemas/packetcraftr.output.v9.schema.json`. The
-`packetcraftr.output/v6`, `packetcraftr.output/v7`, and
-`packetcraftr.output/v8` schemas remain frozen and available for validating
-previously emitted output. The current producer and bundled examples have moved
-to v9; consumers pinned to an earlier family must explicitly support the new
-one.
+All structured command envelopes now identify `packetcraftr.output/v10` and
+validate against `schemas/packetcraftr.output.v10.schema.json`. The
+`packetcraftr.output/v6` through `packetcraftr.output/v9` schemas remain
+frozen and available for validating previously emitted output. The current
+producer and bundled examples have moved to v10; consumers pinned to an
+earlier family must explicitly support the new one.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
@@ -16,6 +15,28 @@ packet-document versions are rejected with a schema error.
 Behavior and contract changes come first, grouped by topic. The
 [renamed and removed paths](#renamed-and-removed-paths) tables at the end map
 each 0.5.0-beta.3 name to its final name, by crate.
+
+## Adaptive scheduling and output/v10
+
+`scan --adaptive` opts raw and connect scans into per-host adaptive
+scheduling; the fixed scheduler remains the default and the tuning flags
+(`--min-timeout-ms`, `--max-timeout-ms`, `--min-window`, `--initial-window`,
+`--host-timeout-ms`, `--retry-backoff-ms`, `--max-backoff-ms`) are rejected
+without it. Host `scan` records gain `incomplete`, set when a host's own
+deadline prevented or truncated intended work; never-sent attempts publish no
+probe evidence.
+
+Machine reports gain a required `scheduling` object: `mode`, the effective
+`adaptive` configuration, `observed_peak_window` (the largest pending count
+actually held, a bound rather than achieved throughput), `retries_started`,
+typed `conditions` with their cited sequences and caveats, `incomplete` host
+identities, and `operation_ceiling`/`process_ceiling` on connect scans. In
+the library, `scan::Request` gains `adaptive: Option<scan::Adaptive>`
+(required field — update every literal), `scan::{Report, Aggregate}` and
+`scan::connect::Report` carry `scheduling`, `scan::discovery::Scan` gains `Incomplete`, and
+`netio::tcp` gains `ConnectBudget` whose leases outlive cancellation cleanup
+and live inside successful `Connection`s; the process-wide pending ceiling is
+unchanged pending measurement.
 
 ## Forwarding semantics and output/v6
 

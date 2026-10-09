@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.1.0",
+  "dataset_version": "1.2.0",
   "families": ["ipv4", "ipv6"],
   "transports": ["tcp", "udp", "icmp"],
   "fixture_addresses": {
@@ -189,6 +189,72 @@
       "divergence": "The provisioned listener/responder, not Nmap output, defines connected/open and refused/closed ground truth. Equal IPv6 bytes on distinct links must remain distinct endpoint identities."
     }
   ],
+  "adaptive_scheduling_scenarios": [
+    {
+      "id": "adaptive-responsive",
+      "condition": "A checksum-valid direct response is delivered on the first attempt. Separate hosts have independently provisioned 10 ms and 100 ms reply delays.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "Each answered endpoint sends exactly once even with an attempt ceiling of three. First-attempt samples update that scoped host's RTT estimate; unsampled hosts use the operation estimate. Retry samples never update the estimator.",
+      "measurement_scope": "behavioral contract; M2 single-probe matrix supplies preservation measurements, not throughput acceptance"
+    },
+    {
+      "id": "adaptive-selective-retry",
+      "condition": "One endpoint never replies and another replies on its first attempt, with an attempt ceiling of three and retry backoff 100 ms capped at one second.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "Only the silent endpoint is retried: at most three starts, with retry readiness at least 100 ms and then 200 ms after settlement. A not-ready retry does not block ready work for another host.",
+      "measurement_scope": "behavioral contract; not native throughput evidence"
+    },
+    {
+      "id": "adaptive-rate-limited-control",
+      "condition": "At least eight probes settle for one scoped host, including at least two correlated control errors from the same responder and at least four silent attempts.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "Publish suspected_response_rate_limit as an inference with bounded cited control/loss probe sequences and counts; pace that host more slowly without extending its deadline. All-silent probes, or control errors from distinct responders or scopes, do not establish this condition.",
+      "measurement_scope": "behavioral contract of an inference; filtering and loss remain alternative explanations"
+    },
+    {
+      "id": "adaptive-fair-hosts",
+      "condition": "Two selected scoped hosts each have three ordered endpoints and a scheduling window of one; all endpoints answer immediately.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "Starts interleave host 1 endpoint 1, host 2 endpoint 1, host 1 endpoint 2, host 2 endpoint 2, host 1 endpoint 3, host 2 endpoint 3. Equal address bytes on different interfaces remain separate host identities.",
+      "measurement_scope": "behavioral contract; not native throughput evidence"
+    },
+    {
+      "id": "adaptive-host-deadline",
+      "condition": "A silent host spends its finite deadline with endpoints still unsent while a second responsive host completes. Discovery and scan share each host's deadline.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "The expired host reports scan incomplete, not scanned or a fabricated timeout for an unsent endpoint. The second host completes. Neither retries, neighbor work, pacing, nor window changes extend the operation deadline.",
+      "measurement_scope": "behavioral contract; not native throughput evidence"
+    },
+    {
+      "id": "adaptive-window-loss",
+      "condition": "Controlled cohorts contain verified replies followed by losses, using an initial window of four with minimum one and operation maximum eight.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "Reply cohorts increase admission conservatively; a lossy cohort halves the window once. The window remains between one and eight, and shrinking does not cancel already admitted work.",
+      "measurement_scope": "behavioral contract; a configured window is not achieved concurrency or throughput"
+    },
+    {
+      "id": "adaptive-connect-cleanup",
+      "condition": "A blocked TCP provider outlives cancellation, then returns a socket whose drop is independently controlled. Another operation uses a separate admission budget.",
+      "provision": "injected_provider_isolated_process",
+      "families": ["ipv4", "ipv6"],
+      "expected": "The canceled work retains both operation and process permits until provider/socket cleanup completes. A pending vector becoming empty does not free a permit; independent operations still obey the shared process ceiling of sixteen.",
+      "measurement_scope": "resource-lifetime contract; retaining sixteen is not a validated capacity increase"
+    },
+    {
+      "id": "adaptive-plan-boundary",
+      "condition": "The selected plan's charged state exceeds max_prepared_bytes; a second plan exactly fits its checked charges. Both use documentation addresses and recording providers.",
+      "provision": "injected_provider_virtual_clock",
+      "families": ["ipv4", "ipv6"],
+      "expected": "The oversized plan fails before any active discovery, transmission, or connect. Retained scheduling state scales with distinct endpoints rather than the attempt ceiling; shared payloads/profiles and scoped identity bytes are charged.",
+      "measurement_scope": "logical-byte boundary contract; charged bytes are not peak resident memory"
+    }
+  ],
   "provenance": {
     "source": "Original PacketcraftR fixture specifications authored in this repository",
     "retrieved": "2026-10-06",
@@ -197,6 +263,6 @@
     "license_rationale": "Original project-authored fixture specifications distributed under the repository license.",
     "maintainer": "tyk-swe",
     "refresh": "Review condition and expected outcome together; increment dataset_version; rerun both IP families and all declared transports and windows.",
-    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions."
+    "coverage": "Six packet conditions across two IP families, three transports and two scheduling windows; native loopback connected/refused outcomes in both IP families; responsive/silent single-hop traceroutes for both IP families and all three transports; M4 numeric manifest/selection and native scoped host-local/two-link fixture conditions; eight M7 adaptive scheduling behavioral/resource contracts. M7 contracts are not relabeled as cross-platform native performance evidence."
   }
 }

@@ -174,7 +174,7 @@ impl Clock for AdmissionClock {
                 let snapshot = tcp_connect_snapshot();
                 assert_eq!(snapshot.active, MAX_PENDING_CONNECTIONS);
                 assert_eq!(snapshot.cleanup_retaining_capacity, MAX_PENDING_CONNECTIONS);
-                assert!(snapshot.rejected_admissions > self.rejected_before);
+                assert_eq!(snapshot.rejected_admissions, self.rejected_before);
                 self.gate.release(MAX_PENDING_CONNECTIONS);
                 wait_until("first-wave admission returns", || {
                     tcp_connect_snapshot().active == 0
@@ -204,6 +204,7 @@ fn request() -> scan::Request {
             .collect(),
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(50),
         probes_per_second: None,
         max_in_flight: MAX_PENDING_CONNECTIONS,

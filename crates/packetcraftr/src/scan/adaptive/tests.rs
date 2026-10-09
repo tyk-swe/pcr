@@ -43,7 +43,7 @@ fn control_reply(latency: Duration, responder: IpAddr) -> Outcome {
 }
 
 fn send(controller: &mut Controller, work: &mut Work, selection: Selection, now: Instant) {
-    controller.admitted(work, selection, now);
+    controller.admitted(work, selection);
     controller.confirm_send(work, selection, now);
 }
 
@@ -565,4 +565,140 @@ fn interleaved_cohorts_each_halve_once() {
     assert_eq!(controller.window(), 1);
     controller.settle(&mut work, second.selections[1], Outcome::Silent, start);
     assert_eq!(controller.window(), 1);
+}
+
+#[test]
+fn conditions_choose_the_lowest_responder_past_the_cite_cap() {
+    let mut controller = Controller::new(config(), request_timeout(), 8);
+    let targets = [host(1)];
+    let mut work = controller.open_stage(&targets, 14, 1, 0, Instant::now());
+    let start = Instant::now();
+    let end = start + Duration::from_secs(60);
+    let mut selected = 0u8;
+    while !work.done() {
+        let wave = controller.select(&mut work, start, end, 14);
+        for selection in &wave.selections {
+            send(&mut controller, &mut work, *selection, start);
+            let outcome = if selected < 10 {
+                let responder = if selected < 8 {
+                    IpAddr::V4(Ipv4Addr::new(192, 0, 2, 201 + selected))
+                } else {
+                    IpAddr::V4(Ipv4Addr::new(192, 0, 2, 250))
+                };
+                control_reply(Duration::from_millis(5), responder)
+            } else {
+                Outcome::Silent
+            };
+            controller.settle(&mut work, *selection, outcome, start);
+            selected += 1;
+        }
+    }
+    let report = controller.finish((None, None));
+    let [condition] = report.conditions.as_slice() else {
+        panic!("one condition: {:?}", report.conditions);
+    };
+    assert_eq!(
+        condition.control_responder,
+        "192.0.2.250".parse::<IpAddr>().unwrap()
+    );
+    assert_eq!(condition.control_sequences, vec![8, 9]);
+    assert_eq!(condition.loss_sequences, vec![10, 11, 12, 13]);
+    assert_eq!(condition.completed, 14);
+}
+
+#[test]
+fn the_same_responder_keeps_counting_while_its_citations_cap() {
+    let mut controller = Controller::new(config(), request_timeout(), 8);
+    let targets = [host(1)];
+    let mut work = controller.open_stage(&targets, 13, 1, 0, Instant::now());
+    let start = Instant::now();
+    let end = start + Duration::from_secs(60);
+    let responder = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 250));
+    let mut selected = 0;
+    while !work.done() {
+        let wave = controller.select(&mut work, start, end, 13);
+        for selection in &wave.selections {
+            send(&mut controller, &mut work, *selection, start);
+            let outcome = if selected < 9 {
+                control_reply(Duration::from_millis(5), responder)
+            } else {
+                Outcome::Silent
+            };
+            controller.settle(&mut work, *selection, outcome, start);
+            selected += 1;
+        }
+    }
+    let entry = &controller.hosts[0].control[&responder];
+    assert_eq!(entry.count, 9);
+    assert_eq!(entry.sequences.len(), CITED_SEQUENCES);
+    let report = controller.finish((None, None));
+    assert_eq!(report.conditions.len(), 1);
+    assert_eq!(
+        report.conditions[0].control_sequences.len(),
+        CITED_SEQUENCES
+    );
+}
+
+#[test]
+fn the_host_deadline_anchors_at_selection_not_later_admission() {
+    let mut config = config();
+    config.host_timeout = Duration::from_millis(100);
+    let mut controller = Controller::new(config, request_timeout(), 8);
+    let targets = [host(1)];
+    let mut work = controller.open_stage(&targets, 2, 1, 0, Instant::now());
+    let t0 = Instant::now();
+    let end = t0 + Duration::from_secs(60);
+    let wave = controller.select(&mut work, t0, end, 1);
+    let first = wave.selections[0];
+    let t40 = t0 + Duration::from_millis(40);
+    controller.admitted(&mut work, first);
+    assert_eq!(
+        controller.host_remaining(first.host, t40),
+        Duration::from_millis(60)
+    );
+    controller.commit_attempt(&mut work, first, t40);
+    controller.note_attempted(first);
+    controller.settle(
+        &mut work,
+        first,
+        reply(Duration::from_millis(5)),
+        t40 + Duration::from_millis(5),
+    );
+    let t60 = t0 + Duration::from_millis(60);
+    let wave = controller.select(&mut work, t60, end, 1);
+    let second = wave.selections[0];
+    assert_eq!(second.host_deadline, t0 + Duration::from_millis(100));
+    let t100 = t0 + Duration::from_millis(100);
+    let wave = controller.select(&mut work, t100, end, 1);
+    assert!(wave.done);
+    assert!(controller.is_incomplete(second.host));
+}
+
+#[test]
+fn canceled_endpoints_release_their_unstarted_attempt_slots() {
+    let mut config = config();
+    config.host_timeout = Duration::from_millis(100);
+    let mut controller = Controller::new(config, request_timeout(), 8);
+    let targets = [host(1)];
+    let start = Instant::now();
+    let end = start + Duration::from_secs(60);
+
+    let mut work = controller.open_stage(&targets, 1, 3, 0, start);
+    let wave = controller.select(&mut work, start, end, 1);
+    let selection = wave.selections[0];
+    controller.admitted(&mut work, selection);
+    controller.settle(&mut work, selection, Outcome::Omitted, start);
+    assert_eq!(controller.take_canceled_responses(&mut work), 3);
+
+    let mut work = controller.open_stage(&targets, 1, 3, 0, start);
+    let wave = controller.select(&mut work, start, end, 1);
+    let selection = wave.selections[0];
+    send(&mut controller, &mut work, selection, start);
+    controller.settle(&mut work, selection, Outcome::Silent, start);
+    assert_eq!(controller.take_canceled_responses(&mut work), 0);
+    let expired = start + config.host_timeout;
+    controller.select(&mut work, expired, end, 1);
+    assert_eq!(controller.take_canceled_responses(&mut work), 2);
+    controller.select(&mut work, expired + Duration::from_millis(1), end, 1);
+    assert_eq!(controller.take_canceled_responses(&mut work), 0);
 }

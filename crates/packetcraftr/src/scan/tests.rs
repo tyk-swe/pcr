@@ -418,6 +418,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
         rtt: Default::default(),
         discovery: Vec::new(),
         feedback: None,
+        adaptive_attempts: None,
     };
     for (has_response, correlation_expired, expected) in [
         (false, false, super::Attribution::Late),

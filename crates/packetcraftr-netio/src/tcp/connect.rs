@@ -118,14 +118,23 @@ impl ConnectBudget {
     }
 
     fn lease(&self) -> Result<Lease, Error> {
-        self.state
-            .active
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |active| {
-                (active < self.state.capacity).then(|| active + 1)
-            })
-            .map_err(|_| Error::Capacity {
-                limit: self.state.capacity,
-            })?;
+        let mut active = self.state.active.load(Ordering::Relaxed);
+        loop {
+            if active >= self.state.capacity {
+                return Err(Error::Capacity {
+                    limit: self.state.capacity,
+                });
+            }
+            match self.state.active.compare_exchange_weak(
+                active,
+                active + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => active = actual,
+            }
+        }
         Ok(Lease {
             state: Arc::clone(&self.state),
         })

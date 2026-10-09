@@ -141,6 +141,7 @@ where
             feedback: controller
                 .as_ref()
                 .map(|_| (Vec::new(), request.max_in_flight)),
+            adaptive_attempts: controller.as_ref().map(|_| request.attempts),
         },
         &mut emit,
     );
@@ -974,6 +975,7 @@ where
         })?;
         let capacity = controller.window();
         let wave = controller.select(&mut work, now, operation_end, capacity);
+        evidence.release_responses(controller.take_canceled_responses(&mut work));
         if wave.selections.is_empty() {
             if wave.done {
                 break;
@@ -996,7 +998,7 @@ where
             continue;
         }
         for selection in &wave.selections {
-            controller.admitted(&mut work, *selection, now);
+            controller.admitted(&mut work, *selection);
         }
         settle(request, clock, deadline, owed, &mut stats)?;
         let mut batches = Vec::with_capacity(wave.selections.len());
@@ -1098,6 +1100,7 @@ where
             };
             controller.settle(&mut work, selection, outcome, settled_at);
         }
+        evidence.release_responses(controller.take_canceled_responses(&mut work));
     }
     Ok(stats)
 }

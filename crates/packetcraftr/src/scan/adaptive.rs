@@ -186,6 +186,12 @@ impl Estimator {
     }
 }
 
+#[derive(Default)]
+struct ControlResponder {
+    count: u64,
+    sequences: Vec<u64>,
+}
+
 struct Host {
     key: (IpAddr, Option<interface::Id>),
     scope: Option<ResolvedZone>,
@@ -196,7 +202,7 @@ struct Host {
     completed: u64,
     replies: u64,
     losses: u64,
-    control: Vec<(u64, IpAddr)>,
+    control: HashMap<IpAddr, ControlResponder>,
     control_errors: u64,
     loss_sequences: Vec<u64>,
     condition_raised: bool,
@@ -217,6 +223,7 @@ pub(super) struct Work {
     unfinished: usize,
     max_attempts: u32,
     first_sequence: u64,
+    canceled_responses: usize,
 }
 
 struct Slot {
@@ -241,6 +248,7 @@ pub(super) struct Selection {
     pub host_deadline: Instant,
     pub cohort: u64,
     pub host_limited: bool,
+    pub selected_at: Instant,
 }
 
 pub(super) struct Wave {
@@ -323,7 +331,7 @@ impl Controller {
             completed: 0,
             replies: 0,
             losses: 0,
-            control: Vec::new(),
+            control: HashMap::new(),
             control_errors: 0,
             loss_sequences: Vec::new(),
             condition_raised: false,
@@ -423,10 +431,17 @@ impl Controller {
             unfinished,
             max_attempts,
             first_sequence,
+            canceled_responses: 0,
         }
     }
 
+    pub(super) fn take_canceled_responses(&self, work: &mut Work) -> usize {
+        std::mem::take(&mut work.canceled_responses)
+    }
+
     fn expire(&mut self, work: &mut Work, now: Instant) {
+        let max_attempts = work.max_attempts;
+        let mut canceled = 0usize;
         for slot in &mut work.slots {
             if !self.host_expired(slot.host, now) {
                 continue;
@@ -440,11 +455,16 @@ impl Controller {
                 continue;
             }
             for endpoint in &mut slot.endpoints {
+                if !endpoint.finished {
+                    canceled = canceled
+                        .saturating_add(max_attempts.saturating_sub(endpoint.sent) as usize);
+                }
                 endpoint.finished = true;
             }
             work.unfinished = work.unfinished.saturating_sub(remaining);
             self.mark_incomplete(slot.host);
         }
+        work.canceled_responses = work.canceled_responses.saturating_add(canceled);
     }
 
     pub(super) fn select(
@@ -563,6 +583,7 @@ impl Controller {
                 host_deadline,
                 cohort,
                 host_limited,
+                selected_at: now,
             });
             misses = 0;
         }
@@ -580,11 +601,11 @@ impl Controller {
         }
     }
 
-    pub(super) fn admitted(&mut self, work: &mut Work, selection: Selection, now: Instant) {
+    pub(super) fn admitted(&mut self, work: &mut Work, selection: Selection) {
         let slot = &mut work.slots[selection.slot];
         slot.endpoints[selection.endpoint].pending = true;
         *self.cohort_members.entry(selection.cohort).or_default() += 1;
-        self.host_started(selection.host, now);
+        self.host_started(selection.host, selection.selected_at);
     }
 
     /// Commits an admitted slot's attempt number and paces the host from the
@@ -669,8 +690,10 @@ impl Controller {
                 }
                 if control {
                     host.control_errors = host.control_errors.saturating_add(1);
-                    if host.control.len() < CITED_SEQUENCES {
-                        host.control.push((selection.sequence, responder));
+                    let responder = host.control.entry(responder).or_default();
+                    responder.count = responder.count.saturating_add(1);
+                    if responder.sequences.len() < CITED_SEQUENCES {
+                        responder.sequences.push(selection.sequence);
                     }
                 }
                 self.successes = self.successes.saturating_add(1);
@@ -699,6 +722,11 @@ impl Controller {
                 }
             }
             Outcome::Aborted | Outcome::Omitted => {
+                if !was_finished {
+                    work.canceled_responses = work
+                        .canceled_responses
+                        .saturating_add(work.max_attempts.saturating_sub(endpoint.sent) as usize);
+                }
                 endpoint.finished = true;
             }
         }
@@ -724,18 +752,16 @@ impl Controller {
         {
             return;
         }
-        let mut responders: HashMap<IpAddr, usize> = HashMap::new();
-        for (_, responder) in &host.control {
-            *responders.entry(*responder).or_default() += 1;
-        }
-        let Some(control_responder) = responders
+        let Some(control_responder) = host
+            .control
             .iter()
-            .filter(|(_, count)| **count >= INFERENCE_MIN_CONTROL)
+            .filter(|(_, entry)| entry.count >= INFERENCE_MIN_CONTROL as u64)
             .map(|(responder, _)| *responder)
             .min()
         else {
             return;
         };
+        let control_sequences = host.control[&control_responder].sequences.clone();
         let gap = self
             .rto(host_index)
             .max(self.config.retry_backoff)
@@ -753,12 +779,7 @@ impl Controller {
             completed: host.completed,
             replies: host.replies,
             losses: host.losses,
-            control_sequences: host
-                .control
-                .iter()
-                .filter(|(_, responder)| *responder == control_responder)
-                .map(|(sequence, _)| *sequence)
-                .collect(),
+            control_sequences,
             loss_sequences: host.loss_sequences.clone(),
             caveat: "inferred from control replies beside silent attempts; \
                      filtering or loss remain alternative explanations",
@@ -794,7 +815,6 @@ pub(super) fn state_charge(
         .saturating_add(std::mem::size_of::<Condition>())
         .saturating_add(std::mem::size_of::<(IpAddr, Option<interface::Id>)>())
         .saturating_add(std::mem::size_of::<usize>())
-        .saturating_add(CITED_SEQUENCES.saturating_mul(std::mem::size_of::<(u64, IpAddr)>()))
         .saturating_add(
             CITED_SEQUENCES
                 .saturating_mul(2)
@@ -802,7 +822,17 @@ pub(super) fn state_charge(
         );
     let slot = std::mem::size_of::<Slot>()
         .saturating_add(endpoints_per_host.saturating_mul(std::mem::size_of::<Endpoint>()));
-    let hosts = host_count.saturating_mul(host.saturating_add(slot).saturating_mul(2));
+    let hosts = host_count
+        .saturating_mul(host.saturating_add(slot).saturating_mul(2))
+        .saturating_add(
+            host_count
+                .saturating_mul(endpoints_per_host)
+                .saturating_mul(4)
+                .saturating_mul(
+                    std::mem::size_of::<(IpAddr, ControlResponder)>()
+                        .saturating_add(CITED_SEQUENCES.saturating_mul(std::mem::size_of::<u64>())),
+                ),
+        );
     let live = pending_bound.saturating_mul(2).saturating_mul(
         std::mem::size_of::<u64>()
             .saturating_add(std::mem::size_of::<usize>())

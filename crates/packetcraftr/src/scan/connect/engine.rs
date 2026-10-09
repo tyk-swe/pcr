@@ -404,7 +404,7 @@ struct Progress {
     discovery: Vec<Observation>,
 }
 
-fn run<Q, A, C, F>(
+pub(super) fn run<Q, A, C, F>(
     request: &Request,
     authorizer: &mut A,
     provider: &Arc<Q>,
@@ -748,7 +748,7 @@ where
                 }
                 Err(source) => return Err(execution(sequence, source)),
             };
-            controller.admitted(&mut work, selection, admitted);
+            controller.admitted(&mut work, selection);
             controller.commit_attempt(&mut work, selection, admitted);
             active.push(Active {
                 pending,

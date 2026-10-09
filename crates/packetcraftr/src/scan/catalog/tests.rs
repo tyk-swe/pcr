@@ -10,15 +10,23 @@ fn bundled_catalog_is_valid_and_matches_its_provenance_record() {
     let catalog = bundled();
     let DataSet { name, version } = data_set();
     assert!(
-        MANIFEST.contains(&format!("  name: \"{name}\"\n")),
+        MANIFEST
+            .lines()
+            .any(|line| line == format!("  name: \"{name}\"")),
         "{name}"
     );
     assert!(
-        MANIFEST.contains(&format!("  version: \"{version}\"\n")),
+        MANIFEST
+            .lines()
+            .any(|line| line == format!("  version: \"{version}\"")),
         "{version}"
     );
-    assert!(MANIFEST.contains("  kind: \"port\"\n"));
-    assert!(MANIFEST.contains("  review_outcome: \"accepted\"\n"));
+    assert!(MANIFEST.lines().any(|line| line == "  kind: \"port\""));
+    assert!(
+        MANIFEST
+            .lines()
+            .any(|line| line == "  review_outcome: \"accepted\"")
+    );
     let all = catalog.preset("all").expect("the catalog-wide preset");
     assert_eq!(all.members().count(), catalog.entries.len());
     for entry in &catalog.entries {

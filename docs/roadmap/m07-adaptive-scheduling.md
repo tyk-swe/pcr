@@ -72,11 +72,12 @@ silence, capped at `--max-backoff-ms`, and silent endpoints retry at most
 
 Ordering is deterministic: hosts take turns in selection order, endpoints
 within a host in request order, and sequence numbers are reserved per attempt
-so retries need no renumbering. Every host's deadline starts at its first
-admitted probe and ends `--host-timeout-ms` later inside the operation
-deadline; preparation, pacing, and transmission all spend it, and an endpoint
-whose share is spent sends nothing and publishes no probe evidence while the
-host reports `scan=incomplete`. A connect admission whose worker never called
+so retries need no renumbering. Every host's deadline anchors at the moment
+its first admitted probe was selected and ends `--host-timeout-ms` later
+inside the operation deadline; authorization, admission, preparation, pacing,
+and transmission all spend it, and an endpoint whose share is spent sends
+nothing and publishes no probe evidence while the host reports
+`scan=incomplete`. A connect admission whose worker never called
 the provider also leaves the host incomplete; its `attempted: false` record is
 not network loss and does not contribute to rate-limit inference.
 The admission window starts at

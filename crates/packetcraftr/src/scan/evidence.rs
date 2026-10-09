@@ -101,6 +101,7 @@ pub(super) struct ProbeClassifier<'a> {
     /// Discovery outcomes not yet composed into host records.
     pub(super) discovery: Vec<super::discovery::Observation>,
     pub(super) feedback: Option<(Vec<Feedback>, usize)>,
+    pub(super) adaptive_attempts: Option<u32>,
 }
 
 impl Classifier for ProbeClassifier<'_> {
@@ -127,6 +128,16 @@ impl Classifier for ProbeClassifier<'_> {
 
     fn responder(&self, observation: &Observation) -> IpAddr {
         observation.response.responder
+    }
+
+    fn canceled_responses(&self, probe: &Probe, outcome: &Outcome<Self::Observation>) -> usize {
+        let Some(max_attempts) = self.adaptive_attempts else {
+            return 0;
+        };
+        if !matches!(outcome, Outcome::Reply(_)) {
+            return 0;
+        }
+        usize::try_from(max_attempts.saturating_sub(probe.attempt)).unwrap_or(0)
     }
 
     fn evidence(

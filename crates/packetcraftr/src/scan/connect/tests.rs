@@ -9,10 +9,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::tcp::{self, Provider};
 
 use super::super::{Classification, Error, Limits, Request};
 use super::{Aggregate, Collector, Outcome, ProbeEvidence};
+use crate::clock::Clock;
 use crate::test_support::FakeProviders;
 use crate::{Client, ProviderSet};
 
@@ -494,4 +496,76 @@ fn connect_replies_carry_no_control_responder_and_unreachable_is_not_one() {
         panic!("a connected socket is a definitive reply");
     };
     assert!(!control);
+}
+
+struct SlowAuthorize {
+    selected: SocketAddr,
+}
+
+impl crate::target::ResolveTarget for SlowAuthorize {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &crate::target::Target,
+        _: &Deadline,
+    ) -> Result<crate::target::Authorized, BoundaryError> {
+        Ok(crate::target::Authorized {
+            declared: target.clone(),
+            selected: vec![crate::target::SelectedAddress::new(self.selected.ip())],
+        })
+    }
+}
+
+impl crate::policy::Authorizer for SlowAuthorize {
+    fn authorize_operation(
+        &mut self,
+        operation: crate::policy::Operation<'_>,
+    ) -> Result<(), BoundaryError> {
+        if let crate::policy::Operation::Socket(_) = operation {
+            std::thread::sleep(Duration::from_millis(120));
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
+    let closed = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(Concurrent {
+        active: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+        calls: AtomicUsize::new(0),
+        closed: Arc::clone(&closed),
+    });
+    let mut request = adaptive_request(vec![80, 81], 1, Duration::from_millis(200));
+    request.max_in_flight = 1;
+    request.timeout = Duration::from_millis(200);
+    request.limits.max_duration = Duration::from_secs(60);
+    {
+        let adaptive = request.adaptive.as_mut().unwrap();
+        adaptive.min_timeout = Duration::from_millis(200);
+        adaptive.max_timeout = Duration::from_millis(200);
+        adaptive.min_window = 1;
+        adaptive.initial_window = 1;
+    }
+    let mut authorizer = SlowAuthorize {
+        selected: "127.0.0.1:80".parse().unwrap(),
+    };
+    let clock = crate::test_support::NoopClock;
+    let mut deadline = Deadline::new(Duration::from_secs(60));
+    let report = super::engine::run(
+        &request,
+        &mut authorizer,
+        &provider,
+        &clock,
+        &mut deadline,
+        clock.now(),
+        |_, _| Ok(()),
+    )
+    .expect("the scan completes inside its operation deadline");
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "authorization past the anchored deadline omits the second port"
+    );
+    assert_eq!(report.scheduling.incomplete.len(), 1);
 }

@@ -146,7 +146,11 @@ impl TimeMarker {
     }
 }
 
-/// Captures inside a submission interval are not proven to be post-send.
+/// The interval during which a provider successfully submitted the exact bytes.
+///
+/// A matching reply can arrive before submission returns. Its eligibility
+/// starts at entry to the successful operation, not at return; neither marker
+/// claims an exact wire departure time or authenticates a responder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Timing {
     started: TimeMarker,
@@ -159,8 +163,17 @@ impl Timing {
         self.started
     }
 
-    /// Earliest marker after which a capture is proven to follow acceptance.
+    /// Earliest capture eligible for correlation with this successful submission.
+    ///
+    /// Protocol identity and integrity checks still decide whether a capture
+    /// matches. Captures before this marker, or without monotonic ingress
+    /// timing, cannot be attributed to this submission.
     pub fn freshness_marker(self) -> TimeMarker {
+        self.started
+    }
+
+    /// When the provider returned successful acceptance of the exact bytes.
+    pub fn completed(self) -> TimeMarker {
         self.completed
     }
 
@@ -291,6 +304,20 @@ mod tests {
 
     use super::*;
     use crate::error::test_support::assert_same_failure;
+
+    #[test]
+    fn a_reply_during_successful_submission_is_eligible_without_claiming_exact_departure() {
+        let wire = Bytes::from_static(&[1, 2, 3]);
+        let submission = Submission::start();
+        let ingress = Instant::now();
+        let report = submission.complete(wire.len(), wire.clone());
+
+        report.validate_exact(&wire).expect("exact accepted bytes");
+        let timing = report.timing();
+        assert_eq!(timing.freshness_marker(), timing.started());
+        assert!(timing.freshness_marker().monotonic() <= ingress);
+        assert!(ingress <= timing.completed().monotonic());
+    }
 
     #[test]
     fn inconsistent_monotonic_intervals_and_nonexact_commit_markers_fail_closed() {

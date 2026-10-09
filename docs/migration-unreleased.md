@@ -1989,3 +1989,13 @@ after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
   DNS evidence fault that could never occur, because a framed DNS-over-TCP query
   length cannot overflow. `EvidenceFault` is `#[non_exhaustive]`, but delete any
   reference to the variant; it has no replacement.
+
+## Native submission timing eligibility
+
+`netio::transmit::Timing::freshness_marker()` now returns submission start,
+not acceptance return. Replies captured during an exact successful native send
+can correlate; missing or older monotonic ingress still cannot. Native raw
+socket setup happens before this boundary. Use the new `completed()` accessor
+when the acceptance-return marker is needed. Attempt `sent_at` and latency now
+refer to submission start; neither interval endpoint is precise wire departure,
+causality, or authenticated responder identity. Machine output remains v10.

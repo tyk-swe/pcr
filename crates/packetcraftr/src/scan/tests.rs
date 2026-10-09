@@ -2653,6 +2653,17 @@ fn many_zoned_request(
     request
 }
 
+type ScopedPreflightClient = crate::Client<
+    crate::providers::ProviderSet<
+        crate::test_support::FakeProviders,
+        crate::test_support::FakeProviders,
+        crate::test_support::FakeProviders,
+        crate::test_support::FakeProviders,
+        (),
+        crate::test_support::ZoneMapResolver,
+    >,
+>;
+
 fn scoped_preflight_fixture(
     interface_count: usize,
     host_count: usize,
@@ -2660,16 +2671,7 @@ fn scoped_preflight_fixture(
     wave: usize,
     attempts: u32,
 ) -> (
-    crate::Client<
-        crate::providers::ProviderSet<
-            crate::test_support::FakeProviders,
-            crate::test_support::FakeProviders,
-            crate::test_support::FakeProviders,
-            crate::test_support::FakeProviders,
-            (),
-            crate::test_support::ZoneMapResolver,
-        >,
-    >,
+    ScopedPreflightClient,
     crate::test_support::FakeProviders,
     Request,
 ) {

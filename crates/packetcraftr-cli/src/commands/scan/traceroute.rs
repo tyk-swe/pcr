@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use packetcraftr::probe::Transport;
-use packetcraftr::target::{ScopedAddress, Selection, Specification, Target};
+use packetcraftr::target::{ScopedAddress, Target};
 use packetcraftr::traceroute::hosts;
 
 use crate::commands::traceroute::arguments::Strategy;
@@ -135,6 +135,8 @@ impl Stage {
         let template = hosts::Request {
             targets: scan.targets.clone(),
             max_targets: scan.limits.max_targets,
+            first_sequence: 0,
+            resolved_targets: None,
             address_family: scan.address_family,
             strategy,
             observed: Vec::new(),
@@ -206,17 +208,17 @@ impl Stage {
         started: Instant,
         last_sent: Option<Instant>,
     ) -> Result<hosts::Request, CliError> {
-        let include = scan
+        let resolved = scan
             .hosts
             .iter()
             .map(|host| {
-                Ok(Specification::from(match (&host.scope, host.address) {
+                Ok(match (&host.scope, host.address) {
                     (Some(scope), std::net::IpAddr::V6(address)) => Target::ScopedAddress(
                         ScopedAddress::new(address, scope.zone.clone())
                             .map_err(CliError::classified)?,
                     ),
                     _ => Target::Address(host.address),
-                }))
+                })
             })
             .collect::<Result<_, CliError>>()?;
         let observed = hosts::observed(scan);
@@ -274,10 +276,10 @@ impl Stage {
         // anything marks now, so the first trace batch conservatively owes a
         // full --rate interval.
         let request = hosts::Request {
-            targets: Selection {
-                include,
-                exclude: Vec::new(),
-            },
+            // The bounded declaration stays the scan's original; the exact
+            // hosts already resolved hand off as numeric targets.
+            resolved_targets: Some(resolved),
+            first_sequence: Self::next_sequence(scan)?,
             observed,
             paced_after: last_sent,
             limits: packetcraftr::traceroute::Limits {
@@ -292,6 +294,33 @@ impl Stage {
         };
         request.validate().map_err(CliError::classified)?;
         Ok(request)
+    }
+
+    /// One past the scan's last probe sequence, so the trace continues its
+    /// namespace and no trace probe collides with an identifier the scan's
+    /// evidence already cites.
+    fn next_sequence(scan: &packetcraftr::scan::Aggregate) -> Result<u64, CliError> {
+        let last = scan
+            .discovery
+            .iter()
+            .chain(
+                scan.endpoints
+                    .iter()
+                    .flat_map(|endpoint| endpoint.probes.iter()),
+            )
+            .map(|probe| probe.sequence)
+            .max();
+        match last {
+            Some(u64::MAX) => Err(CliError::classified(
+                packetcraftr::traceroute::Error::InvalidLimit {
+                    field: "first_sequence",
+                    value: u64::MAX,
+                    reason: "the scan's probe sequences leave none for the trace".to_owned(),
+                },
+            )),
+            Some(last) => Ok(last + 1),
+            None => Ok(0),
+        }
     }
 
     pub(super) fn collect(
@@ -363,6 +392,7 @@ mod tests {
     use packetcraftr::Stats;
     use packetcraftr::scan;
     use packetcraftr::scan::discovery::{Host, Scan, State};
+    use packetcraftr::target::Selection;
     use packetcraftr_core::frame::{Frame, LinkType};
 
     use super::*;
@@ -530,13 +560,17 @@ mod tests {
             )
             .expect("a request");
 
-        let include: Vec<_> = request
-            .targets
-            .include
+        // The resolved handoff names the exact scan hosts while `targets`
+        // keeps the scan's original bounded declaration.
+        let resolved: Vec<_> = request
+            .resolved_targets
+            .as_ref()
+            .expect("the resolved hosts hand off")
             .iter()
             .map(ToString::to_string)
             .collect();
-        assert_eq!(include, ["192.0.2.7", "fe80::1%eth0"]);
+        assert_eq!(resolved, ["192.0.2.7", "fe80::1%eth0"]);
+        assert_eq!(request.targets, scan_request().targets);
         assert!(request.paced_after.is_some());
         assert!(request.limits.max_duration <= Duration::from_secs(50));
         assert!(request.limits.max_duration > Duration::from_secs(49));
@@ -854,6 +888,99 @@ mod tests {
             )
             .expect("the empty stream plan also admits");
         assert_eq!(streamed.report.stats.packets_attempted, 0);
+    }
+
+    #[test]
+    fn the_request_continues_the_scan_probe_sequence_namespace() {
+        let stage = Stage::new(&options(), &scan_request()).expect("a valid stage");
+        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        // Discovery and endpoint probes share one namespace: the trace
+        // starts one past their highest.
+        let mut scanned = aggregate(
+            vec![host(address, None)],
+            vec![probe_evidence(7, address, Some(scan::Reply::IcmpEchoReply))],
+            vec![endpoint(
+                address,
+                vec![probe_evidence(0, address, Some(scan::Reply::TcpSynAck))],
+            )],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let request = stage
+            .request(&scanned, Retained::of(&scanned), Instant::now(), None)
+            .expect("a request");
+        assert_eq!(request.first_sequence, 8);
+
+        let empty = aggregate(
+            vec![host(address, None)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let request = stage
+            .request(&empty, Retained::of(&empty), Instant::now(), None)
+            .expect("a request");
+        assert_eq!(request.first_sequence, 0);
+
+        scanned.discovery = vec![probe_evidence(
+            u64::MAX,
+            address,
+            Some(scan::Reply::IcmpEchoReply),
+        )];
+        let error = stage
+            .request(&scanned, Retained::of(&scanned), Instant::now(), None)
+            .expect_err("no sequence space remains");
+        assert_eq!(
+            error.classification.code, "cli.traceroute_limit",
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn the_exact_hosts_hand_off_as_targets_not_declarations() {
+        let mut scan = scan_request();
+        scan.targets = Selection {
+            include: vec![
+                "2001:db8::/116".parse().unwrap(),
+                "2001:db8::1000".parse().unwrap(),
+            ],
+            exclude: Vec::new(),
+        };
+        scan.limits.max_targets = 5_000;
+        let mut options = options();
+        options.strategy = None;
+        let stage = Stage::new(&options, &scan).expect("a valid stage");
+        let hosts: Vec<Host> = (0..4_097u16)
+            .map(|index| {
+                host(
+                    IpAddr::V6(std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, index)),
+                    None,
+                )
+            })
+            .collect();
+        let aggregate = aggregate(hosts, Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
+        let request = stage
+            .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
+            .expect("the exact hosts hand off");
+        assert_eq!(
+            request
+                .resolved_targets
+                .as_ref()
+                .expect("the handoff list")
+                .len(),
+            4_097
+        );
+        assert_eq!(
+            request.targets.include.len(),
+            2,
+            "the compact declaration stays for audit"
+        );
+        request
+            .validate()
+            .expect("the request validates without resolution");
     }
 
     #[test]

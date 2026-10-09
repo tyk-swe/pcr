@@ -464,6 +464,13 @@ The record keeps these rules:
   window, an automatic or link-layer trace whose `--timeout-ms` cannot
   outlast the `--rate` interval is refused with `cli.traceroute_limit`
   before any capture or send.
+- The trace stage numbers its probes one past the scan's last sequence
+  (`first_sequence`), so no trace identifier collides with a scan probe's,
+  and it hands the scan's exact resolved hosts over as `resolved_targets`
+  while `targets` keeps the compact declaration — a scan of more than 4096
+  hosts no longer expands to that many specs.
+- The command's absolute deadline parents every stage's own bound, so no
+  stage's setup can extend its expiry.
 - The trace and the lookups after it share the scan's policy packet and
   byte budget: each stage runs in a `with_remaining_budget` view of the
   allowance remaining after earlier traffic. An exhausted allowance

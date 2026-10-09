@@ -370,6 +370,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         execution::Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
+                // The command's absolute deadline parents every stage's own
+                // limit so stage setup cannot extend its expiry; it starts
+                // before the `started` marker so it cannot end later.
+                let operation_deadline =
+                    packetcraftr_core::budget::Deadline::new(request.limits.max_duration)
+                        .with_cancellation(Some(crate::cancellation::signal().clone()));
+                let client = client.with_parent_deadline(operation_deadline.clone());
+                let trace = trace.map(|(stage, trace_client)| {
+                    (
+                        stage,
+                        trace_client.with_parent_deadline(operation_deadline.clone()),
+                    )
+                });
                 let started = Instant::now();
                 let collector = packetcraftr::scan::Collector::default();
                 let report = client
@@ -379,7 +392,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 let scan_sent = last_scan_transmission(&aggregate);
                 let mut traced = None;
                 if let Some((stage, trace_client)) = trace {
-                    let result = stage.collect(trace_client, &aggregate, started, scan_sent)?;
+                    let result = stage.collect(&trace_client, &aggregate, started, scan_sent)?;
                     aggregate
                         .stats
                         .checked_add_assign(&result.aggregate.stats)
@@ -419,6 +432,19 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 let client = &client;
                 let request = &request;
                 move |emit| {
+                    // The same absolute deadline parents the streamed
+                    // scan, trace, and lookups, so their setup cannot
+                    // extend its expiry.
+                    let operation_deadline =
+                        packetcraftr_core::budget::Deadline::new(request.limits.max_duration)
+                            .with_cancellation(Some(crate::cancellation::signal().clone()));
+                    let client = client.with_parent_deadline(operation_deadline.clone());
+                    let trace = trace.map(|(stage, trace_client)| {
+                        (
+                            stage,
+                            trace_client.with_parent_deadline(operation_deadline.clone()),
+                        )
+                    });
                     let started = Instant::now();
                     let emit = Arc::new(Mutex::new(emit));
                     // Events stream as they settle; the tracker keeps each
@@ -463,7 +489,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let trace_emit = Arc::clone(&emit);
                         let result = stage.stream(
-                            trace_client,
+                            &trace_client,
                             &aggregate,
                             *retained,
                             started,

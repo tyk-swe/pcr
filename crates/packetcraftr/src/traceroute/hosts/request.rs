@@ -12,7 +12,7 @@ use crate::execution::limits::{check_limits, duration_violation};
 use crate::execution::rate_delay;
 use crate::probe::Transport;
 use crate::scan::Reply;
-use crate::target::{Family, Selection};
+use crate::target::{Family, Selection, Target};
 use crate::traceroute::error::Probes;
 use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
 use crate::traceroute::{Error, Limits, MAX_PROBES};
@@ -46,6 +46,16 @@ pub struct Request {
     pub address_family: Family,
     /// Probe for hosts no observation covers; `None` leaves them not traced.
     pub strategy: Option<Strategy>,
+    /// The probe sequence the plan starts numbering from: callers running
+    /// the operation inside a shared sequence space pass one past their last
+    /// probe; an independent operation leaves it `0`.
+    pub first_sequence: u64,
+    /// The exact targets a containing operation already resolved, each
+    /// still re-authorized here, overriding `targets`' expansion. `targets`
+    /// keeps the original bounded declaration for audit. Only numeric
+    /// [`Target::Address`] and [`Target::ScopedAddress`] values are
+    /// accepted, so this handoff adds no hostname resolution of its own.
+    pub resolved_targets: Option<Vec<Target>>,
     /// Responsive probes a scan observed; see [`observed`](super::observed).
     pub observed: Vec<Observed>,
     /// UDP and TCP probes only; ICMP ignores it. `None` uses 49151, just
@@ -92,8 +102,11 @@ impl Request {
         .validate()?;
         // On a link-layer route each probe's neighbor request waits one rate
         // interval inside the probe's exchange window, so a timeout that
-        // cannot outlast the interval can never send the probe.
-        if self.route.link_mode != packetcraftr_netio::link::Mode::Layer3 {
+        // cannot outlast the interval can never send the probe. A plan that
+        // can trace nothing resolves no neighbor and skips the check.
+        if self.route.link_mode != packetcraftr_netio::link::Mode::Layer3
+            && (self.strategy.is_some() || !self.observed.is_empty())
+        {
             let interval = rate_delay(&Probes, "probes_per_second", 1, self.probes_per_second)?;
             if interval >= self.timeout {
                 return Err(Error::InvalidLimit {
@@ -106,6 +119,11 @@ impl Request {
                 });
             }
         }
+        // The exclusive sequence end must exist: the plan's probe count can
+        // never wrap u64 back to zero.
+        self.first_sequence
+            .checked_add(u64::try_from(self.limits.max_probes).unwrap_or(u64::MAX))
+            .ok_or_else(|| overflow("sequence"))?;
         check_limits(
             &[("max_targets", self.max_targets, MAX_PROBES)],
             &[],
@@ -116,6 +134,27 @@ impl Request {
             },
         )?;
         self.targets.validate().map_err(Error::TargetSelection)?;
+        if let Some(resolved) = &self.resolved_targets {
+            let bound = self.max_targets.min(crate::target::MAX_CANDIDATES);
+            if resolved.is_empty() || resolved.len() > bound {
+                return Err(Error::InvalidLimit {
+                    field: "resolved_targets",
+                    value: u64::try_from(resolved.len()).unwrap_or(u64::MAX),
+                    reason: format!("must hold between 1 and {bound} targets"),
+                });
+            }
+            if let Some(target) = resolved
+                .iter()
+                .find(|target| matches!(target, Target::Hostname(_)))
+            {
+                return Err(Error::InvalidProbeOption {
+                    option: "resolved_targets",
+                    reason: format!(
+                        "must hold only resolved numeric or scoped addresses, not {target:?}"
+                    ),
+                });
+            }
+        }
         if let Some(strategy) = &self.strategy {
             strategy.validate()?;
             if strategy.transport == Transport::Tcp && self.payload_size > 0 {

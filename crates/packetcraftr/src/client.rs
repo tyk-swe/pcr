@@ -37,6 +37,11 @@ pub struct Client<P, K = SystemClock> {
     pub(crate) neighbor_pause: Duration,
     pub(crate) interfaces: route::ResolvedInterface,
     pub(crate) cancellation: Option<Cancellation>,
+    /// An optional absolute deadline a containing operation already set: the
+    /// client's operation deadlines attach it as a parent so cooperative
+    /// boundaries enforce it, and a blocked provider may still overrun the
+    /// deadline it could not check.
+    pub(crate) parent_deadline: Option<Arc<Deadline>>,
 }
 
 impl<P> Client<P> {
@@ -53,6 +58,7 @@ impl<P> Client<P> {
             neighbor_pause: Duration::ZERO,
             interfaces: route::ResolvedInterface::default(),
             cancellation: None,
+            parent_deadline: None,
         }
     }
 }
@@ -72,6 +78,7 @@ impl<P, K: Clock> Client<P, K> {
             neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces,
             cancellation: self.cancellation,
+            parent_deadline: self.parent_deadline,
         }
     }
 
@@ -150,6 +157,7 @@ impl<P, K: Clock> Client<P, K> {
         let clock = self.clock.clone();
         Deadline::with_time_source(limit, move || clock.now())
             .with_cancellation(self.cancellation.clone())
+            .with_parent(self.parent_deadline.clone())
     }
 
     pub(crate) fn now(&self) -> Instant {
@@ -169,7 +177,21 @@ impl<P, K: Clock> Client<P, K> {
             neighbor_pause: self.neighbor_pause,
             interfaces: self.interfaces.clone(),
             cancellation: self.cancellation.clone(),
+            parent_deadline: self.parent_deadline.clone(),
         }
+    }
+
+    /// A view of this client whose operation deadlines attach the supplied
+    /// absolute `deadline` as a parent of the deadline each operation
+    /// derives: cooperative boundaries check it, so setup cannot extend or
+    /// restart its expiry, though it cannot guarantee a blocked provider
+    /// returns in wall-clock time. A parent already set stays attached, so
+    /// a narrower call can never widen an earlier bound.
+    #[must_use]
+    pub fn with_parent_deadline(&self, deadline: Deadline) -> Self {
+        let mut view = self.view_with_registry(Arc::clone(&self.registry));
+        view.parent_deadline = Some(Arc::new(deadline.with_parent(self.parent_deadline.clone())));
+        view
     }
 
     /// A view of this client whose operation packet and byte ceilings drop

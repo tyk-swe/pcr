@@ -20,7 +20,8 @@ use crate::probe::runner::{BatchEvidence, run_planned};
 use crate::probe::{Batch, Transport, check_probe_count, check_probe_duration, enforce_deadline};
 use crate::providers::{PacketProviders, TargetProviders};
 use crate::target::{
-    DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_selection, wire_limits,
+    DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_resolved_selection,
+    admit_selection, wire_limits,
 };
 use crate::traceroute::error::Probes;
 use crate::traceroute::request::tcp_payload;
@@ -170,24 +171,45 @@ fn approve<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<Approved, Error> {
     request.validate()?;
-    let (selected, plan) = admit_selection(
-        authorizer,
-        deadline,
-        &Probes,
-        DeclaredTargets {
-            selection: &request.targets,
-            family: FamilyGate::new(request.address_family, Error::family),
-            max_targets: request.max_targets,
-        },
-        Error::TargetSelection,
-        |selected| plan_hosts(request, &selected.targets),
-        |plan| {
-            Ok(wire_limits(
-                u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
-                plan.maximum_bytes,
-            ))
-        },
-    )?;
+    let declared = DeclaredTargets {
+        selection: &request.targets,
+        family: FamilyGate::new(request.address_family, Error::family),
+        max_targets: request.max_targets,
+    };
+    // An exact resolved handoff re-authorizes every supplied target; the
+    // bounded declaration still validates and gates for the report.
+    let (selected, plan) = if let Some(resolved) = &request.resolved_targets {
+        admit_resolved_selection(
+            authorizer,
+            deadline,
+            &Probes,
+            declared,
+            resolved,
+            Error::TargetSelection,
+            |selected| plan_hosts(request, &selected.targets),
+            |plan| {
+                Ok(wire_limits(
+                    u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
+                    plan.maximum_bytes,
+                ))
+            },
+        )?
+    } else {
+        admit_selection(
+            authorizer,
+            deadline,
+            &Probes,
+            declared,
+            Error::TargetSelection,
+            |selected| plan_hosts(request, &selected.targets),
+            |plan| {
+                Ok(wire_limits(
+                    u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
+                    plan.maximum_bytes,
+                ))
+            },
+        )?
+    };
     Ok(Approved {
         declared_target: selected.declared.clone(),
         resolved_addresses: selected.addresses(),

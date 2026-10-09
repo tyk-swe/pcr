@@ -173,7 +173,7 @@ impl<'r> Planner<'r> {
             in_flight: None,
             caches: (0..6).map(|_| Cache::new(max_age)).collect(),
             hosts: Vec::new(),
-            next_sequence: 0,
+            next_sequence: request.first_sequence,
         }
     }
 

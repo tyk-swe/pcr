@@ -36,6 +36,7 @@ use crate::traceroute::{
     classify_response,
 };
 use crate::{Sink, Stats};
+use packetcraftr_netio::link::Mode;
 
 const LOCAL: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
@@ -298,6 +299,8 @@ fn request(strategy: Option<Strategy>) -> Request {
     Request {
         targets: Selection::from(Target::Hostname("fixtures.invalid".parse().unwrap())),
         max_targets: 16,
+        first_sequence: 0,
+        resolved_targets: None,
         address_family: Family::Any,
         strategy,
         observed: Vec::new(),
@@ -487,10 +490,11 @@ fn assert_sound(request: &Request, traced: &Traced, network: &Network) {
         }
     }
     sequences.sort_unstable();
+    let first = request.first_sequence;
     assert_eq!(
         sequences,
-        (0..u64::try_from(probes.len()).unwrap()).collect::<Vec<_>>(),
-        "sequences are global and contiguous"
+        (first..first + u64::try_from(probes.len()).unwrap()).collect::<Vec<_>>(),
+        "sequences are global and contiguous from the request's first"
     );
 }
 
@@ -1917,4 +1921,120 @@ fn a_replayed_scan_udp_response_cannot_terminate_a_trace_hop() {
             );
         }
     }
+}
+
+#[test]
+fn a_link_layer_plan_that_traces_nothing_needs_no_pacing_room() {
+    // The pacing bound exists because each probe's possible neighbor request
+    // spends one interval inside the probe's window: a plan with no strategy
+    // and no observations sends nothing, so it keeps the same allowance the
+    // engine's admission check would.
+    for mode in [Mode::Auto, Mode::Layer2] {
+        let mut plan = request(None);
+        plan.route.link_mode = mode;
+        plan.probes_per_second = Some(1);
+        plan.timeout = Duration::from_millis(500);
+        plan.validate().expect("nothing to pace");
+
+        let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+        let traced = trace(&plan, &mut network);
+        assert_eq!(
+            traced.report.stats.packets_attempted, 0,
+            "{mode:?}: no traffic"
+        );
+        for host in &traced.report.hosts {
+            assert!(
+                matches!(host.state, State::NotTraced(_)),
+                "{mode:?}: {host:?}"
+            );
+        }
+        assert_eq!(network.batches, 0, "{mode:?}: refusal precedes batches");
+
+        // A strategy or observation brings the bound back.
+        let mut paced = plan.clone();
+        paced.strategy = Some(Strategy {
+            transport: Transport::Icmp,
+            destination_port: None,
+        });
+        let error = paced.validate().expect_err("the bound applies again");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidLimit {
+                    field: "probes_per_second",
+                    value: 1,
+                    ..
+                }
+            ),
+            "{mode:?}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn a_first_sequence_that_leaves_no_room_is_rejected_before_admission() {
+    let mut plan = request(tcp());
+    plan.first_sequence = u64::MAX;
+    let error = plan
+        .validate()
+        .expect_err("one probe already wraps the namespace");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "sequence",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn the_plan_numbers_probes_from_the_continuing_sequence() {
+    let mut network = Network::new([
+        (host(1), path(&[1], End::Reply)),
+        (host(2), path(&[1], End::Reply)),
+    ]);
+    let mut plan = request(Some(Strategy {
+        transport: Transport::Icmp,
+        destination_port: None,
+    }));
+    plan.first_sequence = 17;
+    let traced = trace(&plan, &mut network);
+    let sequences: Vec<u64> = traced
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Probe(probe) => Some(probe.sequence),
+            _ => None,
+        })
+        .collect();
+    assert!(!sequences.is_empty());
+    assert_eq!(sequences.iter().min(), Some(&17), "{sequences:?}");
+    // Every probe id belongs to this operation's namespace: none collides
+    // with the scan's 0-based numbering.
+    for (sequence, expected) in sequences.iter().zip(17..) {
+        assert_eq!(sequence, &expected);
+    }
+
+    // UDP destination ports still derive from each host's own probe count,
+    // not the global namespace: the offset changes ids alone.
+    let mut network = Network::new([(host(1), path(&[1], End::Silent))]);
+    let mut plan = request(Some(Strategy {
+        transport: Transport::Udp,
+        destination_port: Some(33_434),
+    }));
+    plan.first_sequence = 17;
+    plan.max_hops = 2;
+    let traced = trace(&plan, &mut network);
+    let ports: Vec<Option<u16>> = traced
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Probe(probe) => Some(probe.destination_port),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ports, [Some(33_434), Some(33_435)], "{ports:?}");
 }

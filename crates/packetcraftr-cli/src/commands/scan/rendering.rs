@@ -221,9 +221,24 @@ fn render_traceroute_text(trace: &output::traceroute::hosts::Report) -> Result<(
     }))?;
     write_summary_line(format_args!(
         "traced {} host(s); retained evidence {} byte(s)",
-        trace.hosts.len(),
+        traced_hosts(trace),
         trace.retained_evidence_bytes
     ))
+}
+
+/// Count complete and incomplete traces, excluding not-traced records.
+fn traced_hosts(trace: &output::traceroute::hosts::Report) -> usize {
+    trace
+        .hosts
+        .iter()
+        .filter(|host| {
+            matches!(
+                host.summary.status,
+                output::traceroute::hosts::Status::Complete
+                    | output::traceroute::hosts::Status::Incomplete
+            )
+        })
+        .count()
 }
 
 fn strategy_text(strategy: packetcraftr::probe::Transport, port: Option<u16>) -> String {
@@ -589,8 +604,49 @@ fn endpoint_text(
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+
     use super::*;
+    use output::traceroute::hosts::Status;
     use output::{network::InterfaceId, scan::Classification};
+
+    fn traced_report(statuses: &[Status]) -> output::traceroute::hosts::Report {
+        output::traceroute::hosts::Report {
+            plan: output::traceroute::hosts::Plan {
+                first_hop: 1,
+                max_hops: 8,
+                attempts: 1,
+                max_probes: 1000,
+                strategy: None,
+                reuse: None,
+            },
+            hosts: statuses
+                .iter()
+                .map(|status| output::traceroute::hosts::Host {
+                    summary: output::traceroute::hosts::Summary {
+                        address: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                        scope: None,
+                        status: *status,
+                        reason: None,
+                        completion: None,
+                        selection: None,
+                        reused_hops: Vec::new(),
+                    },
+                    hops: Vec::new(),
+                })
+                .collect(),
+            undecoded: Vec::new(),
+            retained_evidence_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn the_traced_count_covers_only_hosts_the_trace_probed() {
+        let mixed = traced_report(&[Status::Complete, Status::Incomplete, Status::NotTraced]);
+        assert_eq!(traced_hosts(&mixed), 2);
+        let none = traced_report(&[Status::NotTraced, Status::NotTraced]);
+        assert_eq!(traced_hosts(&none), 0);
+    }
 
     #[test]
     fn text_endpoints_distinguish_identical_ipv6_addresses_on_different_interfaces() {

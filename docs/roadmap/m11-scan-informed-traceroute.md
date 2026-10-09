@@ -135,7 +135,14 @@ incomplete.
   stage runs inside the policy packet and byte allowance remaining after
   the scan's traffic (`with_remaining_budget`), so an exhausted budget
   refuses further trace traffic; a plan that traces no host requires no
-  additional allowance. The
+  additional allowance, and it also skips the neighbor-pacing timeout bound
+  a probing plan would face. The scan hands the trace its exact resolved
+  hosts through `resolved_targets` — numeric or scoped targets each
+  re-authorized on entry — while `targets` keeps the original bounded
+  declaration, and trace probes continue the scan's sequence namespace via
+  `first_sequence` — so no trace identifier collides with a scan probe's.
+  The command's absolute deadline is the parent of each stage's own bound,
+  so no stage's setup can extend its expiry. The
   requests actually sent count in the operation's statistics. The stage spends
   what is left of `--max-duration`, takes a monotonic pacing marker from the
   stage before it — so a scan or trace that sent anything owes the next stage

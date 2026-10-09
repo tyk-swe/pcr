@@ -8,7 +8,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
+use common::Step;
+use common::clock::VirtualClock;
 use common::responder::{Arrival, Io, Path, Routes, State};
+use packetcraftr::clock::Clock;
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::probe::{ProbeStatus, Transport};
 use packetcraftr::scan::{self, Reply};
@@ -55,6 +58,8 @@ fn request(octets: &[u8]) -> Request {
             exclude: Vec::new(),
         },
         max_targets: 16,
+        first_sequence: 0,
+        resolved_targets: None,
         address_family: Family::Any,
         strategy: Some(Strategy {
             transport: Transport::Tcp,
@@ -1021,4 +1026,261 @@ fn a_tcp_observation_rejects_payload_before_hostname_resolution() {
         }];
         assert!(plan.validate().is_ok(), "{strategy:?}");
     }
+}
+
+#[test]
+fn an_exact_resolved_handoff_does_not_expand_the_declaration() {
+    // The scan's 4097 resolved hosts fit under one compact /115
+    // declaration: the bounded selection stays for audit while the exact
+    // list drives the plan, so no host even resolves.
+    let address =
+        |index: u16| IpAddr::V6(std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, index));
+    let state = network(&[]);
+    let providers = common::providers(Routes, Io(Arc::clone(&state)));
+    let steps = providers.resolver.steps.clone();
+    let open = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        Policy::default(),
+        providers,
+    );
+    let resolved: Vec<packetcraftr::target::Target> = (0..4097u16)
+        .map(|index| packetcraftr::target::Target::Address(address(index)))
+        .collect();
+    let mut plan = request(&[]);
+    plan.targets = Selection {
+        include: vec!["2001:db8::/115".parse().unwrap()],
+        exclude: Vec::new(),
+    };
+    plan.max_targets = 5_000;
+    plan.strategy = None;
+    plan.resolved_targets = Some(resolved);
+    let collector = Collector::default();
+    let report = open
+        .trace_hosts(plan, collector.clone())
+        .expect("the bounded declaration admits the exact list");
+    let aggregate = collector.finish(report).expect("the plan aggregates");
+    assert_eq!(aggregate.hosts.len(), 4097);
+    assert!(
+        aggregate
+            .hosts
+            .iter()
+            .all(|host| matches!(host.host.state, HostState::NotTraced(_))),
+        "no host traces without a strategy or observation"
+    );
+    assert!(
+        steps
+            .take()
+            .iter()
+            .all(|step| !matches!(step, Step::Resolve(_))),
+        "no resolution"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!((state.armed, state.sends), (0, 0));
+
+    // The declaration's own bound still applies: the same count written out
+    // as individual specifications is over the selection limit.
+    let mut too_many_specs = request(&[]);
+    too_many_specs.targets = Selection {
+        include: (0..4097u16)
+            .map(|index| packetcraftr::target::Target::Address(address(index)).into())
+            .collect(),
+        exclude: Vec::new(),
+    };
+    assert!(
+        matches!(
+            too_many_specs.validate(),
+            Err(traceroute::Error::TargetSelection(_))
+        ),
+        "spec expansion still rejects the unbounded list"
+    );
+}
+
+#[test]
+fn a_resolved_handoff_reauthorizes_every_target_it_was_given() {
+    let state = network(&[]);
+    let open = client(&state, Policy::default());
+    let declared = || Selection {
+        include: vec!["192.0.2.0/24".parse().unwrap()],
+        exclude: Vec::new(),
+    };
+
+    // No hostname sneaks through the resolved path: the request must be
+    // rejected before any provider runs.
+    let mut plan = request(&[]);
+    plan.targets = declared();
+    plan.resolved_targets = Some(vec![packetcraftr::target::Target::Hostname(
+        "unresolved.invalid".parse().unwrap(),
+    )]);
+    for error in [
+        plan.validate().expect_err("hostnames cannot hand off"),
+        open.trace_hosts(plan.clone(), |_| Ok(()))
+            .expect_err("validation precedes resolution"),
+    ] {
+        assert!(
+            matches!(
+                error,
+                traceroute::Error::InvalidProbeOption {
+                    option: "resolved_targets",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    // And the per-request bound still applies to the exact list.
+    let mut plan = request(&[]);
+    plan.targets = declared();
+    plan.max_targets = 1;
+    plan.resolved_targets = Some(vec![
+        packetcraftr::target::Target::Address(IpAddr::V4(host(11))),
+        packetcraftr::target::Target::Address(IpAddr::V4(host(12))),
+    ]);
+    let error = plan.validate().expect_err("the bound applies");
+    assert!(
+        matches!(
+            error,
+            traceroute::Error::InvalidLimit {
+                field: "resolved_targets",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+
+    // A supplied address the policy refuses is denied before any I/O: the
+    // handoff authorizes each target anew.
+    let denied = Policy {
+        allowed_destinations: vec![DestinationConstraint::Exact(IpAddr::V4(host(99)))],
+        ..Policy::default()
+    };
+    let mut plan = request(&[]);
+    plan.targets = declared();
+    plan.resolved_targets = Some(vec![packetcraftr::target::Target::Address(IpAddr::V4(
+        host(11),
+    ))]);
+    let error = client(&state, denied)
+        .trace_hosts(plan, |_| Ok(()))
+        .expect_err("the policy denies the supplied address");
+    assert!(
+        error.classification().code.starts_with("policy."),
+        "{error:?}"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!((state.armed, state.sends), (0, 0));
+}
+
+#[test]
+fn a_parent_deadline_caps_the_trace_whatever_the_plan_allows() {
+    // The parent's virtual second is already spent: the operation refuses
+    // before resolving, capturing, or sending despite the request's own
+    // ten-second limit.
+    let state = network(&[(11, &[1], Arrival::Reply)]);
+    let clock = VirtualClock::default();
+    let source = clock.clone();
+    // The clock is attached after the parent and a narrower-budget view is
+    // attached after that: every view composition keeps the bound.
+    let expired = client(&state, Policy::default())
+        .with_parent_deadline(packetcraftr_core::budget::Deadline::with_time_source(
+            Duration::from_secs(1),
+            move || source.now(),
+        ))
+        .with_clock(clock.clone())
+        .with_remaining_budget(&Stats::default());
+    let mut plan = request(&[11]);
+    plan.max_hops = 1;
+    clock.advance(Duration::from_secs(2));
+    let error = expired
+        .trace_hosts(plan.clone(), |_| Ok(()))
+        .expect_err("the parent deadline already expired");
+    assert!(
+        matches!(error, traceroute::Error::DurationLimit { .. }),
+        "{error:?}"
+    );
+    assert_eq!(state.lock().unwrap().sends, 0);
+
+    // A wider parent attached afterwards cannot extend the earlier bound:
+    // the spent parent stays composed underneath.
+    let source = clock.clone();
+    let widening = expired.with_parent_deadline(
+        packetcraftr_core::budget::Deadline::with_time_source(Duration::from_secs(3), move || {
+            source.now()
+        }),
+    );
+    let error = widening
+        .trace_hosts(plan.clone(), |_| Ok(()))
+        .expect_err("the narrow parent still holds");
+    assert!(
+        matches!(error, traceroute::Error::DurationLimit { .. }),
+        "{error:?}"
+    );
+    assert_eq!(state.lock().unwrap().sends, 0);
+
+    // The same parent also stops the run mid-plan: the first host's Host
+    // event spends the rest of the parent inside the sink, and the second
+    // host never probes.
+    let state = network(&[(11, &[1], Arrival::Reply), (12, &[1], Arrival::Reply)]);
+    let clock = VirtualClock::default();
+    let source = clock.clone();
+    let parented = client(&state, Policy::default())
+        .with_clock(clock.clone())
+        .with_parent_deadline(packetcraftr_core::budget::Deadline::with_time_source(
+            Duration::from_secs(1),
+            move || source.now(),
+        ));
+    plan.targets = request(&[11, 12]).targets;
+    let sink_clock = clock.clone();
+    let error = parented
+        .trace_hosts(plan, move |event: hosts::Event| {
+            if let hosts::Event::Host(_) = event {
+                sink_clock.advance(Duration::from_secs(2));
+            }
+            Ok(())
+        })
+        .expect_err("the parent bound the whole operation");
+    assert!(
+        matches!(error, traceroute::Error::DurationLimit { .. }),
+        "{error:?}"
+    );
+    assert_eq!(
+        state.lock().unwrap().sends,
+        1,
+        "only the first host's probe ran"
+    );
+}
+
+#[test]
+fn a_resolved_handoff_dedups_excludes_and_filters_by_family() {
+    // Three copies of one valid address, one excluded, one off-family: the
+    // strict set admits exactly the unique in-scope host.
+    let state = network(&[]);
+    let mut plan = request(&[]);
+    plan.targets = Selection {
+        include: vec!["192.0.2.0/24".parse().unwrap()],
+        exclude: vec!["192.0.2.12".parse().unwrap()],
+    };
+    plan.address_family = Family::Ipv4;
+    plan.strategy = None;
+    plan.resolved_targets = Some(vec![
+        packetcraftr::target::Target::Address(IpAddr::V4(host(11))),
+        packetcraftr::target::Target::Address(IpAddr::V4(host(11))),
+        packetcraftr::target::Target::Address(IpAddr::V4(host(11))),
+        packetcraftr::target::Target::Address(IpAddr::V4(host(12))),
+        packetcraftr::target::Target::Address(IpAddr::V6(std::net::Ipv6Addr::new(
+            0x2001, 0xdb8, 0, 0, 0, 0, 0, 11,
+        ))),
+    ]);
+    let collector = Collector::default();
+    let report = client(&state, Policy::default())
+        .trace_hosts(plan, collector.clone())
+        .expect("the strict set admits");
+    let aggregate = collector.finish(report).expect("the plan aggregates");
+    assert_eq!(aggregate.hosts.len(), 1);
+    assert_eq!(aggregate.hosts[0].host.address, IpAddr::V4(host(11)));
+    assert!(matches!(
+        aggregate.hosts[0].host.state,
+        HostState::NotTraced(_)
+    ));
+    let state = state.lock().unwrap();
+    assert_eq!((state.armed, state.sends), (0, 0));
 }

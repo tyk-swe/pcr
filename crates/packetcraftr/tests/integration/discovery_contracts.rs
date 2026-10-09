@@ -1243,6 +1243,8 @@ fn trace_request(
             exclude: Vec::new(),
         },
         max_targets: 16,
+        first_sequence: 0,
+        resolved_targets: None,
         address_family: Family::Any,
         strategy: Some(packetcraftr::traceroute::hosts::Strategy {
             transport: packetcraftr::probe::Transport::Tcp,

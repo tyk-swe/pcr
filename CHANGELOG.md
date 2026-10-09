@@ -2000,6 +2000,21 @@ All notable changes to PacketcraftR are documented here. The format follows
 - A multi-host trace resting on a TCP observation rejects a nonzero
   `payload_size` before hostname resolution, not only when TCP is the
   fallback strategy.
+- The trace stage on an automatic or link-layer route only enforces the
+  neighbor pacing interval when the plan can actually probe: a no-strategy,
+  no-observation trace stays admissible since it resolves no neighbor.
+- Trace probe sequences continue the scan's namespace via
+  `hosts::Request::first_sequence` instead of restarting at zero, so no
+  trace probe's identifier collides with one scan evidence already cites.
+- `hosts::Request::resolved_targets` hands the scan's exact resolved hosts
+  to the trace (numeric or scoped addresses only, each re-authorized) while
+  `targets` keeps the original bounded declaration; a 4 096+ host scan no
+  longer expands to 4 096+ selection specs.
+- The raw `scan` command bounds the whole operation with an absolute
+  parent deadline (`Client::with_parent_deadline`) shared by the scan,
+  trace, and reverse-DNS stages, so stage setup cannot extend its expiry.
+- The text summary counts only records the trace marks complete or
+  incomplete, not not-traced records.
 - `scan --traceroute` and the reverse-DNS lookups after it run inside the
   scan's policy packet and byte budget rather than a fresh one: the trace
   stage and each lookup share `Client::with_remaining_budget`, so an

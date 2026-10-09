@@ -40,7 +40,7 @@ impl From<Transport> for packetcraftr_core::document::service_probes::Transport 
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Selected numeric IP:port endpoints; IPv6 uses [address]:port.
+    /// Selected numeric IP:port endpoints; IPv6 uses `[address]:port`.
     #[arg(value_name = "ENDPOINT", required = true)]
     pub(crate) endpoints: Vec<SocketAddr>,
     /// Transport of every selected endpoint; services may use any port.

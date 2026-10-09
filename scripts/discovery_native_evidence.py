@@ -84,7 +84,7 @@ def validate(report, expected_commit=None, require_complete=False):
                     validate_router_evidence(output, case['family'] == 'ipv4', case['name'] == 'discovery-blocked')
                 result = output['result']
                 targets = ['127.0.0.1' if case['family'] == 'ipv4' else '::1']
-                if report['platform'] == 'Linux' and not socket:
+                if report['platform'] == 'Linux' and not case['name'].startswith('connect-'):
                     local = addresses(case['family'] == 'ipv4')
                     index = list(REASONS).index(case['name'])
                     targets = local[1:3] if index == 5 else [local[-1] if index == 4 else local[index + 1]]

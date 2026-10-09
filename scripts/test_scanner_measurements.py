@@ -3,6 +3,7 @@ import copy
 import json
 import pathlib
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -24,6 +25,13 @@ adaptive_spec.loader.exec_module(adaptive_scenarios)
 
 
 class AdaptiveScenarioMeasurements(unittest.TestCase):
+    def test_bounded_measurement_retains_timeout_output(self):
+        command = [sys.executable, '-c', "import time; print('partial output', flush=True); time.sleep(5)"]
+        with mock.patch.object(benchmark, 'PROCESS_TIMEOUT', 0.5):
+            with self.assertRaises(subprocess.TimeoutExpired) as failed:
+                benchmark.measured(command)
+        self.assertIn('partial output', failed.exception.stdout)
+
     def record(self, scenario="responsive-many", mode="adaptive"):
         config = adaptive_scenarios.SCENARIOS[scenario]
         oracle = adaptive_scenarios.expected(scenario, mode)

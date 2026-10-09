@@ -67,6 +67,18 @@ def privileged():
     return bool(ctypes.windll.shell32.IsUserAnAdmin())
 
 
+def captured(command, timeout):
+    """Retain timeout diagnostics; a terminated child never counts as success."""
+    try:
+        process = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+        return dict(command=command, exit_code=process.returncode, stdout=process.stdout, stderr=process.stderr)
+    except subprocess.TimeoutExpired as error:
+        def text(value):
+            return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value or ''
+        return dict(command=command, exit_code=None, stdout=text(error.stdout), stderr=text(error.stderr),
+                    error='process exceeded its finite timeout')
+
+
 def execute(args, report):
     if args.emit_unavailable:
         return
@@ -82,13 +94,12 @@ def execute(args, report):
     for profile in report['profiles']:
         command = ['cargo', 'build', '--locked', '-p', 'packetcraftr-cli',
                    *host_native.FEATURES[profile['name']], '--message-format=json']
-        built = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=900)
-        profile['build'] = dict(command=command, exit_code=built.returncode, stdout=built.stdout,
-                                stderr=built.stderr, execution='compilation')
-        if built.returncode:
+        built = captured(command, timeout=900)
+        profile['build'] = dict(built, execution='compilation')
+        if built['exit_code'] != 0:
             profile['error'] = 'native CLI build failed; compilation is not runtime evidence'
             raise RuntimeError(profile['error'])
-        binary, = [row['executable'] for row in map(json.loads, built.stdout.splitlines())
+        binary, = [row['executable'] for row in map(json.loads, built['stdout'].splitlines())
                    if row.get('reason') == 'compiler-artifact' and row.get('executable')
                    and row.get('target', {}).get('name') == 'packetcraftr']
         directory = args.report.parent / profile['name']
@@ -108,9 +119,8 @@ def execute(args, report):
             child_report.unlink(missing_ok=True)
             command = ['unshare', '--user', *mapping, '--net', sys.executable, str(pathlib.Path(__file__).resolve()),
                        '--binary', str(preserved), '--report', str(child_report), '--parent-namespace', str(namespace)]
-            output = subprocess.run(command, capture_output=True, text=True, timeout=180)
-            profile['launcher'] = dict(command=command, exit_code=output.returncode,
-                                        stdout=output.stdout, stderr=output.stderr)
+            output = captured(command, timeout=180)
+            profile['launcher'] = output
             if not child_report.exists():
                 profile['scenarios'] = [unavailable(case, family, 'isolation_unavailable',
                     'Fresh network namespace admission failed; launcher output is preserved.') for case, family in inventory()]
@@ -119,7 +129,7 @@ def execute(args, report):
             if evidence.get('error'):
                 raise RuntimeError(evidence['error'])
             profile.update(isolation=evidence['isolation'], scenarios=evidence['scenarios'])
-            if output.returncode and not any(case['status'] == 'failed' for case in profile['scenarios']):
+            if output['exit_code'] != 0 and not any(case['status'] == 'failed' for case in profile['scenarios']):
                 raise RuntimeError('failed namespace process cannot close a native discovery scenario')
         else:
             profile.update(isolation=dict(kind='host_local_only', external_destinations=False, interface_mutation=False),
@@ -149,6 +159,11 @@ def main():
     report = initial_report(args.profiles)
     try:
         execute(args, report)
+        if not args.emit_unavailable:
+            settled = initial_report(args.profiles)
+            bindings = ('commit', 'corpus_sha256', 'fixture_sha256', 'peer_fixture_sha256', 'launcher_sha256')
+            if settled['dirty'] or any(settled[key] != report[key] for key in bindings):
+                raise ValueError('native discovery sources or revision changed during execution')
     except Exception as error:
         report['error'] = str(error)
     finally:

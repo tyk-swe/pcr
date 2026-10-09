@@ -160,4 +160,4 @@ explicitly unavailable, never exercised. `--require-complete` fails on missing
 required coverage; portable/pcap-free raw capability refusals count only when
 the actual typed admission failure and nonzero process result were retained.
 See [M5](roadmap/m05-host-discovery.md#discovery-validation) for commands and
-current acceptance limits.
+current acceptance limits and explicitly skipped platform-isolation checks.

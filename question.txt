@@ -1,0 +1,1 @@
+Do you have an approved isolated macOS/Windows test environment for on-link, routed, and shared-MAC discovery, with Npcap already installed on Windows? The reviewed hosted tests are running, but their loopback-only safety scope cannot cover those remaining native cases.

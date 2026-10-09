@@ -121,6 +121,7 @@ def measured(command):
     for reader in readers:
         reader.start()
     peak = None
+    failure = None
     deadline = time.monotonic() + PROCESS_TIMEOUT
     try:
         if hasattr(os, "wait4"):
@@ -135,13 +136,18 @@ def measured(command):
                 time.sleep(0.001)
         else:
             process.wait(timeout=PROCESS_TIMEOUT)
-    except BaseException:
+    except BaseException as error:
         process.kill()
         process.wait()
-        raise
+        failure = error
     finally:
         for reader in readers:
             reader.join(timeout=2)
+    if failure is not None:
+        if isinstance(failure, subprocess.TimeoutExpired):
+            failure.output = buffers[0].decode('utf-8', errors='replace')
+            failure.stderr = buffers[1].decode('utf-8', errors='replace')
+        raise failure
     if any(reader.is_alive() for reader in readers) or overflow.is_set():
         raise ValueError("benchmark output exceeded its finite bound or did not close")
     return {

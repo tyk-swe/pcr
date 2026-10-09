@@ -5,6 +5,8 @@ import copy
 import importlib.util
 import json
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -39,6 +41,45 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 validate(changed)
 
+    def test_exercised_socket_contract_checks_targets_modes_and_evidence(self):
+        report = launcher.initial_report(['portable'])
+        profile = report['profiles'][0]
+        profile.update(execution='privileged_native', privilege_granted=True, binary_sha256='0' * 64,
+                       isolation=dict(kind='fresh_network_namespace', namespace=2, parent_namespace=1))
+        case = next(row for row in profile['scenarios']
+                    if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
+        case.clear()
+        case.update(name='connect-responsive', family='ipv4', status='exercised', runs=[])
+        for mode in ('only', 'before', 'before_all'):
+            scan = 'not_requested' if mode == 'only' else 'scanned'
+            output = dict(schema='packetcraftr.output/v10', status='success', result=dict(
+                hosts=[dict(address='127.0.0.1', discovery='responded', scan=scan,
+                            reasons=[dict(kind='tcp_connected', evidence='socket', basis='direct')])],
+                endpoints=[] if mode == 'only' else [{}]))
+            case['runs'].append(dict(mode=mode, exit_code=0, stderr='', stdout=json.dumps(output),
+                command=['fixture', '--output', 'json', 'scan', '127.0.0.1'],
+                observation=dict(discovery='responded', scan=scan, reasons=['tcp_connected'],
+                                 hosts=1, endpoints=0 if mode == 'only' else 1)))
+        validate(report)
+        for mutation in ('target', 'command', 'evidence', 'modes', 'exit'):
+            changed = copy.deepcopy(report)
+            observed = next(row for row in changed['profiles'][0]['scenarios']
+                            if row['name'] == 'connect-responsive' and row['family'] == 'ipv4')
+            output = json.loads(observed['runs'][0]['stdout'])
+            if mutation == 'target':
+                output['result']['hosts'][0]['address'] = '203.0.113.9'
+            elif mutation == 'command':
+                observed['runs'][0]['command'][4] = '203.0.113.9'
+            elif mutation == 'evidence':
+                output['result']['hosts'][0]['reasons'][0]['evidence'] = 'wire'
+            elif mutation == 'modes':
+                observed['runs'].pop()
+            else:
+                observed['runs'][0]['exit_code'] = None
+            observed['runs'][0]['stdout'] = json.dumps(output)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                validate(changed)
+
     def test_review_binding_rejects_a_different_or_dirty_revision(self):
         report = launcher.initial_report(['full-native'])
         with self.assertRaises(ValueError):
@@ -57,6 +98,35 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
             self.assertIn('error', observed)
             self.assertEqual(observed['stdout'], json.dumps(output))
             self.assertEqual(observed['stderr'], 'retained diagnostic')
+
+    def test_changed_sources_cannot_close_a_native_execution(self):
+        report = launcher.initial_report(['portable'])
+        report['dirty'] = False
+        settled = copy.deepcopy(report)
+        settled['fixture_sha256'] = '1' * 64
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory) / 'report.json'
+            arguments = ['discovery', '--reviewed-commit', report['commit'], '--profiles', 'portable',
+                         '--report', str(destination)]
+            with patch.object(sys, 'argv', arguments), patch.object(launcher, 'execute'), \
+                    patch.object(launcher, 'initial_report', side_effect=[report, settled]):
+                self.assertEqual(launcher.main(), 1)
+            observed = json.loads(destination.read_text())
+            self.assertIn('sources or revision changed', observed['error'])
+
+    def test_timeouts_preserve_diagnostics_without_becoming_exercised(self):
+        failure = subprocess.TimeoutExpired(['fixture'], 15, output='partial stdout', stderr='partial stderr')
+        with patch.object(measurements, 'measured', side_effect=failure):
+            observed = run('fixture', ['127.0.0.1'], 'only', ['--connect'], 'responded', {'tcp_refused'})
+        self.assertEqual(observed['stdout'], 'partial stdout')
+        self.assertEqual(observed['stderr'], 'partial stderr')
+        self.assertIsNone(observed['exit_code'])
+        self.assertEqual(observed['error']['code'], 'fixture.timeout')
+        with patch.object(launcher.subprocess, 'run', side_effect=failure):
+            observed = launcher.captured(['fixture'], timeout=15)
+        self.assertEqual(observed['stdout'], 'partial stdout')
+        self.assertEqual(observed['stderr'], 'partial stderr')
+        self.assertIsNone(observed['exit_code'])
 
     def test_discovery_corpus_rejects_missing_duplicate_and_single_family_conditions(self):
         corpus, _ = measurements.load_corpus(ROOT / 'docs/scanner-corpus.v1.json')

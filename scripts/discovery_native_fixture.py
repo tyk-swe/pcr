@@ -7,6 +7,7 @@ import json
 import ipaddress
 import pathlib
 import socket
+import subprocess
 import threading
 
 from discovery_isolated_fixture import SCANNER, addresses
@@ -38,7 +39,12 @@ def run(binary, targets, mode, options, expected_state, expected_reasons, eviden
         command += ['--ports', str(scan_port) if evidence == 'wire' else options[-1]]
     if mode == 'before_all':
         command += ['--unresponsive-hosts', 'scan']
-    measured = measurements.measured(command)
+    try:
+        measured = measurements.measured(command)
+    except subprocess.TimeoutExpired as error:
+        return dict(command=command, mode=mode, exit_code=None,
+                    stdout=error.stdout or '', stderr=error.stderr or '',
+                    error=dict(code='fixture.timeout', message=str(error)))
     measured['mode'] = mode
     try:
         output = measurements.strict_json(measured['stdout'])

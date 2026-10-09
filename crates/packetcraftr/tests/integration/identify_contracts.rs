@@ -110,6 +110,7 @@ struct FakeUdp {
     wrong_id: bool,
     cancellation: Option<Cancellation>,
     empty_response: bool,
+    peer: Option<SocketAddr>,
 }
 
 type DatagramCall = (SocketAddr, Vec<u8>, usize);
@@ -142,7 +143,7 @@ impl udp::Provider for FakeUdp {
             signal.cancel();
         }
         Ok(udp::Reply {
-            peer: endpoint,
+            peer: self.peer.unwrap_or(endpoint),
             local: "127.0.0.1:40001".parse().expect("local"),
             exchange: bounded::Exchange {
                 response: Bytes::from(response),
@@ -946,6 +947,23 @@ fn host_and_operation_read_limits_bound_retained_bytes() {
 }
 
 #[test]
+fn ssh_identification_completes_even_when_binary_data_arrives_in_the_same_read() {
+    let response = b"notice\r\nSSH-2.0-OpenSSH_9.8p1\r\n\x00\x00\x00\x0c\x06\x14binary";
+    let tcp = FakeTcp::replying([response.to_vec()]);
+    let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "ssh-banner");
+    let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+    assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+    let evidence = &report.records[0].probes[0];
+    assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+    assert_eq!(evidence.response, response);
+    assert_eq!(
+        report.records[0].candidates[0].version.as_deref(),
+        Some("9.8p1")
+    );
+}
+
+#[test]
 fn changed_peer_is_rejected_before_any_request_bytes_are_written() {
     let tcp = FakeTcp {
         peer: Some("127.0.0.2:38080".parse().expect("other peer")),
@@ -958,6 +976,61 @@ fn changed_peer_is_rejected_before_any_request_bytes_are_written() {
         Err(identify::Error::Provider { .. })
     ));
     assert!(tcp.writes.lock().expect("writes").is_empty());
+}
+
+#[test]
+fn peer_checks_ignore_only_irrelevant_ipv6_scopes() {
+    for transport in [identify::Transport::Tcp, identify::Transport::Udp] {
+        for (expected, actual, accepted) in [
+            ("[::1%7]:38080", "[::1]:38080", true),
+            ("[2001:db8::1%7]:38080", "[2001:db8::1]:38080", true),
+            ("[fe80::1%7]:38080", "[fe80::1%7]:38080", true),
+            ("[fe80::1%7]:38080", "[fe80::1%8]:38080", false),
+            ("[fe80::1%7]:38080", "[fe80::1]:38080", false),
+            ("[::1%7]:38080", "[::2]:38080", false),
+            ("[::1%7]:38080", "[::1]:38081", false),
+        ] {
+            let peer = Some(actual.parse().unwrap());
+            let tcp = FakeTcp {
+                peer,
+                ..FakeTcp::replying([b"HTTP/1.0 200 OK\r\nServer: nginx/1.27.2\r\n\r\n".to_vec()])
+            };
+            let udp = FakeUdp {
+                peer,
+                ..FakeUdp::default()
+            };
+            let mut request = request(vec![identify::Endpoint {
+                address: expected.parse().unwrap(),
+                transport,
+            }]);
+            corpus_with(
+                &mut request,
+                if transport == identify::Transport::Tcp {
+                    "http-head"
+                } else {
+                    "dns-udp"
+                },
+            );
+            let client = Client::new(
+                builtin::registry(),
+                Policy {
+                    allow_public_destinations: true,
+                    ..Policy::default()
+                },
+                ProviderSet::tcp(tcp.clone(), ()).with_udp(udp),
+            );
+            let result = client.identify(&request);
+            if accepted {
+                assert_eq!(
+                    result.unwrap().records[0].outcome,
+                    identify::Outcome::Matched
+                );
+            } else {
+                assert!(matches!(result, Err(identify::Error::Provider { .. })));
+                assert!(tcp.writes.lock().unwrap().is_empty());
+            }
+        }
+    }
 }
 
 #[test]

@@ -79,6 +79,40 @@ fn schema_accepts_based_source_reject_zero() {
 }
 
 #[test]
+fn service_probe_ascii_fields_agree_with_runtime_validation() {
+    use packetcraftr_core::document::service_probes;
+
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    for character in (0..=127).map(char::from).chain(['é', '中', '🦀']) {
+        for version_stop in [false, true] {
+            let mut document = original.clone();
+            let expected = character.is_ascii() && (version_stop || !character.is_ascii_control());
+            if version_stop {
+                document["matches"][0]["version"]["stop_at"] = character.to_string().into();
+            } else {
+                document["matches"][0]["prefix"] = format!("OpenSSH_{character}").into();
+            }
+            assert_eq!(
+                service_probes::parse(&serde_json::to_vec(&document).unwrap()).is_ok(),
+                expected,
+                "parser: {character:?}, version stop: {version_stop}"
+            );
+            assert_eq!(
+                schema.is_valid(&document),
+                expected,
+                "schema: {character:?}, version stop: {version_stop}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rewrite_v2_reject_assignment_properties() {
     let document = json!({
         "schema": "packetcraftr.rewrite/v2",

@@ -240,7 +240,8 @@
           "prefix": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 512
+            "maxLength": 512,
+            "pattern": "^[ -~]+$"
           },
           "product": {
             "type": "string",
@@ -268,7 +269,8 @@
                   "stop_at": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 32
+                    "maxLength": 32,
+                    "pattern": "^[\\u0000-\\u007f]+$"
                   }
                 }
               }

@@ -77,6 +77,34 @@ fn connected_udp_filters_other_peers_and_preserves_oversized_prefix() {
 }
 
 #[test]
+fn connected_udp_accepts_an_irrelevant_ipv6_scope_normalized_by_the_socket() {
+    let server = UdpSocket::bind("[::1]:0").unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let std::net::SocketAddr::V6(mut endpoint) = server.local_addr().unwrap() else {
+        unreachable!("IPv6 fixture");
+    };
+    endpoint.set_scope_id(7);
+    let responder = std::thread::spawn(move || {
+        let mut buffer = [0; 16];
+        let (count, peer) = server.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..count], b"query");
+        server.send_to(b"reply", peer).unwrap();
+    });
+    let result = udp::SystemProvider.exchange(
+        endpoint.into(),
+        b"query",
+        32,
+        &Deadline::new(Duration::from_secs(3)),
+    );
+    responder.join().unwrap();
+    let reply = result.unwrap();
+    assert_eq!(reply.exchange.response.as_ref(), b"reply");
+    assert!(matches!(reply.exchange.outcome, Outcome::Complete));
+}
+
+#[test]
 fn udp_timeout_preserves_sent_bytes_without_retransmission() {
     let server = UdpSocket::bind("127.0.0.1:0").unwrap();
     server

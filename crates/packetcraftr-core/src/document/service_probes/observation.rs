@@ -4,8 +4,8 @@
 use bytes::Bytes;
 
 use super::{
-    Field, MAX_FIELD_BYTES, MAX_RESPONSE_BYTES, Observation, ObservationOutcome, ObservedField,
-    Probe, Protocol, Request,
+    Field, MAX_FIELD_BYTES, MAX_OBSERVED_FIELDS, MAX_RESPONSE_BYTES, Observation,
+    ObservationOutcome, ObservedField, Probe, Protocol, Request,
 };
 use crate::{
     document::udp_profiles::Payload,
@@ -53,7 +53,10 @@ fn failure(
 }
 
 fn field(observation: &mut Observation, name: Field, value: &[u8]) {
-    if value.len() <= MAX_FIELD_BYTES {
+    if observation.fields.len() >= MAX_OBSERVED_FIELDS {
+        observation.outcome = ObservationOutcome::Truncated;
+        observation.diagnostic = Some("observed field count exceeds its bounded limit".into());
+    } else if value.len() <= MAX_FIELD_BYTES {
         observation.fields.push(ObservedField {
             field: name,
             value: value.to_vec(),

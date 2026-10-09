@@ -19,6 +19,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 - DNS decoding recognizes CHAOS-class TXT metadata used by `version.bind`,
   retaining its original wire class and bounded character-string values.
 
+### Fixed
+
+- Service observations enforce the retained-field cap while parsing, reporting
+  excess valid fields as truncated rather than retaining oversized evidence.
+  The service-probe schema now enforces the parser's ASCII match-prefix and
+  version-delimiter contracts.
+- Bounded TCP exchanges flush nonempty requests under the write deadline before
+  reading replies, including injected buffered streams. SSH identification stops
+  after its complete banner even when subsequent binary data shares the read.
+- Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs
+  while preserving exact addresses, ports, and link-local or multicast scopes.
+
 ### Breaking
 
 - Structured command output moves to `packetcraftr.output/v11`, adding explicit

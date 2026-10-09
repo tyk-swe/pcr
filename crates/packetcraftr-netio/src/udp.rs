@@ -66,7 +66,7 @@ impl Provider for SystemProvider {
         socket.connect(endpoint)?;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
-        if peer != endpoint {
+        if !crate::bounded::same_peer(endpoint, peer) {
             return Err(Error::Peer {
                 expected: endpoint,
                 actual: peer,

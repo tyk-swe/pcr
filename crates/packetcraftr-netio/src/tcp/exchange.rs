@@ -8,7 +8,7 @@ use crate::bounded::{Exchange, Outcome, retryable, timeout};
 
 use super::{Error, Stream};
 
-/// Writes exactly one request and retains at most `max_response` reply bytes.
+/// Writes and flushes exactly one request, retaining at most `max_response` reply bytes.
 ///
 /// `complete` recognizes a complete application record without issuing further
 /// reads. The caller authorizes the endpoint and the exact request first.
@@ -51,6 +51,25 @@ pub fn exchange(
                 }
                 Err(source) if retryable(&source) => continue,
                 Err(source) => break 'exchange Outcome::Failed(source),
+            }
+        }
+        if !request.is_empty() {
+            loop {
+                let wait = match timeout(deadline) {
+                    Ok(wait) => wait,
+                    Err(outcome) => break 'exchange outcome,
+                };
+                if let Err(source) = stream.set_write_timeout(Some(wait)) {
+                    break 'exchange Outcome::Failed(source);
+                }
+                if let Err(source) = deadline.enforce() {
+                    break 'exchange Outcome::interrupted(source);
+                }
+                match stream.flush() {
+                    Ok(()) => break,
+                    Err(source) if retryable(&source) => continue,
+                    Err(source) => break 'exchange Outcome::Failed(source),
+                }
             }
         }
         loop {
@@ -99,6 +118,8 @@ pub fn exchange(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::collections::VecDeque;
     use std::io::{self, Cursor, Read, Write};
     use std::net::SocketAddr;
     use std::time::Duration;
@@ -111,11 +132,22 @@ mod tests {
         input: Cursor<Vec<u8>>,
         output: Vec<u8>,
         fail_write_after: Option<usize>,
-        cancel_on_timeout: Option<Cancellation>,
+        cancel_on_timeout: Option<(Cancellation, usize)>,
+        timeout_calls: Cell<usize>,
+        require_flush: bool,
+        flush_errors: VecDeque<io::ErrorKind>,
+        flushed: bool,
+        flushes: usize,
+        reads: usize,
     }
 
     impl Read for Duplex {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            assert!(
+                !self.require_flush || self.flushed,
+                "request is still buffered"
+            );
+            self.reads += 1;
             self.input.read(buffer)
         }
     }
@@ -132,6 +164,11 @@ mod tests {
             Ok(count)
         }
         fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            if let Some(kind) = self.flush_errors.pop_front() {
+                return Err(kind.into());
+            }
+            self.flushed = true;
             Ok(())
         }
     }
@@ -144,16 +181,17 @@ mod tests {
             Ok("127.0.0.1:12345".parse().unwrap())
         }
         fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-            if let Some(signal) = &self.cancel_on_timeout {
+            let calls = self.timeout_calls.get() + 1;
+            self.timeout_calls.set(calls);
+            if let Some((signal, at)) = &self.cancel_on_timeout
+                && calls == *at
+            {
                 signal.cancel();
             }
             Ok(())
         }
         fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-            if let Some(signal) = &self.cancel_on_timeout {
-                signal.cancel();
-            }
-            Ok(())
+            self.set_read_timeout(None)
         }
     }
 
@@ -163,7 +201,90 @@ mod tests {
             output: vec![],
             fail_write_after: None,
             cancel_on_timeout: None,
+            timeout_calls: Cell::new(0),
+            require_flush: false,
+            flush_errors: VecDeque::new(),
+            flushed: false,
+            flushes: 0,
+            reads: 0,
         }
+    }
+
+    #[test]
+    fn buffered_requests_are_flushed_before_reading_and_retry_only_the_flush() {
+        for errors in [
+            VecDeque::new(),
+            VecDeque::from([io::ErrorKind::Interrupted]),
+        ] {
+            let mut stream = duplex(b"response");
+            stream.require_flush = true;
+            let expected_flushes = errors.len() + 1;
+            stream.flush_errors = errors;
+            let report = exchange(
+                &mut stream,
+                b"request",
+                32,
+                &Deadline::new(Duration::from_secs(1)),
+                |bytes| bytes == b"response",
+            )
+            .unwrap();
+            assert!(matches!(report.outcome, Outcome::Complete));
+            assert_eq!(stream.output, b"request");
+            assert_eq!(report.bytes_sent, 7);
+            assert_eq!(report.response.as_ref(), b"response");
+            assert_eq!(stream.flushes, expected_flushes);
+        }
+    }
+
+    #[test]
+    fn flush_failure_retains_writes_and_prevents_reads() {
+        let mut stream = duplex(b"response");
+        stream.flush_errors.push_back(io::ErrorKind::BrokenPipe);
+        let report = exchange(
+            &mut stream,
+            b"request",
+            32,
+            &Deadline::new(Duration::from_secs(1)),
+            |_| false,
+        )
+        .unwrap();
+        assert_eq!(report.bytes_sent, 7);
+        assert_eq!(stream.reads, 0);
+        assert!(report.response.is_empty());
+        assert!(
+            matches!(report.outcome, Outcome::Failed(source) if source.kind() == io::ErrorKind::BrokenPipe)
+        );
+    }
+
+    #[test]
+    fn cancellation_during_flush_timeout_configuration_prevents_flush_and_reads() {
+        let signal = Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal.clone()));
+        let mut stream = duplex(b"response");
+        stream.cancel_on_timeout = Some((signal, 2));
+        let report = exchange(&mut stream, b"request", 32, &deadline, |_| false).unwrap();
+        assert!(matches!(report.outcome, Outcome::Cancelled));
+        assert_eq!(report.bytes_sent, 7);
+        assert_eq!(stream.flushes, 0);
+        assert_eq!(stream.reads, 0);
+    }
+
+    #[test]
+    fn banner_collection_never_flushes_or_writes() {
+        let mut stream = duplex(b"banner\n");
+        stream.flush_errors.push_back(io::ErrorKind::BrokenPipe);
+        let report = exchange(
+            &mut stream,
+            b"",
+            32,
+            &Deadline::new(Duration::from_secs(1)),
+            |bytes| bytes.ends_with(b"\n"),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, Outcome::Complete));
+        assert!(stream.output.is_empty());
+        assert_eq!(stream.flushes, 0);
     }
 
     #[test]
@@ -218,7 +339,7 @@ mod tests {
             let deadline =
                 Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal.clone()));
             let mut stream = duplex(b"response");
-            stream.cancel_on_timeout = Some(signal);
+            stream.cancel_on_timeout = Some((signal, 1));
             let report = exchange(&mut stream, request, 32, &deadline, |_| false).unwrap();
             assert!(matches!(report.outcome, Outcome::Cancelled));
             assert!(stream.output.is_empty());

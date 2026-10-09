@@ -96,6 +96,48 @@ fn known_dns_and_txt_claims_reuse_core_protocol_parsing() {
 }
 
 #[test]
+fn dns_txt_extraction_bounds_fields_before_matching() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "dns-version-udp");
+    for strings in [510, 511, 512, 768] {
+        let query = probe.request_bytes(1234).unwrap();
+        let mut reply = Dns::try_from(query.as_slice()).unwrap();
+        reply.edit(|reply| {
+            reply.response = true;
+            for chunk in vec![Bytes::new(); strings].chunks(256) {
+                reply.answers.push(Record {
+                    owner: reply.questions[0].name.clone(),
+                    class: 3,
+                    ttl: 0,
+                    value: RecordValue::Txt(chunk.to_vec()),
+                });
+            }
+        });
+        let wire = reply.to_wire().unwrap();
+        let observation = service_probes::observe(probe, &wire, false);
+        // The response code occupies the first retained field.
+        let exceeded = strings + 1 > service_probes::MAX_OBSERVED_FIELDS;
+        assert_eq!(
+            observation.fields.len(),
+            (strings + 1).min(service_probes::MAX_OBSERVED_FIELDS)
+        );
+        assert_eq!(
+            observation.outcome,
+            if exceeded {
+                ObservationOutcome::Truncated
+            } else {
+                ObservationOutcome::Complete
+            }
+        );
+        if exceeded {
+            let identification = corpus.identify(probe, &observation);
+            assert_eq!(identification.outcome, MatchOutcome::Truncated);
+            assert!(identification.candidates.is_empty());
+        }
+    }
+}
+
+#[test]
 fn unknown_services_and_unknown_software_never_invent_versions() {
     let corpus = corpus();
     for (id, wire) in [

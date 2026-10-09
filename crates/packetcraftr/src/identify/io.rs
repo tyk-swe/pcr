@@ -152,7 +152,7 @@ pub(super) fn exchange<P: TcpProviders + UdpProviders>(
                     Ok(reply) => reply,
                     Err(source) => return Ok(Reply::udp_failed(source)),
                 };
-            if reply.peer != endpoint.address {
+            if !bounded::same_peer(endpoint.address, reply.peer) {
                 return Err(Error::Provider {
                     reason: "UDP reply changed the numeric peer".into(),
                 });
@@ -206,7 +206,7 @@ fn tcp_exchange<P: TcpProviders>(
         Ok(peer) => peer,
         Err(source) => return Ok(Reply::failed(source)),
     };
-    if peer != endpoint {
+    if !bounded::same_peer(endpoint, peer) {
         return Err(Error::Provider {
             reason: "TCP connection changed the numeric peer".into(),
         });
@@ -231,12 +231,9 @@ fn tcp_exchange<P: TcpProviders>(
 
 fn complete(probe: &Probe, bytes: &[u8]) -> bool {
     match probe.request {
-        Request::Banner {} => {
-            bytes
-                .split(|byte| *byte == b'\n')
-                .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\r"))
-                && bytes.ends_with(b"\n")
-        }
+        Request::Banner {} => bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\r\n")),
         Request::HttpHead {} => bytes.windows(4).any(|window| window == b"\r\n\r\n"),
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))

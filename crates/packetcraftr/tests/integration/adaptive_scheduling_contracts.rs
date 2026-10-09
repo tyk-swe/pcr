@@ -28,7 +28,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -439,6 +439,7 @@ struct ConnectScript {
     occupied: Arc<Mutex<HashMap<SocketAddr, usize>>>,
     occupied_peak: Arc<Mutex<HashMap<SocketAddr, usize>>>,
     blocked: Arc<Mutex<Vec<SocketAddr>>>,
+    started: Arc<Condvar>,
 }
 
 struct Stub {
@@ -493,6 +494,7 @@ impl tcp::Provider for ConnectScript {
             .expect("calls")
             .entry(endpoint)
             .or_default() += 1;
+        self.started.notify_all();
         {
             let mut occupied = self.occupied.lock().expect("occupied");
             let live = occupied.entry(endpoint).or_default();
@@ -522,6 +524,50 @@ impl tcp::Provider for ConnectScript {
     }
 }
 
+#[derive(Clone)]
+struct ConnectClock {
+    time: VirtualClock,
+    script: ConnectScript,
+    endpoints: [SocketAddr; 2],
+}
+
+impl Clock for ConnectClock {
+    type Error = <VirtualClock as Clock>::Error;
+
+    fn now(&self) -> Instant {
+        self.time.now()
+    }
+
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        // Keep logical deadlines frozen until both initial workers enter the
+        // fixture. Runner scheduling must not erase the pending-connect case.
+        let (calls, _) = self
+            .script
+            .started
+            .wait_timeout_while(
+                self.script.calls.lock().expect("calls"),
+                Duration::from_secs(5),
+                |calls| {
+                    self.endpoints
+                        .iter()
+                        .any(|endpoint| !calls.contains_key(endpoint))
+                },
+            )
+            .expect("connect start signal");
+        assert!(
+            self.endpoints
+                .iter()
+                .all(|endpoint| calls.contains_key(endpoint)),
+            "both initial connect workers must enter the fixture: {calls:?}"
+        );
+        drop(calls);
+        self.time.sleep(delay, deadline)?;
+        // Give asynchronous completion/cleanup workers an opportunity to run.
+        std::thread::sleep(Duration::from_millis(1));
+        Ok(())
+    }
+}
+
 #[test]
 fn adaptive_connect_does_not_duplicate_a_pending_endpoint() {
     let slow = host("192.0.2.30");
@@ -542,7 +588,12 @@ fn adaptive_connect_does_not_duplicate_a_pending_endpoint() {
             tcp: script.clone(),
             resolver: common::ScriptedResolver::default(),
         },
-    );
+    )
+    .with_clock(ConnectClock {
+        time: VirtualClock::default(),
+        script: script.clone(),
+        endpoints: [SocketAddr::new(slow, 80), SocketAddr::new(fast, 80)],
+    });
     let mut request = request(vec![fast, slow], &[80], 2);
     request.route = packetcraftr::route::Options::default();
     request.adaptive.as_mut().unwrap().host_timeout = Duration::from_secs(30);

@@ -30,6 +30,7 @@ mod engine;
 mod error;
 mod evidence;
 mod executor;
+pub mod hosts;
 mod plan;
 mod report;
 mod request;

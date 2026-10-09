@@ -1,0 +1,379 @@
+{
+  "schema": "packetcraftr.output/v10",
+  "command": "scan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "target": "192.0.2.10,192.0.2.11,192.0.2.12",
+    "resolved_addresses": [
+      "192.0.2.10",
+      "192.0.2.11",
+      "192.0.2.12"
+    ],
+    "plan": {
+      "method": {
+        "requested": "raw",
+        "selected": "raw"
+      },
+      "port_catalog": {
+        "name": "port-catalog",
+        "version": "1.0.0"
+      },
+      "excluded_endpoints": 0,
+      "discovery": {
+        "mode": "omitted",
+        "probes": [],
+        "neighbor": false,
+        "excluded_endpoints": 0,
+        "unresponsive": "skip"
+      }
+    },
+    "hosts": [
+      {
+        "address": "192.0.2.10",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      },
+      {
+        "address": "192.0.2.11",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      },
+      {
+        "address": "192.0.2.12",
+        "discovery": "not_requested",
+        "scan": "scanned",
+        "reasons": [],
+        "probes": []
+      }
+    ],
+    "endpoints": [
+      {
+        "address": "192.0.2.10",
+        "transport": "tcp",
+        "port": 443,
+        "classification": "timeout",
+        "port_hint": "https",
+        "inference": {
+          "state": "filtered",
+          "rule": "tcp_syn.silence",
+          "supporting": [
+            0
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 0,
+            "stage": "scan",
+            "protocol": "tcp",
+            "destination": "192.0.2.10",
+            "destination_port": 443,
+            "attempt": 1,
+            "status": "timeout",
+            "classification": "timeout",
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "reason": "no checksum-valid, protocol-consistent response before the deadline"
+          }
+        ]
+      },
+      {
+        "address": "192.0.2.11",
+        "transport": "tcp",
+        "port": 443,
+        "classification": "open",
+        "port_hint": "https",
+        "inference": {
+          "state": "open",
+          "rule": "tcp_syn.syn_ack",
+          "supporting": [
+            1
+          ],
+          "conflicting": [],
+          "unanswered": [],
+          "failed": []
+        },
+        "probes": [
+          {
+            "sequence": 1,
+            "stage": "scan",
+            "protocol": "tcp",
+            "destination": "192.0.2.11",
+            "destination_port": 443,
+            "attempt": 1,
+            "status": "response",
+            "classification": "open",
+            "sent_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 0
+            },
+            "reason": "TCP SYN/ACK from the destination",
+            "responder": "192.0.2.11",
+            "received_at": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 9000000
+            },
+            "latency": {
+              "secs": 0,
+              "nanos": 9000000
+            }
+          }
+        ]
+      }
+    ],
+    "undecoded": [],
+    "unattributed": [],
+    "retained_evidence_bytes": 0,
+    "rtt": {
+      "sent": 2,
+      "received": 1,
+      "lost": 1,
+      "min": {
+        "secs": 0,
+        "nanos": 9000000
+      },
+      "avg": {
+        "secs": 0,
+        "nanos": 9000000
+      },
+      "max": {
+        "secs": 0,
+        "nanos": 9000000
+      }
+    },
+    "traceroute": {
+      "plan": {
+        "first_hop": 1,
+        "max_hops": 30,
+        "attempts": 1,
+        "max_probes": 4096,
+        "strategy": {
+          "strategy": "tcp",
+          "destination_port": 80
+        },
+        "reuse": {
+          "max_age": {
+            "secs": 30,
+            "nanos": 0
+          }
+        }
+      },
+      "hosts": [
+        {
+          "address": "192.0.2.10",
+          "status": "complete",
+          "completion": "destination_reached",
+          "selection": {
+            "strategy": "tcp",
+            "destination_port": 80,
+            "basis": "requested"
+          },
+          "reused_hops": [],
+          "hops": [
+            {
+              "hop_limit": 1,
+              "probes": [
+                {
+                  "sequence": 2,
+                  "hop_limit": 1,
+                  "attempt": 1,
+                  "strategy": "tcp",
+                  "destination": "192.0.2.10",
+                  "destination_port": 80,
+                  "status": "response",
+                  "response_kind": "intermediate",
+                  "responder": "192.0.2.1",
+                  "sent_at": {
+                    "unix_seconds": 1770000001,
+                    "nanoseconds": 0
+                  },
+                  "received_at": {
+                    "unix_seconds": 1770000001,
+                    "nanoseconds": 4000000
+                  },
+                  "latency": {
+                    "secs": 0,
+                    "nanos": 4000000
+                  },
+                  "reason": "ICMPv4 time exceeded before reaching the endpoint"
+                }
+              ]
+            },
+            {
+              "hop_limit": 2,
+              "probes": [
+                {
+                  "sequence": 3,
+                  "hop_limit": 2,
+                  "attempt": 1,
+                  "strategy": "tcp",
+                  "destination": "192.0.2.10",
+                  "destination_port": 80,
+                  "status": "timeout",
+                  "sent_at": {
+                    "unix_seconds": 1770000001,
+                    "nanoseconds": 0
+                  },
+                  "reason": "no checksum-valid, protocol-consistent response before the deadline"
+                }
+              ]
+            },
+            {
+              "hop_limit": 3,
+              "probes": [
+                {
+                  "sequence": 4,
+                  "hop_limit": 3,
+                  "attempt": 1,
+                  "strategy": "tcp",
+                  "destination": "192.0.2.10",
+                  "destination_port": 80,
+                  "status": "response",
+                  "response_kind": "destination_reached",
+                  "responder": "192.0.2.10",
+                  "sent_at": {
+                    "unix_seconds": 1770000002,
+                    "nanoseconds": 0
+                  },
+                  "received_at": {
+                    "unix_seconds": 1770000002,
+                    "nanoseconds": 4000000
+                  },
+                  "latency": {
+                    "secs": 0,
+                    "nanos": 4000000
+                  },
+                  "reason": "TCP SYN/ACK from the destination"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "address": "192.0.2.11",
+          "status": "complete",
+          "completion": "destination_reached",
+          "selection": {
+            "strategy": "tcp",
+            "destination_port": 443,
+            "basis": "observed",
+            "observation": {
+              "stage": "scan",
+              "sequence": 1,
+              "reply": "tcp_syn_ack",
+              "observed_at": {
+                "unix_seconds": 1770000000,
+                "nanoseconds": 9000000
+              }
+            }
+          },
+          "reused_hops": [
+            {
+              "hop_limit": 1,
+              "source": "192.0.2.10",
+              "probes": [
+                2
+              ],
+              "responders": [
+                "192.0.2.1"
+              ],
+              "observed_at": {
+                "unix_seconds": 1770000001,
+                "nanoseconds": 4000000
+              },
+              "age": {
+                "secs": 2,
+                "nanos": 0
+              }
+            }
+          ],
+          "hops": [
+            {
+              "hop_limit": 2,
+              "probes": [
+                {
+                  "sequence": 5,
+                  "hop_limit": 2,
+                  "attempt": 1,
+                  "strategy": "tcp",
+                  "destination": "192.0.2.11",
+                  "destination_port": 443,
+                  "status": "timeout",
+                  "sent_at": {
+                    "unix_seconds": 1770000003,
+                    "nanoseconds": 0
+                  },
+                  "reason": "no checksum-valid, protocol-consistent response before the deadline"
+                }
+              ]
+            },
+            {
+              "hop_limit": 3,
+              "probes": [
+                {
+                  "sequence": 6,
+                  "hop_limit": 3,
+                  "attempt": 1,
+                  "strategy": "tcp",
+                  "destination": "192.0.2.11",
+                  "destination_port": 443,
+                  "status": "response",
+                  "response_kind": "destination_reached",
+                  "responder": "192.0.2.11",
+                  "sent_at": {
+                    "unix_seconds": 1770000004,
+                    "nanoseconds": 0
+                  },
+                  "received_at": {
+                    "unix_seconds": 1770000004,
+                    "nanoseconds": 4000000
+                  },
+                  "latency": {
+                    "secs": 0,
+                    "nanos": 4000000
+                  },
+                  "reason": "TCP SYN/ACK from the destination"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "address": "192.0.2.12",
+          "status": "not_traced",
+          "reason": "no_responsive_probe",
+          "reused_hops": [],
+          "hops": []
+        }
+      ],
+      "undecoded": [],
+      "retained_evidence_bytes": 0
+    }
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 7,
+    "packets_completed": 7,
+    "bytes": 280,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

@@ -8,13 +8,15 @@ use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::WORKFLOW;
 use crate::StatsOverflow;
-use crate::target::Family;
+use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 
 /// Why a traceroute stopped.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    TargetSelection(SelectionError),
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
     #[error("invalid traceroute limit {field}={value}: {reason}")]
@@ -36,6 +38,8 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("traceroute duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
+    #[error("invalid scan observation: {message}")]
+    InvalidObservation { message: String },
     #[error("scoped link-local target {target} is not supported by this workflow")]
     ScopedTarget { target: String },
     #[error("traceroute authorization failed")]
@@ -83,7 +87,9 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::InvalidLimit { .. }
+            Self::TargetSelection(source) => source.classification(),
+            Self::InvalidObservation { .. }
+            | Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }
             | Self::InvalidSourcePort
             | Self::InvalidProbeOption { .. }

@@ -648,3 +648,40 @@ fn schema_reject_event_unknown_root_discs() {
     unknown["event"] = "future_unknown_event".into();
     assert!(schema_validator().validate(&unknown).is_err());
 }
+
+#[test]
+fn scan_traceroute_events_match_the_published_schema() {
+    use output::traceroute::hosts::{Complete, Event};
+
+    let mut names = Vec::new();
+    for event in common::trace_hosts::events() {
+        let record = Event::publish(event)
+            .expect("a representable event")
+            .expect("these events are trace records");
+        names.push(output::stream::StreamRecord::event_name(&record));
+        validate_typed_event(output::contract::Command::Scan, record, Vec::new());
+    }
+    assert!(names.contains(&"traceroute_probe"));
+    assert!(names.contains(&"traceroute_host"));
+    assert!(names.contains(&"traceroute_undecoded"));
+
+    let mut complete: Value = serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-scan-complete.json"
+    ))
+    .expect("published scan completion must parse");
+    complete["result"]["traceroute"] = serde_json::to_value(Complete {
+        plan: output::traceroute::hosts::Plan {
+            first_hop: 1,
+            max_hops: 30,
+            attempts: 3,
+            max_probes: 4096,
+            strategy: None,
+            reuse: None,
+        },
+        retained_evidence_bytes: 0,
+    })
+    .unwrap();
+    schema_validator()
+        .validate(&complete)
+        .unwrap_or_else(|error| panic!("the completion must match the schema: {error}"));
+}

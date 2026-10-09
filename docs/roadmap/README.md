@@ -114,7 +114,7 @@ identification.
 | M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | Planned |
 | M9 | [TLS services and identification corpus][m9] | TLS-wrapped interrogation over a bounded transport, an expanded reviewed corpus, and held-out evaluation of coverage and confidence. | M8 | Planned |
 | M10 | [OS identification][m10] | Finite IPv4 and IPv6 stack-fingerprint collection, matching against a reviewed corpus, and qualified or explicitly inconclusive results. | M5, M7 | Planned |
-| M11 | [Scan-informed traceroute][m11] | Traceroute that selects an observed responsive probe, traces several authorized hosts under one plan, and reuses paths with explicit provenance. | M5, M6 | Planned |
+| M11 | [Scan-informed traceroute][m11] | Traceroute that selects an observed responsive probe, traces several authorized hosts under one plan, and reuses paths with explicit provenance. | M5, M6 | In progress |
 | M12 | [TCP diagnostic scans][m12] | ACK/window and FIN/NULL/Xmas/Maimon scan families with probe flags kept separate from inference rules. | M6 | Planned |
 | M13 | [SCTP and IP-protocol inventory][m13] | SCTP INIT/COOKIE-ECHO scanning, typed IP-protocol inventory, and the remaining discovery probe families. | M5, M6 | Planned |
 

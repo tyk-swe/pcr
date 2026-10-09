@@ -31,24 +31,7 @@ pub(super) fn render_text(
     for hop in &result.hops {
         write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
         for probe in &hop.probes {
-            write_stdout_line(format_args!(
-                "  sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
-                probe.sequence,
-                probe.attempt,
-                probe.status.as_str(),
-                probe
-                    .response_kind
-                    .map_or("none", output::traceroute::ResponseKind::as_str),
-                probe.sent_at,
-                optional_display(probe.received_at),
-                optional_display(probe.responder),
-                optional_duration(probe.latency),
-                optional_display(probe.destination_port),
-                probe.reason,
-            ))?;
-            if let Some(frame) = &probe.frame {
-                write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
-            }
+            render_probe_text("  ", probe)?;
         }
     }
     render_undecoded(
@@ -83,4 +66,30 @@ pub(super) fn emit_complete(
     Ok(stream.complete_published(
         output::envelope::Published::<output::traceroute::Event>::from(summary),
     )?)
+}
+
+/// One probe's evidence line after `lead`, with its frame beneath.
+pub(in crate::commands) fn render_probe_text(
+    lead: &str,
+    probe: &output::traceroute::Probe,
+) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "{lead}sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
+        probe.sequence,
+        probe.attempt,
+        probe.status.as_str(),
+        probe
+            .response_kind
+            .map_or("none", output::traceroute::ResponseKind::as_str),
+        probe.sent_at,
+        optional_display(probe.received_at),
+        optional_display(probe.responder),
+        optional_duration(probe.latency),
+        optional_display(probe.destination_port),
+        probe.reason,
+    ))?;
+    if let Some(frame) = &probe.frame {
+        write_stdout_line(format_args!("{lead}  frame {}", captured_frame_text(frame)))?;
+    }
+    Ok(())
 }

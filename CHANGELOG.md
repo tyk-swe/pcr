@@ -8,6 +8,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Structured command output moves to `packetcraftr.output/v10`, which adds the
+  scan trace stage; the v6, v7, v8, and v9 families and schemas stay frozen.
+  Raw scan results gain an optional `traceroute` member, NDJSON scans gain
+  `traceroute_probe`, `traceroute_undecoded`, and `traceroute_host` records,
+  and `complete` gains an optional `traceroute`. `traceroute::Error` gains
+  `TargetSelection` and `InvalidObservation`. CLI `output::scan::Report::publish`
+  takes the optional trace member, and the NDJSON `complete` conversion takes
+  the optional trace summary. See `docs/migration-unreleased.md`.
 - `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
   capture cleanup failed.
 - Structured command output moves to `packetcraftr.output/v9`, which adds host
@@ -720,6 +728,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Scan-informed traceroute (roadmap M11). `scan --traceroute` traces every
+  scanned host after the scan, within the remaining `--max-duration`, with each
+  host's TCP or ICMP echo probe taken from what the scan saw it answer
+  (`--traceroute-strategy` and `--traceroute-port` cover the rest, and a host
+  without either is `not_traced`). `--traceroute-first-hop`,
+  `--traceroute-max-hops`, `--traceroute-attempts`, and
+  `--traceroute-max-probes` bound one plan authorized for every host before any
+  probe, and `--traceroute-reuse-max-age-ms` lets a host reuse hops an earlier
+  host observed in the same operation, published as `reused_hops` with their
+  source and age. The library adds `traceroute::hosts`, `hosts::observed`, and
+  `Client::trace_hosts`. See `docs/roadmap/m11-scan-informed-traceroute.md`.
 - Host discovery (roadmap M5). `scan --discovery before|only|skip` runs a
   discovery stage before the scan, alone, or records that it was skipped;
   without the flag hosts are labelled `not_requested`. `--discovery-probes`

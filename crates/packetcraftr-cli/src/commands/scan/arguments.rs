@@ -110,6 +110,18 @@ the scan share one authorization, sequence space, --max-probes,
 and its reasons are socket observations. --reverse-dns sends one PTR question
 per looked-up host through the DNS workflow within the remaining
 --max-duration; names are observations, never authenticated identity.
+
+--traceroute traces every scanned host after the scan, within the remaining
+--max-duration and one --traceroute-max-probes budget, before reverse DNS. Each
+host is traced with a TCP port or ICMP echo probe it answered during the scan
+(a SYN/ACK over a reset over an echo reply, naming that scan probe); a host the
+scan saw no such answer from is traced with --traceroute-strategy and
+--traceroute-port when given, and is otherwise reported not_traced rather
+than guessed at. --traceroute-reuse-max-age-ms lets a host copy a hop that an
+earlier host's trace observed within this operation, for hops younger than
+that age; a reused hop is reported apart from probed hops, naming its source
+host and age, and is a claim from that host's path, not an observation for this
+host. Tracing needs the raw method and no --list.
 ";
 
 /// One `--ports` or `--exclude-ports` term.
@@ -414,6 +426,42 @@ pub(crate) struct Args {
     /// Maximum charged plans and in-flight packet descriptions.
     #[arg(long, default_value_t = packetcraftr::scan::Limits::default().max_prepared_bytes)]
     pub(crate) max_prepared_bytes: usize,
+    /// After the scan, trace every scanned host.
+    #[arg(long)]
+    pub(crate) traceroute: bool,
+    /// Probe for hosts the scan saw no responsive TCP or ICMP echo probe
+    /// from; without it those hosts are not traced.
+    #[arg(long, value_enum, requires = "traceroute")]
+    pub(crate) traceroute_strategy: Option<crate::commands::traceroute::arguments::Strategy>,
+    /// Non-zero UDP base port or fixed TCP port for --traceroute-strategy.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..), requires = "traceroute")]
+    pub(crate) traceroute_port: Option<u16>,
+    /// First non-zero IPv4 TTL or IPv6 hop limit traced.
+    #[arg(
+        long,
+        default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP,
+        value_parser = clap::value_parser!(u8).range(1..),
+        requires = "traceroute"
+    )]
+    pub(crate) traceroute_first_hop: u8,
+    /// Last IPv4 TTL or IPv6 hop limit traced.
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_HOPS, requires = "traceroute")]
+    pub(crate) traceroute_max_hops: u8,
+    /// Number of attempts retained for every traced hop.
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_PROBES_PER_HOP, requires = "traceroute")]
+    pub(crate) traceroute_attempts: u32,
+    /// Maximum generated trace probes across every host and hop.
+    #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS, requires = "traceroute")]
+    pub(crate) traceroute_max_probes: usize,
+    /// Let a host reuse hops an earlier host's trace observed within this
+    /// operation, for hops younger than this many milliseconds.
+    #[arg(
+        long,
+        value_name = "MS",
+        value_parser = clap::value_parser!(u64).range(1..=crate::command_options::MAX_MILLISECONDS),
+        requires = "traceroute"
+    )]
+    pub(crate) traceroute_reuse_max_age_ms: Option<u64>,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
@@ -50,6 +50,37 @@ pub(crate) struct State {
     pub(crate) hops: Option<u8>,
     pub(crate) ttls: Vec<u8>,
     pub(crate) sent_wires: Vec<Bytes>,
+    /// Per-destination path topology; when non-empty it decides every reply,
+    /// and a destination without a path never answers.
+    pub(crate) paths: HashMap<Ipv4Addr, Path>,
+}
+
+/// What a destination does with a probe that outlives the hops before it.
+#[derive(Clone, Copy)]
+pub(crate) enum Arrival {
+    Reply,
+    Unreachable,
+    Silent,
+}
+
+/// `hops[ttl - 1]` is the router answering a probe that expires at `ttl`, or
+/// `None` for a silent hop.
+#[derive(Clone)]
+pub(crate) struct Path {
+    pub(crate) hops: Vec<Option<Ipv4Addr>>,
+    pub(crate) arrival: Arrival,
+}
+
+impl Path {
+    pub(crate) fn new(hops: &[u8], arrival: Arrival) -> Self {
+        Self {
+            hops: hops
+                .iter()
+                .map(|octet| (*octet != 0).then(|| Ipv4Addr::new(198, 51, 100, *octet)))
+                .collect(),
+            arrival,
+        }
+    }
 }
 
 pub(crate) fn router(ttl: u8) -> Ipv4Addr {
@@ -155,6 +186,38 @@ impl transmit::Provider for Io {
         let report = transmit::Report::committed(wire.len(), wire.clone());
         let ingress = Instant::now();
         let replies = match state.hops {
+            _ if !state.paths.is_empty() => match state.paths.get(&ip.destination) {
+                None => Vec::new(),
+                Some(path) => match path.hops.get(usize::from(ip.ttl) - 1) {
+                    Some(Some(hop)) => vec![icmp_error(*hop, 11, 0)],
+                    Some(None) => Vec::new(),
+                    None => match path.arrival {
+                        Arrival::Silent => Vec::new(),
+                        Arrival::Unreachable => {
+                            vec![icmp_error(Ipv4Addr::new(198, 51, 100, 250), 3, 1)]
+                        }
+                        Arrival::Reply if tcp.is_some() => vec![reply(0, Tcp::SYN | Tcp::ACK)],
+                        Arrival::Reply => match decoded.packet.get::<Icmpv4>() {
+                            Some(echo) => {
+                                let mut response = Packet::new();
+                                response.push(Ipv4 {
+                                    source: ip.destination,
+                                    destination: ip.source,
+                                    ..Default::default()
+                                });
+                                response.push(Icmpv4 {
+                                    icmp_type: 0,
+                                    code: 0,
+                                    body: echo.body.clone(),
+                                    ..Default::default()
+                                });
+                                vec![frame(response)]
+                            }
+                            None => vec![icmp_error(ip.destination, 3, 3)],
+                        },
+                    },
+                },
+            },
             Some(hops) if ip.ttl < hops => vec![icmp_error(router(ip.ttl), 11, 0)],
             _ if tcp.is_none() && state.mismatched_dns_replies => {
                 let udp = decoded.packet.get::<Udp>().unwrap();

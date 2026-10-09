@@ -1,0 +1,33 @@
+{
+  "schema": "packetcraftr.output/v10",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 6,
+  "status": "success",
+  "result": {
+    "sequence": 2,
+    "hop_limit": 1,
+    "attempt": 1,
+    "strategy": "tcp",
+    "destination": "192.0.2.10",
+    "destination_port": 80,
+    "status": "response",
+    "response_kind": "intermediate",
+    "responder": "192.0.2.1",
+    "sent_at": {
+      "unix_seconds": 1770000001,
+      "nanoseconds": 0
+    },
+    "received_at": {
+      "unix_seconds": 1770000001,
+      "nanoseconds": 4000000
+    },
+    "latency": {
+      "secs": 0,
+      "nanos": 4000000
+    },
+    "reason": "ICMPv4 time exceeded before reaching the endpoint"
+  },
+  "diagnostics": [],
+  "event": "traceroute_probe"
+}

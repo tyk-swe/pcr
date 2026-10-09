@@ -124,22 +124,60 @@ where
     F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
     G: Errors<Step = u64> + Copy,
 {
+    let mut batches = batches.into_iter();
+    run_planned(
+        |_, _, _| Ok(batches.next()),
+        probes_per_second,
+        None,
+        deadline,
+        clock,
+        executor,
+        evidence,
+    )
+}
+
+/// Runs the batches `next` plans one at a time. `next` sees the evidence
+/// gathered so far, the clock's current instant, and the deadline before each
+/// batch, and ends the run by returning `None`. The first batch waits what
+/// remains of one probe's rate interval after `paced_after`.
+pub(crate) fn run_planned<E, C, K, F, G, B>(
+    mut next: impl FnMut(&mut BatchEvidence<K, F, G>, Instant, &Deadline) -> Result<Option<B>, G::Error>,
+    probes_per_second: Option<u32>,
+    paced_after: Option<Instant>,
+    deadline: &mut Deadline,
+    clock: &mut C,
+    executor: &mut E,
+    evidence: &mut BatchEvidence<K, F, G>,
+) -> Result<Stats, G::Error>
+where
+    E: Executor<Batch<K::Probe>>,
+    C: Clock,
+    K: Classifier,
+    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
+    G: Errors<Step = u64> + Copy,
+    B: BorrowMut<Batch<K::Probe>>,
+{
     let errors = evidence.errors();
     let mut context = Context::new(deadline, clock, errors);
     let mut previous_probes = None;
     let mut last_sequence = 0;
 
-    for mut planned in batches {
+    while let Some(mut planned) = next(evidence, context.now(), context.deadline())? {
         let batch = planned.borrow_mut();
         let sequence = batch.sequence;
         context.enforce(sequence)?;
-        if let Some(previous_probes) = previous_probes {
-            let delay = rate_delay(
+        let delay = match (previous_probes, paced_after) {
+            (Some(previous_probes), _) => rate_delay(
                 &errors,
                 "probes_per_second",
                 previous_probes,
                 probes_per_second,
-            )?;
+            )?,
+            (None, Some(after)) => rate_delay(&errors, "probes_per_second", 1, probes_per_second)?
+                .saturating_sub(context.now().saturating_duration_since(after)),
+            (None, None) => Duration::ZERO,
+        };
+        if previous_probes.is_some() || !delay.is_zero() {
             context.pace(sequence, delay)?;
         }
         previous_probes = Some(batch.probes.len());

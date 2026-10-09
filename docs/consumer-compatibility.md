@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v9.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v10.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,9 +36,47 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v10
+
+`packetcraftr.output/v10` is the current production family. It preserves every
+v9 meaning and adds the scan trace stage requested with `scan --traceroute`:
+
+- an optional `traceroute` member on raw scan results, absent unless the stage
+  ran, with its `plan` (`first_hop`, `max_hops`, `attempts`, `max_probes`, the
+  optional fallback `strategy`, and the `reuse` `max_age` when reuse was
+  enabled), one record per scanned host in host order, `undecoded` frames with
+  the `destination` they belong to, and `retained_evidence_bytes`;
+- per host, a `status` (`complete`, `incomplete`, or `not_traced`). A
+  `not_traced` host has a `reason` (`no_responsive_probe` or `scoped_target`)
+  and no `completion` or `selection`; a traced host has a `completion`
+  (`destination_reached` or `unreachable` for `complete`; `maximum_hops` or
+  `timeout` for `incomplete`) and a `selection`;
+- a `selection` with the `strategy` and `destination_port` used and its
+  `basis`: `observed` carries an `observation` naming the scan probe it rests
+  on (`stage`, `sequence`, `reply`, and `observed_at`), and `requested` means
+  the request's fallback strategy;
+- `hops`, the hops this host's own probes observed, in the standalone
+  traceroute hop and probe encoding. A hop in `hops` is an observation;
+- `reused_hops`, hops copied from an earlier host's trace in the same
+  operation, each with the `source` host, the source's probe sequences
+  (`probes`), the `responders`, `observed_at`, and the `age` since the
+  source batch was planned. A reused hop is a claim from another host's path,
+  not an observation for this host, and has no probe record of its own;
+- `traceroute_probe`, `traceroute_undecoded`, and `traceroute_host` stream
+  records, published as the stage runs. `traceroute_probe` is the standalone
+  probe record, and `traceroute_host` is the host record without `hops` and
+  with the `probes` sequences it sent. A host's record follows its last probe;
+  and
+- an optional `traceroute` object (`plan` and `retained_evidence_bytes`) in the
+  `complete` record.
+
+The standalone `traceroute` command keeps its v9 result and stream shapes
+under the v10 identifier. [Scanner evidence](scanner-evidence.md#traceroute-stage)
+defines the vocabulary.
+
 ## Output family v9
 
-`packetcraftr.output/v9` is the current production family. It preserves every
+`packetcraftr.output/v9` is frozen. It preserves every
 v8 meaning and adds host discovery:
 
 - a required `hosts` list on raw scan results and connect reports, and one

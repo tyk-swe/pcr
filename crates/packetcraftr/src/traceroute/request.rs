@@ -15,6 +15,7 @@ use crate::target::Target;
 use super::Error;
 use super::error::Probes;
 use crate::probe::Transport;
+use crate::probe::check_collection_evidence;
 use crate::traceroute::{
     DEFAULT_MAX_UNDECODED_FRAMES, MAX_DSCP, MAX_PAYLOAD_SIZE, MAX_PROBES, MAX_PROBES_PER_HOP,
 };
@@ -103,6 +104,60 @@ pub struct Request {
 
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
+        Bounds {
+            limits: &self.limits,
+            first_hop: self.first_hop,
+            max_hops: self.max_hops,
+            probes_per_hop: self.probes_per_hop,
+            timeout: self.timeout,
+            probes_per_second: self.probes_per_second,
+            payload_size: self.payload_size,
+            dscp: self.dscp,
+        }
+        .validate()?;
+        if self.payload_size > 0 && self.strategy == Transport::Tcp {
+            return Err(tcp_payload());
+        }
+        check_destination_port(self.strategy, self.destination_port)?;
+        if self.source_port == Some(0)
+            || (self.strategy == Transport::Icmp && self.source_port.is_some())
+        {
+            return Err(Error::InvalidSourcePort);
+        }
+        Ok(())
+    }
+
+    // `validate` rejects `max_hops < first_hop`, so the u8 subtraction cannot underflow, and a u8
+    // widened to usize leaves room for the increment
+    pub(in crate::traceroute) fn hop_count(&self) -> usize {
+        usize::from(self.max_hops - self.first_hop) + 1
+    }
+
+    pub(in crate::traceroute) fn total_probe_count(&self) -> Result<usize, Error> {
+        self.hop_count()
+            .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
+            .ok_or(Error::InvalidLimit {
+                field: "probes",
+                value: u64::MAX,
+                reason: "probe-count arithmetic overflowed".to_owned(),
+            })
+    }
+}
+
+/// The request bounds standalone and multi-host tracing validate identically.
+pub(super) struct Bounds<'a> {
+    pub(super) limits: &'a Limits,
+    pub(super) first_hop: u8,
+    pub(super) max_hops: u8,
+    pub(super) probes_per_hop: u32,
+    pub(super) timeout: Duration,
+    pub(super) probes_per_second: Option<u32>,
+    pub(super) payload_size: u16,
+    pub(super) dscp: u8,
+}
+
+impl Bounds<'_> {
+    pub(super) fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.first_hop == 0 {
             return Err(Error::InvalidLimit {
@@ -158,52 +213,50 @@ impl Request {
                 reason: format!("must be within 0..={MAX_DSCP}"),
             });
         }
-        if self.payload_size > 0 && self.strategy == Transport::Tcp {
-            return Err(Error::InvalidProbeOption {
-                option: "payload_size",
-                reason: "TCP SYN probes carry no payload".to_owned(),
-            });
-        }
-        match (self.strategy, self.destination_port) {
-            (Transport::Udp | Transport::Tcp, None) => {
-                return Err(Error::InvalidPort {
-                    message: "UDP and TCP traceroute require a destination port".to_owned(),
-                });
-            }
-            (Transport::Udp | Transport::Tcp, Some(0)) => {
-                return Err(Error::InvalidPort {
-                    message: "UDP and TCP traceroute require a non-zero destination port"
-                        .to_owned(),
-                });
-            }
-            (Transport::Icmp, Some(_)) => {
-                return Err(Error::InvalidPort {
-                    message: "ICMP traceroute is portless".to_owned(),
-                });
-            }
-            _ => {}
-        }
-        if self.source_port == Some(0)
-            || (self.strategy == Transport::Icmp && self.source_port.is_some())
-        {
-            return Err(Error::InvalidSourcePort);
-        }
         Ok(())
     }
+}
 
-    // `validate` rejects `max_hops < first_hop`, so the u8 subtraction cannot underflow, and a u8
-    // widened to usize leaves room for the increment
-    pub(in crate::traceroute) fn hop_count(&self) -> usize {
-        usize::from(self.max_hops - self.first_hop) + 1
+pub(super) fn check_collection(
+    collection: &crate::exchange::Collection,
+    limits: &Limits,
+    probes_per_hop: u32,
+) -> Result<(), Error> {
+    check_collection_evidence(&Probes, collection, limits.evidence())?;
+    let hop_probes = usize::try_from(probes_per_hop).unwrap_or(usize::MAX);
+    if collection.max_responses < hop_probes {
+        return Err(Error::InvalidLimit {
+            field: "max_responses",
+            value: u64::try_from(collection.max_responses).unwrap_or(u64::MAX),
+            reason: format!(
+                "must retain at least one response per probe of a hop (probes_per_hop={probes_per_hop})"
+            ),
+        });
     }
+    Ok(())
+}
 
-    pub(in crate::traceroute) fn total_probe_count(&self) -> Result<usize, Error> {
-        self.hop_count()
-            .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
-            .ok_or(Error::InvalidLimit {
-                field: "probes",
-                value: u64::MAX,
-                reason: "probe-count arithmetic overflowed".to_owned(),
-            })
+pub(super) fn tcp_payload() -> Error {
+    Error::InvalidProbeOption {
+        option: "payload_size",
+        reason: "TCP SYN probes carry no payload".to_owned(),
+    }
+}
+
+pub(super) fn check_destination_port(
+    transport: Transport,
+    destination_port: Option<u16>,
+) -> Result<(), Error> {
+    match (transport, destination_port) {
+        (Transport::Udp | Transport::Tcp, None) => Err(Error::InvalidPort {
+            message: "UDP and TCP traceroute require a destination port".to_owned(),
+        }),
+        (Transport::Udp | Transport::Tcp, Some(0)) => Err(Error::InvalidPort {
+            message: "UDP and TCP traceroute require a non-zero destination port".to_owned(),
+        }),
+        (Transport::Icmp, Some(_)) => Err(Error::InvalidPort {
+            message: "ICMP traceroute is portless".to_owned(),
+        }),
+        _ => Ok(()),
     }
 }

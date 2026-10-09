@@ -260,7 +260,7 @@ def connect_case(binary, corpus, case, family, nmap):
         if run["exit_code"] != 0:
             raise ValueError(f"native connect execution failed: {run['stderr']} {run['stdout']}")
         envelope = strict_json(run["stdout"])
-        if (envelope["schema"] != "packetcraftr.output/v9"
+        if (envelope["schema"] != "packetcraftr.output/v10"
                 or envelope["status"] != "success" or envelope["command"] != "scan"):
             raise ValueError("native connect did not publish a successful scan envelope")
         result = envelope["result"]

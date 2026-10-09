@@ -4,7 +4,7 @@
 use crate::output::contract::Format;
 
 pub(super) mod arguments;
-mod rendering;
+pub(super) mod rendering;
 
 use packetcraftr_netio as net;
 

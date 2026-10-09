@@ -1997,6 +1997,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
   socket preparation outside the eligible interval and reject missing/stale
   ingress; submission timing is not precise wire departure or identity proof.
+- `scan --link-mode layer3` is honored in the trace stage's early
+  validation, so its neighbor-pacing timeout rule applies only to routes
+  that can resolve a neighbor.
 - `traceroute::hosts` defaults TCP and UDP probes to source port 49151, just
   below the source ports a scan's generated UDP probes use, so a reply to a
   scan probe can never terminate a trace hop under tuple-only correlation;

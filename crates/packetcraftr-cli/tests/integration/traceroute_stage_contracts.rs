@@ -203,3 +203,51 @@ fn a_link_layer_pacing_interval_beyond_the_timeout_is_refused_upfront() {
         }
     }
 }
+
+#[test]
+fn a_layer3_trace_pacing_bound_reaches_scan_validation_instead() {
+    // The trace stage sees the requested link mode from the start: an
+    // explicit layer-3 route resolves no neighbor, so the rate-1/timeout-500ms
+    // plan is not a traceroute pacing rejection; the scan's own duration
+    // bound fails first instead, still before any capture or send.
+    for format in ["json", "ndjson"] {
+        let output = run(&[
+            "--output",
+            format,
+            "scan",
+            "127.0.0.1",
+            "--method",
+            "raw",
+            "--transport",
+            "icmp",
+            "--traceroute",
+            "--traceroute-strategy",
+            "icmp",
+            "--link-mode",
+            "layer3",
+            "--rate",
+            "1",
+            "--timeout-ms",
+            "500",
+            "--max-duration-ms",
+            "1",
+        ]);
+        if format == "json" {
+            let document = parse_json(&output);
+            assert_eq!(document["status"], "error");
+            assert_eq!(
+                document["error"]["code"], "policy.scan_duration_limit",
+                "{document}"
+            );
+            assert!(
+                document["error"].get("scan").is_none(),
+                "{document} sent no probe"
+            );
+        } else {
+            let records = common::parse_ndjson(&output);
+            assert_eq!(records.len(), 1, "{records:?}");
+            assert_eq!(records[0]["event"], "error");
+            assert_eq!(records[0]["error"]["code"], "policy.scan_duration_limit");
+        }
+    }
+}

@@ -248,7 +248,10 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         timeout: timeout.timeout(),
         probes_per_second: rate,
         limits: scan_limits,
-        route: packetcraftr::route::Options::default(),
+        route: packetcraftr::route::Options {
+            link_mode: route.link_mode.into(),
+            ..Default::default()
+        },
         collection: crate::system::exchange::collection(timeout.timeout(), queue_limits)?,
     };
     let trace_stage = traceroute

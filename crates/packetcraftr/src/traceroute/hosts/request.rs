@@ -9,9 +9,11 @@ use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::selection::Observed;
 use crate::execution::limits::{check_limits, duration_violation};
+use crate::execution::rate_delay;
 use crate::probe::Transport;
 use crate::scan::Reply;
 use crate::target::{Family, Selection};
+use crate::traceroute::error::Probes;
 use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
 use crate::traceroute::{Error, Limits, MAX_PROBES};
 
@@ -46,7 +48,11 @@ pub struct Request {
     pub strategy: Option<Strategy>,
     /// Responsive probes a scan observed; see [`observed`](super::observed).
     pub observed: Vec<Observed>,
-    /// UDP and TCP probes only; ICMP ignores it.
+    /// UDP and TCP probes only; ICMP ignores it. `None` uses 49151, just
+    /// below the source ports a scan's generated UDP probes use, so a reply
+    /// to a scan probe can never share a trace probe's tuple; an explicit
+    /// port can opt back into that collision, so combined operations give a
+    /// non-colliding one.
     pub source_port: Option<u16>,
     /// Zero bytes appended to every UDP or ICMP echo probe; TCP probes require 0.
     pub payload_size: u16,
@@ -84,6 +90,22 @@ impl Request {
             dscp: self.dscp,
         }
         .validate()?;
+        // On a link-layer route each probe's neighbor request waits one rate
+        // interval inside the probe's exchange window, so a timeout that
+        // cannot outlast the interval can never send the probe.
+        if self.route.link_mode != packetcraftr_netio::link::Mode::Layer3 {
+            let interval = rate_delay(&Probes, "probes_per_second", 1, self.probes_per_second)?;
+            if interval >= self.timeout {
+                return Err(Error::InvalidLimit {
+                    field: "probes_per_second",
+                    value: u64::from(self.probes_per_second.unwrap_or_default()),
+                    reason: format!(
+                        "neighbor pacing interval {interval:?} must be shorter than the {:?} probe timeout on an automatic or link-layer route; raise the timeout, increase the rate, or select layer 3",
+                        self.timeout
+                    ),
+                });
+            }
+        }
         check_limits(
             &[("max_targets", self.max_targets, MAX_PROBES)],
             &[],

@@ -3,7 +3,7 @@
 
 use crate::{
     Error,
-    transmit::{self, Layer3Frame, Submission},
+    transmit::{self, Layer3Frame},
 };
 
 use preparation::prepare;
@@ -18,8 +18,8 @@ pub(in crate::platform) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmi
     let packet = prepare(frame)?;
     #[cfg(target_os = "macos")]
     validate_platform_support(&packet)?;
-    let submission = Submission::start();
-    let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
+    let (actual, submission) =
+        send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
     let expected = packet.submission.len();
     if actual != expected {
         return Err(Error::PartialSend { expected, actual });

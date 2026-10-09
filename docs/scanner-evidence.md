@@ -56,7 +56,7 @@ aggregate `scan` result, from
 | `status` | Attempt observation: `response` if a checksum-valid, protocol-consistent reply was attributed within the attempt's window, else `timeout`. |
 | `classification` | Attempt observation: the per-attempt value from the classification vocabulary below. |
 | `responder` | Attempt observation: the address that actually answered. It can differ from `destination` — an ICMP error reports the intermediate hop that sent it, and a next-hop neighbor answer is not the target answering. |
-| `sent_at`, `received_at`, `latency` | Metadata: timing of the attempt and its attributed reply. |
+| `sent_at`, `received_at`, `latency` | Metadata: submission-start timing of the attempt and ingress of its attributed reply; latency includes the submission interval, not precise wire transit. |
 | `frame` | Metadata: the retained captured reply bytes, when retained evidence kept them. |
 | `reason` | Attempt observation: the fixed correlation string behind the classification (see below), or `no checksum-valid, protocol-consistent response before the deadline` for silence. |
 | `application` | Attempt observation, subordinate: the UDP profile check outcome described below. |
@@ -448,6 +448,9 @@ The record keeps these rules:
   a typed limit after the scan and before any trace probe; a plan in which no
   host can be traced deducts nothing. The finalized trace collection is
   validated before the scan sends.
+- The stage's TCP and UDP probes default to source port 49151, one below
+  the range the scan's generated UDP probes use, so a replayed scan reply
+  cannot match a trace probe's tuple.
 - A scan that sent traffic paces the trace's first batch by a full `--rate`
   interval, and the trace marks its own sends for the lookups after it the
   same way: pacing rides on monotonic markers, so a wall-clock `sent_at` stays
@@ -457,7 +460,10 @@ The record keeps these rules:
   packet and byte budgets, authorizes it like a probe, sends it once, paces
   it on the trace's rate, and keeps its answer for the operation; the
   requests sent count in the operation's `stats` (and `neighbor_stats` in the
-  library `Report`).
+  library `Report`). Because that interval is spent inside each probe's
+  window, an automatic or link-layer trace whose `--timeout-ms` cannot
+  outlast the `--rate` interval is refused with `cli.traceroute_limit`
+  before any capture or send.
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs
@@ -482,3 +488,13 @@ The record keeps these rules:
 [trace-hosts]: ../crates/packetcraftr/src/traceroute/hosts.rs
 [trace-output]: ../crates/packetcraftr-cli/src/output/traceroute/hosts.rs
 [udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs
+
+### Successful native submission intervals
+
+`transmit::Timing::freshness_marker()` is the start of a successful exact-byte
+native send; `completed()` is when acceptance returned. Matching captures inside
+that interval are eligible, subject to integrity, identity, ingress, and deadline
+checks. Raw socket creation/configuration precedes the start marker. Missing
+monotonic ingress or captures older than that marker remain ineligible. Neither
+marker is an exact wire-departure timestamp, a causality guarantee, or host identity
+proof; reported latency is measured from submission start.

@@ -228,12 +228,24 @@ incomplete.
   deducted from the trace's limits and capture queues, except when no host
   can be traced at all, where nothing is deducted and `not_traced` outcomes
   are reported normally.
+- **The default trace source port is disjoint from the scan's.** TCP and UDP
+  probes default to 49151, just below the 49152..=65535 range a scan's
+  generated UDP probes use, so a replayed scan reply cannot match a trace
+  probe's tuple; an explicit `source_port` overrides it on the caller's
+  responsibility.
+- **A link-layer trace's timeout must outlast one `--rate` interval.** Each
+  probe's possible neighbor request spends an interval inside the probe's
+  window, so an automatic or link-layer plan whose timeout cannot outlast it
+  is refused with `cli.traceroute_limit` before any work; a layer-3 route is
+  exempt.
 - **Not every scan host has a trace.** The stage declares every scan host,
   including a host discovery found silent, so such a host is traced only when
   `--traceroute-strategy` names a probe, and is `not_traced` otherwise.
 - **Native evidence is Linux-only and delayed.** The one native run used
-  namespaces with replies delayed past `send()`. No undelayed run and no run
-  on macOS or Windows exists (see Blockers).
+  namespaces with replies delayed past `send()`, before the M5 submission
+  change that correlates replies captured during transmission. An undelayed
+  run on the updated submission boundary and any run on macOS or Windows
+  remains needed (see Blockers).
 
 ## Change map
 
@@ -316,7 +328,9 @@ Settled at M11 with the recommended positions:
       any probe are in the [stage contracts][cli-stage].
 - [ ] Linux, macOS, and Windows support and runtime evidence are recorded
       independently. The Linux namespace run above passes only with delayed
-      replies, and macOS and Windows have not run (see Blockers).
+      replies, predating the submission-boundary fix that correlates early
+      replies; an undelayed retest and the macOS and Windows runs are still
+      open (see Blockers).
 
 ## Blockers
 
@@ -326,11 +340,12 @@ keep M11 `In progress`:
 - **Ground truth ([M2][m2]).** Trace results are scanner results, so path
   shapes (shared prefix, divergence, reconvergence, equal-cost routes, silent
   hops) need comparison-corpus entries with independent expected paths.
-- **Runtime evidence ([M3][m3]).** The [freshness rule][netio-transmit] that
-  discards replies arriving before `send()` returns applies to trace probes
-  as it does to every raw probe, so the Linux run needed delayed replies.
-  Deciding what such frames prove belongs with native validation in [M3][m3].
-  `scan --traceroute` has not run on macOS or Windows.
+- **Runtime evidence ([M3][m3]).** The M5 native work changed the
+  submission boundary so immediate replies now correlate, but M11's one
+  Linux run predates it and needed replies delayed past `send()`; the stage
+  needs a fresh undelayed native run on the updated boundary before its
+  runtime evidence counts. `scan --traceroute` has not run on macOS or
+  Windows.
 
 [m2]: m02-ground-truth-benchmarks.md
 [m5]: m05-host-discovery.md

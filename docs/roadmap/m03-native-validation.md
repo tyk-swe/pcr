@@ -165,13 +165,15 @@ leave the other seven scenarios unexecuted. The broader macOS/Windows native
 inventory, interface-isolation evidence, and administrator-owned protection
 controls remain incomplete, so M3 stays **In progress**.
 
-[M6][m6-limits] found an open question for native scan evidence on Linux. Over
-an isolated veth pair, kernel replies (SYN/ACK, RST, ICMP port unreachable)
-arrive about 30 µs after a probe, before `send()` returns. The shared rule that
-a capture inside the submission interval is not proven post-send discards
-them, so those raw scan endpoints read as silent. Slower replies correlate
-normally. Native scan scenarios here need to decide what such frames prove
-before claiming TCP or ICMP-error coverage.
+[M6][m6-limits] originally reproduced a fast-reply race on isolated Linux
+veth links: replies arrived before `send()` returned and the completion-marker
+rule discarded them. M5 now uses the start of the successful exact native
+submission as the eligibility boundary, after socket preparation. Immediate
+IPv4/IPv6 discovery and ARP/NDP fixtures exercise this ordering; stale ingress
+remains ineligible. The interval is not an exact wire-departure time or proof
+of identity. See [M5's native route](m05-host-discovery.md#independent-discovery-corpus-and-runtime-route)
+for versioned evidence and remaining platform/isolation gates. This does not
+close M3's broader inventory or administrative-protection requirements.
 
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md

@@ -1,6 +1,6 @@
 {
   "schema": "packetcraftr.scanner-corpus/v1",
-  "dataset_version": "1.2.0",
+  "dataset_version": "1.3.0",
   "families": ["ipv4", "ipv6"],
   "transports": ["tcp", "udp", "icmp"],
   "fixture_addresses": {
@@ -187,6 +187,126 @@
         "scope_interface_retained": true
       },
       "divergence": "The provisioned listener/responder, not Nmap output, defines connected/open and refused/closed ground truth. Equal IPv6 bytes on distinct links must remain distinct endpoint identities."
+    }
+  ],
+  "discovery_scenarios": [
+    {
+      "id": "discovery-responsive",
+      "condition": "Target answers echo, SYN, and UDP discovery with independently constructed protocol-matching replies.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "responded",
+        "reply_by_probe": {
+          "icmp": "icmp_echo_reply",
+          "tcp": "tcp_syn_ack",
+          "udp": "udp_payload"
+        },
+        "basis": "direct",
+        "responded_reasons": 1
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
+    },
+    {
+      "id": "discovery-closed-but-responsive",
+      "condition": "Target answers echo and refuses TCP/UDP ports; a closed endpoint does not imply an absent host.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "responded",
+        "reply_by_probe": {
+          "icmp": "icmp_echo_reply",
+          "tcp": "tcp_reset",
+          "udp": "icmp_port_unreachable"
+        },
+        "basis": "direct",
+        "responded_reasons": 1
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
+    },
+    {
+      "id": "discovery-silent",
+      "condition": "On-link peer sends no answer; silence remains uncertainty, never absence.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "no_response",
+        "reply_by_probe": {
+          "icmp": null,
+          "tcp": null,
+          "udp": null
+        },
+        "basis": "direct",
+        "responded_reasons": 0
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
+    },
+    {
+      "id": "discovery-blocked",
+      "condition": "Router emits administrative-prohibition errors quoting the exact probe; router evidence is not a target response.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "no_response",
+        "reply_by_probe": {
+          "icmp": "icmp_administratively_prohibited",
+          "tcp": "icmp_administratively_prohibited",
+          "udp": "icmp_administratively_prohibited"
+        },
+        "basis": "direct",
+        "responded_reasons": 0
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
+    },
+    {
+      "id": "discovery-routed",
+      "condition": "Off-link target is reached through a router which reports it unreachable; explicit neighbor discovery must not solicit or identify the gateway as the target.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "no_response",
+        "reply_by_probe": {
+          "icmp": "icmp_destination_unreachable",
+          "tcp": "icmp_destination_unreachable",
+          "udp": "icmp_destination_unreachable"
+        },
+        "basis": "direct",
+        "responded_reasons": 0
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
+    },
+    {
+      "id": "discovery-shared-link-address",
+      "condition": "Two same-family on-link targets answer ARP/NDP with one link address; report possible proxy, not authenticated identities.",
+      "provision": "injected_provider_and_controlled_native",
+      "families": [
+        "ipv4",
+        "ipv6"
+      ],
+      "expected": {
+        "state": "responded",
+        "reply_by_probe": {
+          "neighbor": "neighbor_reply"
+        },
+        "basis": "possible_proxy",
+        "responded_reasons": 1
+      },
+      "measurement_scope": "Discovery and scan share authorization, finite attempts, pacing, duration, probe and evidence budgets; native paths are reported separately from injected providers."
     }
   ],
   "adaptive_scheduling_scenarios": [

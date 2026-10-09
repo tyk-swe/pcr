@@ -740,6 +740,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Independently expected dual-stack discovery corpus conditions and fresh/cache,
+  routed, silent, and shared-MAC neighbor regressions. Reviewed native discovery
+  routes preserve exact revision, corpus/source/executable digests, commands,
+  runtime output, isolation, and precise unsupported/unavailable paths across
+  the five build profiles without claiming unexecuted native coverage.
 - Scan-informed traceroute (roadmap M11). `scan --traceroute` traces every
   scanned host after the scan, within the remaining `--max-duration`, with each
   host's TCP or ICMP echo probe taken from what the scan saw it answer
@@ -1986,6 +1991,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Correlate immediate native replies captured during successful exact-byte
+  transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
+  socket preparation outside the eligible interval and reject missing/stale
+  ingress; submission timing is not precise wire departure or identity proof.
+- `traceroute::hosts` defaults TCP and UDP probes to source port 49151, just
+  below the source ports a scan's generated UDP probes use, so a reply to a
+  scan probe can never terminate a trace hop under tuple-only correlation;
+  `Request::source_port` still overrides it.
+- `traceroute::hosts::Request` refuses an automatic or link-layer rate whose
+  interval fills or exceeds the probe timeout before admission: a neighbor
+  request spends that interval inside each probe's window, so a timeout that
+  cannot outlast it could only expire after the request was sent.
 - `traceroute::hosts` plans each host's anchor and reuse decisions on a fresh
   clock sample after every event publication, so a slow sink can no longer
   make a stale reuse cache look fresh.

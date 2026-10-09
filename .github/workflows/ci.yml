@@ -41,7 +41,7 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --all-features
       - name: Test scanner measurement contracts
-        run: python3 -m unittest scripts/test_scanner_measurements.py
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Check dependency direction
         run: python3 scripts/check-architecture.py
       - name: Documentation for supported feature profiles

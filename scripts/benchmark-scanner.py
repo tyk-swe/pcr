@@ -20,6 +20,8 @@ from validation_evidence import ROOT, digest
 OUTPUT_LIMIT = 1024 * 1024
 PROCESS_TIMEOUT = 15
 CONDITIONS = ("responsive", "closed", "blocked", "silent", "malformed", "unrelated")
+DISCOVERY_CONDITIONS = tuple("discovery-" + name for name in (
+    "responsive", "closed-but-responsive", "silent", "blocked", "routed", "shared-link-address"))
 
 
 class FixtureUnavailable(Exception):
@@ -90,6 +92,12 @@ def load_corpus(path):
         network = ipaddress.ip_network("192.0.2.0/24" if family == "ipv4" else "2001:db8::/32")
         if any(ipaddress.ip_address(value) not in network for value in addresses.values()):
             raise ValueError("injected fixtures must use documentation addresses")
+    if "discovery_scenarios" in corpus:
+        if [case["id"] for case in corpus["discovery_scenarios"]] != list(DISCOVERY_CONDITIONS):
+            raise ValueError("corpus must contain the complete, ordered discovery inventory")
+        for case in corpus["discovery_scenarios"]:
+            if case["families"] != ["ipv4", "ipv6"]:
+                raise ValueError("discovery conditions must cover both address families")
     return corpus, hashlib.sha256(raw).hexdigest()
 
 
@@ -113,6 +121,7 @@ def measured(command):
     for reader in readers:
         reader.start()
     peak = None
+    failure = None
     deadline = time.monotonic() + PROCESS_TIMEOUT
     try:
         if hasattr(os, "wait4"):
@@ -127,13 +136,18 @@ def measured(command):
                 time.sleep(0.001)
         else:
             process.wait(timeout=PROCESS_TIMEOUT)
-    except BaseException:
+    except BaseException as error:
         process.kill()
         process.wait()
-        raise
+        failure = error
     finally:
         for reader in readers:
             reader.join(timeout=2)
+    if failure is not None:
+        if isinstance(failure, subprocess.TimeoutExpired):
+            failure.output = buffers[0].decode('utf-8', errors='replace')
+            failure.stderr = buffers[1].decode('utf-8', errors='replace')
+        raise failure
     if any(reader.is_alive() for reader in readers) or overflow.is_set():
         raise ValueError("benchmark output exceeded its finite bound or did not close")
     return {

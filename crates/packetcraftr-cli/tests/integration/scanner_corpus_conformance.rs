@@ -42,3 +42,34 @@ fn the_corpus_inventory_is_unique_and_complete() {
         .expect("connect");
     assert_eq!(connect.len() * families.len(), 4);
 }
+
+#[test]
+fn discovery_corpus_conditions_are_unique_ordered_and_dual_stack() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap();
+    let cases = corpus["discovery_scenarios"].as_array().unwrap();
+    let ids: Vec<_> = cases
+        .iter()
+        .map(|case| case["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "discovery-responsive",
+            "discovery-closed-but-responsive",
+            "discovery-silent",
+            "discovery-blocked",
+            "discovery-routed",
+            "discovery-shared-link-address"
+        ]
+    );
+    for case in cases {
+        assert_eq!(case["families"], serde_json::json!(["ipv4", "ipv6"]));
+    }
+    let mut duplicate = corpus.clone();
+    duplicate["discovery_scenarios"][0]["unknown"] = true.into();
+    assert!(
+        corpus_schema().validate(&duplicate).is_err(),
+        "discovery fixture boundaries stay strict"
+    );
+}

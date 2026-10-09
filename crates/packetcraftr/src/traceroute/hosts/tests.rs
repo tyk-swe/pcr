@@ -10,8 +10,9 @@ use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::packet::Packet;
+use packetcraftr_core::protocol::network::Ipv6;
 use packetcraftr_core::protocol::network::{Icmpv4, Ipv4};
-use packetcraftr_core::protocol::transport::Tcp;
+use packetcraftr_core::protocol::transport::{Tcp, Udp};
 use packetcraftr_netio::interface::Id as InterfaceId;
 
 use super::engine::run;
@@ -32,6 +33,7 @@ use crate::traceroute::plan::build_batches;
 use crate::traceroute::plan::packet::probe_packet;
 use crate::traceroute::{
     Error, Limits, MAX_PROBE_BYTES, Probe, ProbeEvidence, ResponseKind, Termination,
+    classify_response,
 };
 use crate::{Sink, Stats};
 
@@ -1385,7 +1387,9 @@ fn a_single_host_probes_exactly_like_standalone_traceroute() {
             strategy: transport,
             address_family: Family::Any,
             destination_port: port,
-            source_port: None,
+            // The multi-host default source port is deliberately one below
+            // standalone's; give the comparison the same explicit one.
+            source_port: (transport != Transport::Icmp).then_some(49_151),
             payload_size: 0,
             dont_fragment: false,
             dscp: 0,
@@ -1716,4 +1720,201 @@ fn a_report_cannot_credit_more_neighbor_sends_than_packets() {
         .expect_err("one claimed neighbor send cannot exceed zero packets");
 
     assert!(matches!(error, Error::IncoherentEvents { .. }), "{error:?}");
+}
+
+#[test]
+fn a_link_layer_rate_that_outlasts_the_timeout_is_rejected() {
+    use packetcraftr_netio::link::Mode;
+
+    // An automatic or link-layer route spends one rate interval on a possible
+    // neighbor request inside each probe's window: a timeout that cannot
+    // outlast the interval can never send the probe.
+    for mode in [Mode::Auto, Mode::Layer2] {
+        let mut plan = request(tcp());
+        plan.route.link_mode = mode;
+        plan.probes_per_second = Some(1);
+        plan.timeout = Duration::from_millis(500);
+        let error = plan.validate().expect_err("a one-second pacing interval");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidLimit {
+                    field: "probes_per_second",
+                    value: 1,
+                    ..
+                }
+            ),
+            "{mode:?}: {error:?}"
+        );
+        let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+        let error = trace_error(&plan, &[host(1)], &mut network);
+        assert!(matches!(error, Error::InvalidLimit { .. }), "{mode:?}");
+        assert_eq!(network.batches, 0, "{mode:?}: refusal precedes any batch");
+
+        // An interval that exactly fills the timeout leaves nothing either.
+        plan.timeout = Duration::from_secs(1);
+        let error = plan.validate().expect_err("an interval of the timeout");
+        assert!(matches!(error, Error::InvalidLimit { .. }), "{mode:?}");
+
+        // A faster rate fits the probe inside the window again.
+        plan.probes_per_second = Some(10);
+        plan.timeout = Duration::from_millis(150);
+        assert!(plan.validate().is_ok(), "{mode:?}");
+    }
+
+    // A layer-3 route resolves no neighbor and keeps the pacing.
+    let mut plan = request(tcp());
+    plan.probes_per_second = Some(1);
+    plan.timeout = Duration::from_millis(500);
+    assert!(plan.validate().is_ok());
+}
+
+fn udp_scan_probe(target: IpAddr, attempt: u32) -> scan::Probe {
+    scan::Probe {
+        sequence: 0,
+        stage: Stage::Scan,
+        address: target,
+        scope: None,
+        endpoint: crate::probe::ProbeEndpoint::Udp { port: 33_434 },
+        attempt,
+        udp_payload: Bytes::new(),
+        udp_profile: None,
+    }
+}
+
+#[test]
+fn the_default_followup_source_port_sits_below_the_scan_udp_range() {
+    let v6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 9);
+    let mut plan = request(Some(Strategy {
+        transport: Transport::Udp,
+        destination_port: Some(33_434),
+    }));
+    let mut network = Network::new([
+        (host(1), path(&[1], End::Reply)),
+        (host(2), path(&[1], End::Reply)),
+    ]);
+    let mut resolver = Resolver {
+        targets: vec![
+            SelectedAddress::new(IpAddr::V4(host(1))),
+            SelectedAddress::new(IpAddr::V4(host(2))),
+            SelectedAddress::new(IpAddr::V6(v6)),
+        ],
+        operations: Vec::new(),
+        deny_target: false,
+        deny_operation: false,
+    };
+    let deadline = network.clock.deadline(plan.limits.max_duration);
+    trace_with(&plan, &mut resolver, &mut network, deadline).expect("traced");
+    assert!(!network.sent.is_empty());
+    assert!(
+        network.sent.iter().all(|probe| probe.source_port == 49_151),
+        "every default probe keeps the disjoint port"
+    );
+
+    // Every generated scan UDP source port stays in the ephemeral range the
+    // trace's default deliberately leaves alone.
+    for attempt in [1, 2, 16_384, 16_385, u32::MAX] {
+        let packet = udp_scan_probe(IpAddr::V4(host(1)), attempt).packet();
+        let port = packet.get::<Udp>().expect("a UDP scan probe").source_port;
+        assert!(
+            (49_152..=65_535).contains(&port),
+            "attempt {attempt}: {port}"
+        );
+    }
+
+    // An explicit source port is still honored.
+    plan.source_port = Some(52_000);
+    let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+    trace(&plan, &mut network);
+    assert!(
+        network.sent.iter().all(|probe| probe.source_port == 52_000),
+        "an explicit source port wins"
+    );
+}
+
+#[test]
+fn a_replayed_scan_udp_response_cannot_terminate_a_trace_hop() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let probe = |address: IpAddr, source_port: u16| {
+        let mut packet = probe_packet(&Probe {
+            sequence: 1,
+            address,
+            target: crate::probe::ProbeEndpoint::Udp { port: 33_434 },
+            hop_limit: 1,
+            attempt: 1,
+            source_port,
+            payload_size: 0,
+            dont_fragment: false,
+            dscp: 0,
+        });
+        match address {
+            IpAddr::V4(_) => {
+                packet.get_mut::<Ipv4>().expect("IPv4 probe").source = LOCAL;
+            }
+            IpAddr::V6(_) => {
+                packet.get_mut::<Ipv6>().expect("IPv6 probe").source = Ipv6Addr::LOCALHOST;
+            }
+        }
+        packet
+    };
+
+    // A fresh direct UDP reply to the earlier scan's tuple does not match the
+    // trace probe's 49151-sourced tuple, while a reply to the trace's own
+    // port is the destination.
+    for (address, destination, mark) in [
+        (IpAddr::V4(host(1)), IpAddr::V4(LOCAL), &[0x45_u8][..]),
+        (
+            IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 9)),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            &[0x60_u8][..],
+        ),
+    ] {
+        let request = probe(address, 49_151);
+        for (response_port, expected) in [
+            (49_152_u16, None),
+            (49_151, Some(ResponseKind::DestinationReached)),
+        ] {
+            let mut packet = Packet::new();
+            match destination {
+                IpAddr::V4(local) => {
+                    packet
+                        .push(Ipv4 {
+                            source: host(1),
+                            destination: local,
+                            ..Ipv4::default()
+                        })
+                        .push(Udp {
+                            source_port: 33_434,
+                            destination_port: response_port,
+                            ..Udp::default()
+                        });
+                }
+                IpAddr::V6(local) => {
+                    packet
+                        .push(Ipv6 {
+                            source: Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 9),
+                            destination: local,
+                            ..Ipv6::default()
+                        })
+                        .push(Udp {
+                            source_port: 33_434,
+                            destination_port: response_port,
+                            ..Udp::default()
+                        });
+                }
+            }
+            let response = decoded_packet(
+                packet,
+                UNIX_EPOCH + Duration::from_secs(2),
+                mark,
+                Vec::new(),
+            );
+            let classified = classify_response(&registry, Transport::Udp, &request, &response);
+            assert_eq!(
+                classified.map(|response| response.kind),
+                expected,
+                "{address}: port {response_port}"
+            );
+        }
+    }
 }

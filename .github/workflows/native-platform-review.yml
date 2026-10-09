@@ -8,11 +8,12 @@ on:
         type: string
         required: true
       scenario:
-        description: Select the full inventory or M4 scoped target evidence across every profile
+        description: Select the full inventory, M4 scoped targets, or M5 host discovery
         type: choice
         options:
           - all
           - scoped_ipv6_targets
+          - host_discovery
         default: all
 
 permissions:
@@ -53,8 +54,13 @@ jobs:
       - name: Initialize honest unexercised platform inventory
         shell: bash
         run: |
-          ${{ matrix.python }} scripts/test-native-platform.py --emit-unavailable \
-            --report target/validation/native-platform.json
+          if [[ "${{ inputs.scenario }}" == host_discovery ]]; then
+            ${{ matrix.python }} scripts/test-host-discovery-native.py --emit-unavailable \
+              --report target/validation/host-discovery.json
+          else
+            ${{ matrix.python }} scripts/test-native-platform.py --emit-unavailable \
+              --report target/validation/native-platform.json
+          fi
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - name: Exercise reviewed macOS host-local scenarios
@@ -64,6 +70,12 @@ jobs:
           REVIEWED_COMMIT: ${{ inputs.commit }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
+          if [[ "$SCENARIO" == host_discovery ]]; then
+            sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
+              python3 scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/host-discovery.json
+            exit
+          fi
           sudo -n env "PATH=$PATH" "RUSTUP_HOME=$HOME/.rustup" "CARGO_HOME=$HOME/.cargo" \
             python3 scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
             --scenario "$SCENARIO" \
@@ -75,6 +87,11 @@ jobs:
           REVIEWED_COMMIT: ${{ inputs.commit }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
+          if [[ "$SCENARIO" == host_discovery ]]; then
+            python scripts/test-host-discovery-native.py --reviewed-commit "$REVIEWED_COMMIT" \
+              --report target/validation/host-discovery.json
+            exit
+          fi
           python scripts/test-native-platform.py --reviewed-commit "$REVIEWED_COMMIT" \
             --scenario "$SCENARIO" \
             --report target/validation/native-platform.json

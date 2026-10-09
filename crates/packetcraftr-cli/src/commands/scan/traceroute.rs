@@ -381,7 +381,12 @@ mod tests {
                 max_duration: Duration::from_secs(60),
                 ..Default::default()
             },
-            route: Default::default(),
+            // The unit fixtures describe scan requests, not link-layer
+            // route constraints; a layer-3 route reserves no neighbor pacing.
+            route: packetcraftr::route::Options {
+                link_mode: packetcraftr_netio::link::Mode::Layer3,
+                ..Default::default()
+            },
             collection: Default::default(),
         }
     }

@@ -330,6 +330,12 @@ fn cache_index(address: IpAddr, transport: Transport) -> usize {
     usize::from(address.is_ipv6()) * 3 + transport
 }
 
+/// The default source port for follow-up probes sits just below the scan's
+/// generated UDP range, so a replayed scan response can never share a probe's
+/// tuple. An explicit `source_port` still takes it back on the caller's
+/// responsibility.
+const SCAN_FOLLOWUP_SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE - 1;
+
 impl Current {
     fn below(&self, request: &Request, hop_limit: u8, then: impl Fn(u8) -> Mode) -> Mode {
         match hop_limit
@@ -435,9 +441,9 @@ impl Current {
         let strategy = self.selection.strategy;
         let source_port = match strategy.transport {
             Transport::Icmp => 0,
-            Transport::Udp | Transport::Tcp => request
-                .source_port
-                .unwrap_or(crate::traceroute::SOURCE_PORT),
+            Transport::Udp | Transport::Tcp => {
+                request.source_port.unwrap_or(SCAN_FOLLOWUP_SOURCE_PORT)
+            }
         };
         let first_sequence = *next_sequence;
         let mut probes = Vec::new();

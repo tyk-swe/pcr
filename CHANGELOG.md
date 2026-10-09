@@ -1991,6 +1991,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Native discovery evidence verification accepts output/v11 as well as the
+  frozen output/v10 family, retaining its revision, capture, and admission checks.
 - Correlate immediate native replies captured during successful exact-byte
   transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
   socket preparation outside the eligible interval and reject missing/stale

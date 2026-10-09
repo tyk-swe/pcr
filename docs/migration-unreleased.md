@@ -2055,3 +2055,7 @@ socket setup happens before this boundary. Use the new `completed()` accessor
 when the acceptance-return marker is needed. Attempt `sent_at` and latency now
 refer to submission start; neither interval endpoint is precise wire departure,
 causality, or authenticated responder identity. Machine output remains v10.
+
+That version describes the M5 timing change. The M11 output/v11 family
+preserves these timing fields, and native discovery validation accepts both
+families without changing its evidence requirements.

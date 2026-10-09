@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #![allow(dead_code)]
 
+use std::convert::Infallible;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
@@ -498,9 +499,30 @@ fn connect_replies_carry_no_control_responder_and_unreachable_is_not_one() {
     assert!(!control);
 }
 
+/// A test clock whose authorization time is fully scripted: `sleep` yields
+/// to any async fake worker without consuming virtual time, while the
+/// authorizer's `advance` supplies the delay a real one would spend. The
+/// operation deadline stays real to bound the test itself.
+#[derive(Clone, Default)]
+struct AuthorizationClock(crate::test_support::RecordingClock);
+
+impl crate::clock::Clock for AuthorizationClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        self.0.now()
+    }
+
+    fn sleep(&self, _: Duration, _: &Deadline) -> Result<(), Self::Error> {
+        std::thread::yield_now();
+        Ok(())
+    }
+}
+
 struct SlowAuthorize {
     selected: SocketAddr,
     delay: Duration,
+    clock: Option<crate::test_support::RecordingClock>,
 }
 
 impl crate::target::ResolveTarget for SlowAuthorize {
@@ -522,7 +544,11 @@ impl crate::policy::Authorizer for SlowAuthorize {
         operation: crate::policy::Operation<'_>,
     ) -> Result<(), BoundaryError> {
         if let crate::policy::Operation::Socket(_) = operation {
-            std::thread::sleep(self.delay);
+            if let Some(clock) = &self.clock {
+                clock.advance(self.delay);
+            } else {
+                std::thread::sleep(self.delay);
+            }
         }
         Ok(())
     }
@@ -530,29 +556,30 @@ impl crate::policy::Authorizer for SlowAuthorize {
 
 #[test]
 fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
-    let closed = Arc::new(AtomicUsize::new(0));
-    let provider = Arc::new(Concurrent {
-        active: AtomicUsize::new(0),
-        peak: AtomicUsize::new(0),
+    let provider = Arc::new(RefusedAll {
         calls: AtomicUsize::new(0),
-        closed: Arc::clone(&closed),
     });
-    let mut request = adaptive_request(vec![80, 81], 1, Duration::from_millis(200));
+    let mut request = adaptive_request(vec![80, 81], 1, Duration::from_secs(30));
     request.max_in_flight = 1;
-    request.timeout = Duration::from_millis(200);
-    request.limits.max_duration = Duration::from_secs(60);
+    request.timeout = Duration::from_secs(30);
+    // The declared bound must cover the planned worst case (two exchanges
+    // plus backoff spacing); the real operation deadline below stays 60s.
+    request.limits.max_duration = Duration::from_secs(65);
     {
         let adaptive = request.adaptive.as_mut().unwrap();
-        adaptive.min_timeout = Duration::from_millis(200);
-        adaptive.max_timeout = Duration::from_millis(200);
+        adaptive.min_timeout = Duration::from_secs(30);
+        adaptive.max_timeout = Duration::from_secs(30);
         adaptive.min_window = 1;
         adaptive.initial_window = 1;
     }
+    let clock = AuthorizationClock::default();
     let mut authorizer = SlowAuthorize {
         selected: "127.0.0.1:80".parse().unwrap(),
-        delay: Duration::from_millis(120),
+        // Script admission at 20s and 40s around the anchored 30s deadline,
+        // without relying on wall-clock authorization sleeps.
+        delay: Duration::from_secs(20),
+        clock: Some(clock.0.clone()),
     };
-    let clock = crate::test_support::NoopClock;
     let mut deadline = Deadline::new(Duration::from_secs(60));
     let report = super::engine::run(
         &request,
@@ -603,6 +630,7 @@ fn the_descriptor_queue_caps_pending_even_when_leases_free_early() {
         let mut authorizer = SlowAuthorize {
             selected: "127.0.0.1:80".parse().unwrap(),
             delay: Duration::from_millis(2),
+            clock: None,
         };
         let clock = crate::test_support::NoopClock;
         let mut deadline = Deadline::new(Duration::from_secs(60));
@@ -675,6 +703,7 @@ fn the_connect_charge_uses_the_effective_descriptor_cap() {
         let mut authorizer = SlowAuthorize {
             selected: "127.0.0.1:80".parse().unwrap(),
             delay: Duration::ZERO,
+            clock: None,
         };
         let deadline = Deadline::new(Duration::from_secs(60));
         request.limits.max_prepared_bytes = charge;

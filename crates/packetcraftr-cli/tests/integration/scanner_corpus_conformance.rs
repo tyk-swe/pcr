@@ -73,3 +73,30 @@ fn discovery_corpus_conditions_are_unique_ordered_and_dual_stack() {
         "discovery fixture boundaries stay strict"
     );
 }
+
+#[test]
+fn identification_inventory_preserves_uncertainty_and_claim_confidence() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../docs/scanner-corpus.v1.json")).unwrap();
+    let cases = corpus["identification_scenarios"].as_array().unwrap();
+    let ids: std::collections::BTreeSet<_> = cases
+        .iter()
+        .map(|case| case["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 10);
+    for case in cases {
+        assert_eq!(case["families"], serde_json::json!(["ipv4", "ipv6"]));
+        if matches!(
+            case["expected"]["outcome"].as_str(),
+            Some("unknown" | "ambiguous" | "malformed" | "truncated" | "excluded")
+        ) {
+            assert!(case["expected"]["version"].is_null());
+        }
+        if case["id"] == "identification-misleading-banner" {
+            assert_eq!(case["expected"]["confidence"], "claim");
+        }
+    }
+    let mut invalid = corpus.clone();
+    invalid["identification_scenarios"][0]["authenticated"] = true.into();
+    assert!(corpus_schema().validate(&invalid).is_err());
+}

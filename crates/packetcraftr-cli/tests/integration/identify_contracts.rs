@@ -1,0 +1,273 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::io::{Read, Write};
+use std::net::{TcpListener, UdpSocket};
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+
+use serde_json::Value;
+use tempfile::TempDir;
+
+use crate::common::{parse_json, parse_ndjson, path_text, run, run_success};
+
+fn corpus(directory: &TempDir, probe: &str) -> PathBuf {
+    let mut corpus: Value = serde_json::from_slice(include_bytes!(
+        "../../../packetcraftr/data/service-probes.json"
+    ))
+    .unwrap();
+    corpus["probes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|entry| entry["id"] == probe);
+    corpus["matches"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|entry| entry["probe"] == probe);
+    let path = directory.path().join("corpus.json");
+    std::fs::write(&path, serde_json::to_vec(&corpus).unwrap()).unwrap();
+    path
+}
+
+fn http_peer() -> (String, thread::JoinHandle<Vec<u8>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = thread::spawn(move || {
+        let (mut connection, _) = listener.accept().unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            connection.read_exact(&mut byte).unwrap();
+            request.extend(byte);
+        }
+        connection
+            .write_all(b"HTTP/1.0 200 OK\r\nServer: nginx/1.26.2\r\n\r\n")
+            .unwrap();
+        request
+    });
+    (address, server)
+}
+
+#[test]
+fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
+    let directory = TempDir::new().unwrap();
+    let corpus = corpus(&directory, "http-head");
+    let (address, server) = http_peer();
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+    ]));
+    assert_eq!(server.join().unwrap(), b"HEAD / HTTP/1.0\r\n\r\n");
+    assert_eq!(report["schema"], "packetcraftr.output/v11");
+    assert_eq!(report["command"], "identify");
+    let record = &report["result"]["records"][0];
+    assert_eq!(record["endpoint"]["address"], address);
+    assert_eq!(record["outcome"], "matched");
+    assert_eq!(
+        record["probes"][0]["request_hex"],
+        "48454144202f20485454502f312e300d0a0d0a"
+    );
+    assert_eq!(
+        record["probes"][0]["response_hex"],
+        "485454502f312e3020323030204f4b0d0a5365727665723a206e67696e782f312e32362e320d0a0d0a"
+    );
+    let claims = record["probes"][0]["observation"]["claims"]
+        .as_array()
+        .unwrap();
+    assert!(claims.iter().all(|claim| claim["unauthenticated"] == true));
+    let candidate = &record["candidates"][0];
+    assert_eq!(candidate["product"], "nginx");
+    assert_eq!(candidate["version"], "1.26.2");
+    assert_eq!(candidate["confidence"], "claim");
+    assert_eq!(candidate["provenance"]["probe"], "http-head");
+    assert_eq!(
+        candidate["provenance"]["version"],
+        report["result"]["corpus_version"]
+    );
+}
+
+#[test]
+fn ndjson_publishes_one_endpoint_then_one_terminal_completion() {
+    let directory = TempDir::new().unwrap();
+    let corpus = corpus(&directory, "http-head");
+    let (address, server) = http_peer();
+    let records = parse_ndjson(&run_success(&[
+        "--output",
+        "ndjson",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+    ]));
+    server.join().unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["event"], "identify_endpoint");
+    assert_eq!(records[0]["sequence"], 0);
+    assert_eq!(records[1]["event"], "complete");
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["result"]["endpoints"], 1);
+    assert_eq!(records[1]["result"]["complete"], true);
+    assert!(records[1]["result"].get("records").is_none());
+}
+
+#[test]
+fn dns_udp_on_a_nonstandard_port_matches_protocol_without_a_version() {
+    let directory = TempDir::new().unwrap();
+    let corpus = corpus(&directory, "dns-udp");
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let address = socket.local_addr().unwrap().to_string();
+    let server = thread::spawn(move || {
+        let mut bytes = [0; 512];
+        let (length, peer) = socket.recv_from(&mut bytes).unwrap();
+        bytes[2] = 0x80;
+        bytes[3] = 0;
+        socket.send_to(&bytes[..length], peer).unwrap();
+    });
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--transport",
+        "udp",
+        "--corpus",
+        path_text(&corpus),
+    ]));
+    server.join().unwrap();
+    let record = &report["result"]["records"][0];
+    assert_eq!(record["outcome"], "matched");
+    assert_eq!(record["candidates"][0]["product"], "DNS service");
+    assert_eq!(record["candidates"][0]["confidence"], "protocol");
+    assert!(record["candidates"][0]["version"].is_null());
+}
+
+#[test]
+fn exclusions_prevent_network_calls_and_intensity_prevents_probe_planning() {
+    let directory = TempDir::new().unwrap();
+    let corpus = corpus(&directory, "http-head");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let address = endpoint.to_string();
+    let mut exclusions: Value = serde_json::from_slice(include_bytes!(
+        "../../../packetcraftr/data/service-exclusions.json"
+    ))
+    .unwrap();
+    exclusions["entries"] = serde_json::json!([{
+        "transport": "tcp", "ports": [endpoint.port()], "reason": "Isolated fixture exclusion",
+        "metadata": exclusions["entries"][0]["metadata"].clone(),
+    }]);
+    let path = directory.path().join("exclusions.json");
+    std::fs::write(&path, serde_json::to_vec(&exclusions).unwrap()).unwrap();
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+        "--exclusions",
+        path_text(&path),
+    ]));
+    assert_eq!(report["result"]["records"][0]["outcome"], "excluded");
+    assert_eq!(report["result"]["usage"]["attempts"], 0);
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+        "--intensity",
+        "1",
+        "--ignore-exclusions",
+    ]));
+    assert_eq!(report["result"]["exclusion_set"], "operator-no-exclusions");
+    assert_eq!(report["result"]["usage"]["attempts"], 0);
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+}
+
+#[test]
+fn policy_invalid_documents_and_unsupported_formats_are_typed_errors() {
+    let denied = parse_json(&run(&[
+        "--output",
+        "json",
+        "identify",
+        "8.8.8.8:53",
+        "--transport",
+        "udp",
+    ]));
+    assert_eq!(denied["status"], "error");
+    assert_eq!(denied["error"]["kind"], "policy");
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("invalid.json");
+    std::fs::write(&path, b"{\"schema\":\"unsupported\"}").unwrap();
+    let malformed = parse_ndjson(&run(&[
+        "--output",
+        "ndjson",
+        "identify",
+        "127.0.0.1:12345",
+        "--corpus",
+        path_text(&path),
+    ]));
+    assert_eq!(malformed.len(), 1);
+    assert_eq!(malformed[0]["event"], "error");
+    assert_eq!(malformed[0]["sequence"], 0);
+    assert!(
+        malformed[0]["error"]["code"]
+            .as_str()
+            .unwrap()
+            .starts_with("document.service_probes")
+    );
+    let unsupported = run(&["--output", "pcap", "identify", "127.0.0.1:12345"]);
+    assert!(!unsupported.status.success());
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("cli.output_format"));
+}
+
+#[test]
+fn operation_deadline_retains_partial_evidence_before_completion() {
+    let directory = TempDir::new().unwrap();
+    let corpus = corpus(&directory, "http-head");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = thread::spawn(move || {
+        let (mut connection, _) = listener.accept().unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut bytes = [0; 128];
+        assert!(connection.read(&mut bytes).unwrap() > 0);
+        // Keep the peer open until the client closes after its bounded read.
+        assert!(matches!(connection.read(&mut bytes), Ok(0) | Err(_)));
+    });
+    let records = parse_ndjson(&run_success(&[
+        "--output",
+        "ndjson",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+        "--operation-timeout-ms",
+        "100",
+        "--probe-timeout-ms",
+        "1000",
+    ]));
+    server.join().unwrap();
+    assert_eq!(records[0]["event"], "identify_endpoint");
+    assert_eq!(records[0]["result"]["probes"][0]["io_outcome"], "timed_out");
+    assert_eq!(records[1]["event"], "complete");
+    assert_eq!(records[1]["result"]["complete"], false);
+}

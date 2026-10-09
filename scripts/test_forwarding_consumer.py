@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Reference consumer contract: accepted families and v10 report fields."""
+"""Reference consumer contract: accepted families and v11 report fields."""
 from __future__ import annotations
 
 import importlib.util
@@ -26,13 +26,17 @@ def consume_stream(document: Path) -> dict:
 
 
 class Family(unittest.TestCase):
-    def test_declares_v10_and_frozen_earlier_families(self):
-        self.assertIn("packetcraftr.output/v10", CONSUMER.SCHEMAS)
-        for family in ("v6", "v7", "v8", "v9"):
+    def test_declares_v11_and_frozen_earlier_families(self):
+        self.assertIn("packetcraftr.output/v11", CONSUMER.SCHEMAS)
+        for family in ("v6", "v7", "v8", "v9", "v10"):
             self.assertIn(f"packetcraftr.output/{family}", CONSUMER.SCHEMAS)
 
     def test_accepts_the_v10_forwarding_fixture(self):
         observed = consume_stream(ROOT / "examples/consumers/fixtures/v10-forwarding.json")
+        self.assertTrue(observed)
+
+    def test_accepts_the_v11_forwarding_fixture(self):
+        observed = consume_stream(ROOT / "examples/consumers/fixtures/v11-forwarding.json")
         self.assertTrue(observed)
 
     def test_accepts_v10_forwarding_with_scheduling_metadata(self):

@@ -3,6 +3,7 @@
 
 mod connect;
 mod error;
+mod exchange;
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -12,6 +13,7 @@ use packetcraftr_core::budget::Deadline;
 
 pub use connect::{ConnectBudget, PendingConnect, start_connect};
 pub use error::Error;
+pub use exchange::exchange;
 
 /// Process-wide connections that may hold a worker or an open socket at once.
 pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;

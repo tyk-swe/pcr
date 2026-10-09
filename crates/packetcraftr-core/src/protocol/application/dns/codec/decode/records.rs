@@ -78,7 +78,8 @@ impl<'a> Rdata<'a> {
         })
     }
 
-    // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
+    // IN records and CH TXT metadata are supported here; OPT repurposes CLASS
+    // as its UDP byte size. TXT's character-string layout also applies to CH.
     // The top class bit is mDNS's cache-flush flag (RFC 6762 section 10.2), so
     // only an mDNS message masks it to find the class the rdata type needs.
     // The record keeps the full class either way.
@@ -97,7 +98,7 @@ impl<'a> Rdata<'a> {
             (6, 1) => self.decode_soa(),
             (12, 1) => Ok(RecordValue::Ptr(self.exact_name(self.offset)?)),
             (15, 1) => self.decode_mx(),
-            (16, 1) => self.decode_txt(),
+            (16, 1 | 3) => self.decode_txt(),
             (28, 1) => {
                 let bytes: [u8; 16] = bytes
                     .try_into()

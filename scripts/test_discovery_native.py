@@ -50,7 +50,7 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
 
     def test_capture_free_profiles_require_a_real_typed_native_refusal(self):
         case = dict(name='discovery-responsive', status='unavailable', reason_code='unsupported_capability',
-                    runs=[dict(exit_code=1, stdout=json.dumps(dict(schema='packetcraftr.output/v10', status='error',
+                    runs=[dict(exit_code=1, stdout=json.dumps(dict(schema='packetcraftr.output/v11', status='error',
                               error=dict(kind='capability', code='capability.unsupported'))))])
         for name in ('portable', 'default', 'pcap-free', 'layer2', 'full-native'):
             self.assertEqual(expected_capability_refusal(dict(name=name), case), name in ('portable', 'default', 'pcap-free'))
@@ -76,7 +76,7 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
         case.update(name='connect-responsive', family='ipv4', status='exercised', runs=[])
         for mode in ('only', 'before', 'before_all'):
             scan = 'not_requested' if mode == 'only' else 'scanned'
-            output = dict(schema='packetcraftr.output/v10', status='success', result=dict(
+            output = dict(schema='packetcraftr.output/v11', status='success', result=dict(
                 hosts=[dict(address='127.0.0.1', discovery='responded', scan=scan,
                             reasons=[dict(kind='tcp_connected', evidence='socket', basis='direct')])],
                 endpoints=[] if mode == 'only' else [{}]))

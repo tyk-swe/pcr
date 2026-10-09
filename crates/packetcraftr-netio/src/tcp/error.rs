@@ -9,6 +9,8 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("TCP exchange requires 1..=65535 response bytes and at most 65537 request bytes")]
+    ExchangeLimit,
     #[error(transparent)]
     Socket(#[from] io::Error),
     #[error("could not inspect the connected {operation} endpoint")]
@@ -60,6 +62,7 @@ impl Classified for Error {
                 operation: "starting a TCP connection",
             }
             .classification(),
+            Self::ExchangeLimit => Classification::new("cli.tcp_exchange_limit", Kind::Usage, None),
             Self::Timeout => Classification::new(
                 "cli.tcp_connect_timeout",
                 Kind::Usage,

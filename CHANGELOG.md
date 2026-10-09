@@ -6,8 +6,25 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Explicit, bounded `identify` workflow and CLI command for selected numeric
+  TCP/UDP endpoints, with SSH banner collection, HTTP HEAD and DNS probes on
+  any permitted port. Operation, host, connection and probe budgets preserve
+  partial evidence; reviewed sensitive-service exclusions apply before planning.
+- Independently versioned, core-only probe/match and exclusion documents with
+  bundled project-authored data and provenance. Output separates untrusted
+  claims, deterministic candidates, ordinal confidence and exact match evidence;
+  unknown and ambiguous outcomes do not assert exact versions.
+- DNS decoding recognizes CHAOS-class TXT metadata used by `version.bind`,
+  retaining its original wire class and bounded character-string values.
+
 ### Breaking
 
+- Structured command output moves to `packetcraftr.output/v11`, adding explicit
+  identification records and terminal metadata. The v6 through v10 families and
+  schemas remain frozen. Consumers must accept v11 before reading current CLI
+  output; see `docs/migration-unreleased.md`.
 - `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
   capture cleanup failed.
 - Structured command output moves to `packetcraftr.output/v10`, which adds a

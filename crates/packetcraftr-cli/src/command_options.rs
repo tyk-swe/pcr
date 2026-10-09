@@ -11,8 +11,8 @@ pub(crate) use offline_limits::{
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
-    DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs, NumericPolicyArgs,
-    PublicDestinationArgs, SendPolicyArgs, TrafficBudgetArgs,
+    DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs, IdentificationPolicyArgs,
+    NumericPolicyArgs, PublicDestinationArgs, SendPolicyArgs, TrafficBudgetArgs,
 };
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};

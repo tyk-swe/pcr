@@ -1,0 +1,281 @@
+{
+  "schema": "packetcraftr.service-probes/v1",
+  "name": "project-service-probes",
+  "version": "1.0.0",
+  "probes": [
+    {
+      "id": "ssh-banner",
+      "transport": "tcp",
+      "intensity": 1,
+      "request": {
+        "type": "banner"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc4253#section-4.2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Receives the server identification only; transmits no SSH bytes, credentials, or authentication attempt."
+      }
+    },
+    {
+      "id": "http-head",
+      "transport": "tcp",
+      "intensity": 2,
+      "request": {
+        "type": "http_head"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Sends only HEAD / HTTP/1.0 with no credentials, body, or mutable method; does not follow redirects or authenticate."
+      }
+    },
+    {
+      "id": "dns-tcp",
+      "transport": "tcp",
+      "intensity": 2,
+      "request": {
+        "type": "dns",
+        "payload": {
+          "type": "dns",
+          "name": ".",
+          "query_type": 1,
+          "class": 1,
+          "recursion_desired": false,
+          "id_base": 20547
+        }
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc1035#section-4.1.2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Sends one nonrecursive root IN A question; does not update records, request transfers, authenticate, or trigger recursive resolution."
+      }
+    },
+    {
+      "id": "dns-udp",
+      "transport": "udp",
+      "intensity": 2,
+      "request": {
+        "type": "dns",
+        "payload": {
+          "type": "dns",
+          "name": ".",
+          "query_type": 1,
+          "class": 1,
+          "recursion_desired": false,
+          "id_base": 20547
+        }
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc1035#section-4.1.2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Sends one nonrecursive root IN A question; does not update records, request transfers, authenticate, or trigger recursive resolution."
+      }
+    },
+    {
+      "id": "dns-version-tcp",
+      "transport": "tcp",
+      "intensity": 3,
+      "request": {
+        "type": "dns",
+        "payload": {
+          "type": "dns",
+          "name": "version.bind.",
+          "query_type": 16,
+          "class": 3,
+          "recursion_desired": false,
+          "id_base": 20547
+        }
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc4892#section-2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Sends one nonrecursive version.bind CH TXT metadata question; no updates, transfer, credentials, or recursive resolution."
+      }
+    },
+    {
+      "id": "dns-version-udp",
+      "transport": "udp",
+      "intensity": 3,
+      "request": {
+        "type": "dns",
+        "payload": {
+          "type": "dns",
+          "name": "version.bind.",
+          "query_type": 16,
+          "class": 3,
+          "recursion_desired": false,
+          "id_base": 20547
+        }
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "https://www.rfc-editor.org/rfc/rfc4892#section-2",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      },
+      "read_only_review": {
+        "reviewed_by": "tyk-swe",
+        "reviewed": "2026-10-09",
+        "statement": "Sends one nonrecursive version.bind CH TXT metadata question; no updates, transfer, credentials, or recursive resolution."
+      }
+    }
+  ],
+  "matches": [
+    {
+      "id": "openssh-claim",
+      "probe": "ssh-banner",
+      "field": "ssh_software",
+      "prefix": "OpenSSH_",
+      "product": "OpenSSH",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "nginx-claim",
+      "probe": "http-head",
+      "field": "http_server",
+      "prefix": "nginx/",
+      "product": "nginx",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "apache-claim",
+      "probe": "http-head",
+      "field": "http_server",
+      "prefix": "Apache/",
+      "product": "Apache HTTP Server",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "dns-protocol-tcp",
+      "probe": "dns-tcp",
+      "field": "dns_rcode",
+      "prefix": "0",
+      "product": "DNS service",
+      "version": null,
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "dns-protocol-udp",
+      "probe": "dns-udp",
+      "field": "dns_rcode",
+      "prefix": "0",
+      "product": "DNS service",
+      "version": null,
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "bind-claim-tcp",
+      "probe": "dns-version-tcp",
+      "field": "dns_txt",
+      "prefix": "BIND ",
+      "product": "BIND",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "id": "bind-claim-udp",
+      "probe": "dns-version-udp",
+      "field": "dns_txt",
+      "prefix": "BIND ",
+      "product": "BIND",
+      "version": {
+        "max_bytes": 64,
+        "stop_at": " ;()"
+      },
+      "metadata": {
+        "source": "PacketcraftR project-authored fixture",
+        "reference": "docs/scanner-data-policy.md",
+        "license": "AGPL-3.0-only",
+        "maintainer": "tyk-swe",
+        "updated": "2026-10-09"
+      }
+    }
+  ]
+}

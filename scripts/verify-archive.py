@@ -19,12 +19,17 @@ ASSETS = (
     'schemas/packetcraftr.output.v8.schema.json',
     'schemas/packetcraftr.output.v9.schema.json',
     'schemas/packetcraftr.output.v10.schema.json',
+    'schemas/packetcraftr.output.v11.schema.json',
     'docs/verification-contract.md', 'docs/consumer-compatibility.md',
     'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
     'examples/consumers/forwarding.py',
     'examples/consumers/fixtures/v6-forwarding.json',
+    'examples/consumers/fixtures/v11-forwarding.json',
     'schemas/packetcraftr.rewrite.v2.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
+    'schemas/packetcraftr.service-probes.v1.schema.json',
+    'schemas/packetcraftr.service-exclusions.v1.schema.json',
+    'docs/service-identification.md',
     'examples/captures/tls-handshake.pcapng',
     'examples/captures/clock-regression.pcap',
     'examples/captures/scoped-vxlan.pcap',
@@ -37,6 +42,12 @@ ASSETS = (
     'examples/documents/packet-dhcpv6-reply.json',
     'examples/documents/rewrite-field-edits.json',
     'examples/documents/udp-profiles.json',
+    'examples/documents/service-probes.json',
+    'examples/documents/service-exclusions.json',
+    'crates/packetcraftr/data/service-probes.json',
+    'crates/packetcraftr/data/service-probes.provenance.yaml',
+    'crates/packetcraftr/data/service-exclusions.json',
+    'crates/packetcraftr/data/service-exclusions.provenance.yaml',
     'examples/documents/packet-ipv4-udp.json',
     'examples/documents/output-stats-resources.json',
     'examples/documents/output-stats-clock.json',
@@ -104,7 +115,7 @@ def verify(root, version, commit, target, variant):
     if len(records) != expected_frames + 1:
         raise ValueError(f'packaged capture must produce {expected_frames} frames and one completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v10'
+        if (record.get('schema') != 'packetcraftr.output/v11'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
@@ -124,6 +135,13 @@ def verify(root, version, commit, target, variant):
         actual = json.loads(cli('--output', 'json', 'stats',
                                 f'examples/captures/{capture}', *options))
         expected = json.loads((root / 'examples/documents' / example).read_text(encoding='utf-8'))
+        if expected.get('schema') != 'packetcraftr.output/v10':
+            raise ValueError(f'{example} must preserve its released output/v10 family')
+        if actual.get('schema') != 'packetcraftr.output/v11':
+            raise ValueError(f'packaged stats output for {example} must use output/v11')
+        # Preserve released examples and compare every other envelope/payload
+        # field against the current producer without changing archived files.
+        expected['schema'] = actual['schema']
         if actual != expected:
             raise ValueError(f'packaged stats output differs from {example}')
 

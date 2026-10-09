@@ -5,6 +5,20 @@ use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
 
+#[cfg(target_os = "windows")]
+#[path = "udp/winsock.rs"]
+mod udp_backend;
+#[cfg(not(target_os = "windows"))]
+#[path = "udp/stdlib.rs"]
+mod udp_backend;
+
+pub(crate) fn receive_datagram(
+    socket: &std::net::UdpSocket,
+    buffer: &mut [u8],
+) -> std::io::Result<(usize, bool)> {
+    udp_backend::receive(socket, buffer)
+}
+
 use crate::{
     Error, interface,
     interface::Id as InterfaceId,

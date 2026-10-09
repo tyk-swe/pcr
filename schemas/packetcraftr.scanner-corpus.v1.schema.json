@@ -6,6 +6,7 @@
   "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "provenance"],
   "additionalProperties": false,
   "properties": {
+    "identification_scenarios": {"type": "array", "minItems": 10, "items": {"$ref": "#/$defs/identificationScenario"}},
     "schema": {"const": "packetcraftr.scanner-corpus/v1"},
     "dataset_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "families": {"const": ["ipv4", "ipv6"]},
@@ -590,6 +591,93 @@
     }
   },
   "$defs": {
+    "identificationScenario": {
+      "type": "object",
+      "required": [
+        "id",
+        "condition",
+        "provision",
+        "families",
+        "transport",
+        "expected",
+        "measurement_scope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^identification-[a-z-]+$"
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provision": {
+          "enum": [
+            "protocol_fixture",
+            "loopback_or_recording_provider"
+          ]
+        },
+        "families": {
+          "const": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "measurement_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "required": [
+            "outcome",
+            "product",
+            "version",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "enum": [
+                "matched",
+                "unknown",
+                "ambiguous",
+                "malformed",
+                "truncated",
+                "excluded"
+              ]
+            },
+            "product": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "confidence": {
+              "enum": [
+                "claim",
+                "protocol",
+                null
+              ]
+            }
+          }
+        }
+      }
+    },
+
     "text": {"type": "string", "minLength": 1, "maxLength": 4096},
     "addresses": {
       "type": "object",

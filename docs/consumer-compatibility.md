@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v10.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v11.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,9 +36,37 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v11
+
+`packetcraftr.output/v11` is the current production family. It preserves every
+v10 meaning and adds the explicit `identify` command. Scans never start service
+identification implicitly. Aggregate JSON reports carry `records`; NDJSON emits
+one `identify_endpoint` record per selected numeric endpoint and one terminal
+`complete` record with endpoint count, corpus and exclusions versions, usage,
+elapsed time, and `complete`/`cancelled` state.
+
+Each endpoint distinguishes `excluded`, `unknown`, `matched`, `ambiguous`,
+`malformed`, `truncated`, and `budget_exhausted`. Probe evidence retains exact
+`request_hex` and `response_hex`, local and peer numeric addresses when available,
+I/O outcome, unauthenticated observed `claims`, and separate matched `candidates`.
+Candidate provenance identifies the corpus, version, probe, rule, and observed
+field indices. Confidence is ordinal: `claim` is weaker than `protocol`. A
+protocol match identifies a parsed protocol and never supports a product version;
+a claim match remains peer-supplied unauthenticated product/version evidence.
+Unknown, ambiguous, malformed, and truncated outcomes carry no exact versions.
+No identification result is a vulnerability finding.
+
+Identification budget exhaustion preserves retained evidence and marks the
+report `complete: false`. `--operation-timeout-ms` bounds identification;
+`--max-duration-ms` bounds preparation, identification, and publication together.
+Keep the overall duration greater than the operation timeout to leave time for
+publication. Cancellation or overall publication expiry produces the shared typed
+error terminal when the stream can still be written. An unwritable stream has no
+terminal guarantee and must be treated as incomplete.
+
 ## Output family v10
 
-`packetcraftr.output/v10` is the current production family. It preserves every
+`packetcraftr.output/v10` is frozen. It preserves every
 v9 meaning and adds opt-in adaptive scheduling:
 
 - a required `scheduling` object on raw scan results, NDJSON scan `complete`

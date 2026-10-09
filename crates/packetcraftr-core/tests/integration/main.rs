@@ -63,6 +63,7 @@ mod runtime_document_contracts;
 mod runtime_reflection_contracts;
 mod runtime_registry_contracts;
 mod semantic_contracts;
+mod service_identification_contracts;
 mod syslog_contracts;
 mod tcp_option_contracts;
 mod tcp_reassembly_edge_contracts;

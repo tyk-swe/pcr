@@ -71,7 +71,9 @@ fn request(targets: &[&str], endpoints: Vec<ProbeEndpoint>, discovery: Options) 
         discovery,
         attempts: 1,
         adaptive: None,
-        timeout: Duration::from_millis(20),
+        // Host-state fixtures include packet preparation and run alongside
+        // other suites. Timing boundary tests set their own shorter windows.
+        timeout: Duration::from_millis(200),
         probes_per_second: None,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),

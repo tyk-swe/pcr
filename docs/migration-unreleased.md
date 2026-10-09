@@ -2,11 +2,11 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v10` and
-validate against `schemas/packetcraftr.output.v10.schema.json`. The
-`packetcraftr.output/v6` through `packetcraftr.output/v9` schemas remain
+All structured command envelopes now identify `packetcraftr.output/v11` and
+validate against `schemas/packetcraftr.output.v11.schema.json`. The
+`packetcraftr.output/v6` through `packetcraftr.output/v10` schemas remain
 frozen and available for validating previously emitted output. The current
-producer and bundled examples have moved to v10; consumers pinned to an
+producer emits v11; consumers pinned to an
 earlier family must explicitly support the new one.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
@@ -15,6 +15,26 @@ packet-document versions are rejected with a schema error.
 Behavior and contract changes come first, grouped by topic. The
 [renamed and removed paths](#renamed-and-removed-paths) tables at the end map
 each 0.5.0-beta.3 name to its final name, by crate.
+
+## Explicit service identification and output/v11
+
+`identify IP:PORT... --transport tcp|udp` explicitly selects numeric endpoints
+reported by scans. It reads the bundled versioned corpus or `--corpus PATH`,
+applies the selected intensity and reviewed sensitive-service exclusions before
+planning, and authorizes every final numeric endpoint and request. Use
+`--exclusions PATH` for another versioned exclusion document or the explicit
+`--ignore-exclusions` override. Ordinary scans retain their existing behavior.
+
+The command supports text, aggregate JSON, and sequenced NDJSON. Read-only SSH
+banner, HTTP HEAD, and DNS observations work on any port; TLS remains outside
+this milestone. Claims are unauthenticated bytes, separate from matched product
+and version candidates with ordinal confidence and corpus provenance. Unknown
+and ambiguous results never publish exact versions. Four scopes independently
+bound attempts, writes, reads, and elapsed time: operation, host, connection,
+and probe. The identification timeout defaults to 30 seconds; the overall
+invocation duration defaults to 35 seconds, leaving bounded publication time
+for partial reports when the operation budget expires. See
+[consumer compatibility](consumer-compatibility.md#output-family-v11).
 
 ## Adaptive scheduling and output/v10
 

@@ -1,0 +1,408 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "name",
+    "version",
+    "probes",
+    "matches"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.service-probes/v1"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "probes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "transport",
+          "intensity",
+          "request",
+          "metadata",
+          "read_only_review"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "transport": {
+            "enum": [
+              "tcp",
+              "udp"
+            ]
+          },
+          "intensity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9
+          },
+          "request": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "banner"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "http_head"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "payload"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "dns"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "name",
+                      "recursion_desired"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "dns"
+                      },
+                      "name": {
+                        "type": "string",
+                        "enum": [
+                          ".",
+                          "version.bind.",
+                          "version.bind"
+                        ]
+                      },
+                      "query_type": {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          16
+                        ]
+                      },
+                      "class": {
+                        "type": "integer",
+                        "enum": [
+                          1,
+                          3
+                        ]
+                      },
+                      "recursion_desired": {
+                        "const": false
+                      },
+                      "id_base": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "name": {
+                              "const": "."
+                            }
+                          }
+                        },
+                        "then": {
+                          "properties": {
+                            "query_type": {
+                              "const": 1
+                            },
+                            "class": {
+                              "const": 1
+                            }
+                          }
+                        },
+                        "else": {
+                          "required": [
+                            "query_type",
+                            "class"
+                          ],
+                          "properties": {
+                            "query_type": {
+                              "const": 16
+                            },
+                            "class": {
+                              "const": 3
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "metadata": {
+            "$ref": "#/$defs/metadata"
+          },
+          "read_only_review": {
+            "$ref": "#/$defs/review"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "transport": {
+                  "const": "udp"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "properties": {
+                    "type": {
+                      "const": "dns"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "matches": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "probe",
+          "field",
+          "prefix",
+          "product",
+          "metadata"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "probe": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "field": {
+            "enum": [
+              "ssh_banner",
+              "ssh_software",
+              "http_status",
+              "http_server",
+              "dns_rcode",
+              "dns_txt"
+            ]
+          },
+          "prefix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "max_bytes",
+                  "stop_at"
+                ],
+                "properties": {
+                  "max_bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 64
+                  },
+                  "stop_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  }
+                }
+              }
+            ]
+          },
+          "metadata": {
+            "$ref": "#/$defs/metadata"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "field": {
+                  "enum": [
+                    "http_status",
+                    "dns_rcode"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "version": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "field": {
+                  "const": "dns_rcode"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "product": {
+                  "const": "DNS service"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "field": {
+                  "const": "http_status"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "product": {
+                  "const": "HTTP service"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packetcraftr.dev/schemas/packetcraftr.service-probes.v1.schema.json",
+  "title": "PacketcraftR bounded read-only service probes and claim matches",
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "reference",
+        "license",
+        "maintainer",
+        "updated"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+        },
+        "maintainer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+        },
+        "updated": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_by",
+        "reviewed",
+        "statement"
+      ],
+      "properties": {
+        "reviewed_by": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "reviewed": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

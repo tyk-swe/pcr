@@ -6,6 +6,8 @@
 //! All platform-specific and potentially unsafe I/O is contained here.
 
 #[forbid(unsafe_code)]
+pub mod bounded;
+#[forbid(unsafe_code)]
 pub mod capture;
 #[forbid(unsafe_code)]
 pub mod deadline;
@@ -27,6 +29,8 @@ pub mod tcp;
 mod test_support;
 #[forbid(unsafe_code)]
 pub mod transmit;
+#[forbid(unsafe_code)]
+pub mod udp;
 #[forbid(unsafe_code)]
 mod unsupported;
 #[forbid(unsafe_code)]

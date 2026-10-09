@@ -22,6 +22,7 @@ pub(crate) enum InputKind {
     Capture,
     Manifest,
     UdpProfiles,
+    ServiceDocument,
 }
 
 impl InputKind {
@@ -35,6 +36,7 @@ impl InputKind {
             Self::Capture => "capture",
             Self::Manifest => "target manifest",
             Self::UdpProfiles => "UDP profiles",
+            Self::ServiceDocument => "service identification document",
         }
     }
 
@@ -50,6 +52,7 @@ impl InputKind {
                 "--targets-file or --exclude-file PATH, or - with redirected manifest stdin"
             }
             Self::UdpProfiles => "--udp-profiles PATH, or - with redirected document stdin",
+            Self::ServiceDocument => "--corpus PATH or --exclusions PATH",
         }
     }
 
@@ -71,6 +74,7 @@ impl InputKind {
             Self::UdpProfiles => {
                 "provide a --udp-profiles path, or pipe the document to stdin with -"
             }
+            Self::ServiceDocument => "provide a non-empty JSON service identification document",
         }
     }
 
@@ -81,7 +85,8 @@ impl InputKind {
             | Self::SessionResponse
             | Self::Capture
             | Self::Manifest
-            | Self::UdpProfiles => CliError::new(
+            | Self::UdpProfiles
+            | Self::ServiceDocument => CliError::new(
                 Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),

@@ -108,6 +108,31 @@ pub(crate) struct HostnamePolicyArgs {
     budgets: TrafficBudgetArgs,
 }
 
+/// Identification uses numeric endpoints and constructs reviewed requests.
+#[derive(Clone, Debug, Args)]
+pub(crate) struct IdentificationPolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    budgets: TrafficBudgetArgs,
+}
+
+impl IdentificationPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources(settings);
+    }
+
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
+        self.budgets.apply_to(&mut policy);
+        policy
+    }
+}
+
 impl HostnameResolutionArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [max_resolved_addresses: Count @ Operation]);

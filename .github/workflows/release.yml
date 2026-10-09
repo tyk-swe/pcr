@@ -243,6 +243,12 @@ jobs:
               "examples/documents/packet-dhcpv6-reply.json",
               "examples/documents/rewrite-field-edits.json",
               "examples/documents/udp-profiles.json",
+              "examples/documents/service-probes.json",
+              "examples/documents/service-exclusions.json",
+              "crates/packetcraftr/data/service-probes.json",
+              "crates/packetcraftr/data/service-probes.provenance.yaml",
+              "crates/packetcraftr/data/service-exclusions.json",
+              "crates/packetcraftr/data/service-exclusions.provenance.yaml",
               "examples/documents/packet-ipv4-udp.json",
               "examples/documents/output-stats-resources.json",
               "examples/documents/output-stats-clock.json",
@@ -258,6 +264,7 @@ jobs:
               "examples/documents/output-http2-connection-event.json",
               "examples/consumers/forwarding.py",
               "examples/consumers/fixtures/v6-forwarding.json",
+              "examples/consumers/fixtures/v11-forwarding.json",
           )
           for source in map(pathlib.Path, assets):
               destination = staging / source

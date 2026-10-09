@@ -35,6 +35,67 @@ pub trait TcpProviders: Send + Sync + 'static {
     fn tcp(&self) -> &Self::Tcp;
 }
 
+pub trait UdpProviders: Send + Sync + 'static {
+    type Udp: net::udp::Provider + 'static;
+
+    fn udp(&self) -> &Self::Udp;
+}
+
+/// Adds datagram I/O without changing the existing provider set's fields.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WithUdp<P, U> {
+    pub providers: P,
+    pub udp: U,
+}
+
+impl<P: CaptureProviders, U: Send + Sync + 'static> CaptureProviders for WithUdp<P, U> {
+    type Interface = P::Interface;
+    type Capture = P::Capture;
+
+    fn interface(&self) -> &Self::Interface {
+        self.providers.interface()
+    }
+    fn capture(&self) -> &Self::Capture {
+        self.providers.capture()
+    }
+}
+
+impl<P: PacketProviders, U: Send + Sync + 'static> PacketProviders for WithUdp<P, U> {
+    type Route = P::Route;
+    type Transmit = P::Transmit;
+
+    fn route(&self) -> &Self::Route {
+        self.providers.route()
+    }
+    fn transmit(&self) -> &Self::Transmit {
+        self.providers.transmit()
+    }
+}
+
+impl<P: TargetProviders, U: Send + Sync + 'static> TargetProviders for WithUdp<P, U> {
+    type Resolver = P::Resolver;
+
+    fn resolver(&self) -> &Self::Resolver {
+        self.providers.resolver()
+    }
+}
+
+impl<P: TcpProviders, U: Send + Sync + 'static> TcpProviders for WithUdp<P, U> {
+    type Tcp = P::Tcp;
+
+    fn tcp(&self) -> &Self::Tcp {
+        self.providers.tcp()
+    }
+}
+
+impl<P: Send + Sync + 'static, U: net::udp::Provider + 'static> UdpProviders for WithUdp<P, U> {
+    type Udp = U;
+
+    fn udp(&self) -> &U {
+        &self.udp
+    }
+}
+
 /// A workflow uses only the providers it needs, and only after its request is
 /// admitted.
 pub trait Providers: PacketProviders + TargetProviders + TcpProviders {}
@@ -91,6 +152,14 @@ impl ProviderSet {
 }
 
 impl<R, N, C, T, P, H> ProviderSet<R, N, C, T, P, H> {
+    #[must_use]
+    pub fn with_udp<U>(self, udp: U) -> WithUdp<Self, U> {
+        WithUdp {
+            providers: self,
+            udp,
+        }
+    }
+
     #[must_use]
     pub fn with_resolver<Q>(self, resolver: Q) -> ProviderSet<R, N, C, T, P, Q> {
         ProviderSet {
@@ -232,6 +301,14 @@ impl TcpProviders for SystemProviders {
 
     fn tcp(&self) -> &Self::Tcp {
         &net::tcp::SystemProvider
+    }
+}
+
+impl UdpProviders for SystemProviders {
+    type Udp = net::udp::SystemProvider;
+
+    fn udp(&self) -> &Self::Udp {
+        &net::udp::SystemProvider
     }
 }
 

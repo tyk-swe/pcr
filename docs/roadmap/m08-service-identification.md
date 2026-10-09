@@ -2,13 +2,13 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M7][m7] | [M9][m9] |
+| In progress | [M7][m7] | [M9][m9] |
 
 A scan says a port answered. It does not say what is listening. PacketcraftR's
-closest existing feature is the UDP profile, which sends a configured request
-and reports whether configured checks matched; `confirmed` there means the
-checks matched, not that a product was identified. The workflow crate exposes
-no identification engine, corpus, or result record.
+UDP profiles send configured requests and report whether configured checks
+matched; `confirmed` means those checks matched, not that a product was
+identified. Identification adds a separate workflow whose claims remain
+distinct from scan state.
 
 This milestone adds read-only identification of the application behind an
 endpoint, as an explicit operation with its own budgets, and reports what was
@@ -103,22 +103,31 @@ Unknown and ambiguous cases are results in their own right.
 | UDP building blocks | [`scan/profile.rs`][udp-profiles] |
 | Records and contract | [`output/scan.rs`][scan-output], [`output/contract.rs`][output-contract], `schemas/` |
 
-## Decisions to settle
+## Recorded decisions
 
-1. Whether identification is a stage of `scan` or a separate command
-   (recommended: a stage that runs only when requested, over endpoints the scan
-   reported, so one authorization and budget cover both).
-2. The match language (recommended: start with anchored literals and bounded
-   field extraction over parsed protocol structures; add a pattern language
-   only with a linear-time engine and a dependency review).
-3. How confidence is expressed (recommended: ordinal levels defined by which
-   evidence supports the candidate, evaluated in [M9][m9-evaluation], not a
-   probability nobody has measured).
-4. The default sensitive-service exclusions (recommended: a reviewed list
-   shipped as data under the [M1 data policy][m1-data], overridable only
-   explicitly).
-5. What qualifies a probe as read-only (recommended: a per-probe review record
-   stating that it does not authenticate, change state, or follow redirects).
+1. Identification is a separate, explicitly invoked `identify` command and
+   `Client::identify` operation over selected numeric endpoints. The library
+   offers `Endpoint::from_scan` to select reported TCP open and UDP
+   open/open-or-filtered endpoints. Each invocation declares and authorizes its
+   own budgets; ordinary scans do not start identification.
+2. Matching uses anchored ASCII literals over bounded parsed fields, with
+   bounded version-token extraction. The request language is closed to SSH
+   banner reads, HTTP HEAD and reviewed nonrecursive DNS questions. No regex
+   engine or arbitrary operator request bytes are introduced.
+3. Confidence is ordinal: `claim` for an unauthenticated software claim and
+   `protocol` for protocol evidence. These are not measured probabilities.
+   Protocol classification does not conflict with a more specific product claim.
+   Coverage and calibration expansion belongs to [M9][m9-evaluation].
+4. Sensitive-service exclusions are independently versioned reviewed data,
+   applied before planning. `--ignore-exclusions` explicitly overrides only that
+   data; authorization and resource limits still apply.
+5. Every probe carries a read-only review record and source/maintenance metadata.
+   Core validates the reviewed request forms independently of transport I/O.
+
+See the [user guide](../service-identification.md),
+[independent fixture inventory](../scanner-corpus.v1.json), and
+[implementation evidence](evidence/m08/README.md). Cross-platform acceptance
+must run against the reviewed revision before the milestone closes.
 
 ## Exit criteria
 

@@ -38,6 +38,7 @@ pub mod evidence;
 pub mod exchange;
 mod execution;
 pub mod fuzz;
+pub mod identify;
 mod mtu;
 pub mod neighbor;
 mod planning;
@@ -62,6 +63,6 @@ pub use error::{Error, NeighborSpent};
 pub use execution::Sink;
 pub use providers::{
     CaptureProviders, PacketProviders, ProviderSet, Providers, SystemProviders, TargetProviders,
-    TcpProviders,
+    TcpProviders, UdpProviders, WithUdp,
 };
 pub use stats::{Stats, StatsOverflow};

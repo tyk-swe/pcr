@@ -32,7 +32,7 @@ def expected_capability_refusal(profile, case):
     if type(run.get('exit_code')) is not int or run['exit_code'] == 0:
         return False
     output = measurements.strict_json(run['stdout'])
-    return (output.get('schema') == 'packetcraftr.output/v10' and output.get('status') == 'error'
+    return (output.get('schema') in ('packetcraftr.output/v10', 'packetcraftr.output/v11') and output.get('status') == 'error'
             and output.get('error', {}).get('kind') == 'capability'
             and output['error'].get('code') in ('capability.unsupported', 'capability.route'))
 
@@ -95,7 +95,7 @@ def validate(report, expected_commit=None, require_complete=False):
                 if len(run['stdout'].encode()) > measurements.OUTPUT_LIMIT or len(run['stderr'].encode()) > measurements.OUTPUT_LIMIT:
                     raise ValueError('native runtime output exceeds finite evidence bound')
                 output = measurements.strict_json(run['stdout'])
-                if output.get('schema') != 'packetcraftr.output/v10' or output.get('status') != 'success':
+                if output.get('schema') not in ('packetcraftr.output/v10', 'packetcraftr.output/v11') or output.get('status') != 'success':
                     raise ValueError('native command did not publish the successful machine contract')
                 if report['platform'] == 'Linux' and case['name'] in ('discovery-blocked', 'discovery-routed'):
                     validate_router_evidence(output, case['family'] == 'ipv4', case['name'] == 'discovery-blocked')

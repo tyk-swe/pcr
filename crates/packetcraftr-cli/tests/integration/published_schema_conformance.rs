@@ -47,20 +47,35 @@ fn scan_listing_accepts_port_zero_in_json_and_ndjson() {
 
 #[test]
 fn schema_accepts_based_source_reject_zero() {
-    let validator = schema_validator();
-    let mut document: Value = serde_json::from_str(include_str!(
+    let original: Value = serde_json::from_str(include_str!(
         "../../../../examples/documents/output-read-dissect-event.json"
     ))
     .expect("published read example must be JSON");
-    document["result"]["source_frame"] = json!(1);
-    validator
-        .validate(&document)
-        .unwrap_or_else(|error| panic!("source frame 1 is valid: {error}"));
-    document["result"]["source_frame"] = json!(0);
-    assert!(
-        validator.validate(&document).is_err(),
-        "source frame 0 is invalid"
-    );
+    common::frozen_v10_schema_validator()
+        .validate(&original)
+        .unwrap();
+    for (validator, family) in [
+        (
+            common::frozen_v10_schema_validator(),
+            packetcraftr_cli::output::contract::SCHEMA_V10,
+        ),
+        (
+            schema_validator(),
+            packetcraftr_cli::output::contract::SCHEMA_V11,
+        ),
+    ] {
+        let mut document = original.clone();
+        document["schema"] = family.into();
+        document["result"]["source_frame"] = json!(1);
+        validator
+            .validate(&document)
+            .unwrap_or_else(|error| panic!("source frame 1 is valid in {family}: {error}"));
+        document["result"]["source_frame"] = json!(0);
+        assert!(
+            validator.validate(&document).is_err(),
+            "source frame 0 is invalid in {family}"
+        );
+    }
 }
 
 #[test]
@@ -87,6 +102,12 @@ fn every_published_declared_schema() {
         "../../../../schemas/packetcraftr.udp-profiles.v1.schema.json"
     ));
     let rewrite_v2 = rewrite_v2_validator();
+    let service_probes_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+    ));
+    let service_exclusions_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+    ));
     let output_validator = schema_validator();
     let v6_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v6.schema.json"
@@ -99,6 +120,9 @@ fn every_published_declared_schema() {
     ));
     let v9_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v9.schema.json"
+    ));
+    let v10_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v10.schema.json"
     ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
@@ -127,7 +151,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v10" => output_validator,
+            "packetcraftr.output/v11" => output_validator,
+            "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
             "packetcraftr.output/v8" => &v8_validator,
             "packetcraftr.output/v7" => &v7_validator,
@@ -135,6 +160,8 @@ fn every_published_declared_schema() {
             "packetcraftr.packet/v2" => &packet_validator,
             "packetcraftr.rewrite/v2" => &rewrite_v2,
             "packetcraftr.udp-profiles/v1" => &udp_profiles_validator,
+            "packetcraftr.service-probes/v1" => &service_probes_validator,
+            "packetcraftr.service-exclusions/v1" => &service_exclusions_validator,
             other => panic!("{name} declares an unknown schema {other}"),
         };
         if let Err(error) = validator.validate(&document) {

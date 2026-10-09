@@ -245,7 +245,9 @@ fn request(target: IpAddr, probe: ProbeEndpoint, then: Then) -> Request {
         address_family: Family::Any,
         attempts: 1,
         adaptive: None,
-        timeout: Duration::from_millis(20),
+        // This matrix checks host states, not preparation latency under
+        // parallel test load. Preserve real send and capture timestamps.
+        timeout: Duration::from_millis(200),
         probes_per_second: None,
         limits: scan::Limits {
             max_duration: Duration::from_secs(3),

@@ -204,6 +204,7 @@ fn tcp_scan_request(target: Target) -> Request {
         endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(1),
         probes_per_second: None,
         udp_payload: bytes::Bytes::new(),
@@ -416,6 +417,7 @@ fn unsolicited_duplicate_requires_a_winner_and_active_correlation() {
         winners: Default::default(),
         rtt: Default::default(),
         discovery: Vec::new(),
+        feedback: None,
     };
     for (has_response, correlation_expired, expected) in [
         (false, false, super::Attribution::Late),
@@ -662,6 +664,7 @@ fn scoped_request(targets: crate::target::Selection, max_in_flight: usize) -> Re
         endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 443 }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         max_in_flight,
@@ -2190,4 +2193,382 @@ fn explicit_neighbor_discovery_covers_the_implicit_resolution_budget() {
     )
     .expect("two frames fit max_probes = 2");
     assert_eq!(report.stats.packets_attempted, 2);
+}
+
+#[derive(Default)]
+struct WaveExecutor {
+    clock: Option<crate::test_support::RecordingClock>,
+    pipelines: usize,
+    serials: usize,
+    deadline_counts: Vec<usize>,
+    omit: std::collections::HashSet<usize>,
+    unsettled: std::collections::HashSet<usize>,
+}
+
+impl WaveExecutor {
+    fn evidence_for(
+        &self,
+        batch: &Batch<Probe>,
+    ) -> Result<(crate::evidence::SentPacket, Evidence), BoundaryError> {
+        let probe = batch.probe()?;
+        let mut packet = probe_packet(probe);
+        match probe.address {
+            IpAddr::V4(_) => {
+                packet.get_mut::<Ipv4>().expect("IPv4 probe").source = Ipv4Addr::new(10, 0, 0, 1);
+            }
+            IpAddr::V6(_) => {
+                packet.get_mut::<Ipv6>().expect("IPv6 probe").source = "fd00::1".parse().unwrap();
+            }
+        }
+        let sent = crate::test_support::sent_packet(packet.clone());
+        let bytes = u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX);
+        let receipt = crate::test_support::sent_packet(packet);
+        Ok((
+            sent,
+            Evidence {
+                permit: batch.permit,
+                sent: vec![receipt],
+                responses: Vec::new(),
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats {
+                    packets_attempted: 1,
+                    packets_completed: 1,
+                    bytes,
+                    elapsed: Duration::from_millis(1),
+                    capture: packetcraftr_netio::capture::Stats::default(),
+                },
+            },
+        ))
+    }
+}
+
+impl Executor<Batch<Probe>> for WaveExecutor {
+    fn execute(&mut self, _batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.serials += 1;
+        unreachable!("adaptive waves always run through execute_pipeline")
+    }
+}
+
+impl Pipelined for WaveExecutor {
+    fn execute_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: PipelineOptions,
+        emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        self.pipelines += 1;
+        self.deadline_counts.push(options.host_deadlines.len());
+        let mut stats = Stats::default();
+        for (index, batch) in batches.iter().enumerate() {
+            if self.unsettled.contains(&index) {
+                continue;
+            }
+            let expired = options
+                .host_deadlines
+                .get(index)
+                .copied()
+                .flatten()
+                .is_some_and(|limit| {
+                    self.clock
+                        .as_ref()
+                        .is_some_and(|clock| clock.now() >= limit)
+                });
+            if self.omit.contains(&index) || expired {
+                emit(PipelineEvent::Omitted { index })?;
+                continue;
+            }
+            let (sent, evidence) = self.evidence_for(batch)?;
+            stats.packets_attempted += 1;
+            stats.packets_completed += 1;
+            stats.bytes += u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX);
+            emit(PipelineEvent::Sent {
+                index,
+                sent: Arc::new(sent),
+            })?;
+            emit(PipelineEvent::Completed {
+                index,
+                execution: evidence,
+            })?;
+        }
+        Ok(stats)
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        unreachable!("these fixtures select no neighbor discovery")
+    }
+}
+
+fn adaptive_config() -> super::Adaptive {
+    super::Adaptive {
+        min_timeout: Duration::from_millis(10),
+        max_timeout: Duration::from_millis(500),
+        min_window: 1,
+        initial_window: 2,
+        host_timeout: Duration::from_millis(5_000),
+        retry_backoff: Duration::from_millis(100),
+        max_backoff: Duration::from_millis(1_000),
+    }
+}
+
+#[test]
+fn a_fixed_operation_reports_fixed_scheduling_and_never_omits() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 4;
+    request.endpoints = vec![
+        crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+    ];
+    let mut executor = WaveExecutor {
+        omit: [0usize].into_iter().collect(),
+        ..WaveExecutor::default()
+    };
+    let mut clock = NoopClock;
+    let mut deadline = crate::test_support::live();
+    let error = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect_err("fixed waves admit no omission event");
+    assert!(
+        matches!(error, Error::PipelineExecution { .. }),
+        "expected a pipeline execution failure, got {error:?}"
+    );
+
+    let mut executor = WaveExecutor::default();
+    let mut deadline = crate::test_support::live();
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("a fixed pipelined scan completes");
+    assert_eq!(report.scheduling.mode, super::SchedulingMode::Fixed,);
+    assert_eq!(
+        executor.deadline_counts,
+        [0],
+        "fixed waves carry no host deadlines"
+    );
+}
+
+#[test]
+fn adaptive_window_one_uses_the_pipeline_and_completes() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 1;
+    request.timeout = Duration::from_millis(20);
+    request.adaptive = Some(super::Adaptive {
+        initial_window: 1,
+        ..adaptive_config()
+    });
+    let mut executor = WaveExecutor::default();
+    let mut clock = NoopClock;
+    let mut deadline = crate::test_support::live();
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("a window-one adaptive scan completes through the pipeline");
+    assert_eq!(executor.serials, 0, "adaptive never runs the serial path");
+    assert!(executor.pipelines >= 1);
+    assert_eq!(report.scheduling.mode, super::SchedulingMode::Adaptive);
+    assert_eq!(report.hosts[0].scan, super::discovery::Scan::Scanned);
+    assert_eq!(report.counts.timeout, 1, "the silent probe still completes");
+}
+
+#[test]
+fn a_slow_output_callback_omits_the_expired_wave_entry() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 2;
+    request.attempts = 1;
+    request.endpoints = vec![
+        crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+    ];
+    request.timeout = Duration::from_millis(20);
+    request.adaptive = Some(super::Adaptive {
+        host_timeout: Duration::from_millis(100),
+        ..adaptive_config()
+    });
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut executor = WaveExecutor {
+        clock: Some(clock.clone()),
+        ..WaveExecutor::default()
+    };
+    let mut deadline = clock.deadline(request.limits.max_duration);
+    let emit_clock = clock.clone();
+    let probe_events = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let counted = std::rc::Rc::clone(&probe_events);
+    let report = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        move |event, _| {
+            if matches!(event, Event::Sent(_)) {
+                emit_clock.advance(Duration::from_millis(200));
+            }
+            if matches!(event, Event::Probe { .. }) {
+                counted.set(counted.get() + 1);
+            }
+            Ok(())
+        },
+    )
+    .expect("an omitted entry is not an error");
+    assert_eq!(
+        report.hosts[0].scan,
+        super::discovery::Scan::Incomplete,
+        "the deadline-truncated host is incomplete, not scanned"
+    );
+    assert_eq!(report.scheduling.incomplete.len(), 1);
+    assert_eq!(report.scheduling.incomplete[0].address, target);
+    assert_eq!(
+        probe_events.get(),
+        1,
+        "the omitted entry produced no probe evidence"
+    );
+}
+
+#[test]
+fn an_unsettled_wave_entry_fails_the_scan() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 2;
+    request.endpoints = vec![
+        crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        crate::probe::ProbeEndpoint::Tcp { port: 443 },
+    ];
+    request.timeout = Duration::from_millis(20);
+    request.adaptive = Some(adaptive_config());
+    let mut executor = WaveExecutor {
+        unsettled: [1usize].into_iter().collect(),
+        ..WaveExecutor::default()
+    };
+    let mut clock = NoopClock;
+    let mut deadline = crate::test_support::live();
+    let error = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect_err("every wave entry must complete or be omitted");
+    assert!(
+        matches!(error, Error::InvalidEvidence { .. }),
+        "expected invalid evidence, got {error:?}"
+    );
+}
+
+#[test]
+fn adaptive_preparation_charge_fails_before_any_traffic() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 4;
+    request.timeout = Duration::from_millis(20);
+    request.attempts = 32;
+    request.adaptive = Some(adaptive_config());
+    request.limits.max_prepared_bytes = 16;
+    let mut executor = WaveExecutor::default();
+    let mut clock = NoopClock;
+    let mut deadline = Deadline::new(Duration::from_secs(120));
+    let error = engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![target],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect_err("an oversized adaptive plan fails closed before traffic");
+    assert!(
+        matches!(error, Error::PipelineExecution { .. }),
+        "expected a preparation limit failure, got {error:?}"
+    );
+    assert_eq!(executor.pipelines, 0, "no wave ran");
+}
+
+#[test]
+fn adaptive_preparation_charge_has_an_exact_boundary() {
+    let target = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+    let targets = [crate::target::SelectedAddress::new(target)];
+    let mut request = tcp_scan_request(Target::Address(target));
+    request.max_in_flight = 4;
+    request.timeout = Duration::from_millis(20);
+    request.attempts = 32;
+    request.adaptive = Some(adaptive_config());
+    request.limits.max_duration = Duration::from_secs(120);
+    let reservation = engine::adaptive_reservation(&request, &targets, 1);
+    let wave = request.max_in_flight
+        * (std::mem::size_of::<Batch<Probe>>() + std::mem::size_of::<Probe>());
+    let run = |cap: usize| {
+        let mut request = request.clone();
+        request.limits.max_prepared_bytes = cap;
+        let mut executor = WaveExecutor::default();
+        let mut clock = crate::test_support::RecordingClock::default();
+        let mut deadline = clock.deadline(Duration::from_secs(120));
+        engine::run(
+            &request,
+            &mut AddressListAuthorizer {
+                addresses: vec![target],
+            },
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut clock,
+            &mut deadline,
+            |_, _| Ok(()),
+        )
+        .map(|_report| executor.pipelines)
+    };
+    assert!(
+        matches!(
+            run(reservation + wave - 1),
+            Err(Error::PipelineExecution { .. })
+        ),
+        "charge minus one fails closed"
+    );
+    assert!(
+        run(reservation + wave).expect("exact boundary admits") >= 2,
+        "pre-admission plus the adaptive waves ran"
+    );
+    assert!(run(reservation + wave + 1).expect("boundary plus one admits") >= 2);
 }

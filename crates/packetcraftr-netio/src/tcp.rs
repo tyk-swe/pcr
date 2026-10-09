@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 
-pub use connect::{PendingConnect, start_connect};
+pub use connect::{ConnectBudget, PendingConnect, start_connect};
 pub use error::Error;
 
 /// Process-wide connections that may hold a worker or an open socket at once.
@@ -20,12 +20,14 @@ pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
 pub struct Connection<S> {
     inner: S,
     _permit: crate::workers::Permit,
+    _lease: Option<connect::Lease>,
 }
 impl<S> Connection<S> {
-    fn new(inner: S, permit: crate::workers::Permit) -> Self {
+    fn new(inner: S, permit: crate::workers::Permit, lease: Option<connect::Lease>) -> Self {
         Self {
             inner,
             _permit: permit,
+            _lease: lease,
         }
     }
 }

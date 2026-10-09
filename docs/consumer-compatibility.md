@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v9.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v10.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,9 +36,32 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
+## Output family v10
+
+`packetcraftr.output/v10` is the current production family. It preserves every
+v9 meaning and adds opt-in adaptive scheduling:
+
+- a required `scheduling` object on raw scan results, NDJSON scan `complete`
+  records, and connect reports: `mode` (`fixed` or `adaptive`), the effective
+  `adaptive` configuration when enabled, `observed_peak_window`,
+  `retries_started`, typed `conditions`, `incomplete` host identities, and
+  `operation_ceiling`/`process_ceiling` on connect scans.
+  `observed_peak_window` is the largest pending count the operation actually
+  held, never an achieved-throughput measure;
+- a new host `scan` value `incomplete`, set when a host's own deadline
+  prevented or truncated intended adaptive work, or an admitted connect worker
+  never called its provider. Hosts report it only under
+  adaptive scheduling; consumers that exhaustively switch on `scan` must
+  handle it; and
+- `suspected_response_rate_limit` conditions with `host`,
+  `control_responder`, `completed`/`replies`/`losses` counts, and cited
+  `control_sequences`/`loss_sequences`. Conditions are inferred: filtering or
+  ordinary loss remain alternative explanations, and a condition never
+  changes a port's classification.
+
 ## Output family v9
 
-`packetcraftr.output/v9` is the current production family. It preserves every
+`packetcraftr.output/v9` is frozen. It preserves every
 v8 meaning and adds host discovery:
 
 - a required `hosts` list on raw scan results and connect reports, and one

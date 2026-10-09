@@ -38,6 +38,7 @@ pub enum Scan {
     Skipped,
     /// The request ran discovery only.
     NotRequested,
+    Incomplete,
 }
 
 /// The observation behind a reason.
@@ -181,6 +182,7 @@ pub(in crate::scan) struct Composer {
     indices: HashMap<(IpAddr, Option<interface::Id>), usize>,
     /// Targets whose next hop stayed silent, so no frame could reach them.
     unreachable: Vec<bool>,
+    incomplete: Vec<bool>,
 }
 
 impl Composer {
@@ -220,6 +222,7 @@ impl Composer {
             hosts,
             indices,
             unreachable: vec![false; targets.len()],
+            incomplete: vec![false; targets.len()],
         }
     }
 
@@ -228,6 +231,12 @@ impl Composer {
     pub(in crate::scan) fn unreachable(&mut self, index: usize) {
         if let Some(unreachable) = self.unreachable.get_mut(index) {
             *unreachable = true;
+        }
+    }
+
+    pub(in crate::scan) fn incomplete(&mut self, index: usize) {
+        if let Some(incomplete) = self.incomplete.get_mut(index) {
+            *incomplete = true;
         }
     }
 
@@ -288,7 +297,12 @@ impl Composer {
                     .push(address);
             }
         }
-        for (host, unreachable) in self.hosts.iter_mut().zip(&self.unreachable) {
+        for ((host, unreachable), incomplete) in self
+            .hosts
+            .iter_mut()
+            .zip(&self.unreachable)
+            .zip(&self.incomplete)
+        {
             host.probes.sort_unstable();
             host.reasons.sort_by_key(|reason| reason.probe);
             if let (Some(link), Some(neighbor)) = (resolved(host), &host.neighbor) {
@@ -325,17 +339,21 @@ impl Composer {
             if matches!(self.mode, Mode::Before | Mode::Only) && !host.reasons.is_empty() {
                 host.state = State::Responded;
             }
-            host.scan = match self.mode {
-                Mode::Only => Scan::NotRequested,
-                Mode::Before
-                    if host.state == State::NoResponse
-                        && (self.unresponsive == Unresponsive::Skip
-                            || *unreachable
-                            || unsendable(host)) =>
-                {
-                    Scan::Skipped
+            host.scan = if *incomplete {
+                Scan::Incomplete
+            } else {
+                match self.mode {
+                    Mode::Only => Scan::NotRequested,
+                    Mode::Before
+                        if host.state == State::NoResponse
+                            && (self.unresponsive == Unresponsive::Skip
+                                || *unreachable
+                                || unsendable(host)) =>
+                    {
+                        Scan::Skipped
+                    }
+                    Mode::Omitted | Mode::Skipped | Mode::Before => Scan::Scanned,
                 }
-                Mode::Omitted | Mode::Skipped | Mode::Before => Scan::Scanned,
             };
         }
         self.hosts

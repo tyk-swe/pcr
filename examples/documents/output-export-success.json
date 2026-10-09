@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v9",
+  "schema": "packetcraftr.output/v10",
   "command": "export",
   "mode": "aggregate",
   "status": "success",

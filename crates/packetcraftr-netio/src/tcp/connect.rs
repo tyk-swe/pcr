@@ -8,7 +8,10 @@ use crate::{
 use packetcraftr_core::budget::{Cancelled, Deadline};
 use std::{
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Instant, SystemTime},
 };
 
@@ -77,10 +80,89 @@ impl<S> Drop for PendingConnect<S> {
     }
 }
 
+pub struct ConnectBudget {
+    state: Arc<BudgetState>,
+}
+
+struct BudgetState {
+    capacity: usize,
+    active: AtomicUsize,
+}
+
+pub(crate) struct Lease {
+    state: Arc<BudgetState>,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.state.active.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl ConnectBudget {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            state: Arc::new(BudgetState {
+                capacity,
+                active: AtomicUsize::new(0),
+            }),
+        }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.state.capacity
+    }
+
+    pub fn active(&self) -> usize {
+        self.state.active.load(Ordering::Relaxed)
+    }
+
+    fn lease(&self) -> Result<Lease, Error> {
+        self.state
+            .active
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |active| {
+                (active < self.state.capacity).then(|| active + 1)
+            })
+            .map_err(|_| Error::Capacity {
+                limit: self.state.capacity,
+            })?;
+        Ok(Lease {
+            state: Arc::clone(&self.state),
+        })
+    }
+
+    pub fn start<P>(
+        &self,
+        provider: Arc<P>,
+        endpoint: SocketAddr,
+        caller: &Deadline,
+    ) -> Result<PendingConnect<P::Stream>, Error>
+    where
+        P: Provider + 'static,
+        P::Stream: 'static,
+    {
+        let lease = self.lease()?;
+        start(provider, endpoint, caller, Some(lease))
+    }
+}
+
 pub fn start_connect<P>(
     provider: Arc<P>,
     endpoint: SocketAddr,
     caller: &Deadline,
+) -> Result<PendingConnect<P::Stream>, Error>
+where
+    P: Provider + 'static,
+    P::Stream: 'static,
+{
+    start(provider, endpoint, caller, None)
+}
+
+fn start<P>(
+    provider: Arc<P>,
+    endpoint: SocketAddr,
+    caller: &Deadline,
+    lease: Option<Lease>,
 ) -> Result<PendingConnect<P::Stream>, Error>
 where
     P: Provider + 'static,
@@ -97,11 +179,12 @@ where
         .map_err(|_| Error::Capacity {
             limit: MAX_PENDING_CONNECTIONS,
         })?;
-    let lease = permit.clone();
+    let slot = permit.clone();
     let cancel = Arc::new(Mutex::new(CancelState::default()));
     let cancelled = Arc::clone(&cancel);
     let task = permit
         .spawn(move || {
+            let _lease = lease;
             let admitted = {
                 let mut state = cancelled
                     .lock()
@@ -120,7 +203,7 @@ where
             let result = admitted.and_then(|()| {
                 provider
                     .connect(endpoint, &deadline)
-                    .map(|stream| Connection::new(stream, lease))
+                    .map(|stream| Connection::new(stream, slot, _lease))
             });
             ConnectOutcome {
                 attempted,
@@ -136,4 +219,24 @@ where
         cancel,
         progress: Progress::Running,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_saturated_budget_refuses_without_arithmetic_overflow() {
+        let budget = ConnectBudget {
+            state: Arc::new(BudgetState {
+                capacity: usize::MAX,
+                active: AtomicUsize::new(usize::MAX),
+            }),
+        };
+        let Err(Error::Capacity { limit }) = budget.lease() else {
+            panic!("a saturated budget refuses admission");
+        };
+        assert_eq!(limit, usize::MAX);
+        assert_eq!(budget.active(), usize::MAX);
+    }
 }

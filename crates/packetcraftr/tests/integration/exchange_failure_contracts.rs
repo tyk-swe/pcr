@@ -484,6 +484,7 @@ fn scan_port_80(
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: WINDOW,
         probes_per_second: None,
         udp_payload: bytes::Bytes::new(),

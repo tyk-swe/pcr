@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v9",
+  "schema": "packetcraftr.output/v10",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
@@ -44,6 +44,13 @@
       "sent": 1,
       "received": 0,
       "lost": 1
+    },
+    "scheduling": {
+      "mode": "fixed",
+      "observed_peak_window": 1,
+      "retries_started": 0,
+      "conditions": [],
+      "incomplete": []
     }
   },
   "diagnostics": [],

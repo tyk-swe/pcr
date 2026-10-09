@@ -422,6 +422,24 @@
       ],
       "items": false
     },
+    "adaptive_scheduling_scenarios": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "provision", "families", "expected", "measurement_scope"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"enum": ["adaptive-responsive", "adaptive-selective-retry", "adaptive-rate-limited-control", "adaptive-fair-hosts", "adaptive-host-deadline", "adaptive-window-loss", "adaptive-connect-cleanup", "adaptive-plan-boundary"]},
+          "condition": {"$ref": "#/$defs/text"},
+          "provision": {"enum": ["injected_provider_virtual_clock", "injected_provider_isolated_process"]},
+          "families": {"const": ["ipv4", "ipv6"]},
+          "expected": {"$ref": "#/$defs/text"},
+          "measurement_scope": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
     "provenance": {
       "type": "object",
       "required": ["source", "retrieved", "transforms", "license", "license_rationale", "maintainer", "refresh", "coverage"],

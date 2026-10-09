@@ -105,33 +105,44 @@ pub(super) fn build_batches<'a>(
         })
         .zip(first_sequence..)
         .map(move |((target, attempt, endpoint), sequence)| {
-            // Payloads and profiles are UDP-only; a TCP endpoint sharing the
-            // port number must not inherit them.
-            let (udp_profile, udp_payload) = match endpoint {
-                ProbeEndpoint::Udp { port } => {
-                    let profile = request.udp_profiles.get(&port);
-                    let payload = profile.map_or_else(
-                        || request.udp_payload.clone(),
-                        |profile| profile.payload(sequence),
-                    );
-                    (profile.cloned(), payload)
-                }
-                ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => (None, bytes::Bytes::new()),
-            };
             Batch::single(
-                Probe {
-                    sequence,
-                    stage,
-                    address: target.address,
-                    scope: target.scope.clone(),
-                    endpoint,
-                    attempt,
-                    udp_profile,
-                    udp_payload,
-                },
+                planned_probe(request, sequence, stage, target, endpoint, attempt),
                 request.timeout,
             )
         })
+}
+
+pub(super) fn planned_probe(
+    request: &Request,
+    sequence: u64,
+    stage: Stage,
+    target: &crate::target::SelectedAddress,
+    endpoint: ProbeEndpoint,
+    attempt: u32,
+) -> Probe {
+    // Payloads and profiles are UDP-only; a TCP endpoint sharing the
+    // port number must not inherit them.
+    let (udp_profile, udp_payload) = match endpoint {
+        ProbeEndpoint::Udp { port } => {
+            let profile = request.udp_profiles.get(&port);
+            let payload = profile.map_or_else(
+                || request.udp_payload.clone(),
+                |profile| profile.payload(sequence),
+            );
+            (profile.cloned(), payload)
+        }
+        ProbeEndpoint::Tcp { .. } | ProbeEndpoint::Icmp => (None, bytes::Bytes::new()),
+    };
+    Probe {
+        sequence,
+        stage,
+        address: target.address,
+        scope: target.scope.clone(),
+        endpoint,
+        attempt,
+        udp_profile,
+        udp_payload,
+    }
 }
 
 pub(super) fn worst_case_duration(
@@ -160,6 +171,60 @@ pub(super) fn worst_case_duration(
     exchange_time.checked_add(delay).ok_or_else(overflow)
 }
 
+/// Scheduling upper projection for adaptive work. It intentionally assumes a
+/// fully serial exchange: every probe can wait out `max_timeout`, plus pacing,
+/// per-endpoint retry backoffs, and the worst inferred per-host spacing. It
+/// excludes provider overrun and contended worker waits; the operation
+/// deadline stays the hard bound regardless.
+pub(super) fn adaptive_worst_case_duration(
+    request: &Request,
+    adaptive: &super::Adaptive,
+    batch_count: usize,
+) -> Result<Duration, Error> {
+    let overflow = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    };
+    if batch_count == 0 {
+        return Ok(Duration::ZERO);
+    }
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
+    let exchange_time = adaptive
+        .max_timeout
+        .checked_mul(batch_count_u32)
+        .ok_or_else(&overflow)?;
+    let delay_count = batch_count_u32.saturating_sub(1);
+    let delay = if delay_count == 0 {
+        Duration::ZERO
+    } else {
+        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
+            .checked_mul(delay_count)
+            .ok_or_else(&overflow)?
+    };
+    let distinct = batch_count_u32
+        .checked_div(request.attempts.max(1))
+        .unwrap_or(1);
+    let mut retry_gaps = Duration::ZERO;
+    for attempt in 2..=request.attempts.max(1) {
+        let shift = attempt.saturating_sub(2).min(31);
+        let gap = adaptive
+            .retry_backoff
+            .saturating_mul(1u32 << shift)
+            .min(adaptive.max_backoff);
+        retry_gaps = retry_gaps.checked_add(gap).ok_or_else(&overflow)?;
+    }
+    let retry_total = retry_gaps.checked_mul(distinct).ok_or_else(&overflow)?;
+    let spacing = adaptive
+        .max_backoff
+        .checked_mul(delay_count)
+        .ok_or_else(&overflow)?;
+    exchange_time
+        .checked_add(delay)
+        .and_then(|total| total.checked_add(retry_total))
+        .and_then(|total| total.checked_add(spacing))
+        .ok_or_else(overflow)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::target::{Family, Target};
@@ -176,6 +241,7 @@ mod tests {
             endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
             discovery: Default::default(),
             attempts: 1,
+            adaptive: None,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
             udp_payload: bytes::Bytes::new(),

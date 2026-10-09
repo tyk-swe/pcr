@@ -45,6 +45,7 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_prepared_bytes: usize,
     pub(crate) max_evidence_frames: usize,
     pub(crate) max_evidence_bytes: usize,
+    pub(crate) host_deadlines: Vec<Option<std::time::Instant>>,
     /// The operation's statistics before this pipeline, which its failure
     /// reports with its own.
     pub(crate) preceding: Stats,
@@ -55,6 +56,9 @@ pub(crate) enum PipelineEvent {
     Sent {
         index: usize,
         sent: Arc<SentPacket>,
+    },
+    Omitted {
+        index: usize,
     },
     Completed {
         index: usize,
@@ -641,6 +645,7 @@ mod tests {
             endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
             discovery: Default::default(),
             attempts: 1,
+            adaptive: None,
             timeout: Duration::from_millis(20),
             probes_per_second: None,
             limits: Limits::default(),

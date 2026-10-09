@@ -40,6 +40,8 @@ jobs:
           cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
+      - name: Test scanner measurement contracts
+        run: python3 -m unittest scripts/test_scanner_measurements.py
       - name: Check dependency direction
         run: python3 scripts/check-architecture.py
       - name: Documentation for supported feature profiles
@@ -112,7 +114,7 @@ jobs:
       - name: Test passive native providers and CLI integration
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
       - name: Execute deterministic contracts with every native backend enabled
-        run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli --all-features
+        run: cargo test --locked -p packetcraftr -p packetcraftr-netio -p packetcraftr-cli --all-features
 
   fuzz-check:
     name: Fuzz target compilation

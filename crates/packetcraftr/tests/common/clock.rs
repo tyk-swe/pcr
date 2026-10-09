@@ -46,3 +46,30 @@ impl Clock for VirtualClock {
         Ok(())
     }
 }
+
+/// A clock that actually sleeps and stamps real monotonic time, so receipt
+/// markers and scheduling deadlines share one time domain.
+#[derive(Clone, Default)]
+pub(crate) struct RealClock {
+    delays: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl RealClock {
+    pub(crate) fn delays(&self) -> Vec<Duration> {
+        self.delays.lock().expect("delays lock").clone()
+    }
+}
+
+impl Clock for RealClock {
+    type Error = Infallible;
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn sleep(&self, delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
+        std::thread::sleep(delay);
+        self.delays.lock().expect("delays lock").push(delay);
+        Ok(())
+    }
+}

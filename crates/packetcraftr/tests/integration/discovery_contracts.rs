@@ -70,6 +70,7 @@ fn request(targets: &[&str], endpoints: Vec<ProbeEndpoint>, discovery: Options) 
         endpoints,
         discovery,
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         udp_payload: Default::default(),

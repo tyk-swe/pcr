@@ -80,6 +80,12 @@ def load_corpus(path):
             "numeric-source-equivalence", "numeric-narrowing", "manifest-boundaries",
             "scoped-host-local", "scoped-isolated-links"]:
         raise ValueError("corpus must contain the complete target-planning fixture inventory")
+    if "adaptive_scheduling_scenarios" in corpus and [
+            case["id"] for case in corpus["adaptive_scheduling_scenarios"]] != [
+            "adaptive-responsive", "adaptive-selective-retry", "adaptive-rate-limited-control",
+            "adaptive-fair-hosts", "adaptive-host-deadline", "adaptive-window-loss",
+            "adaptive-connect-cleanup", "adaptive-plan-boundary"]:
+        raise ValueError("adaptive scheduling inventory must contain each authored condition once in order")
     for family, addresses in corpus["fixture_addresses"].items():
         network = ipaddress.ip_network("192.0.2.0/24" if family == "ipv4" else "2001:db8::/32")
         if any(ipaddress.ip_address(value) not in network for value in addresses.values()):
@@ -148,7 +154,7 @@ def require_integer(value, label):
     return value
 
 
-def validate_packet(record, case, family, transport, window):
+def validate_packet(record, case, family, transport, window, adaptive=False):
     if (record["schema"] != "packetcraftr.scanner-fixture/v1"
             or record.get("workflow") != "raw_scan" or type(record["window"]) is not int):
         raise ValueError("fixture executable published an unknown contract")
@@ -157,6 +163,8 @@ def validate_packet(record, case, family, transport, window):
         raise ValueError("fixture identity disagrees with requested condition")
     if record["execution"] != "injected_provider":
         raise ValueError("packet fixtures must not be relabeled native runtime evidence")
+    if record.get("scheduling_mode", "fixed") != ("adaptive" if adaptive else "fixed"):
+        raise ValueError("fixture scheduling mode disagrees with the requested mode")
     observation = record["observation"]
     if type(observation["attributed_response"]) is not bool:
         raise ValueError("packet attribution must be a boolean")
@@ -246,7 +254,7 @@ def nmap_identity(binary, expected):
                 acquisition="operator-provided executable; not vendored")
 
 
-def connect_case(binary, corpus, case, family, nmap):
+def connect_case(binary, corpus, case, family, nmap, adaptive=False):
     version = socket.AF_INET if family == "ipv4" else socket.AF_INET6
     address = "127.0.0.1" if family == "ipv4" else "::1"
     with fixture_socket(version, address) as fixture:
@@ -256,14 +264,22 @@ def connect_case(binary, corpus, case, family, nmap):
         command = [binary, "--output", "json", "scan", address, "--connect", "--ports", str(port),
                    "--attempts", "1", "--max-probes", "1", "--max-in-flight", "1",
                    "--timeout-ms", "1000", "--max-duration-ms", "2000"]
+        if adaptive:
+            command.append("--adaptive")
         run = measured(command)
         if run["exit_code"] != 0:
             raise ValueError(f"native connect execution failed: {run['stderr']} {run['stdout']}")
         envelope = strict_json(run["stdout"])
-        if (envelope["schema"] != "packetcraftr.output/v9"
+        if (envelope["schema"] not in ("packetcraftr.output/v9", "packetcraftr.output/v10")
                 or envelope["status"] != "success" or envelope["command"] != "scan"):
             raise ValueError("native connect did not publish a successful scan envelope")
         result = envelope["result"]
+        if envelope["schema"] == "packetcraftr.output/v10":
+            if result["scheduling"]["mode"] != ("adaptive" if adaptive else "fixed"):
+                raise ValueError("connect scheduling mode disagrees with the requested mode")
+        if adaptive:
+            if envelope["schema"] != "packetcraftr.output/v10":
+                raise ValueError("adaptive connect requires the v10 scheduling contract")
         endpoints = result["endpoints"]
         if result["method"] != "tcp_connect" or len(endpoints) != 1 or len(endpoints[0]["probes"]) != 1:
             raise ValueError("native connect fixture has unexpected endpoint/attempt cardinality")
@@ -320,10 +336,15 @@ def main():
     parser.add_argument("--corpus", type=pathlib.Path, default=ROOT / "docs/scanner-corpus.v1.json")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--report", type=pathlib.Path, required=True)
+    parser.add_argument("--adaptive", action="store_true",
+                        help="exercise opt-in scheduling on the same M2 fixtures and hard ceilings")
     args = parser.parse_args()
     if not 1 <= args.repetitions <= 10:
         parser.error("repetitions must be 1..=10")
     report = dict(schema="packetcraftr.scanner-benchmark/v1", platform=platform.platform(),
+                  scheduling_mode="adaptive" if args.adaptive else "fixed",
+                  measured_inventory="m2_single_probe_scan_connect_and_traceroute",
+                  adaptive_scenario_performance="not_benchmarked",
                   repetitions=args.repetitions, cases=[], status="incomplete",
                   coverage_complete=False, comparison_complete=False, tools={})
 
@@ -342,6 +363,9 @@ def main():
     try:
         corpus, corpus_digest = load_corpus(args.corpus)
         report.update(dataset_version=corpus["dataset_version"], corpus_sha256=corpus_digest,
+                      settings=dict(raw=corpus["request"], connect=dict(
+                          attempts=1, max_probes=1, max_in_flight=1,
+                          timeout_ms=1000, max_duration_ms=2000)),
                       commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                       dirty=bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)))
         binary = tool(args.binary, "binary")
@@ -362,7 +386,8 @@ def main():
                         row.update(status="unavailable", reason="no PacketcraftR CLI executable")
                         continue
                     try:
-                        row.update(connect_case(binary, corpus, case, family, args.nmap), status="exercised")
+                        row.update(connect_case(binary, corpus, case, family, args.nmap, args.adaptive),
+                                   status="exercised")
                     except FixtureUnavailable as error:
                         row.update(status="unavailable", execution="native_loopback", reason=str(error))
                     except Exception as error:
@@ -377,10 +402,14 @@ def main():
                                 row.update(status="unavailable", reason="no injected-provider fixture executable")
                                 continue
                             try:
-                                run = measured([args.fixture_binary, case["id"], family, transport, str(window)])
+                                command = [args.fixture_binary, case["id"], family, transport, str(window)]
+                                if args.adaptive:
+                                    command.append("adaptive")
+                                run = measured(command)
                                 if run["exit_code"] != 0:
                                     raise ValueError(f"fixture execution failed: {run['stderr']} {run['stdout']}")
-                                run.update(validate_packet(strict_json(run["stdout"]), case, family, transport, window))
+                                run.update(validate_packet(strict_json(run["stdout"]), case, family, transport,
+                                                           window, args.adaptive))
                                 row.update(run, status="exercised", execution="injected_provider")
                             except Exception as error:
                                 row.update(status="failed", error=str(error))

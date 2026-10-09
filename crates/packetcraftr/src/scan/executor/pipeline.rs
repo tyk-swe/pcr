@@ -103,6 +103,11 @@ fn validate_options(
             max_wait_secs(),
             !options.max_duration.is_zero() && options.max_duration <= MAX_WAIT,
         ),
+        (
+            "host_deadlines",
+            batches.len(),
+            options.host_deadlines.is_empty() || options.host_deadlines.len() == batches.len(),
+        ),
     ];
     match bounds.into_iter().find(|(_, _, holds)| !holds) {
         Some((field, maximum, _)) => Err(limit(field, maximum)),
@@ -368,11 +373,27 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
         Ok(())
     }
 
+    fn host_deadline(&self, index: usize) -> Option<Instant> {
+        self.options.host_deadlines.get(index).copied().flatten()
+    }
+
+    fn omit(&mut self, index: usize) -> Result<(), BoundaryError> {
+        self.failed_probe = None;
+        (self.emit)(PipelineEvent::Omitted { index })?;
+        self.next += 1;
+        Ok(())
+    }
+
     fn send(&mut self, AdmittedProbe { cost, memory }: AdmittedProbe) -> Result<(), BoundaryError> {
         let client = self.executor.client;
         check(client, self.deadline)?;
-        let batch = &self.batches[self.next];
-        let probe = self.planned[self.next].probe;
+        let index = self.next;
+        let host_deadline = self.host_deadline(index);
+        if host_deadline.is_some_and(|limit| client.now() >= limit) {
+            return self.omit(index);
+        }
+        let batch = &self.batches[index];
+        let probe = self.planned[index].probe;
         self.failed_probe = Some(probe.clone());
         let prepared = self
             .plan
@@ -397,6 +418,9 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             ));
         }
         check(client, self.deadline)?;
+        if host_deadline.is_some_and(|limit| client.now() >= limit) {
+            return self.omit(index);
+        }
         self.stats.packets_attempted += 1;
         let sent = Arc::new(
             prepared
@@ -416,6 +440,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             .checked_add(batch.timeout)
             .ok_or_else(|| limit("probe timeout", max_wait_secs()))?
             .min(self.deadline);
+        let end = host_deadline.map_or(end, |limit| end.min(limit));
         self.pending.insert(
             self.next,
             Pending {
@@ -535,6 +560,7 @@ impl<'a, P: PacketProviders, K: Clock> Pipeline<'a, P, K> {
             &self.plan.interfaces[source],
             received,
         );
+
         if candidates.is_empty() {
             // Pending probes whose window closed have not settled yet, but
             // a frame after their deadline cannot be their outcome either.
@@ -807,3 +833,6 @@ fn pending_evidence(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

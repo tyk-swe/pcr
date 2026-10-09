@@ -56,6 +56,7 @@ fn request() -> Request {
             .to_vec(),
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         udp_payload: Default::default(),

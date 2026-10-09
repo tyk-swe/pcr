@@ -32,7 +32,13 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                 .with_parent(request.parent_deadline.clone()),
         );
         operation.deadline.check_cancelled()?;
-        request.validate(&self.policy)?;
+        let plan = request.validate_plan(&self.policy)?;
+        // Obtain entropy before any I/O, so an entropy failure cannot discard
+        // earlier probe evidence. Plans without admitted DNS need no entropy.
+        let mut dns_identities = plan
+            .dns
+            .then(super::identity::DnsIdentities::new)
+            .transpose()?;
         let mut hosts = BTreeMap::new();
         let mut records = Vec::with_capacity(request.endpoints.len());
         let mut complete = true;
@@ -71,7 +77,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         .with_parent(Some(Arc::clone(&host.deadline))),
                 );
                 for attempt in 1..=request.limits.probe.attempts {
-                    let bytes = request_bytes(probe, operation.usage.attempts + 1)?;
+                    let mut bytes = request_bytes(probe, 0)?;
                     let mut connection = Scope::new(
                         request.limits.connection,
                         self.deadline(request.limits.connection.timeout)
@@ -95,6 +101,13 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         .min(probe_scope.remaining_read())
                         .min(connection.remaining_read())
                         as usize;
+                    if matches!(probe.request, service_probes::Request::Dns { .. }) {
+                        let identities =
+                            dns_identities.as_mut().ok_or_else(|| Error::Provider {
+                                reason: "admitted DNS probe has no operation identity".into(),
+                            })?;
+                        bytes = request_bytes(probe, identities.next()?)?;
+                    }
                     operation.attempt();
                     host.attempt();
                     probe_scope.attempt();
@@ -205,15 +218,7 @@ pub(super) fn host_key(address: SocketAddr) -> (IpAddr, u32) {
     )
 }
 
-pub(super) fn request_bytes(probe: &Probe, sequence: u64) -> Result<Vec<u8>, Error> {
-    let sequence =
-        u16::try_from(sequence).map_err(|_| Error::request("DNS transaction sequence overflow"))?;
-    let transaction_id = match &probe.request {
-        service_probes::Request::Dns {
-            payload: packetcraftr_core::document::udp_profiles::Payload::Dns { id_base, .. },
-        } => id_base.wrapping_add(sequence),
-        _ => sequence,
-    };
+pub(super) fn request_bytes(probe: &Probe, transaction_id: u16) -> Result<Vec<u8>, Error> {
     let payload = probe.request_bytes(transaction_id)?;
     if probe.transport == Transport::Tcp
         && matches!(probe.request, service_probes::Request::Dns { .. })

@@ -37,14 +37,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   while preserving exact addresses, ports, and link-local or multicast scopes.
   TCP and UDP socket setup clears only those irrelevant scopes so they are also
   accepted on Windows.
+  IPv4-mapped endpoints also use their native IPv4 socket family, with matching
+  canonical peer checks.
 - Identification policy declarations bound the selected probe traffic rather
   than unused attempt allowances. Duplicate endpoint aliases are rejected before
   I/O, including irrelevant IPv6 scopes/flow information and mapped IPv4 aliases.
   Cancellation while a TCP connection is pending remains cancelled evidence,
   distinct from a connection timeout.
+- Identification DNS transaction IDs start from system randomness and remain
+  distinct across an operation's probes and retries. Entropy failure preserves
+  its typed source and stops before any probe I/O.
 
 ### Breaking
 
+- Live identification no longer derives DNS transaction IDs from corpus
+  `id_base` values. Offline request reconstruction supplies an explicit ID.
 - Structured command output moves to `packetcraftr.output/v11`, adding explicit
   identification records and terminal metadata. The v6 through v10 families and
   schemas remain frozen. Consumers must accept v11 before reading current CLI

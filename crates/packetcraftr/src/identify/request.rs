@@ -133,6 +133,10 @@ impl Request {
     /// Validate the documents, hard bounds, and declared socket traffic before
     /// any provider is called. Exclusions are applied before probe planning.
     pub fn validate(&self, policy: &Policy) -> Result<(), Error> {
+        self.validate_plan(policy).map(|_| ())
+    }
+
+    pub(super) fn validate_plan(&self, policy: &Policy) -> Result<super::plan::Declaration, Error> {
         self.corpus.validate()?;
         self.exclusions.validate()?;
         if self.endpoints.is_empty() || self.endpoints.len() > MAX_ENDPOINTS {
@@ -195,12 +199,12 @@ impl Request {
                 "connection and probe response limits must not exceed {MAX_RESPONSE_BYTES}"
             )));
         }
-        let (endpoints, limits, units) = super::plan::declaration(self)?;
-        let declaration = SocketOperation::new(&endpoints, limits)
+        let plan = super::plan::declaration(self)?;
+        let declaration = SocketOperation::new(&plan.endpoints, plan.limits)
             .map_err(|source| Error::request(source.to_string()))?
-            .with_traffic_unit_bound(units);
+            .with_traffic_unit_bound(plan.units);
         policy.authorize(Operation::Socket(declaration))?;
-        Ok(())
+        Ok(plan)
     }
 }
 

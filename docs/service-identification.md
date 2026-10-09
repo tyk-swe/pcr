@@ -64,6 +64,11 @@ Policy traffic declarations follow applicable, writable probes and their finite
 attempt bounds: banner collection declares only a TCP connection, while a UDP
 query declares only a message. Final destination and exact request-byte checks
 still precede every transmission.
+Live DNS transaction IDs use a fresh system-random seed for each operation and
+do not repeat across its bounded probes or retries. Corpus `id_base` values do
+not choose live identities; the core request builder accepts an explicit ID for
+offline reconstruction. Entropy is acquired before probe I/O and failures retain
+their original source.
 Retries consume attempts and
 fresh connection resources. A smaller enclosing allowance reduces the receive
 buffer rather than allowing an oversize read. A full receive buffer is

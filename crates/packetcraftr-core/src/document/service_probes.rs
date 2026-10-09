@@ -93,6 +93,7 @@ pub struct Probe {
 impl Probe {
     /// Returns application bytes; transport framing belongs to the workflow.
     /// Each DNS attempt supplies its transaction ID explicitly.
+    /// DNS uses the supplied header transaction ID, independently of `id_base`.
     pub fn request_bytes(&self, transaction_id: u16) -> Result<Vec<u8>, Error> {
         validate_probe(self)?;
         match &self.request {

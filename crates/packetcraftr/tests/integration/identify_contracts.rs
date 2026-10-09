@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::io::{self, Cursor, Read, Write};
 use std::net::{SocketAddr, TcpListener, UdpSocket};
 use std::sync::{Arc, Condvar, Mutex};
@@ -27,6 +27,13 @@ struct FakeTcp {
     advance: Option<TestClock>,
     peer: Option<SocketAddr>,
     pending_cancellation: Option<PendingCancellation>,
+    dns_reply: Option<DnsReply>,
+}
+
+#[derive(Clone, Copy)]
+enum DnsReply {
+    Echo,
+    WrongId,
 }
 
 #[derive(Clone)]
@@ -87,6 +94,7 @@ impl tcp::Provider for FakeTcp {
             ),
             writes: Arc::clone(&self.writes),
             peer: self.peer.unwrap_or(endpoint),
+            dns_reply: self.dns_reply,
         })
     }
 }
@@ -95,6 +103,7 @@ struct FakeStream {
     response: Cursor<Vec<u8>>,
     writes: Arc<Mutex<Vec<Vec<u8>>>>,
     peer: SocketAddr,
+    dns_reply: Option<DnsReply>,
 }
 
 impl Read for FakeStream {
@@ -106,6 +115,15 @@ impl Read for FakeStream {
 impl Write for FakeStream {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.writes.lock().expect("writes").push(bytes.to_vec());
+        if let Some(reply) = self.dns_reply {
+            let mut response = dns_response(&bytes[2..]);
+            if matches!(reply, DnsReply::WrongId) {
+                response[0] ^= 0xff;
+            }
+            let mut frame = (response.len() as u16).to_be_bytes().to_vec();
+            frame.extend_from_slice(&response);
+            self.response = Cursor::new(frame);
+        }
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -139,6 +157,7 @@ struct FakeUdp {
     cancellation: Option<Cancellation>,
     empty_response: bool,
     peer: Option<SocketAddr>,
+    failures: Arc<Mutex<VecDeque<io::ErrorKind>>>,
 }
 
 type DatagramCall = (SocketAddr, Vec<u8>, usize);
@@ -157,6 +176,9 @@ impl udp::Provider for FakeUdp {
             .lock()
             .expect("UDP calls")
             .push((endpoint, request.to_vec(), max_response));
+        if let Some(failure) = self.failures.lock().unwrap().pop_front() {
+            return Err(io::Error::from(failure).into());
+        }
         let mut response = if self.empty_response {
             Vec::new()
         } else {
@@ -468,8 +490,11 @@ fn udp_wrong_transaction_id_remains_malformed_evidence() {
 }
 
 #[test]
-fn configured_dns_id_base_is_preserved_on_the_wire() {
-    let udp = FakeUdp::default();
+fn dns_retries_use_distinct_operation_identities_despite_document_id_bases() {
+    let udp = FakeUdp {
+        failures: Arc::new(Mutex::new(VecDeque::from([io::ErrorKind::TimedOut; 2]))),
+        ..FakeUdp::default()
+    };
     let mut request = request(vec![endpoint(35353, identify::Transport::Udp)]);
     let mut corpus = (*request.corpus).clone();
     for probe in &mut corpus.probes {
@@ -477,34 +502,61 @@ fn configured_dns_id_base_is_preserved_on_the_wire() {
             payload: packetcraftr_core::document::udp_profiles::Payload::Dns { id_base, .. },
         } = &mut probe.request
         {
-            *id_base = u16::MAX;
+            *id_base = if probe.id.contains("version") {
+                u16::MAX
+            } else {
+                0
+            };
         }
     }
     request.corpus = Arc::new(corpus);
+    request.intensity = 3;
+    request.limits.probe.attempts = 3;
     let report = client(FakeTcp::default(), udp.clone())
         .identify(&request)
         .expect("DNS identify");
     assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
     let calls = udp.calls.lock().expect("calls");
-    assert_eq!(&calls[0].1[..2], &[0, 0]);
+    let ids: Vec<_> = calls
+        .iter()
+        .map(|call| u16::from_be_bytes(call.1[..2].try_into().unwrap()))
+        .collect();
+    assert_eq!(ids.len(), 4);
+    assert_eq!(ids.iter().copied().collect::<BTreeSet<_>>().len(), 4);
+    assert!(ids.windows(2).all(|ids| ids[1] == ids[0].wrapping_add(1)));
+    assert_eq!(report.usage.attempts, 4);
 }
 
 #[test]
 fn tcp_dns_keeps_exact_frames_and_rejects_malformed_lengths() {
     let mut request = request(vec![endpoint(35353, identify::Transport::Tcp)]);
     corpus_with(&mut request, "dns-tcp");
-    let payload = request.corpus.probes[0]
-        .request_bytes(20548)
-        .expect("DNS payload");
-    let response = dns_response(&payload);
+    let report = client(
+        FakeTcp {
+            dns_reply: Some(DnsReply::Echo),
+            ..FakeTcp::default()
+        },
+        FakeUdp::default(),
+    )
+    .identify(&request)
+    .expect("TCP DNS");
+    assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+    let evidence = &report.records[0].probes[0];
+    let response = dns_response(&evidence.request[2..]);
     let mut frame = (response.len() as u16).to_be_bytes().to_vec();
     frame.extend_from_slice(&response);
-    let report = client(FakeTcp::replying([frame.clone()]), FakeUdp::default())
-        .identify(&request)
-        .expect("TCP DNS");
-    assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
     assert_eq!(report.records[0].probes[0].response, frame);
-    assert_eq!(&report.records[0].probes[0].request[2..], payload);
+    let wrong_id = client(
+        FakeTcp {
+            dns_reply: Some(DnsReply::WrongId),
+            ..FakeTcp::default()
+        },
+        FakeUdp::default(),
+    )
+    .identify(&request)
+    .unwrap();
+    assert_eq!(wrong_id.records[0].outcome, identify::Outcome::Malformed);
+    assert!(wrong_id.records[0].candidates.is_empty());
     for malformed in [vec![0], vec![0, 0], vec![0, 20, 1, 2, 3]] {
         let report = client(FakeTcp::replying([malformed.clone()]), FakeUdp::default())
             .identify(&request)
@@ -1007,9 +1059,14 @@ fn changed_peer_is_rejected_before_any_request_bytes_are_written() {
 }
 
 #[test]
-fn peer_checks_ignore_only_irrelevant_ipv6_scopes() {
+fn peer_checks_normalize_mapped_ipv4_and_preserve_relevant_ipv6_scopes() {
     for transport in [identify::Transport::Tcp, identify::Transport::Udp] {
         for (expected, actual, accepted) in [
+            ("[::ffff:127.0.0.1%7]:38080", "127.0.0.1:38080", true),
+            ("127.0.0.1:38080", "[::ffff:127.0.0.1%7]:38080", true),
+            ("[::ffff:127.0.0.1%7]:38080", "127.0.0.2:38080", false),
+            ("[::ffff:127.0.0.1%7]:38080", "127.0.0.1:38081", false),
+            ("[::1]:38080", "127.0.0.1:38080", false),
             ("[::1%7]:38080", "[::1]:38080", true),
             ("[2001:db8::1%7]:38080", "[2001:db8::1]:38080", true),
             ("[fe80::1%7]:38080", "[fe80::1%7]:38080", true),

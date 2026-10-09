@@ -10,6 +10,7 @@
 mod budget;
 mod engine;
 mod error;
+mod identity;
 mod io;
 mod plan;
 mod record;

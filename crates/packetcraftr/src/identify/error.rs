@@ -15,6 +15,8 @@ pub enum Error {
     #[error(transparent)]
     Policy(#[from] crate::policy::Error),
     #[error(transparent)]
+    Entropy(#[from] packetcraftr_core::error::BoundaryError),
+    #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error("service identification provider violated its bounded exchange contract: {reason}")]
     Provider { reason: String },
@@ -34,6 +36,7 @@ impl Classified for Error {
             Self::Corpus(source) => source.classification(),
             Self::Exclusions(source) => source.classification(),
             Self::Policy(source) => source.classification(),
+            Self::Entropy(source) => source.classification(),
             Self::Cancelled(source) => source.classification(),
             Self::Request { .. } => Classification::new(
                 "cli.identify_request",

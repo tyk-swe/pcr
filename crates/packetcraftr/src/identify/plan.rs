@@ -7,6 +7,13 @@ use std::net::SocketAddr;
 use super::{Error, Request, Transport, engine};
 use crate::policy::SocketLimits;
 
+pub(super) struct Declaration {
+    pub(super) endpoints: Vec<SocketAddr>,
+    pub(super) limits: SocketLimits,
+    pub(super) units: u64,
+    pub(super) dns: bool,
+}
+
 #[derive(Default)]
 struct Traffic {
     attempts: u64,
@@ -19,11 +26,10 @@ struct Traffic {
 
 /// Conservative bounds for the selected plan, not the unused operation
 /// allowance. Responses and deadlines can reduce traffic further at runtime.
-pub(super) fn declaration(
-    request: &Request,
-) -> Result<(Vec<SocketAddr>, SocketLimits, u64), Error> {
+pub(super) fn declaration(request: &Request) -> Result<Declaration, Error> {
     let mut endpoints = Vec::new();
     let mut hosts = BTreeMap::<_, Traffic>::new();
+    let mut dns = false;
     let limits = request.limits;
     let attempts = limits
         .probe
@@ -54,6 +60,10 @@ pub(super) fn declaration(
                 continue;
             }
             admitted = true;
+            dns |= matches!(
+                probe.request,
+                packetcraftr_core::document::service_probes::Request::Dns { .. }
+            );
             let host = hosts.entry(engine::host_key(endpoint.address)).or_default();
             host.attempts += attempts;
             if endpoint.transport == Transport::Tcp {
@@ -89,9 +99,9 @@ pub(super) fn declaration(
     // but their sum must also respect the shared host and operation attempts.
     let admitted_attempts = total.attempts.min(limits.operation.attempts);
     let units = admitted_attempts + total.writing_connections.min(admitted_attempts);
-    Ok((
+    Ok(Declaration {
         endpoints,
-        SocketLimits::new(
+        limits: SocketLimits::new(
             total.connections.min(limits.operation.attempts),
             total.messages.min(limits.operation.attempts),
             total
@@ -100,5 +110,6 @@ pub(super) fn declaration(
                 .min(total.max_request_bytes * limits.operation.attempts),
         ),
         units,
-    ))
+        dns,
+    })
 }

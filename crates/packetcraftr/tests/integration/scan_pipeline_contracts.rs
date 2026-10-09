@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use crate::common;
 
-use common::clock::VirtualClock;
+use common::clock::{RealClock, VirtualClock};
 use common::responder::{Io, Routes, State};
 use packetcraftr::{
     Client,
@@ -737,11 +737,8 @@ fn settled_packets_stay_within_the_preparation_budget() {
     request.limits.max_duration = Duration::from_secs(60);
     let budget = request.limits.max_prepared_bytes;
     let count = request.endpoints.len();
-    let clock = VirtualClock::default();
-    let state = Arc::new(Mutex::new(State {
-        idle_clock: Some(clock.clone()),
-        ..State::default()
-    }));
+    let clock = RealClock::default();
+    let state = Arc::new(Mutex::new(State::default()));
     let client = Client::new(
         builtin::registry(),
         Policy {

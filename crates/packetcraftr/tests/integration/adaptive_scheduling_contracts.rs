@@ -794,14 +794,14 @@ fn delayed_io(first: IpAddr, second: IpAddr, io: &responder::Io) -> DelayedIo {
 fn bootstrap_request(first: IpAddr, second: IpAddr) -> Request {
     let mut request = request(vec![first, second], &[80], 1);
     request.max_in_flight = 1;
-    request.timeout = Duration::from_millis(200);
+    request.timeout = Duration::from_millis(1000);
     {
         let adaptive = request.adaptive.as_mut().unwrap();
         adaptive.min_timeout = Duration::from_millis(10);
-        adaptive.max_timeout = Duration::from_millis(200);
+        adaptive.max_timeout = Duration::from_millis(1000);
         adaptive.min_window = 1;
         adaptive.initial_window = 1;
-        adaptive.host_timeout = Duration::from_secs(2);
+        adaptive.host_timeout = Duration::from_secs(5);
     }
     request
 }

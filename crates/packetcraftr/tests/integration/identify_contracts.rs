@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read, Write};
 use std::net::{SocketAddr, TcpListener, UdpSocket};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -26,6 +26,13 @@ struct FakeTcp {
     failures: Arc<Mutex<VecDeque<io::ErrorKind>>>,
     advance: Option<TestClock>,
     peer: Option<SocketAddr>,
+    pending_cancellation: Option<PendingCancellation>,
+}
+
+#[derive(Clone)]
+struct PendingCancellation {
+    signal: Cancellation,
+    release: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl FakeTcp {
@@ -41,8 +48,29 @@ impl tcp::Provider for FakeTcp {
     type Stream = FakeStream;
 
     fn connect(&self, endpoint: SocketAddr, deadline: &Deadline) -> Result<FakeStream, tcp::Error> {
-        assert!(deadline.remaining().expect("live deadline") <= Duration::from_secs(2));
+        let max_timeout = if self.pending_cancellation.is_some() {
+            10
+        } else {
+            2
+        };
+        assert!(deadline.remaining().expect("live deadline") <= Duration::from_secs(max_timeout));
         self.endpoints.lock().expect("endpoints").push(endpoint);
+        if let Some(pending) = &self.pending_cancellation {
+            pending.signal.cancel();
+            let (release, ready) = &*pending.release;
+            let (_released, timeout) = ready
+                .wait_timeout_while(
+                    release.lock().unwrap(),
+                    Duration::from_secs(5),
+                    |released| !*released,
+                )
+                .expect("pending cancellation gate");
+            assert!(
+                !timeout.timed_out(),
+                "caller must release its cancelled worker"
+            );
+            return Err(pending.signal.check().expect_err("cancelled").into());
+        }
         if let Some(clock) = &self.advance {
             clock.advance(Duration::from_secs(1));
         }
@@ -871,8 +899,8 @@ fn operation_and_host_attempt_limits_stop_extra_connections() {
 #[test]
 fn host_budgets_canonicalize_aliases_and_preserve_relevant_ipv6_scope() {
     for (addresses, expected_attempts) in [
-        (["127.0.0.1:35353", "[::ffff:127.0.0.1%7]:35353"], 1),
-        (["[2001:db8::1%7]:35353", "[2001:db8::1%8]:35353"], 1),
+        (["127.0.0.1:35353", "[::ffff:127.0.0.1%7]:35354"], 1),
+        (["[2001:db8::1%7]:35353", "[2001:db8::1%8]:35354"], 1),
         (["[fe80::1%7]:35353", "[fe80::1%8]:35353"], 2),
     ] {
         let udp = FakeUdp {
@@ -1031,6 +1059,209 @@ fn peer_checks_ignore_only_irrelevant_ipv6_scopes() {
             }
         }
     }
+}
+
+#[test]
+fn policy_traffic_limits_follow_the_selected_transport_and_probe_plan() {
+    for (probe, transport, units) in [
+        ("ssh-banner", identify::Transport::Tcp, 1),
+        ("http-head", identify::Transport::Tcp, 2),
+        ("dns-tcp", identify::Transport::Tcp, 2),
+        ("dns-udp", identify::Transport::Udp, 1),
+    ] {
+        for allowed in [units - 1, units] {
+            let tcp = FakeTcp::default();
+            let udp = FakeUdp::default();
+            let mut request = request(vec![endpoint(38080, transport)]);
+            corpus_with(&mut request, probe);
+            let bytes = request.corpus.probes[0].request_bytes(1).unwrap().len() as u64
+                + u64::from(probe == "dns-tcp") * 2;
+            let client = Client::new(
+                builtin::registry(),
+                Policy {
+                    max_packets_per_operation: allowed,
+                    max_bytes_per_operation: bytes,
+                    ..Policy::default()
+                },
+                ProviderSet::tcp(tcp.clone(), ()).with_udp(udp.clone()),
+            );
+            let result = client.identify(&request);
+            if allowed == units {
+                assert_eq!(result.unwrap().usage.attempts, 1, "{probe}");
+            } else {
+                assert!(matches!(result, Err(identify::Error::Policy(_))), "{probe}");
+                assert!(tcp.endpoints.lock().unwrap().is_empty());
+                assert!(udp.calls.lock().unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_transport_declarations_respect_shared_attempt_allowances() {
+    for host_bound in [false, true] {
+        for udp_first in [false, true] {
+            let tcp = FakeTcp::default();
+            let udp = FakeUdp::default();
+            let mut endpoints = vec![
+                endpoint(32222, identify::Transport::Tcp),
+                endpoint(32222, identify::Transport::Udp),
+            ];
+            if udp_first {
+                endpoints.reverse();
+            }
+            let mut request = request(endpoints);
+            let mut corpus = (*request.corpus).clone();
+            corpus
+                .probes
+                .retain(|probe| matches!(probe.id.as_str(), "ssh-banner" | "dns-udp"));
+            corpus
+                .matches
+                .retain(|rule| matches!(rule.probe.as_str(), "ssh-banner" | "dns-udp"));
+            request.corpus = Arc::new(corpus);
+            if host_bound {
+                request.limits.host.attempts = 1;
+            } else {
+                request.limits.operation.attempts = 1;
+            }
+            let client = Client::new(
+                builtin::registry(),
+                Policy {
+                    max_packets_per_operation: 1,
+                    ..Policy::default()
+                },
+                ProviderSet::tcp(tcp.clone(), ()).with_udp(udp.clone()),
+            );
+            let report = client.identify(&request).expect("one shared traffic unit");
+            assert_eq!(report.usage.attempts, 1);
+            assert_eq!(tcp.endpoints.lock().unwrap().len(), usize::from(!udp_first));
+            assert_eq!(udp.calls.lock().unwrap().len(), usize::from(udp_first));
+            assert!(!report.complete);
+        }
+    }
+}
+
+#[test]
+fn zero_traffic_plans_do_not_authorize_unselected_or_unwritable_endpoints() {
+    for (probe, port, transport, unwritable) in [
+        ("ssh-banner", 38080, identify::Transport::Udp, false),
+        ("http-head", 38080, identify::Transport::Tcp, true),
+        ("http-head", 9100, identify::Transport::Tcp, false),
+    ] {
+        let tcp = FakeTcp::default();
+        let udp = FakeUdp::default();
+        let mut request = request(vec![identify::Endpoint {
+            address: SocketAddr::from(([192, 0, 2, 1], port)),
+            transport,
+        }]);
+        corpus_with(&mut request, probe);
+        if unwritable {
+            request.limits.connection.write_bytes = 0;
+        }
+        let client = Client::new(
+            builtin::registry(),
+            Policy {
+                max_packets_per_operation: 0,
+                max_bytes_per_operation: 0,
+                ..Policy::default()
+            },
+            ProviderSet::tcp(tcp.clone(), ()).with_udp(udp.clone()),
+        );
+        let report = client.identify(&request).expect("no traffic to authorize");
+        assert_eq!(report.usage.attempts, 0);
+        assert!(tcp.endpoints.lock().unwrap().is_empty());
+        assert!(udp.calls.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn duplicate_peer_aliases_are_rejected_before_provider_calls() {
+    for (addresses, duplicate) in [
+        (["[::1%7]:32222", "[::1%8]:32222"], true),
+        (["[2001:db8::1%7]:32222", "[2001:db8::1%8]:32222"], true),
+        (["[fe80::1%7]:32222", "[fe80::1%7]:32222"], true),
+        (["127.0.0.1:32222", "[::ffff:127.0.0.1%7]:32222"], true),
+        (["[fe80::1%7]:32222", "[fe80::1%8]:32222"], false),
+        (["[::1%7]:32222", "[::1%8]:32223"], false),
+    ] {
+        let tcp = FakeTcp::default();
+        let udp = FakeUdp::default();
+        let mut endpoints: Vec<_> = addresses
+            .into_iter()
+            .map(|address| identify::Endpoint {
+                address: address.parse().unwrap(),
+                transport: identify::Transport::Tcp,
+            })
+            .collect();
+        if let SocketAddr::V6(address) = &mut endpoints[1].address {
+            address.set_flowinfo(123);
+        }
+        let mut request = request(endpoints);
+        request.intensity = 1;
+        let client = Client::new(
+            builtin::registry(),
+            Policy {
+                allow_public_destinations: true,
+                ..Policy::default()
+            },
+            ProviderSet::tcp(tcp.clone(), ()).with_udp(udp.clone()),
+        );
+        let result = client.identify(&request);
+        if duplicate {
+            assert!(
+                matches!(result, Err(identify::Error::Request { .. })),
+                "{addresses:?}"
+            );
+            assert!(tcp.endpoints.lock().unwrap().is_empty());
+            assert!(udp.calls.lock().unwrap().is_empty());
+        } else {
+            assert_eq!(result.unwrap().usage.attempts, 2);
+        }
+    }
+    let mut request = request(vec![
+        endpoint(32222, identify::Transport::Tcp),
+        endpoint(32222, identify::Transport::Udp),
+    ]);
+    request.intensity = 2;
+    request
+        .validate(&Policy::default())
+        .expect("transport is part of peer identity");
+}
+
+#[test]
+fn cancellation_while_tcp_connect_is_pending_retains_cancelled_evidence() {
+    let signal = Cancellation::default();
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let tcp = FakeTcp {
+        pending_cancellation: Some(PendingCancellation {
+            signal: signal.clone(),
+            release: Arc::clone(&release),
+        }),
+        ..FakeTcp::default()
+    };
+    let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);
+    request.intensity = 1;
+    request.limits.connection.timeout = Duration::from_secs(10);
+    request.limits.probe.timeout = Duration::from_secs(10);
+    let result = client(tcp.clone(), FakeUdp::default())
+        .with_cancellation(signal)
+        .identify(&request);
+    *release.0.lock().unwrap() = true;
+    release.1.notify_all();
+    let report = result.expect("cancelled evidence");
+    assert!(report.cancelled);
+    assert!(!report.complete);
+    let evidence = &report.records[0].probes[0];
+    assert_eq!(evidence.io_outcome, identify::IoOutcome::Cancelled);
+    assert!(matches!(
+        evidence
+            .source
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<tcp::Error>(),
+        Some(tcp::Error::Cancelled(_))
+    ));
+    assert!(tcp.writes.lock().unwrap().is_empty());
 }
 
 #[test]

@@ -25,14 +25,23 @@ All notable changes to PacketcraftR are documented here. The format follows
   excess valid fields as truncated rather than retaining oversized evidence.
   The service-probe schema now enforces the parser's ASCII match-prefix and
   version-delimiter contracts. Both service-document schemas reject Unicode
-  controls in shared text fields and require ASCII date digits.
+  controls in shared text fields and require ASCII date digits. Shared text
+  limits count Unicode characters as published, with separate finite UTF-8 and
+  whole-document byte caps. The scanner-corpus schema requires its identification
+  scenario inventory.
 - Bounded TCP exchanges flush nonempty requests under the write deadline before
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.
+  A valid banner may follow all sixteen permitted pre-identification lines.
 - Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs
   while preserving exact addresses, ports, and link-local or multicast scopes.
   TCP and UDP socket setup clears only those irrelevant scopes so they are also
   accepted on Windows.
+- Identification policy declarations bound the selected probe traffic rather
+  than unused attempt allowances. Duplicate endpoint aliases are rejected before
+  I/O, including irrelevant IPv6 scopes/flow information and mapped IPv4 aliases.
+  Cancellation while a TCP connection is pending remains cancelled evidence,
+  distinct from a connection timeout.
 
 ### Breaking
 

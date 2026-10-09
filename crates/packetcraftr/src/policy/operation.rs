@@ -125,6 +125,12 @@ impl<'a> SocketOperation<'a> {
             limits: WireLimits::new(units, sockets.application_bytes),
         })
     }
+    /// Refine independent component maxima with a workflow-enforced shared
+    /// traffic bound. This never increases either the units or byte allowance.
+    pub(crate) fn with_traffic_unit_bound(mut self, bound: u64) -> Self {
+        self.limits = WireLimits::new(self.limits.packets().min(bound), self.limits.wire_bytes());
+        self
+    }
     pub fn endpoints(&self) -> &'a [std::net::SocketAddr] {
         self.endpoints
     }
@@ -307,6 +313,19 @@ impl Policy {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn shared_socket_bound_only_reduces_units_and_preserves_bytes() {
+        let operation = SocketOperation::new(&[], SocketLimits::new(3, 4, 100)).unwrap();
+        assert_eq!(
+            operation.with_traffic_unit_bound(2).limits(),
+            WireLimits::new(2, 100)
+        );
+        assert_eq!(
+            operation.with_traffic_unit_bound(u64::MAX).limits(),
+            operation.limits()
+        );
+    }
 
     #[test]
     fn aggregate_dns_limits_reject_overflow_in_each_quantity() {

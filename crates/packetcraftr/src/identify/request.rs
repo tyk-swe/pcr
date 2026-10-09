@@ -13,7 +13,7 @@ use serde::Serialize;
 use super::{
     Error, MAX_ATTEMPTS, MAX_ENDPOINTS, MAX_OPERATION_BYTES, MAX_RESPONSE_BYTES, Transport,
 };
-use crate::policy::{Operation, Policy, SocketLimits, SocketOperation};
+use crate::policy::{Operation, Policy, SocketOperation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct Endpoint {
@@ -150,7 +150,11 @@ impl Request {
                 || address.is_unspecified()
                 || address.is_multicast()
                 || address == std::net::IpAddr::V4(std::net::Ipv4Addr::BROADCAST)
-                || !unique.insert(*endpoint)
+                || !unique.insert((
+                    super::engine::host_key(endpoint.address),
+                    endpoint.address.port(),
+                    endpoint.transport,
+                ))
             {
                 return Err(Error::request(
                     "endpoints must be distinct, unicast, nonzero numeric socket addresses",
@@ -191,34 +195,10 @@ impl Request {
                 "connection and probe response limits must not exceed {MAX_RESPONSE_BYTES}"
             )));
         }
-        let endpoints = self
-            .endpoints
-            .iter()
-            .filter(|endpoint| {
-                !self
-                    .exclusions
-                    .excludes(endpoint.transport, endpoint.address.port())
-            })
-            .map(|endpoint| endpoint.address)
-            .collect::<Vec<_>>();
-        let attempts = if endpoints.is_empty() {
-            0
-        } else {
-            self.limits.operation.attempts
-        };
-        let declaration = SocketOperation::new(
-            &endpoints,
-            SocketLimits::new(
-                attempts,
-                attempts,
-                if attempts == 0 {
-                    0
-                } else {
-                    self.limits.operation.write_bytes
-                },
-            ),
-        )
-        .map_err(|source| Error::request(source.to_string()))?;
+        let (endpoints, limits, units) = super::plan::declaration(self)?;
+        let declaration = SocketOperation::new(&endpoints, limits)
+            .map_err(|source| Error::request(source.to_string()))?
+            .with_traffic_unit_bound(units);
         policy.authorize(Operation::Socket(declaration))?;
         Ok(())
     }

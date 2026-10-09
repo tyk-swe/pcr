@@ -11,6 +11,7 @@ mod budget;
 mod engine;
 mod error;
 mod io;
+mod plan;
 mod record;
 mod request;
 

@@ -195,7 +195,7 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
     }
 }
 
-fn host_key(address: SocketAddr) -> (IpAddr, u32) {
+pub(super) fn host_key(address: SocketAddr) -> (IpAddr, u32) {
     (
         address.ip().to_canonical(),
         match address {
@@ -205,7 +205,7 @@ fn host_key(address: SocketAddr) -> (IpAddr, u32) {
     )
 }
 
-fn request_bytes(probe: &Probe, sequence: u64) -> Result<Vec<u8>, Error> {
+pub(super) fn request_bytes(probe: &Probe, sequence: u64) -> Result<Vec<u8>, Error> {
     let sequence =
         u16::try_from(sequence).map_err(|_| Error::request("DNS transaction sequence overflow"))?;
     let transaction_id = match &probe.request {

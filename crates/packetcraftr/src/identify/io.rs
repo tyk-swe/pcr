@@ -191,10 +191,11 @@ fn tcp_exchange<P: TcpProviders>(
     let outcome = match pending.wait(deadline) {
         Ok(Some(outcome)) => outcome,
         Ok(None) => {
-            return Ok(Reply {
-                outcome: IoOutcome::TimedOut,
-                ..Reply::failed(tcp::Error::DeadlineExceeded)
-            });
+            let source = match deadline.check_cancelled() {
+                Ok(()) => tcp::Error::DeadlineExceeded,
+                Err(cancelled) => tcp::Error::Cancelled(cancelled),
+            };
+            return Ok(Reply::tcp_failed(source));
         }
         Err(source) => return Ok(Reply::tcp_failed(source)),
     };

@@ -47,6 +47,8 @@ fields and bounded version-token extraction; no unbounded regular expressions
 are accepted. Each probe includes a read-only review and maintenance/source
 metadata, and each match rule has its own provenance. Core owns document
 validation, response parsing and deterministic matching independently of I/O.
+Shared descriptive text is limited to 512 Unicode characters and 2,048 UTF-8
+bytes per value, in addition to each document's enclosing byte-size limit.
 
 ## Budgets and sensitive endpoints
 
@@ -56,6 +58,12 @@ must admit an attempt before I/O; partial transfers are charged with their actua
 completed byte counts. Host limits span all ports and transports of the same
 numeric host, including the interface scope of link-local IPv6 addresses.
 Mapped IPv4 and irrelevant global IPv6 scope IDs share the same host budget.
+Endpoint uniqueness uses that same host identity plus port and transport;
+irrelevant IPv6 flow information does not make a second endpoint distinct.
+Policy traffic declarations follow applicable, writable probes and their finite
+attempt bounds: banner collection declares only a TCP connection, while a UDP
+query declares only a message. Final destination and exact request-byte checks
+still precede every transmission.
 Retries consume attempts and
 fresh connection resources. A smaller enclosing allowance reduces the receive
 buffer rather than allowing an oversize read. A full receive buffer is

@@ -3,7 +3,7 @@
   "$id": "packetcraftr.scanner-corpus/v1",
   "title": "Independent scanner ground-truth inventory",
   "type": "object",
-  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "provenance"],
+  "required": ["schema", "dataset_version", "families", "transports", "fixture_addresses", "request", "nmap", "scenarios", "native_connect_scenarios", "traceroute_scenarios", "identification_scenarios", "provenance"],
   "additionalProperties": false,
   "properties": {
     "identification_scenarios": {"type": "array", "minItems": 10, "items": {"$ref": "#/$defs/identificationScenario"}},

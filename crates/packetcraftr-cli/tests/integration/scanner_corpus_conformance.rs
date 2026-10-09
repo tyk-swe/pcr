@@ -99,4 +99,16 @@ fn identification_inventory_preserves_uncertainty_and_claim_confidence() {
     let mut invalid = corpus.clone();
     invalid["identification_scenarios"][0]["authenticated"] = true.into();
     assert!(corpus_schema().validate(&invalid).is_err());
+    let mut absent = corpus.clone();
+    absent
+        .as_object_mut()
+        .unwrap()
+        .remove("identification_scenarios");
+    assert!(corpus_schema().validate(&absent).is_err());
+    let mut short = corpus;
+    short["identification_scenarios"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    assert!(corpus_schema().validate(&short).is_err());
 }

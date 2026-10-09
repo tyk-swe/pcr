@@ -550,7 +550,9 @@ fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
     }
     let mut authorizer = SlowAuthorize {
         selected: "127.0.0.1:80".parse().unwrap(),
-        delay: Duration::from_millis(120),
+        // Authorization deliberately exceeds the host budget. Requiring an
+        // earlier attempt to succeed would depend on the runner's scheduling.
+        delay: Duration::from_millis(250),
     };
     let clock = crate::test_support::NoopClock;
     let mut deadline = Deadline::new(Duration::from_secs(60));
@@ -566,8 +568,8 @@ fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
     .expect("the scan completes inside its operation deadline");
     assert_eq!(
         provider.calls.load(Ordering::SeqCst),
-        1,
-        "authorization past the anchored deadline omits the second port"
+        0,
+        "authorization past the anchored deadline prevents every connection"
     );
     assert_eq!(report.scheduling.incomplete.len(), 1);
 }

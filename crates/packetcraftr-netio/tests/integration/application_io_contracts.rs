@@ -77,6 +77,7 @@ fn connected_udp_filters_other_peers_and_preserves_oversized_prefix() {
 }
 
 #[test]
+#[cfg(native_route)]
 fn connected_udp_accepts_an_irrelevant_ipv6_scope_normalized_by_the_socket() {
     let server = UdpSocket::bind("[::1]:0").unwrap();
     server
@@ -85,7 +86,21 @@ fn connected_udp_accepts_an_irrelevant_ipv6_scope_normalized_by_the_socket() {
     let std::net::SocketAddr::V6(mut endpoint) = server.local_addr().unwrap() else {
         unreachable!("IPv6 fixture");
     };
-    endpoint.set_scope_id(7);
+    // Some kernels use even a loopback scope as an interface-selection hint.
+    // Exercise normalization with a real loopback index, not an arbitrary one.
+    let loopback = packetcraftr_netio::interface::SystemProvider
+        .ipv6_interfaces(&Deadline::new(Duration::from_secs(3)))
+        .unwrap()
+        .into_iter()
+        .find(|interface| {
+            interface.flags.loopback
+                && interface
+                    .addresses
+                    .iter()
+                    .any(|address| address.address == std::net::Ipv6Addr::LOCALHOST)
+        })
+        .expect("IPv6 loopback interface");
+    endpoint.set_scope_id(loopback.id.index);
     let responder = std::thread::spawn(move || {
         let mut buffer = [0; 16];
         let (count, peer) = server.recv_from(&mut buffer).unwrap();
@@ -98,8 +113,9 @@ fn connected_udp_accepts_an_irrelevant_ipv6_scope_normalized_by_the_socket() {
         32,
         &Deadline::new(Duration::from_secs(3)),
     );
-    responder.join().unwrap();
-    let reply = result.unwrap();
+    let responder_result = responder.join();
+    let reply = result.expect("scoped IPv6 loopback exchange");
+    responder_result.unwrap();
     assert_eq!(reply.exchange.response.as_ref(), b"reply");
     assert!(matches!(reply.exchange.outcome, Outcome::Complete));
 }

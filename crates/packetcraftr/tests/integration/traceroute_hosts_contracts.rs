@@ -4,13 +4,14 @@ use crate::common;
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::responder::{Arrival, Io, Path, Routes, State};
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::probe::{ProbeStatus, Transport};
-use packetcraftr::scan;
+use packetcraftr::scan::{self, Reply};
 use packetcraftr::target::{Family, Selection};
 use packetcraftr::traceroute::hosts::{
     self, Basis, Collector, NotTraced, Observed, Request, Reuse, State as HostState, Strategy,
@@ -862,4 +863,162 @@ fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
         .expect_err("73 bytes cannot fit a 74-byte probe");
     assert_eq!(error.classification().code, "policy.byte_limit");
     assert_eq!(state.lock().unwrap().sends, 3, "still no trace traffic");
+}
+
+/// A resolver that counts calls and answers every hostname with one fixed
+/// address, so a rejected plan proves it never ran.
+#[derive(Clone)]
+struct CountingResolver {
+    address: IpAddr,
+    calls: Arc<AtomicUsize>,
+}
+
+impl packetcraftr::target::Resolver for CountingResolver {
+    fn resolve(
+        &self,
+        _hostname: &packetcraftr::target::Hostname,
+        _limit: usize,
+    ) -> Result<Vec<IpAddr>, packetcraftr::target::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![self.address])
+    }
+}
+
+#[test]
+fn a_tcp_observation_rejects_payload_before_hostname_resolution() {
+    let observation = |address: IpAddr, reply: Reply| Observed {
+        address,
+        transport: Transport::Tcp,
+        destination_port: Some(80),
+        stage: scan::Stage::Scan,
+        sequence: 0,
+        reply,
+        observed_at: None,
+    };
+    for (reply, address, strategy) in [
+        // A TCP payload is invalid whether TCP comes from the fallback or
+        // the observation; the error must precede even hostname resolution.
+        (Reply::TcpSynAck, IpAddr::V4(host(11)), None),
+        (
+            Reply::TcpSynAck,
+            IpAddr::V6("2001:db8::11".parse().unwrap()),
+            None,
+        ),
+        (
+            Reply::TcpReset,
+            IpAddr::V4(host(11)),
+            Some(Strategy {
+                transport: Transport::Icmp,
+                destination_port: None,
+            }),
+        ),
+        (
+            Reply::TcpReset,
+            IpAddr::V4(host(11)),
+            Some(Strategy {
+                transport: Transport::Udp,
+                destination_port: Some(33_434),
+            }),
+        ),
+    ] {
+        let state = network(&[]);
+        let resolver = CountingResolver {
+            address,
+            calls: Arc::default(),
+        };
+        let providers = packetcraftr::ProviderSet {
+            route: Routes,
+            interface: crate::common::Interfaces::default(),
+            capture: Io(Arc::clone(&state)),
+            transmit: Io(Arc::clone(&state)),
+            tcp: crate::common::ScriptedTcp::default(),
+            resolver: resolver.clone(),
+        };
+        let client = Client::new(
+            packetcraftr_core::protocol::builtin::registry(),
+            Policy {
+                allow_hostname_resolution: true,
+                ..Policy::default()
+            },
+            providers,
+        );
+        let mut plan = request(&[]);
+        plan.targets = Selection {
+            include: vec!["trace.invalid".parse().unwrap()],
+            exclude: Vec::new(),
+        };
+        plan.max_hops = 1;
+        plan.payload_size = 8;
+        plan.strategy = strategy;
+        plan.observed = vec![observation(address, reply)];
+
+        let error = plan
+            .validate()
+            .expect_err("a TCP-observed plan carries no payload");
+        assert!(
+            matches!(
+                error,
+                traceroute::Error::InvalidProbeOption {
+                    option: "payload_size",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+        let error = client
+            .trace_hosts(plan, Collector::default())
+            .expect_err("validation precedes resolution");
+        assert!(
+            matches!(
+                error,
+                traceroute::Error::InvalidProbeOption {
+                    option: "payload_size",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            resolver.calls.load(Ordering::SeqCst),
+            0,
+            "the resolver never ran"
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.armed, 0);
+        assert_eq!(state.sends, 0);
+    }
+
+    // Controls: the same observation with no payload still validates, and so
+    // do payload-bearing plans that never select TCP.
+    let mut valid = request(&[11]);
+    valid.max_hops = 1;
+    valid.observed = vec![observation(IpAddr::V4(host(11)), Reply::TcpSynAck)];
+    assert!(valid.validate().is_ok());
+
+    for strategy in [
+        None,
+        Some(Strategy {
+            transport: Transport::Icmp,
+            destination_port: None,
+        }),
+        Some(Strategy {
+            transport: Transport::Udp,
+            destination_port: Some(33_434),
+        }),
+    ] {
+        let mut plan = request(&[11]);
+        plan.max_hops = 1;
+        plan.payload_size = 8;
+        plan.strategy = strategy;
+        plan.observed = vec![Observed {
+            address: IpAddr::V4(host(11)),
+            transport: Transport::Icmp,
+            destination_port: None,
+            stage: scan::Stage::Scan,
+            sequence: 0,
+            reply: Reply::IcmpEchoReply,
+            observed_at: None,
+        }];
+        assert!(plan.validate().is_ok(), "{strategy:?}");
+    }
 }

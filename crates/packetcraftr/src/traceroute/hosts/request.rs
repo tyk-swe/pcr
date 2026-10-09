@@ -173,7 +173,14 @@ impl Request {
                 observed.destination_port,
                 observed.reply,
             ) {
-                (Transport::Tcp, Some(port), Reply::TcpSynAck | Reply::TcpReset) if port != 0 => {}
+                (Transport::Tcp, Some(port), Reply::TcpSynAck | Reply::TcpReset) if port != 0 => {
+                    // A valid TCP observation selects a TCP probe; the
+                    // payload rule must hold before resolution, not only
+                    // when TCP is the fallback.
+                    if self.payload_size > 0 {
+                        return Err(tcp_payload());
+                    }
+                }
                 (Transport::Icmp, None, Reply::IcmpEchoReply) => {}
                 (transport, port, reply) => {
                     return Err(invalid(format!(

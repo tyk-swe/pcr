@@ -1110,9 +1110,13 @@ neighbor-configuration error and its classification — and `traceroute::hosts` 
 `Client::trace_hosts` is new. `hosts::Report` carries a `neighbor_stats`
 summary of the neighbor requests the probes' routes resolved; those packets
 and bytes are already inside `stats`, so it is a library field for
-accounting, not a new output member. `Client::with_remaining_budget` is a
-new additive view helper that narrows an operation's packet and byte
-ceilings by what an earlier stage already sent; `scan --traceroute` uses it
+accounting, not a new output member. Multi-host `hosts::Request::validate`
+is stricter before any DNS work: a TCP-selected probe with a nonzero
+`payload_size` fails `InvalidProbeOption`
+whether TCP came from the fallback strategy or a valid observation.
+`Client::with_remaining_budget` is a new additive view helper that narrows
+an operation's packet and byte ceilings by what an earlier stage already
+sent; `scan --traceroute` uses it
 so the trace and its lookups share the scan's policy budget. The standalone
 `traceroute::Request`, `Report`, and `Aggregate` are unchanged.
 `probe::runner::run_batches` keeps its behavior over the new `run_planned`.

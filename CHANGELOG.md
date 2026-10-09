@@ -1997,6 +1997,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
   socket preparation outside the eligible interval and reject missing/stale
   ingress; submission timing is not precise wire departure or identity proof.
+- A multi-host trace resting on a TCP observation rejects a nonzero
+  `payload_size` before hostname resolution, not only when TCP is the
+  fallback strategy.
 - `scan --traceroute` and the reverse-DNS lookups after it run inside the
   scan's policy packet and byte budget rather than a fresh one: the trace
   stage and each lookup share `Client::with_remaining_budget`, so an

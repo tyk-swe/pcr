@@ -109,6 +109,6 @@ fn standalone_traceroute_keeps_its_contract() {
     let output = run(&["--output", "json", "traceroute", "192.0.2.1", "--port", "0"]);
     assert_eq!(output.status.code(), Some(USAGE_EXIT));
     let document = parse_json(&output);
-    assert_eq!(document["schema"], "packetcraftr.output/v10");
+    assert_eq!(document["schema"], "packetcraftr.output/v11");
     assert_eq!(document["command"], "traceroute");
 }

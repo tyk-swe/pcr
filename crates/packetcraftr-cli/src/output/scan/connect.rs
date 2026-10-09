@@ -123,6 +123,7 @@ pub struct Summary {
     /// cannot hold; absent when no lookup ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reverse_dns_stats: Option<packetcraftr::Stats>,
+    pub scheduling: super::Scheduling,
 }
 impl Summary {
     pub fn new(
@@ -138,6 +139,7 @@ impl Summary {
             plan,
             socket_stats: report.stats.into(),
             reverse_dns_stats,
+            scheduling: report.scheduling.into(),
         }
     }
 }

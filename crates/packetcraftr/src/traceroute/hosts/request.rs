@@ -9,6 +9,7 @@ use packetcraftr_netio::deadline::MAX_WAIT;
 use super::selection::Observed;
 use crate::execution::limits::{check_limits, duration_violation};
 use crate::probe::Transport;
+use crate::scan::Reply;
 use crate::target::{Family, Selection};
 use crate::traceroute::request::{Bounds, check_destination_port, tcp_payload};
 use crate::traceroute::{Error, Limits, MAX_PROBES};
@@ -131,13 +132,18 @@ impl Request {
                     observed.address
                 )));
             }
-            match (observed.transport, observed.destination_port) {
-                (Transport::Tcp, Some(port)) if port != 0 => {}
-                (Transport::Icmp, None) => {}
-                (transport, port) => {
+            match (
+                observed.transport,
+                observed.destination_port,
+                observed.reply,
+            ) {
+                (Transport::Tcp, Some(port), Reply::TcpSynAck | Reply::TcpReset) if port != 0 => {}
+                (Transport::Icmp, None, Reply::IcmpEchoReply) => {}
+                (transport, port, reply) => {
                     return Err(invalid(format!(
-                        "{transport} observation for {} with port {port:?} cannot select a trace; \
-                         only TCP with a non-zero port and portless ICMP can",
+                        "{transport} observation for {} with port {port:?} and reply {reply:?} \
+                         cannot select a trace; only a TCP SYN/ACK or reset on a non-zero port \
+                         and a portless ICMP echo reply can",
                         observed.address
                     )));
                 }

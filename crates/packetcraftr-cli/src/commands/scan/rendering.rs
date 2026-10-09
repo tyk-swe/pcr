@@ -80,12 +80,51 @@ pub(super) fn render_text(
         optional_duration(rtt.avg),
         optional_duration(rtt.max),
     ))?;
+    render_scheduling_text(&result.scheduling)?;
     if let Some(trace) = &result.traceroute {
         render_traceroute_text(trace)?;
     }
     render_diagnostics_text(&diagnostics)
 }
 
+fn render_scheduling_text(scheduling: &output::scan::Scheduling) -> Result<(), CliError> {
+    let ceilings = match (scheduling.operation_ceiling, scheduling.process_ceiling) {
+        (Some(operation), Some(process)) => {
+            format!(" operation-ceiling={operation} process-ceiling={process}")
+        }
+        _ => String::new(),
+    };
+    write_summary_line(format_args!(
+        "scheduling={} peak-window={} retries={}{}",
+        scheduling.mode, scheduling.observed_peak_window, scheduling.retries_started, ceilings,
+    ))?;
+    for condition in &scheduling.conditions {
+        let host = match &condition.host.scope {
+            Some(scope) => format!("{}%{}", condition.host.address, scope.zone),
+            None => condition.host.address.to_string(),
+        };
+        write_summary_line(format_args!(
+            "condition {} host={} responder={} completed={} replies={} losses={} controls={} silent={} ({})",
+            condition.kind,
+            host,
+            condition.control_responder,
+            condition.completed,
+            condition.replies,
+            condition.losses,
+            listed(&condition.control_sequences),
+            listed(&condition.loss_sequences),
+            condition.caveat,
+        ))?;
+    }
+    for host in &scheduling.incomplete {
+        let host = match &host.scope {
+            Some(scope) => format!("{}%{}", host.address, scope.zone),
+            None => host.address.to_string(),
+        };
+        write_summary_line(format_args!("host {host} scan=incomplete"))?;
+    }
+    Ok(())
+}
 /// The trace stage: one line per host, then its hops in hop order. A reused
 /// hop is a claim from another host's trace, so it is marked apart from the
 /// probes that observed a hop for this host.
@@ -528,7 +567,8 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         optional_duration(rtt.min),
         optional_duration(rtt.avg),
         optional_duration(rtt.max),
-    ))
+    ))?;
+    render_scheduling_text(&report.summary.scheduling)
 }
 
 fn endpoint_text(

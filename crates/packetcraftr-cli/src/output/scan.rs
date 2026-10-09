@@ -196,6 +196,106 @@ pub struct Endpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Scheduling {
+    pub mode: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adaptive: Option<Adaptive>,
+    pub observed_peak_window: usize,
+    pub retries_started: u64,
+    pub conditions: Vec<Condition>,
+    pub incomplete: Vec<HostId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_ceiling: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_ceiling: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Adaptive {
+    pub min_timeout: Duration,
+    pub max_timeout: Duration,
+    pub min_window: usize,
+    pub initial_window: usize,
+    pub host_timeout: Duration,
+    pub retry_backoff: Duration,
+    pub max_backoff: Duration,
+}
+
+impl From<library::Adaptive> for Adaptive {
+    fn from(value: library::Adaptive) -> Self {
+        Self {
+            min_timeout: value.min_timeout,
+            max_timeout: value.max_timeout,
+            min_window: value.min_window,
+            initial_window: value.initial_window,
+            host_timeout: value.host_timeout,
+            retry_backoff: value.retry_backoff,
+            max_backoff: value.max_backoff,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HostId {
+    pub address: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
+}
+
+impl From<library::HostIdentity> for HostId {
+    fn from(value: library::HostIdentity) -> Self {
+        Self {
+            address: value.address,
+            scope: value.scope.as_ref().map(Scope::from),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Condition {
+    pub kind: &'static str,
+    pub host: HostId,
+    pub control_responder: IpAddr,
+    pub completed: u64,
+    pub replies: u64,
+    pub losses: u64,
+    pub control_sequences: Vec<u64>,
+    pub loss_sequences: Vec<u64>,
+    pub caveat: &'static str,
+}
+
+impl From<library::Condition> for Condition {
+    fn from(value: library::Condition) -> Self {
+        Self {
+            kind: value.kind.as_str(),
+            host: value.host.into(),
+            control_responder: value.control_responder,
+            completed: value.completed,
+            replies: value.replies,
+            losses: value.losses,
+            control_sequences: value.control_sequences,
+            loss_sequences: value.loss_sequences,
+            caveat: value.caveat,
+        }
+    }
+}
+
+impl From<library::Scheduling> for Scheduling {
+    fn from(value: library::Scheduling) -> Self {
+        Self {
+            mode: value.mode.as_str(),
+            adaptive: value.adaptive.map(Adaptive::from),
+            observed_peak_window: value.observed_peak_window,
+            retries_started: value.retries_started,
+            conditions: value.conditions.into_iter().map(Into::into).collect(),
+            incomplete: value.incomplete.into_iter().map(Into::into).collect(),
+            operation_ceiling: value.operation_ceiling,
+            process_ceiling: value.process_ceiling,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub planned_duration: Duration,
     pub target: String,
@@ -207,6 +307,7 @@ pub struct Report {
     pub unattributed: Vec<Unattributed>,
     pub retained_evidence_bytes: usize,
     pub rtt: Rtt,
+    pub scheduling: Scheduling,
     /// Present only when the scan traced its hosts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub traceroute: Option<super::traceroute::hosts::Report>,
@@ -256,6 +357,7 @@ impl Report {
             retained_evidence_bytes,
             stats,
             rtt,
+            scheduling,
         } = aggregate;
         let endpoint_outputs = endpoints
             .into_iter()
@@ -285,6 +387,7 @@ impl Report {
                     .collect::<Result<_, _>>()?,
                 retained_evidence_bytes,
                 rtt: rtt.into(),
+                scheduling: scheduling.into(),
                 traceroute,
             },
             diagnostics,
@@ -384,6 +487,7 @@ pub enum Event {
         counts: ClassificationCounts,
         retained_evidence_bytes: usize,
         rtt: Rtt,
+        scheduling: Scheduling,
         #[serde(skip_serializing_if = "Option::is_none")]
         traceroute: Option<super::traceroute::hosts::Complete>,
     },
@@ -486,6 +590,7 @@ impl
                 counts: summary.counts.into(),
                 retained_evidence_bytes: summary.retained_evidence_bytes,
                 rtt: summary.rtt.into(),
+                scheduling: summary.scheduling.into(),
                 traceroute,
             },
             Vec::new(),

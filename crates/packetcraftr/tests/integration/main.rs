@@ -10,6 +10,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod adaptive_scheduling_contracts;
 mod capture_contracts;
 mod connect_clock_contracts;
 mod connect_evidence_contracts;

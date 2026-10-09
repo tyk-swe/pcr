@@ -237,3 +237,52 @@ fn scan_traceroute_member_matches_the_published_schema() {
         );
     }
 }
+
+#[test]
+fn an_adaptive_scan_with_a_traceroute_member_matches_the_published_schema() {
+    use packetcraftr_cli::output::traceroute::hosts::Report;
+
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/documents/output-scan-success.json"
+    ))
+    .expect("published scan example must parse");
+    document["result"]["scheduling"] = serde_json::json!({
+        "mode": "adaptive",
+        "adaptive": {
+            "min_timeout": {"secs": 0, "nanos": 10_000_000},
+            "max_timeout": {"secs": 0, "nanos": 100_000_000},
+            "min_window": 1,
+            "initial_window": 4,
+            "host_timeout": {"secs": 30, "nanos": 0},
+            "retry_backoff": {"secs": 0, "nanos": 50_000_000},
+            "max_backoff": {"secs": 1, "nanos": 0}
+        },
+        "observed_peak_window": 3,
+        "retries_started": 2,
+        "conditions": [],
+        "incomplete": []
+    });
+    let member = serde_json::to_value(
+        Report::new(trace_plan(), common::trace_hosts::aggregate()).expect("a representable trace"),
+    )
+    .expect("the trace serializes");
+    document["result"]["traceroute"] = member;
+    schema_validator()
+        .validate(&document)
+        .unwrap_or_else(|error| {
+            panic!("adaptive scan with a trace must match the schema: {error}")
+        });
+
+    assert_eq!(
+        document["result"]["scheduling"]["mode"],
+        Value::from("adaptive")
+    );
+    assert_eq!(
+        document["result"]["traceroute"]["hosts"][0]["selection"]["basis"],
+        Value::from("observed")
+    );
+    assert_eq!(
+        document["result"]["traceroute"]["hosts"][0]["selection"]["observation"]["reply"],
+        Value::from("tcp_syn_ack")
+    );
+}

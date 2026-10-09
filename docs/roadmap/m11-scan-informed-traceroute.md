@@ -137,9 +137,10 @@ incomplete.
   usage errors, as are `--list`, a port without a strategy, a port with ICMP,
   and invalid trace bounds, all before any probe. A trace error fails the
   command with its own classification.
-- Results ship in `packetcraftr.output/v10` ([schema][schema-v10],
-  [migration][migration], [compatibility][compatibility-v10]). v10 adds an
-  optional `traceroute` member to scan results, `traceroute_probe`,
+- Results ship in `packetcraftr.output/v11` ([schema][schema-v11],
+  [migration][migration], [compatibility][compatibility-v11]). v11 preserves
+  every v10 meaning (M7's scheduling members) and adds an optional
+  `traceroute` member to scan results, `traceroute_probe`,
   `traceroute_undecoded`, and `traceroute_host` stream records, and
   `complete.traceroute`. The [evidence model][evidence-trace] defines the
   fields.
@@ -345,9 +346,9 @@ keep M11 `In progress`:
 [cli-aggregate]: ../../crates/packetcraftr-cli/tests/integration/aggregate_schema_conformance.rs
 [cli-ndjson]: ../../crates/packetcraftr-cli/tests/integration/ndjson_conformance.rs
 [netio-transmit]: ../../crates/packetcraftr-netio/src/transmit.rs
-[schema-v10]: ../../schemas/packetcraftr.output.v10.schema.json
-[migration]: ../migration-unreleased.md#scan-traceroute-and-outputv10
-[compatibility-v10]: ../consumer-compatibility.md#output-family-v10
+[schema-v11]: ../../schemas/packetcraftr.output.v11.schema.json
+[migration]: ../migration-unreleased.md#scan-traceroute-and-outputv11
+[compatibility-v11]: ../consumer-compatibility.md#output-family-v11
 [evidence-trace]: ../scanner-evidence.md#traceroute-stage
 [method-tests]: ../../crates/packetcraftr/src/scan/method/tests.rs
 [nmap-discovery]: https://nmap.org/book/man-host-discovery.html

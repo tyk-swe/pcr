@@ -631,6 +631,7 @@ fn scan_aggregate(
         retained_evidence_bytes: 0,
         stats: Stats::default(),
         rtt: scan::Rtt::default(),
+        scheduling: Default::default(),
     }
 }
 

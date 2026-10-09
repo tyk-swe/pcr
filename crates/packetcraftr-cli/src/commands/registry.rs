@@ -40,6 +40,7 @@ macro_rules! commands {
     ) => {
         /// The parsed subcommand with its arguments.
         #[derive(Debug, Subcommand)]
+        #[allow(clippy::large_enum_variant)]
         pub(crate) enum CommandLine {
             $(
                 $(#[$attribute])*

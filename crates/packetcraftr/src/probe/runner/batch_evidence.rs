@@ -53,6 +53,13 @@ pub(crate) trait Classifier {
     fn passed(&self, _probe: &Self::Probe, _passed: Passed, _frame: Frame) -> Option<Self::Event> {
         None
     }
+    fn canceled_responses(
+        &self,
+        _probe: &Self::Probe,
+        _outcome: &Outcome<Self::Observation>,
+    ) -> usize {
+        0
+    }
     /// Attributes unsolicited capture evidence without changing a probe's outcome.
     fn unsolicited(
         &self,
@@ -116,6 +123,10 @@ impl<K, F, G: Copy> BatchEvidence<K, F, G> {
 
     pub(crate) fn reserve_responses(&mut self, count: usize, max_response_bytes: usize) {
         self.state.reserve_responses(count, max_response_bytes);
+    }
+
+    pub(crate) fn release_responses(&mut self, count: usize) {
+        self.state.release_responses(count);
     }
 
     pub(crate) fn into_classifier(self) -> K {
@@ -209,6 +220,7 @@ where
                     observation: candidate.observation,
                 }),
             };
+            state.release_responses(classifier.canceled_responses(probe, &outcome));
             let event = classifier.evidence(probe, sent, outcome);
             state.publish_diagnostics(|diagnostic| {
                 emit(classifier.diagnostic(diagnostic), deadline)

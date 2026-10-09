@@ -26,6 +26,7 @@ fn request(endpoints: &[ProbeEndpoint]) -> Request {
         udp_profiles: Default::default(),
         address_family: Family::Any,
         attempts: 1,
+        adaptive: None,
         timeout: std::time::Duration::from_millis(1),
         probes_per_second: None,
         limits: Limits::default(),

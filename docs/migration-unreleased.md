@@ -2,13 +2,13 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-All structured command envelopes now identify `packetcraftr.output/v10` and
-validate against `schemas/packetcraftr.output.v10.schema.json`. The
-`packetcraftr.output/v6`, `packetcraftr.output/v7`, `packetcraftr.output/v8`,
-and `packetcraftr.output/v9` schemas remain frozen and available for validating
-previously emitted output. The current producer and bundled examples have moved
-to v10; consumers pinned to an earlier family must explicitly support the new
-one.
+All structured command envelopes now identify `packetcraftr.output/v11` and
+validate against `schemas/packetcraftr.output.v11.schema.json`. The
+`packetcraftr.output/v6` through `packetcraftr.output/v10` schemas remain
+frozen and available for validating previously emitted output. The current
+producer and bundled examples have moved to v11; consumers pinned to an
+earlier family must explicitly support the new one. This cycle published two
+families: v10 added adaptive scheduling, and v11 adds the scan trace stage.
 Packet documents now use
 `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
 packet-document versions are rejected with a schema error.
@@ -16,6 +16,28 @@ packet-document versions are rejected with a schema error.
 Behavior and contract changes come first, grouped by topic. The
 [renamed and removed paths](#renamed-and-removed-paths) tables at the end map
 each 0.5.0-beta.3 name to its final name, by crate.
+
+## Adaptive scheduling and output/v10
+
+`scan --adaptive` opts raw and connect scans into per-host adaptive
+scheduling; the fixed scheduler remains the default and the tuning flags
+(`--min-timeout-ms`, `--max-timeout-ms`, `--min-window`, `--initial-window`,
+`--host-timeout-ms`, `--retry-backoff-ms`, `--max-backoff-ms`) are rejected
+without it. Host `scan` records gain `incomplete`, set when a host's own
+deadline prevented or truncated intended work; never-sent attempts publish no
+probe evidence.
+
+Machine reports gain a required `scheduling` object: `mode`, the effective
+`adaptive` configuration, `observed_peak_window` (the largest pending count
+actually held, a bound rather than achieved throughput), `retries_started`,
+typed `conditions` with their cited sequences and caveats, `incomplete` host
+identities, and `operation_ceiling`/`process_ceiling` on connect scans. In
+the library, `scan::Request` gains `adaptive: Option<scan::Adaptive>`
+(required field — update every literal), `scan::{Report, Aggregate}` and
+`scan::connect::Report` carry `scheduling`, `scan::discovery::Scan` gains `Incomplete`, and
+`netio::tcp` gains `ConnectBudget` whose leases outlive cancellation cleanup
+and live inside successful `Connection`s; the process-wide pending ceiling is
+unchanged pending measurement.
 
 ## Forwarding semantics and output/v6
 
@@ -1040,7 +1062,7 @@ In `packetcraftr-cli`, `output::scan::Report::publish` and
 position (empty when no lookup ran), and the published `Plan` gains
 `discovery`.
 
-## Scan traceroute and output/v10
+## Scan traceroute and output/v11
 
 `scan --traceroute` traces every scanned host after the scan and before any
 reverse-DNS lookup. Without it nothing changes: no trace probe is sent and the
@@ -1063,7 +1085,7 @@ a port with `icmp`, and invalid bounds. A trace failure fails the command with
 the trace's own classification. The standalone `traceroute` command is
 unchanged apart from the output version.
 
-Output/v10 changes, all additive within the new family:
+Output/v11 changes, all additive within the new family:
 
 - Raw scan results gain an optional `traceroute` member: the `plan`, one record
   per scanned host in host order, `undecoded` frames with their `destination`,

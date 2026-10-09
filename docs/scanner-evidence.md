@@ -334,7 +334,7 @@ Host records use their own fields instead of re-encoding the attempt
 | Field | Role |
 | --- | --- |
 | `discovery` | Host observation: `responded` when at least one reason exists, `no_response` when discovery ran and none does, `not_requested` when the request omitted discovery, and `skipped` when it skipped discovery explicitly. |
-| `scan` | Metadata: `scanned`, `skipped` (discovery found no response and the request left such hosts out), or `not_requested` (discovery-only). |
+| `scan` | Metadata: `scanned`, `skipped` (discovery found no response and the request left such hosts out), `incomplete` (the host's own deadline prevented or truncated intended adaptive work; never-sent attempts publish no outcome), or `not_requested` (discovery-only). |
 | `reasons[]` | Host observation: why the host counts as responded. |
 | `reasons[].kind` | The reply behind the reason: a discovery probe's typed reply (`icmp_echo_reply`, `tcp_syn_ack`, `tcp_reset`, `udp_payload`, `icmp_port_unreachable`, and the other attempt replies), `tcp_connected` or `tcp_refused` from an ordinary socket, or `neighbor_reply` or `neighbor_cache`. |
 | `reasons[].evidence` | `wire` for a captured reply, `socket` for an operating-system connect result, and `cache` for a neighbor cache entry. |
@@ -371,6 +371,33 @@ The record keeps these rules:
 - Reverse names and link addresses are observations. They are never
   authenticated identity, and no vendor label is published until a vendor
   data set has a provenance record under the [data policy][data-policy].
+
+
+## Scheduling summary
+
+Every raw scan result, NDJSON `complete` record, and connect report carries a
+required `scheduling` object ([library][adaptive], [output][scheduling-output]).
+`mode` is `fixed` or `adaptive`; `fixed` is the default order and `adaptive` is
+the opt-in scheduler that interleaves hosts, estimates a bounded RTO per host,
+spaces retries with backoff, and grows or halves its admission window
+inside `min_window`..=`max_in_flight`.
+
+| Field | Role |
+| --- | --- |
+| `mode` | `fixed` or `adaptive`. |
+| `adaptive` | Metadata: the effective adaptive configuration (`min_timeout`, `max_timeout`, `min_window`, `initial_window`, `host_timeout`, `retry_backoff`, `max_backoff`); absent in fixed mode. |
+| `observed_peak_window` | Metadata: the largest count of probes pending at once the operation actually held, not a throughput rate. |
+| `retries_started` | Metadata: additional probe starts after the first, in either mode. Omitted and never-sent entries count neither here nor as completions. |
+| `conditions[]` | Inferred observations; each is typed and names its caveat. `suspected_response_rate_limit` publishes `host`, `control_responder`, `completed`/`replies`/`losses` counts, and cited `control_sequences`/`loss_sequences`; filtering or ordinary loss remain alternative explanations. It never decides a port's classification. |
+| `incomplete[]` | Metadata: scoped host identities (`address`, optional `scope`) whose deadline prevented or truncated intended work, or whose admitted connect worker never called its provider. |
+| `operation_ceiling` | Metadata: the operation's own connect ceiling (`max_in_flight`), connect scans only. |
+| `process_ceiling` | Metadata: the process-wide connect worker ceiling, connect scans only. Neither ceiling claims achieved concurrency. |
+
+An adaptive per-host deadline bounds preparation, pacing, and transmission:
+preparation and a delay inside an output callback consume the host's
+allowance, and an entry whose deadline is spent before its frame transmits is
+omitted — it sends nothing and publishes no probe evidence; the host reports
+`scan: "incomplete"`.
 
 Every discovery probe carries `stage: "discovery"` and every scan probe
 `stage: "scan"` in one sequence space. Endpoints and their `counts` hold only
@@ -421,6 +448,7 @@ The record keeps these rules:
 [connect-report]: ../crates/packetcraftr/src/scan/connect/report.rs
 [correlation]: ../crates/packetcraftr/src/correlation.rs
 [data-policy]: scanner-data-policy.md
+[adaptive]: ../crates/packetcraftr/src/scan/adaptive.rs
 [discovery-host]: ../crates/packetcraftr/src/scan/discovery/host.rs
 [host-output]: ../crates/packetcraftr-cli/src/output/scan/host.rs
 [m1]: roadmap/m01-claims-evidence.md
@@ -433,6 +461,7 @@ The record keeps these rules:
 [scan-evidence]: ../crates/packetcraftr/src/scan/evidence.rs
 [scan-output]: ../crates/packetcraftr-cli/src/output/scan.rs
 [scan-report]: ../crates/packetcraftr/src/scan/report.rs
+[scheduling-output]: ../crates/packetcraftr-cli/src/output/scan.rs
 [trace-hosts]: ../crates/packetcraftr/src/traceroute/hosts.rs
 [trace-output]: ../crates/packetcraftr-cli/src/output/traceroute/hosts.rs
 [udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs

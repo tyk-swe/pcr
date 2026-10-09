@@ -249,12 +249,13 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v10`](schemas/packetcraftr.output.v10.schema.json)
+- Structured command output: [`packetcraftr.output/v11`](schemas/packetcraftr.output.v11.schema.json)
   (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json),
   [`v7`](schemas/packetcraftr.output.v7.schema.json),
-  [`v8`](schemas/packetcraftr.output.v8.schema.json), and
-  [`v9`](schemas/packetcraftr.output.v9.schema.json) families are retained for
-  previously published evidence)
+  [`v8`](schemas/packetcraftr.output.v8.schema.json),
+  [`v9`](schemas/packetcraftr.output.v9.schema.json), and
+  [`v10`](schemas/packetcraftr.output.v10.schema.json) families are retained
+  for previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)
 - Bundled scanner data: the [port catalog](crates/packetcraftr/data/port-catalog.json)
@@ -517,7 +518,10 @@ packetcraftr capture --interface 1 --write trace.pcapng --rotate-bytes 1048576 -
   sockets and works in the portable profile, while raw scans use
   `--max-in-flight` for a rolling response window. A `--udp-profiles` document
   selects per-port UDP requests and response checks; a matching profile is not
-  authenticated service identity. `--discovery before|only|skip` adds a host
+  authenticated service identity. `--adaptive` opts the scan into per-host
+  deadline, RTO-timeout, retry-backoff, and AIMD-window scheduling under the
+  same bounds; the fixed order stays the default.
+  `--discovery before|only|skip` adds a host
   discovery stage (ICMP echo, TCP, UDP, and ARP/NDP probes) under the same
   authorization and budgets, and publishes one host record per target with the
   evidence behind each response; silent hosts stay uncertain, not absent. `--traceroute` then traces

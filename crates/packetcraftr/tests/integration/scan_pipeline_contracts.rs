@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use crate::common;
 
-use common::clock::VirtualClock;
+use common::clock::{RealClock, VirtualClock};
 use common::responder::{Io, Routes, State};
 use packetcraftr::{
     Client,
@@ -56,6 +56,7 @@ fn request() -> Request {
             .to_vec(),
         discovery: Default::default(),
         attempts: 1,
+        adaptive: None,
         timeout: Duration::from_millis(20),
         probes_per_second: None,
         udp_payload: Default::default(),
@@ -733,13 +734,11 @@ fn settled_packets_stay_within_the_preparation_budget() {
     request.max_in_flight = 512;
     request.udp_payload = bytes::Bytes::from(vec![0; 1400]);
     request.limits.max_prepared_bytes = 400_000;
+    request.limits.max_duration = Duration::from_secs(60);
     let budget = request.limits.max_prepared_bytes;
     let count = request.endpoints.len();
-    let clock = VirtualClock::default();
-    let state = Arc::new(Mutex::new(State {
-        idle_clock: Some(clock.clone()),
-        ..State::default()
-    }));
+    let clock = RealClock::default();
+    let state = Arc::new(Mutex::new(State::default()));
     let client = Client::new(
         builtin::registry(),
         Policy {
@@ -828,4 +827,54 @@ fn pre_send_frames_delivered_after_settlement_are_not_late_evidence() {
             (Some(2), scan::Attribution::Late),
         ]
     );
+}
+
+#[test]
+fn adaptive_replies_release_their_unstarted_attempt_reservations() {
+    use packetcraftr::probe::ProbeEndpoint;
+
+    let mut request = request();
+    request.endpoints = [80, 81].map(|port| ProbeEndpoint::Tcp { port }).to_vec();
+    request.attempts = 3;
+    request.max_in_flight = 2;
+    request.timeout = Duration::from_millis(20);
+    request.adaptive = Some(scan::Adaptive {
+        min_timeout: Duration::from_millis(10),
+        max_timeout: Duration::from_millis(20),
+        min_window: 1,
+        initial_window: 2,
+        host_timeout: Duration::from_secs(2),
+        retry_backoff: Duration::from_millis(100),
+        max_backoff: Duration::from_secs(1),
+    });
+    request.limits.max_duration = Duration::from_secs(60);
+    request.collection.capture.snap_length = 60;
+    request.limits.max_evidence_frames = 6;
+    request.limits.max_evidence_bytes = 360;
+    request.limits.max_undecoded = 6;
+    let state = Arc::new(Mutex::new(State {
+        repeated_syn_acks: true,
+        ..State::default()
+    }));
+    let aggregate = execute(&request, Arc::clone(&state)).unwrap();
+
+    assert_eq!(aggregate.stats.packets_attempted, 2);
+    for endpoint in &aggregate.endpoints {
+        assert_eq!(endpoint.classification, scan::Classification::Open);
+    }
+    assert!(
+        !aggregate.unattributed.is_empty(),
+        "released attempt slots retain at least the first duplicate reply"
+    );
+    assert!(aggregate.unattributed.len() <= 6);
+    assert!(aggregate.retained_evidence_bytes <= 360);
+    assert!(
+        !aggregate
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "scan.evidence_limit"),
+        "{:?}",
+        aggregate.diagnostics
+    );
+    assert_eq!(state.lock().unwrap().sends, 2);
 }

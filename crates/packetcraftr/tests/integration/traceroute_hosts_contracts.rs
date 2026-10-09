@@ -197,6 +197,7 @@ fn scan_observations_choose_each_hosts_probe() {
         retained_evidence_bytes: 0,
         stats: Stats::default(),
         rtt: scan::Rtt::default(),
+        scheduling: Default::default(),
     };
     let mut plan = request(&[11, 12]);
     plan.observed = hosts::observed(&scan);
@@ -388,6 +389,7 @@ fn a_real_scan_selects_the_probe_its_host_answered() {
         address_family: Family::Any,
         endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
         discovery: Default::default(),
+        adaptive: None,
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
         attempts: 1,
@@ -435,4 +437,192 @@ fn a_real_scan_selects_the_probe_its_host_answered() {
         trace.host.termination,
         Some(Termination::DestinationReached)
     );
+}
+
+fn all_replies() -> [scan::Reply; 9] {
+    [
+        scan::Reply::TcpSynAck,
+        scan::Reply::TcpReset,
+        scan::Reply::TcpOther,
+        scan::Reply::UdpPayload,
+        scan::Reply::IcmpEchoReply,
+        scan::Reply::IcmpPortUnreachable,
+        scan::Reply::IcmpAdministrativelyProhibited,
+        scan::Reply::IcmpDestinationUnreachable,
+        scan::Reply::IcmpTimeExceeded,
+    ]
+}
+
+#[test]
+fn observations_with_a_reply_that_cannot_select_a_trace_are_rejected() {
+    let state = network(&[(11, &[1], Arrival::Reply)]);
+    let cases = all_replies()
+        .into_iter()
+        .map(|reply| (Transport::Tcp, Some(80), reply))
+        .chain(
+            all_replies()
+                .into_iter()
+                .map(|reply| (Transport::Icmp, None, reply)),
+        );
+    for (transport, port, reply) in cases {
+        let observed = Observed {
+            address: IpAddr::V4(host(11)),
+            transport,
+            destination_port: port,
+            stage: scan::Stage::Scan,
+            sequence: 1,
+            reply,
+            observed_at: None,
+        };
+        let valid = matches!(
+            (transport, port, reply),
+            (
+                Transport::Tcp,
+                Some(80),
+                scan::Reply::TcpSynAck | scan::Reply::TcpReset
+            ) | (Transport::Icmp, None, scan::Reply::IcmpEchoReply)
+        );
+        // With and without a fallback the observation is validated the same.
+        for strategy in [
+            Some(Strategy {
+                transport: Transport::Tcp,
+                destination_port: Some(80),
+            }),
+            None,
+        ] {
+            let mut plan = request(&[11]);
+            plan.strategy = strategy;
+            plan.observed = vec![observed.clone()];
+            assert_eq!(
+                plan.validate().is_ok(),
+                valid,
+                "{transport} {port:?} {reply:?}"
+            );
+            if !valid {
+                let error = trace(&state, plan).expect_err("the plan is refused");
+                assert!(
+                    matches!(error, traceroute::Error::InvalidObservation { .. }),
+                    "{transport} {port:?} {reply:?}: {error}"
+                );
+                let state = state.lock().unwrap();
+                assert_eq!((state.armed, state.sends), (0, 0), "{transport} {reply:?}");
+                drop(state);
+            }
+        }
+    }
+}
+
+#[test]
+fn valid_observations_execute_with_the_reply_they_rest_on() {
+    for (transport, port, reply) in [
+        (Transport::Tcp, Some(80), scan::Reply::TcpSynAck),
+        (Transport::Tcp, Some(80), scan::Reply::TcpReset),
+        (Transport::Icmp, None, scan::Reply::IcmpEchoReply),
+    ] {
+        let state = network(&[(11, &[1, 2], Arrival::Reply)]);
+        let mut plan = request(&[11]);
+        plan.strategy = None;
+        plan.observed = vec![Observed {
+            address: IpAddr::V4(host(11)),
+            transport,
+            destination_port: port,
+            stage: scan::Stage::Scan,
+            sequence: 1,
+            reply,
+            observed_at: None,
+        }];
+
+        let aggregate = trace(&state, plan).expect("the trace completes");
+
+        let trace = &aggregate.hosts[0];
+        let selection = trace.host.selection.as_ref().expect("the host is traced");
+        assert_eq!(selection.strategy.transport, transport);
+        assert_eq!(selection.strategy.destination_port, port);
+        let Basis::Observed(observed) = &selection.basis else {
+            panic!("the selection rests on the observation");
+        };
+        assert_eq!(observed.reply, reply);
+        assert_eq!(
+            trace.host.termination,
+            Some(Termination::DestinationReached)
+        );
+        assert_true_hops(&state, &aggregate);
+    }
+}
+
+#[test]
+fn an_adaptive_scan_still_selects_the_probe_its_host_answered() {
+    let state = network(&[(11, &[1, 2], Arrival::Reply)]);
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
+    let scan_request = scan::Request {
+        target_sources: Vec::new(),
+        max_in_flight: 4,
+        targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
+        address_family: Family::Any,
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        discovery: Default::default(),
+        adaptive: Some(scan::Adaptive {
+            min_timeout: Duration::from_millis(1),
+            max_timeout: Duration::from_millis(50),
+            min_window: 1,
+            initial_window: 2,
+            host_timeout: Duration::from_secs(5),
+            retry_backoff: Duration::from_millis(1),
+            max_backoff: Duration::from_millis(50),
+        }),
+        udp_payload: Default::default(),
+        udp_profiles: Default::default(),
+        attempts: 1,
+        timeout: Duration::from_millis(50),
+        probes_per_second: None,
+        limits: scan::Limits {
+            max_duration: Duration::from_secs(5),
+            ..Default::default()
+        },
+        route: packetcraftr::route::Options {
+            link_mode: Mode::Layer3,
+            ..Default::default()
+        },
+        collection,
+    };
+    let collector = scan::Collector::default();
+    let report = client(&state, Policy::default())
+        .scan(scan_request, collector.clone())
+        .expect("the adaptive scan completes");
+    let scanned = collector.finish(report).expect("the scan aggregates");
+
+    assert_eq!(
+        scanned.scheduling.mode,
+        scan::SchedulingMode::Adaptive,
+        "the scan ran under adaptive scheduling"
+    );
+    let probe = &scanned.endpoints[0].probes[0];
+    assert_eq!(probe.reply, Some(scan::Reply::TcpSynAck));
+    let mut plan = request(&[11]);
+    plan.strategy = None;
+    plan.observed = hosts::observed(&scanned);
+
+    let aggregate = trace(&state, plan).expect("the trace completes");
+
+    let trace = &aggregate.hosts[0];
+    let selection = trace.host.selection.as_ref().expect("the host is traced");
+    assert_eq!(
+        selection.strategy,
+        Strategy {
+            transport: Transport::Tcp,
+            destination_port: Some(80)
+        }
+    );
+    let Basis::Observed(observed) = &selection.basis else {
+        panic!("the selection rests on the scan");
+    };
+    assert_eq!(observed.sequence, probe.sequence);
+    assert_eq!(observed.stage, probe.stage);
+    assert_eq!(observed.reply, scan::Reply::TcpSynAck);
+    assert_eq!(
+        trace.host.termination,
+        Some(Termination::DestinationReached)
+    );
+    assert_true_hops(&state, &aggregate);
 }

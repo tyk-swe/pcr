@@ -103,3 +103,101 @@ fn ordinary_tcp_reject_no_capture() {
         "omit packet interface/source/link overrides for ordinary TCP"
     );
 }
+
+#[test]
+fn an_adaptive_connect_scan_reports_adaptive_scheduling() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let open = listener.local_addr().unwrap().port();
+    listener.set_nonblocking(true).unwrap();
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        &open.to_string(),
+        "--adaptive",
+        "--timeout-ms",
+        "5000",
+    ]));
+    let scheduling = &report["result"]["scheduling"];
+    assert_eq!(scheduling["mode"], "adaptive", "{report}");
+    assert!(
+        scheduling["adaptive"]["initial_window"].is_number(),
+        "{report}"
+    );
+    assert_eq!(scheduling["operation_ceiling"], 1);
+    assert_eq!(scheduling["process_ceiling"], 16);
+    assert!(scheduling["incomplete"].as_array().unwrap().is_empty());
+    assert_eq!(report["result"]["endpoints"][0]["classification"], "open");
+    let until = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok((socket, _)) = listener.accept() {
+            drop(socket);
+            break;
+        }
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn adaptive_tuning_options_require_the_adaptive_flag() {
+    for flag in [
+        "--min-timeout-ms",
+        "--max-timeout-ms",
+        "--min-window",
+        "--initial-window",
+        "--host-timeout-ms",
+        "--retry-backoff-ms",
+        "--max-backoff-ms",
+    ] {
+        let output = run(&[
+            "--output",
+            "json",
+            "scan",
+            "192.0.2.1",
+            "--list",
+            flag,
+            "10",
+        ]);
+        assert_eq!(output.status.code(), Some(2), "{flag}: {output:?}");
+        let error = parse_json(&output)["error"].clone();
+        assert_eq!(error["code"], "cli.error", "{flag}: {error}");
+        assert!(
+            error["message"].as_str().unwrap().contains("required"),
+            "{flag}: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_fixed_scan_reports_fixed_scheduling() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let open = listener.local_addr().unwrap().port();
+    listener.set_nonblocking(true).unwrap();
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "scan",
+        "127.0.0.1",
+        "--connect",
+        "--ports",
+        &open.to_string(),
+        "--timeout-ms",
+        "5000",
+    ]));
+    let scheduling = &report["result"]["scheduling"];
+    assert_eq!(scheduling["mode"], "fixed", "{report}");
+    assert!(scheduling.get("adaptive").is_none(), "{report}");
+    let until = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok((socket, _)) = listener.accept() {
+            drop(socket);
+            break;
+        }
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}

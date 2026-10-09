@@ -3087,7 +3087,8 @@
                 "planned_duration",
                 "rtt",
                 "retained_evidence_bytes",
-                "plan"
+                "plan",
+                "scheduling"
               ],
               "properties": {
                 "target": {
@@ -3115,22 +3116,8 @@
                 "plan": {
                   "$ref": "#/$defs/scanPlan"
                 },
-                "traceroute": {
-                  "type": "object",
-                  "required": [
-                    "plan",
-                    "retained_evidence_bytes"
-                  ],
-                  "properties": {
-                    "plan": {
-                      "$ref": "#/$defs/scanTraceroutePlan"
-                    },
-                    "retained_evidence_bytes": {
-                      "type": "integer",
-                      "minimum": 0
-                    }
-                  },
-                  "additionalProperties": false
+                "scheduling": {
+                  "$ref": "#/$defs/scanScheduling"
                 }
               },
               "additionalProperties": false
@@ -3275,65 +3262,6 @@
                 {
                   "properties": {
                     "probes": {
-                      "items": {
-                        "$ref": "#/$defs/uint64"
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          },
-          "required": [
-            "event",
-            "result"
-          ]
-        },
-        {
-          "properties": {
-            "event": {
-              "const": "traceroute_probe"
-            },
-            "result": {
-              "$ref": "#/$defs/traceProbe"
-            }
-          },
-          "required": [
-            "event",
-            "result"
-          ]
-        },
-        {
-          "properties": {
-            "event": {
-              "const": "traceroute_undecoded"
-            },
-            "result": {
-              "$ref": "#/$defs/scanTraceUndecoded"
-            }
-          },
-          "required": [
-            "event",
-            "result"
-          ]
-        },
-        {
-          "properties": {
-            "event": {
-              "const": "traceroute_host"
-            },
-            "result": {
-              "allOf": [
-                {
-                  "$ref": "#/$defs/scanTraceHostRecord"
-                },
-                {
-                  "required": [
-                    "probes"
-                  ],
-                  "properties": {
-                    "probes": {
-                      "type": "array",
                       "items": {
                         "$ref": "#/$defs/uint64"
                       }
@@ -4562,7 +4490,8 @@
         "retained_evidence_bytes",
         "plan",
         "unattributed",
-        "hosts"
+        "hosts",
+        "scheduling"
       ],
       "properties": {
         "target": {
@@ -4625,8 +4554,8 @@
             ]
           }
         },
-        "traceroute": {
-          "$ref": "#/$defs/scanTraceroute"
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
         }
       },
       "additionalProperties": true
@@ -8599,7 +8528,8 @@
         "resolved_addresses",
         "planned_duration",
         "socket_stats",
-        "plan"
+        "plan",
+        "scheduling"
       ],
       "properties": {
         "method": {
@@ -8626,6 +8556,9 @@
         },
         "plan": {
           "$ref": "#/$defs/scanPlan"
+        },
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
         }
       },
       "additionalProperties": true
@@ -8640,7 +8573,8 @@
         "socket_stats",
         "endpoints",
         "plan",
-        "hosts"
+        "hosts",
+        "scheduling"
       ],
       "properties": {
         "method": {
@@ -8736,6 +8670,9 @@
               }
             ]
           }
+        },
+        "scheduling": {
+          "$ref": "#/$defs/scanScheduling"
         }
       },
       "additionalProperties": true
@@ -13413,7 +13350,8 @@
           "enum": [
             "scanned",
             "skipped",
-            "not_requested"
+            "not_requested",
+            "incomplete"
           ]
         },
         "reasons": {
@@ -13435,207 +13373,50 @@
       },
       "additionalProperties": true
     },
-    "scanTraceroutePlan": {
+    "scanAdaptive": {
       "type": "object",
-      "description": "The bounds the trace stage ran under.",
+      "description": "The effective adaptive scheduling configuration, published verbatim.",
       "required": [
-        "first_hop",
-        "max_hops",
-        "attempts",
-        "max_probes"
+        "min_timeout",
+        "max_timeout",
+        "min_window",
+        "initial_window",
+        "host_timeout",
+        "retry_backoff",
+        "max_backoff"
       ],
       "properties": {
-        "first_hop": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 255
+        "min_timeout": {
+          "$ref": "#/$defs/duration"
         },
-        "max_hops": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 255
+        "max_timeout": {
+          "$ref": "#/$defs/duration"
         },
-        "attempts": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 4294967295
-        },
-        "max_probes": {
+        "min_window": {
           "type": "integer",
           "minimum": 1
         },
-        "strategy": {
-          "type": "object",
-          "description": "The probe for hosts no scan observation covered; absent when those hosts were not traced.",
-          "required": [
-            "strategy"
-          ],
-          "properties": {
-            "strategy": {
-              "type": "string",
-              "enum": [
-                "udp",
-                "icmp",
-                "tcp"
-              ]
-            },
-            "destination_port": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535
-            }
-          },
-          "additionalProperties": false
-        },
-        "reuse": {
-          "type": "object",
-          "description": "Present when path reuse was enabled for this operation.",
-          "required": [
-            "max_age"
-          ],
-          "properties": {
-            "max_age": {
-              "$ref": "#/$defs/duration"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": true
-    },
-    "scanTraceSelection": {
-      "type": "object",
-      "description": "The probe a host was traced with and what it rests on.",
-      "required": [
-        "strategy",
-        "basis"
-      ],
-      "properties": {
-        "strategy": {
-          "type": "string",
-          "enum": [
-            "udp",
-            "icmp",
-            "tcp"
-          ]
-        },
-        "destination_port": {
+        "initial_window": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
+          "minimum": 1
         },
-        "basis": {
-          "type": "string",
-          "enum": [
-            "observed",
-            "requested"
-          ]
+        "host_timeout": {
+          "$ref": "#/$defs/duration"
         },
-        "observation": {
-          "type": "object",
-          "description": "The scan probe the selection rests on.",
-          "required": [
-            "stage",
-            "sequence",
-            "reply"
-          ],
-          "properties": {
-            "stage": {
-              "$ref": "#/$defs/scanStage"
-            },
-            "sequence": {
-              "$ref": "#/$defs/uint64"
-            },
-            "reply": {
-              "type": "string",
-              "enum": [
-                "tcp_syn_ack",
-                "tcp_reset",
-                "icmp_echo_reply"
-              ]
-            },
-            "observed_at": {
-              "$ref": "#/$defs/timestamp"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "basis": {
-                "const": "observed"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "observation"
-            ]
-          },
-          "else": {
-            "not": {
-              "required": [
-                "observation"
-              ]
-            }
-          }
-        }
-      ],
-      "additionalProperties": true
-    },
-    "scanTraceReusedHop": {
-      "type": "object",
-      "description": "A hop another host's trace observed in this operation, claimed for this host. It is a sourced claim, not an observation for this host.",
-      "required": [
-        "hop_limit",
-        "source",
-        "probes",
-        "responders",
-        "age"
-      ],
-      "properties": {
-        "hop_limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 255
+        "retry_backoff": {
+          "$ref": "#/$defs/duration"
         },
-        "source": {
-          "$ref": "#/$defs/ipAddress"
-        },
-        "probes": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/uint64"
-          },
-          "description": "The source trace's probe sequences that observed the hop."
-        },
-        "responders": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/ipAddress"
-          }
-        },
-        "observed_at": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "age": {
+        "max_backoff": {
           "$ref": "#/$defs/duration"
         }
       },
       "additionalProperties": true
     },
-    "scanTraceHostRecord": {
+    "scanHostId": {
       "type": "object",
-      "description": "One scanned host's trace. not_traced hosts carry a reason and no probes; reused hops are separate from the freshly probed ones.",
+      "description": "A scoped host the scheduler names in conditions or as incomplete.",
       "required": [
-        "address",
-        "status",
-        "reused_hops"
+        "address"
       ],
       "properties": {
         "address": {
@@ -13643,192 +13424,109 @@
         },
         "scope": {
           "$ref": "#/$defs/scope"
-        },
-        "status": {
-          "type": "string",
-          "enum": [
-            "complete",
-            "incomplete",
-            "not_traced"
-          ]
-        },
-        "reason": {
-          "type": "string",
-          "enum": [
-            "no_responsive_probe",
-            "scoped_target"
-          ]
-        },
-        "completion": {
-          "type": "string",
-          "enum": [
-            "destination_reached",
-            "unreachable",
-            "maximum_hops",
-            "timeout"
-          ]
-        },
-        "selection": {
-          "$ref": "#/$defs/scanTraceSelection"
-        },
-        "reused_hops": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/scanTraceReusedHop"
-          }
         }
       },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "not_traced"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "reason"
-            ],
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "completion"
-                  ]
-                },
-                {
-                  "required": [
-                    "selection"
-                  ]
-                }
-              ]
-            }
-          },
-          "else": {
-            "required": [
-              "completion",
-              "selection"
-            ],
-            "not": {
-              "required": [
-                "reason"
-              ]
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "complete"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "completion": {
-                "enum": [
-                  "destination_reached",
-                  "unreachable"
-                ]
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "incomplete"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "completion": {
-                "enum": [
-                  "maximum_hops",
-                  "timeout"
-                ]
-              }
-            }
-          }
-        }
-      ],
       "additionalProperties": true
     },
-    "scanTraceHost": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/scanTraceHostRecord"
-        },
-        {
-          "required": [
-            "hops"
-          ],
-          "properties": {
-            "hops": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/traceHop"
-              }
-            }
-          }
-        }
-      ]
-    },
-    "scanTraceUndecoded": {
+    "scanCondition": {
       "type": "object",
+      "description": "A scheduling condition inferred from observations; loss and filtering remain alternative explanations.",
       "required": [
-        "destination",
-        "hop_limit",
-        "frame"
+        "kind",
+        "host",
+        "control_responder",
+        "completed",
+        "replies",
+        "losses",
+        "control_sequences",
+        "loss_sequences",
+        "caveat"
       ],
       "properties": {
-        "destination": {
+        "kind": {
+          "const": "suspected_response_rate_limit"
+        },
+        "host": {
+          "$ref": "#/$defs/scanHostId"
+        },
+        "control_responder": {
           "$ref": "#/$defs/ipAddress"
         },
-        "hop_limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 255
+        "completed": {
+          "$ref": "#/$defs/uint64"
         },
-        "frame": {
-          "$ref": "#/$defs/frame"
+        "replies": {
+          "$ref": "#/$defs/uint64"
+        },
+        "losses": {
+          "$ref": "#/$defs/uint64"
+        },
+        "control_sequences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          },
+          "maxItems": 8
+        },
+        "loss_sequences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          },
+          "maxItems": 8
+        },
+        "caveat": {
+          "type": "string"
         }
       },
       "additionalProperties": true
     },
-    "scanTraceroute": {
+    "scanScheduling": {
       "type": "object",
-      "description": "The trace stage requested by --traceroute: one record per scanned host, in host order.",
+      "description": "How one operation scheduled its probes. mode is fixed or adaptive; observed_peak_window is the largest count of probes pending at once the operation actually held, not a throughput rate; ceilings are resource bounds, not achieved concurrency.",
       "required": [
-        "plan",
-        "hosts",
-        "undecoded",
-        "retained_evidence_bytes"
+        "mode",
+        "observed_peak_window",
+        "retries_started",
+        "conditions",
+        "incomplete"
       ],
       "properties": {
-        "plan": {
-          "$ref": "#/$defs/scanTraceroutePlan"
+        "mode": {
+          "enum": [
+            "fixed",
+            "adaptive"
+          ]
         },
-        "hosts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/scanTraceHost"
-          }
+        "adaptive": {
+          "$ref": "#/$defs/scanAdaptive"
         },
-        "undecoded": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/scanTraceUndecoded"
-          }
-        },
-        "retained_evidence_bytes": {
+        "observed_peak_window": {
           "type": "integer",
           "minimum": 0
+        },
+        "retries_started": {
+          "$ref": "#/$defs/uint64"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanCondition"
+          }
+        },
+        "incomplete": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanHostId"
+          }
+        },
+        "operation_ceiling": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "process_ceiling": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "additionalProperties": true

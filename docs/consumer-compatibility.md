@@ -8,7 +8,7 @@ require a new family even if an old schema would accept the JSON.
 
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. Resolve a schema's `$id` (for example that of the
-[output schema](../schemas/packetcraftr.output.v10.schema.json)) to the bundled
+[output schema](../schemas/packetcraftr.output.v11.schema.json)) to the bundled
 local file, not a moving branch or network fetch. The release packager copies
 every file under `schemas/`, and the verifier requires the output schema.
 Never modify an already published archive in place.
@@ -36,10 +36,10 @@ lists and omission counts. `fail` and `inconclusive` both produce CLI exit 1
 after a successfully published forwarding report. An error envelope is instead
 an execution failure. Neither process exit nor a partial list alone is a verdict.
 
-## Output family v10
+## Output family v11
 
-`packetcraftr.output/v10` is the current production family. It preserves every
-v9 meaning and adds the scan trace stage requested with `scan --traceroute`:
+`packetcraftr.output/v11` is the current production family. It preserves every
+v10 meaning and adds the scan trace stage requested with `scan --traceroute`:
 
 - an optional `traceroute` member on raw scan results, absent unless the stage
   ran, with its `plan` (`first_hop`, `max_hops`, `attempts`, `max_probes`, the
@@ -70,9 +70,32 @@ v9 meaning and adds the scan trace stage requested with `scan --traceroute`:
 - an optional `traceroute` object (`plan` and `retained_evidence_bytes`) in the
   `complete` record.
 
-The standalone `traceroute` command keeps its v9 result and stream shapes
-under the v10 identifier. [Scanner evidence](scanner-evidence.md#traceroute-stage)
+The standalone `traceroute` command keeps its v10 result and stream shapes
+under the v11 identifier. [Scanner evidence](scanner-evidence.md#traceroute-stage)
 defines the vocabulary.
+
+## Output family v10
+
+`packetcraftr.output/v10` is frozen. It preserves every
+v9 meaning and adds opt-in adaptive scheduling:
+
+- a required `scheduling` object on raw scan results, NDJSON scan `complete`
+  records, and connect reports: `mode` (`fixed` or `adaptive`), the effective
+  `adaptive` configuration when enabled, `observed_peak_window`,
+  `retries_started`, typed `conditions`, `incomplete` host identities, and
+  `operation_ceiling`/`process_ceiling` on connect scans.
+  `observed_peak_window` is the largest pending count the operation actually
+  held, never an achieved-throughput measure;
+- a new host `scan` value `incomplete`, set when a host's own deadline
+  prevented or truncated intended adaptive work, or an admitted connect worker
+  never called its provider. Hosts report it only under
+  adaptive scheduling; consumers that exhaustively switch on `scan` must
+  handle it; and
+- `suspected_response_rate_limit` conditions with `host`,
+  `control_responder`, `completed`/`replies`/`losses` counts, and cited
+  `control_sequences`/`loss_sequences`. Conditions are inferred: filtering or
+  ordinary loss remain alternative explanations, and a condition never
+  changes a port's classification.
 
 ## Output family v9
 
@@ -149,7 +172,7 @@ mapping.
 
 The frozen `packetcraftr.output/v6` and `packetcraftr.output/v7` families stay
 bundled for previously published evidence; new output never reuses their
-identities. The reference consumer accepts all three families.
+identities. The reference consumer accepts v6 through v11.
 
 ## Streams and the reference consumer
 

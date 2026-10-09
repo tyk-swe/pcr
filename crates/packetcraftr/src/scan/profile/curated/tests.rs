@@ -45,9 +45,21 @@ fn conforming_reply(port: u16, query: &[u8]) -> Vec<u8> {
 #[test]
 fn provenance_names_the_published_version() {
     let manifest = include_str!("../../../../data/udp-payloads.provenance.yaml");
-    assert!(manifest.contains("  name: \"udp-payloads\"\n"));
-    assert!(manifest.contains(&format!("  version: \"{CURATED_UDP_PAYLOADS_VERSION}\"\n")));
-    assert!(manifest.contains("  review_outcome: \"accepted\"\n"));
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line == "  name: \"udp-payloads\"")
+    );
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line == format!("  version: \"{CURATED_UDP_PAYLOADS_VERSION}\""))
+    );
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line == "  review_outcome: \"accepted\"")
+    );
     assert_eq!(data_set().version, CURATED_UDP_PAYLOADS_VERSION);
 }
 

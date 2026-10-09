@@ -52,8 +52,10 @@ stdin consumer is admitted across include/exclude/payload/profile inputs.
 selection. --list publishes the exact selected target plan with origins and
 resolved scopes without transmitting, capturing, or connecting; hostname
 resolution still requires its policy opt-in and is reported as performed.
---connect uses ordinary TCP sockets, requires no raw-packet privileges, and caps
-overlapping connections at 16. It reports socket outcomes and rejects packet
+--connect uses ordinary TCP sockets, requires no raw-packet privileges, and
+bounds overlapping connections by --max-in-flight, the operation ceiling; a
+process pool of 16 workers caps what actually runs at once, so windows above
+16 queue with backpressure. It reports socket outcomes and rejects packet
 route overrides. Hostname lookup requires the existing policy opt-in.
 --method selects raw packets (the default), tcp-connect (the same as
 --connect), or auto. An explicit method is never replaced: raw fails with a
@@ -75,9 +77,30 @@ The complete plan is authorized before active discovery; capture is shared per
 interface and ready before sends. One pacing schedule, operation deadline and
 evidence budget apply across every window. --max-prepared-bytes bounds charged
 plans and active packet descriptions.
+
+--adaptive schedules probes adaptively per scoped host while remaining inside
+the same bounds: hosts take turns in selection order instead of draining one
+host's endpoints first, each attempt's timeout follows a bounded per-host RTT
+estimate (only verified first-attempt replies update it) between
+--min-timeout-ms (default 10, so --timeout-ms below 10 needs a smaller
+--min-timeout-ms) and --max-timeout-ms, silent endpoints retry at most
+--attempts times with --retry-backoff-ms doubling up to --max-backoff-ms, and
+the admission window starts at --initial-window and adjusts between
+--min-window and --max-in-flight. Every host's
+own deadline starts at its first admitted probe and ends --host-timeout-ms
+(default --max-duration-ms) later; preparation, pacing, and transmission all
+spend it, and an endpoint whose deadline is spent sends nothing and publishes
+no evidence while the host reports scan=incomplete. A host whose replies
+resemble rate limiting (enough control errors from one responder beside
+losses) publishes suspected_response_rate_limit as an inference, not a
+verdict, and is paced more slowly within its deadline; silence alone never
+infers it. Reports record the observed peak pending count and additional
+starts, both measurements of what ran, not throughput claims. The adaptive
+tuning options require --adaptive; fixed scheduling stays the default order.
 With a window above one, NDJSON publishes probe_sent receipts before final probe
-events and failures retain confirmed pending transmissions in error.scan; a
-window of one publishes final probe events only.
+events and failures retain confirmed pending transmissions in error.scan;
+adaptive waves publish probe_sent receipts at any window, while fixed serial
+scheduling with a window of one publishes final probe events only.
 
 --udp-profiles reads a bounded packetcraftr.udp-profiles/v1 document. Profiles
 select a typed DNS query or explicit hexadecimal bytes per port, with DNS identity
@@ -293,6 +316,77 @@ impl From<UnresponsiveHosts> for packetcraftr::scan::discovery::Unresponsive {
     }
 }
 
+/// Opt-in adaptive scheduling; its timing and window bounds apply only with
+/// `--adaptive` and never silently alter the fixed order.
+#[derive(Clone, Copy, Debug, clap::Args)]
+pub(crate) struct AdaptiveArgs {
+    /// Schedule probes adaptively per scoped host: bounded waves sized by an
+    /// AIMD window, per-host response timeouts, bounded exponential retries,
+    /// and per-host deadlines inside the operation deadline.
+    #[arg(long)]
+    pub(crate) adaptive: bool,
+    /// Floor on the adaptive response timeout in milliseconds (default 10).
+    #[arg(long, requires = "adaptive", value_name = "MS")]
+    pub(crate) min_timeout_ms: Option<u64>,
+    /// Ceiling on the adaptive response timeout in milliseconds
+    /// (defaults to --timeout-ms).
+    #[arg(long, requires = "adaptive", value_name = "MS")]
+    pub(crate) max_timeout_ms: Option<u64>,
+    /// Floor on the adaptive admission window (default 1).
+    #[arg(long, requires = "adaptive", value_name = "COUNT")]
+    pub(crate) min_window: Option<usize>,
+    /// Opening adaptive admission window (defaults to min(4, max-in-flight)).
+    #[arg(long, requires = "adaptive", value_name = "COUNT")]
+    pub(crate) initial_window: Option<usize>,
+    /// Per-scoped-host deadline in milliseconds (defaults to --max-duration-ms).
+    #[arg(long, requires = "adaptive", value_name = "MS")]
+    pub(crate) host_timeout_ms: Option<u64>,
+    /// Base delay before a silent endpoint's next attempt in milliseconds
+    /// (default 100).
+    #[arg(long, requires = "adaptive", value_name = "MS")]
+    pub(crate) retry_backoff_ms: Option<u64>,
+    /// Ceiling on the retry delay in milliseconds (default 1000).
+    #[arg(long, requires = "adaptive", value_name = "MS")]
+    pub(crate) max_backoff_ms: Option<u64>,
+}
+
+impl AdaptiveArgs {
+    /// The effective configuration, or `None` for fixed scheduling.
+    pub(crate) fn into_adaptive(
+        self,
+        timeout: std::time::Duration,
+        max_duration: std::time::Duration,
+        max_in_flight: usize,
+    ) -> Option<packetcraftr::scan::Adaptive> {
+        self.adaptive.then_some(packetcraftr::scan::Adaptive {
+            min_timeout: self
+                .min_timeout_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(std::time::Duration::from_millis(10)),
+            max_timeout: self
+                .max_timeout_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(timeout),
+            min_window: self.min_window.unwrap_or(1),
+            initial_window: self
+                .initial_window
+                .unwrap_or_else(|| 4usize.min(max_in_flight)),
+            host_timeout: self
+                .host_timeout_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(max_duration),
+            retry_backoff: self
+                .retry_backoff_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(std::time::Duration::from_millis(100)),
+            max_backoff: self
+                .max_backoff_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(std::time::Duration::from_secs(1)),
+        })
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Use ordinary TCP connections without raw packet privileges; the same as
@@ -303,7 +397,8 @@ pub(crate) struct Args {
     /// this build's capabilities; an explicit method is never replaced.
     #[arg(long, value_enum, default_value_t = Method::Raw)]
     pub(crate) method: Method,
-    /// Maximum overlapping probe windows; ordinary TCP is capped at 16.
+    /// Maximum overlapping probe windows; ordinary TCP accepts an operation
+    /// bound above the shared 16-worker pool, which queues with backpressure.
     #[arg(long, default_value_t = 1)]
     pub(crate) max_in_flight: usize,
 
@@ -400,6 +495,8 @@ pub(crate) struct Args {
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
+    #[command(flatten)]
+    pub(crate) adaptive: AdaptiveArgs,
     #[command(flatten)]
     pub(crate) timeout: TimeoutArgs,
     /// Operation-wide probe-start rate ceiling, not achieved throughput.

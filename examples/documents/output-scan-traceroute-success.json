@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v10",
+  "schema": "packetcraftr.output/v11",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -149,6 +149,13 @@
         "secs": 0,
         "nanos": 9000000
       }
+    },
+    "scheduling": {
+      "mode": "fixed",
+      "observed_peak_window": 1,
+      "retries_started": 0,
+      "conditions": [],
+      "incomplete": []
     },
     "traceroute": {
       "plan": {

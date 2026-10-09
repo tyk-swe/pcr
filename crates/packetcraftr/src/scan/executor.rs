@@ -4,6 +4,7 @@
 mod pipeline;
 mod registry;
 
+pub(super) use pipeline::AdaptiveAdmission;
 pub(super) use pipeline::limit;
 
 use std::collections::HashSet;
@@ -45,6 +46,7 @@ pub(crate) struct PipelineOptions {
     pub(crate) max_prepared_bytes: usize,
     pub(crate) max_evidence_frames: usize,
     pub(crate) max_evidence_bytes: usize,
+    pub(crate) host_deadlines: Vec<Option<std::time::Instant>>,
     /// The operation's statistics before this pipeline, which its failure
     /// reports with its own.
     pub(crate) preceding: Stats,
@@ -55,6 +57,9 @@ pub(crate) enum PipelineEvent {
     Sent {
         index: usize,
         sent: Arc<SentPacket>,
+    },
+    Omitted {
+        index: usize,
     },
     Completed {
         index: usize,
@@ -89,6 +94,15 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         _options: &PipelineOptions,
     ) -> Result<(), BoundaryError> {
         Ok(())
+    }
+
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+        _summary: &mut AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        self.admit_pipeline(batches, options)
     }
 
     /// Sends at most one ARP or NDP request for `target` and reports what
@@ -439,6 +453,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         pipeline::admit(&self.exchange()?, batches, options)
     }
 
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+        summary: &mut AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        pipeline::admit_adaptive(&self.exchange()?, batches, options, summary)
+    }
+
     fn resolve_neighbor(
         &mut self,
         target: &SelectedAddress,
@@ -641,6 +664,7 @@ mod tests {
             endpoints: vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
             discovery: Default::default(),
             attempts: 1,
+            adaptive: None,
             timeout: Duration::from_millis(20),
             probes_per_second: None,
             limits: Limits::default(),

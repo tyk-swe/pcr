@@ -79,6 +79,10 @@ impl EvidenceState {
         self.outstanding_responses = self.outstanding_responses.saturating_sub(1);
     }
 
+    pub(crate) fn release_responses(&mut self, count: usize) {
+        self.outstanding_responses = self.outstanding_responses.saturating_sub(count);
+    }
+
     /// Retains a correlated frame no outcome carries. The undecoded count
     /// bounds these separately, so neither kind can starve the other, and
     /// both share the frame and byte budget with responses.

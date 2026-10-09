@@ -156,6 +156,7 @@ pub struct Aggregate {
     pub retained_evidence_bytes: usize,
     pub stats: Stats,
     pub rtt: Rtt,
+    pub scheduling: super::Scheduling,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,6 +285,7 @@ pub struct Report {
     pub retained_evidence_bytes: usize,
     pub stats: Stats,
     pub rtt: Rtt,
+    pub scheduling: super::Scheduling,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -431,6 +433,7 @@ impl Collector {
             retained_evidence_bytes: report.retained_evidence_bytes,
             stats: report.stats,
             rtt: report.rtt,
+            scheduling: report.scheduling,
         })
     }
 }

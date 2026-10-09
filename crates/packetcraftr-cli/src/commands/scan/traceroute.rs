@@ -262,6 +262,7 @@ mod tests {
             target_sources: Vec::new(),
             endpoints: vec![packetcraftr::probe::ProbeEndpoint::Icmp],
             discovery: Default::default(),
+            adaptive: None,
             udp_payload: Default::default(),
             udp_profiles: Default::default(),
             address_family: packetcraftr::target::Family::Any,

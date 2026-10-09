@@ -100,6 +100,9 @@ fn every_published_declared_schema() {
     let v9_validator = validator(include_str!(
         "../../../../schemas/packetcraftr.output.v9.schema.json"
     ));
+    let v10_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v10.schema.json"
+    ));
 
     let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/documents");
     let mut paths: Vec<_> = std::fs::read_dir(directory)
@@ -127,7 +130,8 @@ fn every_published_declared_schema() {
             .as_str()
             .unwrap_or_else(|| panic!("{name} must declare a schema"));
         let validator = match schema {
-            "packetcraftr.output/v10" => output_validator,
+            "packetcraftr.output/v11" => output_validator,
+            "packetcraftr.output/v10" => &v10_validator,
             "packetcraftr.output/v9" => &v9_validator,
             "packetcraftr.output/v8" => &v8_validator,
             "packetcraftr.output/v7" => &v7_validator,
@@ -151,4 +155,19 @@ fn every_published_declared_schema() {
         validated > 100,
         "expected every published example to be validated, saw {validated}"
     );
+}
+
+#[test]
+fn frozen_v10_schema_validates_its_published_fixture() {
+    let v10_validator = validator(include_str!(
+        "../../../../schemas/packetcraftr.output.v10.schema.json"
+    ));
+    let document: Value = serde_json::from_str(include_str!(
+        "../../../../examples/consumers/fixtures/v10-forwarding.json"
+    ))
+    .expect("frozen v10 fixture must be JSON");
+    assert_eq!(document["schema"], "packetcraftr.output/v10");
+    v10_validator
+        .validate(&document)
+        .expect("the frozen v10 fixture must match the frozen v10 schema");
 }

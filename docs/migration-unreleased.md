@@ -1105,10 +1105,12 @@ Output/v11 changes, all additive within the new family:
   diagnostics in the scan's `diagnostics`.
 
 In Rust, `traceroute::Error` gains `TargetSelection`, `InvalidObservation`,
-and `Collection` — the last wraps the exchange or capture error a host plan's
-evidence collection failed, so its classification is the underlying
-`cli.exchange_limit` or `cli.capture_limit` — and `traceroute::hosts` with
-`Client::trace_hosts` is new. The standalone
+and `Collection` — the last preserves the underlying exchange, capture, or
+neighbor-configuration error and its classification — and `traceroute::hosts` with
+`Client::trace_hosts` is new. `hosts::Report` carries a `neighbor_stats`
+summary of the neighbor requests the probes' routes resolved; those packets
+and bytes are already inside `stats`, so it is a library field for
+accounting, not a new output member. The standalone
 `traceroute::Request`, `Report`, and `Aggregate` are unchanged.
 `probe::runner::run_batches` keeps its behavior over the new `run_planned`.
 In `packetcraftr-cli`, `output::scan::Report::publish` takes the optional trace

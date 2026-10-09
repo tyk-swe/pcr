@@ -547,7 +547,8 @@ pub(crate) struct Args {
     /// Number of attempts retained for every traced hop.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_PROBES_PER_HOP, requires = "traceroute")]
     pub(crate) traceroute_attempts: u32,
-    /// Maximum generated trace probes across every host and hop.
+    /// Maximum trace-stage transmissions: every host and hop's probes plus the
+    /// neighbor requests link-layer traces may resolve (one per probe).
     #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS, requires = "traceroute")]
     pub(crate) traceroute_max_probes: usize,
     /// Let a host reuse hops an earlier host's trace observed within this

@@ -4,7 +4,7 @@
 //! The optional trace stage of a scan: every scanned host, traced under one
 //! plan with the probes the scan saw it answer.
 
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use packetcraftr::probe::Transport;
 use packetcraftr::target::{ScopedAddress, Selection, Specification, Target};
@@ -86,12 +86,12 @@ impl Retained {
 /// What one run of the stage published.
 pub(super) struct Traced {
     pub(super) aggregate: hosts::Aggregate,
-    pub(super) last_sent: Option<SystemTime>,
+    pub(super) last_sent: Option<Instant>,
 }
 
 pub(super) struct Streamed {
     pub(super) report: hosts::Report,
-    pub(super) last_sent: Option<SystemTime>,
+    pub(super) last_sent: Option<Instant>,
 }
 
 impl Stage {
@@ -204,7 +204,7 @@ impl Stage {
         scan: &packetcraftr::scan::Aggregate,
         retained: Retained,
         started: Instant,
-        last_sent: Option<SystemTime>,
+        last_sent: Option<Instant>,
     ) -> Result<hosts::Request, CliError> {
         let include = scan
             .hosts
@@ -270,18 +270,16 @@ impl Stage {
         } else {
             (self.template.limits, self.template.collection.clone())
         };
-        // The scan's last transmission is a wall-clock timestamp, so a
-        // monotonic rate marker cannot be derived from it; a marker of now
-        // conservatively owes the whole --rate interval before the first
-        // trace probe.
-        let now = Instant::now();
+        // The marker is monotonic from the sending stage: a scan that sent
+        // anything marks now, so the first trace batch conservatively owes a
+        // full --rate interval.
         let request = hosts::Request {
             targets: Selection {
                 include,
                 exclude: Vec::new(),
             },
             observed,
-            paced_after: last_sent.map(|_| now),
+            paced_after: last_sent,
             limits: packetcraftr::traceroute::Limits {
                 max_duration: limits
                     .max_duration
@@ -301,7 +299,7 @@ impl Stage {
         client: &Client,
         scan: &packetcraftr::scan::Aggregate,
         started: Instant,
-        last_sent: Option<SystemTime>,
+        last_sent: Option<Instant>,
     ) -> Result<Traced, CliError> {
         let request = self.request(scan, Retained::of(scan), started, last_sent)?;
         let collector = hosts::Collector::default();
@@ -309,13 +307,9 @@ impl Stage {
             .trace_hosts(request, collector.clone())
             .map_err(CliError::classified)?;
         let aggregate = collector.finish(report).map_err(CliError::classified)?;
-        let last_sent = aggregate
-            .hosts
-            .iter()
-            .flat_map(|trace| &trace.hops)
-            .flat_map(|hop| &hop.probes)
-            .map(|probe| probe.sent_at)
-            .max();
+        // A probe's wire time is wall-clock evidence, not a pacing marker:
+        // anything sent conservatively marks the trace's end.
+        let last_sent = (aggregate.stats.packets_attempted > 0).then(Instant::now);
         Ok(Traced {
             aggregate,
             last_sent,
@@ -328,22 +322,24 @@ impl Stage {
         scan: &packetcraftr::scan::Aggregate,
         retained: Retained,
         started: Instant,
-        last_sent: Option<SystemTime>,
+        last_sent: Option<Instant>,
         emit: impl FnMut(hosts::Event) -> Result<(), packetcraftr_core::error::BoundaryError>
         + Send
         + 'static,
     ) -> Result<Streamed, CliError> {
         let request = self.request(scan, retained, started, last_sent)?;
-        let latest = std::sync::Arc::new(std::sync::Mutex::new(None::<SystemTime>));
+        let latest = std::sync::Arc::new(std::sync::Mutex::new(None::<Instant>));
         let observed = std::sync::Arc::clone(&latest);
         let mut emit = emit;
         let report = client
             .trace_hosts(request, move |event: hosts::Event| {
-                if let hosts::Event::Probe(probe) = &event {
+                // The probe's wall-clock sent_at is evidence, not a pacing
+                // marker: the monotonic marker is when its event settled.
+                if let hosts::Event::Probe(_) = &event {
                     let mut latest = observed
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    *latest = (*latest).max(Some(probe.sent_at));
+                    *latest = Some(Instant::now());
                 }
                 emit(event)
             })
@@ -521,7 +517,7 @@ mod tests {
                 &aggregate,
                 Retained::of(&aggregate),
                 started,
-                Some(SystemTime::now()),
+                Some(Instant::now()),
             )
             .expect("a request");
 
@@ -738,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn pacing_owes_a_full_interval_whatever_the_wall_clock_says() {
+    fn the_scan_pacing_marker_passes_through_monotonic() {
         let stage = Stage::new(&options(), &scan_request()).expect("a valid stage");
         let aggregate = aggregate(
             vec![host(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7)), None)],
@@ -748,19 +744,21 @@ mod tests {
             Vec::new(),
             0,
         );
-        for last_sent in [UNIX_EPOCH, SystemTime::now() + Duration::from_secs(3600)] {
-            let before = Instant::now();
+        for last_sent in [
+            Instant::now().checked_sub(Duration::from_secs(3600)),
+            Some(Instant::now() + Duration::from_secs(3600)),
+        ] {
             let request = stage
                 .request(
                     &aggregate,
                     Retained::of(&aggregate),
                     Instant::now(),
-                    Some(last_sent),
+                    last_sent,
                 )
                 .expect("a request");
-            let after = Instant::now();
-            let paced = request.paced_after.expect("a prior send paces the trace");
-            assert!(before <= paced && paced <= after, "{last_sent:?}");
+            // The monotonic marker is carried through exactly: a far-future
+            // one still owes its interval under the runner's saturating wait.
+            assert_eq!(request.paced_after, last_sent);
         }
         let request = stage
             .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)

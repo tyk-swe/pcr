@@ -123,6 +123,9 @@ pub struct Report {
     pub hosts: Vec<Host>,
     pub reuse: Option<Reuse>,
     pub retained_evidence_bytes: usize,
+    /// What the routes' neighbor resolutions sent apart from the probes';
+    /// already included in `stats`.
+    pub neighbor_stats: Stats,
     pub stats: Stats,
 }
 
@@ -202,11 +205,22 @@ impl Collector {
             undecoded,
             diagnostics,
         } = self.0.take();
-        if probes != report.stats.packets_attempted {
+        // Probe events cover the probes; the neighbor requests the routes
+        // resolved sent no probe event and are accounted apart.
+        let probes_attempted = report
+            .stats
+            .packets_attempted
+            .checked_sub(report.neighbor_stats.packets_attempted)
+            .ok_or_else(|| Error::IncoherentEvents {
+                message: format!(
+                    "{} neighbor request(s) exceed {} attempted packet(s)",
+                    report.neighbor_stats.packets_attempted, report.stats.packets_attempted
+                ),
+            })?;
+        if probes != probes_attempted {
             return Err(Error::IncoherentEvents {
                 message: format!(
-                    "{probes} probe outcome(s) collected for {} attempted probe(s)",
-                    report.stats.packets_attempted
+                    "{probes} probe outcome(s) collected for {probes_attempted} attempted probe(s)"
                 ),
             });
         }

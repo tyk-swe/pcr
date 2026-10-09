@@ -1986,6 +1986,19 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `traceroute::hosts` plans each host's anchor and reuse decisions on a fresh
+  clock sample after every event publication, so a slow sink can no longer
+  make a stale reuse cache look fresh.
+- `Client::trace_hosts` authorizes its neighbor requests against the policy
+  itself and resolves each neighbor once per operation, paced at the trace's
+  rate; `--traceroute-max-probes` and the operation's packet and byte budgets
+  now conservatively reserve one neighbor request per link-layer trace probe,
+  and the requests it actually sends count in `Report::stats` (and the new
+  `Report::neighbor_stats`).
+- `scan --traceroute` and the lookups after it pace from monotonic markers:
+  a stage that sent anything conservatively owes a full rate interval, and
+  wall-clock `sent_at` fields stay evidence only, so a clock adjustment
+  cannot collapse a planned wait.
 - `scan --traceroute` applies the shared evidence budget under NDJSON output
   too: the stream tracker strips matched response frames, so the scan's
   retained counts are accumulated from the published events rather than

@@ -449,8 +449,15 @@ The record keeps these rules:
   host can be traced deducts nothing. The finalized trace collection is
   validated before the scan sends.
 - A scan that sent traffic paces the trace's first batch by a full `--rate`
-  interval: a wall-clock `sent_at` cannot name a monotonic marker, so the
-  interval is owed in full rather than estimated.
+  interval, and the trace marks its own sends for the lookups after it the
+  same way: pacing rides on monotonic markers, so a wall-clock `sent_at` stays
+  evidence and a clock adjustment can never collapse a wait.
+- On a link-layer route each probe may resolve a neighbor: the plan reserves
+  one request per probe inside `--traceroute-max-probes` and the operation's
+  packet and byte budgets, authorizes it like a probe, sends it once, paces
+  it on the trace's rate, and keeps its answer for the operation; the
+  requests sent count in the operation's `stats` (and `neighbor_stats` in the
+  library `Report`).
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs

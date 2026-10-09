@@ -17,7 +17,7 @@ use super::request::Request;
 use super::reuse::{Cache, Intermediate};
 use crate::evidence::SentPacket;
 use crate::probe::runner::{BatchEvidence, Classifier, Outcome as ProbeOutcome};
-use crate::probe::{Batch, ProbeEndpoint, ProbeStatus, Transport};
+use crate::probe::{Batch, ProbeEndpoint, ProbeStatus, Transport, enforce_deadline};
 use crate::target::ResolvedZone;
 use crate::traceroute::error::Probes;
 use crate::traceroute::evidence::{fold_termination, probe_evidence};
@@ -181,10 +181,13 @@ impl<'r> Planner<'r> {
         self.hosts
     }
 
+    /// Plans the next batch. `now` is sampled fresh at every loop, not once
+    /// per call: publishing a host event may take real sink time, and the next
+    /// host's anchor and reuse decisions must see it.
     pub(super) fn next<F>(
         &mut self,
         evidence: &mut BatchEvidence<HostsClassifier<'_>, F, Probes>,
-        now: Instant,
+        mut now: impl FnMut() -> Instant,
         deadline: &Deadline,
     ) -> Result<Option<Batch<Probe>>, Error>
     where
@@ -197,10 +200,12 @@ impl<'r> Planner<'r> {
                     self.slots[current.slot].address,
                     current.selection.strategy.transport,
                 )];
-                current.observe(self.request, cache, hop_limit, outcomes, now);
+                current.observe(self.request, cache, hop_limit, outcomes, now());
             }
         }
         loop {
+            enforce_deadline(&Probes, deadline)?;
+            let now = now();
             if self.current.is_none() {
                 let Some(slot) = self.slots.get(self.next_slot) else {
                     return Ok(None);

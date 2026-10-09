@@ -127,14 +127,20 @@ incomplete.
   answer from; `--traceroute-first-hop`, `--traceroute-max-hops`,
   `--traceroute-attempts`, and `--traceroute-max-probes` bound the plan, and
   `--traceroute-reuse-max-age-ms` enables reuse. Every `--traceroute-*` option
-  requires `--traceroute`. The stage spends what is left of `--max-duration`,
-  owes a full probe interval when the scan transmitted under `--rate` (a
-  conservative pause: a wall-clock `sent_at` cannot name a monotonic marker),
+  requires `--traceroute`. `--traceroute-max-probes` and the policy's
+  packet/byte budgets also reserve the neighbor requests a link-layer trace
+  may send — one per probe, worst case even though the shared operation cache
+  usually serves them; each resolution is authorized like a probe, tries once,
+  keeps its answer for the operation, and waits on the trace's rate. The
+  requests actually sent count in the operation's statistics. The stage spends
+  what is left of `--max-duration`, takes a monotonic pacing marker from the
+  stage before it — so a scan or trace that sent anything owes the next stage
+  a full `--rate` interval and wall-clock `sent_at` stays evidence only —
   takes the scan's timeout, rate, and family, shares the scan's retained
   evidence budget, and uses its own workflow client rather than the scan's
   neighbor-narrowed one. The finalized request — the workflow's route and
-  collection in place — is validated before the scan sends. Its statistics and diagnostics count in the
-  scan's. It needs the raw method:
+  collection in place — is validated before the scan sends. Its statistics
+  and diagnostics count in the scan's. It needs the raw method:
   `--connect`, `--method tcp-connect`, and an automatic choice of connect are
   usage errors, as are `--list`, a port without a strategy, a port with ICMP,
   and invalid trace bounds, all before any probe. A trace error fails the
@@ -194,6 +200,8 @@ incomplete.
     carried the plan.
   - `--traceroute-max-probes 2` was refused with `cli.traceroute_limit` after
     the scan and before any trace probe, as the known limit below says.
+  - Those counts predate the neighbor-request accounting added later: they
+    count trace probes only. The run was not repeated.
 
 ### Known limits
 

@@ -6,6 +6,7 @@
 //! reusing path hops that an earlier host in the same operation learned.
 
 mod engine;
+mod executor;
 mod planner;
 mod report;
 mod request;

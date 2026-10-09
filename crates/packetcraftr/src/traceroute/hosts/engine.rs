@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 use super::planner::{HostsClassifier, Planner, Slot};
@@ -24,7 +25,7 @@ use crate::target::{
 use crate::traceroute::error::Probes;
 use crate::traceroute::request::tcp_payload;
 use crate::traceroute::{Error, MAX_PROBE_BYTES, Probe, WORKFLOW};
-use crate::{Client, Sink};
+use crate::{Client, Sink, Stats};
 
 impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
     /// Traces every authorized host of the request under one finite plan and
@@ -46,15 +47,53 @@ impl<P: PacketProviders + TargetProviders, K: Clock> Client<P, K> {
             build: packetcraftr_core::build::Options::default(),
             allow_permissive_live: false,
         };
-        run(
+        // The trace resolves its own neighbors, so its executor authorizes
+        // each neighbor request like a probe whether or not the caller did.
+        request.validate()?;
+        let mut client = self
+            .view_with_registry(std::sync::Arc::clone(&self.registry))
+            .with_neighbor_request_authorization();
+        if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
+            && (request.strategy.is_some() || !request.observed.is_empty())
+        {
+            client.neighbors = client
+                .neighbors
+                .one_attempt(
+                    request.timeout,
+                    request.limits.max_evidence_frames,
+                    request.limits.max_evidence_bytes,
+                    request.collection.capture.snap_length,
+                    request.limits.max_probes,
+                )
+                .map_err(|source| Error::Collection(BoundaryError::from_error(source)))?;
+            // An implicit neighbor request waits on the trace's own rate
+            // before its probe's batch.
+            client.neighbor_pause =
+                rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?;
+        }
+        let mut executor = super::executor::ClientExecutor::new(ExchangeExecutor::new(
+            &client,
+            send,
+            request.collection.clone(),
+        ));
+        let mut report = run(
             &request,
             &mut self.admission(),
             &self.registry,
-            &mut ExchangeExecutor::new(self, send, request.collection.clone()),
+            &mut executor,
             &mut self.clock.clone(),
             &mut self.deadline(request.limits.max_duration),
             publish,
-        )
+        )?;
+        // The neighbor requests the probes' routes resolved count in the
+        // operation's statistics; they were admitted in the plan's probe and
+        // byte bounds already.
+        report.neighbor_stats = executor.neighbor_stats().clone();
+        report
+            .stats
+            .checked_add_assign(&report.neighbor_stats.clone())
+            .map_err(|source| Probes.stats_overflow(0, source))?;
+        Ok(report)
     }
 }
 
@@ -87,8 +126,11 @@ where
         emit,
     );
     let mut planner = Planner::new(request, approved.slots);
+    // Planning reads the shared clock itself so a blocking event sink cannot
+    // leave stale anchor or reuse times for the next host.
+    let planning_clock = clock.clone();
     let stats = run_planned(
-        |evidence, now, deadline| planner.next(evidence, now, deadline),
+        |evidence, _now, deadline| planner.next(evidence, || planning_clock.now(), deadline),
         request.probes_per_second,
         request.paced_after,
         deadline,
@@ -104,6 +146,7 @@ where
         hosts: planner.into_hosts(),
         reuse: request.reuse,
         retained_evidence_bytes,
+        neighbor_stats: Stats::default(),
         stats,
     })
 }
@@ -116,7 +159,8 @@ struct Approved {
 
 struct Plan {
     slots: Vec<Slot>,
-    probes: usize,
+    /// Trace probes plus the neighbor requests they may resolve.
+    transmissions: usize,
     maximum_bytes: u64,
 }
 
@@ -139,7 +183,7 @@ fn approve<A: Authorizer + ResolveTarget>(
         |selected| plan_hosts(request, &selected.targets),
         |plan| {
             Ok(wire_limits(
-                u64::try_from(plan.probes).unwrap_or(u64::MAX),
+                u64::try_from(plan.transmissions).unwrap_or(u64::MAX),
                 plan.maximum_bytes,
             ))
         },
@@ -159,6 +203,12 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
         .collect();
     let host_probes = request.host_probe_cap()?;
     let mut traced = 0_usize;
+    // A host over a link-layer route may resolve a fresh neighbor for each
+    // of its probe batches: the operation cache usually serves them, but a
+    // route that changed mid-plan could not be foreseen, so admission
+    // reserves one possible request per trace probe.
+    let mut neighbor_requests = 0_usize;
+    let mut neighbor_bytes = 0_u64;
     let mut slots = Vec::with_capacity(targets.len());
     for target in targets {
         let trace = match choose(request, &observations, target) {
@@ -190,6 +240,26 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
                     }
                 }
                 traced += 1;
+                if request.route.link_mode != packetcraftr_netio::link::Mode::Layer3
+                    && !target.address.is_multicast()
+                    && target.address != IpAddr::V4(std::net::Ipv4Addr::BROADCAST)
+                {
+                    neighbor_requests = neighbor_requests
+                        .checked_add(host_probes)
+                        .ok_or_else(|| overflow("probes"))?;
+                    let request_bytes = match target.address {
+                        IpAddr::V4(_) => crate::neighbor::IPV4_REQUEST_BYTES,
+                        IpAddr::V6(_) => crate::neighbor::IPV6_REQUEST_BYTES,
+                    };
+                    neighbor_bytes = neighbor_bytes
+                        .checked_add(
+                            u64::try_from(host_probes)
+                                .unwrap_or(u64::MAX)
+                                .checked_mul(request_bytes)
+                                .ok_or_else(|| overflow("wire_bytes"))?,
+                        )
+                        .ok_or_else(|| overflow("wire_bytes"))?;
+                }
                 Ok(selection)
             }
         };
@@ -202,7 +272,12 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
     let probes = traced
         .checked_mul(host_probes)
         .ok_or_else(|| overflow("probes"))?;
-    check_probe_count(&Probes, probes, request.limits.max_probes)?;
+    // `max_probes` bounds every transmission the plan may send: the trace
+    // probes plus the neighbor requests reserved for unrouted links.
+    let transmissions = probes
+        .checked_add(neighbor_requests)
+        .ok_or_else(|| overflow("probes"))?;
+    check_probe_count(&Probes, transmissions, request.limits.max_probes)?;
     check_probe_duration(
         &Probes,
         worst_case_duration(request, traced)?,
@@ -211,10 +286,11 @@ fn plan_hosts(request: &Request, targets: &[SelectedAddress]) -> Result<Plan, Er
     let maximum_bytes = u64::try_from(probes)
         .unwrap_or(u64::MAX)
         .checked_mul(MAX_PROBE_BYTES + u64::from(request.payload_size))
+        .and_then(|bytes| bytes.checked_add(neighbor_bytes))
         .ok_or_else(|| overflow("wire_bytes"))?;
     Ok(Plan {
         slots,
-        probes,
+        transmissions,
         maximum_bytes,
     })
 }

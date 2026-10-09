@@ -17,7 +17,7 @@ use crate::output;
 use packetcraftr_core::error::{Classified, Kind};
 
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use packetcraftr::probe::{ProbeEndpoint, Transport};
 use packetcraftr::scan::{discovery, method, profile::curated};
@@ -558,21 +558,10 @@ fn publish(
     emit(event)
 }
 
-/// When the scan last transmitted, or now when it sent at no known time.
-fn last_scan_transmission(aggregate: &packetcraftr::scan::Aggregate) -> Option<SystemTime> {
-    reverse::last_transmission(
-        aggregate.stats.packets_attempted > 0,
-        aggregate
-            .discovery
-            .iter()
-            .chain(
-                aggregate
-                    .endpoints
-                    .iter()
-                    .flat_map(|endpoint| &endpoint.probes),
-            )
-            .map(|probe| probe.sent_at),
-    )
+/// A conservative monotonic marker for a scan that sent anything: the probes'
+/// wall-clock `sent_at` is evidence, not a pacing input, so the marker is now.
+fn last_scan_transmission(aggregate: &packetcraftr::scan::Aggregate) -> Option<Instant> {
+    reverse::last_transmission(aggregate.stats.packets_attempted > 0, std::iter::empty())
 }
 
 pub(super) struct Streamed {

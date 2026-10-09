@@ -30,7 +30,9 @@ use crate::target::{
 use crate::test_support::{RecordingClock, decoded_packet, sent_packet};
 use crate::traceroute::plan::build_batches;
 use crate::traceroute::plan::packet::probe_packet;
-use crate::traceroute::{Error, Limits, Probe, ProbeEvidence, ResponseKind, Termination};
+use crate::traceroute::{
+    Error, Limits, MAX_PROBE_BYTES, Probe, ProbeEvidence, ResponseKind, Termination,
+};
 use crate::{Sink, Stats};
 
 const LOCAL: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
@@ -309,7 +311,12 @@ fn request(strategy: Option<Strategy>) -> Request {
         paced_after: None,
         reuse: None,
         limits: Limits::default(),
-        route: crate::route::Options::default(),
+        // The scripted `Network` answers probes directly; a layer-3 route
+        // reserves no neighbor requests in admission.
+        route: crate::route::Options {
+            link_mode: packetcraftr_netio::link::Mode::Layer3,
+            ..crate::route::Options::default()
+        },
         collection: crate::exchange::Collection::default(),
     }
 }
@@ -1514,4 +1521,199 @@ fn a_sent_packet_that_differs_from_its_probe_fails_the_plan_at_that_probe() {
     );
     assert_eq!(network.batches, 3, "no batch follows the rejected one");
     assert_eq!(network.sent.len(), 3);
+}
+
+#[test]
+fn sink_time_during_host_publication_ages_the_reuse_cache() {
+    let hosts = [host(1), host(2)];
+    let mut network = Network::new([
+        (host(1), path(&[1, 2], End::Reply)),
+        (host(2), path(&[1, 2], End::Reply)),
+    ]);
+    let request = reusing(Duration::from_secs(30));
+    let sink_clock = network.clock.clone();
+    let mut clock = network.clock.clone();
+    let mut deadline = network.clock.deadline(request.limits.max_duration);
+    let mut events = Vec::new();
+    let report = run(
+        &request,
+        &mut Resolver::new(&hosts),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut network,
+        &mut clock,
+        &mut deadline,
+        |event, _| {
+            // Publishing a host event may take real sink time; the next
+            // host's anchor and reuse decisions must see it.
+            if matches!(event, Event::Host(_)) {
+                sink_clock.advance(Duration::from_secs(31));
+            }
+            events.push(event);
+            Ok(())
+        },
+    )
+    .expect("the trace completes");
+
+    let traced = Traced {
+        report,
+        events: events.clone(),
+    };
+    assert_eq!(traced.fresh_hops(host(2)), [1, 2, 3]);
+    assert!(traced.host(host(2)).reused.is_empty());
+    assert_eq!(traced.host(host(2)).state, State::Complete);
+    let hosts_published = events
+        .iter()
+        .filter(|event| matches!(event, Event::Host(_)))
+        .count();
+    assert_eq!(hosts_published, 2);
+}
+
+#[test]
+fn a_sink_stalling_past_the_deadline_ends_the_plan_typed() {
+    let hosts = [host(1), host(2)];
+    let mut network = Network::new([
+        (host(1), path(&[1], End::Reply)),
+        (host(2), path(&[1], End::Reply)),
+    ]);
+    let request = request(tcp());
+    let sink_clock = network.clock.clone();
+    let mut clock = network.clock.clone();
+    let deadline = network.clock.deadline(Duration::from_millis(60));
+    let error = run(
+        &request,
+        &mut Resolver::new(&hosts),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut network,
+        &mut clock,
+        &mut deadline.clone(),
+        |event, _| {
+            if matches!(event, Event::Host(_)) {
+                sink_clock.advance(Duration::from_secs(3600));
+            }
+            Ok(())
+        },
+    )
+    .expect_err("the operation deadline ends the plan");
+
+    assert!(matches!(error, Error::DurationLimit { .. }), "{error:?}");
+    // The first host's two batches ran; nothing was sent for the second.
+    assert_eq!(network.batches, 2);
+}
+
+#[test]
+fn a_link_layer_trace_admits_the_neighbor_requests_its_probes_may_resolve() {
+    use packetcraftr_netio::link::Mode;
+
+    let mut plan = request(tcp());
+    plan.route.link_mode = Mode::Layer2;
+    let mut resolver = Resolver::new(&[host(1)]);
+    let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+    let deadline = network.clock.deadline(plan.limits.max_duration);
+    trace_with(&plan, &mut resolver, &mut network, deadline).expect("traced");
+    // Eight hop probes plus one possible neighbor request each.
+    assert_eq!(
+        resolver.operations,
+        [(
+            16,
+            8 * MAX_PROBE_BYTES + 8 * crate::neighbor::IPV4_REQUEST_BYTES
+        )]
+    );
+
+    // Automatic mode admits the same worst case; an explicit layer-3 route
+    // sends no neighbor requests and reserves none.
+    for (mode, expected) in [
+        (Mode::Auto, 16_u64),
+        (packetcraftr_netio::link::Mode::Layer3, 8),
+    ] {
+        let mut plan = request(tcp());
+        plan.route.link_mode = mode;
+        let mut resolver = Resolver::new(&[host(1)]);
+        let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+        let deadline = network.clock.deadline(plan.limits.max_duration);
+        trace_with(&plan, &mut resolver, &mut network, deadline).expect("traced");
+        assert_eq!(resolver.operations[0].0, expected, "{mode:?}");
+    }
+}
+
+#[test]
+fn link_layer_admission_bounds_every_address_kind_it_traces() {
+    let address_of = |ip: IpAddr| SelectedAddress::new(ip);
+    // An IPv6 link-layer trace reserves IPv6-sized neighbor requests.
+    let mut plan = request(tcp());
+    plan.route.link_mode = packetcraftr_netio::link::Mode::Layer2;
+    let v6 = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 7));
+    let mut resolver = Resolver {
+        targets: vec![address_of(v6)],
+        operations: Vec::new(),
+        deny_target: false,
+        deny_operation: false,
+    };
+    let mut network = Network::new([]);
+    let deadline = network.clock.deadline(plan.limits.max_duration);
+    trace_with(&plan, &mut resolver, &mut network, deadline).expect("traced");
+    assert_eq!(
+        resolver.operations,
+        [(
+            16,
+            8 * MAX_PROBE_BYTES + 8 * crate::neighbor::IPV6_REQUEST_BYTES
+        )]
+    );
+
+    // A multicast or broadcast destination is traced but resolves no
+    // neighbor: no reservation.
+    let mut resolver = Resolver {
+        targets: vec![
+            address_of(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))),
+            address_of(IpAddr::V4(Ipv4Addr::BROADCAST)),
+        ],
+        operations: Vec::new(),
+        deny_target: false,
+        deny_operation: false,
+    };
+    let mut network = Network::new([]);
+    let deadline = network.clock.deadline(plan.limits.max_duration);
+    trace_with(&plan, &mut resolver, &mut network, deadline).expect("traced");
+    assert_eq!(resolver.operations, [(16, 16 * MAX_PROBE_BYTES)]);
+}
+
+#[test]
+fn the_probe_budget_covers_the_reserved_neighbor_requests() {
+    let mut plan = request(tcp());
+    plan.route.link_mode = packetcraftr_netio::link::Mode::Layer2;
+    // Two trace probes per host plus two possible neighbor requests.
+    plan.first_hop = 1;
+    plan.max_hops = 2;
+    plan.limits.max_probes = 4;
+    let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+    trace(&plan, &mut network);
+    assert_eq!(network.batches, 2);
+
+    let mut exhausted = plan.clone();
+    exhausted.limits.max_probes = 3;
+    let mut network = Network::new([(host(1), path(&[1], End::Reply))]);
+    let error = trace_error(&exhausted, &[host(1)], &mut network);
+    assert!(matches!(error, Error::InvalidLimit { .. }), "{error:?}");
+    assert_eq!(network.batches, 0, "refusal precedes any batch");
+}
+
+#[test]
+fn a_report_cannot_credit_more_neighbor_sends_than_packets() {
+    let report = Report {
+        target: "192.0.2.1".to_owned(),
+        resolved_addresses: Vec::new(),
+        hosts: Vec::new(),
+        reuse: None,
+        retained_evidence_bytes: 0,
+        neighbor_stats: Stats {
+            packets_attempted: 1,
+            ..Stats::default()
+        },
+        stats: Stats::default(),
+    };
+
+    let error = Collector::default()
+        .finish(report)
+        .expect_err("one claimed neighbor send cannot exceed zero packets");
+
+    assert!(matches!(error, Error::IncoherentEvents { .. }), "{error:?}");
 }

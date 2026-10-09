@@ -52,6 +52,167 @@ fn http_peer() -> (String, thread::JoinHandle<Vec<u8>>) {
     (address, server)
 }
 
+fn repeated_http_corpus(directory: &TempDir) -> PathBuf {
+    let mut document =
+        serde_json::to_value(packetcraftr::identify::builtin_corpus().unwrap()).unwrap();
+    let probe = document["probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|probe| probe["id"] == "http-head")
+        .unwrap()
+        .clone();
+    let rule = document["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["probe"] == "http-head" && rule["product"] == "nginx")
+        .unwrap()
+        .clone();
+    document["probes"] = Value::Array(
+        (0..64)
+            .map(|index| {
+                let mut probe = probe.clone();
+                probe["id"] = format!("wide-http-{index}").into();
+                probe
+            })
+            .collect(),
+    );
+    document["matches"] = Value::Array(
+        (0..64)
+            .map(|index| {
+                let mut rule = rule.clone();
+                rule["id"] = format!("wide-nginx-{index}").into();
+                rule["probe"] = format!("wide-http-{index}").into();
+                rule
+            })
+            .collect(),
+    );
+    let path = directory.path().join("wide-http.json");
+    let bytes = serde_json::to_vec(&document).unwrap();
+    packetcraftr_core::document::service_probes::parse(&bytes).unwrap();
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+#[test]
+fn oversized_ndjson_endpoint_plan_is_rejected_before_connecting() {
+    let directory = TempDir::new().unwrap();
+    let corpus = repeated_http_corpus(&directory);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let result = run(&[
+        "--output",
+        "ndjson",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+        "--max-attempts",
+        "64",
+        "--host-max-attempts",
+        "64",
+        "--max-read-bytes",
+        "4194240",
+        "--host-max-read-bytes",
+        "4194240",
+        "--connection-max-read-bytes",
+        "65535",
+        "--probe-max-read-bytes",
+        "65535",
+    ]);
+    assert!(!result.status.success());
+    let records = parse_ndjson(&result);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["event"], "error");
+    assert_eq!(records[0]["error"]["code"], "cli.identify_record_limit");
+    assert_eq!(records[0]["error"]["kind"], "usage");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
+fn json_preserves_an_endpoint_larger_than_the_ndjson_record_ceiling() {
+    let directory = TempDir::new().unwrap();
+    let corpus = repeated_http_corpus(&directory);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let prefix = "nginx/1.27.2 (";
+    let value = format!("{prefix}{})", "a".repeat(240 - prefix.len() - 1));
+    let reply = format!(
+        "HTTP/1.0 200 OK\r\n{}\r\n",
+        format!("Server: {value}\r\n").repeat(256)
+    );
+    let server = thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        for _ in 0..64 {
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "missing planned HTTP connection"
+                        );
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("HTTP fixture accept: {error}"),
+                }
+            };
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                socket.read_exact(&mut byte).unwrap();
+                request.extend(byte);
+            }
+            socket.write_all(reply.as_bytes()).unwrap();
+        }
+    });
+    let result = run(&[
+        "--output",
+        "json",
+        "identify",
+        &address,
+        "--corpus",
+        path_text(&corpus),
+        "--max-attempts",
+        "64",
+        "--host-max-attempts",
+        "64",
+        "--max-read-bytes",
+        "4194240",
+        "--host-max-read-bytes",
+        "4194240",
+        "--connection-max-read-bytes",
+        "65535",
+        "--probe-max-read-bytes",
+        "65535",
+        "--host-timeout-ms",
+        "30000",
+    ]);
+    server.join().unwrap();
+    assert!(
+        result.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let document = parse_json(&result);
+    let record = &document["result"]["records"][0];
+    assert_eq!(record["probes"].as_array().unwrap().len(), 64);
+    assert_eq!(record["outcome"], "matched");
+    assert!(serde_json::to_vec(record).unwrap().len() > 16 * 1024 * 1024);
+}
+
 #[test]
 fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
     let directory = TempDir::new().unwrap();
@@ -119,6 +280,14 @@ fn ndjson_publishes_one_endpoint_then_one_terminal_completion() {
         &address,
         "--corpus",
         path_text(&corpus),
+        "--max-attempts",
+        "4096",
+        "--host-max-attempts",
+        "4096",
+        "--max-read-bytes",
+        "67108864",
+        "--host-max-read-bytes",
+        "67108864",
     ]));
     server.join().unwrap();
     assert_eq!(records.len(), 2);

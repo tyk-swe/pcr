@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod publication;
 mod rendering;
 
 use std::sync::Arc;
@@ -124,6 +125,9 @@ impl super::Spec for Args {
         };
         let policy = self.policy.into_policy();
         request.validate(&policy).map_err(CliError::classified)?;
+        if format == Format::Ndjson {
+            publication::validate_ndjson(&request)?;
+        }
         let report = client(
             packetcraftr_core::protocol::builtin::registry(),
             policy,

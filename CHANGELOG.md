@@ -38,17 +38,25 @@ All notable changes to PacketcraftR are documented here. The format follows
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.
   A valid banner may follow all sixteen permitted pre-identification lines.
+  Newline-terminated malformed SSH lines also stop collection immediately;
+  HTTP and SSH parser resource limits remain truncated evidence rather than
+  malformed wire syntax.
 - Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs
   while preserving exact addresses, ports, and link-local or multicast scopes.
   TCP and UDP socket setup clears only those irrelevant scopes so they are also
   accepted on Windows.
   IPv4-mapped endpoints also use their native IPv4 socket family, with matching
   canonical peer checks.
+  Exact destination allowlists compare mapped/native IPv4 identities in either
+  direction, including authorization of the connected peer before writes.
 - Identification policy declarations bound the selected probe traffic rather
   than unused attempt allowances. Duplicate endpoint aliases are rejected before
   I/O, including irrelevant IPv6 scopes/flow information and mapped IPv4 aliases.
   Cancellation while a TCP connection is pending remains cancelled evidence,
   distinct from a connection timeout.
+- NDJSON identification checks worst-case endpoint publication size before I/O
+  against its 16 MiB record ceiling, including duplicated claims/candidates.
+  Larger bounded evidence remains available through aggregate JSON output.
 - Identification DNS transaction IDs start from system randomness and remain
   distinct across an operation's probes and retries. Entropy failure preserves
   its typed source and stops before any probe I/O.

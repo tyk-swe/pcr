@@ -116,6 +116,12 @@ and field values remain faithful to their octets; malformed and incomplete
 responses retain their evidence. Source errors remain available to library
 callers and as diagnostics in CLI output.
 
+NDJSON emits one bounded envelope per endpoint. Before probing, the CLI checks
+a conservative size bound from selected probes, available attempt/read budgets,
+hex evidence, claims and both candidate copies against the 16 MiB record ceiling.
+Configurations that could exceed it fail before network I/O. Reduce the host,
+operation or probe limits, or use aggregate JSON for larger bounded evidence.
+
 `claim` confidence means an unauthenticated software field matched a corpus
 literal. `protocol` means protocol syntax supports the candidate's protocol
 classification. These are ordinal categories, not measured probabilities. An

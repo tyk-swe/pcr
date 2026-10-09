@@ -9,6 +9,9 @@
 /crates/packetcraftr-netio/src/transmit/** @tyk-swe
 /crates/packetcraftr-netio/src/tcp.rs @tyk-swe
 /crates/packetcraftr-netio/src/tcp/** @tyk-swe
+/crates/packetcraftr-netio/src/bounded.rs @tyk-swe
+/crates/packetcraftr-netio/src/udp.rs @tyk-swe
+/crates/packetcraftr-netio/src/udp/** @tyk-swe
 /crates/packetcraftr-netio/src/capture.rs @tyk-swe
 /crates/packetcraftr-netio/src/capture/** @tyk-swe
 /crates/packetcraftr-netio/src/route.rs @tyk-swe
@@ -26,6 +29,9 @@
 /crates/packetcraftr/src/preparation/** @tyk-swe
 /crates/packetcraftr/src/probe.rs @tyk-swe
 /crates/packetcraftr/src/probe/** @tyk-swe
+/crates/packetcraftr/src/identify.rs @tyk-swe
+/crates/packetcraftr/src/identify/** @tyk-swe
+/crates/packetcraftr/data/service-* @tyk-swe @rkdxodud-tyk
 
 /crates/packetcraftr-cli/src/output.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-cli/src/output/** @tyk-swe @rkdxodud-tyk

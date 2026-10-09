@@ -157,7 +157,7 @@ macOS/Windows use admitted literal loopback fixtures without interface mutation,
 remote traffic, external DNS, or driver installation. Unavailable raw profiles,
 missing native dependencies, and unavailable routed/shared-link isolation stay
 explicitly unavailable, never exercised. `--require-complete` fails on missing
-required coverage; portable/pcap-free raw capability refusals count only when
+required coverage; portable/default/pcap-free raw capability refusals count only when
 the actual typed admission failure and nonzero process result were retained.
 See [M5](roadmap/m05-host-discovery.md#discovery-validation) for commands and
 current acceptance limits and explicitly skipped platform-isolation checks.

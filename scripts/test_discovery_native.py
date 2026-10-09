@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from discovery_isolated_fixture import checksum, packet, transport
-from discovery_native_evidence import inventory, validate
+from discovery_native_evidence import inventory, validate, expected_capability_refusal
 from discovery_native_fixture import measurements, run, validate_router_evidence
 from validation_evidence import ROOT
 
@@ -40,6 +40,30 @@ class DiscoveryEvidenceContracts(unittest.TestCase):
                 changed['commit'] = 'bad'
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 validate(changed)
+
+    def test_recorded_launcher_failure_cannot_close_acceptance(self):
+        for key in ('error', 'validation_error'):
+            report = launcher.initial_report(['portable'])
+            report[key] = 'retained launcher failure'
+            with self.subTest(field=key), self.assertRaisesRegex(ValueError, 'failed native launcher'):
+                validate(report, require_complete=True)
+
+    def test_capture_free_profiles_require_a_real_typed_native_refusal(self):
+        case = dict(name='discovery-responsive', status='unavailable', reason_code='unsupported_capability',
+                    runs=[dict(exit_code=1, stdout=json.dumps(dict(schema='packetcraftr.output/v10', status='error',
+                              error=dict(kind='capability', code='capability.unsupported'))))])
+        for name in ('portable', 'default', 'pcap-free', 'layer2', 'full-native'):
+            self.assertEqual(expected_capability_refusal(dict(name=name), case), name in ('portable', 'default', 'pcap-free'))
+        for code in (None, 0, True):
+            changed = copy.deepcopy(case)
+            changed['runs'][0]['exit_code'] = code
+            self.assertFalse(expected_capability_refusal(dict(name='default'), changed))
+        for mutation in ('schema', 'status', 'kind', 'code'):
+            changed = copy.deepcopy(case)
+            output = json.loads(changed['runs'][0]['stdout'])
+            (output if mutation in ('schema', 'status') else output['error'])[mutation] = 'wrong'
+            changed['runs'][0]['stdout'] = json.dumps(output)
+            self.assertFalse(expected_capability_refusal(dict(name='default'), changed))
 
     def test_exercised_socket_contract_checks_targets_modes_and_evidence(self):
         report = launcher.initial_report(['portable'])

@@ -22,6 +22,21 @@ def status(cases):
     return 'incomplete' if any(case['status'] == 'unavailable' for case in cases) else 'exercised'
 
 
+def expected_capability_refusal(profile, case):
+    """These profiles have no capture; only a real typed refusal closes that path."""
+    if (case['status'] != 'unavailable' or profile['name'] not in ('portable', 'default', 'pcap-free')
+            or case['name'].startswith('connect-') or case.get('reason_code') != 'unsupported_capability'
+            or not case.get('runs')):
+        return False
+    run = case['runs'][0]
+    if type(run.get('exit_code')) is not int or run['exit_code'] == 0:
+        return False
+    output = measurements.strict_json(run['stdout'])
+    return (output.get('schema') == 'packetcraftr.output/v10' and output.get('status') == 'error'
+            and output.get('error', {}).get('kind') == 'capability'
+            and output['error'].get('code') in ('capability.unsupported', 'capability.route'))
+
+
 def validate(report, expected_commit=None, require_complete=False):
     if report.get('schema') != SCHEMA or report.get('platform') not in ('Linux', 'macOS', 'Windows'):
         raise ValueError('unknown discovery evidence contract or platform')
@@ -34,6 +49,8 @@ def validate(report, expected_commit=None, require_complete=False):
     if not all(HEX.fullmatch(report.get(field, '')) for field in (
             'fixture_sha256', 'peer_fixture_sha256', 'launcher_sha256')):
         raise ValueError('native evidence lacks fixture-source provenance')
+    if require_complete and (report.get('error') or report.get('validation_error')):
+        raise ValueError('failed native launcher record cannot close acceptance')
     profiles = report['profiles']
     names = [profile['name'] for profile in profiles]
     if names != [name for name in PROFILES if name in names] or not names:
@@ -136,10 +153,6 @@ def validate(report, expected_commit=None, require_complete=False):
                     continue
                 # No capture capability was compiled: preserve and verify the
                 # actual typed admission failure, rather than relabel a skip.
-                if (case['status'] == 'unavailable' and profile['name'] in ('portable', 'pcap-free')
-                        and not case['name'].startswith('connect-')
-                        and case.get('reason_code') == 'unsupported_capability'
-                        and case.get('runs') and case['runs'][0]['exit_code'] != 0
-                        and measurements.strict_json(case['runs'][0]['stdout']).get('error', {}).get('code') in ('capability.unsupported', 'capability.route')):
+                if expected_capability_refusal(profile, case):
                     continue
                 raise ValueError('required supported native discovery path remains unavailable or failed')

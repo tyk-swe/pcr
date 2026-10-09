@@ -626,3 +626,37 @@ fn an_adaptive_scan_still_selects_the_probe_its_host_answered() {
     );
     assert_true_hops(&state, &aggregate);
 }
+
+#[test]
+fn a_collection_that_cannot_retain_a_hops_responses_is_rejected() {
+    let state = network(&[(11, &[1], Arrival::Reply)]);
+    let mut plan = request(&[11]);
+    plan.probes_per_hop = 3;
+    plan.collection.max_responses = 2;
+
+    assert!(
+        matches!(
+            plan.validate(),
+            Err(traceroute::Error::InvalidLimit {
+                field: "max_responses",
+                ..
+            })
+        ),
+        "{:?}",
+        plan.validate()
+    );
+    let error = trace(&state, plan).expect_err("the plan is refused");
+
+    assert!(
+        matches!(
+            error,
+            traceroute::Error::InvalidLimit {
+                field: "max_responses",
+                ..
+            }
+        ),
+        "{error}"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!((state.armed, state.sends), (0, 0));
+}

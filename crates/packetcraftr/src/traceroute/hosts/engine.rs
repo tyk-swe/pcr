@@ -22,7 +22,7 @@ use crate::target::{
     DeclaredTargets, FamilyGate, ResolveTarget, SelectedAddress, admit_selection, wire_limits,
 };
 use crate::traceroute::error::Probes;
-use crate::traceroute::request::{check_collection, tcp_payload};
+use crate::traceroute::request::tcp_payload;
 use crate::traceroute::{Error, MAX_PROBE_BYTES, Probe, WORKFLOW};
 use crate::{Client, Sink};
 
@@ -126,7 +126,6 @@ fn approve<A: Authorizer + ResolveTarget>(
     deadline: &Deadline,
 ) -> Result<Approved, Error> {
     request.validate()?;
-    check_collection(&request.collection, &request.limits, request.probes_per_hop)?;
     let (selected, plan) = admit_selection(
         authorizer,
         deadline,

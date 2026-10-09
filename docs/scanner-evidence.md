@@ -441,6 +441,16 @@ The record keeps these rules:
   that this host's own probes would not show.
 - A silent hop is a timeout probe, not an absent hop, and a host that ran out
   of hops is `incomplete`, not unreachable.
+- The stage shares the scan's evidence budget: the response frames the scan
+  retained, its undecoded and unattributed frames, and
+  `retained_evidence_bytes` are deducted from the trace's evidence limits and
+  capture queues. A trace that cannot retain a hop's responses is refused with
+  a typed limit after the scan and before any trace probe; a plan in which no
+  host can be traced deducts nothing. The finalized trace collection is
+  validated before the scan sends.
+- A scan that sent traffic paces the trace's first batch by a full `--rate`
+  interval: a wall-clock `sent_at` cannot name a monotonic marker, so the
+  interval is owed in full rather than estimated.
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs

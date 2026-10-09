@@ -1104,8 +1104,11 @@ Output/v11 changes, all additive within the new family:
 - The trace's packets and time count in the scan's `stats`, and its
   diagnostics in the scan's `diagnostics`.
 
-In Rust, `traceroute::Error` gains `TargetSelection` and `InvalidObservation`,
-and `traceroute::hosts` with `Client::trace_hosts` is new. The standalone
+In Rust, `traceroute::Error` gains `TargetSelection`, `InvalidObservation`,
+and `Collection` — the last wraps the exchange or capture error a host plan's
+evidence collection failed, so its classification is the underlying
+`cli.exchange_limit` or `cli.capture_limit` — and `traceroute::hosts` with
+`Client::trace_hosts` is new. The standalone
 `traceroute::Request`, `Report`, and `Aggregate` are unchanged.
 `probe::runner::run_batches` keeps its behavior over the new `run_planned`.
 In `packetcraftr-cli`, `output::scan::Report::publish` takes the optional trace

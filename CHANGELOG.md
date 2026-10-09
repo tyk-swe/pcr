@@ -13,7 +13,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   Raw scan results gain an optional `traceroute` member, NDJSON scans gain
   `traceroute_probe`, `traceroute_undecoded`, and `traceroute_host` records,
   and `complete` gains an optional `traceroute`. `traceroute::Error` gains
-  `TargetSelection` and `InvalidObservation`. CLI `output::scan::Report::publish`
+  `TargetSelection`, `InvalidObservation`, and `Collection` (the last keeps
+  the underlying exchange and capture classification as its source). CLI
+  `output::scan::Report::publish`
   takes the optional trace member, and the NDJSON `complete` conversion takes
   the optional trace summary. See `docs/migration-unreleased.md`.
 - `neighbor::Error::Cleanup` gains `attempts`, the requests sent before the
@@ -1984,6 +1986,19 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `scan --traceroute` validates the trace request again against the workflow's
+  finalized route and collection before the scan sends, so a queue
+  configuration a hop's attempts cannot retain fails with
+  `cli.traceroute_limit` before any probe instead of during trace admission.
+- `scan --traceroute` shares one evidence budget with its scan: the frames and
+  bytes the scan already retained, including undecoded and unattributed
+  frames, are deducted from the trace's evidence limits and capture queues, so
+  a trace that cannot retain a hop's responses is refused after the scan
+  rather than overrunning it. A plan in which no host can be traced deducts
+  nothing.
+- `scan --traceroute` paces its first probe conservatively: when the scan sent
+  traffic, the first trace batch owes a full `--rate` interval, because a
+  wall-clock `sent_at` cannot name a monotonic pacing marker.
 - Adaptive raw scans admit the conservative worst live wave before any traffic:
   the per-probe and per-route maxima retained across wave-sized chunks plus
   capture interface unions, so a scan over the `capture.interfaces` source

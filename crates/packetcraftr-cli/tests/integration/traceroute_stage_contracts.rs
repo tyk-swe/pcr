@@ -112,3 +112,47 @@ fn standalone_traceroute_keeps_its_contract() {
     assert_eq!(document["schema"], "packetcraftr.output/v11");
     assert_eq!(document["command"], "traceroute");
 }
+
+#[test]
+fn the_trace_stage_validates_its_finalized_queue_limits_before_any_scan() {
+    for format in ["json", "ndjson"] {
+        let output = run(&[
+            "--output",
+            format,
+            "scan",
+            "127.0.0.1",
+            "--method",
+            "raw",
+            "--transport",
+            "icmp",
+            "--traceroute",
+            "--traceroute-strategy",
+            "icmp",
+            "--max-queue-frames",
+            "1",
+            "--max-undecoded",
+            "1",
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(USAGE_EXIT),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        if format == "json" {
+            let document = parse_json(&output);
+            assert_eq!(document["status"], "error");
+            assert_eq!(document["error"]["kind"], "usage");
+            assert_eq!(document["error"]["code"], "cli.traceroute_limit");
+            assert!(
+                document["error"].get("scan").is_none(),
+                "{document} sent no probe"
+            );
+        } else {
+            let records = common::parse_ndjson(&output);
+            assert_eq!(records.len(), 1, "{records:?}");
+            assert_eq!(records[0]["event"], "error");
+            assert_eq!(records[0]["error"]["code"], "cli.traceroute_limit");
+        }
+    }
+}

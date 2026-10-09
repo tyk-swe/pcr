@@ -1421,6 +1421,8 @@ fn evidence_limits_are_shared_across_hosts() {
     plan.limits.max_evidence_frames = 3;
     plan.limits.max_undecoded = 3;
     plan.collection.capture.max_frames = 3;
+    plan.collection.max_responses = 3;
+    plan.collection.max_unmatched_frames = 3;
     let mut network = Network::new([
         (host(1), path(&[1, 2], End::Reply)),
         (host(2), path(&[1, 2], End::Reply)),

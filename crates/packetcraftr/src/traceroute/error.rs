@@ -40,6 +40,9 @@ pub enum Error {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("invalid scan observation: {message}")]
     InvalidObservation { message: String },
+    /// The evidence queues cannot retain what the plan's probes need.
+    #[error("invalid traceroute collection")]
+    Collection(#[source] BoundaryError),
     #[error("scoped link-local target {target} is not supported by this workflow")]
     ScopedTarget { target: String },
     #[error("traceroute authorization failed")]
@@ -102,6 +105,7 @@ impl Classified for Error {
                 ),
             ),
             Self::Authorization(source)
+            | Self::Collection(source)
             | Self::Execution { source, .. }
             | Self::Output { source } => source.classification(),
             Self::ScopedTarget { .. } => Classification::new(

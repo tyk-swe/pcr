@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_netio::deadline::MAX_WAIT;
 
 use super::selection::Observed;
@@ -11,7 +12,7 @@ use crate::execution::limits::{check_limits, duration_violation};
 use crate::probe::Transport;
 use crate::scan::Reply;
 use crate::target::{Family, Selection};
-use crate::traceroute::request::{Bounds, check_destination_port, tcp_payload};
+use crate::traceroute::request::{Bounds, check_collection, check_destination_port, tcp_payload};
 use crate::traceroute::{Error, Limits, MAX_PROBES};
 
 /// A transport and, for TCP and UDP, the destination port to trace with.
@@ -103,6 +104,10 @@ impl Request {
             return Err(Error::InvalidSourcePort);
         }
         self.validate_observed()?;
+        check_collection(&self.collection, &self.limits, self.probes_per_hop)?;
+        self.collection
+            .validate()
+            .map_err(|source| Error::Collection(BoundaryError::from_error(source)))?;
         if let Some(reuse) = &self.reuse
             && duration_violation(reuse.max_age, MAX_WAIT)
         {

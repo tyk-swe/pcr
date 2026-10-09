@@ -249,7 +249,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         probes_per_second: rate,
         limits: scan_limits,
         route: packetcraftr::route::Options::default(),
-        collection: packetcraftr::exchange::Collection::default(),
+        collection: crate::system::exchange::collection(timeout.timeout(), queue_limits)?,
     };
     let trace_stage = traceroute
         .then(|| {
@@ -324,8 +324,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let trace_client = trace_stage
         .is_some()
         .then(|| workflow.client(Runtime::Workflow));
+    // The finalized template is validated again before the scan runs, so a
+    // queue configuration the trace stage cannot use fails before any probe.
     let trace_stage = trace_stage
-        .map(|stage| stage.with_workflow(workflow.route.clone(), workflow.collection.clone()));
+        .map(|stage| stage.with_workflow(workflow.route.clone(), workflow.collection.clone()))
+        .transpose()?;
     let request = packetcraftr::scan::Request {
         route: workflow.route,
         collection: workflow.collection,

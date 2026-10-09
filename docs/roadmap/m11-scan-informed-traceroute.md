@@ -128,10 +128,12 @@ incomplete.
   `--traceroute-attempts`, and `--traceroute-max-probes` bound the plan, and
   `--traceroute-reuse-max-age-ms` enables reuse. Every `--traceroute-*` option
   requires `--traceroute`. The stage spends what is left of `--max-duration`,
-  waits what remains of one probe interval after the scan's last
-  transmission when `--rate` is set, takes the scan's timeout, rate, family,
-  and evidence limits, and uses its own workflow client rather than the
-  scan's neighbor-narrowed one. Its statistics and diagnostics count in the
+  owes a full probe interval when the scan transmitted under `--rate` (a
+  conservative pause: a wall-clock `sent_at` cannot name a monotonic marker),
+  takes the scan's timeout, rate, and family, shares the scan's retained
+  evidence budget, and uses its own workflow client rather than the scan's
+  neighbor-narrowed one. The finalized request — the workflow's route and
+  collection in place — is validated before the scan sends. Its statistics and diagnostics count in the
   scan's. It needs the raw method:
   `--connect`, `--method tcp-connect`, and an automatic choice of connect are
   usage errors, as are `--list`, a port without a strategy, a port with ICMP,
@@ -211,8 +213,13 @@ incomplete.
 - **Hosts are traced one after another.** The [M7][m7-fairness] per-host
   interleaving does not apply, and a slow host delays the ones after it.
 - **Admission happens after the scan.** A trace plan that does not fit what is
-  left of `--max-duration`, or that exceeds `--traceroute-max-probes`, fails
-  the command after the scan has run, before any trace probe is sent.
+  left of `--max-duration`, that exceeds `--traceroute-max-probes`, or whose
+  share of the evidence budget cannot retain a hop's responses fails the
+  command after the scan has run, before any trace probe is sent. The scan's
+  already-retained response, undecoded, and unattributed frames and bytes are
+  deducted from the trace's limits and capture queues, except when no host
+  can be traced at all, where nothing is deducted and `not_traced` outcomes
+  are reported normally.
 - **Not every scan host has a trace.** The stage declares every scan host,
   including a host discovery found silent, so such a host is traced only when
   `--traceroute-strategy` names a probe, and is `not_traced` otherwise.

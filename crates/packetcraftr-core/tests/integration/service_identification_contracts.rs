@@ -44,10 +44,49 @@ fn ssh_accepts_exactly_sixteen_preamble_lines_before_the_identification() {
                 Some("9.8p1")
             );
         } else {
-            assert_eq!(observation.outcome, ObservationOutcome::Malformed);
+            assert_eq!(observation.outcome, ObservationOutcome::Truncated);
             assert!(identification.candidates.is_empty());
         }
     }
+}
+
+#[test]
+fn http_parser_resource_limits_are_truncated_and_syntax_errors_are_malformed() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "http-head");
+    for (wire, expected) in [
+        (
+            format!("HTTP/1.1 200 OK\r\n{}\r\n", "X-Fixture: ok\r\n".repeat(257)),
+            ObservationOutcome::Truncated,
+        ),
+        (
+            format!("HTTP/1.1 200 {}\r\n\r\n", "a".repeat(8192)),
+            ObservationOutcome::Truncated,
+        ),
+        (
+            "HTTP/1.1 invalid\r\n\r\n".into(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            "HTTP/1.1 200 OK\r\nInvalid Header\r\n\r\n".into(),
+            ObservationOutcome::Malformed,
+        ),
+    ] {
+        let observation = service_probes::observe(probe, wire.as_bytes(), false);
+        assert_eq!(observation.outcome, expected, "{observation:?}");
+        assert!(observation.diagnostic.is_some());
+        assert!(corpus.identify(probe, &observation).candidates.is_empty());
+    }
+}
+
+#[test]
+fn ssh_preamble_resource_limits_remain_truncated_evidence() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "ssh-banner");
+    let wire = format!("{}\r\nSSH-2.0-OpenSSH_9.8p1\r\n", "a".repeat(1025));
+    let observation = service_probes::observe(probe, wire.as_bytes(), false);
+    assert_eq!(observation.outcome, ObservationOutcome::Truncated);
+    assert!(corpus.identify(probe, &observation).candidates.is_empty());
 }
 
 #[test]

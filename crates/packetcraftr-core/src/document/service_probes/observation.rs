@@ -75,14 +75,14 @@ fn ssh(bytes: &[u8]) -> Observation {
             if index >= 16 {
                 return failure(
                     Protocol::Ssh,
-                    ObservationOutcome::Malformed,
+                    ObservationOutcome::Truncated,
                     "SSH preamble exceeds 16 lines",
                 );
             }
             if line.len() > MAX_FIELD_BYTES {
                 return failure(
                     Protocol::Ssh,
-                    ObservationOutcome::Malformed,
+                    ObservationOutcome::Truncated,
                     "SSH preamble line exceeds its limit",
                 );
             }
@@ -168,11 +168,14 @@ fn http(bytes: &[u8]) -> Observation {
             ObservationOutcome::Truncated,
             "HTTP response head is incomplete",
         ),
-        Err(error) => failure(
-            Protocol::Http,
-            ObservationOutcome::Malformed,
-            error.to_string(),
-        ),
+        Err(error) => {
+            let outcome = if matches!(error, http::Error::Limit(_)) {
+                ObservationOutcome::Truncated
+            } else {
+                ObservationOutcome::Malformed
+            };
+            failure(Protocol::Http, outcome, error.to_string())
+        }
     }
 }
 

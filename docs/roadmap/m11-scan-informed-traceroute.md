@@ -157,8 +157,40 @@ incomplete.
 
   With `max_age` 4 s the same test reuses hop 3 of the second host and probes
   hops 4, 2, 1, and 5 again.
-- Nothing has run against a live network. Every trace result here comes from
-  scripted or fake-responder topologies.
+- A native Linux run used a throwaway privileged container with network
+  namespaces on documentation addresses. The scanner reached two routers,
+  `r1` (192.0.2.2) and `r2` (192.0.2.6); h1 (198.51.100.10, tcp/22 open) and
+  h2 (198.51.100.11, closed) sat three hops away behind `r2`, and h3
+  (203.0.113.10, closed) two hops away behind `r1`. The routers had ICMP rate
+  limiting off, and replies toward the scanner were delayed 5 ms, because the
+  [freshness rule][netio-transmit] discards replies that arrive before
+  `send()` returns. The binary was a release build with `native-layer2` and
+  `native-layer3`. A first run lost h1's SYN/ACK to
+  `exchange.integrity_rejected` because the veths offloaded checksums, and
+  h1 was correctly reported `not_traced` with `no_responsive_probe`. With
+  checksum offload off on the veths, a `--ports 22 --traceroute
+  --traceroute-attempts 1` scan published:
+  - Every host was `complete` with `destination_reached`, and each was traced
+    over tcp/22 with the `observed` scan probe it answered: h1's
+    `tcp_syn_ack`, and h2's and h3's `tcp_reset`. The fresh hops were
+    192.0.2.2 and 192.0.2.6 before h1 and h2, and 192.0.2.2 before h3, with
+    the destination's own reply at the last hop. No router was reported as a
+    destination.
+  - Without reuse the trace sent 8 probes. With
+    `--traceroute-reuse-max-age-ms 30000` it sent 7: h2 probed hop 2, matched
+    h1's 192.0.2.6, and reused hop 1 (192.0.2.2) from h1, published in
+    `reused_hops` with h1 as its source and an age of about 1.26 s. h3 drew
+    its destination's reply at the anchor hop 2, matched 192.0.2.2 at hop 1,
+    and reused nothing. With a 1 ms maximum age nothing was reused and the
+    trace sent 8 probes.
+  - `--discovery only` selected the `icmp_echo_reply` discovery probe for
+    every host and gave the same paths and reuse over ICMP.
+  - NDJSON streamed three scan `probe` records, then each host's
+    `traceroute_probe` records followed by its `traceroute_host` record, then
+    the `endpoint`, `host`, and `complete` records. `complete.traceroute`
+    carried the plan.
+  - `--traceroute-max-probes 2` was refused with `cli.traceroute_limit` after
+    the scan and before any trace probe, as the known limit below says.
 
 ### Known limits
 
@@ -183,8 +215,9 @@ incomplete.
 - **Not every scan host has a trace.** The stage declares every scan host,
   including a host discovery found silent, so such a host is traced only when
   `--traceroute-strategy` names a probe, and is `not_traced` otherwise.
-- **No live evidence.** No run on a real network, and none on Linux, macOS, or
-  Windows with native capture, exists (see Blockers).
+- **Native evidence is Linux-only and delayed.** The one native run used
+  namespaces with replies delayed past `send()`. No undelayed run and no run
+  on macOS or Windows exists (see Blockers).
 
 ## Change map
 
@@ -266,7 +299,8 @@ Settled at M11 with the recommended positions:
       [method tests][method-tests]), and the stage's usage rejections before
       any probe are in the [stage contracts][cli-stage].
 - [ ] Linux, macOS, and Windows support and runtime evidence are recorded
-      independently. No native run exists on any of them (see Blockers).
+      independently. The Linux namespace run above passes only with delayed
+      replies, and macOS and Windows have not run (see Blockers).
 
 ## Blockers
 
@@ -276,10 +310,11 @@ keep M11 `In progress`:
 - **Ground truth ([M2][m2]).** Trace results are scanner results, so path
   shapes (shared prefix, divergence, reconvergence, equal-cost routes, silent
   hops) need comparison-corpus entries with independent expected paths.
-- **Runtime evidence ([M3][m3]).** No native run of `scan --traceroute`
-  exists on Linux, macOS, or Windows, and the [freshness rule][netio-transmit]
-  that discards replies arriving before `send()` returns applies to trace
-  probes as it does to every raw probe.
+- **Runtime evidence ([M3][m3]).** The [freshness rule][netio-transmit] that
+  discards replies arriving before `send()` returns applies to trace probes
+  as it does to every raw probe, so the Linux run needed delayed replies.
+  Deciding what such frames prove belongs with native validation in [M3][m3].
+  `scan --traceroute` has not run on macOS or Windows.
 
 [m2]: m02-ground-truth-benchmarks.md
 [m5]: m05-host-discovery.md

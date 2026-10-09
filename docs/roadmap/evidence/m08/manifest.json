@@ -1,0 +1,74 @@
+{
+  "manifest_version": 1,
+  "implementation_revision": "928ad8d555fe8b34abd144083612b54ace0fef1f",
+  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/37989728319",
+  "runner": "https://github.com/tyk-swe/pcr/blob/928ad8d555fe8b34abd144083612b54ace0fef1f/scripts/test-service-identification.py",
+  "profiles_per_platform": 5,
+  "cases_per_profile": 72,
+  "total_profiles": 20,
+  "total_cases": 1440,
+  "failed": 0,
+  "unavailable": 0,
+  "independent_audit": {
+    "path": "independent-audit.json",
+    "sha256": "30cfda5c47f4bc8ccb09d3352df1e7d6b9ff9bf9c8553be35a0e933afe1bae08"
+  },
+  "reports": [
+    {
+      "path": "linux.json.gz",
+      "artifact": "service-identification-linux",
+      "platform": "Linux",
+      "architecture": "x86_64",
+      "recorded_at": "2026-10-09T20:56:25.111627+00:00",
+      "profiles": 5,
+      "cases": 360,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 1950874,
+      "original_json_sha256": "d5aeb679a28548dd11175291e979835cbf18db8dd531f477e3efcf245329a55f",
+      "gzip_sha256": "3cb67139d69607d4c7aef76da8c6524e65ae5ea387fa41478fb061b4c1dc3ab7"
+    },
+    {
+      "path": "macos-arm64.json.gz",
+      "artifact": "service-identification-macos-14",
+      "platform": "Darwin",
+      "architecture": "arm64",
+      "recorded_at": "2026-10-09T20:55:27.396518+00:00",
+      "profiles": 5,
+      "cases": 360,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 1967970,
+      "original_json_sha256": "8e4735cbf5c001b67821deeed07ee0d518b2bc553df9e703957fa39b6d5779a9",
+      "gzip_sha256": "fb2baf242d1b2d06f1103ab58a07e82194684d4bef4d55d91095b187f263e6d4"
+    },
+    {
+      "path": "macos-x86_64.json.gz",
+      "artifact": "service-identification-macos-15-intel",
+      "platform": "Darwin",
+      "architecture": "x86_64",
+      "recorded_at": "2026-10-09T21:04:32.401043+00:00",
+      "profiles": 5,
+      "cases": 360,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 1968393,
+      "original_json_sha256": "8e45a8c2f1cdc5d8f351fb325753f17ee3b99b17dc0a043199cdf2cee85fdb98",
+      "gzip_sha256": "efdd9a2e46d630e2c70aa58e09967468ff9525f3a71d26a62497861c498cb869"
+    },
+    {
+      "path": "windows.json.gz",
+      "artifact": "service-identification-windows-2022",
+      "platform": "Windows",
+      "architecture": "AMD64",
+      "recorded_at": "2026-10-09T20:59:41.491185+00:00",
+      "profiles": 5,
+      "cases": 360,
+      "failed": 0,
+      "unavailable": 0,
+      "original_json_bytes": 2023315,
+      "original_json_sha256": "de900d4a3208124daff2c4c9d39b531b3f5ff507d8ddda94da23fdb8479a3d4b",
+      "gzip_sha256": "ff4ba6fab679cc77c8eccd924201613724e713e24cf1afc49ab0bb990b2488af"
+    }
+  ]
+}

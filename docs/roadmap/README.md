@@ -111,7 +111,7 @@ identification.
 | M5 | [Host discovery][m5] | A composed discovery workflow over ARP/NDP and ICMP/TCP/UDP probes, with host-level records, reasons, and optional enrichment. | M4 | In progress |
 | M6 | [Port planning and state inference][m6] | Catalog and named port selections, port exclusions, curated UDP payloads, mixed TCP/UDP plans, inferred states, and capability-aware method planning. | M1 | In progress |
 | M7 | [Adaptive scheduling and bounded performance][m7] | RTT-driven timeouts, selective retries, rate-limit handling, per-host fairness, adaptive windows, and redesigned connect scheduling under hard ceilings. | M2, M6 | In progress |
-| M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | In progress |
+| M8 | [Service and version identification][m8] | A read-only identification workflow with banner and protocol-aware probes, match documents, and separate claim/candidate/confidence records. | M7 | Complete |
 | M9 | [TLS services and identification corpus][m9] | TLS-wrapped interrogation over a bounded transport, an expanded reviewed corpus, and held-out evaluation of coverage and confidence. | M8 | Planned |
 | M10 | [OS identification][m10] | Finite IPv4 and IPv6 stack-fingerprint collection, matching against a reviewed corpus, and qualified or explicitly inconclusive results. | M5, M7 | Planned |
 | M11 | [Scan-informed traceroute][m11] | Traceroute that selects an observed responsive probe, traces several authorized hosts under one plan, and reuses paths with explicit provenance. | M5, M6 | Planned |
@@ -193,6 +193,19 @@ skipping remaining environment-dependent macOS/Windows checks. M5 stays
 `In progress` under the project's broader native close gate; skipped, failed,
 and unavailable checks do not establish parity. This does not re-baseline the
 comparison scorecard or close the broader M2/M3 milestones.
+
+At M8 closure on 2026-10-09, reviewed implementation and fixtures
+`928ad8d555fe8b34abd144083612b54ace0fef1f` have 44 gap rows: 16 present,
+12 partial, 8 missing, 3 deferred, and 5 non-goal, giving 16/36 (44.4%) gap
+coverage. Independent inventory 1.4.0 supplies the identification conditions.
+All [1,440 acceptance case-runs](evidence/m08/README.md) passed across 20
+profile executions on Linux, macOS ARM/Intel, and Windows. Every profile
+exercised IPv4/IPv6 and JSON/NDJSON. Reports retain actual attempts, application
+write/read counts, elapsed time, response prefixes, claims and match provenance.
+Retained-state and peak-RSS benchmark measures have no new M8 measurements;
+held-out identification coverage and confidence remain M9 work. M8's applicable
+ground-truth and socket runtime gates close while M2, M3, M5 and M7 retain their
+broader open gates.
 
 ## Definition of done
 

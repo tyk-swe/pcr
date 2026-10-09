@@ -10,7 +10,12 @@ runtime evidence on Linux, macOS ARM/Intel, and Windows, and the complete
 full-native Linux inventory. Discovery, reverse-name, and host-record rows now
 reflect M5 implementation `e7f3e2efa7b47ba2ffa7e2818dbcc4d53eaef9e3` with
 [recorded Linux acceptance](evidence/m05/README.md); their broader native coverage
-remains incomplete. Other rows retain their earlier review scope.
+remains incomplete. Identification, intensity/exclusions, qualified service
+metadata and scanner-data lifecycle rows reflect completed [M8][m8] at
+`928ad8d555fe8b34abd144083612b54ace0fef1f`, verified on 2026-10-09.
+[M8 acceptance](evidence/m08/README.md) records 1,440 passed case-runs across
+20 ordinary-socket profiles on Linux, macOS ARM/Intel, and Windows. Other rows
+retain their earlier review scope.
 
 Nmap references are the official guide consulted on 2026-10-05/06. No live Nmap
 comparison is claimed. Actual differential runs must pin binary version, build
@@ -90,7 +95,7 @@ successful runtime validation are also separate claims.
 | Existing resource and failure evidence | Nmap exposes timing/reason controls; see [performance][nmap-performance] and [output][nmap-output]. | [Limits][scan-request], [pipeline contracts][pipeline-contract], and [published failure records][scan-output] already cover bounded preparation/evidence and confirmed pending transmissions. Preserve these strengths; logical byte charges and complete acquisition are not the same claim. | Present with constraints | [M1.1][m1] and [M7][m7] |
 | IPv4/IPv6 and native platform coverage | IPv6 and platform/build-dependent capabilities; see [options][nmap-options] and [downloads][nmap-download]. | [Feature profiles][project-readme], [capability selection][native-build], and [dispatch][native-dispatch] cover Linux/macOS/Windows, not every Nmap platform. macOS complete-header raw IPv6 transmission and Windows raw-source restrictions remain explicit limits; capture-backed work needs Layer 2 support. | Partial | Platform gate in [M3][m3], tracked in every milestone. |
 | Privileged native runtime evidence | Platform/build-dependent raw and socket capabilities; see [scan techniques][nmap-techniques] and [downloads][nmap-download]. A guide entry is not runtime evidence. | The [validation matrix][native-validation] and [CI routes][ci] distinguish Linux isolated runtime checks from macOS/Windows compilation, passive, and deterministic contracts. M4 scoped runtime evidence is recorded on macOS ARM/Intel and Windows across five profiles; the broader native inventory and administrator-owned protection controls remain incomplete. | Partial | [M3][m3], required for each native milestone. |
-| Versioned machine output | Nmap offers normal/XML and other output formats; see [output][nmap-output]. | [Scan command formats][scan-command] already support text, JSON, and NDJSON under [output v7][output-contract], with streaming terminal semantics and a [compatibility policy][compatibility]. Machine output is not a missing capability; it is a different contract. | Present with constraints | Preserve/version in every milestone; [M4][m4] introduced v7 for scoped identity and `target_list`, and v6 stays frozen. |
+| Versioned machine output | Nmap offers normal/XML and other output formats; see [output][nmap-output]. | [Scan command formats][scan-command] already support text, JSON, and NDJSON under [output v11][output-contract], with streaming terminal semantics and a [compatibility policy][compatibility]. Machine output is not a missing capability; it is a different contract. | Present with constraints | Preserve/version in every milestone; [M4][m4] introduced v7 for scoped identity and `target_list`, and v6–v10 stay frozen. |
 
 ## Broader diagnostic scan coverage
 
@@ -124,7 +129,7 @@ or this documentation.
 | Capability | Implementation change | Remaining gate |
 | --- | --- | --- |
 | Measurement corpus | The injected-provider scanner fixture exercises 72 raw-scan and 12 traceroute cells against the authored corpus; four native loopback connect cells are specified for the real binary. | [M4 closure measurements](evidence/m04/benchmark.json) passed all 264 repeated cells, including native IPv6 connect in a private loopback namespace. Pinned live Nmap differential comparison remains [M2][m2] work. |
-| Output family | [M6][m6]'s `packetcraftr.output/v8` adds the scan `plan`, port hints, inference, unattributed evidence, and the list `ports` record; [M5][m5]'s `packetcraftr.output/v9` adds host records, probe `stage`, and the discovery plan. v6, v7, and v8 stay frozen. | Consumer and migration review; the release schema verifier still gates. |
+| Output family | [M6][m6]'s `packetcraftr.output/v8` adds the scan `plan`, port hints, inference, unattributed evidence, and the list `ports` record; [M5][m5]'s `packetcraftr.output/v9` adds host records, probe `stage`, and the discovery plan. v10 adds adaptive scheduling; [M8][m8] introduces v11 explicit identification. v6–v10 stay frozen. | [M8 acceptance](evidence/m08/README.md) passes consumer conformance and release asset smoke checks; every later contract change preserves these gates. |
 | Named/preset ports and exclusions | Bundled `port-catalog` 1.0.0 (73 project-authored, RFC-cited TCP/UDP names in six presets, no frequency ranking) resolves names, `@preset`s, and `tcp:`/`udp:` prefixes; `--exclude-ports` applies after expansion and before `--max-ports`, policy, planning, and `--list` (`scan::select_endpoints`). There is no default selection. | A frequency-ranked "top ports" selection waits for a source accepted under [M1.2][m1]. |
 | Mixed-protocol plans | `Request.endpoints` carries typed TCP and UDP endpoints under one probe, wire, and duration budget; plans, correlation winners, collectors, and output key endpoints by address, transport, and port. | SCTP in [M13.1][m13]; native capture-backed runs in [M3][m3]. |
 | Curated UDP payloads | `--curated-udp-payloads` applies seven project-authored, RFC-cited `udp-payloads` 1.0.0 profiles (DNS, mDNS, RPC bind, NTP, SNMPv3, STUN, CoAP); operator profiles win and every override is published. | Coverage against provisioned services in [M2][m2]; identification in [M8][m8]. |

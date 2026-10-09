@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod clock;
+pub(crate) mod discovery;
 pub(crate) mod dns;
 pub(crate) mod responder;
 
@@ -27,6 +28,10 @@ use packetcraftr_core::layer::Padding;
 use packetcraftr_core::packet::{MacAddress, Packet};
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::{Arp, Ethernet};
+use packetcraftr_core::protocol::network::ndp::{
+    MessageOption, NeighborAdvertisement, NeighborSolicitation,
+};
+use packetcraftr_core::protocol::network::{Icmpv6, Ipv6};
 use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::{self, Id as InterfaceId};
@@ -285,13 +290,13 @@ impl RecordingTransmit {
 impl transmit::Provider for RecordingTransmit {
     fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         let bytes = frame.bytes();
-        let report = transmit::Submission::start().complete(bytes.len(), bytes.clone());
-        match arp_reply(bytes) {
+        let submission = transmit::Submission::start();
+        match neighbor_reply(bytes) {
             Some((target, _)) if self.silent => {
-                self.steps.push(Step::Neighbor(IpAddr::V4(target)));
+                self.steps.push(Step::Neighbor(target));
             }
             Some((target, reply)) => {
-                self.steps.push(Step::Neighbor(IpAddr::V4(target)));
+                self.steps.push(Step::Neighbor(target));
                 let reply = if self.untimed {
                     Frame::without_timestamp(LinkType::ETHERNET, reply)
                 } else {
@@ -306,7 +311,9 @@ impl transmit::Provider for RecordingTransmit {
             }
             None => self.steps.push(Step::Transmit(bytes.to_vec())),
         }
-        Ok(report)
+        // The reply enters capture before the send operation returns, as on
+        // a fast native local link.
+        Ok(submission.complete(bytes.len(), bytes.clone()))
     }
 }
 
@@ -334,6 +341,59 @@ impl capture::Provider for RecordingTransmit {
             live: Arc::clone(&self.live),
         })
     }
+}
+
+fn neighbor_reply(request: &[u8]) -> Option<(IpAddr, Bytes)> {
+    arp_reply(request)
+        .map(|(target, reply)| (IpAddr::V4(target), reply))
+        .or_else(|| ndp_reply(request))
+}
+
+fn ndp_reply(request: &[u8]) -> Option<(IpAddr, Bytes)> {
+    let frame = Frame::new(
+        SystemTime::UNIX_EPOCH,
+        LinkType::ETHERNET,
+        Bytes::copy_from_slice(request),
+    )
+    .ok()?;
+    let decoded = Dissector::new(builtin::registry())
+        .decode(frame, decode::Options::default())
+        .ok()?;
+    let ethernet = decoded.packet.get::<Ethernet>()?;
+    let ip = decoded.packet.get::<Ipv6>()?;
+    let icmp = decoded.packet.get::<Icmpv6>()?;
+    if icmp.icmp_type != 135 {
+        return None;
+    }
+    let solicitation = NeighborSolicitation::decode(&icmp.body).ok()?;
+    let mut packet = Packet::new();
+    packet.push(Ethernet {
+        source: NEIGHBOR_MAC.0,
+        destination: ethernet.source,
+        ether_type: WireValue::Auto,
+    });
+    packet.push(Ipv6 {
+        source: solicitation.target,
+        destination: ip.source,
+        hop_limit: 255,
+        ..Default::default()
+    });
+    packet.push(
+        NeighborAdvertisement {
+            target: solicitation.target,
+            router: false,
+            solicited: true,
+            override_address: true,
+            reserved: 0,
+            options: vec![MessageOption::target_link_layer(NEIGHBOR_MAC)],
+        }
+        .to_icmpv6()
+        .ok()?,
+    );
+    let wire = Builder::new(builtin::registry())
+        .build(packet, Context::default(), build::Options::default())
+        .ok()?;
+    Some((IpAddr::V6(solicitation.target), wire.bytes))
 }
 
 fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {

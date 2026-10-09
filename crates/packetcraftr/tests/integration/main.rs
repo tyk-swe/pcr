@@ -16,6 +16,7 @@ mod connect_clock_contracts;
 mod connect_evidence_contracts;
 mod discovery_contracts;
 mod discovery_matrix;
+mod discovery_neighbor_matrix;
 mod dns_batch_contracts;
 mod dns_cancellation_contracts;
 mod dns_wire_contracts;

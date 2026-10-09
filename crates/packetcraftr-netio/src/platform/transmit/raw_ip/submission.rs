@@ -21,6 +21,7 @@ use windows::Win32::Networking::WinSock::{
 
 use super::preparation::PreparedRawIp;
 use crate::interface::Id as InterfaceId;
+use crate::transmit::Submission;
 use crate::{Error, NativeCapability, Unsupported, link::Mode};
 use packetcraftr_core::error::Source;
 
@@ -66,7 +67,9 @@ fn configure_socket_options(
     Ok(())
 }
 
-pub(in crate::platform) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
+pub(in crate::platform) fn send(
+    packet: &PreparedRawIp,
+) -> Result<(usize, Submission), RawSocketError> {
     let domain = match packet.destination {
         IpAddr::V4(_) => Domain::IPV4,
         IpAddr::V6(_) => Domain::IPV6,
@@ -80,12 +83,14 @@ pub(in crate::platform) fn send(packet: &PreparedRawIp) -> Result<usize, RawSock
     })?;
 
     bind_interface(&socket, packet)?;
-    socket
-        .send_to(
-            &packet.submission,
-            &socket_address(packet.destination, packet.interface.index),
-        )
-        .map_err(|source| raw_error("sending the raw IP datagram", source))
+    let destination = socket_address(packet.destination, packet.interface.index);
+    // Setup cannot transmit. Sample eligibility only at the native submission
+    // boundary so queued traffic during socket preparation stays pre-send.
+    let submission = Submission::start();
+    let actual = socket
+        .send_to(&packet.submission, &destination)
+        .map_err(|source| raw_error("sending the raw IP datagram", source))?;
+    Ok((actual, submission))
 }
 
 #[cfg(target_os = "linux")]

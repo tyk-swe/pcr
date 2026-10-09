@@ -52,7 +52,7 @@ aggregate `scan` result, from
 | `status` | Attempt observation: `response` if a checksum-valid, protocol-consistent reply was attributed within the attempt's window, else `timeout`. |
 | `classification` | Attempt observation: the per-attempt value from the classification vocabulary below. |
 | `responder` | Attempt observation: the address that actually answered. It can differ from `destination` — an ICMP error reports the intermediate hop that sent it, and a next-hop neighbor answer is not the target answering. |
-| `sent_at`, `received_at`, `latency` | Metadata: timing of the attempt and its attributed reply. |
+| `sent_at`, `received_at`, `latency` | Metadata: submission-start timing of the attempt and ingress of its attributed reply; latency includes the submission interval, not precise wire transit. |
 | `frame` | Metadata: the retained captured reply bytes, when retained evidence kept them. |
 | `reason` | Attempt observation: the fixed correlation string behind the classification (see below), or `no checksum-valid, protocol-consistent response before the deadline` for silence. |
 | `application` | Attempt observation, subordinate: the UDP profile check outcome described below. |
@@ -419,3 +419,13 @@ scan-stage probes; discovery probes appear only in host records.
 [scan-report]: ../crates/packetcraftr/src/scan/report.rs
 [scheduling-output]: ../crates/packetcraftr-cli/src/output/scan.rs
 [udp-document]: ../crates/packetcraftr-core/src/document/udp_profiles.rs
+
+### Successful native submission intervals
+
+`transmit::Timing::freshness_marker()` is the start of a successful exact-byte
+native send; `completed()` is when acceptance returned. Matching captures inside
+that interval are eligible, subject to integrity, identity, ingress, and deadline
+checks. Raw socket creation/configuration precedes the start marker. Missing
+monotonic ingress or captures older than that marker remain ineligible. Neither
+marker is an exact wire-departure timestamp, a causality guarantee, or host identity
+proof; reported latency is measured from submission start.

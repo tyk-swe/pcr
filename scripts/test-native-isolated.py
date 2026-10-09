@@ -122,9 +122,8 @@ def respond(stop, interface, received):
             source, destination = frame[38:54], frame[22:38]
             source_port, destination_port, sequence = struct.unpack('!HHI', frame[54:62])
             received.append(dict(interface=interface, destination_port=destination_port, frame=frame.hex()))
-            # A veth peer can answer before the scanner's send call returns, and
-            # correlation rightly refuses a frame captured inside that interval.
-            time.sleep(0.05)
+            # Reply immediately: matching ingress during a successful native
+            # submission must be eligible without an artificial egress delay.
             flags, window = (0x12, 65535) if destination_port == SCOPED_OPEN else (0x14, 0)
             tcp = struct.pack('!HHIIBBHHH', destination_port, source_port, 0x1000, (sequence + 1) & 0xffffffff,
                               0x50, flags, window, 0, 0)

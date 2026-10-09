@@ -1986,6 +1986,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `scan --traceroute` applies the shared evidence budget under NDJSON output
+  too: the stream tracker strips matched response frames, so the scan's
+  retained counts are accumulated from the published events rather than
+  re-derived from what the tracker kept.
+- `scan --traceroute` authorizes the trace's neighbor requests (such as a
+  gateway's ARP or NDP resolution) against the destination policy before
+  sending them; the workflow client the stage composes now carries
+  `with_neighbor_request_authorization`.
+- `traceroute::hosts::Request` rejects observations that repeat one scan
+  sequence on different addresses with `InvalidObservation` before admission,
+  since two hosts cannot share one probe's reply.
 - `scan --traceroute` validates the trace request again against the workflow's
   finalized route and collection before the scan sends, so a queue
   configuration a hop's attempts cannot retain fails with

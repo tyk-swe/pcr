@@ -130,11 +130,20 @@ impl Request {
     fn validate_observed(&self) -> Result<(), Error> {
         let invalid = |message: String| Error::InvalidObservation { message };
         let mut seen = HashSet::new();
+        // One observation per scan probe too: the same sequence on two
+        // addresses cannot be the distinct replies the plan rests on.
+        let mut seen_sequences = HashSet::new();
         for observed in &self.observed {
             if !seen.insert(observed.address) {
                 return Err(invalid(format!(
                     "more than one observation for {}",
                     observed.address
+                )));
+            }
+            if !seen_sequences.insert(observed.sequence) {
+                return Err(invalid(format!(
+                    "the observation for {} repeats scan sequence {}",
+                    observed.address, observed.sequence
                 )));
             }
             match (

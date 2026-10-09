@@ -660,3 +660,100 @@ fn a_collection_that_cannot_retain_a_hops_responses_is_rejected() {
     let state = state.lock().unwrap();
     assert_eq!((state.armed, state.sends), (0, 0));
 }
+
+#[test]
+fn observations_sharing_one_scan_sequence_are_rejected() {
+    let strategies = [
+        None,
+        Some(Strategy {
+            transport: Transport::Tcp,
+            destination_port: Some(80),
+        }),
+    ];
+    let stages = [
+        (scan::Stage::Discovery, scan::Stage::Scan),
+        (scan::Stage::Scan, scan::Stage::Discovery),
+    ];
+    for fallback in strategies {
+        for (first, second) in stages {
+            let state = network(&[(11, &[1], Arrival::Reply), (12, &[1], Arrival::Reply)]);
+            let mut plan = request(&[11, 12]);
+            plan.strategy = fallback;
+            plan.observed = vec![
+                Observed {
+                    address: IpAddr::V4(host(11)),
+                    transport: Transport::Tcp,
+                    destination_port: Some(80),
+                    stage: first,
+                    sequence: 0,
+                    reply: scan::Reply::TcpSynAck,
+                    observed_at: None,
+                },
+                Observed {
+                    address: IpAddr::V4(host(12)),
+                    transport: Transport::Tcp,
+                    destination_port: Some(80),
+                    stage: second,
+                    sequence: 0,
+                    reply: scan::Reply::TcpReset,
+                    observed_at: None,
+                },
+            ];
+
+            assert!(
+                matches!(
+                    plan.validate(),
+                    Err(traceroute::Error::InvalidObservation { .. })
+                ),
+                "{:?}",
+                plan.validate()
+            );
+            let error =
+                trace(&state, plan).expect_err("a shared sequence cannot be two distinct replies");
+            assert!(
+                matches!(error, traceroute::Error::InvalidObservation { .. }),
+                "{error}"
+            );
+            let state = state.lock().unwrap();
+            assert_eq!((state.armed, state.sends), (0, 0), "{fallback:?}");
+        }
+    }
+}
+
+#[test]
+fn observations_with_distinct_sequences_retain_their_exact_provenance() {
+    let state = network(&[(11, &[1], Arrival::Reply), (12, &[2], Arrival::Reply)]);
+    let mut plan = request(&[11, 12]);
+    plan.strategy = None;
+    plan.observed = vec![
+        Observed {
+            address: IpAddr::V4(host(11)),
+            transport: Transport::Tcp,
+            destination_port: Some(80),
+            stage: scan::Stage::Scan,
+            sequence: 3,
+            reply: scan::Reply::TcpSynAck,
+            observed_at: None,
+        },
+        Observed {
+            address: IpAddr::V4(host(12)),
+            transport: Transport::Icmp,
+            destination_port: None,
+            stage: scan::Stage::Discovery,
+            sequence: 7,
+            reply: scan::Reply::IcmpEchoReply,
+            observed_at: None,
+        },
+    ];
+
+    let aggregate = trace(&state, plan).expect("distinct sequences trace");
+
+    let selections = [(3, scan::Reply::TcpSynAck), (7, scan::Reply::IcmpEchoReply)];
+    for (trace, (sequence, reply)) in aggregate.hosts.iter().zip(selections) {
+        let Basis::Observed(observed) = &trace.host.selection.as_ref().unwrap().basis else {
+            panic!("the observed host must not use the fallback")
+        };
+        assert_eq!(observed.sequence, sequence);
+        assert_eq!(observed.reply, reply);
+    }
+}

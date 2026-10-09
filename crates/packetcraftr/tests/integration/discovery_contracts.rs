@@ -14,7 +14,7 @@ use packetcraftr::scan::discovery::{
     Basis, Evidence, Mode, NeighborOutcome, Options, ReasonKind, Scan, State, Unresponsive,
 };
 use packetcraftr::scan::{self, Reply, Request, Stage, connect};
-use packetcraftr::target::{Family, Specification, Target};
+use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{ProviderSet, route};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{
@@ -708,6 +708,83 @@ fn a_probe_through_a_denied_gateway_sends_no_neighbor_request() {
         steps.take().as_slice(),
         [Step::Neighbor(gateway), Step::Transmit(_)] if *gateway == address(GATEWAY)
     ));
+}
+
+#[test]
+fn a_trace_through_a_denied_gateway_sends_no_neighbor_request() {
+    let steps = Steps::default();
+    let io = RecordingTransmit::new(steps.clone());
+    // What `scan --traceroute` composes for the trace stage: an independent
+    // workflow client whose neighbor requests are authorized like probes'.
+    let client = |allowed: &[&str]| {
+        Client::new(
+            builtin::registry(),
+            Policy {
+                allowed_destinations: allowed
+                    .iter()
+                    .map(|text| DestinationConstraint::Exact(address(text)))
+                    .collect(),
+                ..Policy::default()
+            },
+            common::providers(GatewayRoutes, io.clone()),
+        )
+        .with_neighbor_request_authorization()
+    };
+    let mut plan = packetcraftr::traceroute::hosts::Request {
+        targets: Selection {
+            include: vec![Specification::Target(Target::Address(address(FIRST)))],
+            exclude: Vec::new(),
+        },
+        max_targets: 16,
+        address_family: Family::Any,
+        strategy: Some(packetcraftr::traceroute::hosts::Strategy {
+            transport: packetcraftr::probe::Transport::Tcp,
+            destination_port: Some(80),
+        }),
+        observed: Vec::new(),
+        source_port: None,
+        payload_size: 0,
+        dont_fragment: false,
+        dscp: 0,
+        first_hop: 1,
+        max_hops: 8,
+        probes_per_hop: 1,
+        timeout: Duration::from_millis(50),
+        probes_per_second: None,
+        paced_after: None,
+        reuse: None,
+        limits: packetcraftr::traceroute::Limits {
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        },
+        route: route::Options {
+            link_mode: LinkMode::Layer2,
+            ..route::Options::default()
+        },
+        collection: packetcraftr::exchange::Collection::default(),
+    };
+    let collector = packetcraftr::traceroute::hosts::Collector::default();
+    let error = client(&[FIRST])
+        .trace_hosts(plan.clone(), collector)
+        .expect_err("the policy denies the gateway the trace resolves");
+    assert_eq!(
+        error.classification().code,
+        "policy.destination_not_allowed",
+        "{error:?}"
+    );
+    assert!(steps.take().is_empty(), "no neighbor request or probe");
+    assert_eq!(io.armed(), 0, "no capture was armed");
+
+    let collector = packetcraftr::traceroute::hosts::Collector::default();
+    plan.observed.clear();
+    client(&[FIRST, GATEWAY])
+        .trace_hosts(plan, collector)
+        .expect("an authorized gateway is resolved");
+    let steps = steps.take();
+    assert!(
+        matches!(steps.first(), Some(Step::Neighbor(gateway)) if *gateway == address(GATEWAY)),
+        "{steps:?}"
+    );
 }
 
 #[test]

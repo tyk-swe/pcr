@@ -319,11 +319,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let client = workflow
         .client(Runtime::Workflow)
         .with_neighbor_request_authorization();
-    // The trace stage resolves its own neighbors, so it takes an ordinary
-    // workflow client rather than the scan's narrowed one.
-    let trace_client = trace_stage
-        .is_some()
-        .then(|| workflow.client(Runtime::Workflow));
+    // The trace stage resolves its own neighbors, so it takes an independent
+    // workflow client with neighbor-request authorization rather than the
+    // scan's neighbor-narrowed one.
+    let trace_client = trace_stage.is_some().then(|| {
+        workflow
+            .client(Runtime::Workflow)
+            .with_neighbor_request_authorization()
+    });
     // The finalized template is validated again before the scan runs, so a
     // queue configuration the trace stage cannot use fails before any probe.
     let trace_stage = trace_stage
@@ -417,9 +420,17 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     // attempt without its frame, for the endpoint inferences.
                     let tracker = packetcraftr::scan::Collector::default();
                     let mut tracked = tracker.clone();
+                    // The tracker strips matched response frames, so the
+                    // scan's retained evidence is counted as events publish.
+                    let retained = Arc::new(Mutex::new(traceroute::Retained::default()));
                     let scan_emit = Arc::clone(&emit);
+                    let observing = Arc::clone(&retained);
                     let mut report = client
                         .scan(request.clone(), move |event: packetcraftr::scan::Event| {
+                            observing
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .observe(&event);
                             if let packetcraftr::scan::Event::Probe { target, probe } = &event {
                                 let probe = packetcraftr::scan::ProbeEvidence {
                                     response: None,
@@ -442,10 +453,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     let scan_sent = last_scan_transmission(&aggregate);
                     let mut traced = None;
                     if let Some((stage, trace_client)) = trace {
+                        let retained = retained
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let trace_emit = Arc::clone(&emit);
                         let result = stage.stream(
                             trace_client,
                             &aggregate,
+                            *retained,
                             started,
                             scan_sent,
                             move |event| publish(&trace_emit, Event::Trace(event)),

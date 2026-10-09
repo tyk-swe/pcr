@@ -33,6 +33,56 @@ pub(super) struct Stage {
     plan: output::traceroute::hosts::Plan,
 }
 
+/// The evidence the scan already holds against the shared budget, as scalar
+/// counts: streaming keeps the counts even though its tracker strips the
+/// matched response frames. Retained bytes stay authoritative on
+/// `scan::Aggregate::retained_evidence_bytes`.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Retained {
+    frames: usize,
+    undecoded: usize,
+}
+
+impl Retained {
+    /// Counts the retained evidence a complete aggregate describes: the
+    /// matched response frames, the undecoded frames, and the unattributed
+    /// frames. A host's probe references name the same discovery evidence and
+    /// are not counted again.
+    fn of(scan: &packetcraftr::scan::Aggregate) -> Self {
+        Self {
+            frames: scan
+                .discovery
+                .iter()
+                .chain(scan.endpoints.iter().flat_map(|endpoint| &endpoint.probes))
+                .filter(|probe| probe.response.is_some())
+                .count()
+                .saturating_add(scan.undecoded.len())
+                .saturating_add(scan.unattributed.len()),
+            undecoded: scan.undecoded.len(),
+        }
+    }
+
+    /// Counts one published scan event's retained evidence: a probe's
+    /// response frame, or one undecoded or unattributed frame. A metadata
+    /// `reply` without a `response` frame holds none, and `Sent` and
+    /// `Diagnostic` events retain nothing.
+    pub(super) fn observe(&mut self, event: &packetcraftr::scan::Event) {
+        match event {
+            packetcraftr::scan::Event::Probe { probe, .. } if probe.response.is_some() => {
+                self.frames = self.frames.saturating_add(1);
+            }
+            packetcraftr::scan::Event::Undecoded { .. } => {
+                self.frames = self.frames.saturating_add(1);
+                self.undecoded = self.undecoded.saturating_add(1);
+            }
+            packetcraftr::scan::Event::Unattributed { .. } => {
+                self.frames = self.frames.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// What one run of the stage published.
 pub(super) struct Traced {
     pub(super) aggregate: hosts::Aggregate,
@@ -152,6 +202,7 @@ impl Stage {
     fn request(
         &self,
         scan: &packetcraftr::scan::Aggregate,
+        retained: Retained,
         started: Instant,
         last_sent: Option<SystemTime>,
     ) -> Result<hosts::Request, CliError> {
@@ -180,20 +231,12 @@ impl Stage {
                 && (covered.contains(&host.address) || self.template.strategy.is_some())
         });
         let (limits, collection) = if sends {
-            let held_frames = scan
-                .discovery
-                .iter()
-                .chain(scan.endpoints.iter().flat_map(|endpoint| &endpoint.probes))
-                .filter(|probe| probe.response.is_some())
-                .count()
-                + scan.undecoded.len()
-                + scan.unattributed.len();
             let limits = packetcraftr::traceroute::Limits {
                 max_evidence_frames: self
                     .template
                     .limits
                     .max_evidence_frames
-                    .saturating_sub(held_frames),
+                    .saturating_sub(retained.frames),
                 max_evidence_bytes: self
                     .template
                     .limits
@@ -203,7 +246,7 @@ impl Stage {
                     .template
                     .limits
                     .max_undecoded
-                    .saturating_sub(scan.undecoded.len()),
+                    .saturating_sub(retained.undecoded),
                 ..self.template.limits
             };
             let limits = packetcraftr::traceroute::Limits {
@@ -260,7 +303,7 @@ impl Stage {
         started: Instant,
         last_sent: Option<SystemTime>,
     ) -> Result<Traced, CliError> {
-        let request = self.request(scan, started, last_sent)?;
+        let request = self.request(scan, Retained::of(scan), started, last_sent)?;
         let collector = hosts::Collector::default();
         let report = client
             .trace_hosts(request, collector.clone())
@@ -283,13 +326,14 @@ impl Stage {
         &self,
         client: &Client,
         scan: &packetcraftr::scan::Aggregate,
+        retained: Retained,
         started: Instant,
         last_sent: Option<SystemTime>,
         emit: impl FnMut(hosts::Event) -> Result<(), packetcraftr_core::error::BoundaryError>
         + Send
         + 'static,
     ) -> Result<Streamed, CliError> {
-        let request = self.request(scan, started, last_sent)?;
+        let request = self.request(scan, retained, started, last_sent)?;
         let latest = std::sync::Arc::new(std::sync::Mutex::new(None::<SystemTime>));
         let observed = std::sync::Arc::clone(&latest);
         let mut emit = emit;
@@ -473,7 +517,12 @@ mod tests {
             .expect("an instant ten seconds ago");
 
         let request = stage
-            .request(&aggregate, started, Some(SystemTime::now()))
+            .request(
+                &aggregate,
+                Retained::of(&aggregate),
+                started,
+                Some(SystemTime::now()),
+            )
             .expect("a request");
 
         let include: Vec<_> = request
@@ -511,7 +560,9 @@ mod tests {
             0,
         );
 
-        let request = stage.request(&aggregate, started, None).unwrap();
+        let request = stage
+            .request(&aggregate, Retained::of(&aggregate), started, None)
+            .unwrap();
 
         assert_eq!(request.limits.max_duration, Duration::from_nanos(1));
         assert!(request.paced_after.is_none());
@@ -545,7 +596,7 @@ mod tests {
         let template = stage.template.collection.clone();
 
         let request = stage
-            .request(&aggregate, Instant::now(), None)
+            .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
             .expect("the narrowed request validates");
 
         // Two answered probes, one undecoded frame, one unattributed frame.
@@ -611,8 +662,9 @@ mod tests {
             (options(), 4usize, "no frames left"),
         ] {
             let stage = Stage::new(&options, &scan).expect("the template itself is valid");
+            let aggregate = held(held_frames);
             let error = stage
-                .request(&held(held_frames), Instant::now(), None)
+                .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
                 .expect_err("the trace cannot retain a hop's responses");
             assert_eq!(
                 error.classification.code, "cli.traceroute_limit",
@@ -638,7 +690,7 @@ mod tests {
         );
 
         let error = stage
-            .request(&aggregate, Instant::now(), None)
+            .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
             .expect_err("no response fits inside the remaining bytes");
 
         assert_eq!(error.classification.kind, Kind::Usage, "{error}");
@@ -667,7 +719,7 @@ mod tests {
         );
 
         let request = stage
-            .request(&aggregate, Instant::now(), None)
+            .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
             .expect("a plan of only not_traced hosts needs no evidence budget");
 
         assert_eq!(
@@ -699,14 +751,19 @@ mod tests {
         for last_sent in [UNIX_EPOCH, SystemTime::now() + Duration::from_secs(3600)] {
             let before = Instant::now();
             let request = stage
-                .request(&aggregate, Instant::now(), Some(last_sent))
+                .request(
+                    &aggregate,
+                    Retained::of(&aggregate),
+                    Instant::now(),
+                    Some(last_sent),
+                )
                 .expect("a request");
             let after = Instant::now();
             let paced = request.paced_after.expect("a prior send paces the trace");
             assert!(before <= paced && paced <= after, "{last_sent:?}");
         }
         let request = stage
-            .request(&aggregate, Instant::now(), None)
+            .request(&aggregate, Retained::of(&aggregate), Instant::now(), None)
             .expect("a request");
         assert!(request.paced_after.is_none());
     }
@@ -729,6 +786,94 @@ mod tests {
         stage
             .with_workflow(scan.route.clone(), scan.collection.clone())
             .expect("an equivalent workflow collection still validates");
+    }
+
+    #[test]
+    fn streamed_events_count_what_a_stripped_aggregate_no_longer_holds() {
+        let stage = Stage::new(&options(), &scan_request()).expect("a valid stage");
+        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        let responded = probe_evidence(0, address, Some(scan::Reply::IcmpEchoReply));
+        let mut retained = Retained::default();
+        retained.observe(&scan::Event::Probe {
+            target: std::sync::Arc::from("192.0.2.7"),
+            probe: responded.clone(),
+        });
+        retained.observe(&scan::Event::Undecoded { frame: frame(0x02) });
+        retained.observe(&scan::Event::Unattributed(scan::Unattributed {
+            attribution: scan::Attribution::Late,
+            sequence: Some(0),
+            frame: frame(0x03),
+        }));
+        retained.observe(&scan::Event::Diagnostic(
+            packetcraftr_core::diagnostic::Diagnostic::info("test.retained", "holds nothing"),
+        ));
+        // A metadata reply with no retained frame is not held evidence.
+        let mut untimed = probe_evidence(1, address, Some(scan::Reply::IcmpEchoReply));
+        untimed.response = None;
+        retained.observe(&scan::Event::Probe {
+            target: std::sync::Arc::from("192.0.2.7"),
+            probe: untimed,
+        });
+
+        // The tracker keeps the outcome but strips the frame, and keeps no
+        // undecoded or unattributed events at all.
+        let mut stripped = responded;
+        stripped.response = None;
+        let aggregate = aggregate(
+            vec![host(address, None)],
+            vec![stripped],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            512,
+        );
+
+        let request = stage
+            .request(&aggregate, retained, Instant::now(), None)
+            .expect("the narrowed request validates");
+
+        assert_eq!(
+            request.limits.max_evidence_frames,
+            stage.template.limits.max_evidence_frames - 3
+        );
+        assert_eq!(
+            request.limits.max_undecoded,
+            stage.template.limits.max_undecoded - 1
+        );
+        assert_eq!(
+            request.limits.max_evidence_bytes,
+            stage.template.limits.max_evidence_bytes - 512
+        );
+    }
+
+    #[test]
+    fn an_exactly_full_frame_budget_fails_with_a_typed_limit() {
+        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        let mut scan = scan_request();
+        scan.limits.max_evidence_frames = 1;
+        scan.limits.max_undecoded = 1;
+        scan.collection.capture.max_frames = 1;
+        scan.collection.max_responses = 1;
+        scan.collection.max_unmatched_frames = 1;
+        let stage = Stage::new(&options(), &scan).expect("the template itself is valid");
+        let aggregate = aggregate(
+            vec![host(address, None)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let retained = Retained {
+            frames: 1,
+            undecoded: 0,
+        };
+
+        let error = stage
+            .request(&aggregate, retained, Instant::now(), None)
+            .expect_err("the scan used the whole shared frame budget");
+
+        assert_eq!(error.classification.code, "cli.traceroute_limit", "{error}");
     }
 
     #[test]

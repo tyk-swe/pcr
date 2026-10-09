@@ -159,5 +159,8 @@ missing native dependencies, and unavailable routed/shared-link isolation stay
 explicitly unavailable, never exercised. `--require-complete` fails on missing
 required coverage; portable/default/pcap-free raw capability refusals count only when
 the actual typed admission failure and nonzero process result were retained.
-See [M5](roadmap/m05-host-discovery.md#discovery-validation) for commands and
-current acceptance limits and explicitly skipped platform-isolation checks.
+See [M5](roadmap/m05-host-discovery.md#independent-discovery-corpus-and-runtime-route) for commands and
+current acceptance limits. [Recorded Linux acceptance](roadmap/evidence/m05/README.md)
+retains all five profiles. Environment-dependent macOS/Windows checks were
+explicitly skipped by the user; failed or unavailable host-local results remain
+failed or unavailable, and broad platform acceptance remains open.

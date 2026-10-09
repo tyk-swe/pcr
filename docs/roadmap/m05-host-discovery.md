@@ -301,33 +301,38 @@ Settled at M5 with the recommended positions:
       vendor label is published.
 - [ ] The declared discovery matrix passes controlled IPv4 and IPv6 behavior
       and native runtime checks on Linux, macOS, and Windows wherever the
-      capability is supported. The [matrix][discovery-matrix] covers every
-      probe, host behavior, and follow-up in both families with fixtures. The
-      independently authored corpus now covers all six conditions. The new
-      Linux immediate-reply namespace fixture passes the dual-stack matrix;
-      reviewed native routes now retain exact clean-revision evidence across
-      profiles and supported macOS/Windows paths when executed (see Blockers).
+      capability is supported. The [raw matrix][discovery-matrix] and
+      [neighbor matrix][neighbor-matrix] cover the independently authored six
+      conditions. [Recorded Linux acceptance](evidence/m05/README.md) passes all
+      required paths across five profiles: 44 exercised cases, 36 actual typed
+      capability refusals, and 168 bounded CLI invocations. The remaining
+      environment-dependent macOS/Windows checks were explicitly skipped at
+      the user's request; they are not passed runtime checks.
 
-## Blockers
+## Remaining native acceptance
 
-Every fixture criterion has evidence, but the roadmap [close
-gates][close-gates] keep M5 `In progress`:
+Implementation, independent corpus coverage, and the required Linux validation
+are complete. The roadmap [close gates][close-gates] keep M5 `In progress`
+because broad macOS/Windows native acceptance remains incomplete. The user's
+instruction to skip those environment-dependent checks changes this task's
+validation scope; it does not establish native parity or close the project's
+remaining platform gate.
 
-- **Native acceptance ([M3][m3]).** The original completion-marker race is
-  fixed: exact successful submissions admit matching captures from immediately
-  before the native send call. Socket preparation is outside that interval;
-  missing ingress and pre-submission frames remain ineligible. This establishes
-  eligibility, not exact wire departure, causality, or authenticated identity.
-  The dual-stack discovery/neighbor regressions exercise replies captured during
-  submission; stale-frame pipeline regressions still pass.
-- The versioned [native discovery launcher](../../scripts/test-host-discovery-native.py)
-  binds the corpus, executable, fixture, clean reviewed revision, actual output,
-  and isolation. Linux creates independent immediate Ethernet replies in fresh
-  namespaces. macOS/Windows admit only literal loopback targets: socket and
-  supported raw paths execute, while routed/proxy/interface-mutation scenarios
-  remain explicitly unavailable without disposable link isolation. Missing
-  drivers and unsupported capabilities are not passes. M5 stays **In progress**
-  until the required supported native paths have retained acceptance evidence.
+The completion-marker race is fixed: exact successful submissions admit matching
+captures from submission start, immediately before the native send call. Socket
+preparation is outside that interval; missing or earlier monotonic ingress stays
+ineligible. The deterministic interval regression and clean-revision Linux
+immediate-reply runtime pass without imposed reply delays.
+
+The [native discovery launcher](../../scripts/test-host-discovery-native.py)
+retains precise unsupported/dependency/isolation results. The reviewed
+[host-local run 37968418933](https://github.com/tyk-swe/pcr/actions/runs/37968418933)
+recorded macOS ARM fixture contradictions (reserved closed sockets timed out,
+and raw IPv4 loopback discovery observed no qualifying replies); those results
+remain failures. Windows completed with explicit missing/unsupported raw
+capabilities. The remaining macOS Intel execution was cancelled after the skip
+instruction. Loopback-only admission cannot prove routed or shared-link behavior;
+no driver installation or remote traffic was introduced.
 
 ## Independent discovery corpus and runtime route
 

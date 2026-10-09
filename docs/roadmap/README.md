@@ -185,6 +185,15 @@ across Linux, macOS ARM/Intel, and Windows; unsupported paths are explicit
 capability results. Identification quality is not applicable to M4. This closes
 M4's gates while the broader M2/M3 milestones remain in progress.
 
+M5 now has [recorded Linux discovery acceptance](evidence/m05/README.md) at
+`e7f3e2efa7b47ba2ffa7e2818dbcc4d53eaef9e3`, using independent dataset 1.3.0.
+All required paths pass across five profiles: 44 exercised cases and 36 preserved
+typed capability refusals, across 168 bounded CLI invocations. The user requested
+skipping remaining environment-dependent macOS/Windows checks. M5 stays
+`In progress` under the project's broader native close gate; skipped, failed,
+and unavailable checks do not establish parity. This does not re-baseline the
+comparison scorecard or close the broader M2/M3 milestones.
+
 ## Definition of done
 
 Every milestone, and every workstream inside it, ships with:

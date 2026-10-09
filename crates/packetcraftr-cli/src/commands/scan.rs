@@ -390,10 +390,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     traced = Some(result);
                 }
                 // The lookups' sends, bytes, and time count in this scan's
-                // reported statistics.
+                // reported statistics, and run in the allowance the scan and
+                // trace left over.
+                let lookups_client = client.with_remaining_budget(&aggregate.stats);
                 let (names, lookups) = reverse::names(
                     lookup,
-                    &client,
+                    &lookups_client,
                     &aggregate.hosts,
                     started,
                     reverse::last_transmission(
@@ -475,10 +477,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                         traced = Some(result);
                     }
                     // The lookups' sends, bytes, and time count in this
-                    // scan's reported statistics.
+                    // scan's reported statistics, and run in the allowance
+                    // the scan and trace left over.
+                    let lookups_client = client.with_remaining_budget(&report.stats);
                     let (reverse_dns, lookups) = reverse::names(
                         lookup,
-                        client,
+                        &lookups_client,
                         &report.hosts,
                         started,
                         reverse::last_transmission(

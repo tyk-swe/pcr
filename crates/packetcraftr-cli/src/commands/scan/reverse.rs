@@ -466,6 +466,26 @@ mod tests {
     }
 
     #[test]
+    fn a_lookup_runs_in_the_allowance_the_scan_and_trace_left() {
+        let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
+        let client = budget_client(2, 3);
+        // The earlier stages spent the whole two-packet allowance: the
+        // narrowed view authorizes no question, so the host keeps a failed
+        // record and no traffic leaves, without the command failing.
+        let spent = packetcraftr::Stats {
+            packets_attempted: 2,
+            ..packetcraftr::Stats::default()
+        };
+        let view = client.with_remaining_budget(&spent);
+        assert_eq!(view.policy().max_packets_per_operation, 0);
+        let (records, stats) = lookup.run(&view, &responding(1), Instant::now(), None);
+        assert_eq!(records.len(), 1);
+        let record = records[0].as_ref().expect("the host keeps a record");
+        assert_eq!(record.status, QuestionStatus::Failed, "{record:?}");
+        assert_eq!(stats.packets_attempted, 0, "nothing was sent");
+    }
+
+    #[test]
     fn every_batch_of_lookups_shares_one_policy_budget() {
         let lookup = udp_lookup(packetcraftr_netio::link::Mode::Layer3);
         let client = budget_client(batch::MAX_QUESTIONS, 3);

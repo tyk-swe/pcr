@@ -1110,7 +1110,10 @@ neighbor-configuration error and its classification — and `traceroute::hosts` 
 `Client::trace_hosts` is new. `hosts::Report` carries a `neighbor_stats`
 summary of the neighbor requests the probes' routes resolved; those packets
 and bytes are already inside `stats`, so it is a library field for
-accounting, not a new output member. The standalone
+accounting, not a new output member. `Client::with_remaining_budget` is a
+new additive view helper that narrows an operation's packet and byte
+ceilings by what an earlier stage already sent; `scan --traceroute` uses it
+so the trace and its lookups share the scan's policy budget. The standalone
 `traceroute::Request`, `Report`, and `Aggregate` are unchanged.
 `probe::runner::run_batches` keeps its behavior over the new `run_planned`.
 In `packetcraftr-cli`, `output::scan::Report::publish` takes the optional trace

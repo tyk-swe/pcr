@@ -132,6 +132,10 @@ incomplete.
   may send — one per probe, worst case even though the shared operation cache
   usually serves them; each resolution is authorized like a probe, tries once,
   keeps its answer for the operation, and waits on the trace's rate. The
+  stage runs inside the policy packet and byte allowance remaining after
+  the scan's traffic (`with_remaining_budget`), so an exhausted budget
+  refuses further trace traffic; a plan that traces no host requires no
+  additional allowance. The
   requests actually sent count in the operation's statistics. The stage spends
   what is left of `--max-duration`, takes a monotonic pacing marker from the
   stage before it — so a scan or trace that sent anything owes the next stage

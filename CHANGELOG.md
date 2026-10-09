@@ -1997,6 +1997,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
   socket preparation outside the eligible interval and reject missing/stale
   ingress; submission timing is not precise wire departure or identity proof.
+- `scan --traceroute` and the reverse-DNS lookups after it run inside the
+  scan's policy packet and byte budget rather than a fresh one: the trace
+  stage and each lookup share `Client::with_remaining_budget`, so an
+  exhausted allowance refuses the trace before any further I/O.
 - `scan --link-mode layer3` is honored in the trace stage's early
   validation, so its neighbor-pacing timeout rule applies only to routes
   that can resolve a neighbor.

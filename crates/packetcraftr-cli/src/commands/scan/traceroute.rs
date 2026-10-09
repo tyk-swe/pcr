@@ -303,6 +303,9 @@ impl Stage {
     ) -> Result<Traced, CliError> {
         let request = self.request(scan, Retained::of(scan), started, last_sent)?;
         let collector = hosts::Collector::default();
+        // The trace runs in the policy allowance the scan left over, not a
+        // fresh one.
+        let client = client.with_remaining_budget(&scan.stats);
         let report = client
             .trace_hosts(request, collector.clone())
             .map_err(CliError::classified)?;
@@ -331,6 +334,7 @@ impl Stage {
         let latest = std::sync::Arc::new(std::sync::Mutex::new(None::<Instant>));
         let observed = std::sync::Arc::clone(&latest);
         let mut emit = emit;
+        let client = client.with_remaining_budget(&scan.stats);
         let report = client
             .trace_hosts(request, move |event: hosts::Event| {
                 // The probe's wall-clock sent_at is evidence, not a pacing
@@ -736,6 +740,120 @@ mod tests {
             stage.template.limits.max_undecoded
         );
         assert_eq!(request.collection, stage.template.collection);
+    }
+
+    fn policy_client(policy: packetcraftr::policy::Policy) -> Client {
+        crate::system::client(
+            packetcraftr_core::protocol::builtin::registry(),
+            policy,
+            crate::system::Runtime::Client,
+        )
+    }
+
+    #[test]
+    fn the_trace_spends_only_the_policy_allowance_the_scan_left() {
+        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        let mut scan = aggregate(
+            vec![host(address, None)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        scan.stats = Stats {
+            packets_attempted: 1,
+            bytes: 27,
+            ..Stats::default()
+        };
+        let mut trace_options = options();
+        trace_options.max_hops = 1;
+        let stage = Stage::new(&trace_options, &scan_request()).expect("a valid stage");
+
+        // The scan used the policy's one packet: the trace plan's worst case
+        // is refused before any provider I/O, on both stage paths.
+        let packet_capped = policy_client(packetcraftr::policy::Policy {
+            max_packets_per_operation: 1,
+            ..packetcraftr::policy::Policy::default()
+        });
+        let error = match stage.collect(&packet_capped, &scan, Instant::now(), None) {
+            Ok(_) => panic!("the scan spent the packet allowance"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.classification.code, "policy.packet_limit",
+            "{error:?}"
+        );
+        let error = stage
+            .stream(
+                &packet_capped,
+                &scan,
+                Retained::of(&scan),
+                Instant::now(),
+                None,
+                |_| Ok(()),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("the stream path narrows the same way"));
+        assert_eq!(
+            error.classification.code, "policy.packet_limit",
+            "{error:?}"
+        );
+
+        // The byte ceiling narrows identically: 73 remaining bytes cannot
+        // fit even one worst-case trace probe.
+        let byte_capped = policy_client(packetcraftr::policy::Policy {
+            max_bytes_per_operation: 100,
+            ..packetcraftr::policy::Policy::default()
+        });
+        let error = match stage.collect(&byte_capped, &scan, Instant::now(), None) {
+            Ok(_) => panic!("73 bytes cannot fit a 74-byte probe"),
+            Err(error) => error,
+        };
+        assert_eq!(error.classification.code, "policy.byte_limit", "{error:?}");
+        let error = stage
+            .stream(
+                &byte_capped,
+                &scan,
+                Retained::of(&scan),
+                Instant::now(),
+                None,
+                |_| Ok(()),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("the stream path narrows bytes the same way"));
+        assert_eq!(error.classification.code, "policy.byte_limit", "{error:?}");
+
+        // A plan that sends nothing never trips the exhausted allowance:
+        // with no strategy and no observations, both paths report the host
+        // not-traced instead of erroring.
+        let mut not_traced = trace_options;
+        not_traced.strategy = None;
+        let stage = Stage::new(&not_traced, &scan_request()).expect("a valid stage");
+        let traced = stage
+            .collect(&packet_capped, &scan, Instant::now(), None)
+            .expect("a plan that sends nothing admits against a spent budget");
+        assert_eq!(traced.aggregate.stats.packets_attempted, 0);
+        assert!(
+            traced
+                .aggregate
+                .hosts
+                .iter()
+                .all(|host| matches!(host.host.state, hosts::State::NotTraced(_))),
+            "{:?}",
+            traced.aggregate.hosts
+        );
+        let streamed = stage
+            .stream(
+                &packet_capped,
+                &scan,
+                Retained::of(&scan),
+                Instant::now(),
+                None,
+                |_| Ok(()),
+            )
+            .expect("the empty stream plan also admits");
+        assert_eq!(streamed.report.stats.packets_attempted, 0);
     }
 
     #[test]

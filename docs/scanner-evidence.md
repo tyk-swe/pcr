@@ -464,6 +464,12 @@ The record keeps these rules:
   window, an automatic or link-layer trace whose `--timeout-ms` cannot
   outlast the `--rate` interval is refused with `cli.traceroute_limit`
   before any capture or send.
+- The trace and the lookups after it share the scan's policy packet and
+  byte budget: each stage runs in a `with_remaining_budget` view of the
+  allowance remaining after earlier traffic. An exhausted allowance
+  refuses tracing before capture or transmission; refused reverse lookups
+  retain failed enrichment records without sending. A trace plan in which
+  no host can be traced requires no additional allowance.
 
 [compatibility]: consumer-compatibility.md
 [connect-engine]: ../crates/packetcraftr/src/scan/connect/engine.rs

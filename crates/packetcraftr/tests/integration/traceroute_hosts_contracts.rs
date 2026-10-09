@@ -17,6 +17,7 @@ use packetcraftr::traceroute::hosts::{
 };
 use packetcraftr::traceroute::{self, ResponseKind, Termination};
 use packetcraftr::{Client, Stats};
+use packetcraftr_core::error::Classified;
 use packetcraftr_netio::link::Mode;
 
 fn host(octet: u8) -> Ipv4Addr {
@@ -393,7 +394,7 @@ fn a_real_scan_selects_the_probe_its_host_answered() {
         udp_payload: Default::default(),
         udp_profiles: Default::default(),
         attempts: 1,
-        timeout: Duration::from_millis(50),
+        timeout: Duration::from_millis(500),
         probes_per_second: None,
         limits: scan::Limits {
             max_duration: Duration::from_secs(5),
@@ -756,4 +757,109 @@ fn observations_with_distinct_sequences_retain_their_exact_provenance() {
         assert_eq!(observed.sequence, sequence);
         assert_eq!(observed.reply, reply);
     }
+}
+
+#[test]
+fn a_trace_spends_only_what_the_scan_left_of_the_policy() {
+    let state = network(&[(11, &[], Arrival::Reply)]);
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
+    let scan_request = scan::Request {
+        target_sources: Vec::new(),
+        max_in_flight: 1,
+        targets: packetcraftr::target::Target::Address(IpAddr::V4(host(11))).into(),
+        address_family: Family::Any,
+        endpoints: vec![packetcraftr::probe::ProbeEndpoint::Tcp { port: 80 }],
+        discovery: Default::default(),
+        adaptive: None,
+        udp_payload: Default::default(),
+        udp_profiles: Default::default(),
+        attempts: 1,
+        timeout: Duration::from_millis(50),
+        probes_per_second: None,
+        limits: scan::Limits {
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        },
+        route: packetcraftr::route::Options {
+            link_mode: Mode::Layer3,
+            ..Default::default()
+        },
+        collection,
+    };
+    // A one-packet policy admits the scan's single probe and nothing else.
+    let capped = client(
+        &state,
+        Policy {
+            max_packets_per_operation: 1,
+            ..Policy::default()
+        },
+    );
+    let collector = scan::Collector::default();
+    let report = capped
+        .scan(scan_request.clone(), collector.clone())
+        .expect("the scan completes");
+    let scanned = collector.finish(report).expect("the scan aggregates");
+    assert_eq!(scanned.stats.packets_attempted, 1);
+
+    let mut plan = request(&[11]);
+    plan.max_hops = 1;
+    plan.timeout = Duration::from_millis(500);
+    plan.observed = hosts::observed(&scanned);
+    let view = capped.with_remaining_budget(&scanned.stats);
+    // The narrowed view reads the remainder; the client keeps the full cap.
+    assert_eq!(view.policy().max_packets_per_operation, 0);
+    assert_eq!(capped.policy().max_packets_per_operation, 1);
+    let error = view
+        .trace_hosts(plan.clone(), Collector::default())
+        .expect_err("the scan spent the whole packet budget");
+    assert_eq!(error.classification().code, "policy.packet_limit");
+    assert_eq!(state.lock().unwrap().sends, 1, "no trace traffic at all");
+
+    // One more packet lets the one-hop trace through.
+    let generous = client(
+        &state,
+        Policy {
+            max_packets_per_operation: 2,
+            ..Policy::default()
+        },
+    );
+    let collector = scan::Collector::default();
+    let report = generous
+        .scan(scan_request.clone(), collector.clone())
+        .expect("the scan completes");
+    let scanned = collector.finish(report).expect("the scan aggregates");
+    assert_eq!(state.lock().unwrap().sends, 2, "the second scan's probe");
+    let collector = Collector::default();
+    let report = generous
+        .with_remaining_budget(&scanned.stats)
+        .trace_hosts(plan.clone(), collector.clone())
+        .expect("one packet remains for the trace");
+    collector.finish(report).expect("the trace aggregates");
+    assert_eq!(
+        state.lock().unwrap().sends,
+        3,
+        "two scan probes plus the trace's one"
+    );
+
+    // The byte ceiling narrows the same way: a spent budget that leaves one
+    // byte under the trace's worst-case wire size is refused before I/O.
+    let byte_capped = client(
+        &state,
+        Policy {
+            max_bytes_per_operation: 1_000,
+            ..Policy::default()
+        },
+    );
+    let spent = Stats {
+        bytes: 1_000 - 73,
+        ..Stats::default()
+    };
+    let view = byte_capped.with_remaining_budget(&spent);
+    assert_eq!(view.policy().max_bytes_per_operation, 73);
+    let error = view
+        .trace_hosts(plan, Collector::default())
+        .expect_err("73 bytes cannot fit a 74-byte probe");
+    assert_eq!(error.classification().code, "policy.byte_limit");
+    assert_eq!(state.lock().unwrap().sends, 3, "still no trace traffic");
 }

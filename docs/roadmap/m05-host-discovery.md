@@ -178,17 +178,19 @@ building blocks and publishes one host record per target in the
   `complete`, `stage` on every probe, sent, connect, and failed-probe record,
   and `plan.discovery`. The [evidence model][evidence-hosts] defines the host
   fields and rules.
-- A native Linux run used two throwaway network namespaces joined by a veth
+- A historical native Linux run, before the submission-start fix, used two
+  throwaway network namespaces joined by a veth
   pair on `192.0.2.0/24` and `2001:db8::/64`. Behind the second namespace,
   `198.51.100.0/24` and `2001:db8:1::/64` were routed to targets that do not
   exist. Replies from the target namespace arrived about 25 µs after each ARP
-  request or probe. That is before `send()` returns, so the
+  request or probe. That was before `send()` returned, so the old
   [freshness rule][netio-transmit] discarded them, and every host, the
   responsive one included, stayed `no_response`. An existing
-  `send --link-mode layer2` to the same host fails the same way. With a 5 ms
-  egress delay on the target namespace, discovery with `icmp,neighbor,tcp/9`
+  `send --link-mode layer2` to the same host failed the same way. With a 5 ms
+  egress delay on the target namespace, the historical run (before the
+  submission-start fix below) used discovery with `icmp,neighbor,tcp/9`
   before a scan of tcp/22 and tcp/80, with `--attempts 2` and `--rate 50`,
-  published the following:
+  and published the following:
   - The dual-stack host was `responded` in both families. Its fresh neighbor
     reply, timestamped at capture, and its echo replies and TCP resets from
     the closed port were all `direct`, and the scan found tcp/22 open and
@@ -301,26 +303,61 @@ Settled at M5 with the recommended positions:
       and native runtime checks on Linux, macOS, and Windows wherever the
       capability is supported. The [matrix][discovery-matrix] covers every
       probe, host behavior, and follow-up in both families with fixtures. The
-      Linux namespace run passes only with delayed replies, and macOS and
-      Windows have not run (see Blockers).
+      independently authored corpus now covers all six conditions. The new
+      Linux immediate-reply namespace fixture passes the dual-stack matrix;
+      reviewed native routes now retain exact clean-revision evidence across
+      profiles and supported macOS/Windows paths when executed (see Blockers).
 
 ## Blockers
 
 Every fixture criterion has evidence, but the roadmap [close
 gates][close-gates] keep M5 `In progress`:
 
-- **Ground truth ([M2][m2]).** Host states are scanner results, so the
-  responsive, closed-but-responsive, silent, blocked, routed, and
-  shared-link-address scenarios need comparison-corpus entries with
-  independent expected outcomes.
-- **Runtime evidence ([M3][m3]): native replies faster than the send call
-  are not correlated.** The [`transmit::Timing`][netio-transmit] freshness rule
-  that [M6][m6] records also discards ARP and NDP replies that arrive before
-  `send()` returns. On a direct veth link that hides every host, so the native
-  run above needed delayed replies. Deciding what such frames prove belongs
-  with native validation in [M3][m3]. Until then no undelayed native scenario
-  can show discovery, and nothing has run on macOS or Windows.
+- **Native acceptance ([M3][m3]).** The original completion-marker race is
+  fixed: exact successful submissions admit matching captures from immediately
+  before the native send call. Socket preparation is outside that interval;
+  missing ingress and pre-submission frames remain ineligible. This establishes
+  eligibility, not exact wire departure, causality, or authenticated identity.
+  The dual-stack discovery/neighbor regressions exercise replies captured during
+  submission; stale-frame pipeline regressions still pass.
+- The versioned [native discovery launcher](../../scripts/test-host-discovery-native.py)
+  binds the corpus, executable, fixture, clean reviewed revision, actual output,
+  and isolation. Linux creates independent immediate Ethernet replies in fresh
+  namespaces. macOS/Windows admit only literal loopback targets: socket and
+  supported raw paths execute, while routed/proxy/interface-mutation scenarios
+  remain explicitly unavailable without disposable link isolation. Missing
+  drivers and unsupported capabilities are not passes. M5 stays **In progress**
+  until the required supported native paths have retained acceptance evidence.
 
+## Independent discovery corpus and runtime route
+
+Dataset `1.3.0` adds six ordered `discovery_scenarios` to the frozen corpus v1
+schema: responsive, closed-but-responsive, silent, blocked, routed, and
+shared-link-address, each in IPv4 and IPv6. Expectations are authored before
+execution; router errors never become host-response reasons. The
+[raw matrix][discovery-matrix] checks every IP probe and follow-up choice; the
+[neighbor matrix][neighbor-matrix] checks fresh ARP/NDP, cache reuse, silence,
+routing, and shared-MAC ambiguity. Existing DNS,
+authorization, unified-budget, socket, omitted/skipped, and streaming contracts
+remain part of acceptance.
+
+Run the reviewed native route at an exact clean implementation revision:
+
+```sh
+# Linux: mapping the invoking owner must be permitted by the managed runtime.
+sudo -n env "PATH=$PATH" "CARGO_HOME=$HOME/.cargo" "RUSTUP_HOME=$HOME/.rustup" \
+  python3 scripts/test-host-discovery-native.py --reviewed-commit "$(git rev-parse HEAD)" \
+  --require-complete --report target/validation/m5-linux/host-discovery.json
+```
+
+Both reviewed native workflows accept `scenario=host_discovery`. They retain
+commands, bounded output, corpus/source/executable digests, and precise
+unavailable paths without changing the historical M3 v3 evidence inventory.
+No vendor dataset, external DNS server, remote target, or driver installation
+is part of these fixtures. Host-local checks cannot prove routed or shared-link
+behavior; the report and gate deliberately preserve that limitation.
+
+[neighbor-matrix]: ../../crates/packetcraftr/tests/integration/discovery_neighbor_matrix.rs
 [m1-vocabulary]: m01-claims-evidence.md#m11-evidence-vocabulary
 [m1-data]: m01-claims-evidence.md#m12-scanner-data-policy
 [m2]: m02-ground-truth-benchmarks.md

@@ -134,3 +134,30 @@ Capture drop counters, host offloading, acquisition location, and timestamp
 semantics remain contextual evidence. Zero or unavailable counters are not an
 automatic completeness guarantee. The comparator deliberately avoids inferring
 device loss or synchronized clocks from those observations.
+
+## Host discovery
+
+M5 adds a separate `packetcraftr.discovery-native-evidence/v1` report; it does
+not change historical M3 v3 inventories. Both reviewed workflows accept
+`scenario=host_discovery` at an exact clean implementation commit. The launcher
+`scripts/test-host-discovery-native.py` builds the five feature profiles and
+retains source/corpus/executable digests, bounded commands/output, literal
+fixture targets, actual isolation and privilege, and per-case outcomes.
+
+Linux uses a fresh namespace and a documentation-address veth pair, with an
+independent immediate Ethernet responder. Six dual-stack conditions cover
+responsive, closed-but-responsive, silent, router-blocked, routed, and
+shared-link-address hosts under discovery-only, responder-only follow-up, and
+scan-all follow-up. Router scenarios must retain the expected router-sourced
+ICMP error frames, not merely publish `no_response`. Native ordinary-socket
+acceptance/refusal is also tested in both families, with closed ports reserved
+rather than closed and rebound.
+
+macOS/Windows use admitted literal loopback fixtures without interface mutation,
+remote traffic, external DNS, or driver installation. Unavailable raw profiles,
+missing native dependencies, and unavailable routed/shared-link isolation stay
+explicitly unavailable, never exercised. `--require-complete` fails on missing
+required coverage; portable/pcap-free raw capability refusals count only when
+the actual typed admission failure and nonzero process result were retained.
+See [M5](roadmap/m05-host-discovery.md#discovery-validation) for commands and
+current acceptance limits.

@@ -253,18 +253,13 @@ gates][close-gates] keep M6 `In progress`:
   mixed TCP/UDP, silent-UDP, and contradictory-attempt scenarios need entries
   in the comparison corpus with independent expected outcomes. The injected
   scanner fixture covers attempt classifications only.
-- **Runtime evidence ([M3][m3]): native replies faster than the send call
-  are not correlated.** In the native run the target kernel's SYN/ACK, RST,
-  and ICMP port-unreachable replies arrived about 30 µs after each probe,
-  before `send()` returned. The
-  shared rule that a capture inside the submission interval is not proven
-  post-send ([`transmit::Timing`][netio-transmit]) discards them in every
-  workflow, so those endpoints inferred silence. The revision before M6
-  behaves the same, and slower replies such as the UDP echo correlate.
-  Deciding what such frames prove belongs with native validation in
-  [M3][m3]; M6 retains no new class of frame for it. Until then no native
-  scenario can show TCP or ICMP-error inference, and nothing has run on macOS
-  or Windows.
+- **Runtime evidence ([M3][m3]).** The original completion-marker race
+  (native SYN/ACK, RST, and ICMP errors arriving before `send()` returned) is
+  fixed by M5's submission-start eligibility boundary. Immediate dual-stack
+  discovery fixtures now exercise these replies. This is not precise wire
+  departure or identity proof, and does not substitute for M6's own exact-revision
+  native port-inference acceptance on every supported platform. See
+  [M5's native evidence route](m05-host-discovery.md#independent-discovery-corpus-and-runtime-route).
 
 [m1]: m01-claims-evidence.md
 [m1-vocabulary]: m01-claims-evidence.md#m11-evidence-vocabulary

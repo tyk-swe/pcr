@@ -422,6 +422,139 @@
       ],
       "items": false
     },
+    "discovery_scenarios": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "condition",
+          "provision",
+          "families",
+          "expected",
+          "measurement_scope"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "enum": [
+              "discovery-responsive",
+              "discovery-closed-but-responsive",
+              "discovery-silent",
+              "discovery-blocked",
+              "discovery-routed",
+              "discovery-shared-link-address"
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/text"
+          },
+          "provision": {
+            "const": "injected_provider_and_controlled_native"
+          },
+          "families": {
+            "const": [
+              "ipv4",
+              "ipv6"
+            ]
+          },
+          "expected": {
+            "type": "object",
+            "required": [
+              "state",
+              "reply_by_probe",
+              "basis",
+              "responded_reasons"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "enum": [
+                  "responded",
+                  "no_response"
+                ]
+              },
+              "reply_by_probe": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": false,
+                "properties": {
+                  "icmp": {
+                    "enum": [
+                      null,
+                      "icmp_echo_reply",
+                      "tcp_syn_ack",
+                      "udp_payload",
+                      "tcp_reset",
+                      "icmp_port_unreachable",
+                      "icmp_administratively_prohibited",
+                      "icmp_destination_unreachable",
+                      "neighbor_reply"
+                    ]
+                  },
+                  "tcp": {
+                    "enum": [
+                      null,
+                      "icmp_echo_reply",
+                      "tcp_syn_ack",
+                      "udp_payload",
+                      "tcp_reset",
+                      "icmp_port_unreachable",
+                      "icmp_administratively_prohibited",
+                      "icmp_destination_unreachable",
+                      "neighbor_reply"
+                    ]
+                  },
+                  "udp": {
+                    "enum": [
+                      null,
+                      "icmp_echo_reply",
+                      "tcp_syn_ack",
+                      "udp_payload",
+                      "tcp_reset",
+                      "icmp_port_unreachable",
+                      "icmp_administratively_prohibited",
+                      "icmp_destination_unreachable",
+                      "neighbor_reply"
+                    ]
+                  },
+                  "neighbor": {
+                    "enum": [
+                      null,
+                      "icmp_echo_reply",
+                      "tcp_syn_ack",
+                      "udp_payload",
+                      "tcp_reset",
+                      "icmp_port_unreachable",
+                      "icmp_administratively_prohibited",
+                      "icmp_destination_unreachable",
+                      "neighbor_reply"
+                    ]
+                  }
+                }
+              },
+              "basis": {
+                "enum": [
+                  "direct",
+                  "possible_proxy"
+                ]
+              },
+              "responded_reasons": {
+                "enum": [
+                  0,
+                  1
+                ]
+              }
+            }
+          },
+          "measurement_scope": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
     "adaptive_scheduling_scenarios": {
       "type": "array",
       "minItems": 8,

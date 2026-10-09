@@ -730,6 +730,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Independently expected dual-stack discovery corpus conditions and fresh/cache,
+  routed, silent, and shared-MAC neighbor regressions. Reviewed native discovery
+  routes preserve exact revision, corpus/source/executable digests, commands,
+  runtime output, isolation, and precise unsupported/unavailable paths across
+  the five build profiles without claiming unexecuted native coverage.
 - `scan --adaptive` opts raw and `--connect` scans into adaptive scheduling:
   per-attempt timeouts follow a bounded per-host RTO estimate inside
   `--min-timeout-ms`/`--max-timeout-ms`, an additive-increase
@@ -1966,6 +1971,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Correlate immediate native replies captured during successful exact-byte
+  transmission, including ARP/NDP discovery and TCP/ICMP-error responses. Keep
+  socket preparation outside the eligible interval and reject missing/stale
+  ingress; submission timing is not precise wire departure or identity proof.
 - Adaptive raw scans admit the conservative worst live wave before any traffic:
   the per-probe and per-route maxima retained across wave-sized chunks plus
   capture interface unions, so a scan over the `capture.interfaces` source

@@ -4,7 +4,6 @@
 //! Every discovery probe under every host behavior, in both address families
 //! and for each choice of what follows discovery.
 
-use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -18,7 +17,6 @@ use packetcraftr::scan::discovery::{
 use packetcraftr::scan::{self, Reply, Request, Stage};
 use packetcraftr::target::{Family, Selection, Specification, Target};
 use packetcraftr::{Client, ProviderSet, route};
-use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::decode::Dissector;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -26,11 +24,10 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::{Icmpv4, Icmpv6, Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
-use packetcraftr_netio::interface::Id;
-use packetcraftr_netio::link::{Capability, Mode as LinkMode};
-use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
+use packetcraftr_netio::link::Mode as LinkMode;
 use packetcraftr_netio::{self as net, capture, transmit};
 
+use crate::common::discovery::{Routes, corpus, family_addresses};
 use crate::common::responder::{Io, State as Responder};
 use crate::common::{Interfaces, ScriptedResolver, ScriptedTcp};
 
@@ -40,6 +37,8 @@ const SCAN_PORT: u16 = 80;
 enum Host {
     /// Echo replies, TCP resets, and port unreachables from the target.
     Answers,
+    Responsive,
+    Blocked,
     Silent,
     /// A router reports the target unreachable.
     Unreachable,
@@ -50,45 +49,6 @@ enum Then {
     ScanResponders,
     ScanEveryHost,
     Nothing,
-}
-
-fn family_addresses(v4: bool) -> [IpAddr; 3] {
-    let [source, target, router] = if v4 {
-        ["192.0.2.1", "192.0.2.10", "192.0.2.254"]
-    } else {
-        ["2001:db8::1", "2001:db8::10", "2001:db8::fe"]
-    };
-    [source, target, router].map(|text| text.parse().unwrap())
-}
-
-#[derive(Clone, Copy)]
-struct Routes;
-
-impl Provider for Routes {
-    type Error = Infallible;
-    fn lookup_with_preferences(
-        &self,
-        destination: IpAddr,
-        _: Option<&Id>,
-        _: Option<IpAddr>,
-        _deadline: &Deadline,
-    ) -> Result<Decision, Infallible> {
-        Ok(Decision {
-            interface: Id {
-                index: 1,
-                name: "fixture0".to_owned(),
-            },
-            source_mac: None,
-            selected_source: Some(family_addresses(destination.is_ipv4())[0]),
-            preferred_source: None,
-            next_hop: None,
-            selection_reason: SelectionReason::OnLink,
-            destination_scope: Scope::Link,
-            mtu: 1500,
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
-        })
-    }
 }
 
 /// Answers each probe as `host` and records what was sent, so the matrix can
@@ -178,12 +138,16 @@ impl Wire {
         let mut reply = Packet::new();
         match (self.host, endpoint) {
             (Host::Silent, _) => return (destination, endpoint, Vec::new()),
+            (Host::Blocked, _) => {
+                ip(&mut reply, family_addresses(v4)[2], source);
+                icmp(&mut reply, v4, (3, 1), if v4 { 13 } else { 1 }, quoted());
+            }
             (Host::Unreachable, _) => {
                 ip(&mut reply, family_addresses(v4)[2], source);
                 // Host unreachable (ICMPv4) and address unreachable (ICMPv6).
                 icmp(&mut reply, v4, (3, 1), if v4 { 1 } else { 3 }, quoted());
             }
-            (Host::Answers, ProbeEndpoint::Tcp { .. }) => {
+            (Host::Answers | Host::Responsive, ProbeEndpoint::Tcp { .. }) => {
                 let tcp = tcp.unwrap();
                 ip(&mut reply, destination, source);
                 reply.push(Tcp {
@@ -191,7 +155,20 @@ impl Wire {
                     destination_port: tcp.source_port,
                     sequence: 100,
                     acknowledgment: tcp.sequence.wrapping_add(1),
-                    flags: Tcp::RST | Tcp::ACK,
+                    flags: if matches!(self.host, Host::Responsive) {
+                        Tcp::SYN | Tcp::ACK
+                    } else {
+                        Tcp::RST | Tcp::ACK
+                    },
+                    ..Default::default()
+                });
+            }
+            (Host::Responsive, ProbeEndpoint::Udp { .. }) => {
+                let udp = udp.unwrap();
+                ip(&mut reply, destination, source);
+                reply.push(Udp {
+                    source_port: udp.destination_port,
+                    destination_port: udp.source_port,
                     ..Default::default()
                 });
             }
@@ -199,7 +176,7 @@ impl Wire {
                 ip(&mut reply, destination, source);
                 icmp(&mut reply, v4, (3, 1), if v4 { 3 } else { 4 }, quoted());
             }
-            (Host::Answers, ProbeEndpoint::Icmp) => {
+            (Host::Answers | Host::Responsive, ProbeEndpoint::Icmp) => {
                 let body = match (packet.get::<Icmpv4>(), packet.get::<Icmpv6>()) {
                     (Some(echo), _) => echo.body.clone(),
                     (None, Some(echo)) => echo.body.clone(),
@@ -215,12 +192,12 @@ impl Wire {
 
 impl transmit::Provider for Wire {
     fn send(&self, outbound: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
+        let submission = transmit::Submission::start();
         let wire = outbound.bytes().clone();
         let (destination, endpoint, replies) = self.replies(&wire);
         self.sent.lock().unwrap().push((destination, endpoint));
         let mut state = self.state.lock().unwrap();
         assert!(state.ready, "capture must be ready before every send");
-        let report = transmit::Report::committed(wire.len(), wire);
         let ingress = Instant::now();
         for reply in replies {
             state
@@ -229,7 +206,9 @@ impl transmit::Provider for Wire {
             state.pending += 1;
         }
         state.sends += 1;
-        Ok(report)
+        // Native replies can arrive while the successful send is still in
+        // progress. Preserve that ordering instead of hiding it in fixtures.
+        Ok(submission.complete(wire.len(), wire))
     }
 }
 
@@ -297,7 +276,10 @@ fn run(
         builtin::registry(),
         Policy::default(),
         ProviderSet {
-            route: Routes,
+            route: Routes {
+                routed: matches!(host, Host::Unreachable),
+                ..Routes::default()
+            },
             interface: Interfaces::default(),
             capture: Io(Arc::clone(&state)),
             transmit: Wire {
@@ -319,15 +301,39 @@ fn run(
 
 #[test]
 fn discovery_states_follow_the_host_in_both_families() {
+    let corpus = corpus();
+    let cases = corpus["discovery_scenarios"].as_array().unwrap();
     let probes = [
-        (ProbeEndpoint::Icmp, Reply::IcmpEchoReply),
-        (ProbeEndpoint::Tcp { port: 22 }, Reply::TcpReset),
-        (ProbeEndpoint::Udp { port: 53 }, Reply::IcmpPortUnreachable),
+        (ProbeEndpoint::Icmp, "icmp"),
+        (ProbeEndpoint::Tcp { port: 22 }, "tcp"),
+        (ProbeEndpoint::Udp { port: 53 }, "udp"),
     ];
     for v4 in [true, false] {
         let [_, target, router] = family_addresses(v4);
-        for (probe, answer) in probes {
-            for host in [Host::Answers, Host::Silent, Host::Unreachable] {
+        for (probe, probe_id) in probes {
+            for authored in &cases[..5] {
+                let host = match authored["id"].as_str().unwrap() {
+                    "discovery-responsive" => Host::Responsive,
+                    "discovery-closed-but-responsive" => Host::Answers,
+                    "discovery-silent" => Host::Silent,
+                    "discovery-blocked" => Host::Blocked,
+                    "discovery-routed" => Host::Unreachable,
+                    other => panic!("unprovisioned discovery condition {other}"),
+                };
+                let expected_reply = match authored["expected"]["reply_by_probe"][probe_id].as_str()
+                {
+                    Some("icmp_echo_reply") => Some(Reply::IcmpEchoReply),
+                    Some("tcp_syn_ack") => Some(Reply::TcpSynAck),
+                    Some("tcp_reset") => Some(Reply::TcpReset),
+                    Some("udp_payload") => Some(Reply::UdpPayload),
+                    Some("icmp_port_unreachable") => Some(Reply::IcmpPortUnreachable),
+                    Some("icmp_administratively_prohibited") => {
+                        Some(Reply::IcmpAdministrativelyProhibited)
+                    }
+                    Some("icmp_destination_unreachable") => Some(Reply::IcmpDestinationUnreachable),
+                    None => None,
+                    other => panic!("unknown authored reply {other:?}"),
+                };
                 for then in [Then::ScanResponders, Then::ScanEveryHost, Then::Nothing] {
                     let case = format!("{target} {probe} {host:?} {then:?}");
                     let (result, sent) = run(request(target, probe, then), host);
@@ -344,7 +350,13 @@ fn discovery_states_follow_the_host_in_both_families() {
                         "{case}"
                     );
 
-                    let answered = matches!(host, Host::Answers);
+                    let answered = authored["expected"]["state"] == "responded";
+                    assert_eq!(
+                        record.reasons.len(),
+                        authored["expected"]["responded_reasons"].as_u64().unwrap() as usize,
+                        "{case}"
+                    );
+                    assert_eq!(discovered.reply, expected_reply, "{case}");
                     let reasons: Vec<_> = record
                         .reasons
                         .iter()
@@ -363,7 +375,7 @@ fn discovery_states_follow_the_host_in_both_families() {
                         assert_eq!(
                             reasons,
                             [(
-                                ReasonKind::Reply(answer),
+                                ReasonKind::Reply(expected_reply.unwrap()),
                                 Evidence::Wire,
                                 Basis::Direct,
                                 Some(0),
@@ -376,7 +388,8 @@ fn discovery_states_follow_the_host_in_both_families() {
                         // uncertainty, never absence or host evidence.
                         assert_eq!(record.state, State::NoResponse, "{case}");
                         assert!(reasons.is_empty(), "{case}");
-                        let responder = matches!(host, Host::Unreachable).then_some(router);
+                        let responder =
+                            matches!(host, Host::Unreachable | Host::Blocked).then_some(router);
                         assert_eq!(discovered.responder, responder, "{case}");
                     }
 

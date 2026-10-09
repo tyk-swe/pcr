@@ -702,3 +702,16 @@ fn canceled_endpoints_release_their_unstarted_attempt_slots() {
     controller.select(&mut work, expired + Duration::from_millis(1), end, 1);
     assert_eq!(controller.take_canceled_responses(&mut work), 0);
 }
+
+#[test]
+fn sequence_ordinals_follow_the_seeded_host_index_not_the_subset_slot() {
+    let mut controller = Controller::new(config(), request_timeout(), 8);
+    let targets = [host(1), host(2)];
+    for target in &targets {
+        controller.host_index(target);
+    }
+    let start = Instant::now();
+    let mut work = controller.open_stage(&targets[1..], 1, 1, 4, start);
+    let wave = controller.select(&mut work, start, start + Duration::from_secs(60), 4);
+    assert_eq!(wave.selections[0].sequence, 5);
+}

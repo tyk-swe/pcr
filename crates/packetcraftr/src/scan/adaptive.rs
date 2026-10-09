@@ -223,6 +223,7 @@ pub(super) struct Work {
     unfinished: usize,
     max_attempts: u32,
     first_sequence: u64,
+    host_count: usize,
     canceled_responses: usize,
 }
 
@@ -425,12 +426,14 @@ impl Controller {
             })
             .collect::<Vec<_>>();
         let unfinished = slots.len().saturating_mul(endpoint_count);
+        let host_count = self.hosts.len();
         Work {
             slots,
             cursor: 0,
             unfinished,
             max_attempts,
             first_sequence,
+            host_count,
             canceled_responses: 0,
         }
     }
@@ -570,8 +573,8 @@ impl Controller {
                 ((u64::from(attempt) - 1)
                     .saturating_mul(endpoints_per_host as u64)
                     .saturating_add(endpoint_index as u64))
-                .saturating_mul(hosts_total as u64)
-                .saturating_add(slot_index as u64),
+                .saturating_mul(work.host_count as u64)
+                .saturating_add(slot.host as u64),
             );
             selections.push(Selection {
                 slot: slot_index,

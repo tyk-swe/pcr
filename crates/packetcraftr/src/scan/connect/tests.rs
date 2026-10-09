@@ -500,6 +500,7 @@ fn connect_replies_carry_no_control_responder_and_unreachable_is_not_one() {
 
 struct SlowAuthorize {
     selected: SocketAddr,
+    delay: Duration,
 }
 
 impl crate::target::ResolveTarget for SlowAuthorize {
@@ -521,7 +522,7 @@ impl crate::policy::Authorizer for SlowAuthorize {
         operation: crate::policy::Operation<'_>,
     ) -> Result<(), BoundaryError> {
         if let crate::policy::Operation::Socket(_) = operation {
-            std::thread::sleep(Duration::from_millis(120));
+            std::thread::sleep(self.delay);
         }
         Ok(())
     }
@@ -549,6 +550,7 @@ fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
     }
     let mut authorizer = SlowAuthorize {
         selected: "127.0.0.1:80".parse().unwrap(),
+        delay: Duration::from_millis(120),
     };
     let clock = crate::test_support::NoopClock;
     let mut deadline = Deadline::new(Duration::from_secs(60));
@@ -568,4 +570,131 @@ fn the_host_deadline_runs_from_selection_so_late_authorization_omits_work() {
         "authorization past the anchored deadline omits the second port"
     );
     assert_eq!(report.scheduling.incomplete.len(), 1);
+}
+
+struct RefusedAll {
+    calls: AtomicUsize,
+}
+impl Provider for RefusedAll {
+    type Stream = Socket;
+    fn connect(&self, _: SocketAddr, _: &Deadline) -> Result<Socket, tcp::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(io::Error::new(io::ErrorKind::ConnectionRefused, "scripted refusal").into())
+    }
+}
+
+#[test]
+fn the_descriptor_queue_caps_pending_even_when_leases_free_early() {
+    for adaptive in [false, true] {
+        let provider = Arc::new(RefusedAll {
+            calls: AtomicUsize::new(0),
+        });
+        let mut request = adaptive_request((80..144).collect(), 1, Duration::from_secs(5));
+        request.max_in_flight = 64;
+        request.limits.max_duration = Duration::from_secs(60);
+        if adaptive {
+            let adaptive = request.adaptive.as_mut().unwrap();
+            adaptive.min_timeout = Duration::from_millis(200);
+            adaptive.max_timeout = Duration::from_millis(200);
+            adaptive.initial_window = 64;
+        } else {
+            request.adaptive = None;
+        }
+        let mut authorizer = SlowAuthorize {
+            selected: "127.0.0.1:80".parse().unwrap(),
+            delay: Duration::from_millis(2),
+        };
+        let clock = crate::test_support::NoopClock;
+        let mut deadline = Deadline::new(Duration::from_secs(60));
+        let calls_at_first = Arc::new(std::sync::Mutex::new(None::<usize>));
+        let provider_calls = Arc::clone(&provider);
+        let first = Arc::clone(&calls_at_first);
+        let report = super::engine::run(
+            &request,
+            &mut authorizer,
+            &provider,
+            &clock,
+            &mut deadline,
+            clock.now(),
+            move |_, _| {
+                let mut first = first.lock().unwrap();
+                if first.is_none() {
+                    *first = Some(provider_calls.calls.load(Ordering::SeqCst));
+                }
+                Ok(())
+            },
+        )
+        .expect("all refused endpoints still settle");
+        assert!(
+            calls_at_first.lock().unwrap().unwrap() <= tcp::MAX_PENDING_CONNECTIONS,
+            "adaptive={adaptive}: the queue admits no more than the native descriptor ceiling"
+        );
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            64,
+            "adaptive={adaptive} incomplete={:?} stats={:?}",
+            report.scheduling.incomplete,
+            report.stats
+        );
+        if !adaptive {
+            assert!(
+                report.scheduling.observed_peak_window <= tcp::MAX_PENDING_CONNECTIONS,
+                "{}",
+                report.scheduling.observed_peak_window
+            );
+        }
+    }
+}
+
+#[test]
+fn the_connect_charge_uses_the_effective_descriptor_cap() {
+    for adaptive in [false, true] {
+        let mut request = adaptive_request((80..144).collect(), 1, Duration::from_secs(5));
+        request.max_in_flight = 64;
+        request.limits.max_duration = Duration::from_secs(60);
+        if !adaptive {
+            request.adaptive = None;
+        }
+        let targets = [crate::target::SelectedAddress::new(
+            "127.0.0.1".parse().unwrap(),
+        )];
+        let effective = tcp::MAX_PENDING_CONNECTIONS;
+        let mut charge = targets.len() * 64 * std::mem::size_of::<SocketAddr>()
+            + targets.len() * 2 * std::mem::size_of::<crate::target::SelectedAddress>()
+            + 64 * std::mem::size_of::<u16>()
+            + effective * std::mem::size_of::<super::engine::Active<Socket>>();
+        if adaptive {
+            charge += super::super::adaptive::state_charge(
+                targets.len(),
+                64,
+                effective,
+                super::super::adaptive::scoped_bytes(&targets),
+                0,
+            );
+        }
+        let mut authorizer = SlowAuthorize {
+            selected: "127.0.0.1:80".parse().unwrap(),
+            delay: Duration::ZERO,
+        };
+        let deadline = Deadline::new(Duration::from_secs(60));
+        request.limits.max_prepared_bytes = charge;
+        super::engine::planned(
+            &request,
+            &mut authorizer,
+            &deadline,
+            std::mem::size_of::<super::engine::Active<Socket>>(),
+        )
+        .expect("the effective-cap charge fits");
+        request.limits.max_prepared_bytes = charge - 1;
+        assert!(
+            super::engine::planned(
+                &request,
+                &mut authorizer,
+                &deadline,
+                std::mem::size_of::<super::engine::Active<Socket>>(),
+            )
+            .is_err(),
+            "adaptive={adaptive}: one byte under the effective charge rejects"
+        );
+    }
 }

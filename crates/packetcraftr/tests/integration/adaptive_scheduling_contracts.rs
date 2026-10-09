@@ -910,3 +910,54 @@ fn a_slow_second_host_still_answers_inside_its_own_window_ipv6() {
     let aggregate = collector.finish(report).expect("v6 aggregate");
     assert_slow_host_answers(&aggregate, &delayed, &io);
 }
+
+#[test]
+fn a_host_filtered_after_discovery_keeps_the_survivors_original_ordinals() {
+    use packetcraftr::scan::discovery::{Mode, Options, Unresponsive};
+    let clock = RealClock::default();
+    let io = real_io();
+    let filtered = host("192.0.2.10");
+    let answered = host("192.0.2.11");
+    let client = client(
+        &io,
+        move |address, port| {
+            if address == answered && port == 9 {
+                Reply::SynAck
+            } else {
+                Reply::Silent
+            }
+        },
+        &clock,
+    );
+    let mut request = request(vec![filtered, answered], &[80], 2);
+    request.discovery = Options {
+        mode: Mode::Before,
+        neighbor: false,
+        probes: vec![ProbeEndpoint::Tcp { port: 9 }],
+        unresponsive: Unresponsive::Skip,
+    };
+    {
+        let adaptive = request.adaptive.as_mut().unwrap();
+        adaptive.host_timeout = Duration::from_secs(2);
+        adaptive.retry_backoff = Duration::from_millis(1);
+    }
+    let aggregate = run(&client, request).expect("the responsive host still scans");
+    let mut discovery: Vec<u64> = aggregate
+        .discovery
+        .iter()
+        .map(|probe| probe.sequence)
+        .collect();
+    discovery.sort_unstable();
+    assert_eq!(
+        discovery,
+        [0, 1, 2],
+        "the filtered host's ordinals stay holes, never renumbered"
+    );
+    let scan: Vec<_> = aggregate
+        .endpoints
+        .iter()
+        .flat_map(|endpoint| endpoint.probes.iter())
+        .map(|probe| (probe.sequence, probe.attempt))
+        .collect();
+    assert_eq!(scan, vec![(5, 1), (7, 2)]);
+}

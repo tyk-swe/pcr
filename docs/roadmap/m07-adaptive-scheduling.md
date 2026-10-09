@@ -96,11 +96,25 @@ control issuer, so connect scans never infer the source-specific condition;
 a connect endpoint still drives window growth, selective retry, and backoff
 from its replies and silence.
 
+Sequence numbers are preauthorized over the original target order, so a host
+filtered by neighbor or discovery work leaves stable ordinal holes rather
+than renumbering the survivors: every wire identity admission prepared —
+source ports, IP identifications, DNS transaction ids — is the one that
+executes. Admission itself walks attempts-then-endpoints-then-hosts to mirror
+live round-robin waves, retains only per-probe and per-route maxima across
+bounded wave-sized chunks so any live wave — filtered or shifted — is checked
+conservatively against `max_prepared_bytes`, and unions capture interfaces
+across chunks whenever a wave could span more than the 15-source bound, so
+neither path can materialize an unadmitted wave mid-operation.
+
 Connect scans share the same controller: `max_in_flight` is the operation
 admission ceiling held by a `ConnectBudget`, the process pool of 16 workers is
 unchanged, windows above it queue with backpressure that consumes no attempts,
 and `retries_started` counts only additional starts the provider actually
-made.
+made. Completed or failed provider results queue behind
+`min(--max-in-flight, 16)` descriptors — the pool cannot hold more live
+sockets — while the configured window and reported admission ceiling stay as
+declared.
 
 Reports publish `scheduling.mode` (`fixed` or `adaptive`), the effective
 adaptive configuration, `observed_peak_window` (the largest pending count the

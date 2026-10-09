@@ -56,7 +56,7 @@ impl<P: TargetProviders + TcpProviders, K: Clock> Client<P, K> {
     }
 }
 
-struct Active<S> {
+pub(super) struct Active<S> {
     pending: tcp::PendingConnect<S>,
     sequence: u64,
     stage: Stage,
@@ -85,7 +85,7 @@ fn execution(
     }
 }
 
-struct Planned {
+pub(super) struct Planned {
     /// Discovery ports, probed on every target before the scan stage.
     discovery: Vec<u16>,
     /// Scan ports, probed on the targets discovery leaves to the scan.
@@ -96,7 +96,7 @@ struct Planned {
     planned_duration: Duration,
 }
 
-fn planned<A: Authorizer + ResolveTarget>(
+pub(super) fn planned<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,
@@ -176,13 +176,14 @@ fn planned<A: Authorizer + ResolveTarget>(
             // operation covers every target on every port of either stage.
             let mut every_port = discovery.clone();
             every_port.extend(ports.iter().filter(|port| !discovery.contains(port)));
+            let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
             let charge = request
                 .adaptive
                 .map(|_| {
                     super::super::adaptive::state_charge(
                         targets,
                         every_port.len(),
-                        request.max_in_flight,
+                        effective,
                         super::super::adaptive::scoped_bytes(&selected.targets),
                         0,
                     )
@@ -202,7 +203,7 @@ fn planned<A: Authorizer + ResolveTarget>(
                     (discovery.len().saturating_add(ports.len()))
                         .saturating_mul(std::mem::size_of::<u16>()),
                 )
-                .saturating_add(request.max_in_flight.saturating_mul(active_size));
+                .saturating_add(effective.saturating_mul(active_size));
             if charge > request.limits.max_prepared_bytes {
                 return Err(Error::PipelineExecution {
                     source: crate::scan::executor::limit(
@@ -558,14 +559,12 @@ where
         );
     }
     let mut active: Vec<Active<Q::Stream>> = Vec::new();
+    let effective = request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS);
     let mut next = 0usize;
     while next < stage.count || !active.is_empty() {
         enforce_deadline(&Probes, deadline)?;
         let mut admission_held = false;
-        while next < stage.count
-            && active.len() < request.max_in_flight
-            && clock.now() >= progress.next_start
-        {
+        while next < stage.count && active.len() < effective && clock.now() >= progress.next_start {
             let Some(admitted) = admit_next(
                 request, stage, next, authorizer, deadline, provider, budget, clock,
             )?
@@ -594,7 +593,7 @@ where
         }
         if next < stage.count || !active.is_empty() {
             let mut wait = Duration::from_millis(1);
-            if next < stage.count && active.len() < request.max_in_flight && !admission_held {
+            if next < stage.count && active.len() < effective && !admission_held {
                 wait = wait.min(progress.next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
@@ -687,7 +686,10 @@ where
         let operation_end = now
             .checked_add(remaining)
             .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
-        let capacity = controller.window().saturating_sub(active.len());
+        let capacity = controller
+            .window()
+            .min(request.max_in_flight.min(tcp::MAX_PENDING_CONNECTIONS))
+            .saturating_sub(active.len());
         let wave = controller.select(&mut work, now, operation_end, capacity);
         let mut admission_held = false;
         let mut paced_out = false;

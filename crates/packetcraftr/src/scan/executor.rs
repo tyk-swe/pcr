@@ -4,6 +4,7 @@
 mod pipeline;
 mod registry;
 
+pub(super) use pipeline::AdaptiveAdmission;
 pub(super) use pipeline::limit;
 
 use std::collections::HashSet;
@@ -93,6 +94,15 @@ pub(crate) trait Pipelined: Executor<Batch<Probe>> {
         _options: &PipelineOptions,
     ) -> Result<(), BoundaryError> {
         Ok(())
+    }
+
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+        _summary: &mut AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        self.admit_pipeline(batches, options)
     }
 
     /// Sends at most one ARP or NDP request for `target` and reports what
@@ -441,6 +451,15 @@ impl<P: PacketProviders, K: Clock> Pipelined for ClientExecutor<'_, P, K> {
         options: &PipelineOptions,
     ) -> Result<(), BoundaryError> {
         pipeline::admit(&self.exchange()?, batches, options)
+    }
+
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: &PipelineOptions,
+        summary: &mut AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        pipeline::admit_adaptive(&self.exchange()?, batches, options, summary)
     }
 
     fn resolve_neighbor(

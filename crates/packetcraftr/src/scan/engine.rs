@@ -97,6 +97,11 @@ where
             options.probes.len().max(approved.endpoints.len()),
         );
         admit_adaptive(request, executor, deadline, &approved, reservation)?;
+        if let Some(controller) = controller.as_mut() {
+            for target in &approved.targets {
+                controller.host_index(target);
+            }
+        }
     } else if request.max_in_flight > 1 {
         // Each stage is admitted for every target before any neighbor request
         // or probe, though discovery may leave the scan fewer.
@@ -218,7 +223,16 @@ where
             stage: Stage::Discovery,
             first_sequence: 0,
         };
-        scan_sequence = discovery.probes(request)?;
+        let discovery_probes = discovery.probes(request)?;
+        scan_sequence = if controller.is_some() {
+            probe_count(
+                approved.targets.len(),
+                options.probes.len(),
+                request.attempts,
+            )? as u64
+        } else {
+            discovery_probes
+        };
         // Probes skipped after a silent neighbor or next hop hold no
         // response capacity; only the remaining targets' probes are
         // outstanding.
@@ -228,7 +242,7 @@ where
             request.attempts,
         )?;
         evidence.reserve_responses(
-            usize::try_from(scan_sequence)
+            usize::try_from(discovery_probes)
                 .unwrap_or(usize::MAX)
                 .saturating_add(scan_probes),
             request.collection.capture.snap_length,
@@ -809,7 +823,7 @@ fn admit_pipelined<E: Pipelined>(
         .map_err(|source| Error::PipelineExecution { source })
 }
 
-fn adaptive_batches<'r>(
+pub(super) fn adaptive_batches<'r>(
     request: &'r Request,
     targets: &'r [SelectedAddress],
     endpoints: &'r [ProbeEndpoint],
@@ -818,18 +832,16 @@ fn adaptive_batches<'r>(
 ) -> impl Iterator<Item = Batch<Probe>> + 'r {
     let host_count = targets.len() as u64;
     let endpoint_count = endpoints.len() as u64;
-    targets
-        .iter()
-        .enumerate()
-        .flat_map(move |(host_index, target)| {
-            (1..=request.attempts).flat_map(move |attempt| {
-                endpoints
-                    .iter()
-                    .enumerate()
-                    .map(move |(endpoint_index, endpoint)| {
+    (1..=request.attempts)
+        .flat_map(move |attempt| {
+            endpoints
+                .iter()
+                .enumerate()
+                .flat_map(move |(endpoint_index, endpoint)| {
+                    targets.iter().enumerate().map(move |(host_index, target)| {
                         (host_index, endpoint_index, attempt, target, *endpoint)
                     })
-            })
+                })
         })
         .map(
             move |(host_index, endpoint_index, attempt, target, endpoint)| {
@@ -909,23 +921,30 @@ fn admit_adaptive<E: Pipelined>(
         }
         check_adaptive_prepared(request, reservation)?;
         let options = pipeline_options(request, deadline, crate::Stats::default(), reservation)?;
-        let chunk = request.max_in_flight.max(1);
-        let mut batches = Vec::with_capacity(chunk);
+        let wave_len = request
+            .max_in_flight
+            .min(approved.targets.len().saturating_mul(endpoints.len()))
+            .max(1);
+        let mut admission = super::executor::AdaptiveAdmission::new(wave_len);
+        let mut batches = Vec::with_capacity(wave_len);
         for batch in adaptive_batches(request, &approved.targets, endpoints, stage, first_sequence)
         {
             batches.push(batch);
-            if batches.len() == chunk {
+            if batches.len() == wave_len {
                 executor
-                    .admit_pipeline(&batches, &options)
+                    .admit_adaptive_pipeline(&batches, &options, &mut admission)
                     .map_err(|source| Error::PipelineExecution { source })?;
                 batches.clear();
             }
         }
         if !batches.is_empty() {
             executor
-                .admit_pipeline(&batches, &options)
+                .admit_adaptive_pipeline(&batches, &options, &mut admission)
                 .map_err(|source| Error::PipelineExecution { source })?;
         }
+        admission
+            .check(wave_len, approved.targets.len(), &options)
+            .map_err(|source| Error::PipelineExecution { source })?;
     }
     Ok(())
 }

@@ -1966,6 +1966,20 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Adaptive raw scans admit the conservative worst live wave before any traffic:
+  the per-probe and per-route maxima retained across wave-sized chunks plus
+  capture interface unions, so a scan over the `capture.interfaces` source
+  bound or `max_prepared_bytes` fails during admission instead of
+  materializing it mid-operation.
+- Adaptive probe sequences stay preauthorized over the original target order:
+  hosts filtered by neighbor or discovery work leave stable ordinal holes, so
+  live wire identities (source ports, identifications, DNS transaction ids)
+  match exactly what admission prepared.
+- Connect scans retain pending-connect records only up to
+  `min(--max-in-flight, 16)`, an explicit 16-record descriptor ceiling beneath
+  the process worker ceiling, so a configured window above it cannot retain
+  completed records beyond what the pool can describe; the operation-level
+  `ConnectBudget` lease and reported window ceilings are unchanged.
 - Scans budget each target's implicit link-layer neighbor resolution: one
   request joins `max_probes`, its worst-case frame joins the wire bytes, its
   attempt timeout joins `max_duration`, and a narrowed resolver caps every

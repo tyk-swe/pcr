@@ -35,6 +35,7 @@ use crate::test_support::{AddressListAuthorizer, Call, NoopClock, RejectingExecu
 use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::registry::Registry;
 
 struct Serial<'e, E>(&'e mut E);
@@ -2572,4 +2573,639 @@ fn adaptive_preparation_charge_has_an_exact_boundary() {
         "pre-admission plus the adaptive waves ran"
     );
     assert!(run(reservation + wave + 1).expect("boundary plus one admits") >= 2);
+}
+
+#[test]
+fn adaptive_preflight_interleaves_hosts_before_attempts() {
+    let targets = [
+        crate::target::SelectedAddress::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+        crate::target::SelectedAddress::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))),
+    ];
+    let endpoints = [
+        crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        crate::probe::ProbeEndpoint::Tcp { port: 81 },
+    ];
+    let mut request = tcp_scan_request(Target::Address(targets[0].address));
+    request.targets.include = targets
+        .iter()
+        .map(|target| crate::target::Specification::Target(Target::Address(target.address)))
+        .collect();
+    request.attempts = 2;
+    request.adaptive = Some(adaptive_config());
+    let order: Vec<_> =
+        engine::adaptive_batches(&request, &targets, &endpoints, super::Stage::Scan, 0)
+            .map(|batch| {
+                let probe = batch.probe().expect("single-probe batch");
+                (probe.attempt, probe.endpoint, probe.address)
+            })
+            .collect();
+    let (h0, h1) = (targets[0].address, targets[1].address);
+    let (e0, e1) = (endpoints[0], endpoints[1]);
+    assert_eq!(
+        order,
+        vec![
+            (1, e0, h0),
+            (1, e0, h1),
+            (1, e1, h0),
+            (1, e1, h1),
+            (2, e0, h0),
+            (2, e0, h1),
+            (2, e1, h0),
+            (2, e1, h1),
+        ],
+        "live waves round-robin hosts, so preflight chunks interleave them too"
+    );
+}
+
+fn many_zoned_request(
+    zones: &[String],
+    targets: Vec<(std::net::Ipv6Addr, usize)>,
+    max_in_flight: usize,
+    attempts: u32,
+) -> Request {
+    let mut request = scoped_request(
+        crate::target::Selection {
+            include: targets
+                .iter()
+                .map(|(address, zone)| {
+                    crate::target::Specification::Target(
+                        format!("{address}%{}", zones[*zone])
+                            .parse()
+                            .expect("scoped target"),
+                    )
+                })
+                .collect(),
+            exclude: Vec::new(),
+        },
+        max_in_flight,
+    );
+    request.attempts = attempts;
+    request.limits.max_duration = Duration::from_secs(60);
+    request.adaptive = Some(super::Adaptive {
+        min_timeout: Duration::from_millis(10),
+        max_timeout: Duration::from_millis(20),
+        min_window: 1,
+        initial_window: max_in_flight,
+        host_timeout: Duration::from_secs(5),
+        retry_backoff: Duration::from_millis(1),
+        max_backoff: Duration::from_millis(10),
+    });
+    request
+}
+
+fn scoped_preflight_fixture(
+    interface_count: usize,
+    host_count: usize,
+    zone_of: impl Fn(usize) -> usize,
+    wave: usize,
+    attempts: u32,
+) -> (
+    crate::Client<
+        crate::providers::ProviderSet<
+            crate::test_support::FakeProviders,
+            crate::test_support::FakeProviders,
+            crate::test_support::FakeProviders,
+            crate::test_support::FakeProviders,
+            (),
+            crate::test_support::ZoneMapResolver,
+        >,
+    >,
+    crate::test_support::FakeProviders,
+    Request,
+) {
+    use crate::providers::ProviderSet;
+    use crate::test_support::{FakeProviders, ZoneMapResolver};
+    let interfaces: Vec<packetcraftr_netio::interface::Id> = (0..interface_count as u32)
+        .map(|index| packetcraftr_netio::interface::Id {
+            name: format!("if{index}"),
+            index: index + 1,
+        })
+        .collect();
+    let zones: Vec<String> = interfaces.iter().map(|id| id.name.clone()).collect();
+    let fake = FakeProviders::default();
+    fake.routes
+        .lock()
+        .expect("routes")
+        .extend((0..host_count).map(|host| scoped_v6_route(interfaces[zone_of(host)].clone())));
+    let providers = ProviderSet::packet(fake.clone(), fake.clone(), fake.clone(), fake.clone())
+        .with_resolver(ZoneMapResolver::new(interfaces));
+    let client = crate::Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        crate::policy::Policy::default(),
+        providers,
+    );
+    let targets: Vec<_> = (0..host_count)
+        .map(|index| {
+            (
+                std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, index as u16 + 1),
+                zone_of(index),
+            )
+        })
+        .collect();
+    let request = many_zoned_request(&zones, targets, wave, attempts);
+    (client, fake, request)
+}
+
+#[test]
+fn adaptive_preflight_rejects_a_wave_spanning_more_interfaces_than_capture_holds() {
+    let (client, fake, request) = scoped_preflight_fixture(16, 16, |host| host, 16, 32);
+    let collector = Collector::default();
+    let error = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report))
+        .expect_err("a wave cannot span sixteen capture sources");
+    assert_eq!(error.classification().code, "policy.scan_pipeline_limit");
+    assert!(
+        fake.calls()
+            .iter()
+            .all(|call| !matches!(call, Call::Transmit(_) | Call::Capture)),
+        "{:?}",
+        fake.calls()
+    );
+}
+
+#[test]
+fn adaptive_preflight_unions_interfaces_across_wave_chunks() {
+    let (client, fake, request) = scoped_preflight_fixture(16, 32, |host| host / 2, 16, 1);
+    let collector = Collector::default();
+    let error = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report))
+        .expect_err("filtering must not build an unadmitted sixteen-source wave");
+    assert_eq!(error.classification().code, "policy.scan_pipeline_limit");
+    assert!(
+        fake.calls()
+            .iter()
+            .all(|call| !matches!(call, Call::Transmit(_) | Call::Capture)),
+        "{:?}",
+        fake.calls()
+    );
+}
+
+#[test]
+fn adaptive_preflight_rejects_a_stage_over_prepared_descriptions() {
+    let (client, fake, mut request) = scoped_preflight_fixture(8, 32, |host| host / 4, 16, 1);
+    request.limits.max_prepared_bytes = 32 * 1024;
+    let collector = Collector::default();
+    let error = client
+        .scan(request, collector.clone())
+        .and_then(|report| collector.finish(report))
+        .expect_err("the conservative wave bound rejects before any work");
+    assert_eq!(error.classification().code, "policy.scan_pipeline_limit");
+    assert!(
+        fake.calls()
+            .iter()
+            .all(|call| !matches!(call, Call::Transmit(_) | Call::Capture)),
+        "{:?}",
+        fake.calls()
+    );
+}
+
+#[derive(Default)]
+struct OrdinalsSpy {
+    neighbors: ScriptedNeighbors,
+    wave: WaveExecutor,
+    echo: Option<Ipv4Addr>,
+    probed: Vec<(super::Stage, u64, u32)>,
+    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::ProbeEndpoint, u32, String)>,
+}
+
+impl Executor<Batch<Probe>> for OrdinalsSpy {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.wave.execute(batch)
+    }
+}
+
+impl Pipelined for OrdinalsSpy {
+    fn execute_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        let mut stats = Stats::default();
+        for (index, batch) in batches.iter().enumerate() {
+            let probe = batch.probe()?;
+            assert_eq!(
+                self.admitted.get(&probe.sequence),
+                Some(&(
+                    probe.address,
+                    probe.endpoint,
+                    probe.attempt,
+                    format!("{:?}", probe.packet())
+                )),
+                "sequence {} executes its admitted packet",
+                probe.sequence
+            );
+            self.probed
+                .push((probe.stage, probe.sequence, probe.attempt));
+            let (sent, mut execution) = self.wave.evidence_for(batch)?;
+            let echoes = matches!(probe.endpoint, crate::probe::ProbeEndpoint::Icmp)
+                && matches!(
+                    (probe.address, self.echo),
+                    (IpAddr::V4(address), Some(echo)) if address == echo
+                );
+            if echoes {
+                let body = probe_packet(probe)
+                    .get::<Icmpv4>()
+                    .map(|icmp| icmp.body.clone())
+                    .unwrap_or_default();
+                if let Some(reply) = echo_reply(body, self.echo.expect("echo target")) {
+                    execution.responses.push(crate::exchange::Response {
+                        request_index: 0,
+                        response: decoded(reply, Vec::new()),
+                        latency: Duration::from_micros(500),
+                    });
+                }
+            }
+            stats.packets_attempted += 1;
+            stats.packets_completed += 1;
+            stats.bytes += u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX);
+            emit(PipelineEvent::Sent {
+                index,
+                sent: Arc::new(sent),
+            })?;
+            emit(PipelineEvent::Completed { index, execution })?;
+        }
+        Ok(stats)
+    }
+
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        _options: &PipelineOptions,
+        _summary: &mut super::executor::AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        for batch in batches {
+            let probe = batch.probe()?;
+            self.admitted.insert(
+                probe.sequence,
+                (
+                    probe.address,
+                    probe.endpoint,
+                    probe.attempt,
+                    format!("{:?}", probe.packet()),
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    fn requests_neighbor(
+        &mut self,
+        target: &crate::target::SelectedAddress,
+        explicit: bool,
+        deadline: &Deadline,
+    ) -> Result<bool, BoundaryError> {
+        self.neighbors.requests_neighbor(target, explicit, deadline)
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        target: &crate::target::SelectedAddress,
+        timeout: Duration,
+        deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        self.neighbors.resolve_neighbor(target, timeout, deadline)
+    }
+}
+
+fn ordinals_request(
+    silent: Ipv4Addr,
+    answered: Ipv4Addr,
+    neighbors: Vec<super::discovery::NeighborOutcome>,
+    endpoints: Vec<crate::probe::ProbeEndpoint>,
+    dns: bool,
+) -> (Request, OrdinalsSpy, AddressListAuthorizer) {
+    use super::discovery::{Mode, Options, Unresponsive};
+    let mut request = tcp_scan_request(Target::Address(IpAddr::V4(answered)));
+    request.targets = crate::target::Selection {
+        include: [silent, answered]
+            .map(|address| {
+                crate::target::Specification::Target(Target::Address(IpAddr::V4(address)))
+            })
+            .to_vec(),
+        exclude: Vec::new(),
+    };
+    request.discovery = Options {
+        mode: Mode::Before,
+        neighbor: true,
+        probes: vec![crate::probe::ProbeEndpoint::Icmp],
+        unresponsive: Unresponsive::Skip,
+    };
+    request.endpoints = endpoints;
+    if dns {
+        use packetcraftr_core::document::udp_profiles::{Config, Payload, ResponseCheck};
+        request.udp_profiles.insert(
+            53,
+            std::sync::Arc::new(
+                crate::scan::profile::UdpProfile::new(Config {
+                    name: "test/dns".to_owned(),
+                    request: Payload::Dns {
+                        name: "example.test".to_owned(),
+                        query_type: 1,
+                        class: 1,
+                        recursion_desired: true,
+                        id_base: 0,
+                    },
+                    response: ResponseCheck::Any {},
+                })
+                .expect("profile"),
+            ),
+        );
+    }
+    request.attempts = 2;
+    request.max_in_flight = 4;
+    request.timeout = adaptive_config().min_timeout;
+    request.adaptive = Some(adaptive_config());
+    let executor = OrdinalsSpy {
+        neighbors: ScriptedNeighbors {
+            outcomes: neighbors.into(),
+            ..ScriptedNeighbors::default()
+        },
+        echo: Some(answered),
+        ..OrdinalsSpy::default()
+    };
+    (
+        request,
+        executor,
+        AddressListAuthorizer {
+            addresses: vec![IpAddr::V4(silent), IpAddr::V4(answered)],
+        },
+    )
+}
+
+#[test]
+fn adaptive_sequences_keep_a_neighbor_skipped_hosts_original_ordinals() {
+    use super::discovery::{Link, NeighborOutcome};
+    let silent = Ipv4Addr::new(192, 0, 2, 10);
+    let answered = Ipv4Addr::new(192, 0, 2, 11);
+    let resolved = NeighborOutcome::Resolved(Link {
+        address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0x10]),
+        cached: false,
+    });
+    let (request, mut executor, mut authorizer) = ordinals_request(
+        silent,
+        answered,
+        vec![NeighborOutcome::Silent, NeighborOutcome::Silent, resolved],
+        vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        false,
+    );
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = crate::test_support::live();
+    engine::run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the surviving host still scans");
+    let discovery: Vec<_> = executor
+        .probed
+        .iter()
+        .filter(|(stage, ..)| *stage == super::Stage::Discovery)
+        .map(|(_, sequence, attempt)| (*sequence, *attempt))
+        .collect();
+    let scan: Vec<_> = executor
+        .probed
+        .iter()
+        .filter(|(stage, ..)| *stage == super::Stage::Scan)
+        .map(|(_, sequence, attempt)| (*sequence, *attempt))
+        .collect();
+    assert_eq!(
+        discovery,
+        vec![(1, 1)],
+        "the silent host leaves seq0 a hole"
+    );
+    assert_eq!(scan, vec![(5, 1), (7, 2)]);
+}
+
+#[test]
+fn adaptive_sequences_stay_stable_when_discovery_filters_a_host() {
+    use super::discovery::{Link, NeighborOutcome, NextHop};
+    let silent = Ipv4Addr::new(192, 0, 2, 10);
+    let answered = Ipv4Addr::new(192, 0, 2, 11);
+    let routed = || {
+        NeighborOutcome::Routed(NextHop {
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 254)),
+            link: Some(Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0xfe]),
+                cached: false,
+            }),
+        })
+    };
+    let (request, mut executor, mut authorizer) = ordinals_request(
+        silent,
+        answered,
+        vec![routed(), routed()],
+        vec![crate::probe::ProbeEndpoint::Tcp { port: 80 }],
+        false,
+    );
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = crate::test_support::live();
+    engine::run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the responsive host still scans");
+    let discovery: Vec<_> = executor
+        .probed
+        .iter()
+        .filter(|(stage, ..)| *stage == super::Stage::Discovery)
+        .map(|(_, sequence, attempt)| (*sequence, *attempt))
+        .collect();
+    let scan: Vec<_> = executor
+        .probed
+        .iter()
+        .filter(|(stage, ..)| *stage == super::Stage::Scan)
+        .map(|(_, sequence, attempt)| (*sequence, *attempt))
+        .collect();
+    assert_eq!(discovery, vec![(0, 1), (1, 1), (2, 2)]);
+    assert_eq!(scan, vec![(5, 1), (7, 2)]);
+}
+
+#[derive(Default)]
+struct PreflightSpy {
+    wave: WaveExecutor,
+    admitted: std::collections::BTreeMap<u64, (IpAddr, crate::probe::ProbeEndpoint, u32, String)>,
+}
+
+impl Executor<Batch<Probe>> for PreflightSpy {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.wave.execute(batch)
+    }
+}
+
+impl Pipelined for PreflightSpy {
+    fn execute_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        options: PipelineOptions,
+        emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        for batch in batches {
+            let probe = batch.probe()?;
+            let admitted = self
+                .admitted
+                .get(&probe.sequence)
+                .expect("every executed adaptive probe was admitted with this identity");
+            assert_eq!(
+                *admitted,
+                (
+                    probe.address,
+                    probe.endpoint,
+                    probe.attempt,
+                    format!("{:?}", probe.packet())
+                ),
+                "sequence {} executes the admitted packet, never a rebuilt one",
+                probe.sequence
+            );
+        }
+        self.wave.execute_pipeline(batches, options, emit)
+    }
+
+    fn admit_adaptive_pipeline(
+        &mut self,
+        batches: &[Batch<Probe>],
+        _options: &PipelineOptions,
+        _summary: &mut super::executor::AdaptiveAdmission,
+    ) -> Result<(), BoundaryError> {
+        for batch in batches {
+            let probe = batch.probe()?;
+            self.admitted.insert(
+                probe.sequence,
+                (
+                    probe.address,
+                    probe.endpoint,
+                    probe.attempt,
+                    format!("{:?}", probe.packet()),
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    fn resolve_neighbor(
+        &mut self,
+        _target: &crate::target::SelectedAddress,
+        _timeout: Duration,
+        _deadline: &Deadline,
+    ) -> Result<(super::discovery::Neighbor, Stats), BoundaryError> {
+        unreachable!("these fixtures select no neighbor discovery")
+    }
+}
+
+#[test]
+fn adaptive_preflight_admits_the_exact_probes_it_later_sends() {
+    use packetcraftr_core::document::udp_profiles::{Config, Payload, ResponseCheck};
+    use std::sync::Arc;
+    let hosts = [
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)),
+    ];
+    let mut request = tcp_scan_request(Target::Address(hosts[0]));
+    request.targets.include = hosts
+        .iter()
+        .map(|address| crate::target::Specification::Target(Target::Address(*address)))
+        .collect();
+    request.endpoints = vec![
+        crate::probe::ProbeEndpoint::Tcp { port: 80 },
+        crate::probe::ProbeEndpoint::Udp { port: 53 },
+        crate::probe::ProbeEndpoint::Udp { port: 123 },
+    ];
+    request.udp_profiles.insert(
+        53,
+        Arc::new(
+            crate::scan::profile::UdpProfile::new(Config {
+                name: "test/dns".to_owned(),
+                request: Payload::Dns {
+                    name: "example.test".to_owned(),
+                    query_type: 1,
+                    class: 1,
+                    recursion_desired: true,
+                    id_base: 0,
+                },
+                response: ResponseCheck::Any {},
+            })
+            .expect("profile"),
+        ),
+    );
+    request.attempts = 2;
+    request.max_in_flight = 4;
+    request.timeout = adaptive_config().min_timeout;
+    request.adaptive = Some(adaptive_config());
+    let mut executor = PreflightSpy::default();
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = crate::test_support::live();
+    engine::run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: hosts.to_vec(),
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("adaptive executes only admitted probes");
+    assert_eq!(executor.admitted.len(), 12);
+}
+
+#[test]
+fn adaptive_sequences_stay_stable_when_discovery_filters_a_host_with_dns() {
+    use super::discovery::{Link, NeighborOutcome, NextHop};
+    let silent = Ipv4Addr::new(192, 0, 2, 10);
+    let answered = Ipv4Addr::new(192, 0, 2, 11);
+    let routed = || {
+        NeighborOutcome::Routed(NextHop {
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 254)),
+            link: Some(Link {
+                address: packetcraftr_core::packet::MacAddress([2, 0, 0, 0, 0, 0xfe]),
+                cached: false,
+            }),
+        })
+    };
+    let (request, mut executor, mut authorizer) = ordinals_request(
+        silent,
+        answered,
+        vec![routed(), routed()],
+        vec![
+            crate::probe::ProbeEndpoint::Tcp { port: 80 },
+            crate::probe::ProbeEndpoint::Udp { port: 53 },
+        ],
+        true,
+    );
+    let mut clock = crate::test_support::RecordingClock::default();
+    let mut deadline = crate::test_support::live();
+    engine::run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+        &mut deadline,
+        |_, _| Ok(()),
+    )
+    .expect("the responsive host still scans");
+    let scan: Vec<_> = executor
+        .probed
+        .iter()
+        .filter(|(stage, ..)| *stage == super::Stage::Scan)
+        .map(|(_, sequence, attempt)| (*sequence, *attempt))
+        .collect();
+    assert_eq!(
+        scan,
+        vec![(5, 1), (7, 1), (9, 2), (11, 2)],
+        "the filtered host's ordinals stay holes and every DNS query id was preauthorized"
+    );
+    assert_eq!(executor.admitted.len(), 12);
 }

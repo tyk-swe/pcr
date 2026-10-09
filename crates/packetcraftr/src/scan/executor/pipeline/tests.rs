@@ -225,3 +225,30 @@ fn a_completed_adaptive_wave_reports_its_sends() {
             .any(|call| matches!(call, Call::Transmit(_)))
     );
 }
+
+#[test]
+fn the_adaptive_summary_charges_the_worst_live_wave_bound() {
+    let mut options = options(Vec::new());
+    let admission = super::AdaptiveAdmission {
+        interfaces: Vec::new(),
+        track_interfaces: false,
+        max_description_bytes: 400,
+        max_route_bytes: 2_100,
+        max_probe_bytes: 10_000,
+    };
+    options.max_prepared_bytes = 50_000;
+    admission
+        .check(16, 32, &options)
+        .expect("16*400 + min(16,32)*2100 + 10000 == 50_000");
+    options.max_prepared_bytes = 49_999;
+    let error = admission
+        .check(16, 32, &options)
+        .expect_err("one byte under the conservative bound rejects");
+    assert_eq!(error.classification().code, "policy.scan_pipeline_limit");
+    options.max_prepared_bytes = 18_500;
+    admission
+        .check(16, 1, &options)
+        .expect("16*400 + min(16,1)*2100 + 10000 == 18_500");
+    options.max_prepared_bytes = 18_499;
+    assert!(admission.check(16, 1, &options).is_err());
+}

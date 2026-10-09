@@ -27,6 +27,7 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{self, Group, GroupRequest, Session as _},
     deadline::MAX_WAIT,
+    interface,
 };
 use prepare::{AdmittedProbe, Plan};
 use std::{
@@ -190,6 +191,98 @@ pub(super) fn admit<P: PacketProviders, K: Clock>(
         .collect::<Result<Vec<_>, _>>()?;
     let preparation = until(executor.client, deadline);
     prepare::plan(executor, &planned, options, deadline, &preparation).map(drop)
+}
+
+pub(in crate::scan) struct AdaptiveAdmission {
+    interfaces: Vec<interface::Id>,
+    track_interfaces: bool,
+    max_description_bytes: usize,
+    max_route_bytes: usize,
+    max_probe_bytes: usize,
+}
+
+impl AdaptiveAdmission {
+    pub(in crate::scan) fn new(effective_wave: usize) -> Self {
+        Self {
+            interfaces: Vec::new(),
+            track_interfaces: effective_wave > capture::MAX_SOURCES,
+            max_description_bytes: 0,
+            max_route_bytes: 0,
+            max_probe_bytes: 0,
+        }
+    }
+
+    pub(in crate::scan) fn check(
+        &self,
+        wave_len: usize,
+        host_count: usize,
+        options: &PipelineOptions,
+    ) -> Result<(), BoundaryError> {
+        let bound = wave_len
+            .saturating_mul(self.max_description_bytes)
+            .saturating_add(
+                wave_len
+                    .min(host_count)
+                    .saturating_mul(self.max_route_bytes),
+            )
+            .saturating_add(self.max_probe_bytes);
+        if bound > options.max_prepared_bytes {
+            return Err(limit("prepared descriptions", options.max_prepared_bytes));
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn admit_adaptive<P: PacketProviders, K: Clock>(
+    executor: &ExchangeExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+    summary: &mut AdaptiveAdmission,
+) -> Result<(), BoundaryError> {
+    validate_options(batches, options)?;
+    let deadline = executor
+        .client
+        .now()
+        .checked_add(options.max_duration)
+        .ok_or_else(|| limit("duration", max_wait_secs()))?;
+    let planned = batches
+        .iter()
+        .map(Planned::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    for planned in &planned {
+        let scope_bytes = planned.probe.scope.as_ref().map_or(0, |scope| {
+            scope
+                .zone
+                .as_str()
+                .len()
+                .saturating_add(scope.interface.name.len())
+        });
+        summary.max_description_bytes = summary
+            .max_description_bytes
+            .max(384usize.saturating_add(scope_bytes));
+    }
+    let preparation = until(executor.client, deadline);
+    let plan = prepare::plan(executor, &planned, options, deadline, &preparation)?;
+    for route in plan.routes.values() {
+        summary.max_route_bytes = summary
+            .max_route_bytes
+            .max(2048usize.saturating_add(route.interface().name.len()));
+    }
+    for probe in &plan.probes {
+        summary.max_probe_bytes = summary.max_probe_bytes.max(probe.memory);
+    }
+    if summary.track_interfaces {
+        for interface in &plan.interfaces {
+            if !summary.interfaces.contains(interface) {
+                summary.interfaces.push(interface.clone());
+                if summary.interfaces.len() > capture::MAX_SOURCES {
+                    return Err(limit("capture interfaces", capture::MAX_SOURCES));
+                }
+            }
+        }
+    }
+    drop(plan);
+    Ok(())
 }
 
 type CaptureSession<P> = <<P as CaptureProviders>::Capture as capture::Provider>::Capture;

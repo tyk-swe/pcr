@@ -396,6 +396,40 @@ fn document_and_constructed_evidence_limits_are_enforced() {
 }
 
 #[test]
+fn exclusions_preserve_overlapping_provenance_and_bound_constructed_documents() {
+    let mut exclusions = service_exclusions::parse(include_bytes!(
+        "../../../packetcraftr/data/service-exclusions.json"
+    ))
+    .unwrap();
+    let mut entry = exclusions.entries[0].clone();
+    entry.ports = vec![9100];
+    let mut overlap = entry.clone();
+    overlap.reason = "A separate operator reason".into();
+    overlap.metadata.maintainer = "Another operator".into();
+    exclusions.entries = vec![entry.clone(), overlap];
+    let parsed = service_exclusions::parse(&serde_json::to_vec(&exclusions).unwrap()).unwrap();
+    assert_eq!(parsed, exclusions, "retain both provenance-bearing entries");
+    assert!(parsed.excludes(entry.transport, 9100));
+
+    entry.ports = (1..=service_exclusions::MAX_EXCLUSION_PORTS)
+        .map(|port| u16::try_from(port).unwrap())
+        .collect();
+    exclusions.entries = vec![entry.clone(); service_exclusions::MAX_EXCLUSION_ENTRIES];
+    exclusions.validate().unwrap();
+    let bytes = serde_json::to_vec(&exclusions).unwrap();
+    assert!(bytes.len() > service_exclusions::MAX_EXCLUSIONS_BYTES);
+    assert!(service_exclusions::parse(&bytes).is_err());
+    exclusions.entries[0].ports.push(2049);
+    assert!(
+        exclusions.validate().is_err(),
+        "one entry exceeds its port bound"
+    );
+    exclusions.entries[0].ports.pop();
+    exclusions.entries.push(entry);
+    assert!(exclusions.validate().is_err(), "too many retained entries");
+}
+
+#[test]
 fn sensitive_exclusions_are_transport_specific_and_explicitly_overridable() {
     let exclusions = service_exclusions::parse(include_bytes!(
         "../../../packetcraftr/data/service-exclusions.json"

@@ -92,6 +92,19 @@ fn http_claims_and_matched_candidates_are_separate_with_exact_evidence() {
         candidate["provenance"]["version"],
         report["result"]["corpus_version"]
     );
+    for path in [
+        "/result/records/0/candidates/0/provenance/field_indices",
+        "/result/records/0/probes/0/identification/candidates/0/provenance/field_indices",
+    ] {
+        let mut unsupported = report.clone();
+        *unsupported.pointer_mut(path).unwrap() = serde_json::json!([]);
+        assert!(
+            crate::common::schema_validator()
+                .validate(&unsupported)
+                .is_err(),
+            "candidate needs a supporting field: {path}"
+        );
+    }
 }
 
 #[test]

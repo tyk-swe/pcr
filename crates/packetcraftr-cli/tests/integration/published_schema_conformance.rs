@@ -79,6 +79,79 @@ fn schema_accepts_based_source_reject_zero() {
 }
 
 #[test]
+fn exclusion_entry_counts_and_overlaps_agree_with_runtime_validation() {
+    use packetcraftr_core::document::service_exclusions;
+
+    let schema = validator(include_str!(
+        "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+    ));
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../packetcraftr/data/service-exclusions.json"
+    ))
+    .unwrap();
+    let entry = |transport: &str, ports: Vec<u16>| {
+        let mut entry = original["entries"][0].clone();
+        entry["transport"] = transport.into();
+        entry["ports"] = json!(ports);
+        entry
+    };
+    for (label, entries, expected) in [
+        ("empty override", vec![], true),
+        (
+            "overlapping reasons",
+            vec![entry("tcp", vec![9100]); 2],
+            true,
+        ),
+        (
+            "different transports",
+            vec![entry("tcp", vec![9100]), entry("udp", vec![9100])],
+            true,
+        ),
+        (
+            "2049 total ports",
+            vec![
+                entry("tcp", (1..=1024).collect()),
+                entry("tcp", (1025..=2049).collect()),
+            ],
+            true,
+        ),
+        (
+            "2048 ports per entry",
+            vec![entry("tcp", (1..=2048).collect())],
+            true,
+        ),
+        (
+            "2049 ports per entry",
+            vec![entry("tcp", (1..=2049).collect())],
+            false,
+        ),
+        (
+            "64 overlapping entries",
+            vec![entry("tcp", vec![9100]); 64],
+            true,
+        ),
+        ("65 entries", vec![entry("tcp", vec![9100]); 65], false),
+        (
+            "duplicate within entry",
+            vec![entry("tcp", vec![9100, 9100])],
+            false,
+        ),
+        ("zero port", vec![entry("tcp", vec![0])], false),
+    ] {
+        let mut document = original.clone();
+        document["entries"] = entries.into();
+        let bytes = serde_json::to_vec(&document).unwrap();
+        assert!(bytes.len() <= service_exclusions::MAX_EXCLUSIONS_BYTES);
+        assert_eq!(
+            service_exclusions::parse(&bytes).is_ok(),
+            expected,
+            "parser: {label}"
+        );
+        assert_eq!(schema.is_valid(&document), expected, "schema: {label}");
+    }
+}
+
+#[test]
 fn service_probe_ascii_fields_agree_with_runtime_validation() {
     use packetcraftr_core::document::service_probes;
 

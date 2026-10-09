@@ -29,6 +29,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   limits count Unicode characters as published, with separate finite UTF-8 and
   whole-document byte caps. The scanner-corpus schema requires its identification
   scenario inventory.
+- Exclusion documents apply their 2,048-port bound and uniqueness per entry,
+  agreeing with the published schema while retaining the 64-entry and 64 KiB
+  limits. Overlapping entries preserve their separate reasons and provenance.
+  Output/v11 requires every identification candidate to reference at least one
+  observed field.
 - Bounded TCP exchanges flush nonempty requests under the write deadline before
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.

@@ -100,6 +100,10 @@ nothing and consume no attempts. `--exclusions PATH` supplies an operator
 `--ignore-exclusions` explicitly disables this exclusion set for one operation;
 destination authorization and all resource budgets still apply. The exclusion
 set and version are included in the report.
+Exclusions accept at most 64 entries, each with 1–2,048 unique nonzero ports.
+Entries form a union: overlapping ports retain their separate reasons and
+provenance. Serialized exclusion documents remain bounded to 64 KiB, and these
+entry/port limits also bound directly constructed documents.
 
 ## Reading evidence
 

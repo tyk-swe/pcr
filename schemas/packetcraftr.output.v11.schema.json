@@ -13655,6 +13655,7 @@
         },
         "field_indices": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "$ref": "#/$defs/uint64"
           }

@@ -20,6 +20,7 @@
     },
     "entries": {
       "type": "array",
+      "description": "Entries combine as a union. Overlapping ports in separate entries retain each reason and its provenance; port uniqueness and the 2048-port bound apply per entry.",
       "minItems": 0,
       "maxItems": 64,
       "items": {

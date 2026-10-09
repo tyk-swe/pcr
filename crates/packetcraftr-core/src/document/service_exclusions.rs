@@ -15,6 +15,7 @@ use crate::error::{Classification, Classified, Kind, Source};
 pub const SERVICE_EXCLUSIONS_SCHEMA_V1: &str = "packetcraftr.service-exclusions/v1";
 pub const MAX_EXCLUSIONS_BYTES: usize = 64 * 1024;
 pub const MAX_EXCLUSION_ENTRIES: usize = 64;
+/// Maximum ports per entry, alongside the entry-count and document-byte bounds.
 pub const MAX_EXCLUSION_PORTS: usize = 2048;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,19 +78,19 @@ impl Exclusions {
         if self.entries.len() > MAX_EXCLUSION_ENTRIES {
             return Err(invalid("exclusions entries", "expected at most 64 entries"));
         }
-        let mut seen = BTreeSet::new();
         for entry in &self.entries {
             text("exclusion reason", &entry.reason)?;
             metadata(&entry.metadata)?;
-            if entry.ports.is_empty() {
-                return Err(invalid("exclusion ports", "expected at least one port"));
+            if entry.ports.is_empty() || entry.ports.len() > MAX_EXCLUSION_PORTS {
+                return Err(invalid(
+                    "exclusion ports",
+                    "expected 1 to 2048 ports per entry",
+                ));
             }
+            let mut seen = BTreeSet::new();
             for port in &entry.ports {
-                if *port == 0 || !seen.insert((entry.transport, *port)) {
-                    return Err(invalid("exclusion port", "zero or duplicate endpoint"));
-                }
-                if seen.len() > MAX_EXCLUSION_PORTS {
-                    return Err(invalid("exclusion ports", "exceeds 2048 endpoint limit"));
+                if *port == 0 || !seen.insert(*port) {
+                    return Err(invalid("exclusion port", "zero or duplicate port in entry"));
                 }
             }
         }

@@ -31,6 +31,10 @@ pub const MAX_FIELD_BYTES: usize = 1024;
 pub const MAX_OBSERVED_FIELDS: usize = 512;
 pub const MAX_CANDIDATES: usize = 512;
 pub const MAX_INTENSITY: u8 = 9;
+/// Unicode scalar-value limit corresponding to the schemas' `maxLength`.
+pub const MAX_TEXT_CHARACTERS: usize = 512;
+/// Separate worst-case UTF-8 byte cap for a bounded descriptive text value.
+pub const MAX_TEXT_BYTES: usize = 4 * MAX_TEXT_CHARACTERS;
 
 /// Entry-specific source review and maintenance, independent of binary version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -391,10 +395,16 @@ pub(super) fn metadata(value: &Metadata) -> Result<(), Error> {
 }
 
 pub(super) fn text(field: &'static str, value: &str) -> Result<(), Error> {
-    if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+    // JSON Schema maxLength counts Unicode characters. Keep a separate finite
+    // UTF-8 allocation bound and the enclosing document's byte-size boundary.
+    if value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().count() > MAX_TEXT_CHARACTERS
+        || value.chars().any(char::is_control)
+    {
         Err(invalid(
             field,
-            "expected 1 to 512 text bytes without controls",
+            "expected 1 to 512 text characters without controls",
         ))
     } else {
         Ok(())

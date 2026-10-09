@@ -71,14 +71,14 @@ fn ssh(bytes: &[u8]) -> Observation {
     // RFC 4253 §4.2 permits pre-identification lines. Bound their processing
     // independently and preserve the complete identification line as a claim.
     for (index, line) in bytes.split_inclusive(|byte| *byte == b'\n').enumerate() {
-        if index >= 16 {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Malformed,
-                "SSH preamble exceeds 16 lines",
-            );
-        }
         if !line.starts_with(b"SSH-") {
+            if index >= 16 {
+                return failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "SSH preamble exceeds 16 lines",
+                );
+            }
             if line.len() > MAX_FIELD_BYTES {
                 return failure(
                     Protocol::Ssh,

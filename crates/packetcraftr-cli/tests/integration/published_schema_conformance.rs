@@ -113,7 +113,7 @@ fn service_probe_ascii_fields_agree_with_runtime_validation() {
 }
 
 #[test]
-fn service_document_text_fields_agree_on_control_characters() {
+fn service_document_text_fields_agree_on_characters_and_length_units() {
     use packetcraftr_core::document::{service_exclusions, service_probes};
 
     for probes in [true, false] {
@@ -179,6 +179,29 @@ fn service_document_text_fields_agree_on_control_characters() {
                     accepted,
                     "schema: {path}, {character:?}"
                 );
+            }
+            for character in ['a', 'é', '中', '🦀'] {
+                for length in [0, 1, 255, 256, 257, 511, 512, 513] {
+                    let mut document = original.clone();
+                    *document.pointer_mut(&path).expect("text fixture field") =
+                        character.to_string().repeat(length).into();
+                    let bytes = serde_json::to_vec(&document).unwrap();
+                    let accepted = if probes {
+                        service_probes::parse(&bytes).is_ok()
+                    } else {
+                        service_exclusions::parse(&bytes).is_ok()
+                    };
+                    assert_eq!(
+                        accepted,
+                        (1..=512).contains(&length),
+                        "{path}, {character:?} x {length}"
+                    );
+                    assert_eq!(
+                        schema.is_valid(&document),
+                        accepted,
+                        "schema: {path}, {character:?} x {length}"
+                    );
+                }
             }
         }
         let mut dates: Vec<_> = metadata

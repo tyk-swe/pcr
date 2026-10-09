@@ -29,6 +29,28 @@ fn probe<'a>(corpus: &'a Corpus, id: &str) -> &'a Probe {
 }
 
 #[test]
+fn ssh_accepts_exactly_sixteen_preamble_lines_before_the_identification() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "ssh-banner");
+    for lines in [0, 15, 16, 17] {
+        let wire = format!("{}SSH-2.0-OpenSSH_9.8p1\r\n", "notice\r\n".repeat(lines));
+        let observation = service_probes::observe(probe, wire.as_bytes(), false);
+        let identification = corpus.identify(probe, &observation);
+        if lines <= 16 {
+            assert_eq!(observation.outcome, ObservationOutcome::Complete);
+            assert_eq!(identification.outcome, MatchOutcome::Matched);
+            assert_eq!(
+                identification.candidates[0].version.as_deref(),
+                Some("9.8p1")
+            );
+        } else {
+            assert_eq!(observation.outcome, ObservationOutcome::Malformed);
+            assert!(identification.candidates.is_empty());
+        }
+    }
+}
+
+#[test]
 fn known_ssh_and_http_claims_keep_observations_separate_from_candidates() {
     let corpus = corpus();
     for (id, wire, product, version, claim_field) in [

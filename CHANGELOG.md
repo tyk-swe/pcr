@@ -24,7 +24,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Service observations enforce the retained-field cap while parsing, reporting
   excess valid fields as truncated rather than retaining oversized evidence.
   The service-probe schema now enforces the parser's ASCII match-prefix and
-  version-delimiter contracts.
+  version-delimiter contracts. Both service-document schemas reject Unicode
+  controls in shared text fields and require ASCII date digits.
 - Bounded TCP exchanges flush nonempty requests under the write deadline before
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.

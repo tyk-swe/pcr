@@ -113,6 +113,103 @@ fn service_probe_ascii_fields_agree_with_runtime_validation() {
 }
 
 #[test]
+fn service_document_text_fields_agree_on_control_characters() {
+    use packetcraftr_core::document::{service_exclusions, service_probes};
+
+    for probes in [true, false] {
+        let (schema, original, mut paths) = if probes {
+            (
+                validator(include_str!(
+                    "../../../../schemas/packetcraftr.service-probes.v1.schema.json"
+                )),
+                serde_json::from_str::<Value>(include_str!(
+                    "../../../packetcraftr/data/service-probes.json"
+                ))
+                .unwrap(),
+                vec![
+                    "/version".to_owned(),
+                    "/matches/0/product".to_owned(),
+                    "/probes/0/read_only_review/reviewed_by".to_owned(),
+                    "/probes/0/read_only_review/statement".to_owned(),
+                ],
+            )
+        } else {
+            (
+                validator(include_str!(
+                    "../../../../schemas/packetcraftr.service-exclusions.v1.schema.json"
+                )),
+                serde_json::from_str::<Value>(include_str!(
+                    "../../../packetcraftr/data/service-exclusions.json"
+                ))
+                .unwrap(),
+                vec!["/version".to_owned(), "/entries/0/reason".to_owned()],
+            )
+        };
+        let metadata = if probes {
+            &["/probes/0/metadata", "/matches/0/metadata"][..]
+        } else {
+            &["/entries/0/metadata"][..]
+        };
+        for base in metadata {
+            for field in ["source", "reference", "license", "maintainer"] {
+                paths.push(format!("{base}/{field}"));
+            }
+        }
+        for path in paths {
+            for character in (0..=159)
+                .map(char::from)
+                .chain(['é', '中', '🦀', '\u{2028}', '\u{2029}'])
+            {
+                let mut document = original.clone();
+                *document.pointer_mut(&path).expect("text fixture field") =
+                    format!("text{character}").into();
+                let bytes = serde_json::to_vec(&document).unwrap();
+                let accepted = if probes {
+                    service_probes::parse(&bytes).is_ok()
+                } else {
+                    service_exclusions::parse(&bytes).is_ok()
+                };
+                assert_eq!(
+                    accepted,
+                    !character.is_control(),
+                    "parser: {path}, {character:?}"
+                );
+                assert_eq!(
+                    schema.is_valid(&document),
+                    accepted,
+                    "schema: {path}, {character:?}"
+                );
+            }
+        }
+        let mut dates: Vec<_> = metadata
+            .iter()
+            .map(|base| format!("{base}/updated"))
+            .collect();
+        if probes {
+            dates.push("/probes/0/read_only_review/reviewed".to_owned());
+        }
+        for path in dates {
+            for date in ["2026-10-09", "٢٠٢٦-١٠-٠٩", "२०२६-१०-०९"] {
+                let mut document = original.clone();
+                *document.pointer_mut(&path).expect("date fixture field") = date.into();
+                let bytes = serde_json::to_vec(&document).unwrap();
+                let accepted = if probes {
+                    service_probes::parse(&bytes).is_ok()
+                } else {
+                    service_exclusions::parse(&bytes).is_ok()
+                };
+                assert_eq!(accepted, date.is_ascii(), "parser date: {path}, {date}");
+                assert_eq!(
+                    schema.is_valid(&document),
+                    accepted,
+                    "schema date: {path}, {date}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn rewrite_v2_reject_assignment_properties() {
     let document = json!({
         "schema": "packetcraftr.rewrite/v2",

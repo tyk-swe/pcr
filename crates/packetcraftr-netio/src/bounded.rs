@@ -16,14 +16,24 @@ pub fn same_peer(expected: SocketAddr, actual: SocketAddr) -> bool {
     if expected.ip() != actual.ip() || expected.port() != actual.port() {
         return false;
     }
-    match (expected, actual) {
-        (SocketAddr::V6(expected), SocketAddr::V6(actual))
-            if expected.ip().is_unicast_link_local() || expected.ip().is_multicast() =>
-        {
+    match (socket_endpoint(expected), socket_endpoint(actual)) {
+        (SocketAddr::V6(expected), SocketAddr::V6(actual)) => {
             expected.scope_id() == actual.scope_id()
         }
         _ => true,
     }
+}
+
+/// Removes only irrelevant scope IDs before socket setup. Some kernels reject
+/// these instead of ignoring them, even for an existing loopback interface.
+pub(crate) fn socket_endpoint(mut endpoint: SocketAddr) -> SocketAddr {
+    if let SocketAddr::V6(address) = &mut endpoint
+        && !address.ip().is_unicast_link_local()
+        && !address.ip().is_multicast()
+    {
+        address.set_scope_id(0);
+    }
+    endpoint
 }
 
 /// Application bytes transferred before the exchange stopped.
@@ -72,6 +82,24 @@ mod tests {
     use std::net::{Ipv6Addr, SocketAddrV6};
 
     use super::*;
+
+    #[test]
+    fn socket_setup_clears_only_irrelevant_scopes_without_changing_flow_information() {
+        for (ip, scope) in [
+            ("::1", 0),
+            ("2001:db8::1", 0),
+            ("fe80::1", 7),
+            ("ff02::1", 7),
+        ] {
+            let ip = ip.parse().unwrap();
+            let endpoint = SocketAddr::V6(SocketAddrV6::new(ip, 80, 123, 7));
+            let expected = SocketAddr::V6(SocketAddrV6::new(ip, 80, 123, scope));
+            assert_eq!(socket_endpoint(endpoint), expected);
+            assert!(same_peer(endpoint, expected));
+        }
+        let ipv4 = "192.0.2.1:80".parse().unwrap();
+        assert_eq!(socket_endpoint(ipv4), ipv4);
+    }
 
     #[test]
     fn peer_identity_ignores_flow_information_but_preserves_multicast_scopes() {

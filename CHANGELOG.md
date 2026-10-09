@@ -31,6 +31,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   after its complete banner even when subsequent binary data shares the read.
 - Identification and connected UDP peer checks ignore irrelevant IPv6 scope IDs
   while preserving exact addresses, ports, and link-local or multicast scopes.
+  TCP and UDP socket setup clears only those irrelevant scopes so they are also
+  accepted on Windows.
 
 ### Breaking
 

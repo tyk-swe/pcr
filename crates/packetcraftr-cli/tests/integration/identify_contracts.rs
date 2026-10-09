@@ -163,6 +163,9 @@ fn json_preserves_an_endpoint_larger_than_the_ndjson_record_ceiling() {
                     Err(error) => panic!("HTTP fixture accept: {error}"),
                 }
             };
+            // Accepted sockets can inherit the listener's nonblocking mode.
+            // Restore blocking I/O so the finite transfer timeouts apply.
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();

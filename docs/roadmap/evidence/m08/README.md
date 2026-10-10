@@ -30,20 +30,23 @@ outcomes. Compilation and unavailable scenarios are not passing runtime evidence
 
 ## Reviewed runtime
 
-The archives below retain the original fixture variants. Their product-ambiguity
-case used two rules for one nginx field, and their known and misleading claims
-differed from inventory 1.4.0. They establish those historical results, not the
-inventory's separate nginx/Apache fields or exact advertised versions. The
-corrected runner exercises all declared inventory conditions; refreshed runtime
-reports will replace these archives after cross-platform validation.
+The archives below replace the historical reports with corrected inventory 1.4.0
+conditions: exact known versions, the misleading HTTP claim, and separate
+nginx/Apache fields with distinct provenance indices.
 
 Clean implementation and fixtures
-`928ad8d555fe8b34abd144083612b54ace0fef1f` passed on 2026-10-09.
-[CI run 37989728319](https://github.com/tyk-swe/pcr/actions/runs/37989728319)
-completed successfully in all eight jobs, including portable isolation, native
+`99a9cf23216eb490892c0b6659e303d1a0b02c3d` passed on 2026-10-10.
+[CI run 38009601998](https://github.com/tyk-swe/pcr/actions/runs/38009601998)
+completed all seven applicable jobs, including portable isolation, native
 contracts, warnings-denied documentation, decoder oracle and fuzz compilation.
+The isolated native launcher is skipped for pull requests.
 
-| Platform | Original acceptance report | Profiles | Passed cases | Failed / unavailable |
+Reports identify CI's PR merge checkout
+`103a1594fd8d94262404bd73b5aee94494877690`. Its tree is identical to the
+implementation tree. The manifest retains both revisions, the base revision and
+tree identities rather than conflating a PR head with the checkout SHA.
+
+| Platform | Corrected acceptance report | Profiles | Passed cases | Failed / unavailable |
 | --- | --- | ---: | ---: | ---: |
 | Linux x86_64 | [linux.json.gz](linux.json.gz) | 5 | 360 | 0 / 0 |
 | macOS ARM64 | [macos-arm64.json.gz](macos-arm64.json.gz) | 5 | 360 | 0 / 0 |
@@ -72,20 +75,26 @@ are covered by the CLI conformance tests and acceptance runner.
 
 ## Local validation
 
-The reviewed source passed:
+Reviewed source `70a9c66eded90db44930a16151a87ee6b1db8322` adds SSH
+collection at definitive parser limits after the retained CI implementation. Its
+local checks passed without supplied Cargo profile overrides:
 
 - `cargo fmt --all -- --check`.
 - `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`.
 - `cargo test --locked --workspace --all-features`.
-- `python3 -m unittest discover -s scripts -p 'test_*.py'` (58 tests).
+- `python3 -m unittest discover -s scripts -p 'test_*.py'` (59 tests).
 - `python3 scripts/check-architecture.py`.
-- `python3 scripts/check-external-consumer.py` (detached offline composition).
-- Warnings-denied `cargo doc` with private items for portable, native Layer3,
-  and all-feature workspace profiles, matching the CI commands.
-- `python3 scripts/test-service-identification.py --require-clean --report target/service-identification/local-final.json` (five profiles, 360 cases).
-- Exact release asset staging, binary-generated documentation, tar extraction,
-  BUILD-METADATA identity, and `scripts/verify-archive.py` smoke checks using
-  an all-feature debug binary, with its build variant explicitly recorded.
+- `python3 scripts/test-service-identification.py --require-clean --report target/service-identification/report.json` (five profiles, 360 cases).
+
+The retained CI run also checked the detached offline consumer and
+warnings-denied documentation with private items in portable, native Layer3 and
+all-feature profiles. V12 release asset staging, binary-generated documentation,
+BUILD-METADATA identity and `scripts/verify-archive.py` checks used an all-feature
+debug binary; this is a disclosed smoke variant rather than a release build.
+The two released clock/scope stats examples retain their v10 markers while the
+packaged producer emits v12. The SSH parser-limit boundary is covered by the
+subsequent source's core/workflow regressions; it is not an additional fixture
+condition in the retained 18-scenario reports.
 
 These results close M8's applicable ground-truth and ordinary-socket gates.
 Broader raw/native inventories and M2/M3/M5/M7 acceptance remain open.

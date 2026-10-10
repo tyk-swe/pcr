@@ -21,6 +21,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Refresh retained M8 reports from the integrated v12 implementation with all
+  inventory conditions and a 1,440-case independent audit; preserve the released
+  v10 clock/scope stats examples in v12 release packaging.
 - SSH collection stops at definitive preamble limits and preserves their precise
   diagnostics and remaining budgets for later probes. Fragmented identification
   after sixteen permitted preamble lines remains readable.

@@ -12,10 +12,11 @@ reflect M5 implementation `e7f3e2efa7b47ba2ffa7e2818dbcc4d53eaef9e3` with
 [recorded Linux acceptance](evidence/m05/README.md); their broader native coverage
 remains incomplete. Identification, intensity/exclusions, qualified service
 metadata and scanner-data lifecycle rows reflect completed [M8][m8] at
-`928ad8d555fe8b34abd144083612b54ace0fef1f`, verified on 2026-10-09.
+`99a9cf23216eb490892c0b6659e303d1a0b02c3d`, verified on 2026-10-10.
 [M8 acceptance](evidence/m08/README.md) records 1,440 passed case-runs across
-20 ordinary-socket profiles on Linux, macOS ARM/Intel, and Windows. Other rows
-retain their earlier review scope.
+20 ordinary-socket profiles on Linux, macOS ARM/Intel, and Windows. Traceroute
+rows include main's `59f7b603` implementation; M11 retains its broader open gate.
+Other rows retain their earlier review scope.
 
 Nmap references are the official guide consulted on 2026-10-05/06. No live Nmap
 comparison is claimed. Actual differential runs must pin binary version, build

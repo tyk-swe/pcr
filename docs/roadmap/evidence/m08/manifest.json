@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
-  "implementation_revision": "928ad8d555fe8b34abd144083612b54ace0fef1f",
-  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/37989728319",
-  "runner": "https://github.com/tyk-swe/pcr/blob/928ad8d555fe8b34abd144083612b54ace0fef1f/scripts/test-service-identification.py",
+  "implementation_revision": "99a9cf23216eb490892c0b6659e303d1a0b02c3d",
+  "workflow_run": "https://github.com/tyk-swe/pcr/actions/runs/38009601998",
+  "runner": "https://github.com/tyk-swe/pcr/blob/99a9cf23216eb490892c0b6659e303d1a0b02c3d/scripts/test-service-identification.py",
   "profiles_per_platform": 5,
   "cases_per_profile": 72,
   "total_profiles": 20,
@@ -11,7 +11,7 @@
   "unavailable": 0,
   "independent_audit": {
     "path": "independent-audit.json",
-    "sha256": "30cfda5c47f4bc8ccb09d3352df1e7d6b9ff9bf9c8553be35a0e933afe1bae08"
+    "sha256": "b0ccda52d95e3c7c0647927c14c5f7b3d3193d2fca435d6d40f5fe4020feac2a"
   },
   "reports": [
     {
@@ -19,56 +19,60 @@
       "artifact": "service-identification-linux",
       "platform": "Linux",
       "architecture": "x86_64",
-      "recorded_at": "2026-10-09T20:56:25.111627+00:00",
+      "recorded_at": "2026-10-10T00:38:17.256511+00:00",
       "profiles": 5,
       "cases": 360,
       "failed": 0,
       "unavailable": 0,
-      "original_json_bytes": 1950874,
-      "original_json_sha256": "d5aeb679a28548dd11175291e979835cbf18db8dd531f477e3efcf245329a55f",
-      "gzip_sha256": "3cb67139d69607d4c7aef76da8c6524e65ae5ea387fa41478fb061b4c1dc3ab7"
+      "original_json_bytes": 1958048,
+      "original_json_sha256": "f78ddf3bb46233e696a2933d4c97bd4c464e6fcdc307982d9aa01ce9f4a88693",
+      "gzip_sha256": "646fb489115a58232eb3d1f9e084f3bad21244642641649a0338b3b8e8455ffa"
     },
     {
       "path": "macos-arm64.json.gz",
       "artifact": "service-identification-macos-14",
       "platform": "Darwin",
       "architecture": "arm64",
-      "recorded_at": "2026-10-09T20:55:27.396518+00:00",
+      "recorded_at": "2026-10-10T00:40:03.558487+00:00",
       "profiles": 5,
       "cases": 360,
       "failed": 0,
       "unavailable": 0,
-      "original_json_bytes": 1967970,
-      "original_json_sha256": "8e4735cbf5c001b67821deeed07ee0d518b2bc553df9e703957fa39b6d5779a9",
-      "gzip_sha256": "fb2baf242d1b2d06f1103ab58a07e82194684d4bef4d55d91095b187f263e6d4"
+      "original_json_bytes": 1975140,
+      "original_json_sha256": "62ab6cdb59954420fb5330c8f303b5f97c663b093cb2b8e66f6d8897d4ab91c2",
+      "gzip_sha256": "a132c1bec5171593efe4fc6827b623c3ae5a2082688de3fe7b7c1da63a8f5d45"
     },
     {
       "path": "macos-x86_64.json.gz",
       "artifact": "service-identification-macos-15-intel",
       "platform": "Darwin",
       "architecture": "x86_64",
-      "recorded_at": "2026-10-09T21:04:32.401043+00:00",
+      "recorded_at": "2026-10-10T00:45:12.283725+00:00",
       "profiles": 5,
       "cases": 360,
       "failed": 0,
       "unavailable": 0,
-      "original_json_bytes": 1968393,
-      "original_json_sha256": "8e45a8c2f1cdc5d8f351fb325753f17ee3b99b17dc0a043199cdf2cee85fdb98",
-      "gzip_sha256": "efdd9a2e46d630e2c70aa58e09967468ff9525f3a71d26a62497861c498cb869"
+      "original_json_bytes": 1975417,
+      "original_json_sha256": "31cb1d69e911c47592a011c1ca23adf106b5d88da3d8dd4419c9604c7b448e1e",
+      "gzip_sha256": "a27ae290181137905f729eab8816d3f2e4fcba619159dc034d1856386005f9ff"
     },
     {
       "path": "windows.json.gz",
       "artifact": "service-identification-windows-2022",
       "platform": "Windows",
       "architecture": "AMD64",
-      "recorded_at": "2026-10-09T20:59:41.491185+00:00",
+      "recorded_at": "2026-10-10T00:42:36.469050+00:00",
       "profiles": 5,
       "cases": 360,
       "failed": 0,
       "unavailable": 0,
-      "original_json_bytes": 2023315,
-      "original_json_sha256": "de900d4a3208124daff2c4c9d39b531b3f5ff507d8ddda94da23fdb8479a3d4b",
-      "gzip_sha256": "ff4ba6fab679cc77c8eccd924201613724e713e24cf1afc49ab0bb990b2488af"
+      "original_json_bytes": 2030616,
+      "original_json_sha256": "e3b41d9b7d05e6dd8a6521451f929d02e8dae9c67cc7cf9fd042ec7b18678a6f",
+      "gzip_sha256": "408c0617fd3f3a6490ea960a43eb9e0fcab0529ae0c280793de5c83309e8a3ea"
     }
-  ]
+  ],
+  "ci_checkout_revision": "103a1594fd8d94262404bd73b5aee94494877690",
+  "ci_base_revision": "59f7b603465fb6f8ec23a80c5a02de73fe9dbe44",
+  "implementation_tree": "7dd270a6cac599063d463aa2de71788a2010c535",
+  "ci_checkout_tree": "7dd270a6cac599063d463aa2de71788a2010c535"
 }

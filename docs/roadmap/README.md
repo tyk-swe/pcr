@@ -194,11 +194,13 @@ skipping remaining environment-dependent macOS/Windows checks. M5 stays
 and unavailable checks do not establish parity. This does not re-baseline the
 comparison scorecard or close the broader M2/M3 milestones.
 
-At M8 closure on 2026-10-09, reviewed implementation and fixtures
-`928ad8d555fe8b34abd144083612b54ace0fef1f` have 44 gap rows: 16 present,
+The M8 baseline on 2026-10-09 at
+`928ad8d555fe8b34abd144083612b54ace0fef1f` recorded 44 gap rows: 16 present,
 12 partial, 8 missing, 3 deferred, and 5 non-goal, giving 16/36 (44.4%) gap
 coverage. Independent inventory 1.4.0 supplies the identification conditions.
-All [1,440 acceptance case-runs](evidence/m08/README.md) passed across 20
+Corrected runtime evidence at `99a9cf23216eb490892c0b6659e303d1a0b02c3d`
+on 2026-10-10 replaces the historical reports. All [1,440 acceptance case-runs](evidence/m08/README.md)
+passed across 20
 profile executions on Linux, macOS ARM/Intel, and Windows. Every profile
 exercised IPv4/IPv6 and JSON/NDJSON. Reports retain actual attempts, application
 write/read counts, elapsed time, response prefixes, claims and match provenance.

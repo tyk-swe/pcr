@@ -9,7 +9,7 @@ use packetcraftr_core::{
             self, Confidence, Corpus, Field, MatchOutcome, ObservationOutcome, Probe, Transport,
         },
     },
-    protocol::application::dns::{Dns, Record, RecordValue},
+    protocol::application::dns::{Dns, Error as DnsError, Record, RecordValue},
 };
 use serde_json::{Value, json};
 
@@ -221,6 +221,126 @@ fn dns_txt_extraction_bounds_fields_before_matching() {
             let identification = corpus.identify(probe, &observation);
             assert_eq!(identification.outcome, MatchOutcome::Truncated);
             assert!(identification.candidates.is_empty());
+        }
+    }
+}
+
+#[test]
+fn dns_decode_resource_limits_preserve_truncated_evidence() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "dns-udp");
+    let query = probe.request_bytes(1234).unwrap();
+    let reply = |records: usize, strings: usize, bytes: usize| {
+        let mut reply = Dns::try_from(query.as_slice()).unwrap();
+        reply.edit(|reply| {
+            reply.response = true;
+            for _ in 0..records {
+                reply.answers.push(Record {
+                    owner: reply.questions[0].name.clone(),
+                    class: 1,
+                    ttl: 0,
+                    value: RecordValue::Txt(vec![Bytes::from(vec![b'a'; bytes]); strings]),
+                });
+            }
+        });
+        reply.to_wire().unwrap().to_vec()
+    };
+    let mut questions = query.clone();
+    questions[2..4].copy_from_slice(&0x8000u16.to_be_bytes());
+    questions[4..6].copy_from_slice(&65u16.to_be_bytes());
+    for _ in 1..65 {
+        questions.extend_from_slice(&query[12..]);
+    }
+    let mut pointers = query.clone();
+    pointers[2..4].copy_from_slice(&0x8000u16.to_be_bytes());
+    pointers[6..8].copy_from_slice(&33u16.to_be_bytes());
+    let mut previous = 12usize;
+    for _ in 0..33 {
+        let offset = pointers.len();
+        let pointer = 0xc000u16 | u16::try_from(previous).unwrap();
+        pointers.extend_from_slice(&pointer.to_be_bytes());
+        // A TXT answer with the same backward-compressed root owner and one
+        // empty string; the 33rd owner exceeds the default pointer budget.
+        pointers.extend_from_slice(&[0, 16, 0, 1, 0, 0, 0, 0, 0, 1, 0]);
+        previous = offset;
+    }
+    for (wire, expected) in [
+        (reply(1, 257, 0), DnsError::TxtStringLimit { limit: 256 }),
+        (reply(1, 65, 255), DnsError::TxtByteLimit { limit: 16_384 }),
+        (
+            reply(513, 1, 0),
+            DnsError::RecordLimit {
+                actual: 513,
+                limit: 512,
+            },
+        ),
+        (
+            questions,
+            DnsError::QuestionLimit {
+                actual: 65,
+                limit: 64,
+            },
+        ),
+        (pointers, DnsError::PointerLimit { limit: 32 }),
+    ] {
+        assert_eq!(Dns::try_from(wire.as_slice()).unwrap_err(), expected);
+        let observation = service_probes::observe(probe, &wire, false);
+        assert_eq!(observation.outcome, ObservationOutcome::Truncated);
+        assert_eq!(
+            observation.diagnostic.as_deref(),
+            Some(expected.to_string().as_str())
+        );
+        assert!(observation.fields.is_empty());
+        let identification = corpus.identify(probe, &observation);
+        assert_eq!(identification.outcome, MatchOutcome::Truncated);
+        assert!(identification.candidates.is_empty());
+    }
+    let mut invalid = query;
+    invalid[2..4].copy_from_slice(&0x8000u16.to_be_bytes());
+    invalid[12] = 0x40;
+    let observation = service_probes::observe(probe, &invalid, false);
+    assert_eq!(observation.outcome, ObservationOutcome::Malformed);
+    assert!(corpus.identify(probe, &observation).candidates.is_empty());
+}
+
+#[test]
+fn dns_reserved_bit_is_malformed_while_ad_and_cd_remain_valid() {
+    let corpus = corpus();
+    for id in ["dns-udp", "dns-version-udp"] {
+        let probe = probe(&corpus, id);
+        let query = probe.request_bytes(1234).unwrap();
+        for flags in [0, 0x10, 0x20, 0x30, 0x40] {
+            let mut reply = Dns::try_from(query.as_slice()).unwrap();
+            reply.edit(|reply| {
+                reply.response = true;
+                if id.contains("version") {
+                    reply.answers.push(Record {
+                        owner: reply.questions[0].name.clone(),
+                        class: 3,
+                        ttl: 0,
+                        value: RecordValue::Txt(vec![Bytes::from_static(b"BIND 9.18.30")]),
+                    });
+                }
+            });
+            let mut wire = reply.to_wire().unwrap().to_vec();
+            wire[2..4].copy_from_slice(&(0x8000u16 | flags).to_be_bytes());
+            let observation = service_probes::observe(probe, &wire, false);
+            let identification = corpus.identify(probe, &observation);
+            if flags == 0x40 {
+                assert_eq!(observation.outcome, ObservationOutcome::Malformed);
+                assert!(observation.fields.is_empty());
+                assert!(
+                    observation
+                        .diagnostic
+                        .as_deref()
+                        .unwrap()
+                        .contains("reserved")
+                );
+                assert!(identification.candidates.is_empty());
+            } else {
+                assert_eq!(observation.outcome, ObservationOutcome::Complete);
+                assert_eq!(identification.outcome, MatchOutcome::Matched);
+            }
         }
     }
 }

@@ -166,6 +166,7 @@ impl tcp::Stream for FakeStream {
 struct FakeUdp {
     calls: Arc<Mutex<Vec<DatagramCall>>>,
     wrong_id: bool,
+    dns_flags: u16,
     cancellation: Option<Cancellation>,
     empty_response: bool,
     peer: Option<SocketAddr>,
@@ -198,6 +199,10 @@ impl udp::Provider for FakeUdp {
         };
         if self.wrong_id && !response.is_empty() {
             response[0] ^= 0xff;
+        }
+        if !response.is_empty() {
+            let flags = u16::from_be_bytes([response[2], response[3]]) | self.dns_flags;
+            response[2..4].copy_from_slice(&flags.to_be_bytes());
         }
         let truncated = response.len() >= max_response;
         response.truncate(max_response);
@@ -1145,6 +1150,18 @@ fn fragmented_ssh_after_sixteen_preamble_lines_remains_collectable() {
 fn definitive_http_errors_complete_without_waiting_for_the_peer_to_close() {
     for (response, expected) in [
         (
+            b"HTTP/1.1 XYZ Bad\r\n".to_vec(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nBadHeader\r\n".to_vec(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            format!("HTTP/1.1 200 OK\r\n{}", "X-Fixture: ok\r\n".repeat(257)).into_bytes(),
+            ObservationOutcome::Truncated,
+        ),
+        (
             b"HTTP/1.1 200 OK\n\n".to_vec(),
             ObservationOutcome::Malformed,
         ),
@@ -1181,6 +1198,43 @@ fn definitive_http_errors_complete_without_waiting_for_the_peer_to_close() {
                 identify::Outcome::Truncated
             }
         );
+    }
+}
+
+#[test]
+fn dns_reserved_header_bits_cannot_become_protocol_matches() {
+    for flags in [0, 0x10, 0x20, 0x30, 0x40] {
+        let mut request = request(vec![endpoint(38053, identify::Transport::Udp)]);
+        corpus_with(&mut request, "dns-udp");
+        let report = client(
+            FakeTcp::default(),
+            FakeUdp {
+                dns_flags: flags,
+                ..FakeUdp::default()
+            },
+        )
+        .identify(&request)
+        .unwrap();
+        let evidence = &report.records[0].probes[0];
+        assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+        assert_eq!(evidence.response[2..4], (0x8000u16 | flags).to_be_bytes());
+        if flags == 0x40 {
+            assert_eq!(report.records[0].outcome, identify::Outcome::Malformed);
+            assert_eq!(evidence.observation.outcome, ObservationOutcome::Malformed);
+            assert!(evidence.observation.fields.is_empty());
+            assert!(report.records[0].candidates.is_empty());
+            assert!(
+                evidence
+                    .observation
+                    .diagnostic
+                    .as_deref()
+                    .unwrap()
+                    .contains("reserved")
+            );
+        } else {
+            assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+            assert_eq!(evidence.observation.outcome, ObservationOutcome::Complete);
+        }
     }
 }
 

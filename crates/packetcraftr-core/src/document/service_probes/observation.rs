@@ -10,7 +10,7 @@ use super::{
 use crate::{
     document::udp_profiles::Payload,
     protocol::application::{
-        dns::{Dns, RecordValue},
+        dns::{Dns, Error as DnsError, RecordValue},
         http,
     },
 };
@@ -231,7 +231,16 @@ fn dns(bytes: &[u8], payload: &Payload) -> Observation {
     let decoded = match Dns::try_from(bytes) {
         Ok(decoded) => decoded,
         Err(error) => {
-            let outcome = if error.truncation_needed().is_some() {
+            let outcome = if error.truncation_needed().is_some()
+                || matches!(
+                    error,
+                    DnsError::QuestionLimit { .. }
+                        | DnsError::RecordLimit { .. }
+                        | DnsError::PointerLimit { .. }
+                        | DnsError::TxtStringLimit { .. }
+                        | DnsError::TxtByteLimit { .. }
+                        | DnsError::MessageTooLarge { .. }
+                ) {
                 ObservationOutcome::Truncated
             } else {
                 ObservationOutcome::Malformed
@@ -252,6 +261,13 @@ fn dns(bytes: &[u8], payload: &Payload) -> Observation {
             "probe has no DNS question",
         );
     };
+    if decoded.reserved {
+        return failure(
+            Protocol::Dns,
+            ObservationOutcome::Malformed,
+            "DNS reply has its reserved header bit set",
+        );
+    }
     let expected_name = name.parse().ok();
     if !decoded.response
         || decoded.opcode != 0

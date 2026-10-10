@@ -21,6 +21,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Identification rejects terminated invalid HTTP lines before timeout, retains
+  DNS decoder resource limits as truncated evidence, and rejects replies with
+  the reserved DNS header bit instead of publishing protocol matches.
 - Refresh retained M8 reports from the integrated v12 implementation with all
   inventory conditions and a 1,440-case independent audit; preserve the released
   v10 clock/scope stats examples in v12 release packaging.

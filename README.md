@@ -252,8 +252,9 @@ shell completion and `man1` directories of the platform.
 - Structured command output: [`packetcraftr.output/v11`](schemas/packetcraftr.output.v11.schema.json)
   (the frozen [`v6`](schemas/packetcraftr.output.v6.schema.json),
   [`v7`](schemas/packetcraftr.output.v7.schema.json),
-  [`v8`](schemas/packetcraftr.output.v8.schema.json), and
-  [`v9`](schemas/packetcraftr.output.v9.schema.json) families are retained
+  [`v8`](schemas/packetcraftr.output.v8.schema.json),
+  [`v9`](schemas/packetcraftr.output.v9.schema.json), and
+  [`v10`](schemas/packetcraftr.output.v10.schema.json) families are retained
   for previously published evidence)
 - Capture rewrite rules: [`packetcraftr.rewrite/v2`](schemas/packetcraftr.rewrite.v2.schema.json)
 - UDP scan profiles: [`packetcraftr.udp-profiles/v1`](schemas/packetcraftr.udp-profiles.v1.schema.json)

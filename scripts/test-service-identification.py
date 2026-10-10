@@ -33,8 +33,8 @@ PROFILES = {
     "layer3": ["--no-default-features", "--features", "native-layer3"],
     "all": ["--all-features"],
 }
-HTTP = b"HTTP/1.1 200 OK\r\nServer: nginx/1.28.0\r\n\r\n"
-SSH = b"SSH-2.0-OpenSSH_9.8 fixture\r\n"
+HTTP = b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n"
+SSH = b"SSH-2.0-OpenSSH_9.8p1 fixture\r\n"
 HTTP_REQUEST = b"HEAD / HTTP/1.0\r\n\r\n"
 PEER_DISCONNECT_ERRNOS = {errno.ENOTCONN, errno.ECONNRESET, errno.ECONNABORTED}
 PEER_DISCONNECT_WINERRORS = {10057, 10054, 10053}
@@ -48,22 +48,23 @@ def require(condition, message):
 def scenarios():
     cases = [
         {"name": "known-ssh", "probe": "ssh-banner", "reply": SSH,
-         "outcome": "matched", "product": "OpenSSH", "version": "9.8"},
+         "outcome": "matched", "product": "OpenSSH", "version": "9.8p1"},
         {"name": "known-http", "probe": "http-head", "reply": HTTP,
-         "outcome": "matched", "product": "nginx", "version": "1.28.0"},
+         "outcome": "matched", "product": "nginx", "version": "1.26.2"},
         {"name": "unknown", "probe": "ssh-banner", "reply": b"unrecognized service\r\n",
          "outcome": "unknown"},
         {"name": "unknown-product", "probe": "http-head",
          "reply": b"HTTP/1.1 200 OK\r\nServer: original-fixture/42\r\n\r\n",
          "outcome": "unknown"},
-        {"name": "ambiguous-products", "probe": "http-head", "reply": HTTP,
+        {"name": "ambiguous-products", "probe": "http-head",
+         "reply": b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\nServer: Apache/2.4.62\r\n\r\n",
          "outcome": "ambiguous"},
         {"name": "ambiguous-versions", "probe": "http-head",
          "reply": b"HTTP/1.1 200 OK\r\nServer: nginx/1.28.0\r\nServer: nginx/1.27.0\r\n\r\n",
-         "outcome": "ambiguous"},
-        {"name": "misleading-banner", "probe": "ssh-banner",
-         "reply": b"SSH-2.0-OpenSSH_99.999 deceptive-fixture\r\n",
-         "outcome": "matched", "product": "OpenSSH", "version": "99.999"},
+         "outcome": "ambiguous", "product": "nginx"},
+        {"name": "misleading-banner", "probe": "http-head",
+         "reply": b"HTTP/1.1 200 OK\r\nServer: nginx/99.0\r\n\r\n",
+         "outcome": "matched", "product": "nginx", "version": "99.0"},
         {"name": "malformed", "probe": "http-head",
          "reply": b"HTTP/1.1 200 OK\r\nServer: nginx/1.28.0\x00\r\n\r\n",
          "outcome": "malformed"},
@@ -74,7 +75,7 @@ def scenarios():
         {"name": "excluded", "probe": "http-head", "reply": HTTP,
          "outcome": "excluded", "no_io": True, "exclude": True},
         {"name": "explicit-exclusion-override", "probe": "http-head", "reply": HTTP,
-         "outcome": "matched", "product": "nginx", "version": "1.28.0",
+         "outcome": "matched", "product": "nginx", "version": "1.26.2",
          "override": True},
         {"name": "intensity", "probe": "http-head", "reply": HTTP,
          "outcome": "unknown", "no_io": True, "intensity": 1},
@@ -226,11 +227,6 @@ def fixture_documents(directory, scenario, port):
     corpus["probes"] = [probe for probe in corpus["probes"] if probe["id"] == scenario["probe"]]
     require(len(corpus["probes"]) == 1, "scenario probe is missing from the shipped corpus")
     corpus["matches"] = [rule for rule in corpus["matches"] if rule["probe"] == scenario["probe"]]
-    if scenario["name"] == "ambiguous-products":
-        overlap = copy.deepcopy(next(rule for rule in corpus["matches"] if rule["product"] == "nginx"))
-        overlap["id"] = "acceptance-overlap"
-        overlap["product"] = "original-overlap-fixture"
-        corpus["matches"].append(overlap)
     corpus_path = directory / "corpus.json"
     corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
     exclusions_path = None
@@ -288,6 +284,11 @@ def verify_result(record, summary, fixture, scenario, corpus):
         require(candidates == [], "nonmatching result invented a candidate")
     elif scenario["outcome"] == "ambiguous":
         require(len(candidates) >= 2 and all(candidate["version"] is None for candidate in candidates), "ambiguous result published an exact version")
+        if scenario.get("product"):
+            require(all(candidate["product"] == scenario["product"] for candidate in candidates), "version ambiguity changed the product")
+        if scenario["name"] == "ambiguous-products":
+            require({candidate["product"] for candidate in candidates} == {"nginx", "Apache HTTP Server"}, "declared product ambiguity was not exercised")
+            require({tuple(candidate["provenance"]["field_indices"]) for candidate in candidates} == {(1,), (2,)}, "product ambiguity must cite separate Server fields")
     else:
         require(any(candidate["product"] == scenario["product"] and candidate["version"] == scenario["version"] for candidate in candidates), "known fixture product/version changed")
     for candidate in candidates:

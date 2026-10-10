@@ -30,6 +30,13 @@ outcomes. Compilation and unavailable scenarios are not passing runtime evidence
 
 ## Reviewed runtime
 
+The archives below retain the original fixture variants. Their product-ambiguity
+case used two rules for one nginx field, and their known and misleading claims
+differed from inventory 1.4.0. They establish those historical results, not the
+inventory's separate nginx/Apache fields or exact advertised versions. The
+corrected runner exercises all declared inventory conditions; refreshed runtime
+reports will replace these archives after cross-platform validation.
+
 Clean implementation and fixtures
 `928ad8d555fe8b34abd144083612b54ace0fef1f` passed on 2026-10-09.
 [CI run 37989728319](https://github.com/tyk-swe/pcr/actions/runs/37989728319)

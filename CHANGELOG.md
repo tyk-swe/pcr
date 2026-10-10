@@ -33,7 +33,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   agreeing with the published schema while retaining the 64-entry and 64 KiB
   limits. Overlapping entries preserve their separate reasons and provenance.
   Output/v11 requires every identification candidate to reference at least one
-  observed field.
+  observed field and validates outcome/candidate uncertainty, including erased
+  versions in ambiguous endpoint and probe results.
 - Bounded TCP exchanges flush nonempty requests under the write deadline before
   reading replies, including injected buffered streams. SSH identification stops
   after its complete banner even when subsequent binary data shares the read.
@@ -50,7 +51,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   Exact destination allowlists compare mapped/native IPv4 identities in either
   direction, including authorization of the connected peer before writes.
 - Identification policy declarations bound the selected probe traffic rather
-  than unused attempt allowances. Duplicate endpoint aliases are rejected before
+  than unused attempt allowances. Permanently unwritable probes are skipped so
+  later speak-first collection can run; exhausted shared budgets still stop I/O.
+  Duplicate endpoint aliases are rejected before
   I/O, including irrelevant IPv6 scopes/flow information and mapped IPv4 aliases.
   Cancellation while a TCP connection is pending remains cancelled evidence,
   distinct from a connection timeout.
@@ -60,6 +63,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Identification DNS transaction IDs start from system randomness and remain
   distinct across an operation's probes and retries. Entropy failure preserves
   its typed source and stops before any probe I/O.
+- Cross-platform identification acceptance now sends the inventory's separate
+  nginx and Apache fields for product ambiguity, and its declared known versions
+  and misleading HTTP claim, rather than substituting other fixture conditions.
 
 ### Breaking
 

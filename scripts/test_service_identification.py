@@ -49,6 +49,34 @@ class FakePeer:
 
 
 class AcceptanceContracts(unittest.TestCase):
+    def test_inventory_conditions_have_matching_runtime_expectations_and_wire_claims(self):
+        inventory = {case["id"]: case for case in json.loads(
+            (RUNNER.ROOT / "docs/scanner-corpus.v1.json").read_text()
+        )["identification_scenarios"]}
+        scenarios = {case["name"]: case for case in RUNNER.scenarios()}
+        names = {"unknown": "unknown-product", "known-dns": "known-dns-udp"}
+        for key, declared in inventory.items():
+            name = names.get(key.removeprefix("identification-"), key.removeprefix("identification-"))
+            scenario = scenarios[name]
+            expected = declared["expected"]
+            with self.subTest(inventory=key):
+                self.assertEqual(scenario["outcome"], expected["outcome"])
+                if expected["outcome"] == "matched":
+                    self.assertEqual(scenario["product"], expected["product"])
+                    self.assertEqual(scenario["version"], expected["version"])
+                    self.assertEqual(scenario.get("confidence", "claim"), expected["confidence"])
+                if name in ("known-ssh", "known-http", "misleading-banner"):
+                    self.assertIn(expected["version"].encode(), scenario["reply"])
+        scenario = scenarios["ambiguous-products"]
+        fields = [line.removeprefix(b"Server: ") for line in scenario["reply"].split(b"\r\n") if line.startswith(b"Server: ")]
+        self.assertEqual(fields, [b"nginx/1.26.2", b"Apache/2.4.62"])
+        self.assertTrue(all(field.decode() in inventory["identification-ambiguous-products"]["condition"] for field in fields))
+        with tempfile.TemporaryDirectory() as temporary:
+            _, _, corpus = RUNNER.fixture_documents(Path(temporary), scenario, 32123)
+        rules = {rule["product"]: rule for rule in corpus["matches"]}
+        self.assertTrue(fields[0].startswith(rules["nginx"]["prefix"].encode()))
+        self.assertTrue(fields[1].startswith(rules["Apache HTTP Server"]["prefix"].encode()))
+
     def envelope(self, mode="aggregate", event=None, sequence=None):
         result = {"records": [{"outcome": "unknown"}]} if mode == "aggregate" else {"outcome": "unknown"}
         envelope = {"schema": RUNNER.SCHEMA, "mode": mode, "command": "identify",

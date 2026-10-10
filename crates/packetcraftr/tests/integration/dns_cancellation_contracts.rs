@@ -74,6 +74,7 @@ fn early_cancel_prevents_dns_execution() {
                         ..Policy::default()
                     },
                     ProviderSet {
+                        udp: (),
                         route: base.route,
                         interface: base.interface,
                         capture: base.capture,

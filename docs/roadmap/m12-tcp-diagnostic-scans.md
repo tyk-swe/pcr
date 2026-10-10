@@ -23,14 +23,6 @@ and stack tests, on the plan and inference foundations of [M6][m6].
 - The flags a probe carries and the rule used to interpret replies are chosen
   separately.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| TCP scan flags | SYN only; [probe construction][scan-packets] requires it for the scan workflow | ACK, window, FIN, NULL, Xmas, Maimon, and configurable flags ([scan techniques][nmap-techniques]) |
-| Custom flags | Available through packet construction and generic exchange, with no scan correlation or inference | Custom flags with a chosen base scan type ([scan techniques][nmap-techniques]) |
-| Inference | [Classification][scan-evidence] of SYN replies and ICMP errors | Mode-specific states such as `unfiltered` and `open\|filtered` ([state meanings][nmap-states]) |
-
 ## Invariants
 
 - ACK responsiveness does not imply an open port.
@@ -64,16 +56,6 @@ and stack tests, on the plan and inference foundations of [M6][m6].
 - A result records both, so a reader can tell which rule produced a state from
   which probe.
 
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Probe flags and correlation | [`scan/plan/packet.rs`][scan-packets] |
-| Typed scan method | [`scan/request.rs`][scan-request], [`commands/scan/arguments.rs`][scan-args] |
-| Mode-specific inference | [`scan/evidence.rs`][scan-evidence], [`scan/report.rs`][scan-report] |
-| Reply and ICMP-quotation matching | core [`protocol/matcher.rs`][core-matcher] |
-| Records | [`output/scan.rs`][scan-output], `schemas/` |
-
 ## Decisions to settle
 
 1. Which families ship (recommended: ACK and window first; each of FIN, NULL,
@@ -105,12 +87,3 @@ and stack tests, on the plan and inference foundations of [M6][m6].
 [m6-inference]: m06-port-planning-inference.md#m65-inferred-states-and-reasons
 [m6-method]: m06-port-planning-inference.md#m66-capability-aware-method-planning
 [compatibility]: ../consumer-compatibility.md
-[scan-request]: ../../crates/packetcraftr/src/scan/request.rs
-[scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
-[scan-evidence]: ../../crates/packetcraftr/src/scan/evidence.rs
-[scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-[core-matcher]: ../../crates/packetcraftr-core/src/protocol/matcher.rs
-[scan-args]: ../../crates/packetcraftr-cli/src/commands/scan/arguments.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[nmap-techniques]: https://nmap.org/book/man-port-scanning-techniques.html
-[nmap-states]: https://nmap.org/book/man-port-scanning-basics.html

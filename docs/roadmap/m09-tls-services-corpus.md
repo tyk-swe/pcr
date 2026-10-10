@@ -24,14 +24,6 @@ and evaluates what the corpus can honestly claim.
 - Hostname, device, and CPE metadata appear only where observations and
   matching data support them.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| TLS | Passive [analysis][tls-analysis] assembles captured ClientHello and ServerHello records and reports SNI, negotiated parameters, and JA3/JA3S/JA4; no active TLS session | Interrogates applications behind TLS when the build supports it ([version detection][nmap-version]) |
-| Dependencies | No TLS library in the workspace; [`deny.toml`][deny] allows a fixed license list and denies duplicate versions | Not applicable |
-| Corpus | None before [M8][m8-documents] | Probe/match, CPE, and device metadata ([version detection][nmap-version]) |
-
 ## Invariants
 
 - Passive TLS decoding and JA3/JA4 observations are not service identification
@@ -81,16 +73,6 @@ and evaluates what the corpus can honestly claim.
   only when an observation and the matching data support them.
 - Each value names its source. An unsupported field is absent, not guessed.
 
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| TLS transport | netio [`tcp.rs`][tcp-provider] and its stream contract |
-| Dependency review | [`deny.toml`][deny], `Cargo.toml`, `THIRD_PARTY_NOTICES.md` |
-| Passive TLS, kept separate | core [`analysis/tls.rs`][tls-analysis], [`protocol/application/tls.rs`][tls-codec] |
-| Interrogation and records | The identification workflow from [M8][m8] |
-| Corpus and evaluation | The probe and match documents from [M8][m8-documents], the [M2][m2-corpus] fixture inventory |
-
 ## Decisions to settle
 
 1. The TLS library (recommended: choose under the [`deny.toml`][deny] license
@@ -126,12 +108,6 @@ and evaluates what the corpus can honestly claim.
       [compatibility policy][compatibility].
 
 [m1-data]: m01-claims-evidence.md#m12-scanner-data-policy
-[m2-corpus]: m02-ground-truth-benchmarks.md#m21-comparison-corpus
 [m8]: m08-service-identification.md
-[m8-documents]: m08-service-identification.md#m83-probe-and-match-documents
 [compatibility]: ../consumer-compatibility.md
 [deny]: ../../deny.toml
-[tcp-provider]: ../../crates/packetcraftr-netio/src/tcp.rs
-[tls-analysis]: ../../crates/packetcraftr-core/src/analysis/tls.rs
-[tls-codec]: ../../crates/packetcraftr-core/src/protocol/application/tls.rs
-[nmap-version]: https://nmap.org/book/man-version-detection.html

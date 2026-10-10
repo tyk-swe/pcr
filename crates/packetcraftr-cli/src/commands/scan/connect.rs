@@ -114,7 +114,7 @@ pub(super) fn run(
                         .map_err(CliError::classified)
                 }
             }),
-            render_text: Box::new(move |(mut aggregate, names, lookups), _| {
+            render: Box::new(move |(mut aggregate, names, lookups), _| {
                 let diagnostics = std::mem::take(&mut aggregate.report.diagnostics);
                 super::rendering::render_connect_text(
                     &output::scan::connect::Report::publish(aggregate, plan, names, lookups)

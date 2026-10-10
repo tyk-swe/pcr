@@ -41,74 +41,19 @@ pub trait UdpProviders: Send + Sync + 'static {
     fn udp(&self) -> &Self::Udp;
 }
 
-/// Adds datagram I/O without changing the existing provider set's fields.
+/// A flat bundle of independently selected workflow capabilities.
+///
+/// Use the partial constructors and `with_*` methods to supply only what a
+/// workflow needs. An omitted provider remains `()` and grants no capability.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct WithUdp<P, U> {
-    pub providers: P,
-    pub udp: U,
-}
-
-impl<P: CaptureProviders, U: Send + Sync + 'static> CaptureProviders for WithUdp<P, U> {
-    type Interface = P::Interface;
-    type Capture = P::Capture;
-
-    fn interface(&self) -> &Self::Interface {
-        self.providers.interface()
-    }
-    fn capture(&self) -> &Self::Capture {
-        self.providers.capture()
-    }
-}
-
-impl<P: PacketProviders, U: Send + Sync + 'static> PacketProviders for WithUdp<P, U> {
-    type Route = P::Route;
-    type Transmit = P::Transmit;
-
-    fn route(&self) -> &Self::Route {
-        self.providers.route()
-    }
-    fn transmit(&self) -> &Self::Transmit {
-        self.providers.transmit()
-    }
-}
-
-impl<P: TargetProviders, U: Send + Sync + 'static> TargetProviders for WithUdp<P, U> {
-    type Resolver = P::Resolver;
-
-    fn resolver(&self) -> &Self::Resolver {
-        self.providers.resolver()
-    }
-}
-
-impl<P: TcpProviders, U: Send + Sync + 'static> TcpProviders for WithUdp<P, U> {
-    type Tcp = P::Tcp;
-
-    fn tcp(&self) -> &Self::Tcp {
-        self.providers.tcp()
-    }
-}
-
-impl<P: Send + Sync + 'static, U: net::udp::Provider + 'static> UdpProviders for WithUdp<P, U> {
-    type Udp = U;
-
-    fn udp(&self) -> &U {
-        &self.udp
-    }
-}
-
-/// A workflow uses only the providers it needs, and only after its request is
-/// admitted.
-pub trait Providers: PacketProviders + TargetProviders + TcpProviders {}
-impl<T> Providers for T where T: PacketProviders + TargetProviders + TcpProviders {}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ProviderSet<R = (), N = (), C = (), T = (), P = (), H = ()> {
+pub struct ProviderSet<R = (), N = (), C = (), T = (), P = (), H = (), U = ()> {
     pub route: R,
     pub interface: N,
     pub capture: C,
     pub transmit: T,
     pub tcp: P,
     pub resolver: H,
+    pub udp: U,
 }
 
 impl ProviderSet {
@@ -120,6 +65,7 @@ impl ProviderSet {
             transmit: (),
             tcp: (),
             resolver: (),
+            udp: (),
         }
     }
 
@@ -136,6 +82,7 @@ impl ProviderSet {
             transmit,
             tcp: (),
             resolver: (),
+            udp: (),
         }
     }
 
@@ -147,21 +94,27 @@ impl ProviderSet {
             transmit: (),
             tcp,
             resolver,
+            udp: (),
         }
     }
 }
 
-impl<R, N, C, T, P, H> ProviderSet<R, N, C, T, P, H> {
+impl<R, N, C, T, P, H, U> ProviderSet<R, N, C, T, P, H, U> {
     #[must_use]
-    pub fn with_udp<U>(self, udp: U) -> WithUdp<Self, U> {
-        WithUdp {
-            providers: self,
+    pub fn with_udp<Q>(self, udp: Q) -> ProviderSet<R, N, C, T, P, H, Q> {
+        ProviderSet {
+            route: self.route,
+            interface: self.interface,
+            capture: self.capture,
+            transmit: self.transmit,
+            tcp: self.tcp,
+            resolver: self.resolver,
             udp,
         }
     }
 
     #[must_use]
-    pub fn with_resolver<Q>(self, resolver: Q) -> ProviderSet<R, N, C, T, P, Q> {
+    pub fn with_resolver<Q>(self, resolver: Q) -> ProviderSet<R, N, C, T, P, Q, U> {
         ProviderSet {
             route: self.route,
             interface: self.interface,
@@ -169,11 +122,12 @@ impl<R, N, C, T, P, H> ProviderSet<R, N, C, T, P, H> {
             transmit: self.transmit,
             tcp: self.tcp,
             resolver,
+            udp: self.udp,
         }
     }
 
     #[must_use]
-    pub fn with_tcp<Q>(self, tcp: Q) -> ProviderSet<R, N, C, T, Q, H> {
+    pub fn with_tcp<Q>(self, tcp: Q) -> ProviderSet<R, N, C, T, Q, H, U> {
         ProviderSet {
             route: self.route,
             interface: self.interface,
@@ -181,11 +135,12 @@ impl<R, N, C, T, P, H> ProviderSet<R, N, C, T, P, H> {
             transmit: self.transmit,
             tcp,
             resolver: self.resolver,
+            udp: self.udp,
         }
     }
 }
 
-impl<R, N, C, T, P, H> CaptureProviders for ProviderSet<R, N, C, T, P, H>
+impl<R, N, C, T, P, H, U> CaptureProviders for ProviderSet<R, N, C, T, P, H, U>
 where
     R: Send + Sync + 'static,
     N: net::interface::Provider + 'static,
@@ -193,6 +148,7 @@ where
     T: Send + Sync + 'static,
     P: Send + Sync + 'static,
     H: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Interface = N;
     type Capture = C;
@@ -206,7 +162,7 @@ where
     }
 }
 
-impl<R, N, C, T, P, H> PacketProviders for ProviderSet<R, N, C, T, P, H>
+impl<R, N, C, T, P, H, U> PacketProviders for ProviderSet<R, N, C, T, P, H, U>
 where
     R: net::route::Provider + 'static,
     N: net::interface::Provider + 'static,
@@ -214,6 +170,7 @@ where
     T: net::transmit::Provider + 'static,
     P: Send + Sync + 'static,
     H: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Route = R;
     type Transmit = T;
@@ -227,7 +184,7 @@ where
     }
 }
 
-impl<R, N, C, T, P, H> TargetProviders for ProviderSet<R, N, C, T, P, H>
+impl<R, N, C, T, P, H, U> TargetProviders for ProviderSet<R, N, C, T, P, H, U>
 where
     R: Send + Sync + 'static,
     N: Send + Sync + 'static,
@@ -235,6 +192,7 @@ where
     T: Send + Sync + 'static,
     P: Send + Sync + 'static,
     H: target::Resolver + 'static,
+    U: Send + Sync + 'static,
 {
     type Resolver = H;
 
@@ -243,7 +201,7 @@ where
     }
 }
 
-impl<R, N, C, T, P, H> TcpProviders for ProviderSet<R, N, C, T, P, H>
+impl<R, N, C, T, P, H, U> TcpProviders for ProviderSet<R, N, C, T, P, H, U>
 where
     R: Send + Sync + 'static,
     N: Send + Sync + 'static,
@@ -251,11 +209,29 @@ where
     T: Send + Sync + 'static,
     P: net::tcp::Provider<Stream: 'static> + 'static,
     H: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Tcp = P;
 
     fn tcp(&self) -> &P {
         &self.tcp
+    }
+}
+
+impl<R, N, C, T, P, H, U> UdpProviders for ProviderSet<R, N, C, T, P, H, U>
+where
+    R: Send + Sync + 'static,
+    N: Send + Sync + 'static,
+    C: Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    P: Send + Sync + 'static,
+    H: Send + Sync + 'static,
+    U: net::udp::Provider + 'static,
+{
+    type Udp = U;
+
+    fn udp(&self) -> &U {
+        &self.udp
     }
 }
 
@@ -323,5 +299,29 @@ impl<P: TcpProviders> net::tcp::Provider for TcpOf<P> {
         deadline: &packetcraftr_core::budget::Deadline,
     ) -> Result<Self::Stream, net::tcp::Error> {
         self.0.tcp().connect(endpoint, deadline)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderSet;
+
+    #[test]
+    fn replacing_a_provider_preserves_the_other_capabilities() {
+        let providers = ProviderSet::packet(1, 2, 3, 4)
+            .with_tcp(5)
+            .with_resolver(6)
+            .with_udp(7)
+            .with_udp("udp")
+            .with_tcp("tcp")
+            .with_resolver("resolver");
+
+        assert_eq!(providers.route, 1);
+        assert_eq!(providers.interface, 2);
+        assert_eq!(providers.capture, 3);
+        assert_eq!(providers.transmit, 4);
+        assert_eq!(providers.tcp, "tcp");
+        assert_eq!(providers.resolver, "resolver");
+        assert_eq!(providers.udp, "udp");
     }
 }

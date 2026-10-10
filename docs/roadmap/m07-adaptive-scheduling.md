@@ -25,16 +25,6 @@ baseline before it is accepted.
 - Ordinary TCP scanning is scheduled under explicit process-wide and
   operation-wide ceilings that have been redesigned and validated.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Timing inputs | Fixed `--timeout`, `--attempts` (default 1, at most 32), `--max-in-flight` (default 1, at most 1,024), and an optional `--rate` probe-start ceiling ([request][scan-request], [limits][scan-limits]) | Dynamic timeouts, parallelism, retry selection, and rate-limit handling ([performance][nmap-performance]) |
-| Use of RTT | [Reports][scan-report] summarize RTT; [planning][scan-plan] computes a conservative fixed schedule | RTT-driven timeouts ([performance][nmap-performance]) |
-| Ordering | [Raw planning][scan-plan] follows address, attempt, then port order under global limits | Host grouping, per-host timeouts and delays, port ordering ([performance][nmap-performance], [port specification][nmap-ports]) |
-| Connect scan | [Connect execution][connect-engine] is capped by the TCP provider's [`MAX_PENDING_CONNECTIONS`][tcp-provider], the process-wide worker capacity of 16 | Parallel host and probe scheduling ([performance][nmap-performance]) |
-| Bounds | Probe, duration, prepared-byte, and evidence ceilings; cancelled workers keep their permits until cleanup finishes ([limits][scan-limits], [pipeline contracts][pipeline-contract]) | Timing templates and explicit limits ([performance][nmap-performance]) |
-
 ## Implementation status
 
 The implementation gates are complete: `scan::Adaptive` and `Request.adaptive`
@@ -255,17 +245,6 @@ bounds in response to losses and replies.
 - Plan retention improves under the same ceilings. A plan that exceeds its
   ceiling fails closed.
 
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Schedule, ordering, retries | [`scan/plan.rs`][scan-plan], [`scan/engine.rs`][scan-engine] |
-| Windows, pacing, backpressure | [`scan/executor/pipeline.rs`][scan-pipeline], [`probe/runner.rs`][probe-runner] |
-| Clock and deadlines | [`clock.rs`][clock], [`deadline.rs`][deadline] |
-| Ceilings | [`scan.rs`][scan-limits], [`scan/request.rs`][scan-request] |
-| Connect scheduling | [`scan/connect/engine.rs`][connect-engine], netio [`tcp.rs`][tcp-provider], [`resources.rs`][netio-resources] |
-| Virtual-clock contracts | [`scan_pipeline_contracts.rs`][pipeline-contract], [`connect_clock_contracts.rs`][connect-clock-contract] |
-
 ## Decisions to settle
 
 1. The RTT estimator and its bounds (recommended: a smoothed mean-and-variance
@@ -309,19 +288,3 @@ bounds in response to losses and replies.
 [m6]: m06-port-planning-inference.md
 [m8]: m08-service-identification.md
 [m10]: m10-os-identification.md
-[scan-limits]: ../../crates/packetcraftr/src/scan.rs
-[scan-request]: ../../crates/packetcraftr/src/scan/request.rs
-[scan-plan]: ../../crates/packetcraftr/src/scan/plan.rs
-[scan-engine]: ../../crates/packetcraftr/src/scan/engine.rs
-[scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-[scan-pipeline]: ../../crates/packetcraftr/src/scan/executor/pipeline.rs
-[connect-engine]: ../../crates/packetcraftr/src/scan/connect/engine.rs
-[probe-runner]: ../../crates/packetcraftr/src/probe/runner.rs
-[clock]: ../../crates/packetcraftr/src/clock.rs
-[deadline]: ../../crates/packetcraftr/src/deadline.rs
-[tcp-provider]: ../../crates/packetcraftr-netio/src/tcp.rs
-[netio-resources]: ../../crates/packetcraftr-netio/src/resources.rs
-[pipeline-contract]: ../../crates/packetcraftr/tests/integration/scan_pipeline_contracts.rs
-[connect-clock-contract]: ../../crates/packetcraftr/tests/integration/connect_clock_contracts.rs
-[nmap-performance]: https://nmap.org/book/man-performance.html
-[nmap-ports]: https://nmap.org/book/man-port-specification.html

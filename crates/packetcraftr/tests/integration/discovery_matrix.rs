@@ -279,6 +279,7 @@ fn run(
         builtin::registry(),
         Policy::default(),
         ProviderSet {
+            udp: (),
             route: Routes {
                 routed: matches!(host, Host::Unreachable),
                 ..Routes::default()

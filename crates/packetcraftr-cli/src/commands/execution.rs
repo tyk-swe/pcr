@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output;
+use crate::output::contract::Format;
 use packetcraftr_core as core;
 
 use crate::errors::CliError;
@@ -17,31 +18,30 @@ type Publish<'a, E, U> = Box<dyn FnOnce(Emit<E>) -> Result<U, CliError> + 'a>;
 type Convert<'a, R, T> =
     Box<dyn FnOnce(R) -> Result<output::envelope::Published<T>, CliError> + 'a>;
 
-type Render<'a, R, F> = Box<dyn FnOnce(R, F) -> Result<(), CliError> + 'a>;
+type Render<'a, R> = Box<dyn FnOnce(R, Format) -> Result<(), CliError> + 'a>;
 
-pub(super) struct Hooks<'a, E, U, R, F, T> {
+pub(super) struct Hooks<'a, E, U, R, T> {
     pub(super) command: output::contract::Command,
     pub(super) run: Collect<'a, R>,
     pub(super) run_with_events: Publish<'a, E, U>,
     pub(super) on_event: fn(E, &StreamEncoder) -> Result<(), CliError>,
     pub(super) into_result: Convert<'a, R, T>,
-    pub(super) render_text: Render<'a, R, F>,
+    pub(super) render: Render<'a, R>,
     pub(super) complete: fn(U, &StreamEncoder) -> Result<(), CliError>,
 }
 
-pub(super) fn run_workflow<E, U, R, F, T>(
-    format: F,
+pub(super) fn run_workflow<E, U, R, T>(
+    format: Format,
     stream: &StreamEncoder,
     cancellation: &core::budget::Cancellation,
-    hooks: Hooks<'_, E, U, R, F, T>,
+    hooks: Hooks<'_, E, U, R, T>,
 ) -> Result<(), CliError>
 where
     E: 'static,
-    F: Copy + Into<output::contract::Format>,
     T: serde::Serialize,
 {
-    match format.into() {
-        output::contract::Format::Ndjson => {
+    match format {
+        Format::Ndjson => {
             let events = stream.clone();
             let on_event = hooks.on_event;
             let emitting = cancellation.clone();
@@ -57,10 +57,10 @@ where
         wide => {
             let report = (hooks.run)()?;
             emission_check(cancellation)?;
-            if wide == output::contract::Format::Json {
+            if wide == Format::Json {
                 crate::rendering::emit_published(hooks.command, (hooks.into_result)(report)?)
             } else {
-                (hooks.render_text)(report, format)
+                (hooks.render)(report, format)
             }
         }
     }
@@ -75,7 +75,6 @@ fn emission_check(cancellation: &core::budget::Cancellation) -> Result<(), CliEr
 mod tests {
     use std::cell::RefCell;
 
-    use crate::output::contract::Format;
     use packetcraftr_core::budget::Cancellation;
 
     use super::*;
@@ -103,7 +102,7 @@ mod tests {
     fn hooks<'a>(
         log: &'a RefCell<Vec<String>>,
         stream_engine: impl FnOnce(Emit<u64>) -> Result<u64, CliError> + 'a,
-    ) -> Hooks<'a, u64, u64, u64, Format, u64> {
+    ) -> Hooks<'a, u64, u64, u64, u64> {
         Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
@@ -116,12 +115,33 @@ mod tests {
                 log.borrow_mut().push("into_result".to_owned());
                 Ok(output::envelope::Published::new(report, Vec::new()))
             }),
-            render_text: Box::new(|report: u64, format| {
-                log.borrow_mut()
-                    .push(format!("render_text:{report}:{format:?}"));
+            render: Box::new(|report: u64, format| {
+                log.borrow_mut().push(format!("render:{report}:{format:?}"));
                 Ok(())
             }),
             complete,
+        }
+    }
+
+    #[test]
+    fn text_and_capture_formats_reach_the_aggregate_renderer_unchanged() {
+        for format in [Format::Text, Format::Pcap, Format::PcapNg] {
+            let (stream, output) = stream(output::contract::Command::Exchange);
+            let log = RefCell::new(Vec::new());
+            run_workflow(
+                format,
+                &stream,
+                &Cancellation::default(),
+                hooks(&log, |_| {
+                    panic!("aggregate output must not run the event engine")
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                *log.borrow(),
+                ["run".to_owned(), format!("render:41:{format:?}")]
+            );
+            assert!(output.records().is_empty());
         }
     }
 

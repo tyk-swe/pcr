@@ -154,6 +154,7 @@ fn client<K: Clock + Clone>(
         builtin::registry(),
         packetcraftr::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: common::FixedRoutes,
             interface: common::Interfaces::default(),
             capture: ScriptedIo {
@@ -606,6 +607,7 @@ fn adaptive_connect_does_not_duplicate_a_pending_endpoint() {
         builtin::registry(),
         packetcraftr::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: common::FixedRoutes,
             interface: common::Interfaces::default(),
             capture: packets.clone(),
@@ -740,6 +742,7 @@ fn adaptive_waves_alternate_hosts_in_selection_order_ipv6() {
         builtin::registry(),
         packetcraftr::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: V6Routes,
             interface: common::Interfaces::default(),
             capture: ScriptedIo {
@@ -929,6 +932,7 @@ fn a_slow_second_host_still_answers_inside_its_own_window_ipv4() {
         builtin::registry(),
         packetcraftr::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: common::FixedRoutes,
             interface: common::Interfaces::default(),
             capture: delayed.clone(),
@@ -968,6 +972,7 @@ fn a_slow_second_host_still_answers_inside_its_own_window_ipv6() {
         builtin::registry(),
         packetcraftr::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: V6Routes,
             interface: common::Interfaces::default(),
             capture: delayed.clone(),

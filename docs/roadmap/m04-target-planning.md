@@ -2,252 +2,49 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Complete | [M1][m1] | [M5][m5] |
+| Complete | [M1](m01-claims-evidence.md) | [M5](m05-host-discovery.md) |
 
-At this milestone's start, PacketcraftR bounded target expansion, deduplicated,
-applied numeric exclusions, and filtered address families. Targets reached a
-scan only as positional arguments, there was no way to see the resulting plan
-without running it, and a link-local IPv6 address lost its interface scope on
-the way to a socket. An authorized inventory is usually a file, and an operator needs to
-check what a scan would touch before it touches anything.
+## Outcome and decisions
 
-This milestone adds bounded manifests, a list mode that sends nothing, and
-scoped IPv6 targets, without changing how targets are authorized.
+- Bounded line-oriented target/exclusion manifests share argument admission.
+  Blank lines and `#` comments are ignored; limits are combined across files
+  (1 MiB, 4,096 physical lines, 512 bytes per declaration), tightened only downward.
+  One `-` stdin consumer is allowed across manifests, payload, and profile inputs.
+- `scan --list` publishes the same selected targets and declaration provenance
+  without target/neighbor packets. Hostname resolution remains explicitly
+  authorized and reported; it is not advertised as network-free.
+- Exclusions remain numeric. Zone-qualified unicast `fe80::/10` targets carry
+  both declared zone and resolved interface. Name/index aliases coalesce only
+  when they identify the same interface; ambiguity fails before active work.
+- Scope remains part of raw route, socket, endpoint, and correlation identity.
+  Output first gained scope/list records in v7; current v12 retains them under
+  the [consumer policy](../consumer-compatibility.md#output-family-v7).
+- Octet ranges, hostname/CIDR shorthand, and random/unbounded generation remain
+  outside this milestone. M6 owns the later list-mode port selection.
 
-## Outcome
+## Completion evidence
 
-- Targets and exclusions can be supplied from bounded files or standard input,
-  with the same authorization and selection as positional arguments.
-- A list mode publishes the scan plan (addresses, families, and where each
-  came from) without sending a target or neighbor packet.
-- A scoped IPv6 target keeps its interface or zone identity from declaration to
-  the socket or route that uses it.
+Reviewed implementation and fixtures
+`8e010a0b9eac118aa13384f0b854111a73d47d76` closed M4 on 2026-10-07.
+The [acceptance records](evidence/m04/README.md) retain commands, corpus/executable
+identity, output, scope markers, and separate work/latency/retention/RSS measurements.
 
-## Baseline
+- Recording-provider and CLI contracts verify numeric zero-I/O listing,
+  authorized DNS, source equivalence, exclusions, malformed/oversized inputs,
+  duplicate diagnostics, family selection, and scope refusal/propagation.
+- Independent dataset 1.1.0 produced 264 matching case-runs across 88 cells,
+  repeated three times. Raw/traceroute benchmarks use injected providers;
+  connect benchmarks use native sockets. No Nmap comparison was run.
+- Twenty scoped native profile executions passed on Linux, macOS ARM/Intel,
+  and Windows; [reviewed run 37549075757](https://github.com/tyk-swe/pcr/actions/runs/37549075757)
+  records the host-local lanes. Linux also passed the eight isolated scenarios.
+- The [gap matrix](nmap-gap-matrix.md) marks manifests, listing, and scoped
+  targets present with constraints. M4 has no remaining gate.
 
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Declarations | Positional IP addresses, hostnames, and bounded CIDRs; repeatable numeric `--exclude`; `--max-targets` (default 1,024) and `--family` ([scan arguments][scan-args], [selection][target-selection], [admission][target-admission]) | Hostnames, addresses, CIDRs, octet ranges, exclusions ([target specification][nmap-targets]) |
-| Files and stdin | None for targets or exclusions | `-iL` and `--excludefile` ([target specification][nmap-targets]) |
-| Listing | [`plan`][route-plan] performs passive route planning for one packet; it is not a scan manifest | `-sL` lists targets ([host discovery][nmap-discovery]) |
-| Hostnames | Resolution is opt-in; every selected authorized answer is considered ([target model][target-model]) | The first resolved address unless `--resolve-all` is given ([target specification][nmap-targets]) |
-| Scoped IPv6 | [`Target`][target-model] holds an `IpAddr` or hostname with no zone; [connect planning][connect-engine] builds numeric socket endpoints without scope | Zone-qualified non-global addresses ([target specification][nmap-targets]) |
+## Limits
 
-## Invariants
-
-- Numeric and CIDR authorization, hostname authorization, exclusions, and
-  family selection behave identically for every input form.
-- A manifest can only declare targets the policy would accept as arguments. It
-  is not a way to widen authorization.
-- Input is untrusted: size, line count, and expansion are bounded before any
-  target is admitted.
-
-## Scope
-
-### M4.1 Target and exclusion manifests
-
-- Bounded ingestion of target and exclusion declarations from a file or from
-  standard input.
-- Deterministic deduplication across positional arguments and manifests.
-- Provenance: each selected target records the input that declared it.
-- Malformed entries, oversized input, and duplicate declarations are reported
-  before active work, with the offending source and position.
-
-### M4.2 Scan list and plan mode
-
-- A bulk mode that publishes the selected targets and their provenance, and
-  sends no target or neighbor packets when the declarations are numeric.
-- It is distinct from today's passive packet-route [`plan`][route-plan], which
-  keeps its meaning.
-- Hostname resolution stays an explicit opt-in. When it runs, the output says
-  so; resolution is never presented as a network-free operation.
-
-### M4.3 Scoped IPv6 targets
-
-- A target declaration may carry an interface or zone for a non-global IPv6
-  address.
-- The scope is part of the target's identity through authorization, selection,
-  and deduplication.
-- Raw and ordinary-socket paths both honor the scope. A missing or ambiguous
-  scope fails before active work.
-
-## Non-goals
-
-- Nmap's target grammar. Octet ranges and hostname/CIDR shorthand are not
-  implemented or promised; a bounded explicit manifest expresses the same
-  authorized inventory.
-- Random or unbounded target generation.
-
-## Implementation notes
-
-- Input lands in [`input/manifest.rs`][cli-manifest]: one declaration per
-  physical line (512-byte declaration bound), `#` comments including trailing
-  comments, CRLF tolerated, and a shared budget of 1 MiB / 4,096 physical
-  lines across every manifest, tightened by `--max-manifest-bytes` /
-  `--max-manifest-lines` within those ceilings. All manifests are read before
-  policy, resolution, or provider calls, and exactly one `-` stdin consumer is
-  admitted across `--targets-file`, `--exclude-file`, `--udp-payload-file`, and
-  `--udp-profiles`.
-- `scan --list` runs [`Client::plan_targets`][target-plan] through the same
-  admission as a live scan and publishes the `target_list` branch of
-  `packetcraftr.output/v7`: JSON aggregate, NDJSON `target` records with a
-  single `complete` terminal, and text listing each target's scoped address
-  and declaration sources plus a DNS warning when resolution ran.
-- `Target::ScopedAddress` carries a validated [`Zone`][target-model] on
-  unicast `fe80::/10` addresses; zones resolve to exactly one interface id
-  via `Resolver::resolve_zone` (numeric index or name, ambiguity and unknown
-  interfaces rejected). `SelectedAddress` deduplicates on `(address, resolved
-  interface)`, so name/index aliases merge while different interfaces stay
-  distinct. Scopes travel through connect sockets (`SocketAddrV6` scope id),
-  raw route planning (`route_on` pinned to the resolved interface, route keys
-  keyed by scope, mismatched provider answers rejected before sends), and
-  endpoint/correlation identity.
-
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Target model, zone identity | [`target/model.rs`][target-model] |
-| Selection, exclusion, deduplication, provenance | [`target/selection.rs`][target-selection], [`target/admission.rs`][target-admission] |
-| Manifest reading and bounds | [`input/bounded.rs`][cli-bounded-input], [`commands/scan/arguments.rs`][scan-args] |
-| List mode | [`commands/scan.rs`][scan-command], [`output/scan.rs`][scan-output] |
-| Scoped socket endpoints | [`scan/connect/engine.rs`][connect-engine], netio [`interface.rs`][netio-interface] |
-
-## Decisions
-
-Settled at M4 with the recommended positions:
-
-1. **Manifests are line-oriented text.** One declaration per line, `#`
-   comments and blank lines ignored, bounded by combined bytes and physical
-   lines before parsing — no new document family.
-2. **Standard input is an explicit `-` path**, as the capture readers already
-   use. One operation admits at most one stdin consumer across include,
-   exclude, payload, and profile inputs.
-3. **List mode is a mode of `scan` (`--list`)**, so the published plan is the
-   selection a scan would execute through the same admission path.
-4. **Exclusions stay numeric.** A name-based exclusion would depend on
-   resolution the operator has not authorized.
-5. **Declared zone text and resolved interface identity travel together** as
-   `ResolvedZone`; a zone that does not resolve to exactly one interface is
-   rejected, and `%zone` is accepted only on unicast `fe80::/10` addresses for
-   this release.
-6. **Port selections publish in the list output when [M6][m6] adds them**,
-   rather than being designed here. M6 publishes them as the list `ports`
-   record.
-7. **Scoped output ships in a new `packetcraftr.output/v7` family.**
-   Reinterpreting v6 probe/endpoint identity to carry scope would change what
-   existing fields mean, and the [compatibility policy][compatibility]
-   requires a new family for new enum meanings; v7 adds the `target_list`
-   branch and optional `scope` fields mechanically derived from v6, which
-   stays frozen.
-
-## Exit criteria
-
-- [x] Numeric list/plan operations send no target or neighbor packets, shown
-      with recording providers (`target::plan` tests assert zero provider
-      calls for numeric selections; `Call::RouteOn` evidence covers the raw
-      scoped path).
-- [x] Hostname resolution in list mode requires its opt-in and is reported as
-      resolution, not as a network-free operation (`resolution_performed` in
-      the `target_list` report; a text warning names DNS traffic).
-- [x] Denials, exclusions, malformed input, oversized input, duplicate targets,
-      scope ambiguity, and family mismatches each fail or narrow selection
-      before active work (`target::plan` and `input::manifest` tests).
-- [x] The same declarations produce the same authorized selection whether
-      supplied as arguments, a file, or standard input (one ingestion path
-      builds `Selection`; `-` is a single stdin consumer across include,
-      exclude, payload, and profile inputs).
-- [x] A scoped IPv6 target reaches its socket or route with its scope intact,
-      with runtime evidence on each platform that supports it; elsewhere it
-      publishes a capability failure. Clean five-profile Linux, macOS ARM,
-      macOS Intel, and Windows records are preserved in the
-      [acceptance evidence](evidence/m04/README.md). Injected
-      providers record a `SocketAddrV6` carrying the resolved `scope_id` and
-      raw plans routed on the resolved interface. On Linux, the isolated
-      launcher's `scoped_ipv6_targets` scenario ([native
-      validation][native-validation]) gives two veth links the same
-      link-local pair, so only the zone selects the peer. In that scenario,
-      name and index aliases merge in `--list`, a connect scan reaches the
-      listener on its zone's link and is refused on the other, and raw SYNs
-      leave on the zone's interface and correlate the peer's answers. A
-      build without interface enumeration publishes `capability.unsupported`
-      (`target::plan` test).
-- [x] The [gap matrix][matrix] target rows are updated against the reviewed
-      revision: files/stdin, bulk listing, and scoped targets are `Present
-      with constraints`, with scoped runtime evidence on every supported
-      platform and broader M2/M3 gates still explicitly open.
-
-## Ground-truth inventory
-
-[`scanner-corpus.v1.json`](../scanner-corpus.v1.json), dataset 1.1.0, records
-numeric source equivalence, exclusions/family narrowing, manifest failure and
-duplicate boundaries, and the independently provisioned host-local and isolated
-two-link scoped conditions. Numeric CLI contracts and native scoped suites read
-those expectations; native records include the corpus revision and SHA-256.
-The listener/responder conditions are the oracle, not agreement with Nmap.
-
-## Validation recorded on 2026-10-07
-
-Clean implementation and fixture revision
-`8e010a0b9eac118aa13384f0b854111a73d47d76` passes every M4 exit criterion.
-The [checked-in acceptance records](evidence/m04/README.md) preserve corpus
-identity, executable digests, commands, exit codes, process output, scope-path
-markers, namespace identities, and per-case benchmark measurements.
-
-- `cargo fmt --all -- --check`, workspace all-target/all-feature Clippy with
-  `-D warnings`, and all-feature workspace tests passed. Python evidence
-  contracts passed (22 tests), as did the four-crate dependency-direction check.
-  The 16 target-planning CLI contracts passed in full-native and portable builds.
-- Linux passed all eight isolated native scenarios. The focused five-profile
-  run separately verified scoped list aliases, distinct zones, connect outcomes,
-  and supported raw route/correlation behavior. Layer 2 uses its explicit link
-  mode and an independent NDP/TCP responder; pcap-free reports unavailable
-  capture instead of a network timeout.
-- [Reviewed-native run 37549075757](https://github.com/tyk-swe/pcr/actions/runs/37549075757)
-  passed on macOS ARM, macOS Intel, and Windows for the same clean revision.
-  All five profiles actually executed their scoped scenario on each runner.
-  Supported profiles exercised native interface selection and scoped TCP
-  sockets; Windows pcap-free/full-native also delivered exact raw IPv6 UDP
-  through a pinned route to an independently bound local receiver.
-- Portable profiles independently executed list, connect, and raw requests and
-  returned `capability.unsupported`. macOS complete-header Layer 3 IPv6 remains
-  an explicit capability limit. Focused v3 reports remain globally incomplete
-  because the seven broader M3 scenarios were deliberately unselected; all 20
-  M4 platform/architecture/profile scenarios are exercised, with zero failed
-  or unavailable scenarios.
-- Corpus dataset 1.1.0 retains independent numeric, manifest, and scoped
-  expectations. The refreshed benchmark ran three repetitions of 88 cells
-  in a private loopback namespace: all 264 published outcomes matched their
-  provisioned expectations. IPv4 and IPv6 each passed 6 connect, 108 raw-scan,
-  and 18 traceroute case-runs. Work, latency, charged retained bytes, and peak
-  process memory are retained per case. Raw/traceroute benchmarks use injected
-  providers; connect benchmarks use native sockets. Nmap comparison was not run.
-
-The M4 gate is complete. M2's broader differential-comparison work and M3's
-broader native inventories and administrator-owned protection controls remain
-separate open milestones.
-
-## Blockers
-
-None for M4. The native capability limits above remain documented constraints.
-
-[m1]: m01-claims-evidence.md
-[m3]: m03-native-validation.md
-[m5]: m05-host-discovery.md
-[m6]: m06-port-planning-inference.md
-[matrix]: nmap-gap-matrix.md
-[native-validation]: ../native-validation.md
-[target-model]: ../../crates/packetcraftr/src/target/model.rs
-[target-selection]: ../../crates/packetcraftr/src/target/selection.rs
-[target-admission]: ../../crates/packetcraftr/src/target/admission.rs
-[connect-engine]: ../../crates/packetcraftr/src/scan/connect/engine.rs
-[netio-interface]: ../../crates/packetcraftr-netio/src/interface.rs
-[route-plan]: ../../crates/packetcraftr-cli/src/commands/plan.rs
-[scan-command]: ../../crates/packetcraftr-cli/src/commands/scan.rs
-[scan-args]: ../../crates/packetcraftr-cli/src/commands/scan/arguments.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[cli-bounded-input]: ../../crates/packetcraftr-cli/src/input/bounded.rs
-[cli-manifest]: ../../crates/packetcraftr-cli/src/input/manifest.rs
-[target-plan]: ../../crates/packetcraftr/src/target/plan.rs
-[nmap-targets]: https://nmap.org/book/man-target-specification.html
-[nmap-discovery]: https://nmap.org/book/man-host-discovery.html
+Portable builds without interface enumeration refuse scoped selection.
+macOS complete-header raw IPv6 remains unsupported. Focused host-local reports
+leave the seven unrelated M3 scenarios unselected; their global incompleteness
+does not erase M4 evidence or close broader M2/M3 gates. See
+[native validation](../native-validation.md) for current validation routes.

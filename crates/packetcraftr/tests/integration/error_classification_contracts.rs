@@ -204,6 +204,7 @@ fn replay_stops_at_wire_byte_ceiling() {
             ..policy::Policy::default()
         },
         ProviderSet {
+            udp: (),
             interface: replay_interfaces(),
             ..common::providers(FixedRoutes, RecordingTransmit::new(steps.clone()))
         },

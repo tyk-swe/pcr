@@ -88,7 +88,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 output::envelope::Published::<output::traceroute::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|report, _| {
+            render: Box::new(|report, _| {
                 rendering::render_text(
                     output::envelope::Published::try_from(report).map_err(CliError::classified)?,
                 )

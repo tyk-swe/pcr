@@ -5,15 +5,13 @@ use packetcraftr_core::analysis;
 
 use super::StreamEncoder;
 use crate::errors::CliError;
+use crate::output::contract::Format;
 
-pub(crate) fn ip_event_sink<F>(
-    format: F,
+pub(crate) fn ip_event_sink(
+    format: Format,
     stream: &StreamEncoder,
-) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
-where
-    F: Into<crate::output::contract::Format>,
-{
-    let stream = (format.into() == crate::output::contract::Format::Ndjson).then(|| stream.clone());
+) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError> {
+    let stream = (format == Format::Ndjson).then(|| stream.clone());
     move |event| {
         if let Some(stream) = &stream {
             stream

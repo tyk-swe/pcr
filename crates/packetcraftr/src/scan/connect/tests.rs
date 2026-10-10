@@ -28,6 +28,7 @@ fn client<T: Provider<Stream: 'static> + Send + Sync + 'static>(tcp: T) -> Clien
         packetcraftr_core::protocol::builtin::registry(),
         crate::policy::Policy::default(),
         ProviderSet {
+            udp: (),
             route: fake.clone(),
             interface: fake.clone(),
             capture: fake.clone(),

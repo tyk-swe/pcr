@@ -560,6 +560,7 @@ mod tests {
             },
         ]);
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -598,6 +599,7 @@ mod tests {
             },
         ]);
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -662,6 +664,7 @@ mod tests {
 
         fn plan(resolver: impl Resolver + 'static) -> Error {
             let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+                udp: (),
                 route: (),
                 interface: (),
                 capture: (),
@@ -697,6 +700,7 @@ mod tests {
         }]);
         let calls = Arc::clone(&resolver.calls);
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -748,6 +752,7 @@ mod tests {
         ]);
         let resolve_calls = resolver.calls.clone();
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -788,6 +793,7 @@ mod tests {
         }]);
         let zone_calls = resolver.calls.clone();
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -855,6 +861,7 @@ mod tests {
         }]);
         let zone_calls = resolver.calls.clone();
         let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+            udp: (),
             route: (),
             interface: (),
             capture: (),
@@ -911,6 +918,7 @@ mod tests {
         ] {
             let resolver = ZoneMapResolver::new(vec![interface]);
             let providers = crate::providers::ProviderSet::<(), (), (), (), (), _> {
+                udp: (),
                 route: (),
                 interface: (),
                 capture: (),

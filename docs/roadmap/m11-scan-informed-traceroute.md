@@ -21,16 +21,6 @@ several hosts. Standalone traceroute keeps its behavior.
 - Path reuse across hosts is evaluated, and where it is used every reused hop
   says where it came from and how fresh it is.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Strategies | UDP, TCP SYN, and ICMP, with hop bounds, payload shaping, and finite evidence ([request][trace-request]) | Traceroute is a scan-integrated capability ([host discovery][nmap-discovery]) |
-| Targets per run | One [`target`][trace-request]; [execution][trace-engine] selects one destination address | Every scanned host ([host discovery][nmap-discovery]) |
-| Hop order | [Planning][trace-plan] advances hops upward from the first hop | Starts at a high TTL and decrements ([host discovery][nmap-discovery]) |
-| Use of scan results | None; traceroute is separate from scanning | Selects responsive protocols and endpoints ([host discovery][nmap-discovery]) |
-| Path reuse | None | Reuses path information across hosts ([host discovery][nmap-discovery]) |
-
 ## Invariants
 
 - A cached hop never appears as a fresh observation for another target.
@@ -64,105 +54,27 @@ incomplete.
 
 ## Implementation notes
 
-- The library module [`traceroute::hosts`][hosts] traces several hosts under
-  one plan, and `Client::trace_hosts` runs it for any authorized
-  [`Selection`][target-model]. It reuses the standalone workflow's probes,
-  packet builder, response classifier, executor, and evidence runner, so
-  probe shape, correlation, and evidence limits are the same as for
-  `traceroute`. The [runner][runner] gains `run_planned`, which asks a planner
-  for each batch after the previous batch's evidence is classified.
-- A host's probe comes from [`hosts::observed`][hosts-selection], which reads a
-  scan aggregate. Only a reply from the host itself counts, so a router's ICMP
-  error never selects a probe. A TCP SYN/ACK is preferred over a TCP reset,
-  which is preferred over an ICMP echo reply, and the lowest scan sequence wins
-  a tie. UDP is never selected: a UDP trace changes the destination port on
-  every probe, so one observed port would not cover the probes sent. Each
-  selection keeps the observation it rests on (`stage`, `sequence`, `reply`,
-  and capture time) and says `observed`, or `requested` when it comes from
-  the request's fallback strategy. A host with no observation and no strategy
-  is `not_traced` with `no_responsive_probe`, and a scoped address is
-  `not_traced` with `scoped_target`. A probe is never guessed.
-- One admission covers the whole plan. The declared selection is resolved and
-  authorized, then every host's choice is validated (IPv6 with
-  `dont_fragment`, TCP with a payload, a UDP port range that would overflow),
-  and one operation is authorized for the probes and bytes of every traced
-  host before any capture or send. The worst case is the traced hosts times
-  the hops times the attempts, with a timeout per hop batch and the rate pause
-  between all batches, plus one probe's interval when the request says when the
-  previous transmission was sent. A plan that exceeds `max_probes` or
-  `max_duration` is refused whole. Hosts that are not traced add nothing, and a
-  plan with none authorizes zero packets and sends nothing.
-- A host's ceiling is its hops times its attempts. A host ends `complete` when
-  a probe reached the destination or drew an unreachable, and `incomplete`
-  when its bounds ran out first, whether it answered anything or not; its
-  `completion` says which (`maximum_hops` or `timeout`).
-- Hosts are traced one after another in selection order. Probe sequences are
-  global across the plan and contiguous in send order, and a UDP trace offsets
-  its destination port by the host's own probe count, so a single host probes
-  exactly as standalone traceroute does
-  (`a_single_host_probes_exactly_like_standalone_traceroute`). Each host's
-  record is published right after its last probe.
-- Path reuse is off unless `hosts::Request::reuse` is set. A host that finds
-  fresh cached hops starts at the highest one (the anchor) and descends,
-  probing each hop, until a responder matches a hop that an earlier host
-  recorded at that hop limit. It then takes that host's fresh hops below the
-  match without probing, probes any hop whose entry expired or was silent, and
-  continues upward from the anchor with the standalone stop rule. A host
-  without fresh entries traces upward as before. Each hop limit is probed at
-  most once per host, so the ceiling holds. A cache entry is made only from a
-  hop that a host probed itself and that drew a time-exceeded reply, and
-  only hosts of the same address family traced with the same transport
-  match. A reused hop never becomes a probe event or a cache entry. An entry is
-  fresh while at most `max_age` has passed since its batch was planned, and the
-  cache lives for one operation.
-- A reused hop is recorded in the library's `Host::reused` and published as
-  the output's `reused_hops`, with its `source` host, the source's probe
-  sequences, the distinct responders, the latest capture time, and its `age`
-  at reuse. Fresh probes stay in `hops`, so a consumer can tell an observation
-  from a claim.
-- The CLI stage is `scan --traceroute`. After the scan it traces every scan
-  host in host order, then runs reverse DNS. Its probes come from the scan's
-  own observations. `--traceroute-strategy udp|icmp|tcp` and
-  `--traceroute-port` name the probe for hosts the scan saw no TCP or ICMP echo
-  answer from; `--traceroute-first-hop`, `--traceroute-max-hops`,
-  `--traceroute-attempts`, and `--traceroute-max-probes` bound the plan, and
-  `--traceroute-reuse-max-age-ms` enables reuse. Every `--traceroute-*` option
-  requires `--traceroute`. `--traceroute-max-probes` and the policy's
-  packet/byte budgets also reserve the neighbor requests a link-layer trace
-  may send — one per probe, worst case even though the shared operation cache
-  usually serves them; each resolution is authorized like a probe, tries once,
-  keeps its answer for the operation, and waits on the trace's rate. The
-  stage runs inside the policy packet and byte allowance remaining after
-  the scan's traffic (`with_remaining_budget`), so an exhausted budget
-  refuses further trace traffic; a plan that traces no host requires no
-  additional allowance, and it also skips the neighbor-pacing timeout bound
-  a probing plan would face. The scan hands the trace its exact resolved
-  hosts through `resolved_targets` — numeric or scoped targets each
-  re-authorized on entry — while `targets` keeps the original bounded
-  declaration, and trace probes continue the scan's sequence namespace via
-  `first_sequence` — so no trace identifier collides with a scan probe's.
-  The command's absolute deadline is the parent of each stage's own bound,
-  so no stage's setup can extend its expiry. The
-  requests actually sent count in the operation's statistics. The stage spends
-  what is left of `--max-duration`, takes a monotonic pacing marker from the
-  stage before it — so a scan or trace that sent anything owes the next stage
-  a full `--rate` interval and wall-clock `sent_at` stays evidence only —
-  takes the scan's timeout, rate, and family, shares the scan's retained
-  evidence budget, and uses its own workflow client rather than the scan's
-  neighbor-narrowed one. The finalized request — the workflow's route and
-  collection in place — is validated before the scan sends. Its statistics
-  and diagnostics count in the scan's. It needs the raw method:
-  `--connect`, `--method tcp-connect`, and an automatic choice of connect are
-  usage errors, as are `--list`, a port without a strategy, a port with ICMP,
-  and invalid trace bounds, all before any probe. A trace error fails the
-  command with its own classification.
-- Results ship in `packetcraftr.output/v11` ([schema][schema-v11],
-  [migration][migration], [compatibility][compatibility-v11]). v11 preserves
-  every v10 meaning (M7's scheduling members) and adds an optional
-  `traceroute` member to scan results, `traceroute_probe`,
-  `traceroute_undecoded`, and `traceroute_host` stream records, and
-  `complete.traceroute`. The [evidence model][evidence-trace] defines the
-  fields.
+`Client::trace_hosts` uses the standalone probes, classifier, and evidence runner
+for a bounded authorized host plan. Observed probe selection prefers a direct
+TCP SYN/ACK, then TCP reset, then ICMP echo, breaking ties by scan sequence. A
+router error cannot select a probe. UDP requires an explicit strategy because
+its destination port changes per trace probe. No observation/fallback or unsupported
+scope produces an explicit `not_traced` outcome, not a guessed probe.
+
+Hosts execute in selection order with shared sequence, pacing, evidence, packet,
+byte, and deadline budgets. Reuse is opt-in, bounded by family/scope/freshness,
+and retains sourced claims separately from fresh observations. See
+[trace evidence][evidence-trace] for record meanings and [known limits](#known-limits)
+for reuse and admission constraints.
+
+The raw-only `scan --traceroute` stage runs before reverse DNS and inherits the
+scan's remaining allowance. List/connect modes and invalid settings fail before
+active work; admission of the remaining trace budget happens after scanning.
+Standalone traceroute keeps its contract. Stage fields were introduced in v11
+and are retained in current v12 under the [consumer policy][compatibility-v11].
+
+## Recorded fixture and native checks
+
 - The evaluation behind decision 2 runs on the unit-test fixtures, which
   answer from a scripted topology: the [library tests][hosts-tests] and the
   same fixtures through a client and the fake responder in the
@@ -183,8 +95,8 @@ incomplete.
   h2 (198.51.100.11, closed) sat three hops away behind `r2`, and h3
   (203.0.113.10, closed) two hops away behind `r1`. The routers had ICMP rate
   limiting off, and replies toward the scanner were delayed 5 ms, because the
-  [freshness rule][netio-transmit] discards replies that arrive before
-  `send()` returns. The binary was a release build with `native-layer2` and
+  then-current [freshness rule][netio-transmit] discarded replies arriving before
+  `send()` returned. The binary was a release build with `native-layer2` and
   `native-layer3`. A first run lost h1's SYN/ACK to
   `exchange.integrity_rejected` because the veths offloaded checksums, and
   h1 was correctly reported `not_traced` with `no_responsive_probe`. With
@@ -214,7 +126,7 @@ incomplete.
   - Those counts predate the neighbor-request accounting added later: they
     count trace probes only. The run was not repeated.
 
-### Known limits
+## Known limits
 
 - **A reused hop is a sourced claim, not an observation.** Matching one router
   at one hop limit does not prove that two paths share the hops below it.
@@ -257,22 +169,6 @@ incomplete.
   change that correlates replies captured during transmission. An undelayed
   run on the updated submission boundary and any run on macOS or Windows
   remains needed (see Blockers).
-
-## Change map
-
-| Change | Where |
-| --- | --- |
-| Request shape, multiple targets | [`traceroute/hosts/request.rs`][hosts-request] |
-| Probe selection from scan results | [`traceroute/hosts/selection.rs`][hosts-selection] |
-| Plans across hosts and admission | [`traceroute/hosts/engine.rs`][hosts-engine] |
-| Per-host planning and classification | [`traceroute/hosts/planner.rs`][hosts-planner] |
-| Reuse cache | [`traceroute/hosts/reuse.rs`][hosts-reuse] |
-| Hop provenance and records | [`traceroute/hosts/report.rs`][hosts-report] |
-| Adaptive batch runner | [`probe/runner.rs`][runner] |
-| Scan results as input | [`scan/report.rs`][scan-report] |
-| Arguments and the stage | [`commands/scan/arguments.rs`][scan-args], [`commands/scan/traceroute.rs`][scan-trace] |
-| Published records | [`output/traceroute/hosts.rs`][trace-output] |
-| Existing contracts | [`traceroute_contracts.rs`][trace-contract] |
 
 ## Decisions
 
@@ -361,35 +257,16 @@ keep M11 `In progress`:
 [m2]: m02-ground-truth-benchmarks.md
 [m5]: m05-host-discovery.md
 [m6]: m06-port-planning-inference.md
-[trace-request]: ../../crates/packetcraftr/src/traceroute/request.rs
-[trace-plan]: ../../crates/packetcraftr/src/traceroute/plan.rs
-[trace-engine]: ../../crates/packetcraftr/src/traceroute/engine.rs
 [m3]: m03-native-validation.md
 [m7-fairness]: m07-adaptive-scheduling.md#m74-per-host-fairness-and-deadlines
 [close-gates]: README.md#close-gates
-[hosts]: ../../crates/packetcraftr/src/traceroute/hosts.rs
-[hosts-request]: ../../crates/packetcraftr/src/traceroute/hosts/request.rs
-[hosts-selection]: ../../crates/packetcraftr/src/traceroute/hosts/selection.rs
-[hosts-engine]: ../../crates/packetcraftr/src/traceroute/hosts/engine.rs
-[hosts-planner]: ../../crates/packetcraftr/src/traceroute/hosts/planner.rs
-[hosts-reuse]: ../../crates/packetcraftr/src/traceroute/hosts/reuse.rs
-[hosts-report]: ../../crates/packetcraftr/src/traceroute/hosts/report.rs
 [hosts-tests]: ../../crates/packetcraftr/src/traceroute/hosts/tests.rs
 [hosts-contracts]: ../../crates/packetcraftr/tests/integration/traceroute_hosts_contracts.rs
-[runner]: ../../crates/packetcraftr/src/probe/runner.rs
-[target-model]: ../../crates/packetcraftr/src/target/model.rs
-[scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-[scan-args]: ../../crates/packetcraftr-cli/src/commands/scan/arguments.rs
-[scan-trace]: ../../crates/packetcraftr-cli/src/commands/scan/traceroute.rs
-[trace-output]: ../../crates/packetcraftr-cli/src/output/traceroute/hosts.rs
 [trace-contract]: ../../crates/packetcraftr/tests/integration/traceroute_contracts.rs
 [cli-stage]: ../../crates/packetcraftr-cli/tests/integration/traceroute_stage_contracts.rs
 [cli-aggregate]: ../../crates/packetcraftr-cli/tests/integration/aggregate_schema_conformance.rs
 [cli-ndjson]: ../../crates/packetcraftr-cli/tests/integration/ndjson_conformance.rs
 [netio-transmit]: ../../crates/packetcraftr-netio/src/transmit.rs
-[schema-v11]: ../../schemas/packetcraftr.output.v11.schema.json
-[migration]: ../migration-unreleased.md#scan-traceroute-and-outputv11
 [compatibility-v11]: ../consumer-compatibility.md#output-family-v11
 [evidence-trace]: ../scanner-evidence.md#traceroute-stage
 [method-tests]: ../../crates/packetcraftr/src/scan/method/tests.rs
-[nmap-discovery]: https://nmap.org/book/man-host-discovery.html

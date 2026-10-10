@@ -23,14 +23,6 @@ later milestones are judged against. It adds no scanner capability.
 - Repeatable workflow benchmarks that report elapsed time, work sent, result
   accuracy, retained-state charges, and peak process memory.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Expected outcomes | [Connect contracts][connect-contract] over loopback and [scan pipeline contracts][pipeline-contract] over controlled providers; no scenario inventory with provisioned network conditions | Not applicable; Nmap is a comparison subject, not an oracle |
-| Comparison runs | None recorded | The [reference guide][nmap-guide] moves with development; the [download page][nmap-download] names the stable release |
-| Benchmarks | [Core microbenchmarks][core-bench] for decode, documents, capture files, reassembly, checksums, and TLS parsing; no live-workflow benchmark | Timing and performance options ([performance][nmap-performance]); the guide's throughput claims are not acceptance targets |
-
 ## Scope
 
 ### M2.1 Comparison corpus
@@ -69,15 +61,6 @@ A repeatable benchmark for each live workflow, run against corpus scenarios.
   charged-bytes figure is not a claim about resident memory.
 - A baseline run at the current behavior is recorded before any optimization
   in [M7][m7] is evaluated.
-
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Scenario provisioning | [`scripts/test-native-isolated.py`][isolated-launcher], [native validation][native-validation] |
-| Expected-outcome contracts | [`scan_pipeline_contracts.rs`][pipeline-contract], [`connect_scan_contracts.rs`][connect-contract] |
-| Evidence recording | [`scripts/validation_evidence.py`][validation-evidence] |
-| Benchmark harness | [`benches/benchmarks.rs`][core-bench] as the existing precedent; workflow benchmarks belong to the `packetcraftr` crate |
 
 ## Decisions to settle
 
@@ -164,15 +147,6 @@ M2 stays **In progress**.
 [m3]: m03-native-validation.md
 [m7]: m07-adaptive-scheduling.md
 [close-gates]: README.md#close-gates
-[native-validation]: ../native-validation.md
-[isolated-launcher]: ../../scripts/test-native-isolated.py
-[validation-evidence]: ../../scripts/validation_evidence.py
-[core-bench]: ../../crates/packetcraftr-core/benches/benchmarks.rs
-[connect-contract]: ../../crates/packetcraftr-cli/tests/integration/connect_scan_contracts.rs
-[pipeline-contract]: ../../crates/packetcraftr/tests/integration/scan_pipeline_contracts.rs
-[nmap-guide]: https://nmap.org/book/man.html
-[nmap-download]: https://nmap.org/download.html
-[nmap-performance]: https://nmap.org/book/man-performance.html
 
 [corpus]: ../scanner-corpus.v1.json
 [corpus-schema]: ../../schemas/packetcraftr.scanner-corpus.v1.schema.json

@@ -21,14 +21,6 @@ remaining discovery probe families.
   distinct from transport ports.
 - Additional discovery probes can be selected explicitly.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| SCTP | A [codec][sctp-codec] for the common header and checksum and a [matcher helper][sctp-matcher] that reads an initiate tag from opaque chunk bytes; [scan transports][scan-args] are TCP, UDP, and ICMP | SCTP INIT and COOKIE-ECHO scans ([scan techniques][nmap-techniques]) |
-| IP protocols | [Requests][scan-request] target TCP/UDP ports or ICMP echo; no protocol-number selection | IP protocol scan ([scan techniques][nmap-techniques]) |
-| Discovery probes | SYN, UDP, and echo; none of ACK, ICMP timestamp/netmask, SCTP, or IP-protocol | Those additional probe families ([host discovery][nmap-discovery]) |
-
 ## Invariants
 
 - A protocol number is not a transport port. Selections and results for each
@@ -66,18 +58,6 @@ remaining discovery probe families.
 - Each is an explicit discovery strategy with its own correlation, composed by
   the [M5][m5] workflow.
 
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Chunk models | core [`protocol/transport/sctp.rs`][sctp-codec] |
-| SCTP correlation | core [`protocol/matcher/sctp.rs`][sctp-matcher] |
-| Typed protocols and protocol numbers | [`correlation.rs`][correlation], [`scan/request.rs`][scan-request] |
-| Probe construction | [`scan/plan/packet.rs`][scan-packets] |
-| Inference | [`scan/evidence.rs`][scan-evidence] |
-| Raw transmission | netio [`transmit.rs`][netio-transmit], [`platform/transmit/raw_ip.rs`][raw-ip] |
-| Arguments and records | [`commands/scan/arguments.rs`][scan-args], [`output/scan.rs`][scan-output] |
-
 ## Decisions to settle
 
 1. Which platforms can transmit SCTP and arbitrary IP protocols (recommended:
@@ -114,15 +94,3 @@ remaining discovery probe families.
 [m6]: m06-port-planning-inference.md
 [m6-mixed]: m06-port-planning-inference.md#m64-mixed-tcpudp-plans
 [m6-inference]: m06-port-planning-inference.md#m65-inferred-states-and-reasons
-[correlation]: ../../crates/packetcraftr/src/correlation.rs
-[scan-request]: ../../crates/packetcraftr/src/scan/request.rs
-[scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
-[scan-evidence]: ../../crates/packetcraftr/src/scan/evidence.rs
-[sctp-codec]: ../../crates/packetcraftr-core/src/protocol/transport/sctp.rs
-[sctp-matcher]: ../../crates/packetcraftr-core/src/protocol/matcher/sctp.rs
-[netio-transmit]: ../../crates/packetcraftr-netio/src/transmit.rs
-[raw-ip]: ../../crates/packetcraftr-netio/src/platform/transmit/raw_ip.rs
-[scan-args]: ../../crates/packetcraftr-cli/src/commands/scan/arguments.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[nmap-techniques]: https://nmap.org/book/man-port-scanning-techniques.html
-[nmap-discovery]: https://nmap.org/book/man-host-discovery.html

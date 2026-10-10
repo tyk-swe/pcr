@@ -24,22 +24,6 @@ scanner capability.
 - The reviewed-native and administrator-owned permission controls that protect
   the Linux lane apply to the new routes.
 
-## Baseline
-
-| | Linux | macOS and Windows |
-| --- | --- | --- |
-| Compilation and deterministic contracts | [`ci.yml`][ci] `linux` and `portable` jobs | [`ci.yml`][ci] `platforms` job on `macos-14`, `macos-15-intel`, and `windows-2022` |
-| Privileged isolated native inventory | `native-isolated` job and [`native-review.yml`][native-review], through the [namespace launcher][isolated-launcher] | Not configured |
-| Scenarios | Seven named in [`validation_evidence.py`][validation-evidence]: loopback exchange, readiness and repeated cleanup, idle deadline and cancellation, bounded-queue loss, settings before activation, native filter error, interface disappearance | No equivalent privileged evidence claimed |
-| Evidence | `native-isolated.json`, initialized as `not_exercised` and validated for distinct namespace identifiers | None |
-
-Known platform limits at `22c7d182d577`, from the
-[project README][project-readme]: macOS does not support complete-header raw
-IPv6 transmission; Windows may reject raw UDP with a non-local source; Layer 2
-needs libpcap and BPF-device access on macOS and Npcap on Windows. The
-[validation matrix][native-validation] is the authoritative statement of what
-each route covers.
-
 ## Invariants
 
 - Privileged validation is not automatically enabled for arbitrary pull
@@ -80,17 +64,6 @@ Raw-source restrictions are recorded as the capability limits they are.
   never relabeled as privileged native evidence.
 - Missing runtime evidence remains an open platform gap in the
   [gap matrix][matrix] and in the [validation matrix][native-validation].
-
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| CI routes | [`ci.yml`][ci] (`platforms`, `native-isolated`), [`native-review.yml`][native-review] |
-| Scenario launcher | [`scripts/test-native-isolated.py`][isolated-launcher] |
-| Scenario inventory and evidence checks | [`scripts/validation_evidence.py`][validation-evidence], [`scripts/check-release-evidence.py`][release-evidence] |
-| Native contract executable | [`tests/native_isolated.rs`][native-isolated-test] |
-| Capability selection | netio [`build.rs`][native-build], [`platform/dispatch.rs`][native-dispatch] |
-| Published route coverage | [`docs/native-validation.md`][native-validation] |
 
 ## Decisions to settle
 
@@ -178,13 +151,4 @@ close M3's broader inventory or administrative-protection requirements.
 [close-gates]: README.md#close-gates
 [matrix]: nmap-gap-matrix.md
 [m6-limits]: m06-port-planning-inference.md#known-limits
-[project-readme]: ../../README.md
 [native-validation]: ../native-validation.md
-[ci]: ../../.github/workflows/ci.yml
-[native-review]: ../../.github/workflows/native-review.yml
-[isolated-launcher]: ../../scripts/test-native-isolated.py
-[validation-evidence]: ../../scripts/validation_evidence.py
-[release-evidence]: ../../scripts/check-release-evidence.py
-[native-isolated-test]: ../../crates/packetcraftr-netio/tests/native_isolated.rs
-[native-build]: ../../crates/packetcraftr-netio/build.rs
-[native-dispatch]: ../../crates/packetcraftr-netio/src/platform/dispatch.rs

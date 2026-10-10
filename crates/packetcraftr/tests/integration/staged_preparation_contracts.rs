@@ -67,7 +67,7 @@ fn fully_recorded_client(
     (Client::new(builtin::registry(), policy, providers), steps)
 }
 
-fn send_once<P: packetcraftr::Providers>(
+fn send_once<P: packetcraftr::PacketProviders>(
     client: &Client<P>,
     packet: Packet,
     options: send::Options,

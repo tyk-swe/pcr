@@ -555,7 +555,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     .map_err(CliError::classified)
                 }
             }),
-            render_text: Box::new(move |(report, names, traced), _| {
+            render: Box::new(move |(report, names, traced), _| {
                 rendering::render_text(
                     output::scan::Report::publish(
                         report,

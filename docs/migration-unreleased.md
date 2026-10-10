@@ -1,335 +1,151 @@
 # Migrating from 0.5.0-beta.3
 
-These notes describe the pending changes in `[Unreleased]`.
+This guide describes the net upgrade from the released beta.3 to current `main`.
+It does not preserve superseded intermediate APIs. See the [changelog](../CHANGELOG.md)
+for additions and the [path tables](#renamed-and-removed-paths) for mechanical
+Rust replacements. Callers already tracking `main` should also read
+[the provider cleanup](#callers-tracking-main).
 
-All structured command envelopes now identify `packetcraftr.output/v12` and
-validate against `schemas/packetcraftr.output.v12.schema.json`. The
-`packetcraftr.output/v6` through `packetcraftr.output/v11` schemas remain
-frozen and available for validating previously emitted output. The current
-producer and bundled examples have moved to v12; consumers pinned to an
-earlier family must explicitly support the new one. This cycle published three
-families: v10 added adaptive scheduling, v11 added the scan trace stage, and
-v12 adds explicit service identification.
-Packet documents now use
-`packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
-packet-document versions are rejected with a schema error.
+## Contract versions
 
-Behavior and contract changes come first, grouped by topic. The
-[renamed and removed paths](#renamed-and-removed-paths) tables at the end map
-each 0.5.0-beta.3 name to its final name, by crate.
+| Contract | beta.3 | Current main |
+| --- | --- | --- |
+| Packet JSON/YAML | `packetcraftr.packet/v1` | `packetcraftr.packet/v2` |
+| Command JSON/NDJSON | `packetcraftr.output/v2` | `packetcraftr.output/v12` |
 
-## Explicit service identification and output/v12
+Update consumers explicitly; older packet documents are rejected. Output v6–v11
+schemas remain frozen for previously emitted evidence, not as current producer
+versions. Never relabel old evidence as v12. The [consumer policy](consumer-compatibility.md)
+defines strict envelopes/enums, extensible result records, sequence/terminal rules,
+and each retained output family's additions. Keep schemas, examples, and release
+assets from the same revision.
 
-`identify IP:PORT... --transport tcp|udp` explicitly selects numeric endpoints
-reported by scans. It reads the bundled versioned corpus or `--corpus PATH`,
-applies the selected intensity and reviewed sensitive-service exclusions before
-planning, and authorizes every final numeric endpoint and request. Use
-`--exclusions PATH` for another versioned exclusion document or the explicit
-`--ignore-exclusions` override. Ordinary scans retain their existing behavior.
+## Service identification
 
-The command supports text, aggregate JSON, and sequenced NDJSON. Read-only SSH
-banner, HTTP HEAD, and DNS observations work on any port; TLS remains outside
-this milestone. Claims are unauthenticated bytes, separate from matched product
-and version candidates with ordinal confidence and corpus provenance. Unknown
-and ambiguous results never publish exact versions. Four scopes independently
-bound attempts, writes, reads, and elapsed time: operation, host, connection,
-and probe. The identification timeout defaults to 30 seconds; the overall
-invocation duration defaults to 35 seconds, leaving bounded publication time
-for partial reports when the operation budget expires. See
-[consumer compatibility](consumer-compatibility.md#output-family-v12).
+`identify` is an explicit operation; scans do not invoke it. Consumers gain the
+`identify` command and endpoint records in output/v12. Observed claims are
+unauthenticated, candidates cite matching evidence and corpus provenance, and
+unknown or ambiguous results never assert exact versions. See
+[identification controls](service-identification.md) and the
+[v12 contract](consumer-compatibility.md#output-family-v12).
 
-## Adaptive scheduling and output/v10
+## Adaptive scheduling
 
-`scan --adaptive` opts raw and connect scans into per-host adaptive
-scheduling; the fixed scheduler remains the default and the tuning flags
-(`--min-timeout-ms`, `--max-timeout-ms`, `--min-window`, `--initial-window`,
-`--host-timeout-ms`, `--retry-backoff-ms`, `--max-backoff-ms`) are rejected
-without it. Host `scan` records gain `incomplete`, set when a host's own
-deadline prevented or truncated intended work; never-sent attempts publish no
-probe evidence.
+Fixed scheduling remains the default; adaptive tuning flags require
+`scan --adaptive`. Rust `scan::Request` gains `adaptive: Option<scan::Adaptive>`;
+use `None` to retain fixed scheduling. Raw/connect reports and aggregates gain
+`scheduling`, and `scan::discovery::Scan` gains `Incomplete`. Handle that state
+when a host deadline prevents intended work; never-sent attempts carry no probe
+evidence. Netio `tcp::ConnectBudget` leases remain held until worker/socket cleanup.
+See the [scheduling contract](consumer-compatibility.md#output-family-v10),
+introduced in v10 and retained in current v12.
 
-Machine reports gain a required `scheduling` object: `mode`, the effective
-`adaptive` configuration, `observed_peak_window` (the largest pending count
-actually held, a bound rather than achieved throughput), `retries_started`,
-typed `conditions` with their cited sequences and caveats, `incomplete` host
-identities, and `operation_ceiling`/`process_ceiling` on connect scans. In
-the library, `scan::Request` gains `adaptive: Option<scan::Adaptive>`
-(required field — update every literal), `scan::{Report, Aggregate}` and
-`scan::connect::Report` carry `scheduling`, `scan::discovery::Scan` gains `Incomplete`, and
-`netio::tcp` gains `ConnectBudget` whose leases outlive cancellation cleanup
-and live inside successful `Connection`s; the process-wide pending ceiling is
-unchanged pending measurement.
+## Forwarding verification
 
-## Forwarding semantics and output/v6
+`verify-forwarding` is new since beta.3. Missing fields do not satisfy ordinary
+preservation: use explicit presence/absence checks. Read evidence states and the
+terminal verdict, not just retained details. [Verification semantics](verification-contract.md)
+is the authoritative reference.
 
-`verify-forwarding` is new in this release. Its rule semantics are in
-[verification semantics](verification-contract.md), with
-[consumer compatibility](consumer-compatibility.md) and
-[resource presets](resource-presets.md). Two points matter to output/v6
-consumers: ordinary preservation no longer treats two missing fields as a
-satisfied check (use explicit `--preserve-presence` / `--expect-absent` for
-decoder-view absence), and checks expose evidence states, so an unrelated
-incomplete field cannot erase a readable-field violation. Consumers of earlier
-output contracts must reject or explicitly migrate v6 rather than infer
-semantics.
-
-Rust `Observation` fields are private and observations bind to the exact
-compiled rules and side; use collectors and read-only getters, not literals.
-`verify` returns `forwarding::Error`, and `verify_with_limits` accepts
-independent detail and scratch budgets and a shared deadline. Forwarding
-defaults retain at most 4 MiB of detail charges across categories, in addition
-to the per-category entry ceiling; omission counts stay explicit and do not
-change verdicts.
+Rust `Observation` fields are private; construct observations through collectors
+and read them through getters. `verify` returns `forwarding::Error`;
+`verify_with_limits` accepts independent detail/scratch budgets and a shared
+deadline. Omission counts do not change verdicts.
 
 ## Offline HTTP/2 analysis
 
-The new `http2` command and `packetcraftr_core::analysis::http2` collector add
-cleartext prior-knowledge and h2c-upgrade analysis. The
-`packetcraftr_core::protocol::application::http2` module exposes bounded frame
-parsing. Existing `http` behavior and prior output/v6 branches are unchanged.
-HTTP/2 is not a stateless dissect/protocols/packet-recipe/`--decode-as`
-codec; use `--http2-port` for service selection. TLS decryption, HTTP/3,
-gRPC message decoding, extended CONNECT, and live HTTP/2 endpoints are out of
-scope.
-
-Rust consumers matching
-`packetcraftr_cli::output::contract::Command` exhaustively must handle
-`Command::Http2`. Output/v6 adds http2 success/error branches and NDJSON
-`http2_frame`/`http2_message`/`http2_issue`/`http2_connection` events plus
-`complete`. TCP conversation `stream` and `http2_stream_id` are different
-identifiers. Preserve unknown frame/setting values and exact hex evidence.
-Final connection status and later issues can qualify earlier complete
-messages. Unaccepted upgrade requests are `incomplete_upgrade` issues with no
-HTTP/2 stream ID; accepted requests use stream 1 and retain `upgrade_head`
-rather than invented HPACK. Existing v1 presets affect shared limits only;
-new HTTP/2-specific defaults remain unchanged. See
-[resource accounting](analysis-resources.md#http2-limits) and the examples
-`output-http2-success.json`, `output-http2-issue-event.json`, and
-`output-http2-connection-event.json`.
+The new `http2` command and core collector inspect cleartext prior-knowledge
+and h2c upgrades; `http` remains HTTP/1-only. Handle `Command::Http2` in exhaustive
+CLI contract matches. HTTP/2 is not a stateless recipe or decode-as codec;
+select services with `--http2-port`. TCP conversation `stream` and
+`http2_stream_id` are distinct. Read final connection assessments and later
+issues as well as messages; TLS decryption and HTTP/3 remain unsupported.
+See [capture investigation](tasks.md#2-investigate-a-capture-without-losing-evidence)
+and [HTTP/2 limits](analysis-resources.md#http2-limits).
 
 ## Error codes and messages
 
-Codes follow the failure's own classification:
+Errors retain typed sources. Read `Classified::causes()`, `error::source_chain`,
+or `error::render` rather than searching `to_string()` for nested error text.
+The CLI publishes that chain in `causes`; `message` describes only the current
+failure. `error::Source` is the shared type-erased handle; replace string sources
+or `SystemFault` with `Source::new(error)`. `document::Error::Parse.source` uses it.
 
-- Analysis processing deadlines classify as `policy.duration_limit`, matching
-  capture-reader and invocation deadlines, instead of
-  `policy.analysis_resource_limit`.
-- Analysis dissection failures keep the decode error's own code instead of
-  `packet.decode`: a layer-limit refusal reports `policy.analysis_resource_limit`
-  like a byte-limit refusal, and codec-contract failures report
-  `internal.codec_contract`.
-- Live workflow build failures report the build error's own code (such as
-  `policy.build_resource_limit`) instead of `packet.build`.
-- A display filter that reads `frame.time_epoch` or `frame.time_nsec` on a
-  frame without a timestamp reports `packet.timestamp_unavailable` (exit 3)
-  from every command, including `read --field`, `capture`, `replay`, and
-  `rewrite`. The message is `display filter requires frame.time_epoch or
-  frame.time_nsec, but the frame has no timestamp`, with the remediation
-  `remove frame.time_epoch and frame.time_nsec from the filter or use
-  timestamped packet blocks`. It previously reported `packet.error` (exit 3) or
-  `cli.filter` (exit 2) depending on the command; update scripts that match
-  either code for this case.
-- A malformed `fuzz --field` (for example `--field bad`) or a selector that
-  names no layer of the recipe reports `cli.selector` (usage, exit 2) instead of
-  `cli.fuzz_limit`, and the `--payload-file` syntax error reads
-  `--payload-file requires <protocol>[#occurrence].<field>=PATH or
-  LAYER.FIELD=PATH`. Scripts that match the old code or text need updating.
-- `build --link-type` validates its value while arguments are parsed, so an
-  unknown name fails as a clap `cli.error` (exit 2) with a multi-line message
-  listing the accepted names, ahead of the "requires PCAP or PCAPNG output"
-  check that used to report a non-capture output first. The exit code is
-  unchanged, so only code that matches the old message needs updating.
-  `dissect --link-type` takes the same names as well as numbers.
-- `read --output pcap --normalize` used to exit 2 with `--normalize requires
-  PCAPNG output`; it now writes classic PCAP. Every other `--normalize` output
-  fails with `cli.capture_normalize_format` and `--normalize requires PCAP or
-  PCAPNG output`.
-- The `cli.filter_unsupported_field` hint for `tcp.stream` and `udp.stream`
-  names `stats`, `expert`, and `export`, and no longer names `follow`, which has
-  no `--filter`.
-- An analysis limit that no capture could satisfy is a usage failure.
-  `http` and `dns-read` report a zero or above-ceiling
-  `--max-application-messages`, `--max-application-streams`,
-  `--max-application-buffer-bytes`, `--max-application-retained-bytes`, or
-  `--max-application-source-spans` (ceilings 100,000, 100,000, 256 MiB, 256 MiB,
-  and 100,000), and more than 256 distinct service ports counting the built-in
-  ones, as `cli.analysis_limit` (exit 2, published kind `usage`, for example
-  `invalid analysis limit max_messages=0: must be non-zero`) instead of
-  `policy.application_limit` (exit 6). `--http-port 0`, `--dns-port 0`, and
-  `--max-http-body-bytes` outside `1..=268435456` never reach analysis:
-  argument parsing rejects them with `cli.error` (exit 2) naming the flag.
-  `export --max-selected-frames` of 0 or above 1,000,000 moves from
-  `policy.export_limit` (exit 6) to `cli.analysis_limit` the same way.
-  `policy.application_limit` and `policy.export_limit` remain for a valid limit
-  that a capture reaches. In Rust, `application::Limits::validate`,
-  `analysis::http::Collector::new`, and `analysis::dns::Collector::new` return
-  `application::Error::Analysis(analysis::Error::InvalidLimit { .. })` where
-  they returned `application::Error::Limit`, and `analysis::export::plan` and
-  `Selection::validate` return
-  `export::Error::Analysis(analysis::Error::InvalidLimit { .. })` where they
-  returned `export::Error::Limit` for `max_selected_frames`.
+`Kind::Cli` becomes `Kind::Usage` (serde/display `"usage"`, exit 2); existing
+`cli.*` classification codes keep their spelling. `filter::Error` loses
+`PartialEq`/`Eq`, and `policy::Error` loses `Clone`/`PartialEq`/`Eq`; use
+`matches!` for variants. Scripts matching these cases need updating:
 
-Errors keep typed sources instead of display strings, and a library error's
-message no longer repeats its source's text: the source appears in
-`Classified::causes()` (and the published `causes`). Code that searched
-`to_string()` for a source's text reads `causes()`, `error::source_chain`, or
-`error::render` (one joined line):
+| Failure | Current classification / action |
+| --- | --- |
+| Analysis processing deadline | `policy.duration_limit`, not `policy.analysis_resource_limit` |
+| Analysis dissection or live build failure | The original decode/build classification, not generic `packet.decode` / `packet.build` |
+| Time filter on an untimestamped frame | `packet.timestamp_unavailable`, exit 3; remove time fields or provide timestamped records |
+| Malformed/unresolved `fuzz --field` | `cli.selector`, exit 2 |
+| Invalid `build --link-type` | Argument-parsing `cli.error`, exit 2, before output-format checks |
+| Invalid normalization output | `cli.capture_normalize_format`; PCAP and PCAPNG are supported |
+| Zero/above-ceiling HTTP/DNS application limits or export selection limit | `cli.analysis_limit`, exit 2, instead of a policy limit reached during processing |
+| Invalid HTTP/DNS port or HTTP body limit | Argument-parsing `cli.error`, exit 2 |
+| Text/hex/raw/JSON stdout write | `io.stdout`, exit 5, with the underlying I/O error in `causes` |
+| UDP/ICMP requested with TCP-connect scan | `cli.scan_method`, exit 2 |
 
-```rust
-// Before
-assert!(error.to_string().contains("public destination"));
-// After
-assert_eq!(error.to_string(), "scan authorization failed");
-assert!(error.causes()[0].contains("public destination"));
-```
+`application::Limits::validate` and HTTP/DNS collector constructors return
+`application::Error::Analysis(analysis::Error::InvalidLimit { .. })` for invalid
+configuration. Export planning/selection use the analogous `export::Error::Analysis`.
+`policy.application_limit` / `policy.export_limit` still denote valid budgets
+exhausted by input.
 
-For a `BoundaryError` source the boundary's message comes first, then its
-captured causes (`BoundaryError::as_causes`). `error::Source` is core's one
-type-erased source handle (it is `Clone`, and a `#[source]` field of this type
-exposes the wrapped error to `downcast_ref` directly); `BoundaryError`,
-`document::Error::Parse`, and `fuzz::CaseFailure::with_source` use it, and
-`document::Error::Parse.source` is a `Source` (was `String`), built with
-`Source::new(error)`. Scan and traceroute cancellation and target-selection
-failures report the carried error's own message, without a `scan:` or
-`traceroute:` prefix. `filter::Error` no longer implements `PartialEq`/`Eq`,
-and `policy::Error` no longer implements `Clone`, `PartialEq`, or `Eq`; compare
-with `matches!`.
+Byte/MAC filters reject ambiguous unquoted words such as `deadbeef`, `c0:0`,
+or `aa:bb-cc` with `cli.filter` (`UnquotedByteWord`); use separated two-digit
+bytes or explicit quoted text. Previous implicit ASCII comparisons must be made
+explicit. Missing timestamp errors and source-only error messages are consistent
+across command paths; do not depend on old message prefixes or OS-error duplication.
 
-The CLI applies the same rule where it used to embed the operating-system error
-in a published `message`. Failed input opens and reads (`open PATH failed`,
-`read packet input failed`), staged output writes (the stage, inspect, sync, and
-publish steps behind `export`, `merge`, `rewrite`, and `follow --write`),
-`follow` payload writes, generated documentation, `capture --write` file I/O
-(`capture file PATH`), and NDJSON encode and write failures now name only what
-failed, and the operating-system error appears once in `causes` (after
-`caused by:` in human output), as the first entry except for an NDJSON stdout
-write failure, whose `causes` list `write NDJSON output failed` first and the
-operating-system error second. A stdout write failure in `text`,
-`hex`, `raw`, and `json` output (a closed pipe or full disk) reads
-`write stdout failed` and reports `io.stdout` with its remediation, where it
-reported `io.runtime` with the error in the message. Scripts that searched
-`message` for the operating-system error read `causes` instead; other codes,
-kinds, remediations, and exit codes are unchanged.
-
-`packetcraftr_core::error::Kind::Cli` is renamed `Kind::Usage`; replace every
-`Kind::Cli` match arm and constructor. `Kind::Usage.as_str()` and its serde
-name are `"usage"`. Classification codes keep their frozen strings (for example
-`cli.capture_filter`). Machine output publishes a usage failure as
-`"kind": "usage"` with exit code 2. `output::envelope::Error.kind` is
-`packetcraftr_core::error::Kind`.
-
-`packetcraftr::route::Error::InvalidSourceRouting` and `InvalidSegmentRouting`
-carry `source: Option<Box<dyn std::error::Error + Send + Sync>>`. Provide
-`source: None` when constructing a local route failure; conversions from
-packet-semantics validation keep the original error as `Some`, so
-`source().downcast_ref::<packetcraftr_core::protocol::semantics::Error>()`
-recovers the typed cause. Native interface-snapshot validation likewise keeps
-its original `route::Error` as a shared `packetcraftr_core::error::Source`.
-Classification codes are unchanged.
-
-Display filters reject an unquoted word that is neither separated bytes nor
-quoted text as a value on a byte, MAC, or byte-sliced field: an unseparated hex
-run (`raw.bytes contains deadbeef`, `ethernet.source[0:2] == c000`), a
-separated word with a short or empty group (`c0:0`, `47:45:`), or one that
-mixes `:` and `-` (`aa:bb-cc`). The failure is a `cli.filter` usage error that
-names the word and advises two-digit groups with separators (`c0:00`) or, on
-byte fields, quoting the word. Before, on byte fields these words compiled into
-an ASCII text comparison that matched only frames carrying those literal
-characters, never the intended bytes, and on MAC fields they failed as an
-incompatible literal, so a filter that relied on one must now say which it
-means. `filter::Error` (already
-`#[non_exhaustive]`) gains `UnquotedByteWord { offset, path, literal }` for the
-rejection; every other incompatible literal keeps `IncompatibleLiteral` and its
-remediation.
+Workflow route errors `InvalidSourceRouting` / `InvalidSegmentRouting` retain
+`source: Option<Box<dyn Error + Send + Sync>>`; use `None` for local refusals.
+Native snapshot errors likewise retain their original typed route source.
 
 ## Named packet fields and DNS messages
 
-Field values gain an object form, `{ "type": "object", "value": { "name":
-TAGGED_VALUE } }`, written `{name=value}` in expressions. Object members share
-the list-item, nesting, node, and payload budgets, and key bytes also consume
-payload budget. Nested paths such as `questions[0].name` use zero-based list
-indices in reflection, templates, filters, and fuzz targets, and protocol field
-descriptions publish nested members.
+Packet/v2 adds named object values (`{name=value}` in expressions). Nested paths
+such as `questions[0].name` work in reflection, templates, filters, and fuzzing;
+object keys/members share finite payload, item, nesting, and node budgets.
 
-DNS is constructible. `Dns::questions` holds lossless `Question` values and
-replaces `qnames`, `qtypes`, and `qclasses`; the read-only reflected `qname`,
-`qtype`, and `qclass` views remain. Section counts are `WireValue<u16>`: fresh
-messages derive them, and `Dns::edit` resets them to `Auto` for explicit
-structured edits. Exact/raw overrides follow the existing strict/permissive
-rules. DNS records reflect as named objects. Untouched decoded messages keep
-compression and unknown bytes exactly; edited messages encode names
-uncompressed and leave unknown RDATA opaque, without interpreting or relocating
-application-specific pointers inside it. The reflected `wire` field preserves
-the original message through document round trips, and explicit structured
-edits invalidate that retained image.
+Replace `Dns::{qnames,qtypes,qclasses}` with `questions: Vec<Question>`; reflected
+read-only singular views remain. Section counts are `WireValue<u16>` and
+`Dns::edit` resets them to `Auto`. Untouched decoded DNS preserves its exact wire
+image, including compression; structured edits re-encode names uncompressed and
+leave unknown RDATA opaque rather than relocating embedded pointers.
 
-DNS `query_type` is an integer in `0..=65535` wherever it appears in aggregate
-summaries and NDJSON DNS events: `"query_type": "aaaa"` becomes `28` and
-`"any"` becomes `255`. Update consumers that compare strings. Named and unknown
-record data keep their existing representations and exact bytes. `--type`
-accepts the existing aliases, 1-5 ASCII decimal digits, or `TYPE` followed by
-1-5 digits; aliases and `TYPE` are case-insensitive and codes must fit `u16`.
-Signs, whitespace, Unicode digits, and out-of-range values are rejected before
-I/O. Text output shows known aliases and `TYPE<n>` for other codes.
-
-In Rust, `dns::QueryType` is a numeric value that stores a private `u16`
-(`QueryType::new(code)`, `.code()`) instead of an enum. Its constants are `A`,
-`AAAA`, `CAA`, `CNAME`, `MX`, `NS`, `PTR`, `SOA`, `SRV`, `TXT`, and `ANY`, so
-update names such as `Aaaa` to `AAAA` and match constants or numeric codes with
-a fallback for other values. Use `Display` for presentation and the integer
-serde value for data; `.as_str()` is removed. Text parsing returns
-`dns::wire::Error` (`QueryTypeSyntax` or `QueryTypeRange`, which keeps the
-original integer parse error). The CLI contract constant is now `SCHEMA_V6`,
-and CLI DNS output structs store `query_type` as `u16`.
+DNS `query_type` serializes as an integer `0..=65535`, not an alias string
+(`"aaaa"` becomes `28`). Rust `dns::QueryType` stores a numeric code: use
+`new(code)`, `.code()`, uppercase constants (`AAAA`, `ANY`), and a fallback for
+unknown codes. `.as_str()` is removed; use `Display`. CLI `--type` accepts names,
+decimal numbers, or `TYPE<n>`. Parsing returns `dns::wire::Error` with the
+original integer error where applicable.
 
 ## Packet templates and UDP scan payloads
 
-`Template::axis` now adds an axis to a Cartesian product instead of replacing
-the previous axis; the last axis varies fastest, and repeating a field or one of
-its aliases is an error. `expansion_len()` returns
-`Result<usize, template::Error>`, so use `expansion_len()?` and handle expansion
-overflow. `expand(maximum)` validates axis fields and values before returning
-its lazy iterator. An axisless template has one packet, and any empty axis
-produces an empty set. `expression::parse_value` exposes the bounded value
-grammar for callers authoring axes.
+`Template::axis` adds to a Cartesian product instead of replacing the prior axis;
+the last varies fastest and duplicate fields/aliases fail. Use
+`expansion_len()?`, handle overflow, and pass a finite bound to `expand(maximum)`.
+An axisless template contains one packet; an empty axis produces none (the CLI
+rejects empty sets). Multi-packet builds use text, hex, NDJSON, or capture output;
+JSON and raw remain single-packet formats.
 
-`build` and `exchange` take `--axis '0.ttl=[1,64]'` and the finite
-`--max-template-packets` ceiling; empty CLI sets are rejected. `--axis` also
-accepts inclusive unsigned ranges `START..END[:STEP]` with decimal or `0x`
-endpoints (`0.ttl=1..64:8`), checked against the packet ceiling before any
-packet materializes; reversed ranges, zero steps, and malformed spans are typed
-errors. Multi-packet builds support text, hex, NDJSON, and PCAP/PCAPNG output,
-while JSON and raw stay single-packet outputs. Output/v6 streams `build` packet
-records carrying `packet_index` plus the built-packet fields, and a completion
-record carrying `packets_built` and `bytes_built`.
+Selectors accept `<protocol>[#occurrence].<field>` or a zero-based layer index.
+`Target::select` / `payload::Target::resolve` accept named selectors; numeric
+`FromStr` paths remain. `expression::Limits` gains `max_generated_bytes` for
+`repeat`, `zeros`, and `cyclic`; add it to literals or use defaults.
 
-Layers in `--axis`, `--payload-file`, and `fuzz --field` can also be named by
-protocol, as `<protocol>[#occurrence].<field>` (`ipv4#2.ttl`), through the new
-`layer::selector` module; the zero-based `LAYER.FIELD` form still works, and
-selectors are case-insensitive. `build --set SELECTOR=VALUE` is new. The numeric
-`fuzz::Target::from_str` and `document::payload::Target::from_str` stay as the
-numeric path, and `Target::select` and `payload::Target::resolve` take the
-selector grammar.
+Boundary fuzz values now derive from the target field's accepted width; re-record
+stored Boundary seeds/indexes. Other strategies retain their reproduction rules.
+The round-trip oracle adds `fuzz.roundtrip_*` diagnostics, distinguished by
+`fuzz::is_roundtrip_diagnostic`.
 
-`expression::Limits` gains `max_generated_bytes` (1 MiB by default), the
-cumulative byte budget for the new `repeat`, `zeros`, and `cyclic` generators.
-Struct literals of `Limits` must name the field or end with
-`..Limits::default()`; code that builds it from `Limits::default()` or a field
-update of an existing value is unaffected. Search for `expression::Limits {`.
-
-`fuzz` Boundary cases derive their values from the target field's probed width,
-so a seed and `--first-case` that reproduced a Boundary case before can yield
-different values. Re-record stored Boundary seeds and indexes; Random, BitFlip,
-and Malformed reproductions are unchanged. The round-trip oracle also adds
-`fuzz.roundtrip_mismatch`, `fuzz.roundtrip_unbuildable`, and
-`fuzz.roundtrip_skipped` diagnostics to a case's diagnostics, and
-`fuzz::is_roundtrip_diagnostic` tells them apart from the others.
-
-Rust `scan::Request` and `scan::Probe` gain `udp_payload: bytes::Bytes`; add
-`udp_payload: bytes::Bytes::new()` to literals to keep empty datagrams.
-`scan::Probe` is `Clone` rather than `Copy`, with shared payload storage.
-Payloads are bounded to `scan::MAX_UDP_PAYLOAD_BYTES` (65,507), counted in the
-operation budget, and rejected when non-empty for TCP or ICMP.
+Raw scan request/probe literals gain `udp_payload: bytes::Bytes` (empty for the
+previous behavior), and probes are `Clone`, not `Copy`. Payloads above
+`scan::MAX_UDP_PAYLOAD_BYTES` or nonempty TCP/ICMP payloads fail before work.
 
 ## Typed TCP options
 
@@ -365,7 +181,7 @@ same order, so those after `next_header` change position. `read --field`
 selects the new fields as `ipv6_fragment.reserved` and
 `ipv6_fragment.reserved_bits`, where they failed with `cli.projection_field`.
 Consumers that pin the exact field set of an `ipv6_fragment` layer must accept
-the two additions; the `packetcraftr.packet/v2` and output/v6 shapes are
+the two additions; the `packetcraftr.packet/v2` and output/v12 shapes are
 unchanged.
 
 `packetcraftr_core::protocol::network::Fragment` gains `pub reserved: u8` (the
@@ -394,7 +210,7 @@ bytes, with zero raw UDP cost. CLI `dns --tcp` works without native packet-I/O
 features. Packet-oriented route overrides and scoped IPv6 link-local TCP remain
 unsupported.
 
-For output/v6, a successful TCP query reports `fallback_attempted=false`, and
+In current output, a successful TCP query reports `fallback_attempted=false`, and
 successful aggregate TCP reports require a retained successful TCP attempt.
 Consumers must inspect the actual attempt transport rather than infer it from
 fallback. A fallback attempt keeps its preceding truncated UDP phase under the
@@ -444,7 +260,7 @@ The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
 that flag. DO requests DNSSEC data and performs no signature validation. The
 advertised receive size is independent of `--max-message-bytes`, which bounds
 response decoding. Existing output `edns` fields still describe the response;
-these request settings add no fields to the output/v6 or packet/v2 contracts.
+these request settings add no fields to the output/v12 or packet/v2 contracts.
 
 ## DNS question batches and reverse names
 
@@ -527,41 +343,20 @@ ServerHello models retain their echoed `session_id`.
 
 ## Live capture
 
-`capture` accepts repeated `--interface` flags and captures the selected
-interfaces as one group with shared queue and operation budgets. Live
-`frame.interface_id` and emitted frame interface values are capture IDs
-(0-based selected-interface order); completion sources map them to native
-interface names and indexes. Update filters that used native OS indexes in this
-field. Cross-interface delivery keeps exact timestamps without promising
-timestamp ordering.
+Repeated `--interface` selections share one capture operation and budget.
+`frame.interface_id` is now the zero-based capture selection ID, not the OS
+index; completion sources map back to native interfaces. Cross-interface delivery
+preserves timestamps without promising order.
 
-Capture completion is an enriched `output::capture::Summary`, replacing the
-empty completion payload. JSON capture requires `--write`, and failures may
-include `error.capture` with source and file evidence plus processed
-statistics. Rotated files are PCAPNG, use uncompressed byte thresholds, and
-finalize compression per file. Explicit ring retention reuses operation-owned
-handles and reports retired files; neither source count nor rotation increases
-the configured operation budget.
+Completion is `output::capture::Summary`, not an empty payload; failures may carry
+`error.capture` partial source/file evidence. JSON requires `--write`; rotated
+files are PCAPNG and share the operation's bounds. Native settings are reported as
+requested/applied/effective, with unknown effective values left null, not guessed.
 
-`output::capture::Event` is removed; capture NDJSON frames are
-`output::read::Frame` records with unchanged JSON. Callers of
-`Event::try_from_frame(source_frame, frame)`, or of its tuple form
-`Event::try_from((source_frame, frame))` or `try_from((source_frame, frame,
-&decoded))`, use `output::read::Frame::try_from` with the same tuple. The result
-implements `StreamRecord` with event name `frame` and serializes to the same
-JSON.
-
-`--capture-buffer-bytes`, `--timestamp-source`, and `--timestamp-precision` set
-native driver options per interface before activation, independent of the
-PacketcraftR queue budgets (`--max-queue-frames`/`--max-captured-bytes`); an
-option the backend cannot honor fails with a typed error instead of falling
-back. Each source reports `capture_settings` as a requested/applied/effective
-triple, with `effective` `null` where the backend cannot confirm the realized
-value, and `interfaces --timestamp-types` adds a `timestamp_types` list to each
-interface. `capture --dissect` adds an optional `decoded` object to NDJSON
-`frame` records (the `decodedStack` that `read --dissect` publishes), and
-`capture --field` streams `fields` rows under `--max-projection-bytes`. Both
-are additive, require text or NDJSON output, and conflict with each other.
+Replace `output::capture::Event::try_from_frame` or its tuple conversion with
+`output::read::Frame::try_from` using the same tuple. The event name remains
+`frame`. Dissection/projection are opt-in text/NDJSON paths; native capture
+settings unsupported by a backend fail rather than silently falling back.
 
 ## Scan requests, round-trip statistics, and UDP profiles
 
@@ -579,7 +374,7 @@ scan publishes no `probe_sent` events, only final `probe` events beside its
 `scan::Report` (the former `Summary`) and `scan::connect::Stats` gain `rtt`:
 confirmed sends, verdicts received inside their round, `lost = sent - received`,
 and min/avg/max over one sample per received probe. Rust literal constructors
-supply `scan::Rtt::default()` or an accumulated value. The output/v6 schema adds
+supply `scan::Rtt::default()` or an accumulated value. The current output schema includes
 matching `rtt` objects on scan summaries and `socket_stats`; absent duration
 fields mean no response produced a sample.
 
@@ -621,73 +416,28 @@ workflow caps `Request::max_in_flight` accordingly and rejects UDP and ICMP.
 
 ## Offline analysis options and results
 
-`analysis::Options` gains `plan`, `deadline`, `stream`, `time_bounds`, and
-`track_sources`, and `analysis::Limits` gains `max_provenance_bytes`;
-exhaustive struct initializers add them or use defaults. The default analysis
-plan preserves the previous reconstruction and index semantics, and `deadline`
-is a shared optional deadline. `analysis::Limits` also holds nested `tcp` and
-`ip` reassembly limits (see [Limits and budgets](#limits-and-budgets)).
+Update exhaustive `analysis::Options` literals for `plan`, `deadline`, `stream`,
+`time_bounds`, and `track_sources`; use defaults to retain ordinary reconstruction.
+`analysis::Limits` gains `max_provenance_bytes` and nested TCP/IP limits.
+Collectors requiring source evidence enable `tcp_events` and `track_sources`.
+See [resource accounting](analysis-resources.md) for exact charges and hard stops.
 
-`analysis::Summary` and `stats::Report` gain `interfaces` (the capture source's
-interface descriptions in global-ID order), and `stats::Report` gains
-`duration()`, `average_packet_size()`, `packet_rate()`, and `byte_rate()`, each
-`None` on an empty match set or zero span. The stats aggregate publishes them as
-`duration`, `average_packet_size`, `packets_per_second`, and `bytes_per_second`,
-plus a required `interfaces` array on `statsResult`.
+`analysis::Summary` and `stats::Report` gain capture `interfaces`; stats adds
+optional duration, mean packet size, packet rate, and byte rate. Empty/zero-span
+results do not invent a rate. `reassembly::tcp::Event::Retransmission` gains
+`ranges: Vec<Range<u32>>`; add it to constructors and use `..` in patterns.
 
-`analysis::reassembly::tcp::Event::Retransmission` gains a `ranges:
-Vec<Range<u32>>` field listing the arriving segment's retransmitted sequence
-spans in stream order; the spans need not form a contiguous prefix. `Event` is
-not `#[non_exhaustive]`, so struct patterns need `..` or a `ranges` binding and
-constructors must supply the field.
+HTTP/DNS partial messages cut off by RST now end as `reset`, with one reset issue,
+not duplicate `evicted` issues. Reset payload contributes no provenance span.
+DNS emitted messages and transaction tracking now share one cumulative retained
+ceiling, so near-limit captures can stop earlier with `policy.application_limit`.
 
-Offline DNS analysis is `analysis::dns::Collector` and the `dns-read` command.
-Collectors enable `Options::tcp_events` and `Options::track_sources`, source
-sets share a provenance allocator bounded by `Limits::max_provenance_bytes`, and
-`LayerDecodeContext::parent` identifies the enclosing protocol so DNS can tell
-UDP messages from TCP length-prefixed ones.
-
-`http` and `dns-read` end a message that a TCP reset cuts off with status
-`reset`. A reset evicts both directions before it closes them, and each eviction
-used to publish its own `evicted` issue and leave the partial message `evicted`,
-so one reset produced two `evicted` issues, a `reset` issue, and an `evicted`
-message. It now produces one `reset` issue, on the resetting flow at the reset
-frame, and the open message in each direction ends `reset`. Consumers that
-counted `issues` or matched `evicted` for reset connections see that change. A
-segment that carries RST also adds no source span, because a reset's payload is
-discarded before reassembly, so it no longer counts against
-`--max-application-source-spans`.
-
-`dns-read` and `analysis::dns::Collector` charge emitted messages and
-transaction tracking against one cumulative `max_retained_bytes` ceiling
-(`--max-application-retained-bytes`) where the two were counted separately, so a
-capture that stayed under the limit on each count can now stop with
-`policy.application_limit`; raise the limit if one does. The `--http-port` and
-`--dns-port` value name is `<PORT>` in help and usage errors, and
-`--max-application-retained-bytes` help and its `--resource-diagnostics` scope
-call the decoded-object charge a flat multiplier that DNS name compression can
-exceed.
-
-`expert` reports more TCP findings: `tcp.syn_retransmission`,
-`tcp.connection_refused`, `tcp.handshake_unanswered`, `tcp.synack_mismatch`,
-`tcp.not_closed_at_end`, `tcp.out_of_order`, `tcp.fast_retransmission`,
-`tcp.ack_unseen_segment`, `tcp.data_after_close`, `tcp.fin_retransmission`, and
-`tcp.window_update`. Three existing codes change meaning, so consumers that match
-on them should account for the new ones. A reset that answers a SYN or SYN-ACK is
-`tcp.connection_refused` where it was `tcp.reset`; the segment at the
-acknowledged edge resent after three duplicate acknowledgments is
-`tcp.fast_retransmission` where it was `tcp.retransmission`; and a segment that
-fills a gap already reported as `tcp.previous_segment_not_captured` is
-`tcp.out_of_order` where it carried the retransmission label. Aggregate output
-(the text summary, the per-code counts, and the JSON and NDJSON totals) for a
-capture with an established TCP connection that never closes also gains one Info
-`tcp.not_closed_at_end` finding per such connection, so consumers that pin exact
-totals should update them. Limits: only four open sequence gaps per direction
-are watched, and a fifth fills silently; a handshake verdict that follows an idle
-expiry is judged against the expired SYN; and findings are judged only on frames
-that pass `--filter`, so a filter that keeps one direction of a conversation can
-report `tcp.handshake_unanswered` or `tcp.not_closed_at_end` for a handshake the
-full capture completed.
+Update consumers of TCP expert codes: resets answering a handshake become
+`tcp.connection_refused`; qualifying retransmissions become
+`tcp.fast_retransmission`; filling a reported gap becomes `tcp.out_of_order`.
+Established connections without a close gain `tcp.not_closed_at_end` (Info),
+changing exact finding totals. Only four sequence gaps per direction are watched;
+idle expiry and one-direction filters can leave handshake/close evidence incomplete.
 
 ## Display filter language
 
@@ -732,125 +482,46 @@ reports the complete captured-byte input count.
 
 ## Capture files
 
-`read --normalize`, `rewrite`, and `merge` refuse a capture that declares a
-frame check sequence, because the PCAPNG they write cannot record it and readers
-would take the FCS bytes for payload. A capture declares one through a PCAPNG
-`if_fcslen` option whose value is not a single zero byte (a malformed length
-counts as declared), or a classic PCAP network word with the
-FCS-length-present flag (bit 26) and a nonzero FCS length (bits 28-31). All three
-name the same reason, `declared frame check sequence`: `read --normalize` and
-`rewrite` fail with `packet.capture_transform_metadata`, `merge` with
-`packet.capture_merge_metadata`, exit 3. `read --normalize` used to exit 0 and
-write frames that still ended in the FCS bytes under an interface with no FCS
-declaration. In the other direction, a classic network word that sets only
-reserved bits, or an FCS length without the present flag, is no longer refused
-by `rewrite` and `merge`; those bits are dropped, as libpcap ignores them. In
-Rust, `capture_file::Reader::refuse_declared_fcs` reports the declaration.
+Normalization, rewriting, and merging now refuse a declared FCS they cannot
+represent (`packet.capture_transform_metadata` or `packet.capture_merge_metadata`,
+exit 3). Use `capture_file::Reader::refuse_declared_fcs` in library transforms.
+Malformed PCAPNG option structure is reported before option-value errors; accepted
+inputs are unchanged. See [capture fidelity](tasks.md#selecting-and-saving-evidence).
 
-`read --normalize` writes classic PCAP with `--output pcap`, from PCAP or PCAPNG
-input, where it used to accept only PCAPNG output. Classic PCAP holds one link
-type and no interface or direction metadata, so the selected frames must share
-one interface, carry no direction, have timestamps, and fit the source snapshot
-length; the file keeps the source's nanosecond or microsecond resolution, and a
-timestamp the resolution cannot hold exactly, any other resolution, and an
-empty selection fail instead of being rounded or guessed. `read --frames
-RANGES` and `--every N` select frames by one-based source position in every
-`read` path; skipped frames still count against the input budgets, and
-`frame.number` and stream numbers keep the source position.
-
-`merge` interleaves its inputs by timestamp and refuses an input that goes back
-in time with `packet.capture_merge_order`. `--max-reorder-frames N` (at most
-`capture_file::MAX_REORDER_FRAMES`, 65536) repairs inversions within an
-`N`-frame look-ahead window per input and also accepts a single input, and
-`--order append` writes each input whole in argument order, keeping timestamps
-verbatim, so the output may be non-monotonic. In Rust, `MergeLimits` gains
-`order: MergeOrder` (default `Chronological`) and `max_reorder_frames: usize`
-(default 0, which refuses the first out-of-order frame as before); a non-zero
-window above the maximum or combined with `MergeOrder::Append` is refused with
-`capture_file::Error::MergeOption`. `merge` is new since 0.5.0-beta.3, so only
-code that tracks `main` must add the fields to `MergeLimits { .. }` literals,
-for example by ending them with `..Default::default()`.
-
-A PCAPNG interface description or packet block with a malformed option list
-reports the structural error (a truncated option, a non-zero end-of-options
-length, or non-zero bytes after the end marker) even when an earlier
-`if_tsresol`, `if_tsoffset`, or `epb_flags` option also has an invalid length or
-repeats; that value error used to be reported first. Which captures are accepted
-is unchanged.
+`read --normalize --output pcap` now writes classic PCAP rather than failing;
+selection must be nonempty, timestamp-exact, single-interface, and carry no packet
+direction. `--frames` / `--every` preserve source numbering and input-budget charges.
+`merge` defaults to chronological input and fails on clock regression; use bounded
+`--max-reorder-frames` or explicit `--order append`, not both. Callers tracking
+`main` add `order` and `max_reorder_frames` to `MergeLimits`, preferably through
+`..Default::default()`.
 
 ## Header rewriting, DHCP, and protocol discovery
 
-Capture header rewriting is new. `rewrite` (`transform::HeaderRewrite`) takes
-CLI header flags. Fixed-width field assignments (`transform::FieldEdits`, `--set
-<protocol>[#occurrence].<field>=<value>`, or `packetcraftr.rewrite/v2` documents
-under `schemas/packetcraftr.rewrite.v2.schema.json`) add `--checksum-mode
-repair|preserve` and `--dry-run`, whose bounded per-frame `changes` never create
-the destination. `--set` conflicts with `--rules-file`, header flags apply
-first, and rules evaluate the original frame in order, atomically per frame.
+`rewrite` and its versioned rules are new since beta.3; command help is the option
+reference. It applies header changes, address maps, and fixed-width assignments
+with explicit checksum policy, bounded changes, and staged publication.
+Callers tracking `main` add `map: None` to hand-built `transform::rules::Rule`
+values; document loaders and `Rules::single` already initialize it.
 
-`rewrite --map-ip OLD=NEW` and `--map-mac OLD=NEW` (`transform::AddressMap`,
-`Rules::with_address_map`) remap addresses many-to-many, and `--set` and
-rewrite/v2 `assign` gain `ipv4.identification`, `ipv4.dscp_ecn`, `tcp.window`,
-`icmp.identifier` and `icmp.sequence` (and the `icmpv6` forms),
-`dhcpv4.transaction_id`, `vxlan.vni`, and `geneve.vni`, with ICMP and ICMPv6
-checksum repair. `transform::rules::Rule` gains `map: Option<AddressMap>`,
-applied after the header patch and before the field assignments, and has no
-`Default`; the document loaders and `Rules::single` already set it, and code
-that builds `Rule { .. }` literals sets `map: None`. `Rules::has_header_edits`
-also reports true when a rule carries a map. Like `merge`, `rewrite` is new
-since 0.5.0-beta.3, so only code that tracks `main` is affected.
-
-DHCP codecs (`protocol::application::dhcp`) bind the standard UDP ports and
-construct fixtures with named option values under `dhcp::Limits`. Protocol
-discovery may replace repeated `children` arrays with `children_reference`:
-resolve that JSON Pointer against the containing top-level field description
-before traversing its children. This only compacts discovery output; reflective
-paths keep their bounds.
+DHCP codecs construct bounded typed fixtures. Protocol field discovery can emit
+`children_reference` instead of repeating children: resolve that JSON Pointer
+against the containing top-level field description before traversal.
 
 ## Protocol coverage and bindings
 
-The registry gains the protocols `stp` (LLC SAP 0x4242), `lldp` (EtherType
-0x88cc), `eapol` (EtherType 0x888e), `vrrp` (IP protocol 112), `etherip` (IP
-protocol 97), `gtpu` (UDP 2152), `tftp` (UDP 69), and `syslog` (UDP 514), plus
-bindings for IP protocols 137 (MPLS-in-IP) and 143 (Ethernet) and UDP 6635
-(MPLS-in-UDP). `protocols` lists eight more rows, and the published
-`output-protocols-success.json` example carries them. UDP 5353 and 5355 also
-decode as `dns`.
+New registered codecs include STP, LLDP, EAPOL, VRRP, EtherIP, GTP-U, TFTP,
+and syslog; UDP 5353/5355 now bind DNS. Consumers that previously read those
+payloads as `raw` should select their typed fields. TFTP DATA/ACK on ephemeral
+ports needs explicit decode-as selection. `BuiltinProtocol` gains matching
+variants; update exhaustive matches.
 
-Captures that carry those ports or protocol numbers used to dissect as `raw`
-and now dissect as typed layers, so `dissect` and `read --dissect` output for
-them changes, and a filter or consumer that matched their raw payloads should
-match the typed fields instead. The `dns` command types its probes to UDP 53,
-5353, and 5355 as DNS. A DNS record whose class carries the mDNS cache-flush
-bit (the top bit, RFC 6762) decodes its typed rdata instead of unknown rdata,
-and the record keeps its full 16-bit class. `--decode-as` accepts `gtpu`,
-`tftp`, and `syslog` on UDP ports, and the generated man pages and completions
-change with the help text. TFTP transfers move to ephemeral ports, so decode
-their DATA and ACK datagrams with `--decode-as udp.port=N:tftp`.
+mDNS cache-flush class bits remain exact. NDP options gain typed variants and
+`MessageOption` is non-exhaustive; use a wildcard and `.value()` as owned `Bytes`,
+not a borrowed value. MLD/IGMPv3 helpers are not registered layers.
 
-Setting a `syslog` layer's `format` moves the RFC 5424 header defaults that
-were left untouched: switching to `rfc3164` clears the version and nil fields,
-and switching back after a real change restores them. Values set explicitly
-stay, and a legacy message still refuses them. GTP-U bytes after the declared
-length are padding and rebuild strictly.
-
-`protocol::network::ndp` types Router Solicitation, Router Advertisement, and
-Redirect messages, and its `MessageOption` is `#[non_exhaustive]` with typed
-variants for the Prefix Information, Redirected Header, MTU, Route Information,
-and RDNSS options (kinds 3, 4, 5, 24, and 25). Those kinds used to decode as
-`MessageOption::Other { kind, value }`; they now decode to their typed variants
-when their length fits the layout, with the same wire bytes, and `Other` keeps
-the rest. Add a wildcard arm to exhaustive matches, and stop expecting `Other`
-for those kinds. `MessageOption::value()` returns an owned `Bytes` because a
-typed option stores fields, not a value to borrow. `protocol::network::mld` and
-`protocol::network::igmpv3` are new helpers like `ndp`, not registered layers.
-The NDP, MLD, and IGMPv3 helpers and the VRRP, STP, LLDP, and EAPOL codecs are
-new since 0.5.0-beta.3, so only code that tracks `main` meets their changes.
-
-Analysis does not scope GTP-U or EtherIP inner flows by TEID or tunnel: they
-have no `EncapsulationIdentifier`, which needs an output schema change.
-Identical inner tuples carried between the same outer IP pair in different
-TEIDs or EtherIP tunnels therefore share one scope and one stream.
+Analysis still does not distinguish GTP-U TEIDs or EtherIP tunnels within an
+otherwise identical outer/inner tuple; such flows share scope and stream identity.
 
 ## Destination allowlists
 
@@ -868,307 +539,98 @@ classify as `cli.live_target`. The CLI exposes the list as repeatable
 command; `fuzz` takes it only with `--live`, and an offline run rejects it with
 a usage error naming `--live` where it used to accept and ignore it.
 
-## Target manifests, scan list mode, scoped IPv6 targets, and output/v7
+## Target planning and scoped IPv6
 
-`scan::Request` also gains `target_sources: Vec<String>`: pass an empty vector
-to retain ordinal-only diagnostics, or one nonempty source label per included
-declaration (at most 4096 bytes each). The CLI supplies argument positions or
-manifest paths/stdin with physical lines so live raw and connect scans publish
-the same source-aware duplicate warnings as list mode, in text, JSON, and
-NDJSON. Invalid label counts or sizes fail before provider calls.
+Manifests and `scan --list` use the same bounded admission as live scans. List
+mode sends no target/neighbor packets; hostname resolution remains an explicit,
+reported opt-in. Scope and target-list output were introduced in v7 and remain
+in v12; see [consumer compatibility](consumer-compatibility.md#output-family-v7).
 
-`scan` accepts repeatable `--targets-file PATH` and `--exclude-file PATH`
-beside positional targets; `-` names redirected standard input, and at most
-one input in an operation may consume stdin across include, exclude, UDP
-payload, and UDP profile inputs. Manifests are line-oriented UTF-8 text:
-blank lines and `#` comments (including trailing comments) are skipped, one
-declaration per remaining line, shared combined limits of 1 MiB and 4096
-physical lines tightened only downward by `--max-manifest-bytes` and
-`--max-manifest-lines`, and a 512-byte per-declaration bound. Every input is
-ingested and parsed before policy, DNS, or provider work; positional
-declarations keep first-seen order ahead of each `--targets-file` in flag
-order.
+`scan::Request` gains `target_sources: Vec<String>`: empty for ordinal diagnostics,
+or one bounded nonempty source label per included declaration. Invalid labels
+fail before provider work. `Client::plan_targets` needs only `TargetProviders`.
 
-`scan --list` plans the selection without sending, capturing, or connecting.
-`Client::plan_targets` (`target::plan::Request`/`Report`) performs the same
-admission path through only the `resolver` provider and reports
-`resolution_performed` — hostname resolution requires the existing
-`--allow-hostname-resolution` opt-in and is reported, never hidden. The
-aggregate and NDJSON `target`/`complete` events are a `target_list` method
-branch of the new `packetcraftr.output/v7` family.
+Handle `Target::ScopedAddress` and use `Authorized::selected()` when scope matters.
+`addresses()` now returns an owned `Vec<IpAddr>`, not a slice. Selection identity
+is `(address, resolved interface)`; the authorized serialized shape changes.
+Raw/connect scan evidence and socket/route identities retain that scope. Workflows
+that cannot carry it fail before work, never silently strip it.
 
-`Target::ScopedAddress` declares an IPv6 link-local target with an explicit
-`%zone` (name or nonzero index; zones resolve to exactly one interface or
-fail before work). Selection and endpoint identity key on
-`(address, interface)` through the new `SelectedAddress`/`ResolvedZone`/`Zone`
-types, so `Authorized` now exposes `selected()` records. The change to
-`addresses()` from `&[IpAddr]` to an owned `Vec<IpAddr>`, the serialized
-authorized-target shape, and the new `Target` enum variant are Rust/API
-breaking changes; callers must update exhaustive matches and use `selected()`
-when scope matters. Raw and connect scans carry the
-scope into routes and `SocketAddrV6`; probe/endpoint/sent/failed evidence
-records gain an optional `scope` field in output/v7. Workflows that cannot
-carry scope (DNS-driven, traceroute, send, exchange) fail with a typed
-capability error before work rather than silently discarding it.
+Raw scan/traceroute `retained_evidence_bytes` counts retained wire bytes; connect
+reports charge retained probe structures/error text, not a wire transcript. Neither
+is process memory. [Scanner evidence](scanner-evidence.md) defines the charges.
 
-Raw scan and traceroute aggregates publish `retained_evidence_bytes`: the
-exact retained wire-frame byte charge. Connect `socket_stats` publishes the
-same field name for its separate per-probe struct plus error-display byte
-charge; sockets do not expose a retained wire transcript. Neither charge
-represents process memory or allocator overhead. The
-v6 schema keeps no such field; see
-[scanner evidence](scanner-evidence.md) for the exact charge definitions.
+## Port planning and inference
 
-## Port planning, state inference, and output/v8
+`scan --ports` accepts catalog names/presets and transport-qualified selections;
+exclusions apply before planning and budgets. No implicit port set is selected.
+Mixed TCP/UDP plans share one operation budget; ICMP remains portless. Catalog
+names are hints, not service identification.
 
-`scan --ports` takes comma-separated terms: numeric ports and `START-END`
-ranges as before, names from the bundled port catalog (`ssh`, `ntp`), and
-`@preset` selections (`@web`, `@mail`, `@name-services`, `@infrastructure`,
-`@legacy-services`, `@all`). A `tcp:` or `udp:` prefix confines a term to one
-transport; an unprefixed term applies to every scan transport that defines it.
-`--exclude-ports` takes the same terms and removes endpoints after expansion
-and before `--max-ports`, planning, policy, or `--list`, so no stage sees an
-excluded endpoint. A scan never gets an implicit default selection. A name or
-preset that no applicable transport defines, a prefix naming a transport the
-scan does not probe, and a selection that exclusions leave empty are usage
-errors (`cli.scan_limit`, exit 2). Catalog names are hints published as
-`port_hint`, not service identification.
+`--method raw|tcp-connect|auto` defaults to raw; `--connect` remains an alias.
+An explicitly chosen method never silently falls back. Automatic selection records
+its reason. Inferred port state is distinct from attempt classification and must
+retain supporting, conflicting, unanswered, and failed sequences. See the
+[v8 additions retained in v12](consumer-compatibility.md#output-family-v8).
 
-`--transport` accepts `tcp,udp` (or repeats) to plan both under one
-`--max-ports`, `--max-probes`, duration, and wire budget. TCP and UDP endpoints
-on one address and port stay distinct in plans, evidence, and output. ICMP echo
-stays portless and cannot be combined with TCP or UDP. `scan --list` publishes
-the expanded selection as `ports` (catalog version, excluded count, and each
-`transport`/`port` with its hint) when port terms are given.
+In Rust, replace separate request transport/port fields with
+`endpoints: Vec<probe::ProbeEndpoint>`; each entry carries its own transport and
+optional port. Replace `Request::selected_ports()` with `planned_endpoints()`;
+use `scan::select_endpoints` for catalog selections (`select_ports` still handles
+numeric lists). Endpoint literals gain `port_hint` and `inference`.
+`ProbeEvidence` gains `reply`, raw `Aggregate` gains `unattributed`, and `Event`
+gains `Unattributed`.
+Port/catalog/profile documents remain independently versioned.
 
-`--method raw|tcp-connect|auto` chooses the scan method; `raw` is the default
-and `--connect` remains an alias of `--method tcp-connect`. An explicit method
-is never replaced: a raw scan in a build without packet capture and transmission
-still fails with `capability.unsupported` (exit 4) after policy review, so a
-policy or budget denial reads the same in every build. `--connect` with UDP or
-ICMP endpoints reports `cli.scan_method` (exit 2, `the tcp_connect scan method
-cannot send udp probes`) instead of `cli.error` with `--connect requires TCP
-transport`; scripts that match the old code or text need updating. `auto` picks
-raw when the build can capture and transmit in the requested `--link-mode`,
-and otherwise TCP connect when every scan and discovery probe is TCP and the
-route needs no packet override. When neither applies it keeps raw, whose
-execution reports the missing capability, and its published reason names what
-an ordinary connection could not probe. Selection reads the build's
-capabilities, not run-time privileges: an unprivileged run of a capture-capable
-build selects raw and fails at execution.
+CLI scan serializers require the published plan rather than inferring it:
+`output::scan::Report::publish` and `output::scan::connect::Report::publish` replace
+plan-less conversions. Supply reverse-DNS results and optional trace data where
+required; list reports take the optional expanded port selection.
 
-`--curated-udp-payloads` adds the bundled `curated/...` UDP profiles for
-planned UDP ports that have one (DNS, mDNS, RPC bind, NTP, SNMPv3, STUN, and
-CoAP). An operator `--udp-profiles` assignment for the same port wins; results
-list the `applied` and `overridden` ports. A confirmed curated check is a
-configured check that matched, not product identity.
+## Host discovery
 
-Output/v8 changes, all additive within the new family:
+Discovery is opt-in (`before`, `only`, or `skip`); silence is `no_response`, not
+proof of absence. Discovery and scan stages share authorization and finite budgets.
+Host records and stage discriminators were introduced in v9 and remain in v12;
+see [host output](consumer-compatibility.md#output-family-v9) and
+[host evidence](scanner-evidence.md#host-observations).
 
-- Raw scan results and NDJSON `complete` require `plan`: `method`
-  (`requested`, `selected`, and an automatic selection's `reason`),
-  `port_catalog` (`name`, `version`), `excluded_endpoints`, and an optional
-  `curated_udp_payloads` (`data_set`, `applied`, `overridden`). Connect
-  summaries carry the same `plan`.
-- Raw scan endpoints gain optional `port_hint` and `inference`; connect
-  endpoints gain `port_hint` and a required `inference`. An inference has a
-  `state` (`open`, `closed`, `filtered`, `open_or_filtered`, `unknown`, or
-  absent when only operational failures were observed), the `rule` that
-  decided it, and every attempt sequence in exactly one of `supporting`,
-  `conflicting`, `unanswered`, or `failed`. Each attempt's `classification`
-  keeps its v6/v7 attempt-observation meaning, and the endpoint
-  `classification` is still the highest-ranked attempt outcome.
-- Raw scan results require `unattributed`: correlated `late`, `duplicate`, and
-  `ambiguous` frames with the probe `sequence` they correlate with when it is
-  unique. They share the `--max-undecoded` count and the evidence frame and
-  byte budgets; the first omission warns `scan.unattributed_limit`.
-- NDJSON adds `unattributed` events and one `endpoint` (raw) or
-  `connect_endpoint` (connect) event per endpoint before `complete`, naming its
-  probe sequences rather than repeating the attempts.
+`scan::Request` gains `discovery: scan::discovery::Options`; `Default` omits it.
+An empty endpoint list is valid only for `Mode::Only`. Probes and raw/connect
+`ProbeEvidence` gain `stage`; reports/aggregates gain `hosts`, and aggregates retain
+discovery probes separately. `scan::Error` gains `InvalidDiscovery` and `Neighbor`;
+`MethodTransport` becomes `MethodProbe { method, probe }`. `scan::method::select`
+takes `&Request` so discovery participates in method choice.
 
-In Rust, `scan::Request` replaces `transport` and `ports` with
-`endpoints: Vec<probe::ProbeEndpoint>`, which may mix TCP and UDP endpoints
-(or hold a lone `ProbeEndpoint::Icmp`); `validate` rejects an empty list,
-duplicates, ICMP beside other endpoints, and more than `limits.max_ports`.
-`Request::selected_ports()` is now `planned_endpoints()`. Build endpoints with
-`scan::select_endpoints(&PortSelection, scan::catalog::bundled(), max_ports)`
-or directly; `scan::select_ports` and `scan::PortSpec` remain for numeric
-lists. `client.scan_connect` rejects non-TCP endpoints with
-`scan::Error::MethodProbe` instead of `InvalidLimit { field: "transport" }`.
-`scan::Endpoint` and `scan::connect::Endpoint` gain `port_hint` and
-`inference`, `scan::ProbeEvidence` and `scan::CorrelatedResponse` gain the
-typed `reply`, `scan::Aggregate` gains `unattributed`, and `scan::Event` gains
-`Unattributed`; add the fields to literals and the arm to exhaustive matches.
-`scan::method::select` implements the method rules from
-`scan::method::Capabilities`, which a caller fills from
-`packetcraftr_netio::NativeCapability::check`. The catalog document format is
-`packetcraftr_core::document::port_catalog` (`packetcraftr.port-catalog/v1`),
-and `scan::profile::curated::merge` combines curated and operator profiles.
+## Scan traceroute
 
-In `packetcraftr-cli`, output conversions take the published plan:
-`output::scan::Report::publish(aggregate, plan)` replaces
-`Published::<Report>::try_from(aggregate)`, NDJSON `complete` converts from
-`(scan::Report, plan)`, and `output::scan::connect::{Report::publish,
-Summary::new}` replace the `TryFrom`/`From` conversions.
-`output::scan::list::Report::new` takes the optional `Ports` selection.
+`scan --traceroute` is an opt-in raw-scan stage before reverse DNS, sharing the
+remaining policy/time budgets. It selects observed responsive TCP/ICMP probes or
+an explicit fallback. Reused hops retain source/age separately from this host's
+observations. Connect/list modes reject the stage before work. See the
+[v11 additions retained in v12](consumer-compatibility.md#output-family-v11) and
+[trace evidence](scanner-evidence.md#traceroute-stage).
 
-## Host discovery and output/v9
+`traceroute::hosts` and `Client::trace_hosts` add bounded multi-host tracing;
+standalone request/report shapes are unchanged. `traceroute::Error` gains
+`TargetSelection`, `InvalidObservation`, and `Collection` with typed sources.
+Hosts requests can reuse already resolved targets and sequence numbering while
+reauthorizing every endpoint. `Client::with_remaining_budget` and
+`with_parent_deadline` only narrow the containing operation's allowance.
 
-`scan --discovery before|only|skip` adds a host-discovery stage. Without the
-flag no discovery probe is sent and hosts are labelled `not_requested`;
-`skip` records the operator's decision as `skipped`. Neither claims
-reachability. `before` probes every target, then scans the hosts that
-responded; `--unresponsive-hosts scan` scans the silent ones too, and every
-host left out is published with `scan: "skipped"`. `only` probes no scan
-port, so `--ports` is a usage error and every host is `scan: "not_requested"`.
-
-`--discovery-probes` selects `icmp` (the default), `tcp`, `udp`, and
-`neighbor`. TCP and UDP probes take `--discovery-ports` terms in the
-`--ports` syntax, and the scan's `--exclude-ports` applies to them, so no stage
-probes an excluded port. `neighbor` sends each on-link target up to
-`--attempts` ARP or NDP requests, paced by `--rate`, each waiting `--timeout`
-and captured within the scan's evidence limits. A routed target is sent none:
-its gateway is published as the next hop, with a link address only when the
-neighbor cache already holds one, and never as the target's. Neighbor requests
-count in the scan statistics. Discovery and the scan share one authorization,
-one sequence space,
-`--max-probes`, `--max-duration`, and the evidence budget, and authorization
-precedes every discovery packet, including ARP and NDP. With `--connect` only
-`tcp` discovery runs, through ordinary sockets; `icmp`, `udp`, and `neighbor`
-report `cli.scan_method`. Inconsistent controls report `cli.scan_discovery`
-or `cli.error` (exit 2) before any probe.
-
-`--reverse-dns SERVER` (with `--reverse-dns-port`, default 53) sends one PTR
-question per host through the DNS workflow after the scan: hosts that
-responded when discovery ran, and every host otherwise. Lookups spend what is
-left of `--max-duration`; a lookup that fails or runs out of time is recorded
-on its host and does not fail the scan. Names are what the server answered,
-not authenticated identity. No vendor label is published; MAC addresses are
-link-layer observations.
-
-Output/v9 changes, all additive within the new family:
-
-- Raw scan results and connect reports require `hosts`, one per selected
-  target in selection order: `discovery` (`not_requested`, `skipped`,
-  `responded`, or `no_response`), `scan` (`scanned`, `skipped`, or
-  `not_requested`), `reasons`, the optional `neighbor` outcome with its
-  `interface` and the `reverse_dns` lookup, and the discovery `probes`. A `no_response` host is
-  uncertain, never absent. Each reason has a `kind`, the `evidence` behind it
-  (`wire`, `socket`, or `cache`), its `basis` (`direct`, `cached`, or
-  `possible_proxy`), and the discovery `probe` or `link_address` it rests on.
-- NDJSON adds one `host` event per target before `complete`, listing its
-  discovery probe sequences instead of repeating the probes.
-- Probe, `probe_sent`, `connect_probe`, and failed-probe records require
-  `stage` (`discovery` or `scan`). Discovery probes are not grouped into
-  `endpoints`, and endpoint `counts` cover the scan stage only.
-- `plan` requires `discovery`: the `mode` (`omitted`, `skipped`, `before`, or
-  `only`), the selected `probes` and `neighbor` flag, the
-  `excluded_endpoints` `--exclude-ports` removed from discovery (the plan's
-  own count covers the scan stage), the `unresponsive` choice, and the
-  optional `reverse_dns` server.
-
-In Rust, `scan::Request` gains `discovery: scan::discovery::Options`
-(`Default` omits discovery), and `endpoints` may be empty only for
-`Mode::Only`. `scan::Probe` and both `ProbeEvidence` types gain `stage`;
-`scan::Report`, `scan::connect::Report`, and both `Aggregate` types gain
-`hosts`, and the aggregates gain `discovery` for the discovery probes. Add the
-fields to literals. `scan::Error` gains `InvalidDiscovery` and `Neighbor`, and
-`MethodTransport { method, transport }` is `MethodProbe { method, probe }`.
-`scan::method::select` takes the `&Request` so discovery probes take part in
-method selection. `dns::ptr_names` extracts the PTR names of a validated
-answer section.
-
-In `packetcraftr-cli`, `output::scan::Report::publish` and
-`output::scan::connect::Report::publish` take the reverse-DNS results by host
-position (empty when no lookup ran), and the published `Plan` gains
-`discovery`.
-
-## Scan traceroute and output/v11
-
-`scan --traceroute` traces every scanned host after the scan and before any
-reverse-DNS lookup. Without it nothing changes: no trace probe is sent and the
-result has no `traceroute` member. Each host is traced with a TCP port or an
-ICMP echo probe the scan saw it answer (a SYN/ACK over a reset over an echo
-reply, and a UDP reply never), and the host's record names that scan probe.
-A host without such an answer is traced with `--traceroute-strategy udp|icmp|tcp`
-(and `--traceroute-port`, defaulting to 33434 for UDP and 80 for TCP), and is
-`not_traced` without one. `--traceroute-first-hop`, `--traceroute-max-hops`,
-`--traceroute-attempts`, and `--traceroute-max-probes` bound the plan, with
-the standalone defaults. One authorization and one probe and duration budget
-cover every traced host, and the stage spends what is left of
-`--max-duration`. `--traceroute-reuse-max-age-ms MS` lets a host reuse hops an
-earlier host's trace observed within this operation, for hops younger than
-`MS`; reused hops are reported apart from probed ones. Every `--traceroute-*`
-option requires `--traceroute`, and the stage needs the raw method:
-`--connect`, `--method tcp-connect`, an automatic choice of connect, and
-`--list` are usage errors before any probe, as are a port without a strategy,
-a port with `icmp`, and invalid bounds. A trace failure fails the command with
-the trace's own classification. The standalone `traceroute` command is
-unchanged apart from the output version.
-
-Output/v11 changes, all additive within the new family:
-
-- Raw scan results gain an optional `traceroute` member: the `plan`, one record
-  per scanned host in host order, `undecoded` frames with their `destination`,
-  and `retained_evidence_bytes`. A host has `status` (`complete`, `incomplete`,
-  or `not_traced`), a `reason` when not traced (`no_responsive_probe` or
-  `scoped_target`), a `completion` and `selection` when traced, `hops` that
-  hold only this host's own probes, and `reused_hops`.
-- A `selection` states its `basis`: `observed`, with the scan probe's `stage`,
-  `sequence`, `reply`, and `observed_at`, or `requested`.
-- A reused hop has its `source` host, the source's `probes`, its `responders`,
-  `observed_at`, and `age`. It is a claim from another host's path, not an
-  observation for this host.
-- NDJSON adds `traceroute_probe`, `traceroute_undecoded`, and
-  `traceroute_host` records while the stage runs, and `complete` gains an
-  optional `traceroute` object with the `plan` and `retained_evidence_bytes`.
-- The trace's packets and time count in the scan's `stats`, and its
-  diagnostics in the scan's `diagnostics`.
-
-In Rust, `traceroute::Error` gains `TargetSelection`, `InvalidObservation`,
-and `Collection` — the last preserves the underlying exchange, capture, or
-neighbor-configuration error and its classification — and `traceroute::hosts` with
-`Client::trace_hosts` is new. `hosts::Report` carries a `neighbor_stats`
-summary of the neighbor requests the probes' routes resolved; those packets
-and bytes are already inside `stats`, so it is a library field for
-accounting, not a new output member. Multi-host `hosts::Request::validate`
-is stricter before any DNS work: a TCP-selected probe with a nonzero
-`payload_size` fails `InvalidProbeOption`
-whether TCP came from the fallback strategy or a valid observation.
-`Client::with_remaining_budget` is a new additive view helper that
-narrows an operation's packet and byte ceilings by what an earlier stage
-already sent; `scan --traceroute` uses it so the trace and its lookups
-share the scan's policy budget. `Client::with_parent_deadline` is a new
-additive view helper that attaches an absolute bound as the parent of
-every deadline the client's operations derive. `hosts::Request` gains
-`first_sequence` (the sequence number the plan starts at; `0` keeps
-standalone numbering) and `resolved_targets` (an exact list of numeric or
-scoped `Target`s a containing operation already resolved, each
-re-authorized on entry, while `targets` keeps the bounded declaration;
-`None` keeps expansion unchanged). The standalone
-`traceroute::Request`, `Report`, and `Aggregate` are unchanged.
-`probe::runner::run_batches` keeps its behavior over the new `run_planned`.
-In `packetcraftr-cli`, `output::scan::Report::publish` takes the optional trace
-member, and the NDJSON `complete` conversion takes the optional trace summary
-as a third value.
+CLI raw-scan publication takes an optional trace report; its terminal conversion
+takes the optional trace summary. Trace packets/time contribute to scan totals,
+without turning reused hops into new probe observations.
 
 ## Send packet sets
 
 `send` expands `--axis` templates as `build` and `exchange` do, and repeats the
 set with `--repeat` and `--rate` instead of sending exactly one packet. The
-output/v6 `sendResult` replaces `frame`/`route` with a `frames` list plus
+current `sendResult` replaces `frame`/`route` with a `frames` list plus
 `passes_completed`; each frame carries a one-based `pass` and its expansion
 `index`. Invalid repeat or rate values classify as `cli.send_limit`, and the
 pacing ceiling is `packetcraftr_netio::deadline::MAX_WAIT`. Rust callers use
 `client.send(send::Request, sink)` (see [Client model](#client-model)).
-
-## Generated documentation
-
-`packetcraftr documentation --directory DIR` writes `DIR/completions/` (Bash,
-Elvish, Fish, PowerShell, Zsh) and `DIR/man/` (one page per command) from the
-finalized command definitions of the binary that runs it. It produces files
-rather than a contract document: it ignores `--output` and reports failures on
-stderr with the `io.documentation` classification.
 
 ## Replay
 
@@ -1204,7 +666,7 @@ input. `FrameEvidence::source_interface_id` is removed because it always equaled
 `frame.interface`; read `evidence.frame.interface`. `replay::Report` (the former
 `Summary`) adds `passes_completed` and `interfaces_used`; the aggregate
 requested interface is optional, and each sent frame keeps its actual output
-route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in output/v6
+route. Replay also gains `Timing::BitRate` (CLI `--bps`), published in current output
 as `{"bit_rate": BITS_PER_SECOND}`.
 
 `replay::Options` gains `max_gap: Option<Duration>` (CLI `--max-gap-ms`). `None`
@@ -1215,39 +677,20 @@ delay after scaling, and the published timing does not record the clamp.
 
 ## Resource and output hardening
 
-Native admission stays process-wide: one worker pool of
-`resources::WORKER_CAPACITY` slots admits capture reads, route queries, and TCP
-connects. `native_snapshot()` (the `native_process` row) covers all of them and
-is supported in every build profile, and `tcp_connect_snapshot()`
-(`tcp_connect_process`) counts the TCP connects' own admissions against that
-same capacity: its `capacity` is the whole pool's, and a connect is refused only
-when the pool as a whole is full. A client can share callback admission through
-`client.with_runtime(runtime.clone())` and inspect it with
-`client.runtime().snapshot()`.
+Native capture/route/TCP work shares one process-wide worker pool; TCP admission
+is not an additional independent pool. Share callback admission through
+`client.with_runtime(runtime.clone())`; inspect its snapshot separately.
+Cancelled/timed-out workers retain permits until cleanup. NDJSON output timeout
+bounds writes, not the operation; invocation deadlines take precedence.
 
-`--resource-diagnostics` opts into an optional `resources` envelope member that
-the output/v6 schemas include; it adds no NDJSON events or sequence positions.
-`--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
-cleanup allowance remain one second, and operation deadlines take precedence.
+Staged writers bind to the directory selected before input. Linux/procfs paths
+use the open directory handle; other platforms recheck identity before publication
+and rollback, with a remaining pathname race window and best-effort cleanup after
+directory moves. No path silently overwrites existing destinations.
 
-Staged output (`rewrite`, `export`, and `merge --write`, `follow --write`) is
-bound to the parent directory opened before any input is read. On Linux with
-procfs, staging, publication, and rollback address that directory handle, so a
-parent path retargeted during the run (a swapped symlink or a renamed and
-replaced directory) cannot redirect the output or the staged bytes. On other
-platforms the directory's identity is re-verified immediately before
-publication and rollback and a change is refused with `io.output_file`
-("changed since staging"); the remaining window between that check and the
-rename is pathname based, and staged-file cleanup after the actual directory
-moves stays best effort there. Destinations that name a directory (a trailing
-separator or `/.`) are refused at staging with "requires a file name".
-
-TCP memory charges now include payload-page slack and transient allocations, so
-a capture accepted near an aggregate limit before can be rejected earlier;
-raise an explicit budget only after considering the hosting process limit.
-Packet-document key reordering no longer changes semantic acceptance, and the
-existing input, depth, and duplicate-field checks still apply. See
-[resource contracts](analysis-resources.md).
+TCP charges include payload-page slack and transient work; DNS retention is
+cumulative. Near-limit captures can therefore be refused earlier. Review
+[resource contracts](analysis-resources.md) before raising a ceiling.
 
 ## Core API conventions
 
@@ -1549,48 +992,33 @@ own `Policy` and resolves declared targets through its `resolver` provider, so
 a client, call `Policy::authorize(operation)` or
 `Policy::resolve_target(target, &resolver)`.
 
-**Composition.** `Client<P, K = SystemClock>` is built with
-`Client::new(registry, policy, providers)` and configured with `with_clock`,
-`with_runtime`, `with_cancellation`, and `with_neighbor_options`; `registry()`,
-`policy()`, `runtime()`, and `providers()` read it back. `ProviderSet { route,
-interface, capture, transmit, tcp, resolver }` composes six providers, and
-`SystemProviders` selects the native ones. `packetcraftr_netio::PacketIo` is
-removed, so transmit and capture are separate fields:
-
-```rust
-// Before
-Client::new(registry, routes, neighbors, PacketIo::new(sender, capture), policy)
-// After
-Client::new(registry, policy, ProviderSet { route, interface, capture, transmit: sender, tcp, resolver })
-```
-
-`Providers` is a blanket marker over four capability traits, and each workflow
-method requires only the cluster it drives:
-
-| Capability trait | Providers | Required by |
-| --- | --- | --- |
-| `CaptureProviders` | `interface`, `capture` | `capture` |
-| `PacketProviders` (extends `CaptureProviders`) | adds `route`, `transmit` | `plan`, `send`, `exchange`, `replay`, `fuzz` |
-| `TargetProviders` | `resolver` | `scan`, `traceroute` (with `PacketProviders`), `scan_connect` |
-| `TcpProviders` | `tcp` | `scan_connect` (with `TargetProviders`), `dns`, `dns_batch` (with `PacketProviders` and `TargetProviders`) |
-
-`ProviderSet` type parameters default to `()`, so a partial bundle composes
-without filler providers, and complete six-field literals keep compiling:
+**Composition.** Construct `Client<P, K = SystemClock>` with
+`Client::new(registry, policy, providers)`. `ProviderSet` holds `route`,
+`interface`, `capture`, `transmit`, `tcp`, `resolver`, and `udp`; `SystemProviders`
+selects system implementations. `PacketIo` is removed. Use partial bundles so
+unused capabilities need no filler implementation:
 
 ```rust
 let capture_only = ProviderSet::capture(interface, capture);
 let packet_io = ProviderSet::packet(route, interface, capture, transmit);
 let connect_only = ProviderSet::tcp(tcp, resolver);
-let full = packet_io.with_tcp(tcp).with_resolver(resolver);
+let sockets = connect_only.with_udp(udp);
 ```
 
-A custom type that implemented `Providers` directly implements the capability
-traits instead (`interface` and `capture` on `CaptureProviders`, `route` and
-`transmit` on `PacketProviders`, `resolver` on `TargetProviders`, `tcp` on
-`TcpProviders`). `Providers` itself needs no `impl`, because the blanket
-implementation covers every type that satisfies all four, and `SystemProviders`
-is a unit struct implementing them. Fakes shared between transmit and capture
-implement `Clone` and fill both fields.
+Each type parameter defaults to `()`. Custom provider bundles implement only the
+capability traits their workflows need; there is no broad `Providers` marker.
+
+| Capability | Fields / purpose |
+| --- | --- |
+| `CaptureProviders` | `interface`, `capture` for capture workflows |
+| `PacketProviders: CaptureProviders` | adds `route`, `transmit` for packet workflows |
+| `TargetProviders` | `resolver` for target planning and resolution |
+| `TcpProviders` | `tcp` for connect scans and DNS TCP |
+| `UdpProviders` | `udp`; identification requires it and `TcpProviders` |
+
+Configure shared clock, runtime, cancellation, and neighbor bounds with the
+client's `with_*` methods. Fakes shared between capture/transmit fill both fields;
+all network providers remain explicit.
 
 **Running a workflow.** Every workflow follows one pattern. The request goes in,
 events reach the sink as each becomes final, and the terminal `Report` comes
@@ -1775,8 +1203,8 @@ enforces the deadline once a case's evidence is recorded.
 
 The `packetcraftr_cli` library now holds the whole command-line application.
 `packetcraftr_cli::main()` parses the process arguments, runs the command, and
-returns its `ExitCode`; the `packetcraftr` binary only calls it. Command-line
-behavior, flags, exit codes, and output documents are unchanged.
+returns its `ExitCode`; the `packetcraftr` binary only calls it. This entry-point
+move does not itself change flags, exit codes, or output documents.
 `output::contract::Format` and `output::stats::Table` are plain output types and
 no longer implement `clap::ValueEnum`: code that parsed them with clap declares
 its own value enum and converts it with `From`, as the CLI does.
@@ -1812,8 +1240,9 @@ differ from the library's. Common replacements:
 | `core::analysis::{scope::Definition, ClockReport, StreamTransport, Endpoint, StreamRef}` | `output::analysis::{Scope, Clock, StreamTransport, Endpoint, StreamRef}` |
 | `packetcraftr::fuzz::Outcome`, `core::fuzz::{CaseOutcome, Strategy}` | `output::fuzz::{Outcome, Strategy}` |
 
-Every conversion is a `From` or `TryFrom` impl, and the `from_*`, `try_from_*`,
-and `complete_from_*` constructors and `Report::new` are removed. A conversion
+Use `From` / `TryFrom` in place of the old `from_*`, `try_from_*`, and
+`complete_from_*` constructors. Scan publication additionally requires an explicit
+plan and stage data through `publish` / `Summary::new`. A conversion
 whose source also carries diagnostics or totals yields
 `output::envelope::Published<T>` (`result`, `diagnostics`, `stats`), which
 `Envelope::published` and `StreamEncoder::{emit_published, complete_published}`
@@ -1822,7 +1251,7 @@ publish:
 | Before | After |
 | --- | --- |
 | `send::Report::try_from_report(r)` returning `(report, diagnostics, stats)` | `Published::<send::Report>::try_from(aggregate)` |
-| `scan::Event::try_from_scan(e)`, `complete_from_scan(s)` | `Published::<scan::Event>::try_from(e)`, `Published::<scan::Event>::from(s)` |
+| `scan::Event::try_from_scan(e)`, `complete_from_scan(s)` | `Published::<scan::Event>::try_from(e)`, `Published::<scan::Event>::from((s, plan, trace_summary))` |
 | `fuzz::Report::try_from_offline(r)` / `try_from_live(r)` | `Published::<fuzz::Report>::try_from(r)` |
 | `build::Report::from_built(b)` | `Published::<build::Report>::from(b)` |
 | `dissect::Report::from_decoded(d)` plus `AggregateResult::new` | `Published::<dissect::AggregateResult>::from((matched, d))` |
@@ -1850,13 +1279,13 @@ spelling for instead of omitting it from `filter_fields`.
 
 ## Renamed and removed paths
 
-Each table maps a 0.5.0-beta.3 name to its final name, by crate. Names are
+Each table maps a 0.5.0-beta.3 name to its current name, by crate. Names are
 relative to the crate root unless a crate prefix is given, and behavior notes
 for a row are in the sections above.
 
 ### packetcraftr-core
 
-| 0.5.0-beta.3 | Final |
+| 0.5.0-beta.3 | Current main |
 | --- | --- |
 | `packetcraftr_core::{Packet, PacketError}` | `packet::{Packet, Error}` |
 | `packet::link::{MacAddress, VlanKind, VlanTag}` | `packet::{MacAddress, VlanKind, VlanTag}` |
@@ -1904,7 +1333,7 @@ for a row are in the sections above.
 
 ### packetcraftr-netio
 
-| 0.5.0-beta.3 | Final |
+| 0.5.0-beta.3 | Current main |
 | --- | --- |
 | `PacketIo { sender, capture }` | removed; transmit and capture are separate `packetcraftr::ProviderSet` fields |
 | `transmit::Sender` | `transmit::Provider` (same `send` method) |
@@ -1934,7 +1363,7 @@ for a row are in the sections above.
 
 ### packetcraftr
 
-| 0.5.0-beta.3 | Final |
+| 0.5.0-beta.3 | Current main |
 | --- | --- |
 | `Client<R, N, I>`, `Client::new(registry, routes, neighbors, io, policy)` | `Client<P, K>`, `Client::new(registry, policy, providers)` |
 | `Client::send(packet, options)` returning `send::Report { sent, stats }` | `client.send(send::Request::packet(packet, options), sink)`; a single `SentPacket` is `aggregate.sent[0].packet` |
@@ -1993,104 +1422,32 @@ for a row are in the sections above.
 
 ### packetcraftr-cli
 
-| 0.5.0-beta.3 | Final |
+| 0.5.0-beta.3 | Current main |
 | --- | --- |
-| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V6` |
+| `output::contract::SCHEMA_V2` | `output::contract::SCHEMA_V12` |
 | `Command::require_format(format) -> Result<(), Error>` | `require_format(format) -> Result<Format, Error>` |
 | `impl clap::ValueEnum` for `output::contract::Format` and `output::stats::Table` | removed; declare your own value enum and convert with `From` |
 | `try_from_*`, `from_*`, and `complete_from_*` constructors on output types | `From`/`TryFrom`, yielding `output::envelope::Published<T>` where diagnostics or stats travel with the result (see [Output field types](#output-field-types)) |
 
-## Unreleased-only changes
+## Callers tracking main
 
-Some `[Unreleased]` changes rename, reshape, or prune items that were added
-after 0.5.0-beta.3, so they have no beta.3 name and nothing to migrate:
+Items introduced and removed entirely after beta.3 have no released migration.
+Pin a reviewed revision rather than depending on intermediate names. This cleanup
+changes provider composition only; CLI behavior and output/v12 remain unchanged:
 
-- CLI output modules named after their commands (`output::dns_read`,
-  `output::verify_forwarding`, `output::scan::connect`), and
-  `output::verify_forwarding::Input` as a struct.
-- Capture groups as sessions (`capture::{Group, GroupRequest, Source, Phase}`
-  and the `InvalidCaptureGroup`, `CaptureSource`, `CaptureSourceContract`,
-  `CaptureGroupState`, and `CaptureCleanup` errors) and the netio TCP provider
-  contract (`tcp::{Provider, Stream, Error, start_connect}`, formerly
-  `tcp::ConnectError`).
-- Parsed field paths (`field::Path`, `Layer::field_path`, and
-  `Layer::set_field_path`), and the `capture_file`, `analysis::Session`, and
-  `filter::Projection` errors that follow the core error convention
-  (`MapError`, `MergeError`, `SessionError`, `ProjectionError`, `PathError`).
-- The rewrite, UDP-profile, recipe, and selector types that live in their
-  owning sub-domain modules (`transform::rules`, `document::udp_profiles`,
-  `document::recipe`, `filter::{FrameDecoder, FrameSelector}`,
-  `analysis::tls::Selector`, `analysis::expert::Selector`), and
-  `dns::batch::{Question, QuestionStatus}` (formerly `BatchReport` and
-  `QuestionOutcome`).
-- Names renamed again before release: `dns::DecodeError` (now `dns::Error`),
-  `dns::QueryTypeParseError` (now `dns::wire::Error`), `dns::DecodeLimits` and
-  `forwarding::VerifyLimits` (now `Limits`), and `output::dns_analysis`.
-- Types added and pruned again before release: the per-command output format
-  proof enums (`AggregateFormat`, `ToolFormat`, `BuildFormat`,
-  `CaptureFormat`, `DissectFormat`, `SendFormat`, `ExchangeFormat`,
-  `ReadFormat`, `FollowFormat`) and their `output::contract::FormatSubset`
-  trait — `Command::require_format` returns the shared `Format` — the
-  `output::diagnostic` and `output::probe` modules (their fields carry the
-  library types directly), and `output::envelope::ErrorKind`
-  (`envelope::Error.kind` stays `core::error::Kind`).
-- Entry points that existed only between beta.3 and the client model:
-  `send_set`, `send_set_with_events`, `send_set_driven`, `send::SetOptions`,
-  `send::SetReport`, `Error::SendOutput`, `Error::InvalidSendOption`,
-  `capture::run`, `scan::connect::{run, run_with_events}`, `dns::run_batch`,
-  `Client::with_progress_runtime`, `ExchangeExecutor::with_dns_tcp`, the scan
-  pipeline seam (`probe::{PipelineOptions, PipelineEvent}`,
-  `pipeline_capacity`, `execute_pipeline`), and the short-lived `scan::Batch`
-  alias of `probe::Batch<scan::Probe>` (beta.3's own `scan::Batch` is in the
-  packetcraftr table).
-- Fields and variants added to types that are themselves new since beta.3.
-  `capture_file::MergeLimits` gains `order` and `max_reorder_frames`;
-  `transform::rules::Rule` gains `map`, and `Rule` has no `Default`;
-  `exchange::Request` gains `stop`; `expression::Limits` gains
-  `max_generated_bytes`; `protocol::network::ndp::MessageOption` is
-  `#[non_exhaustive]`, has typed option variants, and returns an owned `Bytes`
-  from `value()`; and `protocol::network::vrrp::Vrrp::auth_data` is an
-  `Option<Bytes>`, where `None` builds the version's default trailer (eight zero
-  bytes in version 2, none in version 3) and `Some` is written as given. Add the
-  fields to literals and arms to exhaustive matches if you track `main`.
-- The `transform` field-edit types. `FieldAssignment::value` is a `u64`, so
-  build `FieldAssignment { field, value: n }` instead of
-  `value: FieldValue::Unsigned(n)`; a non-unsigned value is no longer
-  representable. `InvalidInput` has no `EditValueNotUnsigned`,
-  `TruncatedIpv4Source`, `TruncatedIpv4Destination`, `TruncatedIpv6Source`, or
-  `TruncatedIpv6Destination` variant, because none was reachable, so drop any
-  arm that names them. `FieldEdit`, `FieldEdits::new`, and `FieldEdits::is_empty`
-  are no longer public; compile edits with `FieldEdits::compile`, which takes
-  the assignments, the checksum mode, and the registry.
-  `protocol::headers::IpHeader::addresses` reads a walked header's source and
-  destination.
-- Public items pruned from types added after beta.3. `analysis::dns::Transport`
-  and `output::dns_read::Transport` are gone: DNS messages and transactions use
-  `analysis::StreamTransport` and `output::analysis::StreamTransport`, which
-  serialize as before (`"tcp"`, `"udp"`). `analysis::Plan::union` is removed;
-  combine `filter::Requirements` with the new `Requirements::union` and build one
-  plan with `Plan::physical`. `FrameRecord::project` and
-  `FrameRecord::scope_definitions` are removed: project through
-  `Projection::values` over `record.physical_context()`, and look a scope up with
-  `scope_definition(id)`. `forwarding::Observation` has no `frame()`,
-  `incomplete()`, or `retained_bytes()` getter. `scan::profile::UdpProfile` no
-  longer implements `Serialize` or `Deserialize` and has no `config()`; build it
-  from a `document::udp_profiles::Config` with `UdpProfile::new(config)`.
-- `dns::EvidenceFault::TcpQueryLengthOverflow`, a variant of the client model's
-  DNS evidence fault that could never occur, because a framed DNS-over-TCP query
-  length cannot overflow. `EvidenceFault` is `#[non_exhaustive]`, but delete any
-  reference to the variant; it has no replacement.
+- `ProviderSet<R,N,C,T,P,H>` defaults UDP to `()`; full literals add `udp: ()`.
+- Replace `WithUdp<ProviderSet<R,N,C,T,P,H>,U>` with
+  `ProviderSet<R,N,C,T,P,H,U>`; `with_udp` now returns this flat bundle.
+- Replace the broad `Providers` bound with the capabilities actually used.
+  To retain the former full bound, use `PacketProviders + TargetProviders + TcpProviders`.
+- Provider builders preserve every unselected capability; repeated `with_udp`
+  replaces UDP rather than nesting a forwarding adapter.
 
 ## Native submission timing eligibility
 
-`netio::transmit::Timing::freshness_marker()` now returns submission start,
-not acceptance return. Replies captured during an exact successful native send
-can correlate; missing or older monotonic ingress still cannot. Native raw
-socket setup happens before this boundary. Use the new `completed()` accessor
-when the acceptance-return marker is needed. Attempt `sent_at` and latency now
-refer to submission start; neither interval endpoint is precise wire departure,
-causality, or authenticated responder identity. Machine output remains v10.
-
-That version describes the M5 timing change. The M11 output/v11 family
-preserves these timing fields, and native discovery validation accepts both
-families without changing its evidence requirements.
+`netio::transmit::Timing::freshness_marker()` denotes submission start; use
+`completed()` for the acceptance-return marker. Replies captured during an exact
+successful native send can correlate; older or missing monotonic ingress cannot.
+`sent_at`/latency use submission start, not proven wire departure or causality.
+These semantics are retained in current output/v12; historical native evidence
+keeps its original schema identity. See [scanner timing](scanner-evidence.md).

@@ -932,6 +932,7 @@ fn a_tcp_observation_rejects_payload_before_hostname_resolution() {
             calls: Arc::default(),
         };
         let providers = packetcraftr::ProviderSet {
+            udp: (),
             route: Routes,
             interface: crate::common::Interfaces::default(),
             capture: Io(Arc::clone(&state)),

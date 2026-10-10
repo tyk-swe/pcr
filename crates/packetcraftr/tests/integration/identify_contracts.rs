@@ -174,7 +174,7 @@ struct FakeUdp {
 }
 
 type DatagramCall = (SocketAddr, Vec<u8>, usize);
-type FakeProviders = packetcraftr::WithUdp<ProviderSet<(), (), (), (), FakeTcp, ()>, FakeUdp>;
+type FakeProviders = ProviderSet<(), (), (), (), FakeTcp, (), FakeUdp>;
 
 impl udp::Provider for FakeUdp {
     fn exchange(
@@ -298,7 +298,10 @@ fn client(tcp: FakeTcp, udp: FakeUdp) -> Client<FakeProviders> {
     Client::new(
         builtin::registry(),
         Policy::default(),
-        ProviderSet::tcp(tcp, ()).with_udp(udp),
+        ProviderSet::tcp((), ())
+            .with_udp(udp)
+            .with_tcp(tcp)
+            .with_resolver(()),
     )
 }
 

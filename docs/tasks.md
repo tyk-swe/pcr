@@ -64,11 +64,54 @@ select an appropriately bounded input. Do not blindly raise every limit.
 For two captures, use `verify-forwarding` with explicit identity and checks; the
 [machine consumer](consumer-compatibility.md) rejects incomplete streams.
 
+### Selecting and saving evidence
+
+Use `read --filter`, `--frames`, `--every`, and epoch bounds to select physical
+frames; use `export --stream tcp:INDEX` for a whole scoped conversation,
+including its contributing fragments. Selection keeps source frame numbers;
+skipped input still spends the read budgets. Epoch bounds exclude untimestamped
+frames and never assume timestamp order.
+
+Capture output in the source format preserves selected bytes, timestamps, and
+options. With no selection or normalization, `read` rewrites byte-for-byte.
+`--normalize` instead discards comments, unknown blocks/options, and section
+structure; it refuses declared frame check sequences and timestamps it cannot
+represent exactly. Classic PCAP also requires a nonempty, single-interface
+selection with one link type, no direction metadata, and compatible snapshot
+length and timestamp precision. Use PCAPNG when those constraints do not fit.
+An error can leave partial stdout; staged `export`, `merge`, and `rewrite` files
+publish only on success and never overwrite an existing destination.
+
+Capture readers accept redirected stdin (`-`) and detect gzip/Zstd by magic.
+`merge` and `verify-forwarding` allow stdin for only one input; live replay is
+file-based. Duration checks run between synchronous reads and cannot interrupt
+a pipe waiting for input. For untrusted captures, see the
+[process-level hard stop](analysis-resources.md#hosting-untrusted-captures-with-a-hard-stop).
+
 ## 3. Run an authorized diagnostic in an isolated lab
 
 Begin with passive `interfaces` and `routes` inspection. Live adapters depend on
 the selected native feature profile, installed backend, and privileges.
 Authorization comes from the system/network owner, not from a command-line flag.
+
+Live operations require finite packet/byte/time budgets and enforce final-wire
+policy, route/interface and MTU checks. `--allow-destination ADDRESS[/PREFIX]`
+only narrows permission; public destinations still need their own opt-in.
+Prefixes must name canonical networks. Read the command's help rather than
+copying flags between workflows. `identify` is explicit, never an automatic
+scan side effect; its [service claims](service-identification.md) are not
+authenticated identities or vulnerability findings.
+
+Linux raw I/O usually needs root or `CAP_NET_RAW`. macOS Layer 2 needs BPF
+access; complete-header raw IPv6 is unsupported on macOS. Windows Layer 2 needs
+Npcap 1.88, and raw sockets usually need administrator rights. Windows may
+reject raw UDP with a non-local source. Containers need interfaces, routes,
+and privileges in the same namespace.
+
+Workflow deadlines cannot interrupt arbitrary synchronous providers or callbacks.
+Timed-out or cancelled workers retain permits and resources until cleanup ends.
+Native BPF (`capture --capture-filter`) runs before capture queues and budgets;
+display filters (`--filter`) run after capture.
 
 On a disposable Linux runner, follow the setup in
 [native validation](native-validation.md#isolated-linux-setup), then run the

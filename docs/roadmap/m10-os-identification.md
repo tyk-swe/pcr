@@ -23,16 +23,6 @@ evidence is not good enough.
   with evaluated confidence, or explicitly unsupported or inconclusive.
 - The corpus is reviewed, versioned, and evaluated against held-out fixtures.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Collection | No OS-fingerprint workflow in the [workflow surface][workflow-surface] or [scan reports][scan-report] | Stack fingerprints from a defined probe sequence ([OS detection][nmap-os]) |
-| Building blocks | Core [TCP][tcp-codec], [network-layer][core-network], and ICMP codecs; [matchers][core-matcher] for echo replies, quoted ICMP, and reverse flows | Not applicable |
-| Matching | None | Fingerprint database with candidates and confidence ([OS detection][nmap-os]) |
-| Suitability | None | Suitability checks before reporting a match ([OS detection][nmap-os]) |
-| Other fingerprints | Passive JA3/JA3S/JA4 from captured TLS handshakes ([TLS analysis][tls-analysis]) | Not an OS-detection input |
-
 ## Invariants
 
 - Service banners and passive TLS client fingerprints are not remote OS proof.
@@ -79,18 +69,6 @@ requirements. The IPv4 method is not assumed to transfer unchanged.
 - Confidence is evaluated on the held-out set and published with the corpus
   version.
 
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Collection workflow | A new workflow module beside [`scan`][scan-limits], exported from [`lib.rs`][workflow-surface] |
-| Probe construction and correlation | [`scan/plan/packet.rs`][scan-packets], [`correlation.rs`][correlation] |
-| Stack features | core [`protocol/transport/tcp.rs`][tcp-codec], [`protocol/network.rs`][core-network] |
-| Response matching | core [`protocol/matcher.rs`][core-matcher] |
-| Fingerprint and corpus documents | core [`document.rs`][core-document] |
-| Packet resources | netio [`transmit.rs`][netio-transmit], [`capture.rs`][netio-capture] |
-| Qualified inventory output | [`output/scan.rs`][scan-output], `schemas/` |
-
 ## Decisions to settle
 
 1. The IPv4 and IPv6 probe sets (recommended: define each from the stack
@@ -130,17 +108,3 @@ requirements. The IPv4 method is not assumed to transfer unchanged.
 [m5]: m05-host-discovery.md
 [m7]: m07-adaptive-scheduling.md
 [m8]: m08-service-identification.md
-[workflow-surface]: ../../crates/packetcraftr/src/lib.rs
-[scan-limits]: ../../crates/packetcraftr/src/scan.rs
-[scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
-[scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-[correlation]: ../../crates/packetcraftr/src/correlation.rs
-[tcp-codec]: ../../crates/packetcraftr-core/src/protocol/transport/tcp.rs
-[core-network]: ../../crates/packetcraftr-core/src/protocol/network.rs
-[core-matcher]: ../../crates/packetcraftr-core/src/protocol/matcher.rs
-[core-document]: ../../crates/packetcraftr-core/src/document.rs
-[tls-analysis]: ../../crates/packetcraftr-core/src/analysis/tls.rs
-[netio-transmit]: ../../crates/packetcraftr-netio/src/transmit.rs
-[netio-capture]: ../../crates/packetcraftr-netio/src/capture.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[nmap-os]: https://nmap.org/book/man-os-detection.html

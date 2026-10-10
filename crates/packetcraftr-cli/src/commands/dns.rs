@@ -100,7 +100,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                     output::envelope::Published::<output::dns::Report>::try_from(aggregate)
                         .map_err(CliError::classified)
                 }),
-                render_text: Box::new(|aggregate, _| {
+                render: Box::new(|aggregate, _| {
                     rendering::render_text(
                         output::envelope::Published::try_from(aggregate)
                             .map_err(CliError::classified)?,
@@ -136,7 +136,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 output::envelope::Published::<output::dns::BatchResult>::try_from(aggregate)
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|aggregate, _| {
+            render: Box::new(|aggregate, _| {
                 rendering::render_batch_text(
                     output::envelope::Published::try_from(aggregate)
                         .map_err(CliError::classified)?,

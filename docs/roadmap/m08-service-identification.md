@@ -2,179 +2,55 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Complete | [M7][m7] | [M9][m9] |
+| Complete | [M7](m07-adaptive-scheduling.md) | [M9](m09-tls-services-corpus.md) |
 
-A scan says a port answered. It does not say what is listening. PacketcraftR's
-UDP profiles send configured requests and report whether configured checks
-matched; `confirmed` means those checks matched, not that a product was
-identified. Identification adds a separate workflow whose claims remain
-distinct from scan state.
+## Outcome and decisions
 
-This milestone adds read-only identification of the application behind an
-endpoint, as an explicit operation with its own budgets, and reports what was
-observed separately from what was inferred.
+`identify` / `Client::identify` is an explicit operation over numeric endpoints;
+ordinary scans never start it. `Endpoint::from_scan` selects reported TCP-open
+and UDP-open/open-or-filtered endpoints. Each invocation declares its own policy
+and operation/host/connection/probe budgets; final endpoints and requests are
+reauthorized before I/O.
 
-## Outcome
-
-- An explicit identification operation interrogates endpoints a scan reported,
-  under per-host, per-connection, and per-probe limits.
-- Banner and protocol-aware probes identify HTTP, SSH, and DNS services on any
-  port.
-- Probes and matches live in versioned, bounded documents with provenance.
-- Results separate observed claims, matched candidates, confidence, and the
-  evidence behind each.
-- Intensity is configurable, and sensitive-service exclusions keep probes away
-  from endpoints that should not receive them.
-
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Identification | None in the [workflow surface][workflow-surface]; [UDP profile][udp-profiles] status (`not_observed`, `unchecked`, `confirmed`, `rejected`) reports configured checks | Active TCP/UDP response matching, including nonstandard ports ([version detection][nmap-version]) |
-| Streams | The [TCP provider][tcp-provider] supplies ordinary streams, used by connect scanning and DNS over TCP | Probes over TCP and UDP ([version detection][nmap-version]) |
-| Protocol parsing | Core codecs for DNS, HTTP, and TLS among others ([application protocols][core-application]); no SSH banner parser | Probe/match database ([version detection][nmap-version]) |
-| Result record | [Scan records][scan-output] carry endpoint, probe, and configured-profile evidence; no candidate or confidence model | Product, version, and extra information ([version detection][nmap-version]) |
-| Controls | Explicit bounded UDP profile configuration | Intensity levels and excluded ports ([version detection][nmap-version]) |
-
-## Invariants
-
-- Identification is read-only. No probe authenticates, changes state, or
-  follows a redirect.
-- Identification is an explicit operation. A scan does not start it on its own.
-- Final numeric endpoints are reauthorized before each connection or datagram.
-- A banner is an untrusted claim. It is never published as authenticated
-  identity.
-- An identified version is not an assertion that the service is vulnerable.
-
-## Scope
-
-### M8.1 Identification workflow and budgets
-
-- An identification operation over selected endpoints, with explicit byte,
-  time, and attempt limits per host, per connection, and per probe, inside the
-  operation's budget.
-- Hidden resolution, redirects, authentication attempts, and extra probing
-  cannot bypass the declared policy and budget.
-- Truncated and malformed replies are evidence with their own outcomes, not
-  errors that discard what was read.
-
-### M8.2 Banner and protocol-aware probes
-
-- Banner collection for services that speak first, starting with SSH.
-- Protocol-aware requests for HTTP and DNS, reusing core parsing.
-- Both TCP and UDP endpoints are supported. HTTPS and other TLS-wrapped
-  services belong to [M9][m9-tls].
+Probes are limited to read-only SSH banners, HTTP HEAD, and reviewed nonrecursive
+DNS questions on TCP/UDP, including nonstandard ports. No hidden resolution,
+redirect following, authentication, arbitrary request bytes, or regex engine is
+introduced. TLS-wrapped services remain M9 work. See the
+[user guide](../service-identification.md) for controls and limits.
 
 ### M8.3 Probe and match documents
 
-- A versioned, bounded document format for probes and matches, parsed and
-  matched in core with no native I/O.
-- Each entry carries maintenance and provenance metadata under the
-  [M1 data policy][m1-data].
-- UDP profile building blocks are reused. A profile's `confirmed` status keeps
-  its meaning and is not reinterpreted as product identity.
+Core owns bounded, independently versioned probe/match and sensitive-service
+exclusion documents under the [data policy](../scanner-data-policy.md). Matching
+uses anchored ASCII literals over parsed fields and bounded version tokens.
+Each probe carries a read-only review and maintenance/provenance record.
+Exclusions apply before planning; `--ignore-exclusions` overrides only that data,
+not policy or resource checks. UDP-profile `confirmed` still means configured
+checks matched, not that a product was identified.
 
-### M8.4 Identification records
+### Claims and output
 
-Four separate things are published for each endpoint:
+Output/v12 separates exact observations from matched candidates and provenance.
+Ordinal confidence is `claim` or `protocol`, not a probability. Banners are
+unauthenticated; unknown or ambiguous evidence never manufactures an exact
+version. Malformed/truncated replies retain their qualifications, and no result
+is a vulnerability finding. See the
+[v12 contract](../consumer-compatibility.md#output-family-v12).
 
-- **Observed claims**: the protocol spoken and the banner or fields received.
-- **Candidates**: products and versions the corpus matched.
-- **Confidence**: how strongly the evidence supports each candidate.
-- **Provenance**: which probe, which response bytes, and which corpus version
-  produced the match.
+## Completion evidence
 
-Unknown and ambiguous cases are results in their own right.
+The [evidence index](evidence/m08/README.md) links core, netio, workflow, and CLI
+contracts to the independent inventory (dataset 1.4.0), covering nonstandard ports,
+misleading/unknown/ambiguous replies, malformed/truncated data, deterministic
+matching, exclusions, budgets, and final-endpoint authorization.
 
-### M8.5 Intensity and sensitive-service exclusions
+Corrected runtime records at `99a9cf23216eb490892c0b6659e303d1a0b02c3d`
+on 2026-10-10 supersede the earlier `928ad8d555fe8b34abd144083612b54ace0fef1f`
+reports: all 1,440 cases passed in 20 profile executions across Linux, macOS
+ARM/Intel, and Windows, using IPv4/IPv6 and JSON/NDJSON. The index preserves
+checkout/tree identities and a separate later local-validation record; these are
+not new measurements of the current checkout.
 
-- Intensity controls that bound how many probes an endpoint receives.
-- Sensitive-service exclusions that keep identification away from endpoints
-  where an unsolicited probe is unsafe, applied before any probe is planned.
-
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Identification workflow | workflow [`identify.rs`][identify-workflow], exported from [`lib.rs`][workflow-surface] |
-| Bounded socket exchanges | netio [`bounded.rs`][bounded-io], [`tcp.rs`][tcp-provider], and [`udp.rs`][udp-provider] |
-| Probe, match and exclusion documents | core [`service_probes.rs`][probe-document] and [`service_exclusions.rs`][exclusion-document], reusing [`udp_profiles.rs`][udp-document] |
-| Protocol parsing | core [`protocol/application/`][core-application] |
-| UDP building blocks | [`scan/profile.rs`][udp-profiles] |
-| Records and contract | [`output/identify.rs`][identify-output], [`output/contract.rs`][output-contract], output/v11 and service document schemas |
-
-## Recorded decisions
-
-1. Identification is a separate, explicitly invoked `identify` command and
-   `Client::identify` operation over selected numeric endpoints. The library
-   offers `Endpoint::from_scan` to select reported TCP open and UDP
-   open/open-or-filtered endpoints. Each invocation declares and authorizes its
-   own budgets; ordinary scans do not start identification.
-2. Matching uses anchored ASCII literals over bounded parsed fields, with
-   bounded version-token extraction. The request language is closed to SSH
-   banner reads, HTTP HEAD and reviewed nonrecursive DNS questions. No regex
-   engine or arbitrary operator request bytes are introduced.
-3. Confidence is ordinal: `claim` for an unauthenticated software claim and
-   `protocol` for protocol evidence. These are not measured probabilities.
-   Protocol classification does not conflict with a more specific product claim.
-   Coverage and calibration expansion belongs to [M9][m9-evaluation].
-4. Sensitive-service exclusions are independently versioned reviewed data,
-   applied before planning. `--ignore-exclusions` explicitly overrides only that
-   data; authorization and resource limits still apply.
-5. Every probe carries a read-only review record and source/maintenance metadata.
-   Core validates the reviewed request forms independently of transport I/O.
-
-See the [user guide](../service-identification.md),
-[independent fixture inventory](../scanner-corpus.v1.json), and
-[implementation evidence](evidence/m08/README.md). Reviewed implementation and
-fixtures `928ad8d555fe8b34abd144083612b54ace0fef1f` passed all 1,440 acceptance
-case-runs across five profiles on Linux, macOS ARM/Intel, and Windows on
-2026-10-09. The evidence index retains the original reports and links each
-criterion to its source contracts.
-
-M7's implementation prerequisites provide bounded connect resources,
-cancellation and deadline composition. Its broader native and performance
-acceptance remains open. M8 closes its own ground-truth and ordinary-socket
-runtime gates; broader M2/M3 inventories and M9 held-out quality remain open.
-
-## Exit criteria
-
-- [x] Known services on nonstandard ports, unknown services, ambiguous matches,
-      misleading banners, truncation, and malformed replies each have an
-      explicit fixture outcome.
-- [x] Unknown and ambiguous cases never become exact versions.
-- [x] Reauthorization covers the final numeric endpoint of every connection and
-      datagram.
-- [x] Hidden resolution, redirects, authentication attempts, and extra probing
-      cannot bypass the declared policy and budget.
-- [x] Identification runs only as an explicit operation.
-- [x] A given corpus version reproduces the same matching results for the same
-      evidence.
-- [x] No output or document presents an identified version as a vulnerability
-      finding.
-- [x] Applicable portable and native behavior passes on Linux, macOS, and
-      Windows, and contract changes follow the
-      [compatibility policy][compatibility].
-
-[m1-data]: m01-claims-evidence.md#m12-scanner-data-policy
-[m7]: m07-adaptive-scheduling.md
-[m9]: m09-tls-services-corpus.md
-[m9-tls]: m09-tls-services-corpus.md#m92-tls-wrapped-interrogation
-[m9-evaluation]: m09-tls-services-corpus.md#m94-held-out-evaluation
-[compatibility]: ../consumer-compatibility.md
-[workflow-surface]: ../../crates/packetcraftr/src/lib.rs
-[scan-limits]: ../../crates/packetcraftr/src/scan.rs
-[udp-profiles]: ../../crates/packetcraftr/src/scan/profile.rs
-[tcp-provider]: ../../crates/packetcraftr-netio/src/tcp.rs
-[udp-provider]: ../../crates/packetcraftr-netio/src/udp.rs
-[bounded-io]: ../../crates/packetcraftr-netio/src/bounded.rs
-[identify-workflow]: ../../crates/packetcraftr/src/identify.rs
-[probe-document]: ../../crates/packetcraftr-core/src/document/service_probes.rs
-[exclusion-document]: ../../crates/packetcraftr-core/src/document/service_exclusions.rs
-[identify-output]: ../../crates/packetcraftr-cli/src/output/identify.rs
-[core-document]: ../../crates/packetcraftr-core/src/document.rs
-[udp-document]: ../../crates/packetcraftr-core/src/document/udp_profiles.rs
-[core-application]: ../../crates/packetcraftr-core/src/protocol/application.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[output-contract]: ../../crates/packetcraftr-cli/src/output/contract.rs
-[nmap-version]: https://nmap.org/book/man-version-detection.html
+M8 closes its applicable ground-truth and ordinary-socket gates. Broader M2/M3/M5/M7
+native/performance acceptance and M9 held-out coverage/calibration remain open.
+No new retained-state or peak-RSS benchmark baseline is claimed.

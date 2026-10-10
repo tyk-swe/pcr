@@ -208,7 +208,7 @@ fn execute_offline(
                 output::envelope::Published::<output::fuzz::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|report, _| {
+            render: Box::new(|report, _| {
                 rendering::render_text(
                     output::envelope::Published::try_from(report).map_err(CliError::classified)?,
                 )
@@ -258,7 +258,7 @@ fn execute_live(
                 output::envelope::Published::<output::fuzz::Report>::try_from(aggregate)
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|aggregate, _| {
+            render: Box::new(|aggregate, _| {
                 rendering::render_text(
                     output::envelope::Published::try_from(aggregate)
                         .map_err(CliError::classified)?,

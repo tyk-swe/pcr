@@ -62,7 +62,7 @@ pub use client::Client;
 pub use error::{Error, NeighborSpent};
 pub use execution::Sink;
 pub use providers::{
-    CaptureProviders, PacketProviders, ProviderSet, Providers, SystemProviders, TargetProviders,
-    TcpProviders, UdpProviders, WithUdp,
+    CaptureProviders, PacketProviders, ProviderSet, SystemProviders, TargetProviders, TcpProviders,
+    UdpProviders,
 };
 pub use stats::{Stats, StatsOverflow};

@@ -27,16 +27,6 @@ keeping every attempt outcome visible.
 - The scan method can be chosen from available capability without changing an
   explicitly requested method.
 
-## Baseline
-
-| | PacketcraftR at `22c7d182d577` | Nmap reference |
-| --- | --- | --- |
-| Port selection | `--ports` takes numeric ports and inclusive ranges with first-seen deduplication, bounded by `--max-ports` (default 1,024); TCP and UDP require explicit ports ([request][scan-request], [arguments][scan-args]) | Named and frequency-ranked ports, fast and top-port selections, exclusions ([port specification][nmap-ports]) |
-| UDP payloads | Empty or one explicit payload; [UDP profiles][udp-profiles] supply per-port requests and response checks from an operator [document][udp-document] | Protocol-specific payloads for common ports ([scan techniques][nmap-techniques]) |
-| Protocols per plan | One transport per [request][scan-request] | TCP, UDP, and SCTP selections can coexist ([scan techniques][nmap-techniques]) |
-| States | [`Classification`][scan-report] of `open`, `closed`, `filtered`, `unreachable`, `unknown`, `timeout`, with ranked endpoint aggregation over [raw observations][scan-evidence] | Scan-dependent states including `open\|filtered` and `unfiltered` ([state meanings][nmap-states]) |
-| Method choice | `--connect` is explicit; no automatic method selection ([scan command][scan-command]) | Connect scan is chosen when raw SYN is unavailable ([scan techniques][nmap-techniques]) |
-
 ## Invariants
 
 - Port-name hints are hints. A name attached to a port number is not service
@@ -95,56 +85,25 @@ keeping every attempt outcome visible.
 
 ## Implementation notes
 
-- Selection lands in [`scan/selection.rs`][scan-selection]. `--ports` and
-  `--exclude-ports` take terms: numeric ports and ranges, catalog names, and
-  `@preset`, each optionally qualified `tcp:` or `udp:`. Inclusions expand in
-  term order, then transport order, and deduplicate first-seen; every excluded
-  endpoint is then removed, and only the remainder meets `--max-ports`. The
-  result is `Request::endpoints`, a list of typed `ProbeEndpoint`s that
-  replaces `transport` and `ports`. Planning, policy review, the probe and
-  wire-byte budgets, and `scan --list` all read that one list.
-- The catalog is a bounded core document,
-  [`packetcraftr.port-catalog/v1`][catalog-document] (256 KiB, 2,048 entries,
-  32 presets, names unique per transport), bundled as
-  [`data/port-catalog.json`][catalog-data] beside its
-  [provenance manifest][catalog-provenance]. Its 73 project-authored entries
-  each cite the RFC that assigns or describes the port. The presets are `web`,
-  `mail`, `name-services`, `infrastructure`, `legacy-services`, and `all`.
-  [`scan::catalog`][scan-catalog] supplies each endpoint's `port_hint`.
-- The curated payloads are a `packetcraftr.udp-profiles/v1` document,
-  [`data/udp-payloads.json`][payload-data], beside its
-  [manifest][payload-provenance]. It covers DNS root NS, mDNS service
-  enumeration, RPC bind NULL, NTP client, SNMPv3 discovery, STUN binding, and
-  CoAP resource discovery, each with a response check.
-  [`profile::curated::merge`][scan-curated] applies them only to planned UDP
-  endpoints, under `--curated-udp-payloads`.
-- [`scan::inference`][scan-inference] draws one `Inference` per endpoint from
-  its attempts' typed `Reply` values or connect outcomes. Each has a state
-  (absent for operational failures), the deciding rule, and every attempt
-  sequence in exactly one of `supporting`, `conflicting`, `unanswered`, or
-  `failed`. ICMP echo endpoints get none. Attempt `classification` and the
-  endpoint aggregate keep their v7 meaning.
-- Frames that correlate with a probe but are not carried by its outcome are
-  retained as `unattributed` evidence ([`Attribution`][scan-report]). That
-  covers a superseded duplicate, a reply after the window, and a frame several
-  probes match, in both serial and pipelined execution. They count toward
-  `--max-undecoded` and the shared evidence byte budget.
-- [`scan::method::select`][scan-method] resolves `--method raw|tcp-connect|auto`
-  (`--connect` aliases `tcp-connect`) against
-  [`NativeCapability::check`][netio-unsupported], which answers from the
-  build's capability cfgs without a native call. An explicit method is never
-  replaced. Selection never fails for missing packet I/O, so in a build
-  without it a raw scan is still reviewed by policy first, then fails with the
-  raw engine's capability error.
-- Results ship in `packetcraftr.output/v8` ([schema][schema-v8],
-  [migration][migration], [compatibility][compatibility-v8]). v8 adds a `plan`
-  record: the requested and selected method with the reason, the
-  `port_catalog` and curated payload data sets, the excluded-endpoint count,
-  and the applied and overridden curated ports. It also adds `port_hint` and
-  `inference` on endpoints, `unattributed` frames, `endpoint` and
-  `connect_endpoint` stream records before `complete`, and the list `ports`
-  record. The [evidence model][evidence-inference] carries the rule table and
-  the Nmap mapping.
+One typed endpoint list drives authorization, planning, budgets, list mode, and
+execution. Port inclusions expand in term/transport order with first-seen
+deduplication; exclusions apply before the port ceiling. TCP/UDP endpoints on the
+same number stay distinct; ICMP is portless.
+
+The [catalog][catalog-data] and [curated payloads][payload-data] are independently
+versioned documents with [catalog][catalog-provenance] and
+[payload][payload-provenance] provenance. Catalog labels are hints, not identified
+services; curated UDP requests require explicit opt-in and apply only to planned
+endpoints. See [inference rules][evidence-inference] for every attempt's partition
+into supporting/conflicting/unanswered/failed evidence and retained unattributed
+frames.
+
+Explicit methods never fall back. Automatic selection reads build capability,
+not runtime privilege; missing raw I/O still fails through policy-first engine
+admission. Output first gained the plan, hints, inference, unattributed frames,
+and endpoint events in v8; current v12 retains them under the
+[consumer policy][compatibility-v8].
+
 - A native Linux run used two throwaway network namespaces joined by a veth
   pair on TEST-NET-1, with checksum offload disabled. It scanned
   `tcp:18080-18082` and three UDP ports in one plan, excluding `tcp:18081`.
@@ -165,17 +124,6 @@ keeping every attempt outcome visible.
 - **Discovery ports follow the same selection.** [M5][m5] discovery takes
   `--discovery-ports` terms through `scan::select_endpoints` with the scan's
   `--exclude-ports`, so discovery never probes an excluded port either.
-
-## Change map
-
-| Change | Start here |
-| --- | --- |
-| Port selection, exclusions, typed protocols | [`scan/request.rs`][scan-request], [`commands/scan/arguments.rs`][scan-args] |
-| Catalog and payload documents | core [`document/udp_profiles.rs`][udp-document] as the bounded-document precedent, [`scan/profile.rs`][udp-profiles] |
-| Combined plans and endpoint identity | [`scan/plan.rs`][scan-plan], [`scan/plan/packet.rs`][scan-packets] |
-| Inference | [`scan/evidence.rs`][scan-evidence], [`scan/report.rs`][scan-report] |
-| Method planning | [`commands/scan.rs`][scan-command], [`scan/connect/engine.rs`][connect-engine] |
-| Published records and contract | [`output/scan.rs`][scan-output], [`output/contract.rs`][output-contract], `schemas/`, `docs/migration-unreleased.md` |
 
 ## Decisions
 
@@ -267,20 +215,10 @@ gates][close-gates] keep M6 `In progress`:
 [m2]: m02-ground-truth-benchmarks.md
 [m3]: m03-native-validation.md
 [m5]: m05-host-discovery.md
-[scan-selection]: ../../crates/packetcraftr/src/scan/selection.rs
-[scan-catalog]: ../../crates/packetcraftr/src/scan/catalog.rs
-[scan-curated]: ../../crates/packetcraftr/src/scan/profile/curated.rs
-[scan-inference]: ../../crates/packetcraftr/src/scan/inference.rs
-[scan-method]: ../../crates/packetcraftr/src/scan/method.rs
-[catalog-document]: ../../crates/packetcraftr-core/src/document/port_catalog.rs
 [catalog-data]: ../../crates/packetcraftr/data/port-catalog.json
 [catalog-provenance]: ../../crates/packetcraftr/data/port-catalog.provenance.yaml
 [payload-data]: ../../crates/packetcraftr/data/udp-payloads.json
 [payload-provenance]: ../../crates/packetcraftr/data/udp-payloads.provenance.yaml
-[netio-unsupported]: ../../crates/packetcraftr-netio/src/unsupported.rs
-[netio-transmit]: ../../crates/packetcraftr-netio/src/transmit.rs
-[schema-v8]: ../../schemas/packetcraftr.output.v8.schema.json
-[migration]: ../migration-unreleased.md
 [compatibility-v8]: ../consumer-compatibility.md#output-family-v8
 [evidence-inference]: ../scanner-evidence.md#port-inference
 [inference-tests]: ../../crates/packetcraftr/src/scan/inference/tests.rs
@@ -298,18 +236,3 @@ gates][close-gates] keep M6 `In progress`:
 [m13]: m13-sctp-ip-protocol.md
 [close-gates]: README.md#close-gates
 [compatibility]: ../consumer-compatibility.md
-[scan-request]: ../../crates/packetcraftr/src/scan/request.rs
-[scan-plan]: ../../crates/packetcraftr/src/scan/plan.rs
-[scan-packets]: ../../crates/packetcraftr/src/scan/plan/packet.rs
-[scan-evidence]: ../../crates/packetcraftr/src/scan/evidence.rs
-[scan-report]: ../../crates/packetcraftr/src/scan/report.rs
-[udp-profiles]: ../../crates/packetcraftr/src/scan/profile.rs
-[connect-engine]: ../../crates/packetcraftr/src/scan/connect/engine.rs
-[udp-document]: ../../crates/packetcraftr-core/src/document/udp_profiles.rs
-[scan-command]: ../../crates/packetcraftr-cli/src/commands/scan.rs
-[scan-args]: ../../crates/packetcraftr-cli/src/commands/scan/arguments.rs
-[scan-output]: ../../crates/packetcraftr-cli/src/output/scan.rs
-[output-contract]: ../../crates/packetcraftr-cli/src/output/contract.rs
-[nmap-ports]: https://nmap.org/book/man-port-specification.html
-[nmap-techniques]: https://nmap.org/book/man-port-scanning-techniques.html
-[nmap-states]: https://nmap.org/book/man-port-scanning-basics.html

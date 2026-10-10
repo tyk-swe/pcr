@@ -204,7 +204,7 @@ fn client<R: Provider + 'static>(
     )
 }
 
-fn send_once<P: packetcraftr::Providers>(
+fn send_once<P: packetcraftr::PacketProviders>(
     client: &Client<P>,
     packet: Packet,
     options: packetcraftr::send::Options,

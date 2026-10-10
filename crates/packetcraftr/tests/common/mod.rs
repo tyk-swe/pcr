@@ -55,6 +55,7 @@ pub(crate) type FakeProviders<R, I> =
 
 pub(crate) fn providers<R, I: Clone>(route: R, io: I) -> FakeProviders<R, I> {
     ProviderSet {
+        udp: (),
         route,
         interface: Interfaces::default(),
         capture: io.clone(),

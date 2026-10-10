@@ -498,6 +498,7 @@ mod client {
     fn client(policy: Policy) -> (Client<Providers>, FakeProviders) {
         let fake = FakeProviders::default();
         let providers = ProviderSet {
+            udp: (),
             route: fake.clone(),
             interface: Interfaces(Arc::clone(&fake.calls)),
             capture: fake.clone(),

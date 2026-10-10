@@ -48,6 +48,11 @@ impl Runtime {
         }
     }
 
+    /// A runtime of the same capacity with no active workers.
+    pub(crate) fn fresh(&self) -> Self {
+        Self::with_valid_capacity(self.capacity())
+    }
+
     pub fn snapshot(&self) -> RuntimeSnapshot {
         RuntimeSnapshot {
             capacity: self.capacity(),

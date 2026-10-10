@@ -29,6 +29,7 @@ mod engine;
 mod error;
 mod evidence;
 mod executor;
+pub mod followup;
 mod inference;
 pub mod method;
 mod plan;

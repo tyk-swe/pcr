@@ -1,18 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Instant;
-
-use packetcraftr::scan::connect;
+use packetcraftr::scan::{connect, followup};
 
 use crate::output::{self, contract::Format};
 use crate::system::{Client, Runtime, client};
 use crate::{errors::CliError, rendering::StreamEncoder};
 
 pub(super) fn run(
-    request: &packetcraftr::scan::Request,
+    request: followup::ConnectRequest,
     plan: output::scan::plan::Plan,
-    lookup: Option<&super::reverse::Lookup>,
     policy: crate::command_options::HostnamePolicyArgs,
     format: Format,
     stream: &StreamEncoder,
@@ -31,27 +28,21 @@ pub(super) fn run(
         crate::commands::execution::Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
-                let started = Instant::now();
                 let collector = connect::Collector::default();
                 let report = client
-                    .scan_connect(request.clone(), collector.clone())
+                    .scan_connect_with_followups(request.clone(), collector.clone())
+                    .map_err(super::followup_error)?;
+                let mut aggregate = collector
+                    .finish(report.scan)
                     .map_err(CliError::classified)?;
-                let mut aggregate = collector.finish(report).map_err(CliError::classified)?;
+                let lookups = report
+                    .reverse_dns
+                    .as_ref()
+                    .and_then(|lookups| lookups.stats.clone());
+                let names = super::reverse_dns_hosts(report.reverse_dns);
                 // Socket statistics have no packet counters for the
                 // lookups' exchanges, which publish their own; their time
                 // still counts in elapsed.
-                let (names, lookups) = super::reverse::names(
-                    lookup,
-                    &client,
-                    &aggregate.report.hosts,
-                    started,
-                    // Wall-clock `scheduled_at` is evidence, never pacing:
-                    // any attempted connection conservatively marks now.
-                    super::reverse::last_transmission(
-                        aggregate.report.stats.connections_attempted > 0,
-                        std::iter::empty::<Instant>(),
-                    ),
-                );
                 if let Some(lookups) = &lookups {
                     aggregate.report.stats.elapsed = aggregate
                         .report
@@ -64,42 +55,27 @@ pub(super) fn run(
             run_with_events: Box::new({
                 let plan = plan.clone();
                 let client = &client;
-                move |mut emit| {
-                    let started = Instant::now();
-                    // Probe events stream as they settle; the tracker keeps
-                    // only what each endpoint's inference needs.
-                    let tracker = connect::Collector::default();
-                    let mut tracked = tracker.clone();
+                let request = &request;
+                move |emit| {
                     let mut report = client
-                        .scan_connect(request.clone(), move |event: connect::Event| {
-                            packetcraftr::Sink::publish(&mut tracked, event.clone())?;
-                            emit(event)
-                        })
-                        .map_err(CliError::classified)?;
-                    let aggregate = tracker
-                        .finish(report.clone())
-                        .map_err(CliError::classified)?;
+                        .scan_connect_with_followups(request.clone(), emit)
+                        .map_err(super::followup_error)?;
+                    let lookups = report
+                        .reverse_dns
+                        .as_ref()
+                        .and_then(|lookups| lookups.stats.clone());
                     // Socket statistics have no packet counters for the
                     // lookups' exchanges, which publish their own; their time
                     // still counts in elapsed.
-                    let (reverse_dns, lookups) = super::reverse::names(
-                        lookup,
-                        client,
-                        &report.hosts,
-                        started,
-                        super::reverse::last_transmission(
-                            report.stats.connections_attempted > 0,
-                            std::iter::empty::<Instant>(),
-                        ),
-                    );
                     if let Some(lookups) = &lookups {
-                        report.stats.elapsed = report.stats.elapsed.saturating_add(lookups.elapsed);
+                        report.scan.stats.elapsed =
+                            report.scan.stats.elapsed.saturating_add(lookups.elapsed);
                     }
                     Ok(Streamed {
-                        report,
-                        endpoints: aggregate.endpoints,
+                        report: report.scan,
+                        endpoints: report.endpoints,
                         plan,
-                        reverse_dns,
+                        reverse_dns: super::reverse_dns_hosts(report.reverse_dns),
                         reverse_dns_stats: lookups,
                     })
                 }

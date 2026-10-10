@@ -7,7 +7,6 @@ mod list;
 mod payload;
 mod profiles;
 mod rendering;
-mod reverse;
 mod traceroute;
 
 use crate::output::contract::Format;
@@ -16,11 +15,10 @@ use crate::output;
 
 use packetcraftr_core::error::{Classified, Kind};
 
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use packetcraftr::probe::{ProbeEndpoint, Transport};
-use packetcraftr::scan::{discovery, method, profile::curated};
+use packetcraftr::scan::{discovery, followup, method, profile::curated};
 
 use self::arguments::Args;
 use super::execution;
@@ -304,65 +302,65 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     };
     let reverse_dns = reverse_dns.map(parse_target).transpose()?;
     if selected_method == method::Method::Connect {
-        let lookup = reverse_dns
+        let reverse = reverse_dns
             .map(|server| {
-                reverse::Lookup::new(
-                    server,
-                    reverse_dns_port,
-                    packetcraftr::dns::TransportMode::Tcp,
+                validated_reverse_dns(
+                    followup::ReverseDns {
+                        server,
+                        server_port: reverse_dns_port,
+                        transport: packetcraftr::dns::TransportMode::Tcp,
+                    },
                     &request,
                 )
             })
             .transpose()?;
-        return connect::run(&request, plan, lookup.as_ref(), policy, format, stream);
+        return connect::run(
+            followup::ConnectRequest {
+                scan: request,
+                reverse_dns: reverse,
+            },
+            plan,
+            policy,
+            format,
+            stream,
+        );
     }
     let workflow = prepare_workflow(&route, policy.into_policy(), request.timeout, queue_limits)?;
-    // Reverse-DNS lookups can share the scan's next hop, so their neighbor
-    // requests are authorized like its probes'.
-    let client = workflow
-        .client(Runtime::Workflow)
-        .with_neighbor_request_authorization();
-    // The trace stage resolves its own neighbors, so it takes an independent
-    // workflow client with neighbor-request authorization rather than the
-    // scan's neighbor-narrowed one.
-    let trace_client = trace_stage.is_some().then(|| {
-        workflow
-            .client(Runtime::Workflow)
-            .with_neighbor_request_authorization()
-    });
-    // The finalized template is validated again before the scan runs, so a
-    // queue configuration the trace stage cannot use fails before any probe.
-    let trace_stage = trace_stage
-        .map(|stage| stage.with_workflow(workflow.route.clone(), workflow.collection.clone()))
-        .transpose()?;
+    let client = workflow.client(Runtime::Workflow);
     let request = packetcraftr::scan::Request {
         route: workflow.route,
         collection: workflow.collection,
         ..request
     };
-    // The lookups resolve any next hop within the scan's bounds, reusing its
-    // answers; without them the scan bounds its own resolutions.
-    let client = if reverse_dns.is_some() {
-        client
-            .with_scan_neighbors(&request)
-            .map_err(CliError::classified)?
-    } else {
-        client
-    };
+    // The finalized template is validated again before the scan runs, so a
+    // queue configuration the trace stage cannot use fails before any probe.
+    if let Some(stage) = &trace_stage {
+        stage.revalidate(&request)?;
+    }
     // DNS over TCP cannot follow a packet route override.
-    let lookup = reverse_dns
+    let reverse = reverse_dns
         .map(|server| {
             let transport = if route.supports_kernel_tcp() {
                 packetcraftr::dns::TransportMode::UdpThenTcp
             } else {
                 packetcraftr::dns::TransportMode::Udp
             };
-            reverse::Lookup::new(server, reverse_dns_port, transport, &request)
+            validated_reverse_dns(
+                followup::ReverseDns {
+                    server,
+                    server_port: reverse_dns_port,
+                    transport,
+                },
+                &request,
+            )
         })
         .transpose()?;
-    let lookup = lookup.as_ref();
-    let trace = trace_stage.as_ref().zip(trace_client.as_ref());
     let trace_plan = trace_stage.as_ref().map(traceroute::Stage::plan);
+    let request = followup::Request {
+        trace: trace_stage.as_ref().map(traceroute::Stage::trace),
+        reverse_dns: reverse,
+        scan: request,
+    };
     execution::run_workflow(
         format,
         stream,
@@ -370,169 +368,44 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         execution::Hooks {
             command: output::contract::Command::Scan,
             run: Box::new(|| {
-                // The command's absolute deadline parents every stage's own
-                // limit so stage setup cannot extend its expiry; it starts
-                // before the `started` marker so it cannot end later.
-                let operation_deadline =
-                    packetcraftr_core::budget::Deadline::new(request.limits.max_duration)
-                        .with_cancellation(Some(crate::cancellation::signal().clone()));
-                let client = client.with_parent_deadline(operation_deadline.clone());
-                let trace = trace.map(|(stage, trace_client)| {
-                    (
-                        stage,
-                        trace_client.with_parent_deadline(operation_deadline.clone()),
-                    )
-                });
-                let started = Instant::now();
-                let collector = packetcraftr::scan::Collector::default();
+                let collector = followup::Collector::default();
                 let report = client
-                    .scan(request.clone(), collector.clone())
-                    .map_err(rendering::scan_error)?;
-                let mut aggregate = collector.finish(report).map_err(rendering::scan_error)?;
-                let scan_sent = last_scan_transmission(&aggregate);
-                let mut traced = None;
-                if let Some((stage, trace_client)) = trace {
-                    let result = stage.collect(&trace_client, &aggregate, started, scan_sent)?;
-                    aggregate
-                        .stats
-                        .checked_add_assign(&result.aggregate.stats)
-                        .map_err(|error| CliError::caused(Kind::Internal, &error))?;
-                    aggregate
-                        .diagnostics
-                        .extend(result.aggregate.diagnostics.iter().cloned());
-                    traced = Some(result);
+                    .scan_with_followups(request.clone(), collector.clone())
+                    .map_err(followup_error)?;
+                let aggregate = collector.finish(report).map_err(followup_error)?;
+                let followup::Aggregate {
+                    mut scan,
+                    trace,
+                    reverse_dns,
+                    stats,
+                } = aggregate;
+                scan.stats = stats;
+                if let Some(trace) = &trace {
+                    scan.diagnostics.extend(trace.diagnostics.iter().cloned());
                 }
-                // The lookups' sends, bytes, and time count in this scan's
-                // reported statistics, and run in the allowance the scan and
-                // trace left over.
-                let lookups_client = client.with_remaining_budget(&aggregate.stats);
-                let (names, lookups) = reverse::names(
-                    lookup,
-                    &lookups_client,
-                    &aggregate.hosts,
-                    started,
-                    reverse::last_transmission(
-                        aggregate.stats.packets_attempted > 0,
-                        scan_sent
-                            .into_iter()
-                            .chain(traced.as_ref().and_then(|traced| traced.last_sent)),
-                    ),
-                );
-                aggregate
-                    .stats
-                    .checked_add_assign(&lookups.unwrap_or_default())
-                    .map_err(|error| CliError::caused(Kind::Internal, &error))?;
-                let traced = trace_plan
-                    .zip(traced)
-                    .map(|(plan, traced)| (plan, traced.aggregate));
-                Ok((aggregate, names, traced))
+                let traced = trace_plan.zip(trace);
+                Ok((scan, reverse_dns_hosts(reverse_dns), traced))
             }),
             run_with_events: Box::new({
                 let plan = plan.clone();
                 let client = &client;
                 let request = &request;
                 move |emit| {
-                    // The same absolute deadline parents the streamed
-                    // scan, trace, and lookups, so their setup cannot
-                    // extend its expiry.
-                    let operation_deadline =
-                        packetcraftr_core::budget::Deadline::new(request.limits.max_duration)
-                            .with_cancellation(Some(crate::cancellation::signal().clone()));
-                    let client = client.with_parent_deadline(operation_deadline.clone());
-                    let trace = trace.map(|(stage, trace_client)| {
-                        (
-                            stage,
-                            trace_client.with_parent_deadline(operation_deadline.clone()),
-                        )
-                    });
-                    let started = Instant::now();
-                    let emit = Arc::new(Mutex::new(emit));
-                    // Events stream as they settle; the tracker keeps each
-                    // attempt without its frame, for the endpoint inferences.
-                    let tracker = packetcraftr::scan::Collector::default();
-                    let mut tracked = tracker.clone();
-                    // The tracker strips matched response frames, so the
-                    // scan's retained evidence is counted as events publish.
-                    let retained = Arc::new(Mutex::new(traceroute::Retained::default()));
-                    let scan_emit = Arc::clone(&emit);
-                    let observing = Arc::clone(&retained);
                     let mut report = client
-                        .scan(request.clone(), move |event: packetcraftr::scan::Event| {
-                            observing
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .observe(&event);
-                            if let packetcraftr::scan::Event::Probe { target, probe } = &event {
-                                let probe = packetcraftr::scan::ProbeEvidence {
-                                    response: None,
-                                    ..probe.clone()
-                                };
-                                packetcraftr::Sink::publish(
-                                    &mut tracked,
-                                    packetcraftr::scan::Event::Probe {
-                                        target: target.clone(),
-                                        probe,
-                                    },
-                                )?;
-                            }
-                            publish(&scan_emit, Event::Scan(event))
-                        })
-                        .map_err(rendering::scan_error)?;
-                    let aggregate = tracker
-                        .finish(report.clone())
-                        .map_err(rendering::scan_error)?;
-                    let scan_sent = last_scan_transmission(&aggregate);
-                    let mut traced = None;
-                    if let Some((stage, trace_client)) = trace {
-                        let retained = retained
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let trace_emit = Arc::clone(&emit);
-                        let result = stage.stream(
-                            &trace_client,
-                            &aggregate,
-                            *retained,
-                            started,
-                            scan_sent,
-                            move |event| publish(&trace_emit, Event::Trace(event)),
-                        )?;
-                        report
-                            .stats
-                            .checked_add_assign(&result.report.stats)
-                            .map_err(|error| CliError::caused(Kind::Internal, &error))?;
-                        traced = Some(result);
-                    }
-                    // The lookups' sends, bytes, and time count in this
-                    // scan's reported statistics, and run in the allowance
-                    // the scan and trace left over.
-                    let lookups_client = client.with_remaining_budget(&report.stats);
-                    let (reverse_dns, lookups) = reverse::names(
-                        lookup,
-                        &lookups_client,
-                        &report.hosts,
-                        started,
-                        reverse::last_transmission(
-                            report.stats.packets_attempted > 0,
-                            scan_sent
-                                .into_iter()
-                                .chain(traced.as_ref().and_then(|traced| traced.last_sent)),
-                        ),
-                    );
-                    report
-                        .stats
-                        .checked_add_assign(&lookups.unwrap_or_default())
-                        .map_err(|error| CliError::caused(Kind::Internal, &error))?;
-                    let traceroute = trace_plan.zip(traced).map(|(plan, traced)| {
+                        .scan_with_followups(request.clone(), emit)
+                        .map_err(followup_error)?;
+                    report.scan.stats = report.stats;
+                    let traceroute = trace_plan.zip(report.trace).map(|(plan, traced)| {
                         output::traceroute::hosts::Complete {
                             plan,
-                            retained_evidence_bytes: traced.report.retained_evidence_bytes,
+                            retained_evidence_bytes: traced.retained_evidence_bytes,
                         }
                     });
                     Ok(Streamed {
-                        report,
-                        endpoints: aggregate.endpoints,
+                        report: report.scan,
+                        endpoints: report.endpoints,
                         plan,
-                        reverse_dns,
+                        reverse_dns: reverse_dns_hosts(report.reverse_dns),
                         traceroute,
                     })
                 }
@@ -576,25 +449,37 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     )
 }
 
-/// What the command streams while it runs: the scan's events, then the trace
-/// stage's.
-pub(super) enum Event {
-    Scan(packetcraftr::scan::Event),
-    Trace(packetcraftr::traceroute::hosts::Event),
+fn validated_reverse_dns(
+    reverse: followup::ReverseDns,
+    scan: &packetcraftr::scan::Request,
+) -> Result<followup::ReverseDns, CliError> {
+    reverse.validate(scan).map_err(followup_error)?;
+    Ok(reverse)
 }
 
-fn publish(
-    emit: &Mutex<execution::Emit<Event>>,
-    event: Event,
-) -> Result<(), packetcraftr_core::error::BoundaryError> {
-    let mut emit = emit.lock().unwrap_or_else(PoisonError::into_inner);
-    emit(event)
+/// A follow-up stage's failure, classified as the failing stage alone would
+/// be; a scan failure keeps the partial evidence its pipeline retained.
+pub(super) fn followup_error(error: followup::Error) -> CliError {
+    match error {
+        followup::Error::Scan(error) => rendering::scan_error(error),
+        followup::Error::StatsOverflow(error) => CliError::caused(Kind::Internal, &error),
+        error => CliError::classified(error),
+    }
 }
 
-/// A conservative monotonic marker for a scan that sent anything: the probes'
-/// wall-clock `sent_at` is evidence, not a pacing input, so the marker is now.
-fn last_scan_transmission(aggregate: &packetcraftr::scan::Aggregate) -> Option<Instant> {
-    reverse::last_transmission(aggregate.stats.packets_attempted > 0, std::iter::empty())
+/// Each host's PTR lookup, by position; empty when no lookup was requested.
+pub(super) fn reverse_dns_hosts(
+    lookups: Option<followup::ReverseLookups>,
+) -> Vec<Option<output::scan::host::ReverseDns>> {
+    lookups
+        .map(|lookups| {
+            lookups
+                .lookups
+                .into_iter()
+                .map(|lookup| lookup.map(Into::into))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) struct Streamed {

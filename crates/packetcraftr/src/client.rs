@@ -181,6 +181,21 @@ impl<P, K: Clock> Client<P, K> {
         }
     }
 
+    /// A view sharing this client's registry, policy, providers, clock, and
+    /// cancellation but nothing a workflow accumulates: its own neighbor
+    /// state, interfaces, and worker runtime, as a newly constructed client
+    /// has. A fresh runtime matters because timed-out workers of an earlier
+    /// stage can keep holding permits of the first.
+    pub(crate) fn independent_view(&self) -> Self {
+        let mut view = self.view_with_registry(Arc::clone(&self.registry));
+        view.runtime = self.runtime.fresh();
+        view.neighbors = neighbor::State::default();
+        view.neighbors_resolved_ahead = false;
+        view.neighbor_pause = Duration::ZERO;
+        view.interfaces = route::ResolvedInterface::default();
+        view
+    }
+
     /// A view of this client whose operation deadlines attach the supplied
     /// absolute `deadline` as a parent of the deadline each operation
     /// derives: cooperative boundaries check it, so setup cannot extend or

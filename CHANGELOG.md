@@ -46,6 +46,10 @@ for remaining acceptance gates and revision-bound evidence.
 
 ### Added
 
+- `scan::followup` runs a scan's trace and reverse-DNS follow-ups under the
+  scan's own budget, so library callers get what `scan --traceroute` and
+  `--reverse-dns` do: `Client::scan_with_followups` for raw scans and
+  `Client::scan_connect_with_followups` for TCP connect scans.
 - Explicit bounded service identification for selected TCP/UDP endpoints:
   SSH banners, HTTP HEAD, and DNS probes on any permitted port; independently
   versioned probe/match data and sensitive-service exclusions; exact evidence

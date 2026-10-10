@@ -32,6 +32,7 @@ mod policy_contracts;
 mod port_selection_matrix;
 mod probe_tunnel_contracts;
 mod route_contracts;
+mod scan_followup_contracts;
 mod scan_pipeline_contracts;
 mod scanner_corpus_contracts;
 mod send_set_contracts;

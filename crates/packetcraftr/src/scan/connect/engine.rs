@@ -9,7 +9,6 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
-use crate::deadline::DeadlineExt as _;
 use crate::providers::{TargetProviders, TcpOf, TcpProviders};
 use crate::{
     Client, Sink,

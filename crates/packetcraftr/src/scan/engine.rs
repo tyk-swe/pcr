@@ -12,7 +12,6 @@ use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::link::Mode;
 
 use crate::clock::Clock;
-use crate::deadline::DeadlineExt as _;
 use crate::execution::Errors as _;
 use crate::execution::{pause, publisher, rate_delay};
 use crate::policy::Authorizer;

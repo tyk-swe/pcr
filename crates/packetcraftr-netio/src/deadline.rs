@@ -3,10 +3,9 @@
 
 //! The one deadline and cancellation convention for provider calls.
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::budget::{Deadline, Interrupted};
 
 /// Longest slice an uninterruptible wait should take between checks of a cancellation signal.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -21,29 +20,10 @@ pub fn remaining_before(deadline: Instant) -> Option<Duration> {
         .filter(|remaining| !remaining.is_zero())
 }
 
-pub fn remaining(deadline: &Deadline) -> Result<Duration, Interrupted> {
-    deadline.check_cancelled()?;
-    let remaining = deadline.remaining()?;
-    if remaining.is_zero() {
-        return Err(DeadlineExceeded {
-            actual: deadline.limit(),
-            limit: deadline.limit(),
-        }
-        .into());
-    }
-    Ok(remaining)
-}
-
 pub fn expires_at(deadline: &Deadline) -> Result<Instant, Interrupted> {
-    let remaining = remaining(deadline)?.min(MAX_WAIT);
+    let remaining = deadline.live_remaining()?.min(MAX_WAIT);
     let now = Instant::now();
     Ok(now.checked_add(remaining).unwrap_or(now))
-}
-
-pub fn detach(deadline: &Deadline) -> Result<Deadline, Interrupted> {
-    Ok(Deadline::new(remaining(deadline)?)
-        .with_cancellation(deadline.cancellation().cloned())
-        .with_parent(Some(Arc::new(deadline.clone()))))
 }
 
 #[cfg(test)]
@@ -62,16 +42,15 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_remainder_is_expired_and_cancellation_comes_first() {
+    fn expires_at_refuses_a_spent_or_cancelled_deadline() {
         let frozen = Instant::now();
         let spent = Deadline::with_time_source(Duration::ZERO, move || frozen);
-        assert!(matches!(remaining(&spent), Err(Interrupted::Exceeded(_))));
         assert!(matches!(expires_at(&spent), Err(Interrupted::Exceeded(_))));
 
         let signal = Cancellation::default();
         let live = Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        assert!(remaining(&live).unwrap() <= Duration::from_secs(60));
+        assert!(expires_at(&live).is_ok());
         signal.cancel();
-        assert!(matches!(remaining(&live), Err(Interrupted::Cancelled(_))));
+        assert!(matches!(expires_at(&live), Err(Interrupted::Cancelled(_))));
     }
 }

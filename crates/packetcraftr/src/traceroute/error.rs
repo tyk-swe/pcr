@@ -76,7 +76,7 @@ pub enum Error {
     IncoherentEvents { message: String },
 }
 
-crate::deadline::deadline_error_conversions!(Error);
+packetcraftr_core::deadline_error_conversions!(Error);
 
 impl Error {
     pub(super) fn family(family: Family) -> Self {

@@ -48,10 +48,12 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
 ) -> Result<T, route::Error> {
     use crate::workers::{Class, Waited};
 
-    let detached = crate::deadline::detach(deadline)
+    let detached = deadline
+        .detach()
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     // Native calls spend wall time even when the caller's clock is frozen.
-    let wait = crate::deadline::detach(&detached)
+    let wait = detached
+        .detach()
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     let permit = crate::workers::shared()
         .admit(Class::Native)

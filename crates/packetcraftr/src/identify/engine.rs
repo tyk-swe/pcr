@@ -68,16 +68,22 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                         .with_parent(Some(Arc::clone(&operation.deadline))),
                 )
             });
+            let mut skipped_unwritable = false;
             for probe in request.corpus.probes.iter().filter(|probe| {
                 probe.transport == endpoint.transport && probe.intensity <= request.intensity
             }) {
+                let initial_bytes = request_bytes(probe, 0)?;
+                if !super::plan::writable(request, initial_bytes.len() as u64) {
+                    skipped_unwritable = true;
+                    continue;
+                }
                 let mut probe_scope = Scope::new(
                     request.limits.probe,
                     self.deadline(request.limits.probe.timeout)
                         .with_parent(Some(Arc::clone(&host.deadline))),
                 );
                 for attempt in 1..=request.limits.probe.attempts {
-                    let mut bytes = request_bytes(probe, 0)?;
+                    let mut bytes = initial_bytes.clone();
                     let mut connection = Scope::new(
                         request.limits.connection,
                         self.deadline(request.limits.connection.timeout)
@@ -190,6 +196,11 @@ impl<P: TcpProviders + UdpProviders, K: Clock> Client<P, K> {
                 if record.outcome == Outcome::BudgetExhausted {
                     break;
                 }
+            }
+            if skipped_unwritable && record.probes.is_empty() {
+                record.outcome = Outcome::BudgetExhausted;
+                complete = false;
+                cancelled |= operation.deadline.check_cancelled().is_err();
             }
             finish_record(&mut record);
             records.push(record);

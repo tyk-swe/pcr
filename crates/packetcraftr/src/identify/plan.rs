@@ -14,6 +14,18 @@ pub(super) struct Declaration {
     pub(super) dns: bool,
 }
 
+pub(super) fn writable(request: &Request, bytes: u64) -> bool {
+    let limits = request.limits;
+    [
+        limits.operation,
+        limits.host,
+        limits.connection,
+        limits.probe,
+    ]
+    .iter()
+    .all(|limit| bytes <= limit.write_bytes)
+}
+
 #[derive(Default)]
 struct Traffic {
     attempts: u64,
@@ -48,15 +60,7 @@ pub(super) fn declaration(request: &Request) -> Result<Declaration, Error> {
             probe.transport == endpoint.transport && probe.intensity <= request.intensity
         }) {
             let bytes = engine::request_bytes(probe, 1)?.len() as u64;
-            if [
-                limits.operation,
-                limits.host,
-                limits.connection,
-                limits.probe,
-            ]
-            .iter()
-            .any(|limit| bytes > limit.write_bytes)
-            {
+            if !writable(request, bytes) {
                 continue;
             }
             admitted = true;

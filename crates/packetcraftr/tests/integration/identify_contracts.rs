@@ -1290,6 +1290,92 @@ fn zero_traffic_plans_do_not_authorize_unselected_or_unwritable_endpoints() {
 }
 
 #[test]
+fn unwritable_active_probes_do_not_block_later_speak_first_collection() {
+    for scope in 0..4 {
+        for allowance in [0, 1] {
+            let banner = b"SSH-2.0-OpenSSH_9.8p1\r\n";
+            let tcp = FakeTcp::replying([banner.to_vec()]);
+            let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);
+            let mut corpus = (*request.corpus).clone();
+            corpus
+                .probes
+                .retain(|probe| probe.transport == identify::Transport::Tcp);
+            corpus.probes.sort_by_key(|probe| probe.id == "ssh-banner");
+            corpus
+                .matches
+                .retain(|rule| corpus.probes.iter().any(|probe| probe.id == rule.probe));
+            request.corpus = Arc::new(corpus);
+            let limit = match scope {
+                0 => &mut request.limits.operation,
+                1 => &mut request.limits.host,
+                2 => &mut request.limits.connection,
+                _ => &mut request.limits.probe,
+            };
+            limit.write_bytes = allowance;
+            let client = Client::new(
+                builtin::registry(),
+                Policy {
+                    max_packets_per_operation: 1,
+                    max_bytes_per_operation: 0,
+                    ..Policy::default()
+                },
+                ProviderSet::tcp(tcp.clone(), ()).with_udp(FakeUdp::default()),
+            );
+            let report = client.identify(&request).expect("banner remains admitted");
+            assert!(report.complete, "scope {scope}, allowance {allowance}");
+            assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+            assert_eq!(report.records[0].probes.len(), 1);
+            assert_eq!(report.records[0].probes[0].probe, "ssh-banner");
+            assert_eq!(report.records[0].probes[0].response, banner);
+            assert_eq!(report.usage.attempts, 1);
+            assert_eq!(report.usage.write_bytes, 0);
+            assert_eq!(tcp.endpoints.lock().unwrap().len(), 1);
+            assert!(tcp.writes.lock().unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn exhausted_write_usage_still_stops_before_later_probes() {
+    let tcp = FakeTcp::replying([b"HTTP/1.0 200 OK\r\nServer: nginx/1.26.2\r\n\r\n".to_vec()]);
+    let mut request = request(vec![endpoint(38080, identify::Transport::Tcp)]);
+    let mut corpus = (*request.corpus).clone();
+    let http = corpus
+        .probes
+        .iter()
+        .find(|probe| probe.id == "http-head")
+        .unwrap()
+        .clone();
+    let mut second = http.clone();
+    second.id = "second-http".into();
+    let ssh = corpus
+        .probes
+        .iter()
+        .find(|probe| probe.id == "ssh-banner")
+        .unwrap()
+        .clone();
+    corpus.probes = vec![http, second, ssh];
+    corpus
+        .matches
+        .retain(|rule| matches!(rule.probe.as_str(), "http-head" | "ssh-banner"));
+    request.corpus = Arc::new(corpus);
+    request.limits.operation.write_bytes = 19;
+    let report = client(tcp.clone(), FakeUdp::default())
+        .identify(&request)
+        .unwrap();
+    assert!(!report.complete);
+    assert_eq!(
+        report.records[0].outcome,
+        identify::Outcome::BudgetExhausted
+    );
+    assert_eq!(report.records[0].probes.len(), 1);
+    assert_eq!(report.records[0].probes[0].probe, "http-head");
+    assert!(!report.records[0].candidates.is_empty());
+    assert_eq!(tcp.endpoints.lock().unwrap().len(), 1);
+    assert_eq!(report.usage.write_bytes, 19);
+}
+
+#[test]
 fn duplicate_peer_aliases_are_rejected_before_provider_calls() {
     for (addresses, duplicate) in [
         (["[::1%7]:32222", "[::1%8]:32222"], true),

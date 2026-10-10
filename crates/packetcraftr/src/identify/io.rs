@@ -4,9 +4,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::document::service_probes::{Probe, Request};
 use packetcraftr_core::error::Source;
+use packetcraftr_core::protocol::application::http;
 use packetcraftr_netio::tcp::Stream as _;
 use packetcraftr_netio::udp::Provider as _;
 use packetcraftr_netio::{bounded, tcp, udp};
@@ -235,7 +237,11 @@ fn complete(probe: &Probe, bytes: &[u8]) -> bool {
         Request::Banner {} => bytes
             .split_inclusive(|byte| *byte == b'\n')
             .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\n")),
-        Request::HttpHead {} => bytes.windows(4).any(|window| window == b"\r\n\r\n"),
+        Request::HttpHead {} => {
+            // Completion means enough bytes to classify, including definitive
+            // syntax failures and parser limits before the terminating blank line.
+            !matches!(http::parse_head(&Bytes::copy_from_slice(bytes)), Ok(None))
+        }
         Request::Dns { .. } => bytes.get(..2).is_some_and(|prefix| {
             bytes.len() >= 2 + usize::from(u16::from_be_bytes([prefix[0], prefix[1]]))
         }),

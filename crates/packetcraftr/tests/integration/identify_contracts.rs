@@ -29,6 +29,7 @@ struct FakeTcp {
     pending_cancellation: Option<PendingCancellation>,
     dns_reply: Option<DnsReply>,
     timeout_after_response: bool,
+    read_chunk: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +98,7 @@ impl tcp::Provider for FakeTcp {
             peer: self.peer.unwrap_or(endpoint),
             dns_reply: self.dns_reply,
             timeout_after_response: self.timeout_after_response,
+            read_chunk: self.read_chunk,
         })
     }
 }
@@ -107,6 +109,7 @@ struct FakeStream {
     peer: SocketAddr,
     dns_reply: Option<DnsReply>,
     timeout_after_response: bool,
+    read_chunk: Option<usize>,
 }
 
 impl Read for FakeStream {
@@ -116,7 +119,8 @@ impl Read for FakeStream {
         {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        self.response.read(bytes)
+        let limit = self.read_chunk.unwrap_or(bytes.len()).min(bytes.len());
+        self.response.read(&mut bytes[..limit])
     }
 }
 
@@ -1067,6 +1071,72 @@ fn malformed_ssh_line_completes_without_waiting_for_the_peer_to_close() {
     assert_eq!(evidence.response, response);
     assert!(evidence.identification.candidates.is_empty());
     assert_eq!(report.records[0].outcome, identify::Outcome::Malformed);
+}
+
+#[test]
+fn definitive_http_errors_complete_without_waiting_for_the_peer_to_close() {
+    for (response, expected) in [
+        (
+            b"HTTP/1.1 200 OK\n\n".to_vec(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            b"HTTP/1.1 200 OK\rX".to_vec(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\n".to_vec(),
+            ObservationOutcome::Malformed,
+        ),
+        (
+            [b"HTTP/1.1 200 ".as_slice(), &vec![b'a'; 8192]].concat(),
+            ObservationOutcome::Truncated,
+        ),
+    ] {
+        let tcp = FakeTcp {
+            timeout_after_response: true,
+            ..FakeTcp::replying([response.clone()])
+        };
+        let mut request = request(vec![endpoint(38080, identify::Transport::Tcp)]);
+        corpus_with(&mut request, "http-head");
+        let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+        let evidence = &report.records[0].probes[0];
+        assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+        assert_eq!(evidence.observation.outcome, expected);
+        assert_eq!(evidence.response, response);
+        assert!(evidence.identification.candidates.is_empty());
+        assert_eq!(
+            report.records[0].outcome,
+            if expected == ObservationOutcome::Malformed {
+                identify::Outcome::Malformed
+            } else {
+                identify::Outcome::Truncated
+            }
+        );
+    }
+}
+
+#[test]
+fn fragmented_valid_http_line_endings_keep_collecting_until_the_head_is_complete() {
+    let response = b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n";
+    let tcp = FakeTcp {
+        timeout_after_response: true,
+        read_chunk: Some(1),
+        ..FakeTcp::replying([response.to_vec()])
+    };
+    let mut request = request(vec![endpoint(38080, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "http-head");
+    let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+    assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+    assert_eq!(report.records[0].probes[0].response, response);
+    assert_eq!(
+        report.records[0].probes[0].io_outcome,
+        identify::IoOutcome::Complete
+    );
+    assert_eq!(
+        report.records[0].candidates[0].version.as_deref(),
+        Some("1.26.2")
+    );
 }
 
 #[test]

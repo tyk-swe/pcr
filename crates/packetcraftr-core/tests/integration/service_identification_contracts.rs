@@ -51,6 +51,33 @@ fn ssh_accepts_exactly_sixteen_preamble_lines_before_the_identification() {
 }
 
 #[test]
+fn ssh_collection_distinguishes_fragmented_banners_from_definitive_limits() {
+    let corpus = corpus();
+    let probe = probe(&corpus, "ssh-banner");
+    let wire = format!("{}SSH-2.0-OpenSSH_9.8p1\r\n", "notice\r\n".repeat(16));
+    for end in 0..wire.len() {
+        assert!(!service_probes::ssh_collection_complete(
+            &wire.as_bytes()[..end]
+        ));
+    }
+    assert!(service_probes::ssh_collection_complete(wire.as_bytes()));
+    for (wire, expected) in [
+        ("notice\r\n".repeat(17), ObservationOutcome::Truncated),
+        ("a".repeat(1025), ObservationOutcome::Truncated),
+        (
+            format!("SSH-2.0-{}", "a".repeat(248)),
+            ObservationOutcome::Malformed,
+        ),
+    ] {
+        assert!(service_probes::ssh_collection_complete(wire.as_bytes()));
+        let observation = service_probes::observe(probe, wire.as_bytes(), false);
+        assert_eq!(observation.outcome, expected);
+        assert!(observation.diagnostic.is_some());
+        assert!(corpus.identify(probe, &observation).candidates.is_empty());
+    }
+}
+
+#[test]
 fn http_parser_resource_limits_are_truncated_and_syntax_errors_are_malformed() {
     let corpus = corpus();
     let probe = probe(&corpus, "http-head");

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::document::service_probes::{Probe, Request};
+use packetcraftr_core::document::service_probes::{self, Probe, Request};
 use packetcraftr_core::error::Source;
 use packetcraftr_core::protocol::application::http;
 use packetcraftr_netio::tcp::Stream as _;
@@ -234,9 +234,7 @@ fn tcp_exchange<P: TcpProviders>(
 
 fn complete(probe: &Probe, bytes: &[u8]) -> bool {
     match probe.request {
-        Request::Banner {} => bytes
-            .split_inclusive(|byte| *byte == b'\n')
-            .any(|line| line.starts_with(b"SSH-") && line.ends_with(b"\n")),
+        Request::Banner {} => service_probes::ssh_collection_complete(bytes),
         Request::HttpHead {} => {
             // Completion means enough bytes to classify, including definitive
             // syntax failures and parser limits before the terminating blank line.

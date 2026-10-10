@@ -21,6 +21,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- SSH collection stops at definitive preamble limits and preserves their precise
+  diagnostics and remaining budgets for later probes. Fragmented identification
+  after sixteen permitted preamble lines remains readable.
 - Service observations enforce the retained-field cap while parsing, reporting
   excess valid fields as truncated rather than retaining oversized evidence.
   The service-probe schema now enforces the parser's ASCII match-prefix and

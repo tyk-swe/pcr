@@ -1074,6 +1074,74 @@ fn malformed_ssh_line_completes_without_waiting_for_the_peer_to_close() {
 }
 
 #[test]
+fn ssh_preamble_limits_finish_collection_and_preserve_later_probe_work() {
+    for (response, diagnostic) in [
+        (
+            "notice\r\n".repeat(17).into_bytes(),
+            "SSH preamble exceeds 16 lines",
+        ),
+        (vec![b'a'; 1025], "SSH preamble line exceeds its limit"),
+    ] {
+        let tcp = FakeTcp {
+            timeout_after_response: true,
+            ..FakeTcp::replying([
+                response.clone(),
+                b"HTTP/1.1 200 OK\r\nServer: nginx/1.26.2\r\n\r\n".to_vec(),
+            ])
+        };
+        let mut request = request(vec![endpoint(38080, identify::Transport::Tcp)]);
+        let corpus = Arc::make_mut(&mut request.corpus);
+        corpus
+            .probes
+            .retain(|probe| matches!(probe.id.as_str(), "ssh-banner" | "http-head"));
+        corpus
+            .matches
+            .retain(|rule| matches!(rule.probe.as_str(), "ssh-banner" | "http-head"));
+        let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+        assert!(report.complete);
+        assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+        assert_eq!(report.records[0].probes.len(), 2);
+        let evidence = &report.records[0].probes[0];
+        assert_eq!(evidence.io_outcome, identify::IoOutcome::Complete);
+        assert_eq!(evidence.response, response);
+        assert_eq!(evidence.observation.outcome, ObservationOutcome::Truncated);
+        assert_eq!(evidence.observation.diagnostic.as_deref(), Some(diagnostic));
+        assert!(evidence.identification.candidates.is_empty());
+        assert_eq!(
+            report.records[0].probes[1].io_outcome,
+            identify::IoOutcome::Complete
+        );
+        assert_eq!(
+            report.records[0].candidates[0].version.as_deref(),
+            Some("1.26.2")
+        );
+    }
+}
+
+#[test]
+fn fragmented_ssh_after_sixteen_preamble_lines_remains_collectable() {
+    let response = format!("{}SSH-2.0-OpenSSH_9.8p1\r\n", "notice\r\n".repeat(16));
+    let tcp = FakeTcp {
+        timeout_after_response: true,
+        read_chunk: Some(1),
+        ..FakeTcp::replying([response.as_bytes().to_vec()])
+    };
+    let mut request = request(vec![endpoint(32222, identify::Transport::Tcp)]);
+    corpus_with(&mut request, "ssh-banner");
+    let report = client(tcp, FakeUdp::default()).identify(&request).unwrap();
+    assert_eq!(report.records[0].outcome, identify::Outcome::Matched);
+    assert_eq!(
+        report.records[0].probes[0].io_outcome,
+        identify::IoOutcome::Complete
+    );
+    assert_eq!(report.records[0].probes[0].response, response.as_bytes());
+    assert_eq!(
+        report.records[0].candidates[0].version.as_deref(),
+        Some("9.8p1")
+    );
+}
+
+#[test]
 fn definitive_http_errors_complete_without_waiting_for_the_peer_to_close() {
     for (response, expected) in [
         (

@@ -67,57 +67,102 @@ fn field(observation: &mut Observation, name: Field, value: &[u8]) {
     }
 }
 
+/// Returns whether bounded SSH bytes provide a definitive observation.
+/// Complete or malformed identification lines and exceeded preamble limits
+/// finish collection; fragmented banners and permitted preambles remain open.
+pub fn ssh_collection_complete(bytes: &[u8]) -> bool {
+    bytes.len() > MAX_RESPONSE_BYTES
+        || ssh_progress(&bytes[..bytes.len().min(MAX_RESPONSE_BYTES)]).1
+}
+
 fn ssh(bytes: &[u8]) -> Observation {
+    ssh_progress(bytes).0
+}
+
+fn ssh_progress(bytes: &[u8]) -> (Observation, bool) {
     // RFC 4253 §4.2 permits pre-identification lines. Bound their processing
     // independently and preserve the complete identification line as a claim.
     for (index, line) in bytes.split_inclusive(|byte| *byte == b'\n').enumerate() {
         if !line.starts_with(b"SSH-") {
+            // A fragmented identification prefix after sixteen preamble lines
+            // must remain readable until its identity can be distinguished.
+            if !line.ends_with(b"\n") && b"SSH-".starts_with(line) {
+                return (base(None, ObservationOutcome::Unknown), false);
+            }
             if index >= 16 {
-                return failure(
-                    Protocol::Ssh,
-                    ObservationOutcome::Truncated,
-                    "SSH preamble exceeds 16 lines",
+                return (
+                    failure(
+                        Protocol::Ssh,
+                        ObservationOutcome::Truncated,
+                        "SSH preamble exceeds 16 lines",
+                    ),
+                    true,
                 );
             }
             if line.len() > MAX_FIELD_BYTES {
-                return failure(
-                    Protocol::Ssh,
-                    ObservationOutcome::Truncated,
-                    "SSH preamble line exceeds its limit",
+                return (
+                    failure(
+                        Protocol::Ssh,
+                        ObservationOutcome::Truncated,
+                        "SSH preamble line exceeds its limit",
+                    ),
+                    true,
                 );
             }
             continue;
         }
-        if !line.ends_with(b"\n") {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Truncated,
-                "SSH identification line is incomplete",
+        if line.len() > 255 {
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "SSH identification requires a bounded CRLF line",
+                ),
+                true,
             );
         }
-        if line.len() > 255 || !line.ends_with(b"\r\n") {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Malformed,
-                "SSH identification requires a bounded CRLF line",
+        if !line.ends_with(b"\n") {
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Truncated,
+                    "SSH identification line is incomplete",
+                ),
+                false,
+            );
+        }
+        if !line.ends_with(b"\r\n") {
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "SSH identification requires a bounded CRLF line",
+                ),
+                true,
             );
         }
         let banner = &line[..line.len() - 2];
         if !banner.iter().all(|byte| matches!(byte, 0x20..=0x7e)) {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Malformed,
-                "SSH identification contains nonprintable bytes",
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "SSH identification contains nonprintable bytes",
+                ),
+                true,
             );
         }
         let software = banner
             .strip_prefix(b"SSH-2.0-")
             .or_else(|| banner.strip_prefix(b"SSH-1.99-"));
         let Some(software) = software else {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Malformed,
-                "unsupported or malformed SSH protocol claim",
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "unsupported or malformed SSH protocol claim",
+                ),
+                true,
             );
         };
         let software = software
@@ -125,18 +170,21 @@ fn ssh(bytes: &[u8]) -> Observation {
             .next()
             .unwrap_or_default();
         if software.is_empty() || software.contains(&b'-') {
-            return failure(
-                Protocol::Ssh,
-                ObservationOutcome::Malformed,
-                "SSH software token is invalid",
+            return (
+                failure(
+                    Protocol::Ssh,
+                    ObservationOutcome::Malformed,
+                    "SSH software token is invalid",
+                ),
+                true,
             );
         }
         let mut observation = base(Some(Protocol::Ssh), ObservationOutcome::Complete);
         field(&mut observation, Field::SshBanner, banner);
         field(&mut observation, Field::SshSoftware, software);
-        return observation;
+        return (observation, true);
     }
-    base(None, ObservationOutcome::Unknown)
+    (base(None, ObservationOutcome::Unknown), false)
 }
 
 fn http(bytes: &[u8]) -> Observation {
